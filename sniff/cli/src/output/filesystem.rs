@@ -506,18 +506,11 @@ pub fn render_git_file_list(
     out
 }
 
-/// ## Arguments
-///
-/// * `git` - Git repository information
-/// * `history_count` - Number of recent commits to display
-pub fn render_git_section(
+fn build_git_status_items(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
-) -> String {
-    let mut out = String::new();
-    let terminal = Terminal::default();
-
+) -> Vec<String> {
     // Build commit URL base from the preferred remote (usually "origin").
     let commit_url_base = build_commit_url_base(git);
 
@@ -530,11 +523,23 @@ pub fn render_git_section(
         .map(|t| t.ahead)
         .unwrap_or(0);
 
-    // === Status Section ===
-    let status_title = Prose::new("<b><u>Status</u></b>");
-    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
-
     let mut status_items: Vec<String> = Vec::new();
+
+    let conflicted: Vec<_> = git
+        .file_changes
+        .iter()
+        .filter(|f| f.status == FileStatus::Conflicted)
+        .collect();
+    for file in &conflicted {
+        let path = file.path.display().to_string();
+        let (dir, name) = split_path(&path);
+        let line = if dir.is_empty() {
+            format!("<red>conflicted: <b>{}</b></red>", name)
+        } else {
+            format!("<red>conflicted: {}<b>{}</b></red>", dir, name)
+        };
+        status_items.push(line);
+    }
 
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
@@ -552,7 +557,6 @@ pub fn render_git_section(
         status_items.push(format_commit_line(commit, verbose, commit_url.as_deref()));
     }
 
-    // File changes grouped by status
     let staged: Vec<_> = git
         .file_changes
         .iter()
@@ -614,17 +618,38 @@ pub fn render_git_section(
         status_items.push(line);
     }
 
-    // Add untracked files
     for file in &untracked {
         let path = file.path.display().to_string();
         let (dir, name) = split_path(&path);
         let line = if dir.is_empty() {
-            format!("<red>untracked: <b>{}</b></red>", name)
+            format!("<dim>untracked: <b>{}</b></dim>", name)
         } else {
-            format!("<red>untracked: {}<b>{}</b></red>", dir, name)
+            format!("<dim>untracked: {}<b>{}</b></dim>", dir, name)
         };
         status_items.push(line);
     }
+
+    status_items
+}
+
+/// ## Arguments
+///
+/// * `git` - Git repository information
+/// * `history_count` - Number of recent commits to display
+pub fn render_git_section(
+    git: &sniff::filesystem::git::GitInfo,
+    history_count: usize,
+    verbose: u8,
+    compact: bool,
+) -> String {
+    let mut out = String::new();
+    let terminal = Terminal::default();
+
+    // === Status Section ===
+    let status_title = Prose::new("<b><u>Status</u></b>");
+    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
+
+    let status_items = build_git_status_items(git, history_count, verbose);
 
     // Render status items as list
     if !status_items.is_empty() {
@@ -637,6 +662,10 @@ pub fn render_git_section(
     } else {
         let clean = Prose::new("<dim>No changes</dim>");
         writeln!(out, "  {}", clean.render(&terminal)).unwrap();
+    }
+
+    if compact {
+        return out;
     }
 
     // === Worktrees Section (only if worktrees exist) ===
@@ -3204,7 +3233,12 @@ pub fn render_repo_deps_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use sniff::filesystem::git::{
+        CommitInfo, FileAction, FileChange, FileStatus, GitConfig, GitInfo, RepoStatus,
+    };
     use sniff::filesystem::repo::Package;
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     fn make_package(name: &str, area: &str, depends_on: &[&str]) -> Package {
@@ -3237,6 +3271,106 @@ mod tests {
             is_updatable: None,
             has_major_update: None,
             is_excluded: false,
+        }
+    }
+
+    fn make_git_info(file_changes: Vec<FileChange>) -> GitInfo {
+        let staged_count = file_changes
+            .iter()
+            .filter(|f| f.status == FileStatus::Staged || f.status == FileStatus::Both)
+            .count();
+        let unstaged_count = file_changes
+            .iter()
+            .filter(|f| f.status == FileStatus::Modified || f.status == FileStatus::Both)
+            .count();
+        let untracked_count = file_changes
+            .iter()
+            .filter(|f| f.status == FileStatus::Untracked)
+            .count();
+
+        GitInfo {
+            repo_root: PathBuf::from("/repo"),
+            org: None,
+            repo: None,
+            current_branch: Some("main".to_string()),
+            branches: vec![],
+            in_worktree: false,
+            base_repo_root: None,
+            recent: vec![CommitInfo {
+                sha: "1234567890abcdef".to_string(),
+                message: "feat: add status output".to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            }],
+            status: RepoStatus {
+                is_dirty: !file_changes.is_empty(),
+                staged_count,
+                unstaged_count,
+                untracked_count,
+                dirty: vec![],
+                untracked: vec![],
+                is_behind: None,
+            },
+            remotes: vec![],
+            worktrees: HashMap::new(),
+            config: GitConfig::default(),
+            tracking: vec![],
+            file_changes,
+        }
+    }
+
+    mod git_status_rendering {
+        use super::*;
+
+        #[test]
+        fn conflicted_files_render_before_commits_and_untracked_is_dimmed() {
+            let git = make_git_info(vec![
+                FileChange {
+                    path: PathBuf::from("src/main.rs"),
+                    status: FileStatus::Staged,
+                    action: FileAction::Modified,
+                    lines_added: 3,
+                    lines_removed: 1,
+                },
+                FileChange {
+                    path: PathBuf::from("conflict.txt"),
+                    status: FileStatus::Conflicted,
+                    action: FileAction::Modified,
+                    lines_added: 0,
+                    lines_removed: 0,
+                },
+                FileChange {
+                    path: PathBuf::from("notes.md"),
+                    status: FileStatus::Untracked,
+                    action: FileAction::Created,
+                    lines_added: 0,
+                    lines_removed: 0,
+                },
+            ]);
+
+            let items = build_git_status_items(&git, 10, 0);
+
+            assert!(items[0].starts_with("<red>conflicted:"));
+            assert!(items.iter().any(|item| item.starts_with("<dim>untracked:")));
+        }
+
+        #[test]
+        fn compact_git_status_omits_meta_section() {
+            let git = make_git_info(vec![FileChange {
+                path: PathBuf::from("conflict.txt"),
+                status: FileStatus::Conflicted,
+                action: FileAction::Modified,
+                lines_added: 0,
+                lines_removed: 0,
+            }]);
+
+            let output = render_git_section(&git, 10, 0, true);
+
+            assert!(output.contains("Status"));
+            assert!(!output.contains("Meta"));
+            assert!(!output.contains("Worktrees"));
         }
     }
 

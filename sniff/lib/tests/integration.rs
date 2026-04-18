@@ -745,6 +745,69 @@ fn create_dirty_git_repo() -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
+fn create_merge_conflict_repo() -> (tempfile::TempDir, PathBuf) {
+    use std::fs;
+    use std::process::Command;
+
+    fn run_git(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {:?} failed with {:?}", args, status);
+    }
+
+    fn run_git_expect_failure(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(
+            !status.success(),
+            "git {:?} unexpectedly succeeded with {:?}",
+            args,
+            status
+        );
+    }
+
+    fn git_stdout(dir: &std::path::Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {:?} failed", args);
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+
+    run_git(dir.path(), &["init"]);
+    run_git(dir.path(), &["config", "user.email", "test@test.com"]);
+    run_git(dir.path(), &["config", "user.name", "Test User"]);
+
+    fs::write(dir.path().join("conflict.txt"), "base\n").unwrap();
+    run_git(dir.path(), &["add", "conflict.txt"]);
+    run_git(dir.path(), &["commit", "-m", "initial commit"]);
+
+    let main_branch = git_stdout(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]);
+
+    run_git(dir.path(), &["checkout", "-b", "feature"]);
+    fs::write(dir.path().join("conflict.txt"), "feature branch\n").unwrap();
+    run_git(dir.path(), &["commit", "-am", "feature change"]);
+
+    run_git(dir.path(), &["checkout", &main_branch]);
+    fs::write(dir.path().join("conflict.txt"), "main branch\n").unwrap();
+    run_git(dir.path(), &["commit", "-am", "main change"]);
+
+    run_git_expect_failure(dir.path(), &["merge", "feature"]);
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
 #[test]
 fn test_git_full_has_file_changes_but_no_diff_payloads() {
     use sniff::request::*;
@@ -834,6 +897,41 @@ fn test_git_deep_includes_diff_payloads() {
     assert!(
         !dirty_file.diff.is_empty(),
         "dirty file should have a non-empty diff"
+    );
+}
+
+#[test]
+fn test_git_full_reports_conflicted_files() {
+    use sniff::filesystem::git::FileStatus;
+    use sniff::request::*;
+
+    let (_dir, path) = create_merge_conflict_repo();
+
+    let plan = DetectionPlan::new()
+        .base_dir(path)
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::full())
+                .without_repo()
+                .without_docs()
+                .without_formatting()
+                .without_file_inventory(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap();
+    let fs = result.filesystem.expect("filesystem should be present");
+    let git = fs.git.expect("git should be present");
+
+    assert!(git.status.is_dirty, "conflicted repo should be dirty");
+    assert!(
+        git.file_changes
+            .iter()
+            .any(|change| change.status == FileStatus::Conflicted
+                && change.path == PathBuf::from("conflict.txt")),
+        "conflicted files should be included in file_changes"
     );
 }
 

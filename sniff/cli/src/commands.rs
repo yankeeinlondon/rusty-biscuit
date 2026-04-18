@@ -607,7 +607,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .count();
                     git.status.is_dirty = git.status.staged_count > 0
                         || git.status.unstaged_count > 0
-                        || git.status.untracked_count > 0;
+                        || git.status.untracked_count > 0
+                        || git
+                            .file_changes
+                            .iter()
+                            .any(|f| f.status == sniff::filesystem::git::FileStatus::Conflicted);
                 }
             }
         }

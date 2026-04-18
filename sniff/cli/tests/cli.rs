@@ -650,6 +650,16 @@ fn test_git_status_subcommand_with_history_flag() {
 }
 
 #[test]
+fn test_git_status_subcommand_compact_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "git-status", "--compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Status"))
+        .stdout(predicate::str::contains("Meta").not());
+}
+
+#[test]
 fn test_git_status_subcommand_json_output() {
     let output = cargo_bin_cmd!("sniff")
         .args(["repo", "git-status", "--json"])
@@ -992,7 +1002,8 @@ fn test_git_status_help_mentions_refresh_remotes() {
         .args(["repo", "git-status", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--refresh-remotes"));
+        .stdout(predicate::str::contains("--refresh-remotes"))
+        .stdout(predicate::str::contains("--compact"));
 }
 
 #[test]
@@ -2519,11 +2530,9 @@ fn test_repo_source_code_changes_json_exact_fields() {
     // At least one commit should have a .rs file
     let has_rs_file = commits.iter().any(|c| {
         c["files"].as_array().is_some_and(|files| {
-            files.iter().any(|f| {
-                f["path"]
-                    .as_str()
-                    .is_some_and(|s| s.ends_with(".rs"))
-            })
+            files
+                .iter()
+                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".rs")))
         })
     });
     assert!(has_rs_file, "Source code changes should include .rs files");
@@ -2554,11 +2563,9 @@ fn test_repo_documentation_changes_json_exact_fields() {
     // At least one commit should have a .md file
     let has_md_file = commits.iter().any(|c| {
         c["files"].as_array().is_some_and(|files| {
-            files.iter().any(|f| {
-                f["path"]
-                    .as_str()
-                    .is_some_and(|s| s.ends_with(".md"))
-            })
+            files
+                .iter()
+                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".md")))
         })
     });
     assert!(
