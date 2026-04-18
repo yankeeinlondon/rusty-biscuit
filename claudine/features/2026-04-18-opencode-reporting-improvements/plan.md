@@ -2,7 +2,41 @@
 phases: 4
 created: 2026-04-17
 start_phase: 1
+packages: [claudine]
+source_files_during_phase_1: []
+docs_updated_during_phase_1: [claudine/features/2026-04-18-opencode-reporting-improvements/plan.md]
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
 ---
+
+## Phase 1 Baseline — Audit Findings
+
+**Tests encoding the old contracts (must be flipped in later phases):**
+
+- `claudine/lib/src/stream/tool_display.rs:744` — `from_result_uses_status_and_drops_summary_when_status_present` asserts `summary.is_none()` when a status is present ("status wins over summary"). Replace in Phase 2 with a test asserting a successful shell result keeps both `status = Success` and `summary = Some("bash ls -la")`.
+- `claudine/cli/src/commands/wrap/live_semantic_sink.rs:1310` — `tool_result_status_wins_over_input_summary` asserts `"ls -la"` is absent from the rendered line. Replace in Phase 3 with an assertion that `successful` and the summary co-render.
+- `claudine/lib/src/stream/badges.rs:609` — `stderr_diagnostics_malformed_assets_yields_config_badge` asserts `badges.len() == 1` with category `Config`. Flip in Phase 3 to assert the Config badge is absent even when `malformed_asset_events > 0`.
+- `claudine/lib/src/stream/badges.rs:629` — `stderr_diagnostics_single_malformed_asset_uses_singular_noun` asserts singular noun form. Flip in Phase 3 (absence check).
+- `claudine/cli/tests/wrap_commands.rs:3890` — `opencode_stderr_malformed_asset_yields_config_badge_and_success` asserts a `config` badge is present in the summary payload. Update in Phase 3 to assert absence while `malformed_asset_events == 1` is preserved.
+- `claudine/cli/tests/wrap_commands.rs:4012` — `opencode_structured_summary_merges_stderr_diagnostics_and_badges` asserts a `config` badge is present after merge. Update in Phase 3 to preserve the diagnostics merge assertion and remove the badge expectation.
+
+**Fixtures available (no new fixtures required for Phase 1):**
+
+- `claudine/lib/tests/fixtures/providers/opencode.ndjson` (112 lines) already contains `step_start` / `step_finish` and 41 tool-use events, covering the replay path for spacing and suppression assertions.
+- Inline shell fixtures in `wrap_commands.rs` (e.g. `opencode_stderr_malformed_asset_yields_config_badge_and_success` at line 3890, `opencode_structured_summary_merges_stderr_diagnostics_and_badges` at line 4012) already emit `ERROR … service=config … failed to load …` stderr lines and the matching stdout events needed for the malformed-asset trailer regression.
+- Unit fixtures inside `live_semantic_sink.rs` (`opencode_stderr_snapshot` at line 2929, `opencode_tool_use_completion_shows_incoming_arrow_only` at line 2951) provide short inline OpenCode event lists for step-phase and tool-result rendering checks. No new fixtures needed for Phase 2–3; the new tests can reuse these.
+
+**Baseline test runs (all passing pre-change):**
+
+- `cargo test -p claudine --test semantic_fidelity` — 34/34
+- `cargo test -p claudine --lib stream::badges` — 27/27
+- `cargo test -p claudine --lib stream::tool_display` — 37/37
+- `cargo test -p claudine-cli --bin claudine live_semantic_sink` — 59/59
+- `cargo test -p claudine-cli --test wrap_commands opencode` — 17/17
+
+These baselines encode the user-visible defects listed in `spec.md`: the current output includes a `config` trailer badge, `Bash(successful)` slot-less renders, and `step_start` / `step_finish` Info lines. Phase 2–3 will flip these assertions to the new contract.
+
+
 
 # OpenCode Reporting Improvements Execution Plan
 
