@@ -185,7 +185,15 @@ pub(crate) async fn execute_actions(
                         Ok(response) => {
                             let response = attach_protect_context(response, protect_decision);
                             if can_block {
-                                if should_replace_selected(selected_response.as_ref(), &response) {
+                                if !response_has_blocking_effect(&response) {
+                                    debug!(
+                                        %cmd,
+                                        "Call response on blocking event had no actionable decision or payload; falling through"
+                                    );
+                                } else if should_replace_selected(
+                                    selected_response.as_ref(),
+                                    &response,
+                                ) {
                                     selected_response = Some(response);
                                 }
                             } else {
@@ -194,13 +202,43 @@ pub(crate) async fn execute_actions(
                         }
                         Err(error) => {
                             warn!(%cmd, %error, "Call mapper failed");
+                            if can_block {
+                                let response = blocking_call_failure_response(
+                                    &cmd,
+                                    format!("call action mapper failed: {error}"),
+                                );
+                                if should_replace_selected(selected_response.as_ref(), &response) {
+                                    selected_response = Some(response);
+                                }
+                            }
                         }
                     },
                     Ok(Err(error)) => {
                         warn!(%cmd, %error, "Call command failed");
+                        if can_block {
+                            let response = blocking_call_failure_response(
+                                &cmd,
+                                format!("call action command failed: {error}"),
+                            );
+                            if should_replace_selected(selected_response.as_ref(), &response) {
+                                selected_response = Some(response);
+                            }
+                        }
                     }
                     Err(_) => {
                         warn!(%cmd, timeout_ms = timeout.as_millis(), "Call command timed out");
+                        if can_block {
+                            let response = blocking_call_failure_response(
+                                &cmd,
+                                format!(
+                                    "call action command timed out after {}ms",
+                                    timeout.as_millis()
+                                ),
+                            );
+                            if should_replace_selected(selected_response.as_ref(), &response) {
+                                selected_response = Some(response);
+                            }
+                        }
                     }
                 }
             }
@@ -351,6 +389,21 @@ fn attach_protect_context(
 ) -> HookResponse {
     // Simplified: new protect doesn't attach context to responses
     response
+}
+
+fn response_has_blocking_effect(response: &HookResponse) -> bool {
+    response.decision.is_some()
+        || response.updated_input.is_some()
+        || response.additional_context.is_some()
+        || response.raw.is_some()
+}
+
+fn blocking_call_failure_response(command: &str, reason: String) -> HookResponse {
+    HookResponse {
+        decision: Some(HookDecision::Deny),
+        reason: Some(format!("{reason} ({command})")),
+        ..HookResponse::default()
+    }
 }
 
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).
@@ -1294,6 +1347,66 @@ mod tests {
         .unwrap();
 
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn blocking_call_command_failure_fails_closed() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_command__".to_string(),
+            args: None,
+            timeout_ms: Some(25),
+            mapper: None,
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("blocking call failure must synthesize a deny response");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+        let reason = result.reason.expect("deny response should explain failure");
+        assert!(reason.contains("call action command failed"));
+        assert!(reason.contains("__claudine_missing_command__"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocking_call_without_actionable_response_falls_through() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "sh".to_string(),
+            args: Some(vec!["-c".to_string(), "exit 1".to_string()]),
+            timeout_ms: Some(250),
+            mapper: None,
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.is_none(),
+            "exit-code mapper status 1 should fall through instead of producing an implicit allow"
+        );
     }
 
     // =========================================================================
