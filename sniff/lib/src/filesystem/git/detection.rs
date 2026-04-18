@@ -163,14 +163,14 @@ pub(crate) fn get_repo_status_with_changes(
     repo: &Repository,
     include_diffs: bool,
 ) -> Result<(RepoStatus, Vec<FileChange>)> {
+    use std::collections::HashSet;
+
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
     // Recurse into untracked directories to get individual file paths
     opts.recurse_untracked_dirs(true);
 
     let statuses = repo.statuses(Some(&mut opts))?;
-
-    use std::collections::HashSet;
 
     let mut staged = 0;
     let mut unstaged = 0;
@@ -268,6 +268,22 @@ pub(crate) fn get_repo_status_with_changes(
         }
     }
 
+    let conflicted_paths = detect_merge_conflicts(repo);
+    if !conflicted_paths.is_empty() {
+        let conflicted_set: HashSet<_> = conflicted_paths.iter().cloned().collect();
+        file_changes.retain(|change| !conflicted_set.contains(&change.path));
+
+        let conflicted_changes = conflicted_paths.into_iter().map(|path| FileChange {
+            path,
+            status: FileStatus::Conflicted,
+            action: FileAction::Modified,
+            lines_added: 0,
+            lines_removed: 0,
+        });
+
+        file_changes = conflicted_changes.chain(file_changes).collect();
+    }
+
     // Convert HashSet to Vec for downstream processing
     let dirty_paths: Vec<PathBuf> = dirty_set.into_iter().collect();
 
@@ -292,7 +308,12 @@ pub(crate) fn get_repo_status_with_changes(
     };
 
     let repo_status = RepoStatus {
-        is_dirty: staged > 0 || unstaged > 0 || untracked_count > 0,
+        is_dirty: staged > 0
+            || unstaged > 0
+            || untracked_count > 0
+            || file_changes
+                .iter()
+                .any(|change| change.status == FileStatus::Conflicted),
         staged_count: staged,
         unstaged_count: unstaged,
         untracked_count,

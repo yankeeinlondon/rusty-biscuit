@@ -120,7 +120,8 @@ impl ConventionalCommit {
 
 /// File change status in the working tree.
 ///
-/// Distinguishes between staged-only, modified-only, and both states.
+/// Distinguishes between staged-only, modified-only, conflicted, and
+/// untracked states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileStatus {
     /// File is staged (in index) but not modified in working tree.
@@ -129,6 +130,8 @@ pub enum FileStatus {
     Modified,
     /// File is both staged and has additional modifications.
     Both,
+    /// File is in an unmerged merge-conflict state.
+    Conflicted,
     /// File is new/untracked.
     Untracked,
 }
@@ -741,7 +744,7 @@ pub struct GitInfo {
     /// Per-remote tracking status (ahead/behind counts).
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tracking: Vec<RemoteTrackingStatus>,
-    /// File changes with their status (staged/modified/both/untracked).
+    /// File changes with their status (staged/modified/both/conflicted/untracked).
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub file_changes: Vec<FileChange>,
 }
