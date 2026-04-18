@@ -551,11 +551,7 @@ where
 /// of `root` are emitted at depth 1; the deepest entries returned have
 /// depth `max_depth`. The walker never follows symlinks (which is what
 /// keeps it safe from cycles) and stops as soon as `*budget` reaches 0.
-fn collect_walk(
-    root: &Path,
-    max_depth: usize,
-    budget: &mut usize,
-) -> Vec<(PathBuf, bool, usize)> {
+fn collect_walk(root: &Path, max_depth: usize, budget: &mut usize) -> Vec<(PathBuf, bool, usize)> {
     let mut out = Vec::new();
     if root.is_dir() {
         recurse_walk(root, 1, max_depth, budget, &mut out);
@@ -1018,7 +1014,11 @@ mod tests {
         // Symlink is not followed, so its contents do not appear.
         assert!(!values.iter().any(|v| v.starts_with("@link-to-real/")));
         // The symlink entry itself is dropped (file_type().is_symlink()).
-        assert!(!values.iter().any(|v| v == "@link-to-real/" || v == "@link-to-real"));
+        assert!(
+            !values
+                .iter()
+                .any(|v| v == "@link-to-real/" || v == "@link-to-real")
+        );
     }
 
     #[test]
@@ -1058,7 +1058,10 @@ mod tests {
         let deduped = dedup_and_sort(entries);
         assert_eq!(deduped.len(), 1);
         assert_eq!(deduped[0].source_rank, 2);
-        assert_eq!(deduped[0].resolved_path, PathBuf::from("/repo/prompts/dup.md"));
+        assert_eq!(
+            deduped[0].resolved_path,
+            PathBuf::from("/repo/prompts/dup.md")
+        );
     }
 
     #[test]
@@ -1172,7 +1175,9 @@ mod tests {
             .map(|e| e.value)
             .collect();
         assert!(
-            values.iter().all(|v| !v.starts_with("@") || v.starts_with("@prompts/") || v.starts_with("@sequences/")),
+            values.iter().all(|v| !v.starts_with("@")
+                || v.starts_with("@prompts/")
+                || v.starts_with("@sequences/")),
             "repo-less @ must not emit arbitrary cwd paths; got: {values:?}",
         );
     }

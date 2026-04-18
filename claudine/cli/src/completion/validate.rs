@@ -287,10 +287,7 @@ mod tests {
     fn sequence_accepts_inline_scalar_list() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("seq.md");
-        write(
-            &path,
-            "---\nsequence:\n  - one\n  - two\n---\nBody\n",
-        );
+        write(&path, "---\nsequence:\n  - one\n  - two\n---\nBody\n");
         assert!(is_valid_sequence(&path));
     }
 

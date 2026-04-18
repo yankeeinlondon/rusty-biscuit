@@ -355,7 +355,11 @@ fn inline_compose_silently_omits_malformed_and_oversized_files() {
     )
     .unwrap();
     // Empty prompt — explicitly forbidden by the validator.
-    fs::write(prompts.join("empty-prompt.md"), "---\nprompt: \"\"\n---\nbody\n").unwrap();
+    fs::write(
+        prompts.join("empty-prompt.md"),
+        "---\nprompt: \"\"\n---\nbody\n",
+    )
+    .unwrap();
     // Oversized file — skipped before parsing.
     let padding = "a".repeat((1024 * 1024 + 1) as usize);
     fs::write(
@@ -639,8 +643,9 @@ fn missing_prompts_and_sequences_directories_return_cleanly() {
     // and nothing about the empty tree becomes a shell-visible error.
     let candidates = run_completion(root, &["inline-compose", "@"]);
     assert!(
-        candidates.iter().all(|c| !c.contains("prompts/")
-            && !c.contains("sequences/")),
+        candidates
+            .iter()
+            .all(|c| !c.contains("prompts/") && !c.contains("sequences/")),
         "no prompts/sequences entries should be produced; got: {candidates:?}",
     );
 }

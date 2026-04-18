@@ -3172,11 +3172,8 @@ mod tests {
             let raw = std::fs::read_to_string(&path).expect("read opencode fixture");
             let fixture_lines: Vec<&str> = raw.lines().collect();
 
-            let combined = replay_to_combined(
-                Provider::OpenCode,
-                &fixture_lines,
-                Some("gpt-4o".into()),
-            );
+            let combined =
+                replay_to_combined(Provider::OpenCode, &fixture_lines, Some("gpt-4o".into()));
 
             let stderr_only: Vec<String> = combined
                 .iter()
@@ -3217,9 +3214,7 @@ mod tests {
                 !bash_incoming_lines.is_empty(),
                 "spec §3: fixture should produce at least one ← Bash line:\n{stderr_joined}"
             );
-            let bash_with_summary = bash_incoming_lines
-                .iter()
-                .any(|l| l.contains("bash "));
+            let bash_with_summary = bash_incoming_lines.iter().any(|l| l.contains("bash "));
             assert!(
                 bash_with_summary,
                 "spec §3: at least one ← Bash result must carry a `bash <command>` summary slot. Got:\n{}",
