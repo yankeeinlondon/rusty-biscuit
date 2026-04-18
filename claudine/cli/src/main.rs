@@ -103,8 +103,7 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     color_eyre::install()?;
 
     // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
@@ -121,10 +120,23 @@ async fn main() -> Result<()> {
     // disabled before parsing. Uses the same token stream the parse will see.
     let is_plain = argv.iter().any(|tok| tok.to_str() == Some("--plain"));
     if is_plain {
-        // NO_COLOR is a well-established convention for disabling terminal colors
-        unsafe { std::env::set_var("NO_COLOR", "1") };
+        // SAFETY: this runs during single-threaded process bootstrap, before
+        // the Tokio runtime is constructed and before any worker threads or
+        // background tasks exist. No concurrent environment access is possible
+        // yet, so mutating the process environment upholds Rust 2024's
+        // `std::env::set_var` safety contract.
+        unsafe {
+            std::env::set_var("NO_COLOR", "1");
+        }
     }
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async_main(argv))
+}
+
+async fn async_main(argv: Vec<OsString>) -> Result<()> {
     let cli = parse_cli_from(&argv);
     log::set_plain(cli.plain);
     telemetry::init_tracing(cli.debug);
