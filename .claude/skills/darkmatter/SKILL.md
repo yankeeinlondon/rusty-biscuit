@@ -40,7 +40,7 @@ Three-phase pipeline for document preparation:
 1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
 2. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
 3. **Text Replacement** - `replace:` frontmatter replaces literal strings
-4. **Page Blocks** - `::block` / `::end-block` conditional regions
+4. **Page Blocks** - `::block` / `::end-block` conditional regions; nest to arbitrary depth with stack-based pairing, lazy child evaluation (skipped parents never evaluate inner `when`), and code-fence protection at every depth
 5. **Interpolation** - `{{ variable }}` expressions expand to values
 6. **Shell Expansion** - `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
 

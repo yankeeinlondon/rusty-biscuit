@@ -43,7 +43,7 @@ If `when` is omitted, the block is treated as enabled and its body is rendered.
 
 ## Nesting
 
-Page blocks can be nested. Inner blocks are only evaluated if their parent block rendered.
+Page blocks can be nested to arbitrary depth. The parser pairs `::block` / `::end-block` with a stack, producing a region tree in which each parent keeps its children in source order. Siblings may freely sit next to nested children, and unrelated markdown can surround any block at any level.
 
 ```md
 ::block when="outer"
@@ -55,6 +55,20 @@ Inner content
 
 ::end-block
 ```
+
+### Evaluation semantics
+
+- **Top-down, lazy.** Children are only evaluated when their parent's `when` is true. If the outer region is skipped, the inner region's `when` expression is never parsed or evaluated — so references that only exist inside the outer scope cannot raise errors when the outer is false.
+- **Literal text is preserved byte-for-byte.** Content between sibling blocks, and between the last child and its parent's `::end-block`, is emitted verbatim.
+- **Shared state.** Every `when` at every depth evaluates against the same `EffectiveState`. Sibling blocks cannot influence each other's conditions; page-block evaluation runs before interpolation and shell expansion, so nested conditions cannot depend on values those stages produce.
+- **Counters.** `ComposeReport.page_blocks_rendered` and `page_blocks_skipped` are incremented per evaluated block. A skipped parent contributes `+1` skipped and zero for its children (since they are never visited).
+
+### Pairing rules and error reporting
+
+- Pairing is strictly positional — there is **no label matching** between `::block` and `::end-block`. A stray `::end-block` inside a nested body closes the *innermost open* block, which can cause authoring mistakes to surface as `UnmatchedEnd` or `UnterminatedBlock` errors on lines far from the real mistake.
+- An unterminated outer block is reported at the line of the **deepest unterminated** directive.
+- `::block` / `::end-block` lines inside fenced code blocks are ignored at every depth, so nested examples in documentation do not interfere with real directives in the surrounding document.
+- `::end-block` must stand alone on its line — any trailing non-whitespace content is a parse error.
 
 ## Boolean Conditional Logic
 
