@@ -73,6 +73,40 @@ pub struct BlockOptions {
     /// Ordering is preserved so deterministic last-write tracing
     /// is possible under permissive duplicate-handling mode.
     pub set_properties: Vec<(String, serde_json::Value)>,
+
+    /// Deferred grammar errors for `set=`/`set.NAME=` clauses.
+    ///
+    /// The parser records invalid or reassigned set clauses here rather
+    /// than raising them inline. The engine stage, which has
+    /// `ComposeOptions` in scope, then decides whether each deferred
+    /// error is fatal (strict, default) or downgraded to a warning
+    /// (permissive flags). Sibling clauses that are independently valid
+    /// remain in `set_object` / `set_properties` so they can still apply
+    /// under permissive mode.
+    pub deferred_set_errors: Vec<DeferredSetError>,
+}
+
+/// A parser-recorded set-override error whose severity is resolved later.
+///
+/// Captured by the directive parser when a `set=<value>` RHS is not
+/// a JSON5 object or when the same `set.NAME=` appears twice on one
+/// directive line. Resolution into a hard error or a warning happens
+/// during transclusion when the governing `ComposeOptions` are in scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeferredSetError {
+    /// Object-form RHS did not parse as a JSON5 object.
+    InvalidAssignment {
+        /// Raw RHS as seen on the directive line (with any stripped quotes re-wrapped).
+        raw: String,
+        /// Human-readable reason (e.g., "expected JSON5 object").
+        reason: String,
+    },
+
+    /// A property-form name (or `"<object>"`) was assigned more than once.
+    ReassignedProperty {
+        /// The conflicting property name, or `"<object>"` for object-form.
+        name: String,
+    },
 }
 
 /// Parsed directive from markdown body.
