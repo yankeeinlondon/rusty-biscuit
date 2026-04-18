@@ -1060,6 +1060,61 @@ impl Markdown {
                 );
             }
 
+            for error in &directive.options.deferred_set_errors {
+                match error {
+                    transclusion::DeferredSetError::InvalidAssignment { raw, reason } => {
+                        if options.allow_invalid_frontmatter_assignment {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
+                                        directive.kind.as_str(),
+                                        directive.line,
+                                        reason,
+                                        raw
+                                    ),
+                                )
+                                .at_line(directive.line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidFrontmatterAssignment {
+                                    line: directive.line,
+                                    raw: raw.clone(),
+                                    reason: reason.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                    transclusion::DeferredSetError::ReassignedProperty { name } => {
+                        if options.allow_reassigned_frontmatter_property {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
+                                        name,
+                                        directive.kind.as_str(),
+                                        directive.line
+                                    ),
+                                )
+                                .at_line(directive.line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidReassignedFrontmatterProperty {
+                                    line: directive.line,
+                                    name: name.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+
             if let Some(expr) = &directive.options.when_expr {
                 let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
                 if !should_include {
@@ -1557,22 +1612,17 @@ impl Markdown {
                 // grandchildren referenced by the child's own `::file`
                 // directives do NOT inherit this parent-applied overlay.
                 if set_object.is_some() || !set_properties.is_empty() {
-                    let base_map: serde_json::Map<String, Value> = child
-                        .frontmatter()
-                        .as_map()
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect();
+                    let base_indexmap =
+                        std::mem::take(child.frontmatter_mut().as_map_mut());
+                    let base_map: serde_json::Map<String, Value> =
+                        base_indexmap.into_iter().collect();
                     let overlaid = state::apply_set_overrides(
                         &base_map,
                         set_object.as_ref(),
                         &set_properties,
                     );
-                    let fm_mut = child.frontmatter_mut().as_map_mut();
-                    fm_mut.clear();
-                    for (key, value) in overlaid {
-                        fm_mut.insert(key, value);
-                    }
+                    *child.frontmatter_mut().as_map_mut() =
+                        overlaid.into_iter().collect();
                 }
 
                 let child_report =

@@ -1,7 +1,8 @@
 //! Block and frontmatter transclusion parsing.
 
 use super::types::{
-    BlockDirective, BlockOptions, DirectiveKind, FrontmatterRefs, ReplaceOption, TransclusionError,
+    BlockDirective, BlockOptions, DeferredSetError, DirectiveKind, FrontmatterRefs, ReplaceOption,
+    TransclusionError,
 };
 use crate::markdown::FrontmatterMap;
 use crate::markdown::compose::parse_utils::{
@@ -204,7 +205,7 @@ fn apply_set_property(
     line: usize,
 ) -> Result<(), TransclusionError> {
     let parsed = if was_quoted {
-        Value::String(raw.to_string())
+        parse_json5_value(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
     } else {
         parse_json5_value(raw).map_err(|e| TransclusionError::ParseDirective {
             line,
@@ -213,7 +214,9 @@ fn apply_set_property(
     };
 
     if options.set_properties.iter().any(|(n, _)| n == &name) {
-        return Err(TransclusionError::InvalidReassignedFrontmatterProperty { line, name });
+        options
+            .deferred_set_errors
+            .push(DeferredSetError::ReassignedProperty { name: name.clone() });
     }
     options.set_properties.push((name, parsed));
     Ok(())
@@ -228,29 +231,38 @@ fn apply_set_object(
     options: &mut BlockOptions,
     raw: &str,
     was_quoted: bool,
-    line: usize,
+    _line: usize,
 ) -> Result<(), TransclusionError> {
-    let parsed = parse_json5_value(raw).map_err(|e| {
-        TransclusionError::InvalidFrontmatterAssignment {
-            line,
-            raw: format_raw_for_error(raw, was_quoted),
-            reason: format!("failed to parse as JSON5: {}", e),
+    let parsed = match parse_json5_value(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            options
+                .deferred_set_errors
+                .push(DeferredSetError::InvalidAssignment {
+                    raw: format_raw_for_error(raw, was_quoted),
+                    reason: format!("failed to parse as JSON5: {}", e),
+                });
+            return Ok(());
         }
-    })?;
+    };
 
     let Value::Object(map) = parsed else {
-        return Err(TransclusionError::InvalidFrontmatterAssignment {
-            line,
-            raw: format_raw_for_error(raw, was_quoted),
-            reason: "expected JSON5 object".to_string(),
-        });
+        options
+            .deferred_set_errors
+            .push(DeferredSetError::InvalidAssignment {
+                raw: format_raw_for_error(raw, was_quoted),
+                reason: "expected JSON5 object".to_string(),
+            });
+        return Ok(());
     };
 
     if options.set_object.is_some() {
-        return Err(TransclusionError::InvalidReassignedFrontmatterProperty {
-            line,
-            name: "<object>".to_string(),
-        });
+        options
+            .deferred_set_errors
+            .push(DeferredSetError::ReassignedProperty {
+                name: "<object>".to_string(),
+            });
+        return Ok(());
     }
     options.set_object = Some(map);
     Ok(())
@@ -536,36 +548,111 @@ mod tests {
     }
 
     #[test]
-    fn set_non_object_rhs_is_invalid_assignment() {
-        let err = parse_directives("::file ./foo.md set=42").unwrap_err();
+    fn set_non_object_rhs_defers_error() {
+        let directive = parse_single("::file ./foo.md set=42");
         assert!(
-            matches!(&err, TransclusionError::InvalidFrontmatterAssignment { .. }),
-            "expected InvalidFrontmatterAssignment, got {:?}",
-            err
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(e, DeferredSetError::InvalidAssignment { .. })),
+            "expected InvalidAssignment deferred error, got {:?}",
+            directive.options.deferred_set_errors
         );
     }
 
     #[test]
-    fn set_object_duplicate_is_reassigned_error() {
-        let err = parse_directives(r#"::file ./foo.md set='{a:1}' set='{b:2}'"#).unwrap_err();
-        match err {
-            TransclusionError::InvalidReassignedFrontmatterProperty { name, .. } => {
-                assert_eq!(name, "<object>");
-            }
-            other => panic!("expected InvalidReassignedFrontmatterProperty, got {:?}", other),
-        }
+    fn set_object_duplicate_defers_error() {
+        let directive = parse_single(r#"::file ./foo.md set='{a:1}' set='{b:2}'"#);
+        assert!(
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(
+                    e,
+                    DeferredSetError::ReassignedProperty { name } if name == "<object>"
+                )),
+            "expected ReassignedProperty(<object>) deferred error, got {:?}",
+            directive.options.deferred_set_errors
+        );
+        assert!(directive.options.set_object.is_some());
     }
 
     #[test]
-    fn set_property_duplicate_is_reassigned_error() {
-        let err =
-            parse_directives(r#"::file ./foo.md set.name="Bob" set.name="Mary""#).unwrap_err();
-        match err {
-            TransclusionError::InvalidReassignedFrontmatterProperty { name, .. } => {
-                assert_eq!(name, "name");
-            }
-            other => panic!("expected InvalidReassignedFrontmatterProperty, got {:?}", other),
-        }
+    fn set_property_duplicate_defers_error_and_rightmost_wins() {
+        let directive =
+            parse_single(r#"::file ./foo.md set.name="Bob" set.name="Mary""#);
+        assert!(
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(
+                    e,
+                    DeferredSetError::ReassignedProperty { name } if name == "name"
+                )),
+            "expected ReassignedProperty(name) deferred error, got {:?}",
+            directive.options.deferred_set_errors
+        );
+        assert_eq!(directive.options.set_properties.len(), 2);
+        assert_eq!(
+            directive.options.set_properties[0],
+            ("name".to_string(), Value::String("Bob".to_string()))
+        );
+        assert_eq!(
+            directive.options.set_properties[1],
+            ("name".to_string(), Value::String("Mary".to_string()))
+        );
+    }
+
+    #[test]
+    fn set_invalid_with_valid_sibling_defers_invalid_and_keeps_valid() {
+        let directive = parse_single(r#"::file ./foo.md set=42 set.name="Bob""#);
+        assert!(directive.options.set_object.is_none());
+        assert!(
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(e, DeferredSetError::InvalidAssignment { .. })),
+        );
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(
+            directive.options.set_properties[0],
+            ("name".to_string(), Value::String("Bob".to_string()))
+        );
+    }
+
+    #[test]
+    fn quoted_property_object_parsed_as_json5() {
+        let directive = parse_single(r#"::file ./foo.md set.author='{name: null}'"#);
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(directive.options.set_properties[0].0, "author");
+        assert_eq!(
+            directive.options.set_properties[0].1,
+            serde_json::json!({"name": null})
+        );
+    }
+
+    #[test]
+    fn quoted_property_object_deep_merge_value() {
+        let directive = parse_single(r#"::file ./foo.md set.a='{y:2}'"#);
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(
+            directive.options.set_properties[0].1,
+            serde_json::json!({"y": 2})
+        );
+    }
+
+    #[test]
+    fn quoted_property_string_fallback_when_not_json5() {
+        let directive = parse_single(r#"::file ./foo.md set.name="Bob""#);
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(
+            directive.options.set_properties[0].1,
+            Value::String("Bob".to_string())
+        );
     }
 
     fn matches_parse_directive(err: &TransclusionError) {
