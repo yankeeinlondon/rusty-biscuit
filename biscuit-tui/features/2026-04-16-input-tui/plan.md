@@ -1,6 +1,6 @@
 ---
 phases: 7
-start_phase: 1
+start_phase: 2
 source_files_during_phase_0:
   - Cargo.toml
   - CLAUDE.md
@@ -16,6 +16,19 @@ docs_updated_during_phase_0:
   - CLAUDE.md
 docs_created_during_phase_0: []
 skills_files_updated_during_phase0: []
+source_files_during_phase_1:
+  - biscuit-tui/lib/src/lib.rs
+  - biscuit-tui/lib/src/core/mod.rs
+  - biscuit-tui/lib/src/core/event.rs
+  - biscuit-tui/lib/src/core/validation.rs
+  - biscuit-tui/lib/src/core/label.rs
+  - biscuit-tui/lib/src/core/theme.rs
+  - biscuit-tui/lib/src/core/keybindings.rs
+  - biscuit-tui/lib/src/core/standalone.rs
+  - biscuit-tui/lib/src/prelude.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
 packages:
   - tui-chrome
   - tui-chrome-cli
