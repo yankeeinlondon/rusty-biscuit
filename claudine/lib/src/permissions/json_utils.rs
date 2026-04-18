@@ -6,7 +6,9 @@ pub(crate) fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a m
         if !current.is_object() {
             *current = Value::Object(Map::new());
         }
-        let obj = current.as_object_mut().unwrap();
+        let obj = current
+            .as_object_mut()
+            .expect("ensure_json_value: current was just set to Object above");
         current = obj.entry((*key).to_owned()).or_insert(Value::Null);
     }
     current
@@ -17,10 +19,7 @@ pub(crate) fn ensure_json_array<'a>(root: &'a mut Value, path: &[&str]) -> &'a m
     if !value.is_array() {
         *value = Value::Array(Vec::new());
     }
-    debug_assert!(
-        value.is_array(),
-        "ensure_json_array: type mismatch after set — expected array, got {:?}",
-        value
-    );
-    unsafe { value.as_array_mut().unwrap_unchecked() }
+    value
+        .as_array_mut()
+        .expect("ensure_json_array: value was just set to Array above")
 }
