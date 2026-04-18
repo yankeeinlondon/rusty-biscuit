@@ -3980,7 +3980,8 @@ Rounded: {{ round(pi) }}"#;
 
         #[test]
         fn page_block_with_infix_and_true() {
-            let content = "---\na: true\nb: true\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
+            let content =
+                "---\na: true\nb: true\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
             let (output, report) = compose_with_page_blocks(content);
             assert!(output.contains("inside"));
             assert_eq!(report.page_blocks_rendered, 1);

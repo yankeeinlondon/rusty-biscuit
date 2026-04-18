@@ -436,16 +436,12 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     match self.mode {
                         ParseMode::Condition => Ok(Token::AndAnd),
-                        ParseMode::Interpolation => Err(LexerError::new(
-                            "Unexpected character: '&'",
-                            start_pos,
-                        )),
+                        ParseMode::Interpolation => {
+                            Err(LexerError::new("Unexpected character: '&'", start_pos))
+                        }
                     }
                 } else {
-                    Err(LexerError::new(
-                        "Unexpected character: '&'",
-                        start_pos,
-                    ))
+                    Err(LexerError::new("Unexpected character: '&'", start_pos))
                 }
             }
             '?' => {
