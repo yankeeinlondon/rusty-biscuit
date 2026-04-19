@@ -558,6 +558,54 @@ mod tests {
     }
 
     #[test]
+    fn discord_webhook_route_round_trips_with_both_fields() {
+        let cfg = RouteConfig::DiscordWebhook {
+            webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+            webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: RouteConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn discord_webhook_route_round_trips_with_env_only() {
+        let cfg = RouteConfig::DiscordWebhook {
+            webhook_url: None,
+            webhook_url_env: "CUSTOM_WEBHOOK_ENV".into(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: RouteConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn discord_webhook_route_applies_default_env_when_absent() {
+        let raw = r#"{"provider":"discord-webhook","webhook_url":"https://discord.com/api/v10/webhooks/1/abc"}"#;
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            parsed,
+            RouteConfig::DiscordWebhook {
+                webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+                webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn discord_webhook_route_applies_default_when_both_fields_absent() {
+        let raw = r#"{"provider":"discord-webhook"}"#;
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            parsed,
+            RouteConfig::DiscordWebhook {
+                webhook_url: None,
+                webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    #[test]
     fn config_round_trips_with_typed_route_config() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("messenger.json");

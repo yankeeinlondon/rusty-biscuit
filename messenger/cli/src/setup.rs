@@ -172,21 +172,39 @@ fn configure_provider(provider: &RouteProvider, route_name: Option<&str>) -> Res
 }
 
 fn configure_discord_webhook() -> Result<RouteConfig> {
-    // Phase 5 replaces this stub with the full interactive walkthrough;
-    // Phase 4 only needs compilation + send-path wiring, so keep a minimal
-    // placeholder that still produces a round-trippable RouteConfig.
+    println!(
+        "\n{}",
+        styled(
+            "<dim>Discord webhooks require the full webhook URL (https://discord.com/api/v10/webhooks/ID/TOKEN).</dim>"
+        )
+    );
+    println!(
+        "{}",
+        styled("<dim>Create one under Server Settings → Integrations → Webhooks.</dim>")
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>The URL binds both the channel and authentication — treat it as a secret.</dim>"
+        )
+    );
+
     let webhook_url = Text::new("Webhook URL:")
         .with_help_message("Full webhook URL (leave empty to use env var instead)")
         .prompt()
-        .map(|s| s.trim().to_string())?;
-    let webhook_url = if webhook_url.is_empty() {
-        None
+        .map_err(handle_cancel)?;
+    let webhook_url = non_empty(webhook_url);
+
+    let webhook_url_env = if webhook_url.is_none() {
+        Text::new("Environment variable for webhook URL:")
+            .with_default("DISCORD_WEBHOOK_URL")
+            .with_help_message("The env var that holds your Discord webhook URL")
+            .prompt()
+            .map_err(handle_cancel)?
     } else {
-        Some(webhook_url)
+        "DISCORD_WEBHOOK_URL".into()
     };
-    let webhook_url_env = Text::new("Environment variable for webhook URL:")
-        .with_default("DISCORD_WEBHOOK_URL")
-        .prompt()?;
+
     Ok(RouteConfig::DiscordWebhook {
         webhook_url,
         webhook_url_env,

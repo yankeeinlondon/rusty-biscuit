@@ -579,6 +579,113 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
+    fn resolve_secret_prefers_direct_value_over_env() {
+        unsafe {
+            std::env::remove_var("DISCORD_WEBHOOK_URL");
+        }
+        let resolved = resolve_secret(
+            Some("https://discord.com/api/v10/webhooks/1/direct"),
+            "DISCORD_WEBHOOK_URL",
+        )
+        .unwrap();
+        assert_eq!(resolved, "https://discord.com/api/v10/webhooks/1/direct");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_falls_back_to_env_var() {
+        unsafe {
+            std::env::set_var(
+                "DISCORD_WEBHOOK_URL",
+                "https://discord.com/api/v10/webhooks/1/from-env",
+            );
+        }
+        let resolved = resolve_secret(None, "DISCORD_WEBHOOK_URL").unwrap();
+        assert_eq!(resolved, "https://discord.com/api/v10/webhooks/1/from-env");
+        unsafe {
+            std::env::remove_var("DISCORD_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_errors_when_neither_value_nor_env_is_set() {
+        unsafe {
+            std::env::remove_var("DISCORD_WEBHOOK_URL");
+        }
+        let err = resolve_secret(None, "DISCORD_WEBHOOK_URL").unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("DISCORD_WEBHOOK_URL"),
+            "error should mention the missing env var, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn build_target_maps_discord_webhook_route_to_webhook_target() {
+        let target = build_target(&RouteConfig::DiscordWebhook {
+            webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+            webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+        })
+        .unwrap();
+
+        assert!(matches!(target, messenger::Target::DiscordWebhook(_)));
+    }
+
+    #[test]
+    fn resolve_route_builds_discord_webhook_ad_hoc_route() {
+        let resolved = resolve_route(
+            Some(RouteProvider::DiscordWebhook),
+            Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+            None,
+            &Config::default(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.name, None);
+        assert_eq!(
+            resolved.route,
+            RouteConfig::DiscordWebhook {
+                webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+                webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    // Setup-flow smoke test: the interactive `inquire` prompt chain cannot run
+    // unattended, so we verify the non-interactive postcondition — a pre-built
+    // RouteConfig::DiscordWebhook is preserved through a save/load cycle and
+    // reports the correct provider kind. The interactive walkthrough is
+    // covered by the setup section of the user guide.
+    #[test]
+    fn discord_webhook_route_survives_config_save_load_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let route = RouteConfig::DiscordWebhook {
+            webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+            webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+        };
+
+        let mut config = Config {
+            default_route: Some("discord.webhook.alerts".into()),
+            routes: HashMap::new(),
+        };
+        config
+            .routes
+            .insert("discord.webhook.alerts".into(), route.clone());
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
+        let stored = loaded.routes.get("discord.webhook.alerts").unwrap();
+        assert_eq!(stored, &route);
+        assert_eq!(stored.provider(), RouteProvider::DiscordWebhook);
+    }
+
+    #[test]
     fn compatibility_warning_format_matches_cli_output() {
         let warning = messenger::CompatibilityWarning {
             provider: messenger::ProviderKind::Slack,
