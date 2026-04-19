@@ -17,13 +17,14 @@ The library does not load secrets or configuration files. Callers construct prov
 
 The built-in providers follow the provider API models currently implemented in this repo:
 
-- Discord: bot token + channel ID
+- Discord (bot): bot token + channel ID
+- Discord (webhook): full webhook URL (binds channel + authentication)
 - Slack: bot token + channel ID
 - Signal: JSON-RPC URL + sending account + recipient/group ID
 - WhatsApp: Cloud API access token + phone number ID + recipient
 - Telegram: bot token + chat ID
 
-Slack and Discord are not modeled as incoming-webhook transports in the current library API.
+Slack is not modeled as an incoming-webhook transport in the current library API. Discord ships both a bot-token adapter and a webhook-URL adapter; the webhook adapter is notification-only and does not support replies.
 
 ## Prelude
 
@@ -83,13 +84,14 @@ If you want visibility before sending, use `plan_send` and inspect `SendPlan::wa
 
 ## Provider Support
 
-| Provider | Rich text           | Replies | Attachments | Location handling       | Silent | Link previews |
-|----------|---------------------|---------|-------------|-------------------------|--------|---------------|
-| Discord  | Markdown rendering  | Yes     | Yes         | Appends text fallback   | No     | No            |
-| Slack    | mrkdwn rendering    | Yes     | No          | Appends text fallback   | No     | Yes           |
-| Signal   | Plain-text fallback | Yes     | No          | Appends text fallback   | No     | No            |
-| WhatsApp | Plain-text fallback | Yes     | No          | Native location payload | No     | No            |
-| Telegram | HTML rendering      | Yes     | No          | Native location payload | Yes    | Yes           |
+| Provider        | Rich text           | Replies | Attachments | Location handling       | Silent | Link previews |
+|-----------------|---------------------|---------|-------------|-------------------------|--------|---------------|
+| Discord         | Markdown rendering  | Yes     | Yes         | Appends text fallback   | No     | No            |
+| Discord-Webhook | Markdown rendering  | No      | Yes         | Appends text fallback   | No     | No            |
+| Slack           | mrkdwn rendering    | Yes     | No          | Appends text fallback   | No     | Yes           |
+| Signal          | Plain-text fallback | Yes     | No          | Appends text fallback   | No     | No            |
+| WhatsApp        | Plain-text fallback | Yes     | No          | Native location payload | No     | No            |
+| Telegram        | HTML rendering      | Yes     | No          | Native location payload | Yes    | Yes           |
 
 Two details matter when integrating:
 
@@ -148,7 +150,7 @@ let with_file = Message::markdown("Artifact ready")
 
 Attachment sources can be local files, URLs, in-memory bytes, or provider-native file identifiers. Validation rejects missing files, unreadable paths, empty URLs, and malformed provider file IDs before a send is attempted.
 
-Only Discord supports attachments today. On Discord, attachments must come from a local file or in-memory bytes; URL-based and provider-file-ID attachments are rejected by the provider adapter.
+Only the Discord adapters (bot and webhook) support attachments today. Attachments must come from a local file or in-memory bytes; URL-based and provider-file-ID attachments are rejected by both adapters.
 
 ## Dispatch And Replies
 
@@ -227,8 +229,8 @@ The crate includes:
 ## Key Crates
 
 - `pulldown-cmark` for Markdown parsing
-- `reqwest` for Slack, Signal, WhatsApp, and Telegram HTTP calls
-- `twilight-http` and `twilight-model` for Discord
+- `reqwest` for Slack, Signal, WhatsApp, Telegram, and Discord-webhook HTTP calls
+- `twilight-http` and `twilight-model` for the Discord bot adapter
 - `thiserror` for the public error type
 - `serde` / `serde_json` for typed receipts and reply references
 
