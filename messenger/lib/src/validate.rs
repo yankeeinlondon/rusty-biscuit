@@ -78,6 +78,20 @@ pub fn normalize_dispatch(
         }
     }
 
+    // Discord webhooks cannot carry a reply context. Enforce this before
+    // normalization so `BestEffort` mode does not silently drop the field and
+    // so `plan_send()` never issues a network call for this misuse.
+    if provider == ProviderKind::DiscordWebhook && dispatch.reply_to.is_some() {
+        tracing::warn!(
+            feature = "replies",
+            "Discord webhooks do not support replies; failing plan-time"
+        );
+        return Err(MessengerError::UnsupportedFeature {
+            provider,
+            feature: "replies",
+        });
+    }
+
     let mut normalized_dispatch = dispatch.clone();
     let mut normalized_message = message.clone();
     let mut warnings = Vec::new();
@@ -298,6 +312,8 @@ pub fn target_provider_kind(target: &Target) -> ProviderKind {
     match target {
         #[cfg(feature = "discord")]
         Target::Discord(_) => ProviderKind::Discord,
+        #[cfg(feature = "discord")]
+        Target::DiscordWebhook(_) => ProviderKind::DiscordWebhook,
         #[cfg(feature = "slack")]
         Target::Slack(_) => ProviderKind::Slack,
         #[cfg(feature = "signal")]
