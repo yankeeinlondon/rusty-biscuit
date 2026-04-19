@@ -8,19 +8,20 @@
 ## Package Area Conventions
 
 - Most areas follow a `{area}/lib` + `{area}/cli` split. Notable exceptions:
-    - `biscuit-visualized`, `tabby`, `tui` — single crate
+    - `biscuit-visualized`, `tabby` — single crate
     - `homelab` — lib/cli/server plus per-device integration crates
     - `schematic` — `define` / `definitions` / `gen` / `oauth` / `schema`
     - `unchained-ai` — includes the `model_id` proc-macro crate
 - `biscuit-speaks` CLI binary is named `so-you-say` (lives under `biscuit-speaks/cli`).
+- `biscuit-tui` follows the lib/cli split; CLI binary is named `question` (lives under `biscuit-tui/cli`).
 
 ## Root `just` Coverage
 
 Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **curated** area list — not every workspace member.
 
 - `so-you-say` appears in the root `areas` list but has **no top-level `so-you-say/justfile`**; its recipes live in `biscuit-speaks/cli`.
-- Workspace members **not** covered by the root `areas` list: `agent-sandbox`, `biscuit-visualized`, `messenger`, `tabby`, `tui`, `worktree`. Use the area `justfile` when present, otherwise direct `cargo` commands.
-- Areas with **no** area `justfile`: `agent-sandbox`, `tabby`, `tui`.
+- Workspace members **not** covered by the root `areas` list: `agent-sandbox`, `biscuit-tui`, `biscuit-visualized`, `messenger`, `tabby`, `worktree`. Use the area `justfile` when present, otherwise direct `cargo` commands.
+- Areas with **no** area `justfile`: `agent-sandbox`, `tabby`.
 
 ## Rustdoc Convention
 
