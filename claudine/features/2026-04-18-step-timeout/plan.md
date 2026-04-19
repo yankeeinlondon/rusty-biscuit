@@ -1,7 +1,7 @@
 ---
 phases: 5
 created: 2026-04-18
-start_phase: 1
+start_phase: 3
 source_files_during_phase_1:
   - claudine/lib/src/harness/model.rs
   - claudine/lib/src/harness/timeout.rs
@@ -15,6 +15,14 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - claudine/lib/src/stream/logs/opencode.rs
+  - claudine/cli/src/commands/wrap/exec.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/composition.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - claudine
   - claudine-cli
