@@ -515,6 +515,7 @@ mod tests {
             append_system_prompt: None,
             replace_system_prompt: None,
             timeout: None,
+            step_timeout: None,
             dry_run: false,
             quiet: false,
             silent: false,

@@ -679,6 +679,12 @@ pub struct WrapperArgs {
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
     pub timeout: Option<u64>,
 
+    /// Step-silence timeout (e.g. `30s`, `5m`). Kills the child when no stream
+    /// event is observed for this long. Only valid in non-interactive
+    /// structured-stream mode.
+    #[arg(long = "step-timeout", value_name = "DURATION")]
+    pub step_timeout: Option<String>,
+
     /// Show what would be executed without launching the child.
     #[arg(long)]
     pub dry_run: bool,
@@ -924,6 +930,13 @@ fn run_provider_wrapper_inner(
         return Err(eyre!("--timeout cannot be used with --interactive mode"));
     }
 
+    // Early check: --step-timeout + --interactive is always an error
+    if args.step_timeout.is_some() && interactive_requested {
+        return Err(eyre!(
+            "--step-timeout cannot be used with --interactive mode"
+        ));
+    }
+
     // clap catches direct `--edit` + `--interactive` conflicts, but once a
     // prompt token starts passthrough capture either flag can arrive from the
     // fallback extractor instead. Keep the merged behavior consistent.
@@ -938,6 +951,27 @@ fn run_provider_wrapper_inner(
              (provide a prompt or use a composition switch)"
         ));
     }
+
+    // Early check: --step-timeout requires non-interactive mode
+    if args.step_timeout.is_some() && !non_interactive_requested {
+        return Err(eyre!(
+            "--step-timeout can only be used in non-interactive mode \
+             (provide a prompt or use a composition switch)"
+        ));
+    }
+
+    // Parse `--step-timeout DURATION` once via the same parser frontmatter
+    // uses so CLI and frontmatter errors share one grammar. The `Path`
+    // argument is only used to decorate `HarnessError`; the CLI flag has no
+    // source file, so we use a synthetic label.
+    let cli_step_timeout_secs: Option<u64> = match args.step_timeout.as_deref() {
+        Some(raw) => Some(
+            claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
+                .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?
+                .as_secs(),
+        ),
+        None => None,
+    };
 
     // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
@@ -1123,6 +1157,13 @@ fn run_provider_wrapper_inner(
     if args.timeout.is_some() && !effective_non_interactive {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \
+             (provide a prompt)"
+        ));
+    }
+
+    if args.step_timeout.is_some() && !effective_non_interactive {
+        return Err(eyre!(
+            "--step-timeout can only be used in non-interactive mode \
              (provide a prompt)"
         ));
     }
@@ -1393,6 +1434,21 @@ fn run_provider_wrapper_inner(
     Span::current().record("structured_mode", use_structured);
     let stream_verbosity = structured_verbosity(silent_requested, quiet_requested);
 
+    // `step_timeout` is only enforceable in structured-stream mode because
+    // it gates on `LiveMetrics::last_event_at`. Warn and drop it otherwise so
+    // the downstream exec path never has to re-check.
+    let cli_step_timeout_secs = if !use_structured && cli_step_timeout_secs.is_some() {
+        if !silent_requested {
+            log::warn(
+                "--step-timeout is only enforced in structured-stream mode; \
+                 this run does not qualify, so the flag will be ignored",
+            );
+        }
+        None
+    } else {
+        cli_step_timeout_secs
+    };
+
     if use_structured {
         profile.apply_structured_stream(&mut child_args);
     }
@@ -1519,7 +1575,7 @@ fn run_provider_wrapper_inner(
                 child_cwd,
                 effective_non_interactive,
                 args.timeout,
-                None,
+                cli_step_timeout_secs,
                 &harness_base_args,
                 &env_plan.env,
                 &mut prompt_state,
@@ -1571,7 +1627,7 @@ fn run_provider_wrapper_inner(
                 &env_plan.env,
                 child_cwd,
                 args.timeout,
-                None,
+                cli_step_timeout_secs,
                 stderr_noise,
                 profile.suppress_structured_stderr_on_success(),
                 stream_verbosity != Verbosity::Silent,
