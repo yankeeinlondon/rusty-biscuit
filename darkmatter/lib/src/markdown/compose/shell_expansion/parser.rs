@@ -28,10 +28,9 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
     let code_regions = find_code_regions(content);
     let mut directives = Vec::new();
 
-    let mut line_num = 1;
     let mut byte_offset = 0;
 
-    for line_slice in content.split_inclusive('\n') {
+    for (line_num, line_slice) in (1..).zip(content.split_inclusive('\n')) {
         let line_start = byte_offset;
         let line = line_slice
             .strip_suffix('\n')
@@ -101,7 +100,6 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
         }
 
         byte_offset = line_with_newline_end;
-        line_num += 1;
     }
 
     Ok(directives)

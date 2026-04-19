@@ -11,9 +11,9 @@
 //! Generated API client for [EmqxBearer](https://docs.emqx.com/en/emqx/latest/admin/api.html).
 //!
 //! EMQX Broker REST API with Bearer Token authentication (JWT)
-use serde::{Deserialize, Serialize};
-pub use schematic_definitions::emqx::*;
 use crate::shared::{RequestParts, SchematicError};
+pub use schematic_definitions::emqx::*;
+use serde::{Deserialize, Serialize};
 /// Request for `ListNodes` endpoint.
 ///
 /// ## Example
@@ -91,7 +91,9 @@ impl GetNodeBasicRequest {
 }
 impl From<&str> for GetNodeBasicRequest {
     fn from(param: &str) -> Self {
-        Self { node: param.to_string() }
+        Self {
+            node: param.to_string(),
+        }
     }
 }
 impl From<String> for GetNodeBasicRequest {
@@ -193,7 +195,9 @@ pub struct GetClientBasicRequest {
 impl GetClientBasicRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(clientid: impl Into<String>) -> Self {
-        Self { clientid: clientid.into() }
+        Self {
+            clientid: clientid.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -248,7 +252,9 @@ pub struct DisconnectClientBasicRequest {
 impl DisconnectClientBasicRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(clientid: impl Into<String>) -> Self {
-        Self { clientid: clientid.into() }
+        Self {
+            clientid: clientid.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -335,7 +341,7 @@ impl SubscribeClientBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -395,7 +401,7 @@ impl UnsubscribeClientBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -486,7 +492,7 @@ impl PublishBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -546,7 +552,7 @@ impl PublishBulkBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -642,7 +648,7 @@ impl CreateRuleBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -698,7 +704,9 @@ impl GetRuleBasicRequest {
 }
 impl From<&str> for GetRuleBasicRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetRuleBasicRequest {
@@ -734,7 +742,10 @@ pub struct UpdateRuleBasicRequest {
 impl UpdateRuleBasicRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(id: impl Into<String>, body: CreateRuleBody) -> Self {
-        Self { id: id.into(), body }
+        Self {
+            id: id.into(),
+            body,
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -757,7 +768,7 @@ impl UpdateRuleBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -808,7 +819,9 @@ impl DeleteRuleBasicRequest {
 }
 impl From<&str> for DeleteRuleBasicRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for DeleteRuleBasicRequest {
@@ -844,7 +857,10 @@ pub struct TestRuleBasicRequest {
 impl TestRuleBasicRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(id: impl Into<String>, body: TestRuleBody) -> Self {
-        Self { id: id.into(), body }
+        Self {
+            id: id.into(),
+            body,
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -867,7 +883,7 @@ impl TestRuleBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -954,7 +970,9 @@ impl GetAuthenticatorBasicRequest {
 }
 impl From<&str> for GetAuthenticatorBasicRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetAuthenticatorBasicRequest {
@@ -1007,7 +1025,9 @@ impl ListAuthUsersBasicRequest {
 }
 impl From<&str> for ListAuthUsersBasicRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for ListAuthUsersBasicRequest {
@@ -1043,7 +1063,10 @@ pub struct CreateAuthUserBasicRequest {
 impl CreateAuthUserBasicRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(id: impl Into<String>, body: CreateAuthUserBody) -> Self {
-        Self { id: id.into(), body }
+        Self {
+            id: id.into(),
+            body,
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -1066,7 +1089,7 @@ impl CreateAuthUserBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -1237,7 +1260,9 @@ impl GetListenerBasicRequest {
 }
 impl From<&str> for GetListenerBasicRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetListenerBasicRequest {
@@ -1447,7 +1472,9 @@ pub struct GetRetainedBasicRequest {
 impl GetRetainedBasicRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(topic: impl Into<String>) -> Self {
-        Self { topic: topic.into() }
+        Self {
+            topic: topic.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -1470,7 +1497,9 @@ impl GetRetainedBasicRequest {
 }
 impl From<&str> for GetRetainedBasicRequest {
     fn from(param: &str) -> Self {
-        Self { topic: param.to_string() }
+        Self {
+            topic: param.to_string(),
+        }
     }
 }
 impl From<String> for GetRetainedBasicRequest {
@@ -1500,7 +1529,9 @@ pub struct DeleteRetainedBasicRequest {
 impl DeleteRetainedBasicRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(topic: impl Into<String>) -> Self {
-        Self { topic: topic.into() }
+        Self {
+            topic: topic.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -1523,7 +1554,9 @@ impl DeleteRetainedBasicRequest {
 }
 impl From<&str> for DeleteRetainedBasicRequest {
     fn from(param: &str) -> Self {
-        Self { topic: param.to_string() }
+        Self {
+            topic: param.to_string(),
+        }
     }
 }
 impl From<String> for DeleteRetainedBasicRequest {
@@ -1652,7 +1685,7 @@ impl CreateBanBasicRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -1850,9 +1883,7 @@ impl EmqxBasicRequest {
             Self::ListNodes(_) => {
                 <ListNodesBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetNode(_) => {
-                <GetNodeBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::GetNode(_) => <GetNodeBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::GetCluster(_) => {
                 <GetClusterBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1874,9 +1905,7 @@ impl EmqxBasicRequest {
             Self::ListSubscriptions(_) => {
                 <ListSubscriptionsBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::Publish(_) => {
-                <PublishBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::Publish(_) => <PublishBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::PublishBulk(_) => {
                 <PublishBulkBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1886,18 +1915,14 @@ impl EmqxBasicRequest {
             Self::CreateRule(_) => {
                 <CreateRuleBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetRule(_) => {
-                <GetRuleBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::GetRule(_) => <GetRuleBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::UpdateRule(_) => {
                 <UpdateRuleBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::DeleteRule(_) => {
                 <DeleteRuleBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::TestRule(_) => {
-                <TestRuleBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::TestRule(_) => <TestRuleBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::ListAuthenticators(_) => {
                 <ListAuthenticatorsBasicRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -2159,9 +2184,8 @@ impl EmqxBasic {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "http://localhost:18083/api/v5";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some(
-        "https://docs.emqx.com/en/emqx/latest/admin/api.html",
-    );
+    pub const DOCS_URL: Option<&'static str> =
+        Some("https://docs.emqx.com/en/emqx/latest/admin/api.html");
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
@@ -2174,22 +2198,21 @@ impl EmqxBasic {
                 env_fallback: Some(schematic_define::EnvAuthStrategy::Basic),
             },
             env_username: Some("EMQX_API_KEY".to_string()),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_API_KEY".to_string()]),
-                    ),
-                    basic_pass: Some(
-                        schematic_define::EnvList::new(
-                            vec!["EMQX_API_SECRET".to_string()],
-                        ),
-                    ),
+                    basic_user: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_KEY".to_string(),
+                    ])),
+                    basic_pass: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_SECRET".to_string(),
+                    ])),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2211,22 +2234,21 @@ impl EmqxBasic {
                 env_fallback: Some(schematic_define::EnvAuthStrategy::Basic),
             },
             env_username: Some("EMQX_API_KEY".to_string()),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_API_KEY".to_string()]),
-                    ),
-                    basic_pass: Some(
-                        schematic_define::EnvList::new(
-                            vec!["EMQX_API_SECRET".to_string()],
-                        ),
-                    ),
+                    basic_user: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_KEY".to_string(),
+                    ])),
+                    basic_pass: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_SECRET".to_string(),
+                    ])),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2254,22 +2276,21 @@ impl EmqxBasic {
                 env_fallback: Some(schematic_define::EnvAuthStrategy::Basic),
             },
             env_username: Some("EMQX_API_KEY".to_string()),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_API_KEY".to_string()]),
-                    ),
-                    basic_pass: Some(
-                        schematic_define::EnvList::new(
-                            vec!["EMQX_API_SECRET".to_string()],
-                        ),
-                    ),
+                    basic_user: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_KEY".to_string(),
+                    ])),
+                    basic_pass: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_SECRET".to_string(),
+                    ])),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2284,10 +2305,7 @@ impl EmqxBasic {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -2298,22 +2316,21 @@ impl EmqxBasic {
                 env_fallback: Some(schematic_define::EnvAuthStrategy::Basic),
             },
             env_username: Some("EMQX_API_KEY".to_string()),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
-                    basic_user: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_API_KEY".to_string()]),
-                    ),
-                    basic_pass: Some(
-                        schematic_define::EnvList::new(
-                            vec!["EMQX_API_SECRET".to_string()],
-                        ),
-                    ),
+                    basic_user: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_KEY".to_string(),
+                    ])),
+                    basic_pass: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_API_SECRET".to_string(),
+                    ])),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2443,29 +2460,24 @@ impl EmqxBasic {
                     .as_ref()
                     .map(|api_key| api_key.header.clone())
             });
-        header
-            .and_then(|header| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|env_name| std::env::var(env_name).ok())
-                    })
-                    .map(|value| (header, value))
-            })
+        header.and_then(|header| {
+            self.headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|env_name| std::env::var(env_name).ok())
+                })
+                .map(|value| (header, value))
+        })
     }
     /// Returns a clone of this client configured with explicit basic auth.
     #[must_use]
-    pub fn basic_auth(
-        &self,
-        username: impl Into<String>,
-        password: impl Into<String>,
-    ) -> Self {
+    pub fn basic_auth(&self, username: impl Into<String>, password: impl Into<String>) -> Self {
         self.variant()
             .headers_builder(self.headers.clone().use_basic_auth(username, password))
             .build()
@@ -2577,7 +2589,9 @@ impl<'a> EmqxBasicVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError>
+            + Send
+            + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -2605,13 +2619,15 @@ impl<'a> EmqxBasicVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+            ) -> Result<(), crate::shared::SchematicError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
+        self.response_mutators.insert(
+            R::ENDPOINT_ID,
+            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+        );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -2637,17 +2653,15 @@ impl<'a> EmqxBasicVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
-                self.base
-                    .headers
-                    .clone()
-                    .with_env_mapping(
-                        schematic_define::RestApi::legacy_env_mapping_for(
-                            &auth_strategy,
-                            &env_auth,
-                            self.base.env_username.as_deref(),
-                        ),
-                    )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
+            {
+                self.base.headers.clone().with_env_mapping(
+                    schematic_define::RestApi::legacy_env_mapping_for(
+                        &auth_strategy,
+                        &env_auth,
+                        self.base.env_username.as_deref(),
+                    ),
+                )
             }
             None => self.base.headers.clone(),
         };
@@ -2675,12 +2689,10 @@ impl EmqxBasic {
             .explicit
             .iter()
             .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => {
-                    match header.as_deref() {
-                        Some(header) => format!("an explicit bearer token in `{header}`"),
-                        None => "an explicit bearer token".to_string(),
-                    }
-                }
+                schematic_define::AuthMethod::BearerToken { header } => match header.as_deref() {
+                    Some(header) => format!("an explicit bearer token in `{header}`"),
+                    None => "an explicit bearer token".to_string(),
+                },
                 schematic_define::AuthMethod::ApiKey { header } => {
                     format!("an explicit API key in `{header}`")
                 }
@@ -2696,22 +2708,20 @@ impl EmqxBasic {
     }
     fn env_fallback_var_names(&self) -> Vec<String> {
         match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .bearer_token
-                    .as_ref()
-                    .map(|list| list.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| api_key.names.names().to_vec())
-                    .unwrap_or_default()
-            }
+            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => self
+                .headers
+                .env_mapping()
+                .bearer_token
+                .as_ref()
+                .map(|list| list.names().to_vec())
+                .unwrap_or_default(),
+            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => self
+                .headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .map(|api_key| api_key.names.names().to_vec())
+                .unwrap_or_default(),
             Some(schematic_define::EnvAuthStrategy::Basic) => {
                 let mut vars = Vec::new();
                 if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
@@ -2734,13 +2744,10 @@ impl EmqxBasic {
             options.push(explicit_methods.join(", "));
         }
         if !env_fallback_vars.is_empty() {
-            options
-                .push(
-                    format!(
-                        "set one of the fallback env vars `{}`", env_fallback_vars
-                        .join("`, `")
-                    ),
-                );
+            options.push(format!(
+                "set one of the fallback env vars `{}`",
+                env_fallback_vars.join("`, `")
+            ));
         }
         let mut message = if options.is_empty() {
             "Authentication required.".to_string()
@@ -2759,19 +2766,15 @@ impl EmqxBasic {
             env_fallback_vars,
         }
     }
-    fn apply_env_fallback(
-        &self,
-        headers: schematic_define::Headers,
-    ) -> schematic_define::Headers {
+    fn apply_env_fallback(&self, headers: schematic_define::Headers) -> schematic_define::Headers {
         let env_mapping = self.headers.env_mapping().clone();
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping
-                    .bearer_token
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
+                let token = env_mapping.bearer_token.as_ref().and_then(|list| {
+                    list.names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
                 match (token, header.as_deref()) {
                     (Some(token), Some(header)) => {
                         headers.use_bearer_token_with_header(token, header)
@@ -2781,38 +2784,31 @@ impl EmqxBasic {
                 }
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
-                let key = env_mapping
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|name| std::env::var(name).ok())
-                    });
+                let key = env_mapping.api_key.as_ref().and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
                 match key {
                     Some(key) => headers.header(header.clone(), key),
                     None => headers,
                 }
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping
-                    .basic_user
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                let password = env_mapping
-                    .basic_pass
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
+                let username = env_mapping.basic_user.as_ref().and_then(|list| {
+                    list.names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
+                let password = env_mapping.basic_pass.as_ref().and_then(|list| {
+                    list.names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
                 match (username, password) {
-                    (Some(username), Some(password)) => {
-                        headers.use_basic_auth(username, password)
-                    }
+                    (Some(username), Some(password)) => headers.use_basic_auth(username, password),
                     _ => headers,
                 }
             }
@@ -2823,12 +2819,10 @@ impl EmqxBasic {
     fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header
-                    .as_deref()
-                    .map_or_else(
-                        || headers.has_authorization(),
-                        |header| headers.has_header(header),
-                    )
+                header.as_deref().map_or_else(
+                    || headers.has_authorization(),
+                    |header| headers.has_header(header),
+                )
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
                 headers.has_header(header)
@@ -2843,7 +2837,8 @@ impl EmqxBasic {
         if !headers.has_explicit_auth() {
             headers = self.apply_env_fallback(headers);
         }
-        if self.auth_is_required() && !headers.has_explicit_auth()
+        if self.auth_is_required()
+            && !headers.has_explicit_auth()
             && !self.headers_satisfy_fallback(&headers)
         {
             return Err(self.authentication_required_error());
@@ -2966,11 +2961,7 @@ impl EmqxBasic {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self
-                .variant_hooks
-                .response_mutators
-                .get(ctx.endpoint_id)
-            {
+            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)
@@ -3049,10 +3040,7 @@ impl EmqxBasic {
     ///
     /// Publish an MQTT message to a topic
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn publish(
-        &self,
-        request: PublishBasicRequest,
-    ) -> Result<(), SchematicError> {
+    pub async fn publish(&self, request: PublishBasicRequest) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
     /// Convenience method for the `PublishBulk` endpoint.
@@ -3069,10 +3057,7 @@ impl EmqxBasic {
     ///
     /// Delete a rule from the rules engine
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn delete_rule(
-        &self,
-        request: DeleteRuleBasicRequest,
-    ) -> Result<(), SchematicError> {
+    pub async fn delete_rule(&self, request: DeleteRuleBasicRequest) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
     /// Convenience method for the `DeleteAuthUser` endpoint.
@@ -3109,10 +3094,7 @@ impl EmqxBasic {
     ///
     /// Remove a ban by type (clientid, username, peerhost) and value
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn delete_ban(
-        &self,
-        request: DeleteBanBasicRequest,
-    ) -> Result<(), SchematicError> {
+    pub async fn delete_ban(&self, request: DeleteBanBasicRequest) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
 }
@@ -3161,7 +3143,7 @@ impl LoginBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -3289,7 +3271,9 @@ impl GetNodeBearerRequest {
 }
 impl From<&str> for GetNodeBearerRequest {
     fn from(param: &str) -> Self {
-        Self { node: param.to_string() }
+        Self {
+            node: param.to_string(),
+        }
     }
 }
 impl From<String> for GetNodeBearerRequest {
@@ -3391,7 +3375,9 @@ pub struct GetClientBearerRequest {
 impl GetClientBearerRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(clientid: impl Into<String>) -> Self {
-        Self { clientid: clientid.into() }
+        Self {
+            clientid: clientid.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -3446,7 +3432,9 @@ pub struct DisconnectClientBearerRequest {
 impl DisconnectClientBearerRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(clientid: impl Into<String>) -> Self {
-        Self { clientid: clientid.into() }
+        Self {
+            clientid: clientid.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -3533,7 +3521,7 @@ impl SubscribeClientBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -3593,7 +3581,7 @@ impl UnsubscribeClientBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -3684,7 +3672,7 @@ impl PublishBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -3744,7 +3732,7 @@ impl PublishBulkBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -3840,7 +3828,7 @@ impl CreateRuleBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -3896,7 +3884,9 @@ impl GetRuleBearerRequest {
 }
 impl From<&str> for GetRuleBearerRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetRuleBearerRequest {
@@ -3932,7 +3922,10 @@ pub struct UpdateRuleBearerRequest {
 impl UpdateRuleBearerRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(id: impl Into<String>, body: CreateRuleBody) -> Self {
-        Self { id: id.into(), body }
+        Self {
+            id: id.into(),
+            body,
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -3955,7 +3948,7 @@ impl UpdateRuleBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -4006,7 +3999,9 @@ impl DeleteRuleBearerRequest {
 }
 impl From<&str> for DeleteRuleBearerRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for DeleteRuleBearerRequest {
@@ -4042,7 +4037,10 @@ pub struct TestRuleBearerRequest {
 impl TestRuleBearerRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(id: impl Into<String>, body: TestRuleBody) -> Self {
-        Self { id: id.into(), body }
+        Self {
+            id: id.into(),
+            body,
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -4065,7 +4063,7 @@ impl TestRuleBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -4152,7 +4150,9 @@ impl GetAuthenticatorBearerRequest {
 }
 impl From<&str> for GetAuthenticatorBearerRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetAuthenticatorBearerRequest {
@@ -4205,7 +4205,9 @@ impl ListAuthUsersBearerRequest {
 }
 impl From<&str> for ListAuthUsersBearerRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for ListAuthUsersBearerRequest {
@@ -4241,7 +4243,10 @@ pub struct CreateAuthUserBearerRequest {
 impl CreateAuthUserBearerRequest {
     /// Creates a new request with the required path parameters and body.
     pub fn new(id: impl Into<String>, body: CreateAuthUserBody) -> Self {
-        Self { id: id.into(), body }
+        Self {
+            id: id.into(),
+            body,
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -4264,7 +4269,7 @@ impl CreateAuthUserBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -4435,7 +4440,9 @@ impl GetListenerBearerRequest {
 }
 impl From<&str> for GetListenerBearerRequest {
     fn from(param: &str) -> Self {
-        Self { id: param.to_string() }
+        Self {
+            id: param.to_string(),
+        }
     }
 }
 impl From<String> for GetListenerBearerRequest {
@@ -4645,7 +4652,9 @@ pub struct GetRetainedBearerRequest {
 impl GetRetainedBearerRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(topic: impl Into<String>) -> Self {
-        Self { topic: topic.into() }
+        Self {
+            topic: topic.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -4668,7 +4677,9 @@ impl GetRetainedBearerRequest {
 }
 impl From<&str> for GetRetainedBearerRequest {
     fn from(param: &str) -> Self {
-        Self { topic: param.to_string() }
+        Self {
+            topic: param.to_string(),
+        }
     }
 }
 impl From<String> for GetRetainedBearerRequest {
@@ -4698,7 +4709,9 @@ pub struct DeleteRetainedBearerRequest {
 impl DeleteRetainedBearerRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(topic: impl Into<String>) -> Self {
-        Self { topic: topic.into() }
+        Self {
+            topic: topic.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -4721,7 +4734,9 @@ impl DeleteRetainedBearerRequest {
 }
 impl From<&str> for DeleteRetainedBearerRequest {
     fn from(param: &str) -> Self {
-        Self { topic: param.to_string() }
+        Self {
+            topic: param.to_string(),
+        }
     }
 }
 impl From<String> for DeleteRetainedBearerRequest {
@@ -4850,7 +4865,7 @@ impl CreateBanBearerRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -5051,18 +5066,12 @@ impl EmqxBearerRequest {
     #[must_use]
     pub fn endpoint_id(&self) -> &'static str {
         match self {
-            Self::Login(_) => {
-                <LoginBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
-            Self::Logout(_) => {
-                <LogoutBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::Login(_) => <LoginBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::Logout(_) => <LogoutBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::ListNodes(_) => {
                 <ListNodesBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetNode(_) => {
-                <GetNodeBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::GetNode(_) => <GetNodeBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::GetCluster(_) => {
                 <GetClusterBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -5084,9 +5093,7 @@ impl EmqxBearerRequest {
             Self::ListSubscriptions(_) => {
                 <ListSubscriptionsBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::Publish(_) => {
-                <PublishBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::Publish(_) => <PublishBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::PublishBulk(_) => {
                 <PublishBulkBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -5096,9 +5103,7 @@ impl EmqxBearerRequest {
             Self::CreateRule(_) => {
                 <CreateRuleBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetRule(_) => {
-                <GetRuleBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::GetRule(_) => <GetRuleBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::UpdateRule(_) => {
                 <UpdateRuleBearerRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -5379,39 +5384,33 @@ impl EmqxBearer {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "http://localhost:18083/api/v5";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some(
-        "https://docs.emqx.com/en/emqx/latest/admin/api.html",
-    );
+    pub const DOCS_URL: Option<&'static str> =
+        Some("https://docs.emqx.com/en/emqx/latest/admin/api.html");
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["EMQX_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
+                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_TOKEN".to_string()]),
-                    ),
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
+                    bearer_token: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_TOKEN".to_string(),
+                    ])),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -5427,30 +5426,25 @@ impl EmqxBearer {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
             env_auth: vec!["EMQX_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
+                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_TOKEN".to_string()]),
-                    ),
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
+                    bearer_token: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_TOKEN".to_string(),
+                    ])),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -5472,30 +5466,25 @@ impl EmqxBearer {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec!["EMQX_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
+                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_TOKEN".to_string()]),
-                    ),
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
+                    bearer_token: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_TOKEN".to_string(),
+                    ])),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -5510,38 +5499,30 @@ impl EmqxBearer {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec!["EMQX_TOKEN".to_string()],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken {
-                header: None,
-            },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::BearerToken { header : None }
-                ],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
-                    header: None,
-                }),
+                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
-                    bearer_token: Some(
-                        schematic_define::EnvList::new(vec!["EMQX_TOKEN".to_string()]),
-                    ),
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
+                    bearer_token: Some(schematic_define::EnvList::new(vec![
+                        "EMQX_TOKEN".to_string(),
+                    ])),
                     basic_user: None,
                     basic_pass: None,
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -5671,21 +5652,20 @@ impl EmqxBearer {
                     .as_ref()
                     .map(|api_key| api_key.header.clone())
             });
-        header
-            .and_then(|header| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|env_name| std::env::var(env_name).ok())
-                    })
-                    .map(|value| (header, value))
-            })
+        header.and_then(|header| {
+            self.headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|env_name| std::env::var(env_name).ok())
+                })
+                .map(|value| (header, value))
+        })
     }
     /// Returns a clone of this client configured with an explicit bearer token.
     #[must_use]
@@ -5801,7 +5781,9 @@ impl<'a> EmqxBearerVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError>
+            + Send
+            + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -5829,13 +5811,15 @@ impl<'a> EmqxBearerVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+            ) -> Result<(), crate::shared::SchematicError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
+        self.response_mutators.insert(
+            R::ENDPOINT_ID,
+            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+        );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -5861,17 +5845,15 @@ impl<'a> EmqxBearerVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
-                self.base
-                    .headers
-                    .clone()
-                    .with_env_mapping(
-                        schematic_define::RestApi::legacy_env_mapping_for(
-                            &auth_strategy,
-                            &env_auth,
-                            self.base.env_username.as_deref(),
-                        ),
-                    )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
+            {
+                self.base.headers.clone().with_env_mapping(
+                    schematic_define::RestApi::legacy_env_mapping_for(
+                        &auth_strategy,
+                        &env_auth,
+                        self.base.env_username.as_deref(),
+                    ),
+                )
             }
             None => self.base.headers.clone(),
         };
@@ -5899,12 +5881,10 @@ impl EmqxBearer {
             .explicit
             .iter()
             .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => {
-                    match header.as_deref() {
-                        Some(header) => format!("an explicit bearer token in `{header}`"),
-                        None => "an explicit bearer token".to_string(),
-                    }
-                }
+                schematic_define::AuthMethod::BearerToken { header } => match header.as_deref() {
+                    Some(header) => format!("an explicit bearer token in `{header}`"),
+                    None => "an explicit bearer token".to_string(),
+                },
                 schematic_define::AuthMethod::ApiKey { header } => {
                     format!("an explicit API key in `{header}`")
                 }
@@ -5920,22 +5900,20 @@ impl EmqxBearer {
     }
     fn env_fallback_var_names(&self) -> Vec<String> {
         match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .bearer_token
-                    .as_ref()
-                    .map(|list| list.names().to_vec())
-                    .unwrap_or_default()
-            }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| api_key.names.names().to_vec())
-                    .unwrap_or_default()
-            }
+            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => self
+                .headers
+                .env_mapping()
+                .bearer_token
+                .as_ref()
+                .map(|list| list.names().to_vec())
+                .unwrap_or_default(),
+            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => self
+                .headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .map(|api_key| api_key.names.names().to_vec())
+                .unwrap_or_default(),
             Some(schematic_define::EnvAuthStrategy::Basic) => {
                 let mut vars = Vec::new();
                 if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
@@ -5958,13 +5936,10 @@ impl EmqxBearer {
             options.push(explicit_methods.join(", "));
         }
         if !env_fallback_vars.is_empty() {
-            options
-                .push(
-                    format!(
-                        "set one of the fallback env vars `{}`", env_fallback_vars
-                        .join("`, `")
-                    ),
-                );
+            options.push(format!(
+                "set one of the fallback env vars `{}`",
+                env_fallback_vars.join("`, `")
+            ));
         }
         let mut message = if options.is_empty() {
             "Authentication required.".to_string()
@@ -5983,19 +5958,15 @@ impl EmqxBearer {
             env_fallback_vars,
         }
     }
-    fn apply_env_fallback(
-        &self,
-        headers: schematic_define::Headers,
-    ) -> schematic_define::Headers {
+    fn apply_env_fallback(&self, headers: schematic_define::Headers) -> schematic_define::Headers {
         let env_mapping = self.headers.env_mapping().clone();
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping
-                    .bearer_token
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
+                let token = env_mapping.bearer_token.as_ref().and_then(|list| {
+                    list.names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
                 match (token, header.as_deref()) {
                     (Some(token), Some(header)) => {
                         headers.use_bearer_token_with_header(token, header)
@@ -6005,38 +5976,31 @@ impl EmqxBearer {
                 }
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
-                let key = env_mapping
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|name| std::env::var(name).ok())
-                    });
+                let key = env_mapping.api_key.as_ref().and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
                 match key {
                     Some(key) => headers.header(header.clone(), key),
                     None => headers,
                 }
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping
-                    .basic_user
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
-                let password = env_mapping
-                    .basic_pass
-                    .as_ref()
-                    .and_then(|list| {
-                        list.names().iter().find_map(|name| std::env::var(name).ok())
-                    });
+                let username = env_mapping.basic_user.as_ref().and_then(|list| {
+                    list.names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
+                let password = env_mapping.basic_pass.as_ref().and_then(|list| {
+                    list.names()
+                        .iter()
+                        .find_map(|name| std::env::var(name).ok())
+                });
                 match (username, password) {
-                    (Some(username), Some(password)) => {
-                        headers.use_basic_auth(username, password)
-                    }
+                    (Some(username), Some(password)) => headers.use_basic_auth(username, password),
                     _ => headers,
                 }
             }
@@ -6047,12 +6011,10 @@ impl EmqxBearer {
     fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header
-                    .as_deref()
-                    .map_or_else(
-                        || headers.has_authorization(),
-                        |header| headers.has_header(header),
-                    )
+                header.as_deref().map_or_else(
+                    || headers.has_authorization(),
+                    |header| headers.has_header(header),
+                )
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
                 headers.has_header(header)
@@ -6067,7 +6029,8 @@ impl EmqxBearer {
         if !headers.has_explicit_auth() {
             headers = self.apply_env_fallback(headers);
         }
-        if self.auth_is_required() && !headers.has_explicit_auth()
+        if self.auth_is_required()
+            && !headers.has_explicit_auth()
             && !self.headers_satisfy_fallback(&headers)
         {
             return Err(self.authentication_required_error());
@@ -6190,11 +6153,7 @@ impl EmqxBearer {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self
-                .variant_hooks
-                .response_mutators
-                .get(ctx.endpoint_id)
-            {
+            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)
@@ -6243,10 +6202,7 @@ impl EmqxBearer {
     ///
     /// Invalidate the current bearer token
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn logout(
-        &self,
-        request: LogoutBearerRequest,
-    ) -> Result<(), SchematicError> {
+    pub async fn logout(&self, request: LogoutBearerRequest) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
     /// Convenience method for the `DisconnectClient` endpoint.
@@ -6283,10 +6239,7 @@ impl EmqxBearer {
     ///
     /// Publish an MQTT message to a topic
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn publish(
-        &self,
-        request: PublishBearerRequest,
-    ) -> Result<(), SchematicError> {
+    pub async fn publish(&self, request: PublishBearerRequest) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
     /// Convenience method for the `PublishBulk` endpoint.
@@ -6343,10 +6296,7 @@ impl EmqxBearer {
     ///
     /// Remove a ban by type (clientid, username, peerhost) and value
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn delete_ban(
-        &self,
-        request: DeleteBanBearerRequest,
-    ) -> Result<(), SchematicError> {
+    pub async fn delete_ban(&self, request: DeleteBanBearerRequest) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
 }

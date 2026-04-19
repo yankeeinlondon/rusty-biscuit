@@ -17,6 +17,7 @@
 pub(crate) mod bootstrap;
 pub(crate) mod command_factory;
 pub(crate) mod file_reference;
+pub(crate) mod supplement;
 pub(crate) mod validate;
 
 use clap_complete::CompleteEnv;

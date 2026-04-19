@@ -45,6 +45,10 @@ impl DispatchRuntimeContext {
     }
 
     /// Load and compile the canonical runtime config for a specific environment.
+    ///
+    /// Deprecated: use [`load_for_env`](Self::load_for_env) instead. This
+    /// method is an identical alias kept for API compatibility.
+    #[deprecated(note = "use load_for_env instead")]
     pub fn load_canonical_for_env(env: &EnvironmentContext) -> Result<Self> {
         let repo_root = runtime_repo_root(env);
         match loader::load_claudine_config(None, repo_root) {

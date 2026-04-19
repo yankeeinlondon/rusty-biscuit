@@ -243,7 +243,10 @@ impl Json5 {
         let toml_value: toml::Value = serde_json::from_value(self.value.clone())
             .map_err(|e| Json5Error::Parse(format!("cannot convert to TOML: {e}")))?;
         let toml_str = toml::to_string_pretty(&toml_value)?;
-        debug!(output_len = toml_str.len(), "JSON5 → TOML conversion complete");
+        debug!(
+            output_len = toml_str.len(),
+            "JSON5 → TOML conversion complete"
+        );
         Ok(toml_str)
     }
 

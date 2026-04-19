@@ -1013,16 +1013,16 @@ pub fn underline_support() -> UnderlineSupport {
             return full_support();
         }
         // Basic underline via common terminal types
+        // These may or may not support extended underlines depending on
+        // the actual terminal behind them. Return basic only to be safe.
         "xterm-256color"
         | "xterm-direct"
         | "tmux-256color"
         | "screen-256color"
-        | "rxvt-unicode-256color" => {
-            // These may or may not support extended underlines depending on
-            // the actual terminal behind them. Return basic only to be safe.
-            if has_basic_underline {
-                return basic_only();
-            }
+        | "rxvt-unicode-256color"
+            if has_basic_underline =>
+        {
+            return basic_only();
         }
         _ => {}
     }

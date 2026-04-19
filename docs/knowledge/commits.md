@@ -16,6 +16,7 @@
 - Use `git diff --staged --name-status` to confirm the exact staged file set before committing.
 - Review staged source changes with `git diff --staged` before committing. Git will happily commit unresolved conflict markers if they are present in the staged content.
 - For new files, `git diff --staged` shows the file as a diff against `/dev/null`. That is normal; confirm the staging state with `git status --short`.
+- A file may appear in the staged list but have no actual content changes (e.g., auto-formatting that matched existing formatting). If `git diff --staged` shows no diff for a file, it has no actual changes and committing it is harmless but unnecessary.
 
 ## Path-Limited Commits
 
@@ -39,6 +40,7 @@
 - In a shared worktree, concurrent agents share the same index. `git reset HEAD` without paths resets the entire staged set for everyone.
 - If multiple agents are committing from the same worktree, the orchestrator should stage groups sequentially or otherwise isolate the work. Shared staging is fragile.
 - If another worker already committed some assigned files, a later commit may legitimately report `nothing to commit`. That does not mean the earlier commit was missing.
+- Auto-formatting workflows (e.g., rustfmt on save) may pre-commit files before an orchestrator assigns them. If a subagent finds no staged changes for an assigned file, it was likely auto-committed by a formatting hook.
 
 ## Shell Gotchas
 

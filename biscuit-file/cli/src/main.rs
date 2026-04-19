@@ -232,12 +232,10 @@ fn main() -> Result<()> {
 
     // Validate UTF-8 upfront for text-based formats
     let text_content = match input_format {
-        FileType::Toml | FileType::Json5 | FileType::Markdown => {
-            Some(
-                std::str::from_utf8(&content)
-                    .wrap_err(format!("{input_format:?} input is not valid UTF-8"))?,
-            )
-        }
+        FileType::Toml | FileType::Json5 | FileType::Markdown => Some(
+            std::str::from_utf8(&content)
+                .wrap_err(format!("{input_format:?} input is not valid UTF-8"))?,
+        ),
         _ => None,
     };
 
@@ -369,8 +367,7 @@ fn process_toml(input: &str, format: Option<OutputFormat>, compact: bool) -> Res
 fn process_yaml(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let yaml = Yaml::from_bytes(content).wrap_err("Failed to parse YAML")?;
     if matches!(format, Some(OutputFormat::Yaml)) {
-        let output =
-            serde_yaml_ng::to_string(yaml.value()).wrap_err("Failed to serialize YAML")?;
+        let output = serde_yaml_ng::to_string(yaml.value()).wrap_err("Failed to serialize YAML")?;
         println!("{output}");
         return Ok(());
     }
@@ -420,7 +417,13 @@ fn run_reference(
     relative_cwd: bool,
     vaults: &[PathBuf],
 ) -> Result<()> {
-    debug!(?reference, relative, relative_cwd, vault_count = vaults.len(), "resolving reference");
+    debug!(
+        ?reference,
+        relative,
+        relative_cwd,
+        vault_count = vaults.len(),
+        "resolving reference"
+    );
 
     let file_ref = match FileReference::new(reference) {
         Ok(fr) => fr,

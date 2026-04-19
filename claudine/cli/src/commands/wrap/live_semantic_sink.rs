@@ -2366,7 +2366,7 @@ mod tests {
         });
         lines.lock().unwrap().clear();
         sink.on_semantic_event(SemanticEvent::Warning {
-            message: "Claude session usage limit approaching; next session window opens at 2024-04-01 19:33:20 UTC".into(),
+            message: "Claude rate limit warning: your 5-hour session window is approaching the cap. Window resets on 2024-04-01 at 19:33".into(),
             extra: json!({
                 "raw_kind": "rate_limit_event",
                 "rate_limit_status": "approaching_limit",
@@ -2374,10 +2374,13 @@ mod tests {
             }),
         });
         let rendered = lines.lock().unwrap().join("\n");
-        let unwrapped = rendered.replace("\n  ", "");
         assert!(
-            unwrapped.contains("next session window opens at 2024-04-01 19:33:20 UTC"),
+            rendered.contains("Window resets on"),
             "explicit Claude rate-limit metadata must render for subscriptions: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("approaching the cap"),
+            "explicit Claude rate-limit metadata must include user-friendly wording: {rendered:?}"
         );
     }
 

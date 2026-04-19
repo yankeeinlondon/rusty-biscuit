@@ -46,7 +46,10 @@ mod tests {
     #[test]
     fn display_escape_safe_chars_unquoted() {
         assert_eq!(shell_escape_for_display("hello"), "hello");
-        assert_eq!(shell_escape_for_display("path/to/file.rs"), "path/to/file.rs");
+        assert_eq!(
+            shell_escape_for_display("path/to/file.rs"),
+            "path/to/file.rs"
+        );
     }
 
     #[test]

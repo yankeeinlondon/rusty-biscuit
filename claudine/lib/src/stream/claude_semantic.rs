@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use chrono::Local;
 use serde_json::{Map, Value};
 
 use super::parser::{SemanticStreamParser, StreamParseError};
@@ -1002,6 +1003,39 @@ fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticEr
     SemanticErrorKind::AgentNative
 }
 
+fn format_reset_hint(reset_at: chrono::DateTime<chrono::Utc>) -> String {
+    let local = reset_at.with_timezone(&Local);
+    format!(
+        "Window resets on {} at {}",
+        local.format("%Y-%m-%d"),
+        local.format("%H:%M")
+    )
+}
+
+/// Map an Anthropic `rateLimitType` string to a human-readable window label.
+///
+/// Anthropic's documented value is `"usage"`, but in practice the stream also
+/// emits bucket-specific hints (e.g. `"five_hour"`, `"seven_day"`). Unknown or
+/// generic types fall back to the bucket-agnostic phrase so the message stays
+/// accurate for limits that aren't session-scoped.
+fn rate_limit_window_label(rate_limit_type: Option<&str>) -> &'static str {
+    let Some(kind) = rate_limit_type else {
+        return "current rate limit window";
+    };
+    let lower = kind.to_ascii_lowercase();
+    let is_week = lower.contains("week") || lower.contains("7d") || lower.contains("seven");
+    let is_session = lower.contains("session") || lower.contains("5h") || lower.contains("five");
+    if is_week && lower.contains("opus") {
+        "weekly Opus usage window"
+    } else if is_week {
+        "weekly usage window"
+    } else if is_session {
+        "5-hour session window"
+    } else {
+        "current rate limit window"
+    }
+}
+
 fn render_claude_rate_limit_message(event: &ClaudeRateLimit) -> Option<String> {
     if let Some(message) = event
         .resolved_message()
@@ -1011,29 +1045,33 @@ fn render_claude_rate_limit_message(event: &ClaudeRateLimit) -> Option<String> {
         return Some(message.to_string());
     }
 
+    let window = rate_limit_window_label(event.resolved_rate_limit_type());
     let reset_hint = event
         .resolved_reset_at()
-        .map(|reset| {
-            format!(
-                "; next session window opens at {}",
-                reset.format("%Y-%m-%d %H:%M:%S UTC")
-            )
-        })
+        .map(format_reset_hint)
+        .map(|hint| format!(". {hint}"))
         .unwrap_or_default();
 
     if event.resolved_overage_status() == Some("blocked")
         || event.resolved_status() == Some("limited")
         || event.resolved_is_throttled() == Some(true)
     {
-        return Some(format!("Claude session usage limit reached{reset_hint}"));
+        return Some(format!(
+            "Claude rate limit reached: your {window} is fully consumed{reset_hint}"
+        ));
     }
 
     match event.resolved_status() {
         Some("approaching_limit") => Some(format!(
-            "Claude session usage limit approaching{reset_hint}"
+            "Claude rate limit warning: your {window} is approaching the cap{reset_hint}"
+        )),
+        Some("allowed_warning") => Some(format!(
+            "Claude rate limit notice: your {window} is past the halfway mark{reset_hint}"
         )),
         Some("allowed") | None => None,
-        Some(status) => Some(format!("Claude rate limit status: {status}{reset_hint}")),
+        Some(status) => Some(format!(
+            "Claude rate limit notice ({status}): {window} status update{reset_hint}"
+        )),
     }
 }
 
@@ -1291,8 +1329,9 @@ mod tests {
         let events = sink.snapshot();
         match &events[0] {
             SemanticEvent::Warning { message, extra } => {
-                assert!(message.contains("approaching"));
-                assert!(message.contains("next session window opens at"));
+                assert!(message.contains("rate limit warning"));
+                assert!(message.contains("approaching the cap"));
+                assert!(message.contains("Window resets on"));
                 assert_eq!(
                     extra.get("rate_limit_status").and_then(Value::as_str),
                     Some("approaching_limit")
@@ -1307,16 +1346,57 @@ mod tests {
         let summary = parser.finish(0);
         let rate_limit = summary.rate_limit.expect("rate limit summary");
         assert_eq!(rate_limit.is_throttled, Some(false));
-        assert_eq!(
-            rate_limit.message.as_deref(),
-            Some(
-                "Claude session usage limit approaching; next session window opens at 2024-04-01 19:33:20 UTC"
-            )
+        let msg = rate_limit.message.as_deref().expect("rate limit message");
+        assert!(
+            msg.starts_with(
+                "Claude rate limit warning: your current rate limit window is approaching the cap"
+            ),
+            "unexpected message: {msg}"
+        );
+        assert!(
+            msg.contains("Window resets on"),
+            "unexpected message: {msg}"
         );
         assert_eq!(
             rate_limit.reset_at.map(|dt| dt.timestamp()),
             Some(1712000000)
         );
+    }
+
+    #[test]
+    fn allowed_warning_status_renders_soft_notice_with_correct_window() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1712000000,"rateLimitType":"seven_day","overageStatus":"allowed"}}"#,
+            )
+            .unwrap();
+        let events = sink.snapshot();
+        match &events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert!(
+                    message.starts_with("Claude rate limit notice"),
+                    "expected soft notice, got: {message}"
+                );
+                assert!(
+                    message.contains("weekly usage window"),
+                    "expected weekly window label, got: {message}"
+                );
+                assert!(
+                    !message.contains("capped soon") && !message.contains("almost fully"),
+                    "allowed_warning must not use cap-imminent language: {message}"
+                );
+                assert_eq!(
+                    extra.get("rate_limit_status").and_then(Value::as_str),
+                    Some("allowed_warning")
+                );
+                assert_eq!(
+                    extra.get("rate_limit_type").and_then(Value::as_str),
+                    Some("seven_day")
+                );
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
     }
 
     #[test]

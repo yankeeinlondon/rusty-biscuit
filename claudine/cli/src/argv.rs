@@ -76,6 +76,7 @@ const COMPOSITION_FLAGS_WITH_VALUE: &[&str] = &[
     "--rsp",
     "--timeout",
     "-t",
+    "--step-timeout",
     "--operation",
     "--op",
     "--set",
@@ -115,6 +116,15 @@ fn normalize_inner(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString>
         return raw;
     }
     if raw.len() < 2 {
+        return raw;
+    }
+
+    // The hidden `__complete` subcommand receives the user's original argv
+    // as its trailing value. Rewriting any of those tokens (Rule 2's
+    // `--provider` canonicalization in particular) would corrupt the
+    // payload the supplement engine classifies against, so normalize is a
+    // full no-op for `__complete` subcommand invocations.
+    if find_subcommand(&raw, &["__complete"]).is_some() {
         return raw;
     }
 
@@ -1261,9 +1271,13 @@ mod tests {
 
     #[test]
     fn rule_3_ignores_setter_before_positional() {
-        // Leading setter does not count as a positional; the later setter
-        // after the flag fires Rule 3 because a real positional was seen in
-        // between. `--help` is hoisted by Rule 4.
+        // Leading setter does not count as a positional on its own. With
+        // `pull_late_composition_flags` in the pipeline, `--provider gemini`
+        // is pulled back ahead of the first setter (`k=early`), which also
+        // means no flag ever trails the real positional (`file.md`). The
+        // `--` separator therefore does not need to fire — clap collects
+        // `k=early`, `file.md`, and `k=late` together as the compose
+        // positional `Vec<String>`. `--help` is hoisted by Rule 4.
         let input = argv(&[
             "claudine", "compose", "k=early", "file.md", "--gemini", "k=late", "--help",
         ]);
@@ -1271,11 +1285,10 @@ mod tests {
             "claudine",
             "--help",
             "compose",
-            "k=early",
-            "file.md",
             "--provider",
             "gemini",
-            "--",
+            "k=early",
+            "file.md",
             "k=late",
         ]);
         assert_eq!(normalize(input), expected);
@@ -1376,6 +1389,7 @@ mod tests {
             "--rsp",
             "--timeout",
             "-t",
+            "--step-timeout",
             "--operation",
             "--op",
             "--set",
@@ -1499,6 +1513,7 @@ mod tests {
             ("--rsp", "prompt.md"),
             ("--timeout", "30"),
             ("-t", "30"),
+            ("--step-timeout", "30s"),
             ("--operation", "ship"),
             ("--op", "ship"),
             ("--set", "{\"k\":\"v\"}"),

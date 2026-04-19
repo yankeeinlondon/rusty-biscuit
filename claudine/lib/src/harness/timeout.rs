@@ -91,6 +91,37 @@ pub fn parse_timeout(input: &str, source_path: &Path) -> Result<Duration, Harnes
     Ok(Duration::from_secs_f64(total_secs))
 }
 
+/// Render a [`Duration`] as a compact user-facing string such as `30s`, `5m`,
+/// or `2h`.
+///
+/// Used for error-message rendering in parse-time validation so error text
+/// reads with the same grammar that `parse_timeout` accepts. Prefers the
+/// largest whole unit that divides the duration evenly; falls back to
+/// seconds otherwise.
+///
+/// ## Examples
+///
+/// ```ignore
+/// use std::time::Duration;
+/// // Hours (evenly divisible)
+/// assert_eq!(format_duration(Duration::from_secs(7200)), "2h");
+/// // Minutes (evenly divisible)
+/// assert_eq!(format_duration(Duration::from_secs(300)), "5m");
+/// // Falls back to seconds
+/// assert_eq!(format_duration(Duration::from_secs(30)), "30s");
+/// assert_eq!(format_duration(Duration::from_secs(90)), "90s");
+/// ```
+pub(crate) fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs();
+    if secs > 0 && secs.is_multiple_of(3600) {
+        format!("{}h", secs / 3600)
+    } else if secs > 0 && secs.is_multiple_of(60) {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +216,24 @@ mod tests {
             parse_timeout("  15  seconds  ", p()).unwrap(),
             Duration::from_secs(15)
         );
+    }
+
+    #[test]
+    fn format_duration_hours_when_evenly_divisible() {
+        assert_eq!(format_duration(Duration::from_secs(7200)), "2h");
+        assert_eq!(format_duration(Duration::from_secs(3600)), "1h");
+    }
+
+    #[test]
+    fn format_duration_minutes_when_evenly_divisible() {
+        assert_eq!(format_duration(Duration::from_secs(300)), "5m");
+        assert_eq!(format_duration(Duration::from_secs(60)), "1m");
+    }
+
+    #[test]
+    fn format_duration_seconds_otherwise() {
+        assert_eq!(format_duration(Duration::from_secs(30)), "30s");
+        assert_eq!(format_duration(Duration::from_secs(90)), "90s");
+        assert_eq!(format_duration(Duration::from_secs(0)), "0s");
     }
 }
