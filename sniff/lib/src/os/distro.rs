@@ -318,10 +318,8 @@ pub fn parse_os_release_content(content: &str) -> Option<LinuxDistro> {
                 "ID" => id = value.to_lowercase(),
                 "NAME" => name = value.to_string(),
                 "VERSION_ID" => version = Some(value.to_string()),
-                "VERSION_CODENAME" => {
-                    if !value.is_empty() {
-                        codename = Some(value.to_string());
-                    }
+                "VERSION_CODENAME" if !value.is_empty() => {
+                    codename = Some(value.to_string());
                 }
                 _ => {}
             }
@@ -391,16 +389,12 @@ pub fn parse_lsb_release_content(content: &str) -> Option<LinuxDistro> {
                     name = value.to_string();
                 }
                 "DISTRIB_RELEASE" => version = Some(value.to_string()),
-                "DISTRIB_CODENAME" => {
-                    if !value.is_empty() {
-                        codename = Some(value.to_string());
-                    }
+                "DISTRIB_CODENAME" if !value.is_empty() => {
+                    codename = Some(value.to_string());
                 }
-                "DISTRIB_DESCRIPTION" => {
-                    // Use description as name if we have it
-                    if !value.is_empty() {
-                        name = value.to_string();
-                    }
+                // Use description as name if we have it
+                "DISTRIB_DESCRIPTION" if !value.is_empty() => {
+                    name = value.to_string();
                 }
                 _ => {}
             }
