@@ -1456,6 +1456,7 @@ mod tests {
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
             timeout: None,
+            step_timeout: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,
@@ -1482,6 +1483,7 @@ mod tests {
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
             timeout: None,
+            step_timeout: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,
