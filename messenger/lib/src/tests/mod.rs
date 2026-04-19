@@ -1,4 +1,6 @@
 mod builders;
+#[cfg(feature = "discord")]
+mod discord_webhook_integration;
 mod receipts;
 #[cfg(feature = "signal")]
 mod signal_integration;
