@@ -10,6 +10,8 @@ use crate::error::MessengerError;
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
     Discord,
+    #[serde(rename = "discord-webhook")]
+    DiscordWebhook,
     Slack,
     Signal,
     WhatsApp,
@@ -17,8 +19,9 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Discord,
+        Self::DiscordWebhook,
         Self::Slack,
         Self::Signal,
         Self::WhatsApp,
@@ -28,6 +31,7 @@ impl ProviderKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Discord => "discord",
+            Self::DiscordWebhook => "discord-webhook",
             Self::Slack => "slack",
             Self::Signal => "signal",
             Self::WhatsApp => "whatsapp",
@@ -48,6 +52,7 @@ impl fmt::Display for ProviderKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Discord => write!(f, "Discord"),
+            Self::DiscordWebhook => write!(f, "Discord-Webhook"),
             Self::Slack => write!(f, "Slack"),
             Self::Signal => write!(f, "Signal"),
             Self::WhatsApp => write!(f, "WhatsApp"),
@@ -63,6 +68,13 @@ pub enum MessageRef {
     Discord {
         channel_id: String,
         message_id: String,
+    },
+    #[serde(rename = "discord-webhook")]
+    DiscordWebhook {
+        webhook_id: String,
+        channel_id: String,
+        message_id: String,
+        thread_id: Option<String>,
     },
     Slack {
         channel_id: String,
@@ -88,6 +100,7 @@ impl MessageRef {
     pub fn provider_kind(&self) -> ProviderKind {
         match self {
             Self::Discord { .. } => ProviderKind::Discord,
+            Self::DiscordWebhook { .. } => ProviderKind::DiscordWebhook,
             Self::Slack { .. } => ProviderKind::Slack,
             Self::Signal { .. } => ProviderKind::Signal,
             Self::WhatsApp { .. } => ProviderKind::WhatsApp,

@@ -8,15 +8,16 @@ Each provider requires credentials and a destination identifier. The sections be
 
 The outbound send model in `messenger` is provider API credentials plus an explicit destination identifier:
 
-- Discord: bot token + channel ID
+- Discord (bot): bot token + channel ID
+- Discord (webhook): full webhook URL (binds channel + authentication)
 - Slack: bot token + channel ID
 - Signal: JSON-RPC URL + account + recipient/group ID
 - WhatsApp: Cloud API credentials + recipient phone number
 - Telegram: bot token + chat ID
 
-`messenger` does not currently model Slack or Discord sends as incoming-webhook URLs.
+Discord ships with two distinct adapters: a bot-token adapter (full capability, replies supported) and a webhook adapter (notification-only, no replies). Slack is modeled only as a bot-token adapter; `messenger` does not currently send via Slack incoming webhooks.
 
-### Discord
+### Discord (Bot)
 
 **What you need:**
 
@@ -36,6 +37,36 @@ The outbound send model in `messenger` is provider API credentials plus an expli
 - [Bot Permissions Calculator](https://discord.com/developers/docs/topics/permissions)
 
 **Environment variable:** `DISCORD_BOT_TOKEN`
+
+---
+
+### Discord (Webhook)
+
+Prefer a Discord **webhook** over a bot when you only need one-way notifications into a specific channel: no Discord application is required, there is no gateway to run, and the per-server permission model is simpler (just "Manage Webhooks"). The tradeoff is capability — webhooks cannot reply to an existing message and cannot be modeled as a conversational agent.
+
+**What you need:**
+
+- A **Webhook URL** of the form `https://discord.com/api/v10/webhooks/{id}/{token}`. This single URL binds both the target channel and the authentication token — there is no separate channel ID field.
+
+**Account setup:**
+
+1. Open the target Discord server and go to **Server Settings > Integrations > Webhooks**.
+2. Click **New Webhook**, pick a name and channel, and click **Copy Webhook URL**.
+3. Treat the URL as a secret: anyone with it can post to the channel.
+
+**Helpful resources:**
+
+- [Discord Webhooks Guide](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks)
+- [Execute Webhook API Reference](https://discord.com/developers/docs/resources/webhook#execute-webhook)
+
+**Capability notes:**
+
+- Markdown rendering: supported (same as the bot adapter).
+- Attachments: supported (local path or in-memory bytes).
+- Replies: **not supported** — `plan_send()` and `send()` return `MessengerError::UnsupportedFeature { provider: DiscordWebhook, feature: "replies" }` before any network call. Use the bot adapter if you need threaded replies.
+- Thread routing: optional, supplied at dispatch time via `Target::discord_webhook_thread(thread_id)`. Thread IDs are not part of the route config.
+
+**Environment variable:** `DISCORD_WEBHOOK_URL`
 
 ---
 
@@ -161,7 +192,7 @@ The outbound send model in `messenger` is provider API credentials plus an expli
 
 The CLI stores its configuration at `~/.messenger.json`. The `messenger setup` command creates and updates this file interactively.
 
-The config examples below intentionally follow the implemented transport models: bot-token-plus-channel for Discord and Slack, recipient-based API sends for Signal and WhatsApp, and bot-token-plus-chat for Telegram.
+The config examples below intentionally follow the implemented transport models: bot-token-plus-channel for Discord (bot) and Slack, webhook-URL-only for Discord (webhook), recipient-based API sends for Signal and WhatsApp, and bot-token-plus-chat for Telegram.
 
 ### Config Schema
 
@@ -178,6 +209,10 @@ The config examples below intentionally follow the implemented transport models:
       "provider": "discord",
       "channel_id": "123456789012345678",
       "bot_token_env": "DISCORD_BOT_TOKEN"
+    },
+    "discord.deploys": {
+      "provider": "discord-webhook",
+      "webhook_url_env": "DISCORD_WEBHOOK_URL"
     },
     "telegram.ops": {
       "provider": "telegram",
@@ -212,10 +247,13 @@ The config examples below intentionally follow the implemented transport models:
 | Provider | Required | Optional |
 |----------|----------|----------|
 | Discord | `provider`, `channel_id` | `bot_token`, `bot_token_env` |
+| Discord (webhook) | `provider` (`"discord-webhook"`) | `webhook_url`, `webhook_url_env` |
 | Slack | `provider`, `channel_id` | `bot_token`, `bot_token_env` |
 | Signal | `provider`, `recipient` | `rpc_url`, `rpc_url_env`, `account`, `account_env` |
 | WhatsApp | `provider`, `recipient` | `access_token`, `access_token_env`, `phone_number_id`, `phone_number_id_env` |
 | Telegram | `provider`, `chat_id` | `bot_token`, `bot_token_env` |
+
+For `discord-webhook` routes, at least one of `webhook_url` or a resolvable `webhook_url_env` must be present at send time. The webhook URL is the single credential; there is no `channel_id` field because the URL already binds the channel.
 
 ### Secret Resolution
 
@@ -330,14 +368,54 @@ if plan.warnings.is_empty() {
 }
 ```
 
+### Discord Webhook Example
+
+```rust
+use messenger::prelude::*;
+use secrecy::SecretString;
+
+#[tokio::main]
+async fn main() -> Result<(), messenger::MessengerError> {
+    let mut messenger = Messenger::new();
+
+    messenger.register(Box::new(DiscordWebhookProvider::new(DiscordWebhookConfig {
+        webhook_url: SecretString::from(std::env::var("DISCORD_WEBHOOK_URL").unwrap()),
+    })));
+
+    let message = Message::markdown("**Deploy succeeded**");
+
+    // Post to the channel bound by the webhook URL.
+    let dispatch = Dispatch::to(Target::discord_webhook());
+
+    // Or route into a specific thread within that channel:
+    // let dispatch = Dispatch::to(Target::discord_webhook_thread("1122334455"));
+
+    let receipt = messenger.send(dispatch, &message).await?;
+    println!("Sent: {}", receipt.raw_id);
+    Ok(())
+}
+```
+
+The webhook adapter does not support replies. Attempting `Dispatch::reply_to(...)` against a `Target::DiscordWebhook` causes `plan_send()`/`send()` to return `MessengerError::UnsupportedFeature` before any network call.
+
+### Ad-hoc CLI Usage
+
+```bash
+# Pass the full webhook URL as the target — it binds the channel and auth.
+messenger send --provider discord-webhook \
+  --channel "https://discord.com/api/v10/webhooks/123456789012345678/abc-token" \
+  "Deploy succeeded"
+```
+
 ### Provider Config Reference
 
 | Provider | Config struct | Required fields |
 |----------|-------------|-----------------|
 | Discord | `DiscordConfig` | `bot_token: SecretString` |
+| Discord (webhook) | `DiscordWebhookConfig` | `webhook_url: SecretString` |
 | Slack | `SlackConfig` | `bot_token: SecretString` |
 | Signal | `SignalConfig` | `rpc_url: String`, `account: String` |
 | WhatsApp | `WhatsAppConfig` | `access_token: SecretString`, `phone_number_id: String` |
 | Telegram | `TelegramConfig` | `bot_token: SecretString` |
 
-All config structs except `DiscordConfig` and `SignalConfig` have an optional `api_base_url: Option<String>` field for testing or proxy use. `WhatsAppConfig` also has an optional `api_version: Option<String>` (defaults to `v23.0`).
+All config structs except `DiscordConfig`, `DiscordWebhookConfig`, and `SignalConfig` have an optional `api_base_url: Option<String>` field for testing or proxy use. `WhatsAppConfig` also has an optional `api_version: Option<String>` (defaults to `v23.0`). `DiscordWebhookConfig` binds its endpoint through the `webhook_url` itself — tests point the provider at a mock server by crafting a URL against the mock's `uri()`.

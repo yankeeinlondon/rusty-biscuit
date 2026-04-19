@@ -6,7 +6,7 @@
         },
         {
             "name": "Messenger",
-            "path": "darkmatter"
+            "path": "messenger"
         },
         {
             "name": "~ monorepo",

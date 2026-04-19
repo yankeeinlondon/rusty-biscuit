@@ -22,7 +22,7 @@ pub fn render_for_provider(markdown: &str, provider: ProviderKind) -> String {
 pub fn render_nodes_for_provider(nodes: &[RichNode], provider: ProviderKind) -> String {
     tracing::trace!("rendering markdown AST");
     match provider {
-        ProviderKind::Discord => discord::render_discord(nodes),
+        ProviderKind::Discord | ProviderKind::DiscordWebhook => discord::render_discord(nodes),
         ProviderKind::Slack => slack_mrkdwn::render_slack_mrkdwn(nodes),
         ProviderKind::Telegram => telegram_html::render_telegram_html(nodes),
         // Signal and WhatsApp don't support rich text

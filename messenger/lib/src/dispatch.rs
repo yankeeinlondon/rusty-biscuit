@@ -41,6 +41,8 @@ pub enum ProviderOverrides {
     None,
     #[cfg(feature = "discord")]
     Discord(DiscordOverrides),
+    #[cfg(feature = "discord")]
+    DiscordWebhook(DiscordWebhookOverrides),
     #[cfg(feature = "slack")]
     Slack(SlackOverrides),
     #[cfg(feature = "signal")]
@@ -54,6 +56,10 @@ pub enum ProviderOverrides {
 #[cfg(feature = "discord")]
 #[derive(Debug, Clone, Default)]
 pub struct DiscordOverrides {}
+
+#[cfg(feature = "discord")]
+#[derive(Debug, Clone, Default)]
+pub struct DiscordWebhookOverrides {}
 
 #[cfg(feature = "slack")]
 #[derive(Debug, Clone, Default)]
