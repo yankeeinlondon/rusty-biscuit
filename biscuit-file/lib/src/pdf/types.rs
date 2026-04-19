@@ -89,7 +89,10 @@ impl PageRange {
     #[must_use]
     pub fn new(start: usize, end: usize) -> Self {
         assert!(start >= 1, "page range start must be >= 1 (1-indexed)");
-        assert!(end >= start, "page range end ({end}) must be >= start ({start})");
+        assert!(
+            end >= start,
+            "page range end ({end}) must be >= start ({start})"
+        );
         Self {
             start,
             end: Some(end),
@@ -110,7 +113,9 @@ impl PageRange {
     /// Returns an error if `start` is 0 or `end` is less than `start`.
     pub fn try_new(start: usize, end: Option<usize>) -> Result<Self, PdfError> {
         if start == 0 {
-            return Err(PdfError::Parse("page range start must be >= 1 (1-indexed)".to_string()));
+            return Err(PdfError::Parse(
+                "page range start must be >= 1 (1-indexed)".to_string(),
+            ));
         }
         if let Some(e) = end
             && e < start
@@ -535,7 +540,11 @@ impl Pdf {
         // For Phase 1, just wrap the text output in markdown
         let text = self.as_text()?;
         let md = PdfMarkdown::new(text);
-        debug!(warnings = md.warnings.len(), assets = md.assets.len(), "PDF → Markdown complete");
+        debug!(
+            warnings = md.warnings.len(),
+            assets = md.assets.len(),
+            "PDF → Markdown complete"
+        );
         Ok(md)
     }
 

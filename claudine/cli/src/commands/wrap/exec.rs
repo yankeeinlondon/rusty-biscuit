@@ -237,7 +237,8 @@ impl StreamTextRenderer {
                 term,
                 self.terminal_options.as_ref(),
             );
-            let _ = out.write_all(rendered.as_bytes());
+            let normalized = normalize_stream_rendered_newlines(text, &rendered);
+            let _ = out.write_all(normalized.as_bytes());
         } else {
             let _ = out.write_all(text.as_bytes());
         }
@@ -276,88 +277,35 @@ fn is_stream_safe_list_item(line: &str) -> bool {
     }
 }
 
-/// Renders streamed thinking/reasoning text dimmed to stderr.
-///
-/// Accumulates thinking text and emits it via Prose dim+italic styling so it
-/// is visually distinct from assistant text. A leading "Thinking..." label is
-/// printed when the first thinking chunk arrives.
-///
-/// Writes to stderr using short-lived locks to avoid blocking the separate
-/// stderr processing thread.
-///
-/// ## Note
-///
-/// This renderer is **no longer wired** into the structured-stream path.
-/// `LiveSemanticSink` now owns reasoning rendering end-to-end via
-/// [`render_thinking_block`], emitting a BlockQuote through the section-aware
-/// stderr emitter. The struct and its methods are retained for potential
-/// future use outside the structured path.
-#[allow(dead_code)]
-struct StreamThinkingRenderer {
-    buffer: String,
-    active: bool,
-}
-
-impl StreamThinkingRenderer {
-    #[allow(dead_code)]
-    fn new() -> Self {
-        Self {
-            buffer: String::new(),
-            active: false,
+/// Darkmatter renders each streamed fragment as a standalone Markdown
+/// document. For short fragments such as a single heading or list item,
+/// that can add synthetic trailing blank lines that were not present in
+/// the provider stream, which then shows up as loose-list spacing in the
+/// terminal. Preserve the provider-authored trailing newline count instead.
+fn normalize_stream_rendered_newlines(source: &str, rendered: &str) -> String {
+    let desired_trailing_newlines = source.bytes().rev().take_while(|b| *b == b'\n').count();
+    let mut kept_lines: Vec<&str> = rendered.split_inclusive('\n').collect();
+    while let Some(last) = kept_lines.last() {
+        let stripped = biscuit_terminal::prelude::strip_escape_codes(*last);
+        let visual = stripped.trim_end_matches('\n').trim();
+        if visual.is_empty() {
+            kept_lines.pop();
+        } else {
+            break;
         }
     }
 
-    #[allow(dead_code)]
-    fn push(&mut self, text: &str) {
-        if !self.active {
-            // Emit a dim+italic "Thinking..." header on first thinking chunk
-            let header = Self::render_dim_italic("\u{27e1} Thinking...");
-            eprintln!("{header}");
-            self.active = true;
-        }
-        self.buffer.push_str(text);
-
-        // Emit complete lines immediately (dimmed)
-        while let Some(newline_pos) = self.buffer.find('\n') {
-            let line = self.buffer[..newline_pos].to_string();
-            self.buffer.drain(..=newline_pos);
-            let rendered = Self::render_dim(&line);
-            eprintln!("{rendered}");
-        }
+    let joined = kept_lines.concat();
+    let trimmed = joined.trim_end_matches('\n');
+    if desired_trailing_newlines == 0 && trimmed.len() == joined.len() {
+        return joined;
     }
 
-    /// Flush remaining thinking text and reset state when switching to
-    /// assistant text or finishing the stream.
-    #[allow(dead_code)]
-    fn flush_if_active(&mut self) {
-        if !self.active {
-            return;
-        }
-        if !self.buffer.is_empty() {
-            let remaining = std::mem::take(&mut self.buffer);
-            let rendered = Self::render_dim(&remaining);
-            eprintln!("{rendered}");
-        }
-        // Blank line to separate thinking from assistant text
-        eprintln!();
-        self.active = false;
+    let mut normalized = trimmed.to_string();
+    for _ in 0..desired_trailing_newlines {
+        normalized.push('\n');
     }
-
-    #[allow(dead_code)]
-    fn render_dim(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::terminal())
-    }
-
-    #[allow(dead_code)]
-    fn render_dim_italic(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim><i>{safe}</i></dim>")).render(&crate::log::terminal())
-    }
+    normalized
 }
 
 /// Spawn the provider child process and return its exit code.
@@ -455,7 +403,9 @@ pub(crate) fn run_child(
     // macOS) and the child writes to stdout/stderr during startup, both
     // processes block on pipe I/O with no reader on the other end.
     let stdout_handle = if filter_stdout {
-        let pipe = child.stdout.take().expect("stdout was set to piped");
+        let pipe = child.stdout.take().expect(
+            "child stdout must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stdout_noise_prefixes
             .iter()
@@ -483,7 +433,9 @@ pub(crate) fn run_child(
     };
 
     let stderr_handle = if filter_stderr {
-        let pipe = child.stderr.take().expect("stderr was set to piped");
+        let pipe = child.stderr.take().expect(
+            "child stderr must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stderr_noise_prefixes
             .iter()
@@ -626,14 +578,21 @@ fn wait_with_signal_handling(
     child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
 
     let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Never signal a PID we no longer own — the kernel may have
+            // recycled `child_pid` onto an unrelated process by now.
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             if !child_in_own_pgroup {
                 // Child shares our process group; the terminal already
@@ -656,6 +615,10 @@ fn wait_with_signal_handling(
     }?;
 
     let status = child.wait()?;
+    // Set the exit flag BEFORE the `_guard` drops so a SIGINT that arrives
+    // in the narrow window between `wait` returning and the guard being
+    // dropped still sees an exited child and refuses to signal the PID.
+    child_exited.store(true, Ordering::SeqCst);
     let code = exit_code_from_status(status);
     let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
     let termination = if was_interrupted {
@@ -684,30 +647,44 @@ fn wait_with_signal_handling(
 /// Behaves like [`wait_with_signal_handling`] while also polling the
 /// stderr-bridge channel. When a signal arrives, the child's process group
 /// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
-/// period. The return value preserves existing SIGINT semantics and reports
-/// `Interrupted` when either a user Ctrl-C or a bridge-signaled early
-/// termination reaped the child.
+/// period. User Ctrl-C still reports `Interrupted`; wrapper-driven early
+/// termination (rate-limit recovery, silent-stall recovery) preserves a
+/// normal `Completed` termination so downstream failure handling can inspect
+/// synthesized summary fields instead of treating the run like a user cancel.
 ///
 /// Isolated to the bridge path so non-OpenCode runs keep the existing
 /// `child.wait()`-based helper.
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
 fn wait_with_signal_and_early_termination(
     child: &mut Child,
     child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    live_metrics: Option<LiveMetrics>,
+    stop_threshold: Duration,
+    silent_stall_threshold: Duration,
+    wall_clock_timeout: Option<Duration>,
+    step_timeout: Option<Duration>,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
-    use std::sync::atomic::AtomicU8;
+    use std::sync::atomic::{AtomicBool, AtomicU8};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
 
     let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Don't signal a PID we no longer own (it may have been
+            // recycled onto an unrelated process).
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             if !child_in_own_pgroup {
                 return;
@@ -727,23 +704,57 @@ fn wait_with_signal_and_early_termination(
     }?;
 
     let mut early_termination: Option<EarlyTermination> = None;
+    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
     let grace_period = Duration::from_secs(5);
+    let loop_start = Instant::now();
 
     loop {
         if let Some(status) = child.try_wait()? {
+            // Mark the PID as reaped before the 5-second grace window's
+            // signal guard can drop so we never signal a recycled PID.
+            child_exited.store(true, Ordering::SeqCst);
             let code = exit_code_from_status(status);
             let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
-            let termination = if was_interrupted || early_termination.is_some() {
+            let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
+            } else if wall_clock_tripped {
+                claudine::harness::ProcessTermination::TimedOut
+            } else if early_termination.is_some() {
+                early_termination_process_outcome(early_termination.as_ref())
             } else {
                 claudine::harness::ProcessTermination::Completed
             };
             return Ok((code, termination, early_termination));
         }
 
-        if early_termination.is_none() {
+        // Wall-clock timeout check: short-circuits directly to TimedOut
+        // without routing through the EarlyTermination surface (matches
+        // the legacy wait_with_timeout behavior for the streaming path).
+        if !wall_clock_tripped
+            && early_termination.is_none()
+            && let Some(budget) = wall_clock_timeout
+            && loop_start.elapsed() >= budget
+        {
+            tracing::warn!(
+                child_pid,
+                timeout_secs = budget.as_secs(),
+                "wall-clock timeout exceeded; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            wall_clock_tripped = true;
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     tracing::info!(
@@ -766,6 +777,60 @@ fn wait_with_signal_and_early_termination(
                     // Channel closed with no signal; continue normal polling.
                 }
             }
+        }
+
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_opencode_hang_termination(
+                metrics,
+                Instant::now(),
+                stop_threshold,
+                silent_stall_threshold,
+            )
+        {
+            tracing::warn!(
+                child_pid,
+                early_termination = ?signal,
+                "OpenCode silent-stall recovery triggered; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        // Step-silence timeout check: user-configured hard kill that
+        // maps to ProcessTermination::TimedOut. Fires after every other
+        // early-termination branch so wall-clock and rate-limit recoveries
+        // keep precedence when they happen in the same poll tick.
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(silence_budget) = step_timeout
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
+        {
+            tracing::warn!(
+                child_pid,
+                step_timeout_secs = silence_budget.as_secs(),
+                "step_timeout exceeded; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
         }
 
         if let Some(deadline) = grace_deadline
@@ -791,32 +856,52 @@ fn wait_with_signal_and_early_termination(
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::too_many_arguments)]
 fn wait_with_signal_and_early_termination(
     child: &mut Child,
     _child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    live_metrics: Option<LiveMetrics>,
+    stop_threshold: Duration,
+    silent_stall_threshold: Duration,
+    wall_clock_timeout: Option<Duration>,
+    step_timeout: Option<Duration>,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
     let mut early_termination: Option<EarlyTermination> = None;
+    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
     let grace_period = Duration::from_secs(5);
+    let loop_start = Instant::now();
 
     loop {
         if let Some(status) = child.try_wait()? {
             let code = exit_code_from_status(status);
-            let termination = if early_termination.is_some() {
-                claudine::harness::ProcessTermination::Interrupted
+            let termination = if wall_clock_tripped {
+                claudine::harness::ProcessTermination::TimedOut
+            } else if early_termination.is_some() {
+                early_termination_process_outcome(early_termination.as_ref())
             } else {
                 claudine::harness::ProcessTermination::Completed
             };
             return Ok((code, termination, early_termination));
         }
 
-        if early_termination.is_none() {
+        if !wall_clock_tripped
+            && early_termination.is_none()
+            && let Some(budget) = wall_clock_timeout
+            && loop_start.elapsed() >= budget
+        {
+            let _ = child.kill();
+            wall_clock_tripped = true;
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     let _ = child.kill();
@@ -826,6 +911,32 @@ fn wait_with_signal_and_early_termination(
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {}
             }
+        }
+
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_opencode_hang_termination(
+                metrics,
+                Instant::now(),
+                stop_threshold,
+                silent_stall_threshold,
+            )
+        {
+            let _ = child.kill();
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(silence_budget) = step_timeout
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
+        {
+            let _ = child.kill();
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
         }
 
         if let Some(deadline) = grace_deadline
@@ -839,11 +950,8 @@ fn wait_with_signal_and_early_termination(
     }
 }
 
-/// Overwrite the synthesized failure fields when the stderr bridge signals
-/// a terminal early-exit condition. Today only
-/// [`EarlyTermination::RateLimit`] applies, which produces a
-/// `usage_limit_reached` error so the summary, JSONL log, and Quota badge
-/// all describe the failure even though the child was killed by a signal.
+/// Overwrite the synthesized summary fields when the stderr bridge or the
+/// OpenCode wait loop signals an early-exit condition.
 ///
 /// Preserves any parser-provided `rate_limit` fields field-by-field:
 /// `is_throttled` is forced to `Some(true)`, `message` is only set when
@@ -870,6 +978,24 @@ fn apply_early_termination_to_summary(
                 rate_limit.reset_at = Some(*reset);
             }
             summary.rate_limit = Some(rate_limit);
+        }
+        EarlyTermination::CompletedButHung { .. } => {
+            summary.exit_code = 0;
+            summary.is_error = false;
+            summary.error_kind = None;
+            summary.error_message = None;
+        }
+        EarlyTermination::SilentStall { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("provider_stalled".into());
+            summary.error_message = Some(message.clone());
+        }
+        EarlyTermination::StepTimeout { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("step_timeout".into());
+            summary.error_message = Some(message.clone());
         }
     }
 }
@@ -1041,7 +1167,10 @@ pub(crate) fn run_child_capture(
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
     // Capture stdout into a string, applying noise filtering
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stdout_noise: Vec<String> = io
         .stdout_noise_prefixes
         .iter()
@@ -1064,7 +1193,10 @@ pub(crate) fn run_child_capture(
     });
 
     // Capture stderr into a string, applying noise filtering
-    let stderr_pipe = child.stderr.take().expect("stderr was set to piped");
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let stderr_noise: Vec<String> = io
         .stderr_noise_prefixes
         .iter()
@@ -1245,6 +1377,23 @@ fn stall_threshold_from_env(policy: HeartbeatPolicy) -> Duration {
     }
 }
 
+/// Resolve the OpenCode silent-stall recovery threshold.
+///
+/// This is separate from the user-facing stall warning: the warning fires
+/// first, then OpenCode gets additional time to recover before Claudine
+/// kills the hung process group. Invalid or non-positive values fall back to
+/// 5 minutes.
+fn opencode_hang_threshold_from_env() -> Duration {
+    match std::env::var("CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+    {
+        Some(secs) => Duration::from_secs(secs),
+        None => Duration::from_secs(300),
+    }
+}
+
 /// Check the live metrics for a stalled stream and emit one warning per
 /// stall episode. Returns `true` when a warning was emitted on this call.
 ///
@@ -1285,6 +1434,87 @@ fn format_stall_duration(secs: u64) -> String {
         format!("{}m", secs / 60)
     } else {
         format!("{}h{}m", secs / 3_600, (secs % 3_600) / 60)
+    }
+}
+
+/// Detect a step-silence timeout for the harness `step_timeout` field.
+///
+/// Returns `Some(EarlyTermination::StepTimeout)` when the time since the last
+/// stream event exceeds `step_timeout`. Returns `None` when `last_event_at`
+/// is not yet populated (first-event grace so provider startup does not
+/// trip a kill) or when silence is still under budget.
+///
+/// Unlike [`detect_opencode_hang_termination`], this helper does not gate on
+/// `in_flight` state or `provider_status`: any silence past the budget is a
+/// hard kill. The caller is responsible for SIGTERM escalation.
+fn detect_step_timeout(
+    metrics: &LiveMetrics,
+    now: Instant,
+    step_timeout: Duration,
+) -> Option<EarlyTermination> {
+    let state = metrics.lock().ok()?;
+    let last_event_at = state.last_event_at?;
+    let silence = now.saturating_duration_since(last_event_at);
+    if silence >= step_timeout {
+        let silence_text = format_stall_duration(silence.as_secs());
+        Some(EarlyTermination::StepTimeout {
+            message: format!(
+                "no stream activity for {silence_text}; terminating due to step_timeout"
+            ),
+        })
+    } else {
+        None
+    }
+}
+
+fn detect_opencode_hang_termination(
+    metrics: &LiveMetrics,
+    now: Instant,
+    stop_threshold: Duration,
+    silent_stall_threshold: Duration,
+) -> Option<EarlyTermination> {
+    let state = metrics.lock().ok()?;
+    let last_event_at = state.last_event_at?;
+    let silence = now.saturating_duration_since(last_event_at);
+
+    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
+        return None;
+    }
+
+    let silence_text = format_stall_duration(silence.as_secs());
+    if silence >= stop_threshold && state.provider_status.as_deref() == Some("stop") {
+        return Some(EarlyTermination::CompletedButHung {
+            message: format!(
+                "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
+            ),
+        });
+    }
+
+    if silence >= silent_stall_threshold {
+        return Some(EarlyTermination::SilentStall {
+            message: format!(
+                "OpenCode produced no activity for {silence_text}; terminating hung process"
+            ),
+        });
+    }
+
+    None
+}
+
+fn early_termination_process_outcome(
+    early_termination: Option<&EarlyTermination>,
+) -> claudine::harness::ProcessTermination {
+    match early_termination {
+        Some(EarlyTermination::StepTimeout { .. }) => {
+            claudine::harness::ProcessTermination::TimedOut
+        }
+        Some(EarlyTermination::CompletedButHung { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        Some(EarlyTermination::RateLimit { .. } | EarlyTermination::SilentStall { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        None => claudine::harness::ProcessTermination::Completed,
     }
 }
 
@@ -1360,6 +1590,7 @@ pub(crate) fn run_child_stream_semantic(
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
+    step_timeout: Option<u64>,
     stderr_noise_prefixes: &[&str],
     suppress_stderr_on_success: bool,
     show_progress_heartbeat: bool,
@@ -1416,6 +1647,7 @@ pub(crate) fn run_child_stream_semantic(
 
     let heartbeat_output = stream_output.clone();
     let stdout_output = stream_output.clone();
+    let wait_loop_metrics = live_metrics.clone();
     let heartbeat = spawn_progress_heartbeat(
         show_progress_heartbeat,
         started_at,
@@ -1426,7 +1658,10 @@ pub(crate) fn run_child_stream_semantic(
     );
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stream_span = Span::current();
     let stdout_renderer = text_renderer.clone();
     let stdout_handle = thread::spawn(move || {
@@ -1483,7 +1718,10 @@ pub(crate) fn run_child_stream_semantic(
         parser
     });
 
-    let pipe = child.stderr.take().expect("stderr was set to piped");
+    let pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let prefixes: Vec<String> = stderr_noise_prefixes
         .iter()
         .map(|s| s.to_string())
@@ -1550,15 +1788,47 @@ pub(crate) fn run_child_stream_semantic(
         stdin_pipe.write_all(seed.as_bytes())?;
     }
 
-    let (exit_code, termination, early_termination) = if let Some(seconds) = timeout {
-        let (code, term) = wait_with_timeout(&mut child, seconds)?;
-        (code, term, None)
-    } else if let Some(rx) = early_terminate_rx {
-        wait_with_signal_and_early_termination(&mut child, true, rx)?
+    let stall_threshold = stall_threshold_from_env(heartbeat_policy);
+    let opencode_hang_threshold = opencode_hang_threshold_from_env();
+    let wall_clock_timeout = timeout.map(Duration::from_secs);
+    let step_timeout_duration = step_timeout.map(Duration::from_secs);
+    let needs_advanced_wait = wall_clock_timeout.is_some()
+        || step_timeout_duration.is_some()
+        || early_terminate_rx.is_some();
+    let (exit_code, termination, early_termination) = if needs_advanced_wait {
+        // Synthesize a disconnected receiver when no stderr bridge is
+        // installed so the wait loop can still enforce wall-clock and
+        // step timeouts for non-OpenCode providers.
+        let rx = early_terminate_rx.unwrap_or_else(|| {
+            let (_tx, rx) = std::sync::mpsc::channel();
+            rx
+        });
+        wait_with_signal_and_early_termination(
+            &mut child,
+            true,
+            rx,
+            Some(wait_loop_metrics),
+            stall_threshold,
+            opencode_hang_threshold,
+            wall_clock_timeout,
+            step_timeout_duration,
+        )?
     } else {
         let (code, term) = wait_with_signal_handling(&mut child, true)?;
         (code, term, None)
     };
+
+    if let Some(
+        EarlyTermination::CompletedButHung { message }
+        | EarlyTermination::SilentStall { message }
+        | EarlyTermination::StepTimeout { message },
+    ) = early_termination.as_ref()
+    {
+        let rendered = Status::new(message)
+            .state(StatusState::Warning)
+            .render(&crate::log::terminal());
+        stream_output.emit_stderr_line(&rendered);
+    }
 
     kill_process_group(&mut child);
     stop_progress_heartbeat(heartbeat);
@@ -1630,6 +1900,7 @@ fn exit_code_from_status(status: ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use darkmatter::markdown::output::terminal::{TerminalImageMode, TerminalOptions};
 
     fn test_renderer() -> StreamTextRenderer {
         StreamTextRenderer {
@@ -1640,6 +1911,21 @@ mod tests {
             last_block_growth_at: None,
             term: None,
             terminal_options: None,
+        }
+    }
+
+    fn markdown_renderer() -> StreamTextRenderer {
+        let term = Terminal::new_optimistic(80);
+        let mut opts = TerminalOptions::default();
+        opts.image_mode = TerminalImageMode::Never;
+        StreamTextRenderer {
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            partial_line_committed: false,
+            last_block_growth_at: None,
+            term: Some(term),
+            terminal_options: Some(opts),
         }
     }
 
@@ -1726,6 +2012,37 @@ mod tests {
         assert_eq!(flushed, "1. first item\n2. second item\n");
         assert!(renderer.block_buffer.is_empty());
         assert!(renderer.line_buffer.is_empty());
+    }
+
+    #[test]
+    fn markdown_streamed_list_items_do_not_gain_blank_lines() {
+        let mut renderer = markdown_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(
+            &mut out,
+            "- Hash: `f525870d`\n- Package: `claudine`\n- Operation: `feat`\n",
+        );
+        let flushed =
+            biscuit_terminal::prelude::strip_escape_codes(&String::from_utf8(out).expect("utf8"));
+
+        assert!(
+            !flushed.contains("\n\n"),
+            "streamed list items should stay contiguous; got: {flushed:?}"
+        );
+    }
+
+    #[test]
+    fn normalize_stream_rendered_newlines_matches_source_trailing_newlines() {
+        assert_eq!(
+            normalize_stream_rendered_newlines("- item\n", "- item\n\n"),
+            "- item\n"
+        );
+        assert_eq!(
+            normalize_stream_rendered_newlines("paragraph\n\n", "paragraph\n\n\n"),
+            "paragraph\n\n"
+        );
+        assert_eq!(normalize_stream_rendered_newlines("done", "done\n"), "done");
     }
 
     #[test]
@@ -2084,5 +2401,173 @@ mod tests {
         assert_eq!(rl.reset_at, Some(existing_reset));
         // retry_after_ms is untouched.
         assert_eq!(rl.retry_after_ms, Some(5000));
+    }
+
+    #[test]
+    fn apply_early_termination_completed_but_hung_restores_success() {
+        let mut summary = StreamExecutionSummary {
+            exit_code: 143,
+            is_error: true,
+            error_kind: Some("agent_native".into()),
+            error_message: Some("killed".into()),
+            ..Default::default()
+        };
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::CompletedButHung {
+                message: "OpenCode reported stop but stayed alive".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 0);
+        assert!(!summary.is_error);
+        assert!(summary.error_kind.is_none());
+        assert!(summary.error_message.is_none());
+    }
+
+    #[test]
+    fn apply_early_termination_silent_stall_sets_provider_stalled_error() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::SilentStall {
+                message: "OpenCode produced no activity for 5m".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("provider_stalled"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("no activity"),
+        );
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_recovers_after_stop_reason() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.provider_status = Some("stop".into());
+        }
+
+        let detected = detect_opencode_hang_termination(
+            &metrics,
+            now,
+            Duration::from_secs(120),
+            Duration::from_secs(300),
+        );
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::CompletedButHung { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_reports_generic_silent_stall() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(360));
+        }
+
+        let detected = detect_opencode_hang_termination(
+            &metrics,
+            now,
+            Duration::from_secs(120),
+            Duration::from_secs(300),
+        );
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::SilentStall { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_step_timeout_fires_after_silence_exceeds_budget() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(6));
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::StepTimeout { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_recent() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(1));
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_last_event_at_is_none() {
+        // First-event grace: a fresh session with no observed SemanticEvent
+        // must never trip the deadline, even if the budget is tiny.
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(1));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn early_termination_process_outcome_maps_step_timeout_to_timed_out() {
+        let termination = EarlyTermination::StepTimeout {
+            message: "no stream activity for 6s; terminating due to step_timeout".into(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::TimedOut);
+    }
+
+    #[test]
+    fn apply_early_termination_step_timeout_sets_step_timeout_error() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::StepTimeout {
+                message: "no stream activity for 6s; terminating due to step_timeout".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("step_timeout"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("no stream activity"),
+        );
     }
 }

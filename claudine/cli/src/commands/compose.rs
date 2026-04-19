@@ -21,6 +21,19 @@ use crate::log;
 use crate::provider_values::provider_value_parser;
 
 /// Shared flags for composition commands.
+///
+/// ## Notes
+///
+/// The eight provider boolean fields (`claude`, `codex`, `gemini`, `goose`,
+/// `kimicode`, `opencode`, `qwen`, `roo`) are handled entirely by the
+/// pre-clap argv normalizer in [`crate::argv`]: Rule 1 rewrites each
+/// `--<provider>` token to the canonical `--provider <slug>` pair before
+/// clap ever sees it. The struct fields and clap `#[arg(...)]` declarations
+/// are retained as user-facing help entries only — their parsed boolean
+/// values are never read at runtime (see [`Self::explicit_provider`]).
+///
+/// Retiring these fields is tracked in the
+/// `2026-04-17-cli-pre-processing` spec follow-ups.
 #[derive(Debug, Clone, Args)]
 pub struct SharedComposeArgs {
     /// Use a specific provider.
@@ -105,6 +118,12 @@ pub struct SharedComposeArgs {
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
     pub timeout: Option<u64>,
 
+    /// Step-silence timeout (e.g. `30s`, `5m`). Kills the child when no stream
+    /// event is observed for this long. Only valid in non-interactive
+    /// structured-stream mode.
+    #[arg(long = "step-timeout", value_name = "DURATION")]
+    pub step_timeout: Option<String>,
+
     /// Set the OPERATION env var for the composed session.
     #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
     pub operation: Option<String>,
@@ -147,16 +166,15 @@ pub struct SharedComposeArgs {
 }
 
 impl SharedComposeArgs {
+    /// Explicit provider selected on the command line.
+    ///
+    /// After [`crate::argv::normalize`], provider boolean flags (`--claude`,
+    /// `--gemini`, …) have already been rewritten to `--provider <slug>`,
+    /// so runtime selection only needs to read the canonical `provider`
+    /// field. The boolean fields remain on the struct as user-facing help
+    /// entries but are never set in practice.
     pub(crate) fn explicit_provider(&self) -> Option<Provider> {
         self.provider
-            .or_else(|| self.claude.then_some(Provider::Claude))
-            .or_else(|| self.codex.then_some(Provider::Codex))
-            .or_else(|| self.gemini.then_some(Provider::Gemini))
-            .or_else(|| self.goose.then_some(Provider::Goose))
-            .or_else(|| self.kimicode.then_some(Provider::KimiCode))
-            .or_else(|| self.opencode.then_some(Provider::OpenCode))
-            .or_else(|| self.qwen.then_some(Provider::QwenCode))
-            .or_else(|| self.roo.then_some(Provider::RooCode))
     }
 
     pub(crate) fn excluded(&self) -> BTreeSet<Provider> {
@@ -167,6 +185,22 @@ impl SharedComposeArgs {
         SystemPromptArgs {
             append_file: self.append_system_prompt.clone(),
             replace_file: self.replace_system_prompt.clone(),
+        }
+    }
+
+    /// Parse `--step-timeout DURATION` into seconds using the same
+    /// [`claudine::harness::parse_timeout`] grammar frontmatter uses, so CLI
+    /// and frontmatter errors share one vocabulary. Returns `Ok(None)` when
+    /// the flag was not supplied.
+    pub(crate) fn step_timeout_secs(&self) -> Result<Option<u64>> {
+        match self.step_timeout.as_deref() {
+            Some(raw) => {
+                let duration =
+                    claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
+                        .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?;
+                Ok(Some(duration.as_secs()))
+            }
+            None => Ok(None),
         }
     }
 }
@@ -233,6 +267,12 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    if shared.step_timeout.is_some() && shared.interactive {
+        return Err(eyre!(
+            "--step-timeout cannot be used with --interactive mode"
+        ));
+    }
+    let cli_step_timeout_secs = shared.step_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
@@ -287,6 +327,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         output: shared.output,
         system_prompt_args,
         timeout: shared.timeout,
+        step_timeout: cli_step_timeout_secs,
         operation: shared.operation,
         sandbox: shared.sandbox,
         repo: shared.repo,
@@ -311,6 +352,12 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    if shared.step_timeout.is_some() && shared.interactive {
+        return Err(eyre!(
+            "--step-timeout cannot be used with --interactive mode"
+        ));
+    }
+    let cli_step_timeout_secs = shared.step_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
     let show_checks = !shared.silent;
@@ -404,6 +451,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         output: shared.output,
         system_prompt_args,
         timeout: shared.timeout,
+        step_timeout: cli_step_timeout_secs,
         operation: shared.operation,
         sandbox: shared.sandbox,
         repo: shared.repo,

@@ -324,3 +324,248 @@ fn recursive_implicit_relative_finds_file_under_git_root() {
         "recursive search should include git root as a traversal start"
     );
 }
+
+mod partial_completion {
+    //! Integration tests for `FileReference::complete_partial`.
+    //!
+    //! Tests that need a controlled `HOME` value run serially so they
+    //! don't trample the ambient environment used by other tests.
+
+    use super::*;
+    use biscuit_file::{CompletionEntryForm, FileReference};
+    use serial_test::serial;
+    use std::env;
+
+    /// Guard that restores the original HOME on drop.
+    struct HomeGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl HomeGuard {
+        fn set(new_home: &Path) -> Self {
+            let previous = env::var_os("HOME");
+            // Safety: callers serialize these via `#[serial]`.
+            unsafe { env::set_var("HOME", new_home) };
+            Self { previous }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            // Safety: callers serialize these via `#[serial]`.
+            match &self.previous {
+                Some(v) => unsafe { env::set_var("HOME", v) },
+                None => unsafe { env::remove_var("HOME") },
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn magic_bare_sigil_includes_repo_and_home_roots() {
+        let tmp_repo = TempDir::new().unwrap();
+        let repo_root = tmp_repo.path();
+        git_init(repo_root);
+        let repo_root_canon = repo_root.canonicalize().unwrap();
+
+        let tmp_home = TempDir::new().unwrap();
+        let home_canon = tmp_home.path().canonicalize().unwrap();
+        let _home_guard = HomeGuard::set(&home_canon);
+
+        let completion = FileReference::complete_partial("@", &repo_root_canon)
+            .unwrap()
+            .expect("magic form is supported");
+
+        assert_eq!(completion.entry_form(), CompletionEntryForm::Magic);
+        assert_eq!(completion.rendered_prefix(), "@");
+        assert_eq!(completion.active_segment(), "");
+        assert_eq!(
+            completion.roots(),
+            &[repo_root_canon.clone(), home_canon.clone()],
+            "repo root must precede home root for @",
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn magic_with_scope_appends_scope_to_each_root() {
+        let tmp_repo = TempDir::new().unwrap();
+        let repo_root = tmp_repo.path();
+        git_init(repo_root);
+        let repo_root_canon = repo_root.canonicalize().unwrap();
+
+        let tmp_home = TempDir::new().unwrap();
+        let home_canon = tmp_home.path().canonicalize().unwrap();
+        let _home_guard = HomeGuard::set(&home_canon);
+
+        let completion = FileReference::complete_partial("@prompts/ab", &repo_root_canon)
+            .unwrap()
+            .expect("magic form is supported");
+
+        assert_eq!(completion.entry_form(), CompletionEntryForm::Magic);
+        assert_eq!(completion.rendered_prefix(), "@prompts/");
+        assert_eq!(completion.active_segment(), "ab");
+        assert_eq!(
+            completion.roots(),
+            &[
+                repo_root_canon.join("prompts"),
+                home_canon.join("prompts"),
+            ],
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn magic_without_repo_only_returns_home_root() {
+        // Use a temp dir that is not a git repo as the base.
+        let base = TempDir::new().unwrap();
+        let base_canon = base.path().canonicalize().unwrap();
+
+        let tmp_home = TempDir::new().unwrap();
+        let home_canon = tmp_home.path().canonicalize().unwrap();
+        let _home_guard = HomeGuard::set(&home_canon);
+
+        let completion = FileReference::complete_partial("@pr", &base_canon)
+            .unwrap()
+            .expect("magic form is supported");
+
+        assert_eq!(completion.entry_form(), CompletionEntryForm::Magic);
+        assert_eq!(completion.rendered_prefix(), "@");
+        assert_eq!(completion.active_segment(), "pr");
+        assert_eq!(
+            completion.roots(),
+            &[home_canon],
+            "only HOME contributes when base is not inside a git repo",
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn magic_without_home_only_returns_repo_root() {
+        let tmp_repo = TempDir::new().unwrap();
+        let repo_root = tmp_repo.path();
+        git_init(repo_root);
+        let repo_root_canon = repo_root.canonicalize().unwrap();
+
+        // Unset HOME while the test runs.
+        let previous_home = env::var_os("HOME");
+        unsafe { env::remove_var("HOME") };
+
+        let completion = FileReference::complete_partial("@", &repo_root_canon)
+            .unwrap()
+            .expect("magic form is supported");
+
+        // Restore HOME before asserting so a panic still cleans up.
+        if let Some(v) = previous_home {
+            unsafe { env::set_var("HOME", v) };
+        }
+
+        assert_eq!(
+            completion.roots(),
+            &[repo_root_canon],
+            "HOME-unset should leave only the git-root entry",
+        );
+    }
+
+    #[test]
+    fn implicit_relative_with_scope_inside_repo() {
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path();
+        git_init(repo_root);
+        let repo_root_canon = repo_root.canonicalize().unwrap();
+        let subdir = repo_root.join("pkg");
+        fs::create_dir_all(&subdir).unwrap();
+        let subdir = subdir.canonicalize().unwrap();
+
+        let completion = FileReference::complete_partial("prompts/ab", &subdir)
+            .unwrap()
+            .expect("implicit-relative form is supported");
+
+        assert_eq!(
+            completion.entry_form(),
+            CompletionEntryForm::ImplicitRelative
+        );
+        assert_eq!(completion.rendered_prefix(), "prompts/");
+        assert_eq!(completion.active_segment(), "ab");
+        assert_eq!(
+            completion.roots(),
+            &[subdir.join("prompts"), repo_root_canon.join("prompts")],
+            "CWD-relative root precedes git-root-relative root",
+        );
+    }
+
+    #[test]
+    fn implicit_relative_base_is_git_root_dedupes_to_one_root() {
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path();
+        git_init(repo_root);
+        let repo_root_canon = repo_root.canonicalize().unwrap();
+
+        let completion = FileReference::complete_partial("", &repo_root_canon)
+            .unwrap()
+            .expect("implicit-relative form is supported");
+
+        assert_eq!(completion.roots(), &[repo_root_canon]);
+    }
+
+    #[test]
+    fn implicit_relative_without_repo_only_returns_base() {
+        // Temp directory with no git init.
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let completion = FileReference::complete_partial("prompts/", &base)
+            .unwrap()
+            .expect("implicit-relative form is supported");
+
+        assert_eq!(
+            completion.roots(),
+            &[base.join("prompts")],
+            "no git root means no repo-root entry",
+        );
+        assert_eq!(completion.active_segment(), "");
+        assert_eq!(completion.rendered_prefix(), "prompts/");
+    }
+
+    #[test]
+    fn separator_reset_empties_active_segment() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+
+        let completion = FileReference::complete_partial("prompts/", &base)
+            .unwrap()
+            .expect("implicit-relative form is supported");
+        assert_eq!(completion.active_segment(), "");
+
+        let completion = FileReference::complete_partial("prompts/sub/", &base)
+            .unwrap()
+            .expect("implicit-relative form is supported");
+        assert_eq!(completion.active_segment(), "");
+        assert_eq!(completion.rendered_prefix(), "prompts/sub/");
+    }
+
+    #[test]
+    fn unsupported_forms_return_none() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+
+        for token in &[
+            "!foo",
+            "/abs/path",
+            "./rel.md",
+            "../rel.md",
+            ".",
+            "..",
+            "vault:notes",
+            "%foo",
+            "%@foo",
+            "{{DIR}}/x.md",
+        ] {
+            let result = FileReference::complete_partial(token, base).unwrap();
+            assert!(
+                result.is_none(),
+                "expected None for unsupported token `{token}`",
+            );
+        }
+    }
+}

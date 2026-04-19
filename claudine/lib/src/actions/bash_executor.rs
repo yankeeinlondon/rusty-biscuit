@@ -1,8 +1,22 @@
 use std::path::Path;
 
+use tracing::warn;
+
 use crate::error::{ClaudineError, Result};
 
-/// Commands that are unconditionally blocked and may never be used as bash actions.
+/// Advisory list of commands that look suspicious in a bash action context.
+///
+/// This list is an **advisory speed bump**, not a boundary. Bash actions are
+/// a user-authored escape hatch; any basename-based deny list can be
+/// trivially bypassed with a rename, a symlink, a `sudo`/`doas` wrapper, or a
+/// `bash -c` child. When a user configures one of these commands as an
+/// action we emit a `tracing::warn!` so it shows up in logs, but we still
+/// allow it to run.
+///
+/// The authoritative command-gating surface is
+/// [`ProtectService`](crate::services::protect) (see
+/// `claudine/docs/topics/protect-service.md`), which is regex-backed and
+/// applies to provider tool invocations across every supported CLI.
 pub const BLOCKED_COMMANDS: &[&str] = &[
     "rm", "rmdir", "mkfs", "dd", "fdisk", "format", "shutdown", "reboot", "halt", "poweroff",
     "init", "kill", "killall", "pkill",
@@ -27,18 +41,25 @@ pub enum ValidatedCommand {
 
 /// Validates a command string for use as a bash action.
 ///
+/// A suspicious basename matching [`BLOCKED_COMMANDS`] only emits a
+/// `tracing::warn!`; the real command-gating control is
+/// [`ProtectService`](crate::services::protect). See the constant's rustdoc
+/// for the reasoning.
+///
 /// ## Errors
 ///
-/// Returns an error if the command is in the blocklist, the file does not exist,
-/// the command cannot be found on PATH, or a JS/TS file has no usable interpreter.
+/// Returns an error if the file does not exist, the command cannot be found
+/// on PATH, or a JS/TS file has no usable interpreter.
 pub fn validate_command(command: &str) -> Result<ValidatedCommand> {
     let path = Path::new(command);
     let base_name = path.file_name().and_then(|n| n.to_str()).unwrap_or(command);
 
     if BLOCKED_COMMANDS.contains(&base_name) {
-        return Err(ClaudineError::ConfigValidation(format!(
-            "command `{base_name}` is blocked and may not be used as a bash action"
-        )));
+        warn!(
+            command = base_name,
+            "bash action uses a command on the advisory BLOCKED_COMMANDS list; \
+             configure `protect` rules to enforce a real policy"
+        );
     }
 
     let extension = path
@@ -163,15 +184,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blocked_commands_rejected() {
-        assert!(validate_command("rm").is_err());
-        assert!(validate_command("shutdown").is_err());
-        assert!(validate_command("killall").is_err());
+    fn advisory_blocked_commands_do_not_reject() {
+        // `BLOCKED_COMMANDS` is an advisory speed bump only; these resolve
+        // via `which::which` and succeed. The real gating is `ProtectService`.
+        // If a basename can't be found on PATH, that's a separate error.
+        if which::which("rm").is_ok() {
+            assert!(validate_command("rm").is_ok());
+        }
     }
 
     #[test]
-    fn blocked_command_in_absolute_path() {
-        assert!(validate_command("/usr/bin/rm").is_err());
+    fn blocked_command_in_absolute_path_allowed() {
+        // Advisory list no longer blocks; the absolute-path gate is just
+        // whether the file exists on disk.
+        if Path::new("/bin/rm").exists() {
+            assert!(validate_command("/bin/rm").is_ok());
+        }
     }
 
     #[test]

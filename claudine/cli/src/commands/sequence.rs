@@ -58,6 +58,16 @@ fn run_sequence_inner(args: SequenceArgs, verbose: u8) -> Result<i32> {
         fail_fast,
     } = args;
 
+    if shared.step_timeout.is_some() && shared.interactive {
+        return Err(eyre!(
+            "--step-timeout cannot be used with --interactive mode"
+        ));
+    }
+    // Validate `--step-timeout` once at entry; the parsed value is threaded
+    // to each step through [`super::wrap::sequence::execute_sequence`] via
+    // [`SharedComposeArgs::step_timeout_secs`].
+    shared.step_timeout_secs()?;
+
     let parsed = super::compose::parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")

@@ -181,6 +181,22 @@ fn wrapper_help_includes_expected_flags() {
         plain.contains("--model") || plain.contains("model"),
         "help output should describe model selection; stdout was: {plain}"
     );
+    assert!(
+        plain.contains("--edit"),
+        "help output should describe prompt editing; stdout was: {plain}"
+    );
+}
+
+#[test]
+fn wrapper_rejects_edit_and_interactive_conflict() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["codex", "--edit", "--interactive"])
+        .assert()
+        .failure()
+        .stderr(contains("--edit"))
+        .stderr(contains("--interactive"))
+        .stderr(contains("cannot be used"));
 }
 
 #[cfg(unix)]
@@ -237,6 +253,68 @@ exit 0
     assert!(env_lines.contains("YOLO=true"));
     assert!(env_lines.contains("INTERACTIVE=false"));
     assert!(env_lines.contains("AGENT_PARAMS=["));
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_rejects_edit_without_interactive_terminal_before_launch() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let args_path = workspace.path().join("args.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["codex", "summarize repo", "--edit"])
+        .assert()
+        .failure()
+        .stderr(contains("--edit requires an interactive terminal"));
+
+    assert!(
+        !args_path.exists(),
+        "provider should not launch when --edit is requested without a TTY"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_preserves_post_boundary_edit_passthrough() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let args_path = workspace.path().join("args.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["codex", "--", "--edit", "--version"])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    assert!(
+        args.lines().any(|line| line == "--edit"),
+        "post-boundary --edit should reach the provider; args were: {args}"
+    );
 }
 
 #[cfg(unix)]
@@ -959,6 +1037,31 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn wrapper_missing_explicit_system_prompt_fails_visibly() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let missing_prompt = workspace.path().join("missing-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "codex",
+            "--append-system-prompt",
+            missing_prompt.to_str().unwrap(),
+            "--",
+            "--version",
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("missing-prompt.md"));
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_universal_model_flag_passes_to_provider() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -1538,6 +1641,33 @@ fn compose_rejects_non_markdown_file() {
         .args(["compose", txt_file.to_str().unwrap()])
         .assert()
         .code(1);
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_missing_explicit_system_prompt_fails_visibly() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let md_file = workspace.path().join("prompt.md");
+    let missing_prompt = workspace.path().join("missing-system-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
+
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "compose",
+            "--codex",
+            "--append-system-prompt",
+            missing_prompt.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("missing-system-prompt.md"));
 }
 
 #[test]
@@ -2549,7 +2679,7 @@ for arg in "$@"; do
 done
 
 printf '%s\n' 'Reading prompt from stdin...' >&2
-cat > /dev/null
+/bin/cat > /dev/null
 if [ -n "$last_message" ]; then
   printf '%s\n' 'Recovered answer' > "$last_message"
 fi
@@ -2593,7 +2723,7 @@ for arg in "$@"; do
   prev="$arg"
 done
 
-cat > /dev/null
+/bin/cat > /dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"codex-1"}'
 printf '%s\n' '{"type":"turn.started"}'
 printf '%s\n' '{"type":"item.started","item":{"id":"t1","type":"command_exec","tool_name":"shell","input":{"cmd":"git status"}}}'
@@ -3804,12 +3934,14 @@ exit 0
 }
 
 /// Phase 6 scenario: a malformed asset stderr line during an otherwise-
-/// successful run should surface as a Warning + Config badge without
-/// failing the session.
+/// successful run should surface as a Warning event (rendered once per
+/// line) without failing the session. Per the 2026-04-18 OpenCode
+/// reporting contract, the diagnostics counter is preserved while the
+/// trailer Config badge is suppressed.
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn opencode_stderr_malformed_asset_yields_config_badge_and_success() {
+fn opencode_stderr_malformed_asset_records_diagnostic_without_config_badge() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     let fake_home = workspace.path().join("home");
@@ -3843,15 +3975,19 @@ exit 0
         serde_json::json!(1),
         "stderr diagnostics should record one malformed asset: row={row}",
     );
-    let badges = row["extra"]["badges"]
-        .as_array()
-        .unwrap_or_else(|| panic!("expected badges array: row={row}"));
-    assert!(
-        badges
-            .iter()
-            .any(|b| b["category"] == serde_json::json!("config")),
-        "Config badge should be present in badges: {badges:?}",
-    );
+    // Per the 2026-04-18 OpenCode reporting contract, malformed-asset
+    // events do not produce a trailer Config badge — the per-line
+    // Warning surface is the authoritative reporting channel. The
+    // `badges` field may be absent or empty; either is acceptable as
+    // long as no Config-category badge is present.
+    let badges = row["extra"]["badges"].as_array();
+    if let Some(b) = badges {
+        assert!(
+            !b.iter()
+                .any(|b| b["category"] == serde_json::json!("config")),
+            "Config trailer badge must be absent — malformed assets are surfaced once per Warning line: {b:?}",
+        );
+    }
     assert_eq!(
         row["extra"]["exit_code"],
         serde_json::json!(0),
@@ -3971,13 +4107,17 @@ exit 0
         "log_records_parsed should count both records: row={row}",
     );
 
-    let badges = row["extra"]["badges"]
-        .as_array()
-        .unwrap_or_else(|| panic!("expected badges array: row={row}"));
-    assert!(
-        badges
-            .iter()
-            .any(|b| b["category"] == serde_json::json!("config")),
-        "Config badge should be recomputed after stderr merge: {badges:?}",
-    );
+    // Per the 2026-04-18 OpenCode reporting contract, malformed-asset
+    // events do not produce a trailer Config badge — the per-line
+    // Warning surface is the authoritative reporting channel. The
+    // `badges` field may be absent or empty; either is acceptable as
+    // long as no Config-category badge is present.
+    let badges = row["extra"]["badges"].as_array();
+    if let Some(b) = badges {
+        assert!(
+            !b.iter()
+                .any(|b| b["category"] == serde_json::json!("config")),
+            "Config trailer badge must be absent after stderr merge — diagnostics counter still records the events: {b:?}",
+        );
+    }
 }

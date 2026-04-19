@@ -232,19 +232,27 @@ That makes authored documents more portable and easier to move around inside a r
 
 ## Timeouts Are Part Of The Failure Model
 
-Timeouts are declared in frontmatter with the `timeout` property:
+Claudine supports two independent timeout properties in frontmatter:
 
 ```yaml
 timeout: 5m
+step_timeout: 30s
 ```
 
-Claudine accepts seconds, minutes, and hours in a few natural spellings. The more important point is not the syntax, though. The important point is that a timeout is treated as a first-class failure event.
+- **`timeout`** is a wall-clock deadline for the whole provider run.
+- **`step_timeout`** is a silence deadline that resets on every `SemanticEvent` observed on the provider's structured stream. When silence exceeds this budget, Claudine terminates the child.
 
-That means a timeout can be:
+Both accept the same human-readable duration syntax (seconds, minutes, and hours in a few natural spellings). The more important point is not the syntax. The important point is that a timeout is treated as a first-class failure event.
+
+A timeout — whether wall-clock or step-silence — can be:
 
 - reported clearly
 - matched by `handle_timeout`
 - recovered with `retry`, `resume`, or `redirect`
+
+Both timeouts produce the same `FailureEvent::Timeout` variant so a single `handle_timeout` handler can recover either case.
+
+`step_timeout` is enforced only in structured-stream mode. Capture-mode and passthrough runs ignore the field after emitting a warning, because the enforcement mechanism depends on the per-event reset driven by the structured event pipeline. When both properties are set, `step_timeout` must be less than or equal to `timeout`; documents that violate this invariant fail parse-time validation.
 
 This is why the timeout logic lives inside the harness model rather than being a separate wrapper concern.
 

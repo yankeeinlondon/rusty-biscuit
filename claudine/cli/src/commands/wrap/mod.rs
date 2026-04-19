@@ -129,6 +129,12 @@ pub(crate) struct AttemptLaunch {
     pub(crate) env: HashMap<OsString, OsString>,
     pub(crate) stdin_seed: Option<String>,
     pub(crate) timeout: Option<u64>,
+    /// Silence-detection step timeout in seconds, if configured.
+    ///
+    /// Enforced by the streaming wait loop against `LiveMetrics.last_event_at`.
+    /// Dropped (with a stderr warning) for capture and passthrough paths
+    /// because those modes have no stream events to observe.
+    pub(crate) step_timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -485,9 +491,8 @@ pub(crate) struct WrapStartupDetection {
 /// walked the tree 3-5 times (once in `detect_environment_fast`, once in
 /// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
 /// helper collapses that into a single scan and then builds the three
-/// consumer contexts from borrowed data, falling back to empty contexts
-/// on detection errors so startup never blocks on an unrelated failure.
-pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+/// consumer contexts from borrowed data.
+pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
     use sniff::request::*;
 
     let plan = DetectionPlan::new()
@@ -504,7 +509,8 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
                 .without_formatting(),
         );
 
-    let result = sniff::detect_with_plan(plan).unwrap_or_default();
+    let result = sniff::detect_with_plan(plan)
+        .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
 
     let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
 
@@ -524,10 +530,29 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
 
     let env_context = claudine::events::environment_context_from_sniff_result(result);
 
-    WrapStartupDetection {
+    Ok(WrapStartupDetection {
         env_context,
         launch_context,
         launch_workspace,
+    })
+}
+
+fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+    WrapStartupDetection {
+        env_context: EnvironmentContext::default(),
+        launch_context: claudine::system_prompt::LaunchContext {
+            cwd: cwd.to_path_buf(),
+            repo_root: None,
+            package_area_root: None,
+            package_root: None,
+        },
+        launch_workspace: env::LaunchWorkspaceContext {
+            launch_cwd: cwd.to_path_buf(),
+            repo_root: None,
+            child_cwd: cwd.to_path_buf(),
+            package_context: None,
+            warnings: Vec::new(),
+        },
     }
 }
 
@@ -620,6 +645,10 @@ pub struct WrapperArgs {
     #[arg(short = 'i', long = "interactive")]
     pub interactive: bool,
 
+    /// Open the prompt in an external editor before launching the provider.
+    #[arg(long, conflicts_with = "interactive")]
+    pub edit: bool,
+
     /// Override the model used by the provider.
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
     pub model: Option<String>,
@@ -649,6 +678,12 @@ pub struct WrapperArgs {
     /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
     pub timeout: Option<u64>,
+
+    /// Step-silence timeout (e.g. `30s`, `5m`). Kills the child when no stream
+    /// event is observed for this long. Only valid in non-interactive
+    /// structured-stream mode.
+    #[arg(long = "step-timeout", value_name = "DURATION")]
+    pub step_timeout: Option<String>,
 
     /// Show what would be executed without launching the child.
     #[arg(long)]
@@ -732,6 +767,62 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
     std::process::exit(code);
 }
 
+fn maybe_edit_prompt_source(
+    prompt_source: profile::PromptSource,
+    silent_requested: bool,
+) -> Result<Option<profile::PromptSource>> {
+    maybe_edit_prompt_source_with(
+        prompt_source,
+        silent_requested,
+        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+        darkmatter::editor::resolve_editor_command,
+        darkmatter::editor::edit_text,
+    )
+}
+
+fn maybe_edit_prompt_source_with<Resolve, Edit>(
+    prompt_source: profile::PromptSource,
+    silent_requested: bool,
+    terminal_ready: bool,
+    resolve_editor: Resolve,
+    edit_text_fn: Edit,
+) -> Result<Option<profile::PromptSource>>
+where
+    Resolve: FnOnce() -> std::result::Result<String, darkmatter::editor::EditorError>,
+    Edit:
+        FnOnce(&str, &str) -> std::result::Result<Option<String>, darkmatter::editor::EditorError>,
+{
+    if !terminal_ready || matches!(prompt_source, profile::PromptSource::InheritStdin) {
+        return Err(eyre!("--edit requires an interactive terminal"));
+    }
+
+    let seed = match prompt_source {
+        profile::PromptSource::None => String::new(),
+        profile::PromptSource::Inline(text) => text,
+        profile::PromptSource::InheritStdin => unreachable!("handled by terminal preflight"),
+    };
+
+    let editor_command = resolve_editor()?;
+    let editor_name = editor_command
+        .split_whitespace()
+        .next()
+        .unwrap_or(editor_command.as_str());
+
+    if !silent_requested {
+        log::info(&format!("opening {editor_name} for prompt..."));
+    }
+
+    match edit_text_fn(&seed, ".md")? {
+        Some(edited_text) => Ok(Some(profile::PromptSource::Inline(edited_text))),
+        None => {
+            if !silent_requested {
+                log::info("prompt empty; aborted");
+            }
+            Ok(None)
+        }
+    }
+}
+
 fn run_provider_wrapper_inner(
     provider: Provider,
     args: WrapperArgs,
@@ -744,16 +835,6 @@ fn run_provider_wrapper_inner(
         )
     })?;
     let cwd = std::env::current_dir()?;
-
-    // One sniff-based scan produces the raw git + repo-structure data that
-    // the rest of startup needs. The result is consumed by three separate
-    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
-    // without ever walking the filesystem again — this avoids the 3-5
-    // redundant tree walks the earlier pipeline performed.
-    let startup = detect_wrap_startup(&cwd);
-    let env_context = startup.env_context;
-    let launch_context = startup.launch_context;
-    let launch_workspace = startup.launch_workspace;
 
     let term = wrap_terminal();
 
@@ -769,6 +850,7 @@ fn run_provider_wrapper_inner(
     let yolo_requested = args.yolo || extracted.yolo;
     let mut yolo_enabled = yolo_requested;
     let interactive_requested = args.interactive || extracted.interactive;
+    let edit_requested = args.edit || extracted.edit;
     let repo_requested = args.repo || extracted.repo;
     let quiet_requested = args.quiet || extracted.quiet;
     let silent_requested = args.silent || extracted.silent;
@@ -776,6 +858,29 @@ fn run_provider_wrapper_inner(
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
+
+    // One sniff-based scan produces the raw git + repo-structure data that
+    // the rest of startup needs. The result is consumed by three separate
+    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
+    // without ever walking the filesystem again — this avoids the 3-5
+    // redundant tree walks the earlier pipeline performed.
+    let startup = match detect_wrap_startup(&cwd) {
+        Ok(startup) => startup,
+        Err(error) => {
+            if repo_requested {
+                return Err(eyre!(
+                    "--repo requires startup repo detection, but startup detection failed: {error}"
+                ));
+            }
+            deferred_warnings.push(format!(
+                "startup detection failed; continuing without repo/package context: {error}"
+            ));
+            fallback_wrap_startup(&cwd)
+        }
+    };
+    let env_context = startup.env_context;
+    let launch_context = startup.launch_context;
+    let launch_workspace = startup.launch_workspace;
 
     // In the direct-wrap path the child inherits stdin automatically —
     // we don't need to detect or seed it. Pass false so that a non-tty
@@ -792,6 +897,13 @@ fn run_provider_wrapper_inner(
         profile::extract_prompt_source_from_passthrough(profile, &child_args, has_piped_stdin)?;
     child_args = extracted_args;
 
+    if edit_requested {
+        let Some(edited_prompt) = maybe_edit_prompt_source(prompt_source, silent_requested)? else {
+            return Ok((0, None, None));
+        };
+        prompt_source = edited_prompt;
+    }
+
     // Default: non-interactive when a prompt reaches the child, interactive
     // otherwise. --interactive/-i overrides the default back to interactive.
     let has_prompt = prompt_source.has_prompt_or_stdin();
@@ -806,6 +918,7 @@ fn run_provider_wrapper_inner(
         structured_mode = tracing::field::Empty,
         has_prompt,
         interactive_requested,
+        edit_requested,
         yolo_requested,
         model_override = %args.model.as_deref().unwrap_or(""),
         child_pid = tracing::field::Empty,
@@ -817,6 +930,20 @@ fn run_provider_wrapper_inner(
         return Err(eyre!("--timeout cannot be used with --interactive mode"));
     }
 
+    // Early check: --step-timeout + --interactive is always an error
+    if args.step_timeout.is_some() && interactive_requested {
+        return Err(eyre!(
+            "--step-timeout cannot be used with --interactive mode"
+        ));
+    }
+
+    // clap catches direct `--edit` + `--interactive` conflicts, but once a
+    // prompt token starts passthrough capture either flag can arrive from the
+    // fallback extractor instead. Keep the merged behavior consistent.
+    if edit_requested && interactive_requested {
+        return Err(eyre!("--edit cannot be used with --interactive"));
+    }
+
     // Early check: --timeout requires non-interactive mode
     if args.timeout.is_some() && !non_interactive_requested {
         return Err(eyre!(
@@ -824,6 +951,27 @@ fn run_provider_wrapper_inner(
              (provide a prompt or use a composition switch)"
         ));
     }
+
+    // Early check: --step-timeout requires non-interactive mode
+    if args.step_timeout.is_some() && !non_interactive_requested {
+        return Err(eyre!(
+            "--step-timeout can only be used in non-interactive mode \
+             (provide a prompt or use a composition switch)"
+        ));
+    }
+
+    // Parse `--step-timeout DURATION` once via the same parser frontmatter
+    // uses so CLI and frontmatter errors share one grammar. The `Path`
+    // argument is only used to decorate `HarnessError`; the CLI flag has no
+    // source file, so we use a synthetic label.
+    let cli_step_timeout_secs: Option<u64> = match args.step_timeout.as_deref() {
+        Some(raw) => Some(
+            claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
+                .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?
+                .as_secs(),
+        ),
+        None => None,
+    };
 
     // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
@@ -949,8 +1097,7 @@ fn run_provider_wrapper_inner(
         &sp_args,
         &launch_context,
         non_interactive_requested,
-    )
-    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    )?;
 
     let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
 
@@ -1010,6 +1157,13 @@ fn run_provider_wrapper_inner(
     if args.timeout.is_some() && !effective_non_interactive {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \
+             (provide a prompt)"
+        ));
+    }
+
+    if args.step_timeout.is_some() && !effective_non_interactive {
+        return Err(eyre!(
+            "--step-timeout can only be used in non-interactive mode \
              (provide a prompt)"
         ));
     }
@@ -1280,6 +1434,21 @@ fn run_provider_wrapper_inner(
     Span::current().record("structured_mode", use_structured);
     let stream_verbosity = structured_verbosity(silent_requested, quiet_requested);
 
+    // `step_timeout` is only enforceable in structured-stream mode because
+    // it gates on `LiveMetrics::last_event_at`. Warn and drop it otherwise so
+    // the downstream exec path never has to re-check.
+    let cli_step_timeout_secs = if !use_structured && cli_step_timeout_secs.is_some() {
+        if !silent_requested {
+            log::warn(
+                "--step-timeout is only enforced in structured-stream mode; \
+                 this run does not qualify, so the flag will be ignored",
+            );
+        }
+        None
+    } else {
+        cli_step_timeout_secs
+    };
+
     if use_structured {
         profile.apply_structured_stream(&mut child_args);
     }
@@ -1406,6 +1575,7 @@ fn run_provider_wrapper_inner(
                 child_cwd,
                 effective_non_interactive,
                 args.timeout,
+                cli_step_timeout_secs,
                 &harness_base_args,
                 &env_plan.env,
                 &mut prompt_state,
@@ -1457,6 +1627,7 @@ fn run_provider_wrapper_inner(
                 &env_plan.env,
                 child_cwd,
                 args.timeout,
+                cli_step_timeout_secs,
                 stderr_noise,
                 profile.suppress_structured_stderr_on_success(),
                 stream_verbosity != Verbosity::Silent,
@@ -1566,10 +1737,10 @@ fn append_resume_passthrough_args(resume_args: &mut Vec<String>, base_args: &[St
     let mut index = 0;
     while index < base_args.len() {
         match base_args[index].as_str() {
-            "--json" | "--verbose" => {
-                if !resume_args.iter().any(|arg| arg == &base_args[index]) {
-                    resume_args.push(base_args[index].clone());
-                }
+            "--json" | "--verbose"
+                if !resume_args.iter().any(|arg| arg == &base_args[index]) =>
+            {
+                resume_args.push(base_args[index].clone());
             }
             "--output-format" | "--format" | "--output-last-message" => {
                 if index + 1 < base_args.len()
@@ -1784,10 +1955,39 @@ fn materialize_harness_prompt(
     })
 }
 
-fn launch_timeout_secs(cli_timeout: Option<u64>, plan_timeout: Option<std::time::Duration>) -> u64 {
-    cli_timeout
-        .or_else(|| plan_timeout.map(|timeout| timeout.as_secs()))
-        .unwrap_or(0)
+/// Resolved timeouts for a single harness attempt.
+///
+/// Combines optional CLI overrides with frontmatter-declared values using the
+/// standard "CLI wins" precedence rule. Each field is an `Option<u64>` of
+/// seconds so the wait loop can skip enforcement when neither source supplies
+/// a value.
+#[derive(Debug, Clone, Copy, Default)]
+struct LaunchTimeouts {
+    timeout: Option<u64>,
+    step_timeout: Option<u64>,
+}
+
+impl LaunchTimeouts {
+    fn timeout_secs_for_span(self) -> u64 {
+        self.timeout.unwrap_or(0)
+    }
+
+    fn step_timeout_secs_for_span(self) -> u64 {
+        self.step_timeout.unwrap_or(0)
+    }
+}
+
+fn resolve_launch_timeouts(
+    cli_timeout: Option<u64>,
+    plan_timeout: Option<std::time::Duration>,
+    cli_step_timeout: Option<u64>,
+    plan_step_timeout: Option<std::time::Duration>,
+) -> LaunchTimeouts {
+    LaunchTimeouts {
+        timeout: cli_timeout.or_else(|| plan_timeout.map(|timeout| timeout.as_secs())),
+        step_timeout: cli_step_timeout
+            .or_else(|| plan_step_timeout.map(|timeout| timeout.as_secs())),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1801,6 +2001,8 @@ fn build_harness_launch(
     effective_non_interactive: bool,
     cli_timeout: Option<u64>,
     plan_timeout: Option<std::time::Duration>,
+    cli_step_timeout: Option<u64>,
+    plan_step_timeout: Option<std::time::Duration>,
 ) -> Result<AttemptLaunch> {
     let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
         let mut args = normalize_resume_args(profile, profile.build_resume_args(&session_id)?);
@@ -1823,11 +2025,19 @@ fn build_harness_launch(
         env.insert(key.clone().into(), value.clone().into());
     }
 
+    let timeouts = resolve_launch_timeouts(
+        cli_timeout,
+        plan_timeout,
+        cli_step_timeout,
+        plan_step_timeout,
+    );
+
     Ok(AttemptLaunch {
         args,
         env,
         stdin_seed,
-        timeout: cli_timeout.or_else(|| plan_timeout.map(|timeout| timeout.as_secs())),
+        timeout: timeouts.timeout,
+        step_timeout: timeouts.step_timeout,
     })
 }
 
@@ -1864,6 +2074,28 @@ fn execute_harness_attempt(
         use_structured,
     )
     .entered();
+    // Step-silence enforcement requires live `SemanticEvent` ticks, which only
+    // exist in the structured-stream path. Capture and passthrough attempts
+    // drop the value with a warning rather than silently ignoring it.
+    let launch = if !use_structured && launch.step_timeout.is_some() {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::status::{Status, StatusState};
+        let rendered = Status::new(
+            "step_timeout is only enforced in structured-stream mode; \
+             ignoring for this capture/passthrough attempt"
+                .to_string(),
+        )
+        .state(StatusState::Warning)
+        .render(term);
+        eprintln!("{rendered}");
+        AttemptLaunch {
+            step_timeout: None,
+            ..launch.clone()
+        }
+    } else {
+        launch.clone()
+    };
+    let launch = &launch;
     let (exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
@@ -1886,6 +2118,7 @@ fn execute_harness_attempt(
             &launch.env,
             child_cwd,
             launch.timeout,
+            launch.step_timeout,
             stderr_noise,
             suppress_stderr_on_success,
             stream_verbosity != Verbosity::Silent,
@@ -2466,6 +2699,7 @@ pub(crate) fn run_harness_loop(
     child_cwd: &Path,
     effective_non_interactive: bool,
     cli_timeout: Option<u64>,
+    cli_step_timeout: Option<u64>,
     base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
@@ -2749,10 +2983,17 @@ pub(crate) fn run_harness_loop(
         )
         .in_scope(|| claudine::harness::capture_pre_run_snapshot(&plan))
         .map_err(|e| eyre!("harness snapshot: {e}"))?;
+        let resolved_timeouts = resolve_launch_timeouts(
+            cli_timeout,
+            plan.timeout,
+            cli_step_timeout,
+            plan.step_timeout,
+        );
         let launch = info_span!(
             "harness_launch_plan",
             attempt,
-            timeout_secs = launch_timeout_secs(cli_timeout, plan.timeout),
+            timeout_secs = resolved_timeouts.timeout_secs_for_span(),
+            step_timeout_secs = resolved_timeouts.step_timeout_secs_for_span(),
         )
         .in_scope(|| {
             build_harness_launch(
@@ -2765,6 +3006,8 @@ pub(crate) fn run_harness_loop(
                 effective_non_interactive,
                 cli_timeout,
                 plan.timeout,
+                cli_step_timeout,
+                plan.step_timeout,
             )
         })?;
 
@@ -3346,6 +3589,7 @@ fn print_wrapper_help(provider: Provider) {
          \x20 -y, --yolo               Enable provider-specific YOLO/auto-approval mode\n\
          \x20     --include <ENV_NAME>  Preserve this env var even when it matches sensitive-name filters\n\
          \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
+         \x20     --edit                Open the prompt in an external editor before launching the provider\n\
          \x20 -m, --model <MODEL>       Override the model used by the provider\n\
          \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
           \x20     --asp <FILE>             Append a system prompt from a file\n\
@@ -3368,6 +3612,7 @@ fn print_wrapper_help(provider: Provider) {
 struct ExtractedWrapperFlags {
     yolo: bool,
     interactive: bool,
+    edit: bool,
     repo: bool,
     quiet: bool,
     silent: bool,
@@ -3435,6 +3680,10 @@ fn extract_wrapper_flags_from_passthrough_with_boundary(
             }
             "-i" | "--interactive" => {
                 extracted.interactive = true;
+                remove_indices.push(i);
+            }
+            "--edit" => {
+                extracted.edit = true;
                 remove_indices.push(i);
             }
             "--repo" => {
@@ -3556,6 +3805,92 @@ mod tests {
     }
 
     #[test]
+    fn maybe_edit_prompt_source_rejects_non_tty_sessions() {
+        let err = maybe_edit_prompt_source_with(
+            profile::PromptSource::Inline("seed".to_string()),
+            false,
+            false,
+            || Ok("code".to_string()),
+            |_, _| Ok(Some("edited".to_string())),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "--edit requires an interactive terminal");
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_rejects_inherited_stdin() {
+        let err = maybe_edit_prompt_source_with(
+            profile::PromptSource::InheritStdin,
+            false,
+            true,
+            || Ok("code".to_string()),
+            |_, _| Ok(Some("edited".to_string())),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "--edit requires an interactive terminal");
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_replaces_seed_with_edited_text() {
+        let edited = maybe_edit_prompt_source_with(
+            profile::PromptSource::Inline("seed prompt".to_string()),
+            true,
+            true,
+            || Ok("code".to_string()),
+            |seed, suffix| {
+                assert_eq!(seed, "seed prompt");
+                assert_eq!(suffix, ".md");
+                Ok(Some("edited prompt".to_string()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            edited,
+            Some(profile::PromptSource::Inline("edited prompt".to_string()))
+        );
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_uses_empty_seed_when_no_prompt_exists() {
+        let edited = maybe_edit_prompt_source_with(
+            profile::PromptSource::None,
+            true,
+            true,
+            || Ok("code".to_string()),
+            |seed, suffix| {
+                assert_eq!(seed, "");
+                assert_eq!(suffix, ".md");
+                Ok(Some("typed from scratch".to_string()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            edited,
+            Some(profile::PromptSource::Inline(
+                "typed from scratch".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_returns_clean_abort_for_empty_buffer() {
+        let edited = maybe_edit_prompt_source_with(
+            profile::PromptSource::Inline("seed".to_string()),
+            true,
+            true,
+            || Ok("code".to_string()),
+            |_, _| Ok(None),
+        )
+        .unwrap();
+
+        assert_eq!(edited, None);
+    }
+
+    #[test]
     fn extract_wrapper_flags_lifts_reserved_aliases_from_passthrough() {
         let mut args = vec![
             "--json".to_string(),
@@ -3578,6 +3913,16 @@ mod tests {
         let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert!(extracted.interactive);
+        assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_lifts_edit_long_form() {
+        let mut args = vec!["do something".to_string(), "--edit".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
+
+        assert!(extracted.edit);
         assert_eq!(args, vec!["do something"]);
     }
 
@@ -3689,6 +4034,16 @@ mod tests {
 
         assert!(!extracted.yolo);
         assert_eq!(args, vec!["prompt", "--", "--yolo"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_extracts_edit_before_dash_but_not_after() {
+        let mut args = vec!["prompt".to_string(), "--".to_string(), "--edit".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+
+        assert!(!extracted.edit);
+        assert_eq!(args, vec!["prompt", "--", "--edit"]);
     }
 
     #[test]
@@ -3860,7 +4215,7 @@ mod tests {
         proptest! {
             #[test]
             fn proptest_extract_wrapper_flags_preserves_others(
-                flags in prop::collection::vec("-y|--yolo|-i|--interactive|-q|--quiet|--silent", 0..5),
+                flags in prop::collection::vec("-y|--yolo|-i|--interactive|--edit|-q|--quiet|--silent", 0..5),
                 others in prop::collection::vec("[a-z0-9]+", 0..10)
             ) {
                 let mut args = Vec::new();
@@ -3890,6 +4245,9 @@ mod tests {
                 }
                 if flags.iter().any(|f| f == "-i" || f == "--interactive") {
                     assert!(extracted.interactive);
+                }
+                if flags.iter().any(|f| f == "--edit") {
+                    assert!(extracted.edit);
                 }
             }
         }

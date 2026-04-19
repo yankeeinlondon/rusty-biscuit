@@ -14,7 +14,11 @@ pub fn extract_text(bytes: &[u8], config: &PdfConfig) -> Result<String, PdfError
 
     let text = if config.normalize_text {
         let normalized = normalize_text(&text);
-        debug!(input_len = text.len(), output_len = normalized.len(), "PDF text extracted (normalized)");
+        debug!(
+            input_len = text.len(),
+            output_len = normalized.len(),
+            "PDF text extracted (normalized)"
+        );
         normalized
     } else {
         debug!(output_len = text.len(), "PDF text extracted");
@@ -264,10 +268,7 @@ mod tests {
 
     #[test]
     fn test_normalize_text_preserves_dash_space_in_prose() {
-        assert_eq!(
-            normalize_text("list items - first"),
-            "list items - first"
-        );
+        assert_eq!(normalize_text("list items - first"), "list items - first");
     }
 
     #[test]

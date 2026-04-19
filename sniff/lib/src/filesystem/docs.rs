@@ -178,6 +178,58 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
     docs
 }
 
+/// Collect every markdown file path under `root`, honoring `.gitignore`.
+///
+/// This is a completion-oriented adapter that returns raw paths only,
+/// without parsing frontmatter or building [`MarkdownMeta`]. It reuses the
+/// same `ignore::WalkBuilder` configuration as [`RepoDocuments::documents`]
+/// (hidden files allowed; repo, global, and local gitignore applied) so
+/// there is exactly one exclusion policy for markdown discovery in sniff.
+///
+/// The returned paths preserve whatever form `root` gives them, so callers
+/// that need canonical-path deduplication (e.g. when package-root and
+/// package-area-root coincide) should [`canonicalize`] the results
+/// themselves.
+///
+/// Unlike [`RepoDocuments`], this function does not require `root` to be
+/// the root of a git repository. Any directory is acceptable; callers pick
+/// the scope (repo root, curated subdirectory, etc.) that fits their
+/// completion context.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::filesystem::docs::collect_markdown_paths;
+/// use std::path::Path;
+///
+/// let paths = collect_markdown_paths(Path::new("/path/to/repo"));
+/// for path in paths {
+///     println!("{}", path.display());
+/// }
+/// ```
+///
+/// [`canonicalize`]: std::fs::canonicalize
+pub fn collect_markdown_paths(root: &Path) -> Vec<PathBuf> {
+    let walker = WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .build();
+
+    walker
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.file_type().is_some_and(|ft| ft.is_file())
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        })
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
+}
+
 /// Parse a single markdown file into its metadata.
 pub(crate) fn parse_markdown_meta(
     path: &Path,
@@ -927,6 +979,155 @@ mod tests {
                 docs.is_some(),
                 "detect_docs should return Some in a git repo"
             );
+        }
+    }
+
+    mod markdown_path_collection {
+        use super::*;
+        use std::fs;
+        use tempfile::TempDir;
+
+        fn write_file(path: &Path, contents: &str) {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, contents).unwrap();
+        }
+
+        #[test]
+        fn returns_only_markdown_files() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+
+            write_file(&root.join("one.md"), "# One");
+            write_file(&root.join("two.txt"), "not markdown");
+            write_file(&root.join("nested/three.md"), "# Three");
+            write_file(&root.join("nested/four.rs"), "fn main() {}");
+
+            let paths = collect_markdown_paths(root);
+
+            let names: std::collections::BTreeSet<_> = paths
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            assert!(names.contains("one.md"));
+            assert!(names.contains("three.md"));
+            assert!(!names.contains("two.txt"));
+            assert!(!names.contains("four.rs"));
+        }
+
+        #[test]
+        fn extension_match_is_case_insensitive() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+
+            write_file(&root.join("upper.MD"), "# Upper");
+            write_file(&root.join("lower.md"), "# Lower");
+
+            let paths = collect_markdown_paths(root);
+            let names: std::collections::BTreeSet<_> = paths
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            assert!(names.contains("upper.MD"));
+            assert!(names.contains("lower.md"));
+        }
+
+        #[test]
+        fn returns_empty_for_nonexistent_root() {
+            let tmp = TempDir::new().unwrap();
+            let missing = tmp.path().join("not-here");
+            let paths = collect_markdown_paths(&missing);
+            assert!(paths.is_empty());
+        }
+
+        #[test]
+        fn returns_empty_for_directory_without_markdown() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            write_file(&root.join("a.txt"), "a");
+            write_file(&root.join("nested/b.rs"), "b");
+
+            let paths = collect_markdown_paths(root);
+            assert!(paths.is_empty());
+        }
+
+        #[test]
+        fn honors_local_gitignore() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+
+            // Initialize a git repo so ignore::WalkBuilder treats the
+            // directory as a repo root and applies .gitignore.
+            git2::Repository::init(root).unwrap();
+
+            write_file(&root.join(".gitignore"), "ignored/\nskip.md\n");
+            write_file(&root.join("kept.md"), "# Kept");
+            write_file(&root.join("skip.md"), "# Skipped");
+            write_file(&root.join("ignored/hidden.md"), "# Hidden");
+            write_file(&root.join("sub/visible.md"), "# Visible");
+
+            let paths = collect_markdown_paths(root);
+            let names: std::collections::BTreeSet<_> = paths
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+
+            assert!(names.contains("kept.md"));
+            assert!(names.contains("visible.md"));
+            assert!(
+                !names.contains("skip.md"),
+                "gitignored files must be excluded: {names:?}"
+            );
+            assert!(
+                !names.contains("hidden.md"),
+                "files under a gitignored directory must be excluded: {names:?}"
+            );
+        }
+
+        #[test]
+        fn allows_canonical_path_deduplication() {
+            // When package-root and package-area-root coincide (or two scopes
+            // happen to enumerate the same directory), callers can dedup
+            // by canonical path without needing any additional sniff state.
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            write_file(&root.join("prompts/a.md"), "# A");
+            write_file(&root.join("prompts/b.md"), "# B");
+
+            let first = collect_markdown_paths(&root.join("prompts"));
+            let second = collect_markdown_paths(&root.join("prompts"));
+
+            let mut merged: Vec<PathBuf> = first
+                .into_iter()
+                .chain(second)
+                .filter_map(|p| std::fs::canonicalize(&p).ok())
+                .collect();
+            merged.sort();
+            merged.dedup();
+
+            let names: Vec<String> = merged
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(names, vec!["a.md".to_string(), "b.md".to_string()]);
+        }
+
+        #[test]
+        fn walks_nested_directories() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+
+            write_file(&root.join("top.md"), "# Top");
+            write_file(&root.join("a/b/c/deep.md"), "# Deep");
+
+            let paths = collect_markdown_paths(root);
+            let names: std::collections::BTreeSet<_> = paths
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            assert!(names.contains("top.md"));
+            assert!(names.contains("deep.md"));
         }
     }
 }

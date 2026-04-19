@@ -6,6 +6,7 @@ pub mod kimi_semantic;
 pub mod logs;
 pub mod opencode_semantic;
 pub mod parser;
+pub mod path_link;
 pub mod progress;
 pub mod protocol;
 pub mod qwen_semantic;

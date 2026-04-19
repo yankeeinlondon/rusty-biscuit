@@ -8,7 +8,7 @@ green := '\033[32m'
 yellow := '\033[33m'
 blue := '\033[34m'
 
-dim := '\033[2m'
+# dim := '\033[2m'
 
 # Build the package
 _build package pkg_name *args="":
@@ -53,7 +53,7 @@ commit agent="opencode" *args="":
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
     @claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
+    @sniff repo git-status --compact 2>/dev/null || exit 0
     @echo
 
 
@@ -65,7 +65,7 @@ _lint pkg:
     echo
     echo -e "Linting {{bold}}{{pkg}}{{reset}}"
     echo
-    cargo clippy -p {{pkg}} -- -D warnings || ( just _speak "The {{pkg}} has failing lints" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing lints!" && exit 1 )
+    cargo clippy -p {{pkg}} -- -D warnings || ( just _speak "The {{pkg}} package has failing lints" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing lints!" && exit 1 )
 
 _fix_lint pkg agent="claude" *args="":
     #!/usr/bin/env bash
@@ -98,10 +98,10 @@ _test pkg *args="":
     echo
     if cargo nextest --version >/dev/null 2>&1; then
         echo -e "ℹ️ using {{green}}cargo nextest run{{reset}}"
-        cargo nextest run -p {{pkg}} {{args}} || ( just _speak "There are failing tests in the {{pkg}} package!" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+        cargo nextest run -p {{pkg}} {{args}} || ( echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
     else
         echo -e "ℹ️ using {{green}}cargo test{{reset}}"
-        cargo test -p {{pkg}} {{args}} || ( just _speak "There are failing tests in the {{pkg}} package!" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+        cargo test -p {{pkg}} {{args}} || ( echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
     fi
     echo
     echo -e "✅ {{green}} all tests passing in {{bold}}{{pkg}}{{reset}}{{green}} package{{reset}}"

@@ -46,6 +46,8 @@ into the most valid form we can deterministically reach.
 - [Shell Expansion](./inline/shell-expansion.md) - allows _approved_ commands to be run and have the STDOUT replace the directive
 - Link Validation is deferred and not part of the shipped compose pipeline yet.
 
+> **Note on parent-side interpolation passthrough:** The parent's interpolation stage (step 5 above) runs **before** the transclusion stage. This means expressions like `::file child.md set={{dictionary}}` or `set.x="{{ env.X }}"` are resolved to literal JSON5 values by the parent's pipeline before the `::file` directive is dispatched to transclusion. "Interpolation on the set RHS" is therefore not a distinct transclusion feature — it is automatic parent-side behavior.
+
 #### Post Ops
 
 - [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible                    

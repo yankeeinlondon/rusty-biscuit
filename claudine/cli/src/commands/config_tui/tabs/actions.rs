@@ -620,17 +620,15 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
                 app.set_modal_highlighted(idx + 1);
             }
         }
-        KeyCode::Enter => {
-            if action_count > 0 {
-                let idx = app.modal_highlighted();
-                // Open the multi-field editor so all action properties are
-                // accessible, not just the primary text field.
-                app.push_modal(ModalState::ActionFieldList {
-                    event,
-                    action_index: idx,
-                    highlighted: 0,
-                });
-            }
+        KeyCode::Enter if action_count > 0 => {
+            let idx = app.modal_highlighted();
+            // Open the multi-field editor so all action properties are
+            // accessible, not just the primary text field.
+            app.push_modal(ModalState::ActionFieldList {
+                event,
+                action_index: idx,
+                highlighted: 0,
+            });
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
             app.push_modal(ModalState::ActionTypeChooser {
@@ -638,33 +636,31 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
                 highlighted: 0,
             });
         }
-        KeyCode::Char('d') | KeyCode::Char('D') => {
-            if action_count > 0 {
-                let idx = app.modal_highlighted();
-                let mut remove_event = false;
-                if let Some(actions) =
-                    current_actions_map_mut(app).and_then(|actions| actions.get_mut(&event))
-                {
-                    if idx < actions.len() {
-                        actions.remove(idx);
-                    }
-                    if actions.is_empty() {
-                        remove_event = true;
-                    }
+        KeyCode::Char('d') | KeyCode::Char('D') if action_count > 0 => {
+            let idx = app.modal_highlighted();
+            let mut remove_event = false;
+            if let Some(actions) =
+                current_actions_map_mut(app).and_then(|actions| actions.get_mut(&event))
+            {
+                if idx < actions.len() {
+                    actions.remove(idx);
                 }
-                if remove_event && let Some(actions) = current_actions_map_mut(app) {
-                    actions.remove(&event);
-                    mark_current_actions_dirty(app);
-                    app.pop_modal();
-                    return;
+                if actions.is_empty() {
+                    remove_event = true;
                 }
+            }
+            if remove_event && let Some(actions) = current_actions_map_mut(app) {
+                actions.remove(&event);
                 mark_current_actions_dirty(app);
-                let new_count = current_actions_map(app)
-                    .and_then(|actions| actions.get(&event))
-                    .map_or(0, |actions| actions.len());
-                if app.modal_highlighted() >= new_count && new_count > 0 {
-                    app.set_modal_highlighted(new_count - 1);
-                }
+                app.pop_modal();
+                return;
+            }
+            mark_current_actions_dirty(app);
+            let new_count = current_actions_map(app)
+                .and_then(|actions| actions.get(&event))
+                .map_or(0, |actions| actions.len());
+            if app.modal_highlighted() >= new_count && new_count > 0 {
+                app.set_modal_highlighted(new_count - 1);
             }
         }
         KeyCode::Esc => {
@@ -690,46 +686,36 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.actions_view = ActionView::Effective;
             app.list_index = 0;
         }
-        KeyCode::Char('a') | KeyCode::Char('A') => {
-            if app.actions_view != ActionView::Effective {
-                let unconfigured = get_unconfigured_events(app);
-                if !unconfigured.is_empty() {
-                    app.modal = Some(ModalState::EventSelector { highlighted: 0 });
-                }
+        KeyCode::Char('a') | KeyCode::Char('A') if app.actions_view != ActionView::Effective => {
+            let unconfigured = get_unconfigured_events(app);
+            if !unconfigured.is_empty() {
+                app.modal = Some(ModalState::EventSelector { highlighted: 0 });
             }
         }
-        KeyCode::Char('d') | KeyCode::Char('D') => {
-            if configured_count > 0 {
-                switch_effective_selection_to_source_view(app);
-                app.modal = Some(ModalState::ConfirmDelete {
-                    event_index: app.list_index,
+        KeyCode::Char('d') | KeyCode::Char('D') if configured_count > 0 => {
+            switch_effective_selection_to_source_view(app);
+            app.modal = Some(ModalState::ConfirmDelete {
+                event_index: app.list_index,
+            });
+        }
+        KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') if configured_count > 0 => {
+            switch_effective_selection_to_source_view(app);
+            let event_keys: Vec<AgenticEvent> = action_entries_for_view(app)
+                .into_iter()
+                .map(|entry| entry.event)
+                .collect();
+            if let Some(event) = event_keys.get(app.list_index).copied() {
+                app.modal = Some(ModalState::EditActions {
+                    event,
+                    highlighted: 0,
                 });
             }
         }
-        KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => {
-            if configured_count > 0 {
-                switch_effective_selection_to_source_view(app);
-                let event_keys: Vec<AgenticEvent> = action_entries_for_view(app)
-                    .into_iter()
-                    .map(|entry| entry.event)
-                    .collect();
-                if let Some(event) = event_keys.get(app.list_index).copied() {
-                    app.modal = Some(ModalState::EditActions {
-                        event,
-                        highlighted: 0,
-                    });
-                }
-            }
+        KeyCode::Up if app.list_index > 0 => {
+            app.list_index -= 1;
         }
-        KeyCode::Up => {
-            if app.list_index > 0 {
-                app.list_index -= 1;
-            }
-        }
-        KeyCode::Down => {
-            if app.list_index + 1 < configured_count {
-                app.list_index += 1;
-            }
+        KeyCode::Down if app.list_index + 1 < configured_count => {
+            app.list_index += 1;
         }
         _ => {}
     }

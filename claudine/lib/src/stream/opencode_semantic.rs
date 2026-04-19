@@ -30,7 +30,8 @@ use serde_json::{Map, Value};
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::opencode::{
     OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeReasoning, OpenCodeStepComplete,
-    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeText, OpenCodeTool,
+    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeTaskEvent, OpenCodeTaskProgress, OpenCodeText,
+    OpenCodeTool,
 };
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
@@ -220,6 +221,39 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         });
     }
 
+    fn handle_task_started(&mut self, event: OpenCodeTaskEvent, raw_kind: &str) {
+        let mut extra = self.base_extra(raw_kind);
+        if let Some(status) = &event.status {
+            extra.insert("status".into(), Value::from(status.as_str()));
+        }
+        self.sink.on_semantic_event(SemanticEvent::SubagentStart {
+            name: event.resolved_name(),
+            id: event.resolved_task_id(),
+            extra: Value::Object(extra),
+        });
+    }
+
+    fn handle_task_completed(&mut self, event: OpenCodeTaskEvent, raw_kind: &str) {
+        let mut extra = self.base_extra(raw_kind);
+        if let Some(status) = &event.status {
+            extra.insert("status".into(), Value::from(status.as_str()));
+        }
+        self.sink.on_semantic_event(SemanticEvent::SubagentStop {
+            name: event.resolved_name(),
+            id: event.resolved_task_id(),
+            status: event.status,
+            extra: Value::Object(extra),
+        });
+    }
+
+    fn handle_task_progress(&mut self, event: OpenCodeTaskProgress, raw_kind: &str) {
+        let message = event.message.unwrap_or_else(|| raw_kind.to_string());
+        self.sink.on_semantic_event(SemanticEvent::Info {
+            message,
+            extra: Value::Object(self.base_extra(raw_kind)),
+        });
+    }
+
     fn handle_error(&mut self, event: OpenCodeError, raw_kind: &str) {
         self.is_error = true;
         self.error_kind = event.resolved_kind();
@@ -315,7 +349,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
 
     fn handle_tool_result(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         let resolved = tool.resolve();
-        let (cached_name, _cached_input) = resolved
+        let (cached_name, cached_input) = resolved
             .id
             .as_ref()
             .and_then(|id| self.tool_uses.remove(id))
@@ -333,6 +367,15 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         }
         if let Some(err) = &resolved.error {
             extra.insert("error".into(), err.clone());
+        }
+        // Preserve the original tool input alongside the result so renderers
+        // can annotate successful incoming tool events with the same slot
+        // content the outgoing `→ Name(...)` arrow used. Prefer a
+        // wire-provided `input` on the `tool_result` / `tool_end` payload
+        // (rare but permitted) and fall back to the cached input captured
+        // on the paired `tool_start`.
+        if let Some(input) = resolved.input.or(cached_input) {
+            extra.insert("input".into(), input);
         }
 
         self.sink.on_semantic_event(SemanticEvent::ToolResult {
@@ -403,6 +446,15 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
             }
             Ok(OpenCodeEvent::Reasoning(reasoning)) => {
                 self.handle_reasoning(reasoning, &raw_kind);
+            }
+            Ok(OpenCodeEvent::TaskStarted(task)) => {
+                self.handle_task_started(task, &raw_kind);
+            }
+            Ok(OpenCodeEvent::TaskCompleted(task)) => {
+                self.handle_task_completed(task, &raw_kind);
+            }
+            Ok(OpenCodeEvent::TaskProgress(progress)) => {
+                self.handle_task_progress(progress, &raw_kind);
             }
             Ok(OpenCodeEvent::StepFinish(sf)) => {
                 self.handle_step_finish(sf, &raw_kind);
@@ -873,6 +925,71 @@ mod tests {
     }
 
     #[test]
+    fn tool_start_tool_end_pair_preserves_cached_input_on_result() {
+        // Per the 2026-04-18 OpenCode reporting contract, a `tool_start`'s
+        // input must survive into the paired `tool_end` ToolResult so
+        // renderers can annotate successful incoming events with the same
+        // slot content the outgoing arrow used.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let result = collected
+            .iter()
+            .find(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+            .expect("expected a ToolResult");
+        let SemanticEvent::ToolResult { extra, .. } = result else {
+            unreachable!()
+        };
+        let input = extra
+            .get("input")
+            .expect("extra['input'] must survive into ToolResult");
+        assert_eq!(input.get("command").and_then(Value::as_str), Some("ls -la"));
+    }
+
+    #[test]
+    fn tool_end_wire_input_wins_over_cached_input() {
+        // When the wire `tool_end` payload carries its own `input` (rare
+        // but permitted), the parser must prefer it over the cached
+        // request-side input so we never overwrite fresher data.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok","input":{"command":"pwd"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let result = collected
+            .iter()
+            .find(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+            .expect("expected a ToolResult");
+        let SemanticEvent::ToolResult { extra, .. } = result else {
+            unreachable!()
+        };
+        assert_eq!(
+            extra
+                .get("input")
+                .and_then(|v| v.get("command"))
+                .and_then(Value::as_str),
+            Some("pwd"),
+            "wire-provided input must win over cached input"
+        );
+    }
+
+    #[test]
     fn tool_use_event_still_increments_tool_calls_counter() {
         // Ensure the trailer count matches the rendered-line count by keeping
         // `tool_calls += 1` even though no ToolCall event is emitted.
@@ -888,5 +1005,55 @@ mod tests {
             .unwrap();
         let summary = Box::new(parser).finish(0);
         assert_eq!(summary.tool_calls, Some(2), "both completions must count");
+    }
+
+    #[test]
+    fn task_started_becomes_subagent_start() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::SubagentStart { id, name, .. } => {
+                assert_eq!(id.as_deref(), Some("sa1"));
+                assert_eq!(name.as_deref(), Some("researcher"));
+            }
+            other => panic!("expected SubagentStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_completed_becomes_subagent_stop() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::SubagentStop {
+                id, name, status, ..
+            } => {
+                assert_eq!(id.as_deref(), Some("sa1"));
+                assert_eq!(name.as_deref(), Some("researcher"));
+                assert_eq!(status.as_deref(), Some("success"));
+            }
+            other => panic!("expected SubagentStop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_progress_becomes_info() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"task_progress","message":"working"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::Info { message, .. } => assert_eq!(message, "working"),
+            other => panic!("expected Info, got {other:?}"),
+        }
     }
 }

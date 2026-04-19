@@ -33,6 +33,67 @@ pub(crate) fn deep_merge(base: &Value, overlay: &Value) -> Value {
     }
 }
 
+/// Deeply merges two JSON values, treating null in the overlay as a literal value.
+///
+/// Behaves like [`deep_merge`] except that an overlay of `Value::Null`
+/// overrides the base (rather than being treated as "not set"). Arrays are
+/// leaves: a higher layer array replaces the base array wholesale rather
+/// than concatenating. This is the merge used when applying `::file`
+/// directive `set=` / `set.NAME=` overrides so that callers can explicitly
+/// set a frontmatter property to null.
+pub(crate) fn deep_merge_override(base: &Value, overlay: &Value) -> Value {
+    match (base, overlay) {
+        (Value::Object(base_obj), Value::Object(overlay_obj)) => {
+            let mut merged = base_obj.clone();
+            for (key, overlay_value) in overlay_obj {
+                let next = match merged.get(key) {
+                    Some(base_value) => deep_merge_override(base_value, overlay_value),
+                    None => overlay_value.clone(),
+                };
+                merged.insert(key.clone(), next);
+            }
+            Value::Object(merged)
+        }
+        _ => overlay.clone(),
+    }
+}
+
+/// Applies three-layer frontmatter overrides from a `::file` transclusion directive.
+///
+/// Layers, from lowest to highest precedence:
+///
+/// 1. `base_fm` — the child file's authored frontmatter.
+/// 2. `set_object` — the object-form payload from `set='{ … }'`, deep-merged onto the base.
+/// 3. `set_properties` — each `set.NAME=<value>` pair, applied in order as single-key
+///    overlays on top of the accumulator.
+///
+/// Object values deep-merge; arrays and scalars (including `null`) override the
+/// lower layer. Ordering of `set_properties` is preserved so that last-write
+/// semantics hold under permissive duplicate-handling mode.
+pub(crate) fn apply_set_overrides(
+    base_fm: &serde_json::Map<String, Value>,
+    set_object: Option<&serde_json::Map<String, Value>>,
+    set_properties: &[(String, Value)],
+) -> serde_json::Map<String, Value> {
+    let mut accumulator = Value::Object(base_fm.clone());
+
+    if let Some(object_overlay) = set_object {
+        accumulator =
+            deep_merge_override(&accumulator, &Value::Object(object_overlay.clone()));
+    }
+
+    for (name, value) in set_properties {
+        let mut single_key = serde_json::Map::with_capacity(1);
+        single_key.insert(name.clone(), value.clone());
+        accumulator = deep_merge_override(&accumulator, &Value::Object(single_key));
+    }
+
+    match accumulator {
+        Value::Object(map) => map,
+        _ => base_fm.clone(),
+    }
+}
+
 /// Merges two `replace` maps with deep merge semantics.
 ///
 /// Values from `overlay` take precedence on conflict.
@@ -690,5 +751,155 @@ mod tests {
 
         // No user ctx means no diagnostics
         assert!(state.ctx_diagnostics().is_empty());
+    }
+
+    // ── deep_merge_override (null-as-literal) ─────────────────────────
+
+    #[test]
+    fn test_deep_merge_override_null_is_literal_at_top_level() {
+        let base = json!({"x": 5});
+        let overlay = json!({"x": null});
+        let merged = deep_merge_override(&base, &overlay);
+        assert_eq!(merged, json!({"x": null}));
+    }
+
+    #[test]
+    fn test_deep_merge_override_null_inside_dict_is_literal() {
+        let base = json!({"author": {"name": "Alice", "handle": "@alice"}});
+        let overlay = json!({"author": {"name": null}});
+        let merged = deep_merge_override(&base, &overlay);
+        assert_eq!(
+            merged,
+            json!({"author": {"name": null, "handle": "@alice"}})
+        );
+    }
+
+    #[test]
+    fn test_deep_merge_override_arrays_are_leaves() {
+        let base = json!({"tags": ["a", "b"]});
+        let overlay = json!({"tags": ["c"]});
+        let merged = deep_merge_override(&base, &overlay);
+        assert_eq!(merged, json!({"tags": ["c"]}));
+    }
+
+    #[test]
+    fn test_deep_merge_override_deep_merges_dicts() {
+        let base = json!({"a": {"x": 1}});
+        let overlay = json!({"a": {"y": 2}});
+        let merged = deep_merge_override(&base, &overlay);
+        assert_eq!(merged, json!({"a": {"x": 1, "y": 2}}));
+    }
+
+    // ── apply_set_overrides ───────────────────────────────────────────
+
+    fn to_map(value: Value) -> serde_json::Map<String, Value> {
+        value.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn test_apply_set_overrides_worked_example() {
+        let base = to_map(json!({
+            "name": "Alice",
+            "author": { "name": "Alice", "handle": "@alice" },
+            "tags": ["red", "green"],
+        }));
+        let set_object = to_map(json!({
+            "author": { "handle": "@bob" },
+            "tags": ["blue"],
+        }));
+        let set_properties: Vec<(String, Value)> =
+            vec![("name".to_string(), json!("Bob"))];
+
+        let effective =
+            apply_set_overrides(&base, Some(&set_object), &set_properties);
+
+        assert_eq!(effective.get("name"), Some(&json!("Bob")));
+        assert_eq!(
+            effective.get("author"),
+            Some(&json!({ "name": "Alice", "handle": "@bob" }))
+        );
+        assert_eq!(effective.get("tags"), Some(&json!(["blue"])));
+    }
+
+    #[test]
+    fn test_apply_set_overrides_three_layer_precedence() {
+        let base = to_map(json!({"name": "Alice"}));
+        let set_object = to_map(json!({"name": "Carol"}));
+        let set_properties: Vec<(String, Value)> =
+            vec![("name".to_string(), json!("Bob"))];
+
+        let effective =
+            apply_set_overrides(&base, Some(&set_object), &set_properties);
+
+        assert_eq!(effective.get("name"), Some(&json!("Bob")));
+    }
+
+    #[test]
+    fn test_apply_set_overrides_null_property_is_literal() {
+        let base = to_map(json!({"x": 5}));
+        let set_properties: Vec<(String, Value)> =
+            vec![("x".to_string(), Value::Null)];
+
+        let effective = apply_set_overrides(&base, None, &set_properties);
+
+        assert_eq!(effective.get("x"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn test_apply_set_overrides_dict_deep_merge_via_property() {
+        let base = to_map(json!({"a": {"x": 1}}));
+        let set_properties: Vec<(String, Value)> =
+            vec![("a".to_string(), json!({"y": 2}))];
+
+        let effective = apply_set_overrides(&base, None, &set_properties);
+
+        assert_eq!(effective.get("a"), Some(&json!({"x": 1, "y": 2})));
+    }
+
+    #[test]
+    fn test_apply_set_overrides_leaf_override() {
+        let base = to_map(json!({"name": "Alice"}));
+        let set_properties: Vec<(String, Value)> =
+            vec![("name".to_string(), json!("Bob"))];
+
+        let effective = apply_set_overrides(&base, None, &set_properties);
+
+        assert_eq!(effective.get("name"), Some(&json!("Bob")));
+    }
+
+    #[test]
+    fn test_apply_set_overrides_array_is_leaf() {
+        let base = to_map(json!({"tags": ["a", "b"]}));
+        let set_properties: Vec<(String, Value)> =
+            vec![("tags".to_string(), json!(["c"]))];
+
+        let effective = apply_set_overrides(&base, None, &set_properties);
+
+        assert_eq!(effective.get("tags"), Some(&json!(["c"])));
+    }
+
+    #[test]
+    fn test_apply_set_overrides_no_overlay_is_identity() {
+        let base = to_map(json!({"a": 1, "b": {"c": 2}}));
+        let effective = apply_set_overrides(&base, None, &[]);
+        assert_eq!(Value::Object(effective), Value::Object(base));
+    }
+
+    #[test]
+    fn test_apply_set_overrides_author_null_leaf_deep_merge() {
+        // Spec: set.author='{name: null}' — overlay `author.name: null` but
+        // keep the surrounding dict (author.handle) from the base.
+        let base = to_map(json!({
+            "author": {"name": "Alice", "handle": "@alice"}
+        }));
+        let set_properties: Vec<(String, Value)> =
+            vec![("author".to_string(), json!({"name": null}))];
+
+        let effective = apply_set_overrides(&base, None, &set_properties);
+
+        assert_eq!(
+            effective.get("author"),
+            Some(&json!({"name": null, "handle": "@alice"}))
+        );
     }
 }

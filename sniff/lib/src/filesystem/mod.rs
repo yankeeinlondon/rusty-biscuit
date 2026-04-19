@@ -17,7 +17,9 @@ pub mod languages;
 pub mod repo;
 mod system_view;
 
-pub use docs::{MarkdownMeta, RepoDocuments, TitleSource, UpdatedSource, detect_docs};
+pub use docs::{
+    MarkdownMeta, RepoDocuments, TitleSource, UpdatedSource, collect_markdown_paths, detect_docs,
+};
 pub use file_types::{
     FileAssociation, FileAssociationBreakdown, FileAssociationStats, FileClassification,
     FileInventory, FrameworkKind, FrameworkStats, ProgrammingLanguage, ProgrammingLanguageStats,

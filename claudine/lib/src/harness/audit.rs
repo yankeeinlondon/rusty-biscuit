@@ -184,6 +184,7 @@ mod tests {
         HarnessPlan {
             source_path: std::path::PathBuf::from("/tmp/source.md"),
             timeout: None,
+            step_timeout: None,
             pre_checks: Vec::new(),
             post_checks: Vec::new(),
             handlers: HandlerTable::default(),
@@ -400,6 +401,7 @@ mod tests {
         let mut plan = HarnessPlan {
             source_path: std::path::PathBuf::from("/tmp/test.md"),
             timeout: None,
+            step_timeout: None,
             pre_checks: Vec::new(),
             post_checks: Vec::new(),
             handlers: HandlerTable::default(),

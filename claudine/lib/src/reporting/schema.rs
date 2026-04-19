@@ -253,6 +253,8 @@ fn migrate_to_v4(conn: &Connection) -> Result<()> {
 }
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    validate_identifier(table, "table")?;
+    validate_identifier(column, "column")?;
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
 
@@ -266,6 +268,20 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
         &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
         [],
     )?;
+    Ok(())
+}
+
+fn validate_identifier(ident: &str, kind: &str) -> Result<()> {
+    if ident.is_empty() {
+        return Err(crate::error::ClaudineError::ConfigValidation(format!(
+            "SQL {kind} identifier must not be empty"
+        )));
+    }
+    if !ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(crate::error::ClaudineError::ConfigValidation(format!(
+            "SQL {kind} identifier `{ident}` contains invalid characters (only [a-zA-Z0-9_] allowed)"
+        )));
+    }
     Ok(())
 }
 

@@ -90,10 +90,10 @@ Every `ToolCall` and `ToolResult` produces a single line in `Section::ToolUseAnd
 
 ```text
 → Bash(bash ls -la)
-← Bash(successful)
+← Bash(successful, bash ls -la)
 
 → Read(/etc/hosts)
-← Read(successful)
+← Read(successful, /etc/hosts)
 
 → Bash(bash git status)
 ← Bash(error)
@@ -105,13 +105,18 @@ Every `ToolCall` and `ToolResult` produces a single line in `Section::ToolUseAnd
 Format rules:
 
 - **Outgoing call:** `→ {DisplayName}({summary})`. The summary is dim-italic.
-- **Incoming result:** `← {DisplayName}({slot})`. The slot prefers status (`successful` / `pending` dim-italic, `error` red+bold) and falls back to a derived output summary when no status is reported.
+- **Incoming result:** `← {DisplayName}({slot})`. The slot resolves status and summary independently and renders both when both are available, so a successful tool result reads symmetrically with the outgoing call. The status word (`successful` / `pending` dim-italic, `error` red+bold) appears first; a derived summary follows when one can be extracted from the cached input or the result output.
+- **Summary precedence:** `extract_tool_summary` runs against `extra["input"]` first (the cached request-side input from the paired tool call), then falls back to `output` when no input-derived summary is available. File tools surface the requested path; shell tools surface the executed command. Tools that `extract_tool_summary` does not know about render as the bare status (`← Read(successful)`) rather than fabricating content.
 - **Shell tools** (`Bash`, `bash`, `run_command`) prepend the canonical shell name to the command (`bash ls -la`) so the user can reason about how the line would actually execute.
 - **Task** prefers `description → subject → prompt → task` for its summary in that order.
 - **Display name humanization:** known tools pass through unchanged (`Bash`, `Read`, …); MCP-shape tools (`mcp__server__tool`) become `Server Tool`; unknown tools are title-cased on `_` boundaries.
 - **User-controlled content** (commands, paths, URLs, raw JSON fallbacks) is escaped so stray `<`, `>`, `{`, or `\` cannot be interpreted as prose markup.
 
 The full input/output JSON is **never** dumped verbatim for known tools. The raw event remains available in the JSONL semantic log.
+
+### OpenCode Phase Markers
+
+OpenCode emits `step_start` and `step_finish` wire events to bracket each turn-internal phase. The OpenCode semantic parser still maps these to `SemanticEvent::Info { extra["step_phase"] }` so they continue to flow through `LiveMetrics` and the JSONL log, but the live sink suppresses any OpenCode `Info` event that carries `extra["step_phase"]` from stderr — they were visually noisy and added blank-line gaps around real tool lines without contributing user-visible meaning. Other providers' `Info` events are unaffected.
 
 ## Thinking (Reasoning) Rendering
 
@@ -189,6 +194,8 @@ Anything unmatched defaults to `Unknown`, which renders as a red `Agent Error` b
 
 Assistant text reaches stdout through [`StreamTextRenderer`](../../cli/src/commands/wrap/exec.rs). It accumulates lines into a block buffer and renders them through Darkmatter at boundaries (paragraph break, code-fence close, stream-safe list item). Partial trailing lines stream raw the moment they arrive, so the user sees progress as the agent types.
 
+When a streamed fragment is rendered as its own Markdown document, Darkmatter may add a trailing blank line that was not present in the provider's source text. `StreamTextRenderer` trims those synthetic trailing blank lines back to the provider-authored newline count before writing to stdout, which keeps standalone headings and list items from turning into loose, double-spaced output during streaming.
+
 ### Sentence-Level Early Flush
 
 For non-fenced prose, the renderer additionally flushes when the buffered block has grown past the `SENTENCE_FLUSH_MIN_BYTES` threshold (200 bytes today) **and** the latest line ends with sentence-terminating punctuation (`.`, `!`, `?`, optionally followed by a closing quote / bracket / parenthesis). This keeps long single-paragraph monologues streaming in roughly sentence-sized chunks instead of waiting for a blank-line boundary, while short responses (`"OK."`) and lines without terminators stay buffered. Code fences and list items are excluded — those branches return earlier in `process_line`.
@@ -210,6 +217,20 @@ When the heartbeat thread observes that `last_event_at` has been stale for at le
 Dedup uses [`progress::should_warn_stall`](../../lib/src/stream/progress.rs): the warning re-fires only after activity resumes (`last_event_at` advances past the stored `last_stall_warning_at`) and the stream stalls again. Override the threshold with `CLAUDINE_STALL_TIMEOUT_SECONDS=<seconds>`.
 
 The current implementation is stderr-only — the warning does not yet flow through `SemanticEventSink` for dispatch / JSONL logging, because the heartbeat thread does not own the sink. Promoting it to a real `SemanticEvent::Warning` is a follow-up that requires plumbing a thread-safe event injector through the parser-thread / heartbeat-thread boundary.
+
+### OpenCode Silent-Stall Recovery
+
+OpenCode has an additional recovery path because its structured stdout stream is not a reliable process-lifecycle contract:
+
+- Some successful runs end on `step_finish.part.reason = "stop"` and then never exit cleanly.
+- Some subagent-heavy runs go completely silent after the last visible `Task(...)` completion even though the parent process remains alive.
+
+To avoid indefinite hangs in those cases, Claudine's OpenCode wait loop now polls `LiveMetricsState` while it waits for process exit:
+
+- If OpenCode has already reported `provider_status = "stop"` and then stays silent for the normal stall window (default **120 s**), Claudine terminates the hung process and treats the run as successful.
+- If OpenCode has no visible in-flight work and stays silent for the hard recovery window (default **300 s**), Claudine terminates the process and synthesizes `error_kind = "provider_stalled"`.
+
+Set `CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS=<seconds>` to override the hard silent-stall recovery window.
 
 ## Heartbeat
 
@@ -383,6 +404,32 @@ A programmatic `handle` property accepts a shell command that receives failure c
 
 ### Timeout
 
-The `timeout` frontmatter property sets a per-session deadline. Parsed from human-readable strings (`30s`, `5m`, `2h`). At the deadline, Claudine sends SIGTERM to the child; after a 5-second grace period, SIGKILL.
+The harness supports two independent timeouts, both parsed from human-readable
+strings (`30s`, `5m`, `2h`):
 
-The `--timeout` CLI flag provides the same capability without harness frontmatter, but is restricted to non-interactive mode — using it with `--interactive` is a hard error.
+| Property | Frontmatter | CLI flag | Semantics |
+|----------|-------------|----------|-----------|
+| Wall clock | `timeout` | `--timeout <SECONDS>` | Deadline for total runtime. Checked every poll against `Instant::now() - loop_start`. |
+| Step silence | `step_timeout` | `--step-timeout <DURATION>` | Deadline for silence between stream events. Resets on every `SemanticEvent`; fires when `last_event_at` is older than the budget. |
+
+At either deadline, Claudine sends SIGTERM to the child; after a 5-second
+grace period, SIGKILL. Both timeouts surface as the same
+`FailureEvent::Timeout` variant, so a single `handle_timeout` handler can
+recover either case.
+
+**Wall-clock precedence.** When both budgets expire in the same poll, the
+wall-clock timeout wins — the loop checks it first, and the step-silence
+branch skips when `early_termination.is_some()`.
+
+**Streaming-only.** `--step-timeout` / `step_timeout` is enforced only when
+the provider runs in structured-stream mode. Capture-mode and passthrough
+runs (notably Goose) emit a warning and ignore the field.
+
+**Interactive restriction.** Both `--timeout` and `--step-timeout` are
+restricted to non-interactive mode — using either with `--interactive` is a
+hard error.
+
+**CLI precedence.** CLI flags override frontmatter. On `compose`,
+`inline-compose`, and `sequence`, the `--step-timeout DURATION` flag uses
+the same duration parser as the frontmatter property and applies uniformly
+across all sequence steps.
