@@ -404,6 +404,32 @@ A programmatic `handle` property accepts a shell command that receives failure c
 
 ### Timeout
 
-The `timeout` frontmatter property sets a per-session deadline. Parsed from human-readable strings (`30s`, `5m`, `2h`). At the deadline, Claudine sends SIGTERM to the child; after a 5-second grace period, SIGKILL.
+The harness supports two independent timeouts, both parsed from human-readable
+strings (`30s`, `5m`, `2h`):
 
-The `--timeout` CLI flag provides the same capability without harness frontmatter, but is restricted to non-interactive mode — using it with `--interactive` is a hard error.
+| Property | Frontmatter | CLI flag | Semantics |
+|----------|-------------|----------|-----------|
+| Wall clock | `timeout` | `--timeout <SECONDS>` | Deadline for total runtime. Checked every poll against `Instant::now() - loop_start`. |
+| Step silence | `step_timeout` | `--step-timeout <DURATION>` | Deadline for silence between stream events. Resets on every `SemanticEvent`; fires when `last_event_at` is older than the budget. |
+
+At either deadline, Claudine sends SIGTERM to the child; after a 5-second
+grace period, SIGKILL. Both timeouts surface as the same
+`FailureEvent::Timeout` variant, so a single `handle_timeout` handler can
+recover either case.
+
+**Wall-clock precedence.** When both budgets expire in the same poll, the
+wall-clock timeout wins — the loop checks it first, and the step-silence
+branch skips when `early_termination.is_some()`.
+
+**Streaming-only.** `--step-timeout` / `step_timeout` is enforced only when
+the provider runs in structured-stream mode. Capture-mode and passthrough
+runs (notably Goose) emit a warning and ignore the field.
+
+**Interactive restriction.** Both `--timeout` and `--step-timeout` are
+restricted to non-interactive mode — using either with `--interactive` is a
+hard error.
+
+**CLI precedence.** CLI flags override frontmatter. On `compose`,
+`inline-compose`, and `sequence`, the `--step-timeout DURATION` flag uses
+the same duration parser as the frontmatter property and applies uniformly
+across all sequence steps.

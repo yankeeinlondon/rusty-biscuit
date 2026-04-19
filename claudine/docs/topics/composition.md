@@ -180,13 +180,45 @@ Available validations include filesystem checks (`file_exists`, `dir_exists`, `j
 
 ### Timeouts
 
-The `timeout` frontmatter property sets a per-execution deadline:
+Claudine supports two independent timeout properties that share the same
+human-readable duration syntax (`s`/`sec`/`seconds`, `m`/`min`/`minutes`,
+`h`/`hr`/`hours`):
 
 ```yaml
 timeout: 5m
+step_timeout: 30s
 ```
 
-Accepts `s`/`sec`/`seconds`, `m`/`min`/`minutes`, `h`/`hr`/`hours` units.
+- **`timeout`** is a wall-clock deadline for the entire provider run. When the
+  elapsed time since launch exceeds this budget, Claudine sends SIGTERM (then
+  SIGKILL after a short grace period).
+- **`step_timeout`** is a silence deadline. The timer resets on every
+  `SemanticEvent` observed on the provider's structured stream (tool call,
+  tool result, reasoning chunk, assistant text, info/warning, etc.). If no
+  event is observed for longer than the budget, Claudine kills the child.
+
+Both timeouts surface as the same `FailureEvent::Timeout` variant, so a
+single `handle_timeout` handler matches either one.
+
+**Streaming-only.** `step_timeout` requires structured streaming. If the
+selected provider runs in capture or passthrough mode, Claudine emits a
+warning and ignores the field. The non-streaming Goose wrapper is the
+primary example.
+
+**Relational validation.** When both properties are present,
+`step_timeout` must be less than or equal to `timeout`. Documents that
+violate this invariant fail parse-time validation with
+`HarnessError::InvalidTimeout`.
+
+**Precedence.** The CLI flags `--timeout` and `--step-timeout` override
+frontmatter when provided. Wall-clock enforcement is checked before
+step-silence on each poll, so if both budgets expire in the same tick the
+run is reported as the wall-clock timeout.
+
+```yaml
+timeout: 10m          # hard ceiling on total runtime
+step_timeout: 45s     # kill the child if it goes silent for 45s
+```
 
 ### Handlers
 
