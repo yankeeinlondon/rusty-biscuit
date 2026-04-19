@@ -1,21 +1,50 @@
 //! `question` — CLI front end for the tui-chrome input components.
 //!
-//! Phase 0 scaffold: parses args and prints help. Individual commands
-//! (text-input, boolean-switch, choose-one, ...) land in later phases.
+//! Each supported component is a subcommand. The global `--output`
+//! flag selects the serialisation format applied to the submitted
+//! value.
+
+use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+
+mod commands;
+mod output;
+
+use commands::text_input::{TextInputArgs, run as run_text_input};
+use output::OutputMode;
 
 /// Interactive prompts backed by tui-chrome components.
 #[derive(Debug, Parser)]
 #[command(name = "question", version, about, long_about = None)]
 struct Cli {
+    /// Output serialisation applied to the submitted value.
+    #[arg(long, value_enum, default_value_t = OutputMode::Raw, global = true)]
+    output: OutputMode,
+
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
-enum Commands {}
+enum Commands {
+    /// Single-line text input.
+    TextInput(TextInputArgs),
+}
 
-fn main() {
-    let _cli = Cli::parse();
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match dispatch(cli) {
+        Ok(code) => ExitCode::from(code as u8),
+        Err(e) => {
+            eprintln!("question: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch(cli: Cli) -> std::io::Result<i32> {
+    match cli.command {
+        Commands::TextInput(args) => run_text_input(args, cli.output),
+    }
 }
