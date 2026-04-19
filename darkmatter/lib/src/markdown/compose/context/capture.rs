@@ -1450,14 +1450,12 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
     values.insert(
         "memory_used".into(),
         hw.map_or(Value::Null, |h| {
-            if h.memory.total_bytes > 0 {
-                Value::String(format!(
-                    "{}%",
-                    (h.memory.used_bytes * 100) / h.memory.total_bytes
-                ))
-            } else {
-                Value::String("0%".to_string())
-            }
+            (h.memory.used_bytes * 100)
+                .checked_div(h.memory.total_bytes)
+                .map_or_else(
+                    || Value::String("0%".to_string()),
+                    |pct| Value::String(format!("{pct}%")),
+                )
         }),
     );
 

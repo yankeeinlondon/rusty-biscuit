@@ -324,11 +324,9 @@ pub(crate) fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
                 in_code_block = true;
                 code_block_start = range.start;
             }
-            Event::End(TagEnd::CodeBlock) => {
-                if in_code_block {
-                    regions.push((code_block_start, range.end));
-                    in_code_block = false;
-                }
+            Event::End(TagEnd::CodeBlock) if in_code_block => {
+                regions.push((code_block_start, range.end));
+                in_code_block = false;
             }
             _ => {}
         }

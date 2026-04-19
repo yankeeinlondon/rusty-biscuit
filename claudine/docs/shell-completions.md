@@ -1,144 +1,176 @@
 # Shell Completions
 
-Claudine ships dynamic shell completions. A one-time bootstrap line in your
-shell rc wires your shell to invoke `claudine` itself for every `<TAB>`, so
-completion output always reflects the currently installed binary — no need
-to regenerate a static script when a new composition command, flag, or
-file-reference behavior ships.
+Claudine ships dynamic shell completions for `bash`, `zsh`, and `fish`.
+The generated script registers a callback that shells out to the hidden
+`claudine __complete` subcommand on every `<TAB>`. The callback handles
+the file-reference argument positions documented below; everything else
+falls back to each shell's default behavior.
+
+`powershell` and `elvish` retain the legacy one-line `COMPLETE=<shell>`
+bootstrap that activates the older `CompleteEnv` runtime path. The
+supplement acceptance matrix covers bash/zsh/fish only.
 
 ## Installation
 
-`claudine completions <shell>` emits the bootstrap snippet for each
-supported shell. Redirect the output into the matching rc file:
+`claudine completions <shell>` emits the script for each supported shell.
+Redirect the output into the shell's completion file:
 
 ```sh
-# Bash
-claudine completions bash >> ~/.bashrc
+# Bash — redirect into your bash-completion completions directory
+claudine completions bash > ~/.local/share/bash-completion/completions/claudine
 
-# Zsh
-claudine completions zsh >> ~/.zshrc
+# Zsh — redirect into the first directory in $fpath (usually autoloaded)
+claudine completions zsh > "${fpath[1]}/_claudine"
 
-# Fish
-claudine completions fish >> ~/.config/fish/config.fish
+# Fish — redirect into the user fish-completions directory
+claudine completions fish > ~/.config/fish/completions/claudine.fish
 
-# PowerShell
+# PowerShell (legacy one-line bootstrap)
 claudine completions powershell >> $PROFILE
 
-# Elvish
+# Elvish (legacy one-line bootstrap)
 claudine completions elvish >> ~/.elvish/rc.elv
 ```
 
-Open a new shell (or `source` the rc file) and completion is live. The
-bootstrap line is stable — you only write it once and Claudine owns the
-runtime output from that point on.
+Open a new shell (or source the rc file) and completion is live. The
+bash/zsh/fish scripts only need to be regenerated if Claudine changes the
+callback wiring itself — the completion candidates are always produced by
+the currently installed binary via the `__complete` subprocess.
+
+> **Backwards compatibility.** Users who previously sourced the old
+> `COMPLETE=<shell> claudine` one-liner continue to reach the legacy
+> completion engine until they run `claudine completions <shell>` and
+> reinstall the generated script. There is no automatic migration.
 
 ## How dynamic completion works
 
-When the shell reaches a `<TAB>` on a `claudine` command line, it invokes
-Claudine with the environment variable `COMPLETE=<shell>`. Claudine's
-`main()` detects this and enters a completion-only code path
-(`CompleteEnv::complete` in [`claudine/cli/src/completion/mod.rs`]) that
-exits before any normal CLI startup — no config load, no telemetry, no
-wrapper launch. The completer then inspects the current partial token,
-discovers matching candidates, validates them against the active
-composition command, and emits the results for the shell to present.
+On every `<TAB>`, the registered callback collects the shell's current
+word list and the index of the token being completed, then invokes:
 
-Because the completer is the same binary that runs the commands, any
-change to supported subcommands, flags, or composition rules shows up on
-the next `<TAB>` with zero user action.
+```text
+claudine __complete --current <INDEX> -- <argv...>
+```
+
+where `<argv...>` is the full command line the user typed, starting with
+the binary name at position 0. The hidden `__complete` subcommand is a
+parallel code path that does not load configuration, telemetry, or the
+wrapper launch pipeline. It classifies the cursor position, applies the
+supplement's candidate-selection rules, and prints one candidate per line
+on stdout. When the engine has no candidates to offer (non-targeted
+positions, errors), each shell falls back to its default file completion.
 
 ## File reference completion
 
-Dynamic completion targets the shared positional on the three composition
-commands:
+Dynamic completion fires at exactly these argument positions — everywhere
+else the shell's default behavior applies.
 
-- `claudine compose …`
-- `claudine inline-compose …`
-- `claudine sequence …`
+### Targeted positions
 
-Each command has its own validity rules (see below); all three share the
-same token classification and scope discovery.
+| Position | Subcommands |
+| --- | --- |
+| Positional `<FILE>` (index 0) | `compose`, `inline-compose`, `sequence` |
+| `--append-system-prompt <FILE>` / `--asp <FILE>` | `compose`, `inline-compose`, `sequence`, `claude`, `codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen` |
+| `--replace-system-prompt <FILE>` / `--rsp <FILE>` | same 10 subcommands |
 
-### Token shapes
+### Supported token shapes
 
-The first step is classifying the partial token in isolation:
+| Partial | Scope |
+| --- | --- |
+| `@…` | `@`-prefixed magic path — enumerated against the repo root plus the user home (`~/` and `~/.claudine/`). |
+| `prompts/…`, `docs/…`, any implicit-relative path | Implicit-relative — enumerated against the repo root only, matching `FileReference`'s implicit-relative contract. |
 
-| Partial               | Scope                                                        |
-| --------------------- | ------------------------------------------------------------ |
-| `@…`                  | Repo-wide magic: the current repo root plus `~/.claudine/prompts` and `~/.claudine/sequences` |
-| `!…`                  | Current monorepo **package area** only                       |
-| `./…`                 | Immediate children of the current working directory          |
-| `../…`                | Immediate children of the parent directory                   |
-| `<bare>` (no sigil)   | Curated landing menu (cwd, repo-area prompts/sequences, repo root, repo prompts/sequences) |
-| `KEY=…`               | Setter — completion is suppressed                            |
-| `vault:…`, `/abs/…`, `%…`, `{{…}}` | Explicitly unsupported in v1 — returns zero candidates |
+Other token shapes (`vault:`, absolute `/path`, `./`, `../`, `!`, `%…`,
+`{{…}}`) return no candidates. The supplement's new engine does not
+recognize `./` / `../` traversal UI or the `!` package sigil; those
+behaviors are documented on the legacy `COMPLETE`-based path only and
+will not reappear in freshly generated scripts.
 
-Setter suppression is strict: the key must match
-`^[A-Za-z_][A-Za-z0-9_]*=`. Hyphenated keys (`my-key=`) and dotted keys
-(`foo.bar=`) are treated as file references at completion time, matching
-the runtime parser's more forgiving shape.
+### Character counting and candidate scope
 
-### Per-command validators
+The spec's "meaningful query characters" drive how much of the filesystem
+is walked. Counting excludes the leading `@` sigil and resets after every
+`/` path separator.
 
-The walker emits every matching entry in its scope, then a mode-specific
-validator decides whether the file is actually a candidate:
+| Typed token | Meaningful chars | Scope |
+| --- | --- | --- |
+| empty, `@`, `prompts/` | 0 | curated only |
+| `@p`, `@pr`, `prompts/a` | 1–2 | curated only |
+| `@pro`, `prompts/abc` | 3+ | curated **plus** `.gitignore`-aware broad repo scan |
 
-| Command           | Validator                                                   |
-| ----------------- | ----------------------------------------------------------- |
-| `compose`         | `.md` / `.markdown` extension only — no frontmatter parse   |
-| `inline-compose`  | `.md` extension **and** a non-empty string `prompt:` in frontmatter |
-| `sequence`        | `.md` extension **and** a resolvable sequence plan (inline list, inline objects, or external YAML reference) |
+Curated scope is fixed — `prompts/` and `sequences/` under each of these
+roots (when applicable):
 
-Validation is fail-closed: any I/O, UTF-8, parse, or size failure silently
-omits the candidate rather than surfacing a shell-visible diagnostic.
-Directories always pass through unconditionally so a single `<TAB>` keeps
-descending into a subtree.
+- `<repo>/`
+- `<package-root>/` (nearest enclosing Cargo package, via `sniff`)
+- `<package-area-root>/` (area directory containing the package, via `sniff`)
+- `~/`
+- `~/.claudine/`
 
-### Safety limits
+When the cursor is not inside any git repository, the curated user-scope
+directories still apply; the 3+-character broad scan never activates.
 
-The walker is bounded by fixed constants in
-[`claudine/cli/src/completion/file_reference.rs`]:
+### Matching semantics
 
-- Maximum recursion depth: 4 (children of the scope root sit at depth 1)
-- Maximum candidates before dedup: 500
-- Maximum file size for frontmatter parse: 1 MiB
-- Skip list: `.git`, `target`, `node_modules`, `dist`, `build`, `.next`,
-  `.venv`, `venv`, `__pycache__`, and the Claudine shadow tree
-  (`.claudine/.shadow`)
-- Symlinks are never followed, so completion is safe against cycles
+Matching is **case-insensitive substring** on the filename with the
+trailing `.md` stripped for matching only. Directory components are never
+considered. The returned candidate keeps its `.md` extension so the shell
+inserts a valid file reference.
 
-### Intentionally unsupported prefixes
+- `@pr<TAB>` → `@prompts/prompt.md`, `@prompts/my-prompt.md`,
+  `@prompts/suppress.md`, and any other curated-scope markdown whose
+  filename contains `pr`.
+- `@omp<TAB>` → `@prompts/prompt.md` (mid-filename substring).
+- `./local` → zero candidates; `./`-prefixed paths are not a supported
+  supplement entry form.
 
-The v1 completer deliberately emits zero candidates for:
+### Markdown-only
 
-- `vault:` — vault-resolved references depend on secrets Claudine cannot
-  safely enumerate at completion time.
-- Absolute paths (`/…`) — the shell's own path completion is a better
-  experience for filesystem-anchored references.
-- `%…` and `{{…}}` — recursive composition and template tokens are
-  resolved at runtime; shell-time completion would guess wrong.
+Every candidate is a `*.md` file. Directories, non-markdown files,
+setters (`KEY=`), and `./`/`../` traversal tokens are all explicitly
+filtered out before emission.
 
-These are dead ends, not errors — no candidates are returned and the
-shell falls back to its default behavior.
+### Broad scan exclusion policy
 
-### Measured latency
+The 3+-character broad scan reuses `sniff`'s `.gitignore`-aware markdown
+walker ([`collect_markdown_files`](../../sniff/lib/src/filesystem/docs.rs)),
+which is configured with `git_ignore`, `git_global`, and `git_exclude`
+enabled. Files under `target/`, `node_modules/`, the Claudine shadow tree,
+or any path matched by repo / global / `.git/info/exclude` rules never
+reach the candidate list.
 
-Measured on the `rusty-biscuit` worktree (≈48 workspace crates, macOS,
-release binary) against the spec's bounded walker — `MAX_RECURSION_DEPTH
-= 4`, `MAX_CANDIDATES = 500`, `MAX_FRONTMATTER_BYTES = 1 MiB`:
+### Deduplication
 
-| Request                     | Cold run | Warm run | Candidates |
-| --------------------------- | -------- | -------- | ---------- |
-| `claudine compose @`        | ~37 ms   | ~18 ms   | 246        |
-| `claudine inline-compose @` | ~37 ms   | ~23 ms   | 139        |
-| `claudine sequence @`       | ~24 ms   | ~23 ms   | 130        |
+Candidates whose canonicalized resolved paths collide are emitted at most
+once. This matters in single-crate areas (`biscuit-visualized`, `tabby`,
+`tui`) where the package root and package-area root coincide.
 
-Cold-cache numbers are well below the ~100 ms threshold where `<TAB>`
-begins to feel sluggish, so the initial bounded-walker constants are
-left at their spec-recommended values. The frontmatter-aware modes
-(`inline-compose`, `sequence`) add roughly 5–10 ms over the
-extension-only `compose` path, driven by the prefix-narrowed YAML parse
-— the cost scales with candidate count, not tree size.
+## Architecture reference
 
-[`claudine/cli/src/completion/mod.rs`]: ../cli/src/completion/mod.rs
-[`claudine/cli/src/completion/file_reference.rs`]: ../cli/src/completion/file_reference.rs
+| File | Role |
+| --- | --- |
+| [`claudine/cli/src/completion/supplement.rs`](../cli/src/completion/supplement.rs) | Supplement completion engine (`run`, `emit_candidates`, meaningful-char counting, curated-scope enumeration) |
+| [`claudine/cli/src/commands/completions.rs`](../cli/src/commands/completions.rs) | `claudine completions <shell>` + hidden `__complete` entry points |
+| [`claudine/cli/src/completion/bootstrap.rs`](../cli/src/completion/bootstrap.rs) | Shell-specific script rendering (bash/zsh/fish full scripts; powershell/elvish legacy bootstraps) |
+| [`claudine/cli/src/completion/mod.rs`](../cli/src/completion/mod.rs) | Legacy `CompleteEnv` entry point preserved for stale installations |
+| [`biscuit-file/lib/src/file_reference/resolve.rs`](../../biscuit-file/lib/src/file_reference/resolve.rs) | `FileReference::complete_partial` — the partial-token API the supplement consumes |
+| [`sniff/lib/src/filesystem/docs.rs`](../../sniff/lib/src/filesystem/docs.rs) | `collect_markdown_paths` — the `.gitignore`-aware markdown walker |
+
+## Open questions
+
+The supplement spec deliberately leaves several items open; they are not
+resolved by the current implementation and may change in future features:
+
+- **Ordering.** Candidates are currently emitted in sorted order (backed
+  by a `BTreeSet`), but the spec does not commit to any specific ordering.
+- **Caching.** The 3+-character broad scan re-walks the repo on every
+  keypress. No caching layer is in place.
+- **Performance budget.** No explicit latency budget is enforced.
+- **Stale script migration.** No deprecation warning is emitted from the
+  legacy `COMPLETE`-based path.
+- **`HOME` unset behavior.** User-scope roots silently skip when
+  `$HOME` is not set or the directories don't exist.
+- **Symlink policy inside curated scopes.** Not specified; the
+  `ignore::WalkBuilder` default governs broad-scan behavior.
+- **Observability.** The `__complete` subcommand does not emit tracing
+  output; a shell completion pipeline is the wrong sink for diagnostic
+  logs without further design work.

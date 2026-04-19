@@ -44,3 +44,12 @@ _confirm question:
     printf '%b [y/N] ' "{{question}}" >&2
     read -n 1 ans; echo >&2
     [[ $ans =~ ^[Yy]$ ]] && echo y || echo n
+
+# Convert the passed string to kebab-case: "hello_world" or "helloWorld" → "hello-world"
+_dasherize str:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    s="{{str}}"
+    s="${s//_/-}"
+    s="${s// /-}"
+    echo "${s}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_ ]+/-/g' | sed -E 's/^-//'

@@ -308,10 +308,7 @@ mod tests {
             FileType::Pdf,
         ];
         for v in variants {
-            assert!(
-                v.mime_type().is_some(),
-                "{v:?} should have a MIME type"
-            );
+            assert!(v.mime_type().is_some(), "{v:?} should have a MIME type");
         }
         assert!(FileType::Unknown.mime_type().is_none());
     }

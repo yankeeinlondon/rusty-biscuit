@@ -16,15 +16,21 @@ use crate::harness::model::{
     ValidationRuleId,
 };
 use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
-use crate::harness::timeout::parse_timeout;
+use crate::harness::timeout::{format_duration, parse_timeout};
 
 /// Harness-relevant frontmatter keys.
-const HARNESS_KEYS: &[&str] = &["pre_checks", "post_checks", "timeout", "handle"];
+const HARNESS_KEYS: &[&str] = &[
+    "pre_checks",
+    "post_checks",
+    "timeout",
+    "step_timeout",
+    "handle",
+];
 
 /// Check whether composed frontmatter contains any harness-relevant keys.
 ///
-/// Returns `true` if any of `pre_checks`, `post_checks`, `timeout`, `handle`,
-/// or any `handle_*` key is present.
+/// Returns `true` if any of `pre_checks`, `post_checks`, `timeout`,
+/// `step_timeout`, `handle`, or any `handle_*` key is present.
 pub fn has_harness_properties(frontmatter: &Value) -> bool {
     let Some(obj) = frontmatter.as_object() else {
         return false;
@@ -90,12 +96,42 @@ pub fn parse_harness_plan(
         None
     };
 
+    // Parse step_timeout (silence deadline). Same syntax as `timeout`.
+    let step_timeout = if let Some(v) = obj.get("step_timeout") {
+        let raw = v.as_str().ok_or_else(|| HarnessError::InvalidFrontmatter {
+            source_path: source_path.to_path_buf(),
+            property: "step_timeout".to_string(),
+            detail: "step_timeout must be a string (e.g. \"30s\", \"5m\")".to_string(),
+        })?;
+        Some(parse_timeout(raw, source_path)?)
+    } else {
+        None
+    };
+
+    // Relational validation: step_timeout must not exceed the wall-clock
+    // timeout when both are present. A step budget greater than the wall
+    // clock is always unreachable.
+    if let (Some(step), Some(total)) = (step_timeout, timeout)
+        && step > total
+    {
+        return Err(HarnessError::InvalidTimeout {
+            source_path: source_path.to_path_buf(),
+            raw: format_duration(step),
+            detail: format!(
+                "step_timeout ({}) must not exceed timeout ({})",
+                format_duration(step),
+                format_duration(total),
+            ),
+        });
+    }
+
     // Parse handlers
     let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx)?;
 
     Ok(HarnessPlan {
         source_path: source_path.to_path_buf(),
         timeout,
+        step_timeout,
         pre_checks,
         post_checks,
         handlers,
@@ -1281,5 +1317,89 @@ mod tests {
             message.contains("\"name\":\"goose.md\""),
             "unexpected error: {message}"
         );
+    }
+
+    #[test]
+    fn parse_harness_plan_extracts_step_timeout() {
+        let fm = json!({ "step_timeout": "2m" });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(
+            plan.step_timeout,
+            Some(std::time::Duration::from_secs(120))
+        );
+        assert!(plan.timeout.is_none());
+    }
+
+    #[test]
+    fn parse_harness_plan_rejects_non_string_step_timeout() {
+        let fm = json!({ "step_timeout": 120 });
+        let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
+        assert!(
+            matches!(err, HarnessError::InvalidFrontmatter { ref property, .. } if property == "step_timeout"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_harness_plan_rejects_step_timeout_exceeding_timeout() {
+        let fm = json!({
+            "timeout": "1m",
+            "step_timeout": "5m"
+        });
+        let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
+        match err {
+            HarnessError::InvalidTimeout { ref detail, .. } => {
+                assert!(
+                    detail.contains("must not exceed"),
+                    "unexpected detail: {detail}"
+                );
+                assert!(detail.contains("5m"), "expected 5m in detail: {detail}");
+                assert!(detail.contains("1m"), "expected 1m in detail: {detail}");
+            }
+            other => panic!("expected InvalidTimeout, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_harness_plan_accepts_step_timeout_without_timeout() {
+        let fm = json!({ "step_timeout": "30s" });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(plan.step_timeout, Some(std::time::Duration::from_secs(30)));
+        assert!(plan.timeout.is_none());
+    }
+
+    #[test]
+    fn parse_harness_plan_accepts_timeout_without_step_timeout() {
+        let fm = json!({ "timeout": "5m" });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(plan.timeout, Some(std::time::Duration::from_secs(300)));
+        assert!(plan.step_timeout.is_none());
+    }
+
+    #[test]
+    fn parse_harness_plan_accepts_equal_step_and_wall_timeouts() {
+        let fm = json!({
+            "timeout": "2m",
+            "step_timeout": "2m"
+        });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(plan.timeout, Some(std::time::Duration::from_secs(120)));
+        assert_eq!(
+            plan.step_timeout,
+            Some(std::time::Duration::from_secs(120))
+        );
+    }
+
+    #[test]
+    fn has_harness_properties_returns_true_for_step_timeout_only() {
+        let fm = json!({ "step_timeout": "30s" });
+        assert!(has_harness_properties(&fm));
+    }
+
+    #[test]
+    fn harness_plan_default_step_timeout_is_none() {
+        let fm = json!({});
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert!(plan.step_timeout.is_none());
     }
 }

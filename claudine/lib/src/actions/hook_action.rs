@@ -79,6 +79,13 @@ pub enum Mapper {
     JsonObject,
 
     /// Interpret the exit code as the decision.
+    ///
+    /// `0` maps to [`HookDecision::Allow`], `2` maps to
+    /// [`HookDecision::Deny`], and any other status (including crashes,
+    /// `command-not-found` at `127`, or user-defined anomalous codes)
+    /// emits **no** decision. The dispatcher logs a `warn!` on
+    /// unexpected statuses and falls through to the next action rather
+    /// than silently allowing a broken handler.
     ExitCode,
 
     /// Map stdout lines to specific response fields using named regex groups.

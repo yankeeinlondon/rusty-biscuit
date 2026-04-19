@@ -915,3 +915,117 @@ fn sequence_summary_emits_final_line() {
         .success()
         .stderr(contains("Sequence finished"));
 }
+
+// ============================================================================
+// Per-step step_timeout override
+// ============================================================================
+
+/// Verifies that a step-level `step_timeout` (declared in a sequence step's
+/// raw state object) overrides the document-level `step_timeout`. The step
+/// overlay passes the step's raw state unchanged under the `state` key, so
+/// per-step `step_timeout` is surfaced via `{{ state.step_timeout || ... }}`
+/// interpolation in the document frontmatter.
+///
+/// Test shape:
+/// - Document `step_timeout` falls back to `30s` when the step does not
+///   declare one, but uses `state.step_timeout` when the step does.
+/// - Step 1 has no `step_timeout`, so the effective deadline is `30s`. The
+///   fake provider completes quickly and the step succeeds.
+/// - Step 2 declares `step_timeout: 1s` at the step level. The fake
+///   provider emits a single start event and then stalls, so the
+///   step-silence deadline fires at ~1s and the step is killed with a
+///   `step_timeout` error well before the 30s document fallback would.
+#[cfg(unix)]
+#[test]
+fn sequence_per_step_step_timeout_override() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    // Document-level step_timeout defaults to 30s; a step may override by
+    // setting `step_timeout` at the step level, which the overlay exposes
+    // via `state.step_timeout`. Step 2 sets it to 1s so the test completes
+    // quickly once its fake provider stalls.
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+step_timeout: '{{ state.step_timeout || "30s" }}'
+sequence:
+  - name: fast
+  - name: slow
+    step_timeout: 1s
+---
+Run step {{ state.name }}
+"#,
+    )
+    .unwrap();
+
+    // Fake opencode tracks invocation count. Step 1 emits a structured
+    // session quickly and exits; step 2 emits a start event only and then
+    // sleeps well past the step-level 1s deadline. The wait loop must
+    // terminate the silent child without letting the test block for the
+    // document-level 30s fallback.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+
+if [ "$count" = "1" ]; then
+  printf '%s\n' '{"type":"step_start","sessionID":"ses_step1"}'
+  printf '%s\n' '{"type":"text","text":"fast step done"}'
+  printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2},"duration_ms":10}'
+  exit 0
+fi
+
+# Step 2: emit start event so last_event_at is populated, then stall so
+# the step-silence deadline fires.
+printf '%s\n' '{"type":"step_start","sessionID":"ses_step2"}'
+sleep 30
+exit 0
+"#,
+    );
+
+    let run_start = std::time::Instant::now();
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
+        .timeout(std::time::Duration::from_secs(25))
+        .args(["sequence", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+    let elapsed = run_start.elapsed();
+
+    // The step-level 1s budget (plus the 5s SIGTERM grace) must win well
+    // before the 30s document fallback. Allow generous slack for slow CI.
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "per-step step_timeout override should fire quickly; run took {elapsed:?}"
+    );
+
+    let calls = fs::read_to_string(&count_path).unwrap();
+    assert_eq!(
+        calls.trim(),
+        "2",
+        "both steps should be launched before the stall on step 2 is detected"
+    );
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("1 succeeded") && plain.contains("1 failed"),
+        "summary should record step 1 success and step 2 failure; stderr: {plain}"
+    );
+}

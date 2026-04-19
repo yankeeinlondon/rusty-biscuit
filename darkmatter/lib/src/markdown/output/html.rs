@@ -147,54 +147,52 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 code_buffer.clear();
                 code_lang.clear();
             }
-            InlineEvent::Standard(Event::End(TagEnd::CodeBlock)) => {
-                if in_code_block {
-                    // Parse DSL metadata
-                    let meta = parse_code_info(&code_info)?;
-                    code_lang = meta.language.clone();
+            InlineEvent::Standard(Event::End(TagEnd::CodeBlock)) if in_code_block => {
+                // Parse DSL metadata
+                let meta = parse_code_info(&code_info)?;
+                code_lang = meta.language.clone();
 
-                    // Check for mermaid code blocks
-                    let is_mermaid = code_lang.eq_ignore_ascii_case("mermaid");
+                // Check for mermaid code blocks
+                let is_mermaid = code_lang.eq_ignore_ascii_case("mermaid");
 
-                    if is_mermaid && options.mermaid_mode != MermaidMode::Off {
-                        match options.mermaid_mode {
-                            MermaidMode::Image => {
-                                // Render as interactive mermaid diagram
-                                has_mermaid = true;
-                                let diagram = Mermaid::new(&code_buffer);
-                                if let Some(title) = &meta.title {
-                                    let diagram = diagram.with_title(title.clone());
-                                    let html = diagram.render_for_html();
-                                    output.push_str(&html.body);
-                                    output.push('\n');
-                                } else {
-                                    let html = diagram.render_for_html();
-                                    output.push_str(&html.body);
-                                    output.push('\n');
-                                }
+                if is_mermaid && options.mermaid_mode != MermaidMode::Off {
+                    match options.mermaid_mode {
+                        MermaidMode::Image => {
+                            // Render as interactive mermaid diagram
+                            has_mermaid = true;
+                            let diagram = Mermaid::new(&code_buffer);
+                            if let Some(title) = &meta.title {
+                                let diagram = diagram.with_title(title.clone());
+                                let html = diagram.render_for_html();
+                                output.push_str(&html.body);
+                                output.push('\n');
+                            } else {
+                                let html = diagram.render_for_html();
+                                output.push_str(&html.body);
+                                output.push('\n');
                             }
-                            MermaidMode::Text => {
-                                // Render as fenced code block (fallback format)
-                                output.push_str("<pre><code class=\"language-mermaid\">");
-                                output.push_str(&html_escape::encode_text(&code_buffer));
-                                output.push_str("</code></pre>\n");
-                            }
-                            MermaidMode::Off => unreachable!(),
                         }
-                    } else {
-                        // Render code block with highlighting
-                        let highlighted = highlight_code_block(
-                            &code_buffer,
-                            &code_lang,
-                            &meta,
-                            &code_highlighter,
-                            &options,
-                        )?;
-                        output.push_str(&highlighted);
+                        MermaidMode::Text => {
+                            // Render as fenced code block (fallback format)
+                            output.push_str("<pre><code class=\"language-mermaid\">");
+                            output.push_str(&html_escape::encode_text(&code_buffer));
+                            output.push_str("</code></pre>\n");
+                        }
+                        MermaidMode::Off => unreachable!(),
                     }
-
-                    in_code_block = false;
+                } else {
+                    // Render code block with highlighting
+                    let highlighted = highlight_code_block(
+                        &code_buffer,
+                        &code_lang,
+                        &meta,
+                        &code_highlighter,
+                        &options,
+                    )?;
+                    output.push_str(&highlighted);
                 }
+
+                in_code_block = false;
             }
             InlineEvent::Standard(Event::Text(text)) if in_code_block => {
                 code_buffer.push_str(&text);

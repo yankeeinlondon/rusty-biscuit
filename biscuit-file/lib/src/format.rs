@@ -94,10 +94,7 @@ impl DataFormat {
     /// ```
     #[must_use]
     pub fn requires_utf8(&self) -> bool {
-        matches!(
-            self,
-            Self::Toml | Self::Json5 | Self::Markdown | Self::Text
-        )
+        matches!(self, Self::Toml | Self::Json5 | Self::Markdown | Self::Text)
     }
 
     /// Returns `true` if this format represents structured data.

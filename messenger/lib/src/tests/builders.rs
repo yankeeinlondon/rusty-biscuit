@@ -1,4 +1,6 @@
-use crate::{Attachment, AttachmentKind, Location, Message, MessageBody, PreparedMessage, ProviderKind};
+use crate::{
+    Attachment, AttachmentKind, Location, Message, MessageBody, PreparedMessage, ProviderKind,
+};
 
 #[test]
 fn text_message_builder() {

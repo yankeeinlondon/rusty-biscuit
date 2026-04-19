@@ -74,8 +74,7 @@ fn attach_mode_completer(cmd: &mut clap::Command, mode: ComposeMode) {
         return;
     };
 
-    let completer =
-        ArgValueCompleter::new(move |current: &OsStr| dispatch_complete(mode, current));
+    let completer = ArgValueCompleter::new(move |current: &OsStr| dispatch_complete(mode, current));
 
     let owned = std::mem::replace(sub, clap::Command::new("__placeholder__"));
     let rebuilt = owned.mut_arg("args", |arg| arg.add(completer));

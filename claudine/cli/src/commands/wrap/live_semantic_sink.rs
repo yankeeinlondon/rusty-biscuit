@@ -2366,7 +2366,7 @@ mod tests {
         });
         lines.lock().unwrap().clear();
         sink.on_semantic_event(SemanticEvent::Warning {
-            message: "Claude session usage limit approaching; next session window opens at 2024-04-01 19:33:20 UTC".into(),
+            message: "Claude rate limit warning: your 5-hour session window is approaching the cap. Window resets on 2024-04-01 at 19:33".into(),
             extra: json!({
                 "raw_kind": "rate_limit_event",
                 "rate_limit_status": "approaching_limit",
@@ -2374,10 +2374,13 @@ mod tests {
             }),
         });
         let rendered = lines.lock().unwrap().join("\n");
-        let unwrapped = rendered.replace("\n  ", "");
         assert!(
-            unwrapped.contains("next session window opens at 2024-04-01 19:33:20 UTC"),
+            rendered.contains("Window resets on"),
             "explicit Claude rate-limit metadata must render for subscriptions: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("approaching the cap"),
+            "explicit Claude rate-limit metadata must include user-friendly wording: {rendered:?}"
         );
     }
 
@@ -3172,11 +3175,8 @@ mod tests {
             let raw = std::fs::read_to_string(&path).expect("read opencode fixture");
             let fixture_lines: Vec<&str> = raw.lines().collect();
 
-            let combined = replay_to_combined(
-                Provider::OpenCode,
-                &fixture_lines,
-                Some("gpt-4o".into()),
-            );
+            let combined =
+                replay_to_combined(Provider::OpenCode, &fixture_lines, Some("gpt-4o".into()));
 
             let stderr_only: Vec<String> = combined
                 .iter()
@@ -3217,9 +3217,7 @@ mod tests {
                 !bash_incoming_lines.is_empty(),
                 "spec §3: fixture should produce at least one ← Bash line:\n{stderr_joined}"
             );
-            let bash_with_summary = bash_incoming_lines
-                .iter()
-                .any(|l| l.contains("bash "));
+            let bash_with_summary = bash_incoming_lines.iter().any(|l| l.contains("bash "));
             assert!(
                 bash_with_summary,
                 "spec §3: at least one ← Bash result must carry a `bash <command>` summary slot. Got:\n{}",

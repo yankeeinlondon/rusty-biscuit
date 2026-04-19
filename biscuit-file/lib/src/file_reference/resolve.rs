@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, trace};
 use walkdir::WalkDir;
 
-use crate::file_reference::context::{ResolutionContext, find_git_root, find_package_area};
+use crate::file_reference::context::{ResolutionContext, find_git_root, find_package_area, home_dir};
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::{
-    MagicPathList, ParsedReference, PathTemplate, ReferenceKind, TemplateSegment,
+    CompletionEntryForm, MagicPathList, ParsedReference, PartialCompletion, PathTemplate,
+    ReferenceKind, TemplateSegment, make_partial_completion,
 };
 
 /// Resolve a parsed reference against runtime context.
@@ -71,7 +72,11 @@ fn resolve_recursive(
         None
     };
 
-    debug!(root_count = roots.len(), ?needle, "starting recursive search");
+    debug!(
+        root_count = roots.len(),
+        ?needle,
+        "starting recursive search"
+    );
 
     let mut matches: Vec<PathBuf> = Vec::new();
 
@@ -292,6 +297,149 @@ pub(crate) fn diff_paths(target: &Path, base: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Expand a partial completion token into its implied roots and segments.
+///
+/// See [`FileReference::complete_partial`] for the public contract.
+pub(crate) fn complete_partial(
+    token: &str,
+    base: &Path,
+) -> Result<Option<PartialCompletion>, FileReferenceError> {
+    let Some((form, path_part)) = classify_token(token) else {
+        return Ok(None);
+    };
+
+    let (scope, active) = split_scope_and_active(path_part);
+
+    let base_abs = if base.is_absolute() {
+        base.to_path_buf()
+    } else {
+        let ambient = std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
+        ambient.join(base)
+    };
+
+    let roots = match form {
+        CompletionEntryForm::Magic => magic_completion_roots(scope, &base_abs)?,
+        CompletionEntryForm::ImplicitRelative => implicit_relative_completion_roots(scope, &base_abs)?,
+    };
+
+    let rendered_prefix = match form {
+        CompletionEntryForm::Magic => format!("@{scope}"),
+        CompletionEntryForm::ImplicitRelative => scope.to_string(),
+    };
+
+    Ok(Some(make_partial_completion(
+        form,
+        roots,
+        active.to_string(),
+        rendered_prefix,
+    )))
+}
+
+/// Classify a raw token into an entry form plus the path portion following
+/// the sigil (if any).
+///
+/// Returns `None` for any form the supplement does not support.
+fn classify_token(token: &str) -> Option<(CompletionEntryForm, &str)> {
+    // Recursive (`%`) wraps another form; completion support would need to
+    // deal with it explicitly, so opt out.
+    if token.starts_with('%') {
+        return None;
+    }
+    // Vault, package, absolute, explicit-relative, and interpolation forms
+    // are all deliberately out of scope.
+    if token.starts_with("vault:") {
+        return None;
+    }
+    if token.starts_with('!') {
+        return None;
+    }
+    if token.starts_with('/') {
+        return None;
+    }
+    if token.starts_with("./")
+        || token.starts_with("../")
+        || token == "."
+        || token == ".."
+    {
+        return None;
+    }
+    if token.starts_with("{{") {
+        return None;
+    }
+
+    if let Some(rest) = token.strip_prefix('@') {
+        Some((CompletionEntryForm::Magic, rest))
+    } else {
+        Some((CompletionEntryForm::ImplicitRelative, token))
+    }
+}
+
+/// Split a path portion into a (scope, active_segment) pair at the last
+/// `/`.
+///
+/// The scope includes the trailing `/` so callers can concatenate it onto
+/// other strings without special-casing an empty path.
+fn split_scope_and_active(path: &str) -> (&str, &str) {
+    match path.rfind('/') {
+        Some(idx) => (&path[..=idx], &path[idx + 1..]),
+        None => ("", path),
+    }
+}
+
+/// Compute the absolute roots implied by a `@`-prefixed token at the given
+/// scope.
+fn magic_completion_roots(
+    scope: &str,
+    base: &Path,
+) -> Result<Vec<PathBuf>, FileReferenceError> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    if let Some(git_root) = find_git_root(base)? {
+        roots.push(append_scope(&git_root, scope));
+    }
+    if let Some(home) = home_dir() {
+        let rooted = append_scope(&home, scope);
+        if !roots.iter().any(|r| r == &rooted) {
+            roots.push(rooted);
+        }
+    }
+
+    Ok(roots)
+}
+
+/// Compute the absolute roots implied by an implicit-relative token at the
+/// given scope.
+fn implicit_relative_completion_roots(
+    scope: &str,
+    base: &Path,
+) -> Result<Vec<PathBuf>, FileReferenceError> {
+    let mut roots: Vec<PathBuf> = vec![append_scope(base, scope)];
+
+    if let Some(git_root) = find_git_root(base)?
+        && git_root.as_path() != base
+    {
+        let rooted = append_scope(&git_root, scope);
+        if !roots.iter().any(|r| r == &rooted) {
+            roots.push(rooted);
+        }
+    }
+
+    Ok(roots)
+}
+
+/// Append a scope string to a root directory.
+///
+/// Strips the trailing `/` before joining so the result is a normal
+/// directory path rather than one with an empty final component.
+fn append_scope(root: &Path, scope: &str) -> PathBuf {
+    let trimmed = scope.trim_end_matches('/');
+    if trimmed.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(trimmed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +555,129 @@ mod tests {
         let roots = collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx).unwrap();
         // /tmp has no git repo, so only CWD is returned.
         assert_eq!(roots, vec![PathBuf::from("/tmp")]);
+    }
+
+    #[test]
+    fn classify_token_magic_empty_tail() {
+        let (form, tail) = classify_token("@").unwrap();
+        assert_eq!(form, CompletionEntryForm::Magic);
+        assert_eq!(tail, "");
+    }
+
+    #[test]
+    fn classify_token_magic_with_partial_name() {
+        let (form, tail) = classify_token("@pr").unwrap();
+        assert_eq!(form, CompletionEntryForm::Magic);
+        assert_eq!(tail, "pr");
+    }
+
+    #[test]
+    fn classify_token_magic_with_scope_and_partial() {
+        let (form, tail) = classify_token("@prompts/p").unwrap();
+        assert_eq!(form, CompletionEntryForm::Magic);
+        assert_eq!(tail, "prompts/p");
+    }
+
+    #[test]
+    fn classify_token_empty_string_is_implicit_relative() {
+        let (form, tail) = classify_token("").unwrap();
+        assert_eq!(form, CompletionEntryForm::ImplicitRelative);
+        assert_eq!(tail, "");
+    }
+
+    #[test]
+    fn classify_token_bare_subdir_is_implicit_relative() {
+        let (form, tail) = classify_token("prompts/p").unwrap();
+        assert_eq!(form, CompletionEntryForm::ImplicitRelative);
+        assert_eq!(tail, "prompts/p");
+    }
+
+    #[test]
+    fn classify_token_rejects_recursive() {
+        assert!(classify_token("%foo").is_none());
+        assert!(classify_token("%@foo").is_none());
+    }
+
+    #[test]
+    fn classify_token_rejects_unsupported_forms() {
+        assert!(classify_token("!foo").is_none());
+        assert!(classify_token("/abs/path").is_none());
+        assert!(classify_token("./rel").is_none());
+        assert!(classify_token("../rel").is_none());
+        assert!(classify_token(".").is_none());
+        assert!(classify_token("..").is_none());
+        assert!(classify_token("vault:notes").is_none());
+        assert!(classify_token("{{DIR}}/x").is_none());
+    }
+
+    #[test]
+    fn split_scope_and_active_no_separator() {
+        assert_eq!(split_scope_and_active(""), ("", ""));
+        assert_eq!(split_scope_and_active("pro"), ("", "pro"));
+    }
+
+    #[test]
+    fn split_scope_and_active_with_separator() {
+        assert_eq!(split_scope_and_active("prompts/"), ("prompts/", ""));
+        assert_eq!(split_scope_and_active("prompts/ab"), ("prompts/", "ab"));
+        assert_eq!(
+            split_scope_and_active("a/b/c"),
+            ("a/b/", "c"),
+            "last slash is the split point"
+        );
+    }
+
+    #[test]
+    fn append_scope_trims_trailing_slash() {
+        assert_eq!(
+            append_scope(Path::new("/root"), "prompts/"),
+            PathBuf::from("/root/prompts")
+        );
+        assert_eq!(
+            append_scope(Path::new("/root"), ""),
+            PathBuf::from("/root")
+        );
+        assert_eq!(
+            append_scope(Path::new("/root"), "/"),
+            PathBuf::from("/root"),
+            "a lone slash reduces to the root itself"
+        );
+    }
+
+    #[test]
+    fn complete_partial_rejects_unsupported_forms() {
+        let result = complete_partial("!foo", Path::new("/tmp")).unwrap();
+        assert!(result.is_none());
+        let result = complete_partial("vault:x", Path::new("/tmp")).unwrap();
+        assert!(result.is_none());
+        let result = complete_partial("./x", Path::new("/tmp")).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn complete_partial_magic_bare_sigil_outside_repo() {
+        // /tmp is not inside a git repo on most systems.
+        let base = Path::new("/tmp");
+        let result = complete_partial("@", base).unwrap().expect("supported");
+        assert_eq!(result.entry_form(), CompletionEntryForm::Magic);
+        assert_eq!(result.active_segment(), "");
+        assert_eq!(result.rendered_prefix(), "@");
+        // Roots include at most HOME; no git root.
+        assert!(
+            result.roots().len() <= 1,
+            "no git root expected under /tmp, got {:?}",
+            result.roots()
+        );
+    }
+
+    #[test]
+    fn complete_partial_implicit_relative_outside_repo() {
+        let base = Path::new("/tmp");
+        let result = complete_partial("prompts/p", base).unwrap().expect("supported");
+        assert_eq!(result.entry_form(), CompletionEntryForm::ImplicitRelative);
+        assert_eq!(result.active_segment(), "p");
+        assert_eq!(result.rendered_prefix(), "prompts/");
+        // No git root under /tmp, so only the base-derived root is present.
+        assert_eq!(result.roots(), &[PathBuf::from("/tmp/prompts")]);
     }
 }

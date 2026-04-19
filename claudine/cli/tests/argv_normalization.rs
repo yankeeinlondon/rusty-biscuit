@@ -201,6 +201,89 @@ fn headline_compose_with_plain_setter_behaves_as_before() {
     );
 }
 
+/// Mixed-order regression from `just clarify`: provider flag before the
+/// setter, then more boolean flags after the setter. The command should
+/// still parse all flags and succeed under `--dry-run`.
+#[test]
+fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
+    let workspace = tempdir().unwrap();
+    let fixture = write_fixture(workspace.path(), "clarify.md");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args([
+            "compose",
+            fixture.to_str().unwrap(),
+            "--gemini",
+            "doc=@pkg/feature/spec.md",
+            "-y",
+            "-i",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let combined = format!("{stderr}{stdout}");
+
+    assert!(
+        combined.contains("AGENT=gemini"),
+        "expected provider selection to survive mixed ordering; got: {combined}"
+    );
+    assert!(
+        combined.contains("YOLO=true"),
+        "expected trailing `-y` to remain a Claudine flag; got: {combined}"
+    );
+    assert!(
+        combined.contains("INTERACTIVE=true"),
+        "expected trailing `-i` to remain a Claudine flag; got: {combined}"
+    );
+}
+
+/// Setter-first form should also work: later flags must be hoisted ahead of
+/// the setter rather than disappearing into the positional bucket.
+#[test]
+fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
+    let workspace = tempdir().unwrap();
+    let fixture = write_fixture(workspace.path(), "setter-first.md");
+
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args([
+            "compose",
+            fixture.to_str().unwrap(),
+            "doc=@pkg/feature/spec.md",
+            "--gemini",
+            "-y",
+            "-i",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let combined = format!("{stderr}{stdout}");
+
+    assert!(
+        combined.contains("AGENT=gemini"),
+        "expected provider selection to survive setter-first ordering; got: {combined}"
+    );
+    assert!(
+        combined.contains("YOLO=true"),
+        "expected `-y` after a setter to remain a Claudine flag; got: {combined}"
+    );
+    assert!(
+        combined.contains("INTERACTIVE=true"),
+        "expected `-i` after a setter to remain a Claudine flag; got: {combined}"
+    );
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Pass-through regression cases (spec: "Pass-through guarantees")
 // ──────────────────────────────────────────────────────────────────────

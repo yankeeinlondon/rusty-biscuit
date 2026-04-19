@@ -43,12 +43,12 @@ pub fn capture_pre_run_snapshot(plan: &HarnessPlan) -> Result<PreRunSnapshot, Ha
 
     for rule in &plan.post_checks {
         match &rule.kind {
-            ValidationKind::FileChanged { file } | ValidationKind::FileUnchanged { file } => {
-                if !snapshot.tracked_files.contains_key(file) {
-                    snapshot
-                        .tracked_files
-                        .insert(file.clone(), fingerprint_file(file));
-                }
+            ValidationKind::FileChanged { file } | ValidationKind::FileUnchanged { file }
+                if !snapshot.tracked_files.contains_key(file) =>
+            {
+                snapshot
+                    .tracked_files
+                    .insert(file.clone(), fingerprint_file(file));
             }
             ValidationKind::FrontmatterPropChanged { prop }
             | ValidationKind::FrontmatterPropUnchanged { prop } => {
@@ -1456,6 +1456,7 @@ mod tests {
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
             timeout: None,
+            step_timeout: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,
@@ -1482,6 +1483,7 @@ mod tests {
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
             timeout: None,
+            step_timeout: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,

@@ -1,4 +1,4 @@
-# TODAY := `date +%F`
+Today := `date +%F`
 set allow-duplicate-variables
 set allow-duplicate-recipes
 
@@ -124,7 +124,7 @@ implement-plan filter="":
     while true; do
         claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y
         echo
-        git add .
+        git add . || exit 0
         just commit
         echo
         [[ ${current} -ge ${phases} ]] && break
@@ -168,12 +168,14 @@ review iteration="1":
     fi
     feature="$(basename "${dir}")"
     feature="$(just _title_case ${feature#????-??-??-})"
-    agent="$(just _choose_agent)"
 
-    echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
     [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
     [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
+
+    agent="$(just _choose_agent)"
+
+    echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
 
     claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" iteration={{iteration}}
@@ -427,6 +429,36 @@ feature feat:
         rm -f "${file}"
         echo -e "the feature had no content so was removed"
     fi
+
+
+
+# adds a new fix topic to the package area
+fix name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    descriptive="$(just _title_case "{{name}}")"
+    dir="{{Today}}-$(just _dasherize "{{name}}")"
+    relative_dir="fixes/${dir}"
+    mkdir -p "${relative_dir}"
+    spec="${relative_dir}/spec.md"
+    link="$(just _link "${spec}" "$(just _abs_path "${relative_dir}")" )"
+    if md edit "${spec}"; then
+        echo -e "Fix spec file created at {{blue}}${link}{{reset}}!"
+        echo
+        agent="$(just _choose_agent)"
+        claudine compose @prompts/fix.md dir="${relative_dir}" spec="spec.md" -y --${agent} && (
+            mv -r "${relative_dir}" "fixes/_completed/${dir}"
+            link="$(just _link "spec.md" "$(just _abs_path "fixes/_completed/${dir}/spec.md")" )"
+            echo
+            echo -e "The {{bold}}${descriptive}"
+        )
+
+    else
+        # rm -rf "${relative_dir}"
+        echo -e "No content was added to the spec file for {{bold}}$(just _title_case "${name}"){{reset}}!"
+    fi
+
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

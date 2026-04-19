@@ -614,13 +614,9 @@ fn set_permission_pattern(root: &mut Value, path: &[&str], pattern: &str, effect
     if !target.is_object() {
         *target = Value::Object(Map::new());
     }
-    debug_assert!(
-        target.is_object(),
-        "set_permission_pattern: type mismatch after set — expected object, got {:?}",
-        target
-    );
-    // SAFETY: the value is guaranteed to be an Object because we just set it above
-    unsafe { target.as_object_mut().unwrap_unchecked() }
+    target
+        .as_object_mut()
+        .expect("set_permission_pattern: target was just set to Object above")
         .insert(pattern.to_owned(), Value::String(effect.to_owned()));
 }
 

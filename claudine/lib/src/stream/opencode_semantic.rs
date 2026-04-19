@@ -30,7 +30,8 @@ use serde_json::{Map, Value};
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::opencode::{
     OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeReasoning, OpenCodeStepComplete,
-    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeText, OpenCodeTool,
+    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeTaskEvent, OpenCodeTaskProgress, OpenCodeText,
+    OpenCodeTool,
 };
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
@@ -216,6 +217,39 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         }
         self.sink.on_semantic_event(SemanticEvent::Reasoning {
             text,
+            extra: Value::Object(self.base_extra(raw_kind)),
+        });
+    }
+
+    fn handle_task_started(&mut self, event: OpenCodeTaskEvent, raw_kind: &str) {
+        let mut extra = self.base_extra(raw_kind);
+        if let Some(status) = &event.status {
+            extra.insert("status".into(), Value::from(status.as_str()));
+        }
+        self.sink.on_semantic_event(SemanticEvent::SubagentStart {
+            name: event.resolved_name(),
+            id: event.resolved_task_id(),
+            extra: Value::Object(extra),
+        });
+    }
+
+    fn handle_task_completed(&mut self, event: OpenCodeTaskEvent, raw_kind: &str) {
+        let mut extra = self.base_extra(raw_kind);
+        if let Some(status) = &event.status {
+            extra.insert("status".into(), Value::from(status.as_str()));
+        }
+        self.sink.on_semantic_event(SemanticEvent::SubagentStop {
+            name: event.resolved_name(),
+            id: event.resolved_task_id(),
+            status: event.status,
+            extra: Value::Object(extra),
+        });
+    }
+
+    fn handle_task_progress(&mut self, event: OpenCodeTaskProgress, raw_kind: &str) {
+        let message = event.message.unwrap_or_else(|| raw_kind.to_string());
+        self.sink.on_semantic_event(SemanticEvent::Info {
+            message,
             extra: Value::Object(self.base_extra(raw_kind)),
         });
     }
@@ -412,6 +446,15 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
             }
             Ok(OpenCodeEvent::Reasoning(reasoning)) => {
                 self.handle_reasoning(reasoning, &raw_kind);
+            }
+            Ok(OpenCodeEvent::TaskStarted(task)) => {
+                self.handle_task_started(task, &raw_kind);
+            }
+            Ok(OpenCodeEvent::TaskCompleted(task)) => {
+                self.handle_task_completed(task, &raw_kind);
+            }
+            Ok(OpenCodeEvent::TaskProgress(progress)) => {
+                self.handle_task_progress(progress, &raw_kind);
             }
             Ok(OpenCodeEvent::StepFinish(sf)) => {
                 self.handle_step_finish(sf, &raw_kind);
@@ -962,5 +1005,55 @@ mod tests {
             .unwrap();
         let summary = Box::new(parser).finish(0);
         assert_eq!(summary.tool_calls, Some(2), "both completions must count");
+    }
+
+    #[test]
+    fn task_started_becomes_subagent_start() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::SubagentStart { id, name, .. } => {
+                assert_eq!(id.as_deref(), Some("sa1"));
+                assert_eq!(name.as_deref(), Some("researcher"));
+            }
+            other => panic!("expected SubagentStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_completed_becomes_subagent_stop() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::SubagentStop {
+                id, name, status, ..
+            } => {
+                assert_eq!(id.as_deref(), Some("sa1"));
+                assert_eq!(name.as_deref(), Some("researcher"));
+                assert_eq!(status.as_deref(), Some("success"));
+            }
+            other => panic!("expected SubagentStop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_progress_becomes_info() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"task_progress","message":"working"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::Info { message, .. } => assert_eq!(message, "working"),
+            other => panic!("expected Info, got {other:?}"),
+        }
     }
 }

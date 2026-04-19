@@ -12,8 +12,15 @@ use crate::harness::error::HarnessError;
 pub struct HarnessPlan {
     /// Absolute path to the source document.
     pub source_path: PathBuf,
-    /// Per-page timeout, if specified.
+    /// Per-page wall-clock timeout, if specified.
     pub timeout: Option<std::time::Duration>,
+    /// Per-page step-silence timeout, if specified.
+    ///
+    /// Resets on every stream event; when silence exceeds this budget the
+    /// child is killed. Streaming-only: ignored in capture and passthrough
+    /// modes. Parse-time validation requires `step_timeout <= timeout` when
+    /// both are present.
+    pub step_timeout: Option<std::time::Duration>,
     /// Validations that must pass before launching the provider.
     pub pre_checks: Vec<ValidationRule>,
     /// Validations that must pass after the provider completes.
@@ -288,6 +295,10 @@ pub enum HandlerAction {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FailureEvent {
     AgentFailure,
+    /// Timed-out termination.
+    ///
+    /// Both wall-clock `timeout` and silence `step_timeout` produce this
+    /// variant so handler authors write a single `handle_timeout` block.
     Timeout,
     Validation(ValidationEvent),
     ShellAuditDenied,

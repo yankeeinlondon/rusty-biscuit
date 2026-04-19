@@ -188,12 +188,10 @@ impl<'a> ExpressionFinder<'a> {
                     in_code_block = true;
                     code_block_start = range.start;
                 }
-                Event::End(TagEnd::CodeBlock) => {
-                    // End of code block
-                    if in_code_block {
-                        regions.push((code_block_start, range.end));
-                        in_code_block = false;
-                    }
+                // End of code block
+                Event::End(TagEnd::CodeBlock) if in_code_block => {
+                    regions.push((code_block_start, range.end));
+                    in_code_block = false;
                 }
                 _ => {}
             }

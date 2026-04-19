@@ -454,7 +454,7 @@ pub fn apply_replacements_in_reverse(
     content: &mut String,
     mut replacements: Vec<(std::ops::Range<usize>, String)>,
 ) {
-    replacements.sort_by(|a, b| b.0.start.cmp(&a.0.start));
+    replacements.sort_by_key(|b| std::cmp::Reverse(b.0.start));
     for (span, replacement) in replacements {
         content.replace_range(span, &replacement);
     }
