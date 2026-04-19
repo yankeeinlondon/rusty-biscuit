@@ -139,6 +139,10 @@ fix name:
         link="$(just _link "${spec}")"
         echo -e "Editing existing fix: {{blue}}${link}{{reset}}"
         if md edit "${spec}"; then
+            if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
+                echo "Ok. Bye."
+                exit 0
+            fi
             agent="$(just _choose_agent)"
             claudine compose @prompts/fix.md dir="${abs_dir}" spec="spec.md" -y --${agent} && (
                 just complete "${complete_name}"
@@ -158,8 +162,12 @@ fix name:
     if md edit "${spec}"; then
         echo -e "Fix spec file created at {{blue}}${link}{{reset}}!"
         echo
+        if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
+            echo "Ok. Bye."
+            exit 0
+        fi
         agent="$(just _choose_agent)"
-        claudine compose @prompts/fix.md dir="${relative_dir}" spec="spec.md" -y --${agent} && (
+        claudine compose @prompts/fix.md dir="$(just _abs_path "${relative_dir}")" spec="spec.md" -y --${agent} && (
             just complete "${dasherized}"
             link="$(just _link "spec.md" "$(just _abs_path "fixes/_completed/${dir}/spec.md")" )"
             echo
