@@ -37,10 +37,13 @@ let receipt = messenger.send(dispatch, &message).await?;
 | Provider | Feature flag | Rich text | Replies | Attachments | Location | Silent | Link preview |
 |----------|-------------|-----------|---------|-------------|----------|--------|-------------|
 | Discord | `discord` (default) | Markdown | Yes | Yes | Text fallback | No | No |
+| Discord-Webhook | `discord` (default) | Markdown | No | Yes | Text fallback | No | No |
 | Slack | `slack` (default) | mrkdwn | Yes | No | Text fallback | No | Yes |
 | Signal | `signal` | Plain text | Yes | No | Text fallback | No | No |
 | WhatsApp | `whatsapp` | Plain text | Yes | No | Native | No | No |
 | Telegram | `telegram` | HTML | Yes | No | Native | Yes | Yes |
+
+Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 
 ## Key Types
 
@@ -76,7 +79,7 @@ Use `plan_send()` to inspect `SendPlan::warnings` before sending. Use `send_many
 messenger/
   lib/           # Reusable library crate
     src/
-      provider/  # Discord, Slack, Signal, WhatsApp, Telegram adapters
+      provider/  # Discord, Discord-Webhook, Slack, Signal, WhatsApp, Telegram adapters
       markdown/  # AST, parser, per-provider renderers
       tests/     # Unit + wiremock integration tests
   cli/           # messenger binary (send, setup, completions)

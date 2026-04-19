@@ -21,7 +21,7 @@ pub trait Provider: Send + Sync {
 }
 ```
 
-`ProviderKind` enum: `Discord`, `Slack`, `Signal`, `WhatsApp`, `Telegram`.
+`ProviderKind` enum: `Discord`, `DiscordWebhook`, `Slack`, `Signal`, `WhatsApp`, `Telegram`.
 
 ## Discord
 
@@ -39,6 +39,27 @@ pub struct DiscordConfig {
 **Attachment support**: Local paths or in-memory bytes only (no URLs or provider file IDs)
 **Target**: `Target::discord_channel("channel_id")`
 **MessageRef**: `MessageRef::Discord { channel_id, message_id }`
+
+## Discord-Webhook
+
+**Feature**: `discord` (default, same flag as the bot adapter)
+**HTTP crate**: `reqwest` (direct `multipart`/`json` POST, not `twilight-http`)
+**Module**: `provider/discord_webhook.rs`
+
+```rust
+pub struct DiscordWebhookConfig {
+    pub webhook_url: SecretString,
+}
+```
+
+**Capabilities**: markdown_rendering, attachments, location (text fallback) — **no reply**, no silent delivery, no link-preview control.
+**Attachment support**: Local paths or in-memory bytes only (no URLs or provider file IDs).
+**Target**: `Target::discord_webhook()` (no thread) or `Target::discord_webhook_thread("thread_id")`.
+**MessageRef**: `MessageRef::DiscordWebhook { webhook_id, channel_id, message_id, thread_id }`.
+
+**Reply enforcement**: `validate::normalize_dispatch` returns `MessengerError::UnsupportedFeature { provider: DiscordWebhook, feature: "replies" }` before any network call when `reply_to` is set — this hard-error fires in both strict and best-effort modes.
+
+**URL parsing**: The constructor parses `/webhooks/{id}/{token}` segments out of the full URL. `try_new` returns `MessengerError::InvalidMessage` for malformed input; `new` panics with the same message (mirrors `DiscordProvider::new`).
 
 ## Slack
 

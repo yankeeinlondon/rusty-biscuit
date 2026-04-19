@@ -17,8 +17,8 @@ messenger completions                # Print shell completion instructions
 | `--channel <id>` | Target channel/recipient |
 | `--route <name>` | Named route from config |
 | `--reply-to <path-or-json>` | Reply to a previous message |
-| `--image <path>` | Attach an image (Discord only) |
-| `--file <path>` | Attach a file (Discord only) |
+| `--image <path>` | Attach an image (Discord / Discord-Webhook only) |
+| `--file <path>` | Attach a file (Discord / Discord-Webhook only) |
 | `--silent` | Suppress notification sound (Telegram only) |
 | `--strict` | Error on unsupported features |
 | `--plain` | Force plain text (disable Markdown) |
@@ -26,7 +26,7 @@ messenger completions                # Print shell completion instructions
 
 ## Route Resolution Order
 
-1. `--provider` + `--channel` (ad-hoc)
+1. `--provider` + `--channel` (ad-hoc) — for `--provider discord-webhook`, pass the full webhook URL as `--channel`
 2. `--route` (named route from config)
 3. `default_route` from `~/.messenger.json`
 
@@ -49,7 +49,8 @@ messenger completions                # Print shell completion instructions
 
 ### Route Shapes by Provider
 
-**Discord / Slack**: `channel_id`, optional `bot_token` / `bot_token_env`
+**Discord (bot) / Slack**: `channel_id`, optional `bot_token` / `bot_token_env`
+**Discord (webhook)**: `provider: "discord-webhook"`, optional `webhook_url` / `webhook_url_env`
 **Signal**: `recipient`, optional `rpc_url` / `rpc_url_env`, optional `account` / `account_env`
 **WhatsApp**: `recipient`, optional `access_token` / `access_token_env`, optional `phone_number_id` / `phone_number_id_env`
 **Telegram**: `chat_id`, optional `bot_token` / `bot_token_env`
@@ -61,6 +62,7 @@ When both an inline secret and env var name are present, the inline value wins.
 | Provider | Variable |
 |----------|----------|
 | Discord | `DISCORD_BOT_TOKEN` |
+| Discord-Webhook | `DISCORD_WEBHOOK_URL` |
 | Slack | `SLACK_BOT_TOKEN` |
 | Signal | `SIGNAL_RPC_URL`, `SIGNAL_ACCOUNT` |
 | WhatsApp | `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` |
