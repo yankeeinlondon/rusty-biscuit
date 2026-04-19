@@ -22,7 +22,8 @@ pub mod prelude;
 
 pub use components::{
     BooleanSwitch, BooleanSwitchState, ChoiceInput, ChoiceOption, ChooseMany, ChooseManyState,
-    ChooseOne, ChooseOneState, SelectionMode, TextInput, TextInputState,
+    ChooseOne, ChooseOneState, SelectionMode, TextAreaInput, TextAreaInputState, TextInput,
+    TextInputState,
 };
 pub use core::{
     CANCELLED_KIND, ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, LabelPosition,
