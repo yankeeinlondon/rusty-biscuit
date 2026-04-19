@@ -2,6 +2,22 @@
 phases: 5
 created: 2026-04-18
 start_phase: 1
+source_files_during_phase_1:
+  - claudine/lib/src/harness/model.rs
+  - claudine/lib/src/harness/timeout.rs
+  - claudine/lib/src/harness/parse.rs
+  - claudine/lib/src/harness/audit.rs
+  - claudine/lib/src/harness/validate.rs
+  - claudine/lib/src/composition/preflight.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/cli/src/commands/compose.rs
+  - claudine/cli/src/commands/wrap/sequence.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
+packages:
+  - claudine
+  - claudine-cli
 ---
 
 # Step Timeout — Execution Plan
