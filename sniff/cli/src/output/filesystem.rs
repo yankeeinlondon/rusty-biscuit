@@ -17,7 +17,7 @@ use sniff::filesystem::{
 };
 
 use super::{TextOutput, format_number, relative_path};
-use crate::args::FilesFilter;
+use crate::args::{FilesFilter, PackagesFormat};
 
 /// Parsed repo filter with support for negation (`!`) and area matching (`@`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1305,20 +1305,98 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
 /// Render package names as a comma-separated plain text list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_repo_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
-    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+/// Filter a package list by name/area filters and an optional package-area scope.
+fn select_repo_packages<'a>(
+    packages: &'a [Package],
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a Package> {
+    let mut filtered = filter_packages(packages, repo_filter);
+    if let Some(area) = package_area {
+        let needle = area.to_lowercase();
+        filtered.retain(|p| p.package_area.to_lowercase() == needle);
+    }
+    filtered
+}
 
-    match repo {
-        Some(repo) if repo.is_monorepo => {
-            if let Some(ref packages) = repo.packages {
-                let filtered = filter_packages(packages, repo_filter);
-                let names: Vec<&str> = filtered.iter().map(|p| p.name.as_str()).collect();
-                names.join(", ")
-            } else {
-                String::new()
-            }
-        }
-        _ => String::from("- the \"--packages\" switch is only intended to be used in a monorepo"),
+/// Collect package names matching the given filters and area scope.
+///
+/// Returns an empty vec when the repo is not a monorepo.
+pub fn collect_repo_package_names<'a>(
+    repo: &'a RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a str> {
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    select_repo_packages(packages, repo_filter, package_area)
+        .into_iter()
+        .map(|p| p.name.as_str())
+        .collect()
+}
+
+/// Render a styled package entry; with `verbose > 0` appends the dimmed/italic
+/// repo-relative root directory (e.g. `name(<dim><i>./relative</i></dim>)`).
+fn package_entry_markup(pkg: &Package, verbose: u8) -> String {
+    if verbose > 0 {
+        format!(
+            "{}(<dim><i>./{}</i></dim>)",
+            pkg.name,
+            pkg.relative.trim_start_matches("./")
+        )
+    } else {
+        pkg.name.clone()
+    }
+}
+
+/// Render the package list for `sniff repo packages` in the requested format.
+///
+/// Honors `--md` (Markdown unordered list), `--list` (one entry per line), and
+/// the default csv form. With `verbose > 0`, each entry is annotated with the
+/// dimmed package root directory.
+pub fn render_repo_packages_formatted(
+    repo: &RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+    format: PackagesFormat,
+    verbose: u8,
+) -> String {
+    if !repo.is_monorepo {
+        return String::from(
+            "- the \"packages\" subcommand is only intended to be used in a monorepo",
+        );
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return String::new();
+    };
+
+    let filtered = select_repo_packages(packages, repo_filter, package_area);
+    if filtered.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let entries: Vec<String> = filtered
+        .iter()
+        .map(|pkg| {
+            let markup = package_entry_markup(pkg, verbose);
+            Prose::new(markup).render(&term)
+        })
+        .collect();
+
+    match format {
+        PackagesFormat::Csv => entries.join(", "),
+        PackagesFormat::Markdown => entries
+            .iter()
+            .map(|e| format!("- {e}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        PackagesFormat::List => entries.join("\n"),
     }
 }
 
