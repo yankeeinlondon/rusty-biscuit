@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use chrono::Local;
 use serde_json::{Map, Value};
 
 use super::parser::{SemanticStreamParser, StreamParseError};
@@ -1002,6 +1003,15 @@ fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticEr
     SemanticErrorKind::AgentNative
 }
 
+fn format_reset_hint(reset_at: chrono::DateTime<chrono::Utc>) -> String {
+    let local = reset_at.with_timezone(&Local);
+    format!(
+        "The next session window opens at {} at {}",
+        local.format("%Y-%m-%d"),
+        local.format("%H:%M")
+    )
+}
+
 fn render_claude_rate_limit_message(event: &ClaudeRateLimit) -> Option<String> {
     if let Some(message) = event
         .resolved_message()
@@ -1013,27 +1023,27 @@ fn render_claude_rate_limit_message(event: &ClaudeRateLimit) -> Option<String> {
 
     let reset_hint = event
         .resolved_reset_at()
-        .map(|reset| {
-            format!(
-                "; next session window opens at {}",
-                reset.format("%Y-%m-%d %H:%M:%S UTC")
-            )
-        })
+        .map(format_reset_hint)
+        .map(|hint| format!(". {hint}"))
         .unwrap_or_default();
 
     if event.resolved_overage_status() == Some("blocked")
         || event.resolved_status() == Some("limited")
         || event.resolved_is_throttled() == Some(true)
     {
-        return Some(format!("Claude session usage limit reached{reset_hint}"));
+        return Some(format!(
+            "Claude rate limit: your session usage limit has been reached{reset_hint}"
+        ));
     }
 
     match event.resolved_status() {
         Some("approaching_limit") => Some(format!(
-            "Claude session usage limit approaching{reset_hint}"
+            "Claude rate limit warning: your current session window is almost fully utilized and you will be capped soon{reset_hint}"
         )),
         Some("allowed") | None => None,
-        Some(status) => Some(format!("Claude rate limit status: {status}{reset_hint}")),
+        Some(status) => Some(format!(
+            "Claude rate limit warning ({status}): your current session window is almost fully utilized and you will be capped soon{reset_hint}"
+        )),
     }
 }
 
@@ -1291,7 +1301,8 @@ mod tests {
         let events = sink.snapshot();
         match &events[0] {
             SemanticEvent::Warning { message, extra } => {
-                assert!(message.contains("approaching"));
+                assert!(message.contains("rate limit warning"));
+                assert!(message.contains("almost fully utilized"));
                 assert!(message.contains("next session window opens at"));
                 assert_eq!(
                     extra.get("rate_limit_status").and_then(Value::as_str),
@@ -1307,11 +1318,14 @@ mod tests {
         let summary = parser.finish(0);
         let rate_limit = summary.rate_limit.expect("rate limit summary");
         assert_eq!(rate_limit.is_throttled, Some(false));
-        assert_eq!(
-            rate_limit.message.as_deref(),
-            Some(
-                "Claude session usage limit approaching; next session window opens at 2024-04-01 19:33:20 UTC"
-            )
+        let msg = rate_limit.message.as_deref().expect("rate limit message");
+        assert!(
+            msg.starts_with("Claude rate limit warning: your current session window is almost fully utilized"),
+            "unexpected message: {msg}"
+        );
+        assert!(
+            msg.contains("next session window opens at"),
+            "unexpected message: {msg}"
         );
         assert_eq!(
             rate_limit.reset_at.map(|dt| dt.timestamp()),
