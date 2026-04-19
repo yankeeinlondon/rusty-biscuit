@@ -1673,10 +1673,10 @@ fn append_resume_passthrough_args(resume_args: &mut Vec<String>, base_args: &[St
     let mut index = 0;
     while index < base_args.len() {
         match base_args[index].as_str() {
-            "--json" | "--verbose" => {
-                if !resume_args.iter().any(|arg| arg == &base_args[index]) {
-                    resume_args.push(base_args[index].clone());
-                }
+            "--json" | "--verbose"
+                if !resume_args.iter().any(|arg| arg == &base_args[index]) =>
+            {
+                resume_args.push(base_args[index].clone());
             }
             "--output-format" | "--format" | "--output-last-message" => {
                 if index + 1 < base_args.len()

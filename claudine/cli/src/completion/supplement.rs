@@ -262,20 +262,6 @@ fn is_setter_shaped(token: &str) -> bool {
         .all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 
-/// Count the spec's "meaningful query characters" in a partial token.
-///
-/// - The leading `@` sigil is excluded from the count.
-/// - The count resets after every `/` path separator (only the portion after
-///   the last `/` contributes).
-pub(crate) fn meaningful_char_count(token: &str) -> usize {
-    let stripped = token.strip_prefix('@').unwrap_or(token);
-    let after_last_slash = match stripped.rfind('/') {
-        Some(idx) => &stripped[idx + 1..],
-        None => stripped,
-    };
-    after_last_slash.chars().count()
-}
-
 /// Top-level emission pipeline: parse the partial, compute roots, walk, match,
 /// dedup, render.
 pub(crate) fn emit_candidates(partial: &str, cwd: &Path) -> Vec<String> {
@@ -285,7 +271,6 @@ pub(crate) fn emit_candidates(partial: &str, cwd: &Path) -> Vec<String> {
 
     let form = completion.entry_form();
     let active = completion.active_segment();
-    let meaningful = meaningful_char_count(partial);
     let enclosing_repo = find_enclosing_repo(cwd);
     let home = dirs::home_dir();
 
@@ -294,13 +279,6 @@ pub(crate) fn emit_candidates(partial: &str, cwd: &Path) -> Vec<String> {
     let mut discovered: Vec<PathBuf> = Vec::new();
     for root in &roots {
         for path in collect_markdown_paths(root) {
-            discovered.push(path);
-        }
-    }
-    if meaningful >= 3
-        && let Some(repo_root) = enclosing_repo.as_deref()
-    {
-        for path in collect_markdown_paths(repo_root) {
             discovered.push(path);
         }
     }
@@ -341,23 +319,19 @@ pub(crate) fn emit_candidates(partial: &str, cwd: &Path) -> Vec<String> {
 /// Compute the curated scope roots that should be enumerated for this
 /// partial.
 ///
-/// Mutates `roots` to contain absolute directory paths. Each root is either:
+/// The engine searches exactly three curated scope bases, each joined with
+/// the curated subdirs (`prompts/`, `sequences/`) when the user has not
+/// committed to a subdirectory, or with the active scope when they have:
 ///
-/// - a curated subdir (`prompts/` or `sequences/`) under a scope base when
-///   the active scope is empty, or
-/// - the active scope directly joined onto each scope base when the user has
-///   already committed to a subdirectory via `/`.
+/// 1. **Repo root** — `<repo>/{prompts,sequences}/`
+/// 2. **Package-area root** — `<repo>/<area>/{prompts,sequences}/` (where
+///    `<area>` is the enclosing package area from `sniff`, excluding `root`)
+/// 3. **User scope** — `~/.claudine/{prompts,sequences}/`
 ///
-/// Scope bases depend on `form`:
-///
-/// - `Magic`: repo root, package root, package-area root, user home, and
-///   `~/.claudine/`.
-/// - `ImplicitRelative` with empty scope: same set as `Magic`. `Magic`-form
-///   candidates under user roots are only reachable via `@` prefix, but the
-///   render stage handles that by prepending `@` for files outside the
-///   git/cwd reach.
-/// - `ImplicitRelative` with non-empty scope: repo-scope only, matching the
-///   spec's criterion 5 contract that `prompts/<tab>` is repo-local.
+/// No per-package roots (those would be too narrow and noisy in monorepos),
+/// no raw `$HOME/` roots, and no broad repo scan. If the user has committed
+/// to a subdirectory via `/` in an `ImplicitRelative` form, only the repo
+/// scope is searched (matches the `prompts/<tab>` semantics — repo-local).
 fn curated_roots(
     completion: &PartialCompletion,
     cwd: &Path,
@@ -391,29 +365,24 @@ fn curated_roots(
 
     if let Some(repo_root) = enclosing_repo {
         push_scope(&mut roots, repo_root);
-        if let Ok(Some(info)) = detect_repo_structure(repo_root) {
-            if let Some(pkg) = info.package_for_dir(cwd) {
-                push_scope(&mut roots, &pkg.path);
-            }
-            if let Some(area) = info.package_area_for_dir(cwd)
-                && area != "root"
-            {
-                let area_root = repo_root.join(area);
-                push_scope(&mut roots, &area_root);
-            }
+        if let Ok(Some(info)) = detect_repo_structure(repo_root)
+            && let Some(area) = info.package_area_for_dir(cwd)
+            && area != "root"
+        {
+            let area_root = repo_root.join(area);
+            push_scope(&mut roots, &area_root);
         }
     }
 
     if include_user_scope
         && let Some(home_dir) = home
     {
-        push_scope(&mut roots, home_dir);
         let claudine = home_dir.join(".claudine");
         push_scope(&mut roots, &claudine);
     }
 
-    // Deduplicate — package-root and area-root can coincide on single-crate
-    // areas like `tabby` / `tui`.
+    // Deduplicate — repo-scope and area-scope can coincide when cwd is at
+    // the repo root (area == repo).
     let mut seen: HashSet<PathBuf> = HashSet::new();
     roots.retain(|r| seen.insert(r.clone()));
     roots
@@ -503,25 +472,6 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, content).unwrap();
-    }
-
-    // -- meaningful_char_count -------------------------------------------
-
-    #[test]
-    fn meaningful_chars_excludes_at_sigil() {
-        assert_eq!(meaningful_char_count(""), 0);
-        assert_eq!(meaningful_char_count("@"), 0);
-        assert_eq!(meaningful_char_count("@p"), 1);
-        assert_eq!(meaningful_char_count("@pr"), 2);
-        assert_eq!(meaningful_char_count("@pro"), 3);
-    }
-
-    #[test]
-    fn meaningful_chars_resets_after_slash() {
-        assert_eq!(meaningful_char_count("@prompts/"), 0);
-        assert_eq!(meaningful_char_count("@prompts/a"), 1);
-        assert_eq!(meaningful_char_count("prompts/"), 0);
-        assert_eq!(meaningful_char_count("prompts/abc"), 3);
     }
 
     // -- classifier ------------------------------------------------------
@@ -665,23 +615,20 @@ mod tests {
     }
 
     #[test]
-    fn magic_three_char_extends_to_broad_scan() {
+    fn non_curated_locations_are_never_searched() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join(".git")).unwrap();
-        // Non-curated location; broad scan should pick this up at 3 chars.
+        // Non-curated location — must NEVER surface regardless of typed
+        // length. The engine only walks prompts/ and sequences/.
         write_file(&tmp.path().join("random").join("process.md"), "# p");
 
-        let two_chars = emit_candidates("@pr", tmp.path());
-        assert!(
-            !two_chars.iter().any(|c| c == "@random/process.md"),
-            "2-char broad scan must not fire: {two_chars:?}"
-        );
-
-        let three_chars = emit_candidates("@pro", tmp.path());
-        assert!(
-            three_chars.iter().any(|c| c == "@random/process.md"),
-            "3-char broad scan must include non-curated match: {three_chars:?}"
-        );
+        for partial in &["@pr", "@pro", "@process", "process"] {
+            let got = emit_candidates(partial, tmp.path());
+            assert!(
+                !got.iter().any(|c| c.contains("random/process.md")),
+                "non-curated path must not surface for {partial:?}: {got:?}"
+            );
+        }
     }
 
     #[test]
@@ -732,39 +679,47 @@ mod tests {
     }
 
     #[test]
-    fn gitignored_files_excluded_from_broad_scan() {
+    fn gitignored_files_excluded_from_curated_scan() {
         let tmp = TempDir::new().unwrap();
         // `ignore::WalkBuilder` (the crate backing
         // `sniff::collect_markdown_paths`) uses the presence of a `.git`
         // directory to locate gitignore files. An empty stub suffices.
         fs::create_dir_all(tmp.path().join(".git")).unwrap();
-        write_file(&tmp.path().join(".gitignore"), "target/\n");
-        write_file(&tmp.path().join("target").join("processed.md"), "# p");
-        write_file(&tmp.path().join("processed.md"), "# p");
+        write_file(&tmp.path().join(".gitignore"), "prompts/ignored/\n");
+        write_file(
+            &tmp.path().join("prompts").join("ignored").join("secret.md"),
+            "# s",
+        );
+        write_file(&tmp.path().join("prompts").join("kept.md"), "# k");
 
-        let got = emit_candidates("@pro", tmp.path());
-        // Top-level file is NOT under a curated dir, so the broad scan
-        // surfaces it; the gitignored one must be excluded.
+        let got = emit_candidates("@", tmp.path());
         assert!(
-            got.iter().any(|c| c == "@processed.md"),
-            "broad scan should include top-level match: {got:?}"
+            got.iter().any(|c| c == "@prompts/kept.md"),
+            "non-ignored curated match must surface: {got:?}"
         );
         assert!(
-            !got.iter().any(|c| c == "@target/processed.md"),
+            !got.iter().any(|c| c.contains("ignored/secret.md")),
             "gitignored match must be excluded: {got:?}"
         );
     }
 
     #[test]
-    fn no_repo_fallback_skips_broad_scan() {
+    fn no_repo_fallback_skips_repo_scope() {
         let tmp = TempDir::new().unwrap();
         // No .git directory — cwd is not inside a repo.
         write_file(&tmp.path().join("other").join("process.md"), "# p");
+        write_file(&tmp.path().join("prompts").join("process.md"), "# p");
         let got = emit_candidates("@pro", tmp.path());
-        // Broad scan must not activate, so the non-curated file is absent.
+        // Without a repo root, neither the non-curated file nor the
+        // cwd-local prompts/ dir should surface — repo scope only applies
+        // when cwd is inside a git repository.
         assert!(
             !got.iter().any(|c| c.contains("other/process.md")),
-            "no-repo fallback must skip broad scan: {got:?}"
+            "no-repo fallback must not walk arbitrary dirs: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("prompts/process.md")),
+            "no-repo fallback must not walk the cwd prompts/ dir: {got:?}"
         );
     }
 

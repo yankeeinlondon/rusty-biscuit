@@ -228,19 +228,17 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 app.modal = Some(ModalState::UserProviderSelector { highlighted });
             }
         }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            if app.is_in_repo {
-                let providers = super::super::get_provider_list();
-                let current = app
-                    .repo_config
-                    .as_ref()
-                    .and_then(|rc| rc.canonical_provider);
-                let highlighted = current
-                    .and_then(|cp| providers.iter().position(|p| *p == cp))
-                    .map(|i| i + 1) // +1 for "(clear)" at index 0
-                    .unwrap_or(0);
-                app.modal = Some(ModalState::RepoProviderSelector { highlighted });
-            }
+        KeyCode::Char('r') | KeyCode::Char('R') if app.is_in_repo => {
+            let providers = super::super::get_provider_list();
+            let current = app
+                .repo_config
+                .as_ref()
+                .and_then(|rc| rc.canonical_provider);
+            let highlighted = current
+                .and_then(|cp| providers.iter().position(|p| *p == cp))
+                .map(|i| i + 1) // +1 for "(clear)" at index 0
+                .unwrap_or(0);
+            app.modal = Some(ModalState::RepoProviderSelector { highlighted });
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
             let current = app.config.default_sounds.success.as_deref();

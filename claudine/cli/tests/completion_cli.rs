@@ -238,28 +238,22 @@ fn two_char_curated_match_finds_multiple_files_by_substring() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn three_char_input_extends_to_broad_repo_scan() {
-    let workspace = TestWorkspace::named("supp-three-char");
+fn non_curated_paths_never_surface_regardless_of_typed_length() {
+    let workspace = TestWorkspace::named("supp-no-broad-scan");
     let root = workspace.path();
     seed_curated_fixtures(root);
-    // Put a matching markdown file OUTSIDE the curated directories so
-    // only the broad scan can reach it.
-    fs::write(root.join("random").join("process.md"), "# process\n").unwrap_or_else(|_| {
-        fs::create_dir_all(root.join("random")).unwrap();
-        fs::write(root.join("random").join("process.md"), "# process\n").unwrap();
-    });
+    // Put a matching markdown file OUTSIDE the curated directories; it
+    // must never surface — the engine only walks prompts/ and sequences/.
+    fs::create_dir_all(root.join("random")).unwrap();
+    fs::write(root.join("random").join("process.md"), "# process\n").unwrap();
 
-    let two_chars = run_complete_trailing(root, &["compose", "@pr"]);
-    assert!(
-        !two_chars.iter().any(|c| c == "@random/process.md"),
-        "2-char broad scan must NOT fire: {two_chars:?}"
-    );
-
-    let three_chars = run_complete_trailing(root, &["compose", "@pro"]);
-    assert!(
-        three_chars.iter().any(|c| c == "@random/process.md"),
-        "3-char broad scan should include non-curated match: {three_chars:?}"
-    );
+    for partial in ["@pr", "@pro", "@process", "process"] {
+        let got = run_complete_trailing(root, &["compose", partial]);
+        assert!(
+            !got.iter().any(|c| c.contains("random/process.md")),
+            "non-curated path leaked for {partial:?}: {got:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -408,26 +402,28 @@ fn non_markdown_files_never_surface() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn gitignored_files_excluded_from_broad_scan() {
+fn gitignored_files_excluded_from_curated_scan() {
     let workspace = TestWorkspace::named("supp-gitignore");
     let root = workspace.path();
     fs::create_dir_all(root.join(".git")).unwrap();
-    fs::write(root.join(".gitignore"), "target/\n").unwrap();
-    fs::create_dir_all(root.join("target")).unwrap();
-    fs::write(root.join("target").join("processed.md"), "# p\n").unwrap();
-    // Put a SURFACE match so the broad scan actually fires and has a
-    // candidate to compare against.
-    fs::write(root.join("processed.md"), "# p\n").unwrap();
+    fs::write(root.join(".gitignore"), "prompts/ignored/\n").unwrap();
+    fs::create_dir_all(root.join("prompts").join("ignored")).unwrap();
+    fs::write(
+        root.join("prompts").join("ignored").join("secret.md"),
+        "# s\n",
+    )
+    .unwrap();
+    fs::write(root.join("prompts").join("kept.md"), "# k\n").unwrap();
 
-    let got = run_complete_trailing(root, &["compose", "@pro"]);
+    let got = run_complete_trailing(root, &["compose", "@"]);
 
     assert!(
-        got.iter().any(|c| c == "@processed.md"),
-        "broad scan should include top-level match: {got:?}"
+        got.iter().any(|c| c == "@prompts/kept.md"),
+        "non-ignored curated match must surface: {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c == "@target/processed.md"),
-        "gitignored file must NOT appear in broad scan: {got:?}"
+        !got.iter().any(|c| c.contains("ignored/secret.md")),
+        "gitignored curated file must NOT appear: {got:?}"
     );
 }
 

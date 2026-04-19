@@ -2366,7 +2366,7 @@ mod tests {
         });
         lines.lock().unwrap().clear();
         sink.on_semantic_event(SemanticEvent::Warning {
-            message: "Claude rate limit warning: your current session window is almost fully utilized and you will be capped soon. The next session window opens at 2024-04-01 at 19:33".into(),
+            message: "Claude rate limit warning: your 5-hour session window is approaching the cap. Window resets on 2024-04-01 at 19:33".into(),
             extra: json!({
                 "raw_kind": "rate_limit_event",
                 "rate_limit_status": "approaching_limit",
@@ -2375,11 +2375,11 @@ mod tests {
         });
         let rendered = lines.lock().unwrap().join("\n");
         assert!(
-            rendered.contains("next session window opens at"),
+            rendered.contains("Window resets on"),
             "explicit Claude rate-limit metadata must render for subscriptions: {rendered:?}"
         );
         assert!(
-            rendered.contains("almost fully"),
+            rendered.contains("approaching the cap"),
             "explicit Claude rate-limit metadata must include user-friendly wording: {rendered:?}"
         );
     }
