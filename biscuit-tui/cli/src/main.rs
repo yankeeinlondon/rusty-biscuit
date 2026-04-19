@@ -14,6 +14,7 @@ mod output;
 use commands::boolean_switch::{BooleanSwitchArgs, run as run_boolean_switch};
 use commands::choose_many::{ChooseManyArgs, run as run_choose_many};
 use commands::choose_one::{ChooseOneArgs, run as run_choose_one};
+use commands::input_table::{InputTableArgs, run as run_input_table};
 use commands::text_area_input::{TextAreaInputArgs, run as run_text_area_input};
 use commands::text_input::{TextInputArgs, run as run_text_input};
 use output::OutputMode;
@@ -42,6 +43,8 @@ enum Commands {
     ChooseOne(ChooseOneArgs),
     /// Multi-selection list.
     ChooseMany(ChooseManyArgs),
+    /// Grid of heterogeneous editable cells.
+    InputTable(InputTableArgs),
 }
 
 fn main() -> ExitCode {
@@ -62,5 +65,6 @@ fn dispatch(cli: Cli) -> std::io::Result<i32> {
         Commands::BooleanSwitch(args) => run_boolean_switch(args, cli.output),
         Commands::ChooseOne(args) => run_choose_one(args, cli.output),
         Commands::ChooseMany(args) => run_choose_many(args, cli.output),
+        Commands::InputTable(args) => run_input_table(args, cli.output),
     }
 }
