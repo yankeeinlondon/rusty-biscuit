@@ -26,7 +26,7 @@ serial_test = "3"
 
 [features]
 default = ["discord", "slack"]
-discord = ["dep:twilight-http", "dep:twilight-model", "dep:rustls"]
+discord = ["dep:twilight-http", "dep:twilight-model", "dep:rustls", "dep:reqwest"]
 slack = ["dep:reqwest"]
 signal = ["dep:reqwest"]
 whatsapp = ["dep:reqwest"]
