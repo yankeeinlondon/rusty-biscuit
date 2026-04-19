@@ -8,10 +8,9 @@
 //!
 //! - [`core`] — cross-cutting primitives ([`EventOutcome`], [`Label`],
 //!   [`ComponentTheme`], [`KeyBindings`], [`run_standalone`], ...)
-//! - [`components`] — per-component widgets + state structs (added in
-//!   later phases).
+//! - [`components`] — per-component widgets + state structs.
 //! - [`helpers`] — free functions for constructing component configs
-//!   from CSV, Markdown lists, and dictionaries (added in Phase 4).
+//!   from CSV, Markdown lists, and dictionaries.
 //!
 //! Most callers will prefer the [`prelude`] re-export which exposes
 //! the commonly used core types in a single glob import.
@@ -21,7 +20,10 @@ pub mod core;
 pub mod helpers;
 pub mod prelude;
 
-pub use components::{BooleanSwitch, BooleanSwitchState, TextInput, TextInputState};
+pub use components::{
+    BooleanSwitch, BooleanSwitchState, ChoiceInput, ChoiceOption, ChooseMany, ChooseManyState,
+    ChooseOne, ChooseOneState, SelectionMode, TextInput, TextInputState,
+};
 pub use core::{
     CANCELLED_KIND, ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, LabelPosition,
     StandaloneState, ValidationState, drive_event_loop, render_with_label, run_standalone,

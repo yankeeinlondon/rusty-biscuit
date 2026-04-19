@@ -7,7 +7,13 @@
 //! [`crate::core::run_standalone`].
 
 pub mod boolean_switch;
+pub mod choose;
+pub mod choose_many;
+pub mod choose_one;
 pub mod text_input;
 
 pub use boolean_switch::{BooleanSwitch, BooleanSwitchState};
+pub use choose::{ChoiceInput, ChoiceOption, SelectionMode};
+pub use choose_many::{ChooseMany, ChooseManyState};
+pub use choose_one::{ChooseOne, ChooseOneState};
 pub use text_input::{TextInput, TextInputState};
