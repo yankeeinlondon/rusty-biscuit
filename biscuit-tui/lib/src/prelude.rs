@@ -11,7 +11,7 @@
 //! Component widgets (TextInput, BooleanSwitch, ...) land in later
 //! phases and are re-exported here as they arrive.
 
-pub use crate::components::{TextInput, TextInputState};
+pub use crate::components::{BooleanSwitch, BooleanSwitchState, TextInput, TextInputState};
 pub use crate::core::{
     CANCELLED_KIND, ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, LabelPosition,
     StandaloneState, ValidationState, drive_event_loop, render_with_label, run_standalone,

@@ -6,6 +6,8 @@
 //! implement [`crate::core::HandleEvent`] so they can be driven by
 //! [`crate::core::run_standalone`].
 
+pub mod boolean_switch;
 pub mod text_input;
 
+pub use boolean_switch::{BooleanSwitch, BooleanSwitchState};
 pub use text_input::{TextInput, TextInputState};
