@@ -117,6 +117,17 @@ pub(crate) struct LiveSemanticSink {
     /// Encapsulates the dedup and section-transition logic so every writer
     /// against this sink sees the same running state.
     section_tracker: Arc<Mutex<SectionTracker>>,
+    /// Running count of consecutive trailing `\n` bytes in the assistant
+    /// text that has been forwarded to the stdout renderer. A value of 2 or
+    /// more means the stdout output already ends on a blank line, so the
+    /// section-transition separator between `FinalStdout` and the next
+    /// stderr section would produce a visually doubled blank line. The
+    /// counter is extended by text events that are entirely newlines, reset
+    /// to the text's own trailing newline count when the text contains
+    /// other bytes, and cleared to `0` whenever the sink emits non-blank
+    /// stderr content (so a stderr line written between two stdout blocks
+    /// does not leave a stale "stdout ended blank" signal in place).
+    stdout_trailing_newlines: usize,
 }
 
 impl LiveSemanticSink {
@@ -150,6 +161,7 @@ impl LiveSemanticSink {
             stream_output: StreamOutput::new(),
             terminal: wrap_terminal(),
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
+            stdout_trailing_newlines: 0,
         }
     }
 
@@ -227,6 +239,7 @@ impl LiveSemanticSink {
             stream_output,
             terminal: wrap_terminal(),
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
+            stdout_trailing_newlines: 0,
         }
     }
 
@@ -292,6 +305,27 @@ impl LiveSemanticSink {
         (self.emit_stderr)(line);
     }
 
+    /// Extend the cumulative stdout trailing-newline counter by the tail of
+    /// `text`. If `text` is entirely newline bytes (or empty), the counter
+    /// is extended. Otherwise the counter is reset to the count of newline
+    /// bytes at the very end of `text`.
+    fn update_stdout_trailing_newlines(&mut self, text: &str) {
+        let trailing = text.bytes().rev().take_while(|b| *b == b'\n').count();
+        if trailing == text.len() {
+            self.stdout_trailing_newlines += trailing;
+        } else {
+            self.stdout_trailing_newlines = trailing;
+        }
+    }
+
+    /// True when the stdout stream has been left ending on a blank line
+    /// (two or more consecutive `\n` bytes at the end). In that state the
+    /// section-transition separator blank is redundant and would produce a
+    /// visually doubled blank line.
+    fn stdout_ends_on_blank_line(&self) -> bool {
+        self.stdout_trailing_newlines >= 2
+    }
+
     /// Section-aware stderr emit used by every status render path.
     ///
     /// Delegates to [`SectionTracker::classify`] for the dedup and
@@ -302,6 +336,10 @@ impl LiveSemanticSink {
     /// - Section transitions are separated by exactly one blank line.
     /// - Consecutive blank lines inside a section collapse to one.
     /// - No leading blank line is emitted before the first rendered line.
+    /// - The section-transition separator is suppressed when the stdout
+    ///   stream already ends on a blank line (the assistant text wrote
+    ///   `\n\n+`), so paragraph-terminated prose does not collide with the
+    ///   stderr separator to produce a doubled blank line.
     fn emit_section_line(&mut self, section: Section, line: &str) {
         let result = {
             let mut tracker = self
@@ -311,10 +349,16 @@ impl LiveSemanticSink {
             tracker.classify(section, line)
         };
         if let Some((needs_separator, _)) = result {
-            if needs_separator {
+            if needs_separator && !self.stdout_ends_on_blank_line() {
                 (self.emit_stderr)("");
             }
             (self.emit_stderr)(line);
+            if !line.trim().is_empty() {
+                // Any non-blank stderr content visually supersedes the
+                // stdout trailing blank — clear the counter so the next
+                // FinalStdout transition resumes normal separator logic.
+                self.stdout_trailing_newlines = 0;
+            }
         }
     }
 
@@ -864,29 +908,28 @@ impl SemanticEventSink for LiveSemanticSink {
         // 4. Forward text/reasoning to their dedicated renderers before the
         //    status-line rendering so stdout writes happen in stream order.
         match &event {
-            SemanticEvent::OutputText { text, .. } => {
+            SemanticEvent::OutputText { text, .. } if self.emit_output_text.is_some() => {
+                // Route the transition into the FinalStdout section
+                // through the shared section tracker so the separator
+                // blank (between stderr events and final stdout) is
+                // emitted exactly once. The raw text bytes continue to
+                // flow directly to the caller's renderer.
+                let needs_separator = {
+                    let mut tracker = self
+                        .section_tracker
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    tracker
+                        .classify(Section::FinalStdout, "x")
+                        .is_some_and(|(s, _)| s)
+                };
+                if needs_separator && !self.stdout_ends_on_blank_line() {
+                    (self.emit_stderr)("");
+                }
                 if let Some(emit) = self.emit_output_text.as_mut() {
-                    // Route the transition into the FinalStdout section
-                    // through the shared section tracker so the separator
-                    // blank (between stderr events and final stdout) is
-                    // emitted exactly once. The raw text bytes continue to
-                    // flow directly to the caller's renderer.
-                    {
-                        let mut tracker = self
-                            .section_tracker
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        if let Some((needs_separator, _)) =
-                            tracker.classify(Section::FinalStdout, "x")
-                        {
-                            drop(tracker);
-                            if needs_separator {
-                                (self.emit_stderr)("");
-                            }
-                        }
-                    }
                     emit(text);
                 }
+                self.update_stdout_trailing_newlines(text);
             }
             SemanticEvent::Reasoning { text, .. } => {
                 let block = render_thinking_block(text, &self.terminal);
@@ -1796,6 +1839,207 @@ mod tests {
         assert!(captured.last().is_some_and(|l| l.is_empty()));
         // And both OutputText chunks still reach the external renderer.
         assert_eq!(*rendered_text.lock().unwrap(), "chunk-a chunk-b");
+    }
+
+    #[test]
+    fn blank_line_terminated_output_text_suppresses_next_section_separator() {
+        // Regression: OpenCode (and any provider that emits assistant text
+        // terminated with `\n\n`) previously produced two visually blank
+        // rows between a stdout paragraph and the next stderr tool line —
+        // one from the text's own trailing blank, another from the section
+        // transition separator. When the stdout already ends on a blank
+        // line the separator is redundant and must be suppressed.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let rendered_text = Arc::new(StdMutex::new(String::new()));
+
+        let output_cb = {
+            let buf = rendered_text.clone();
+            Box::new(move |text: &str| {
+                buf.lock().unwrap().push_str(text);
+            })
+        };
+
+        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
+
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+        // Assistant prose ending with `\n\n` — the stdout stream now ends
+        // on a blank line.
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "I'll start by reading the file.\n\n".into(),
+            extra: json!({}),
+        });
+        // Next tool result triggers a FinalStdout → ToolUseAndEvents
+        // transition. The classifier wants a separator but the stdout
+        // already shows a blank line, so the sink must skip it.
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+
+        let captured = lines.lock().unwrap().clone();
+        let blanks = captured.iter().filter(|l| l.is_empty()).count();
+        assert_eq!(
+            blanks, 1,
+            "exactly one separator blank (the one before the stdout text); \
+             the transition back to stderr must reuse the stdout trailing blank: {captured:?}"
+        );
+    }
+
+    #[test]
+    fn trailing_newline_accumulates_across_chunks() {
+        // Provider streams that split `\n\n` into separate events must
+        // still accumulate to the "ends on a blank line" state, so the
+        // next section transition suppresses the redundant separator.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let rendered_text = Arc::new(StdMutex::new(String::new()));
+
+        let output_cb = {
+            let buf = rendered_text.clone();
+            Box::new(move |text: &str| {
+                buf.lock().unwrap().push_str(text);
+            })
+        };
+
+        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
+
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "paragraph.\n".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "\n".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+
+        let captured = lines.lock().unwrap().clone();
+        let blanks = captured.iter().filter(|l| l.is_empty()).count();
+        assert_eq!(
+            blanks, 1,
+            "chunked `\\n` + `\\n` must accumulate to a blank-line trailing \
+             state and suppress the next section separator: {captured:?}"
+        );
+    }
+
+    #[test]
+    fn single_trailing_newline_does_not_suppress_separator() {
+        // A single `\n` ends the line but does not produce a blank line,
+        // so the section separator is still required to visually separate
+        // stdout prose from the next stderr event.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let rendered_text = Arc::new(StdMutex::new(String::new()));
+
+        let output_cb = {
+            let buf = rendered_text.clone();
+            Box::new(move |text: &str| {
+                buf.lock().unwrap().push_str(text);
+            })
+        };
+
+        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
+
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "single trailing newline.\n".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+
+        let captured = lines.lock().unwrap().clone();
+        let blanks = captured.iter().filter(|l| l.is_empty()).count();
+        assert_eq!(
+            blanks, 2,
+            "one separator into FinalStdout and one back into ToolUseAndEvents: {captured:?}"
+        );
+    }
+
+    #[test]
+    fn stdout_trailing_resets_after_intervening_stderr_line() {
+        // Between two OutputText events that are separated by stderr
+        // content, the second transition back to stdout still needs a
+        // full separator — the stderr scroll between the two stdout
+        // writes visually breaks the "stdout ended on blank" signal.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let rendered_text = Arc::new(StdMutex::new(String::new()));
+
+        let output_cb = {
+            let buf = rendered_text.clone();
+            Box::new(move |text: &str| {
+                buf.lock().unwrap().push_str(text);
+            })
+        };
+
+        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
+
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "first block.\n\n".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "second block.".into(),
+            extra: json!({}),
+        });
+
+        let captured = lines.lock().unwrap().clone();
+        let blanks = captured.iter().filter(|l| l.is_empty()).count();
+        assert_eq!(
+            blanks, 1,
+            "first transition uses stdout trailing blank (skipped), second \
+             transition back into FinalStdout must still emit the separator: \
+             {captured:?}"
+        );
     }
 
     #[test]

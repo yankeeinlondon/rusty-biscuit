@@ -82,7 +82,11 @@ Every emission flows through a [`SectionTracker`](../../cli/src/commands/wrap/se
 | 8 | `FinalStdout` | The agent's final response, on stdout (markdown-rendered when TTY, raw otherwise) |
 | 9 | `TrailerMetadata` | The summary line + verbose details |
 
-Sections do not interleave: once `FinalStdout` opens, no `ToolUseAndEvents` lines emit. Within a section, consecutive blank lines collapse to one.
+Within a section, consecutive blank lines collapse to one.
+
+Section interleaving is provider-dependent. Claude and Codex keep `FinalStdout` strictly at the end of the turn, so `ToolUseAndEvents` never re-opens once stdout starts. OpenCode (and any provider that emits assistant text mid-turn) interleaves `FinalStdout` with `ToolUseAndEvents` — the sink re-enters `FinalStdout` on each `OutputText` event and returns to `ToolUseAndEvents` on the next tool call.
+
+Because interleaving is supported, the transition separator rule has one suppression: when the stdout stream already ends on a blank line (the provider's text ended with `\n\n` or more), the transition from `FinalStdout` back to a stderr section does **not** insert a separator blank. The stdout trailing blank already provides the visual gap; adding another would produce a double-blank gutter around every interleaved prose paragraph. `LiveSemanticSink` tracks cumulative trailing `\n` bytes across `OutputText` events and clears the counter whenever non-blank stderr content emits, so a stderr line between two stdout blocks still forces a full separator on the return trip into `FinalStdout`.
 
 ## Tool Call Rendering
 
