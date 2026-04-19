@@ -1,5 +1,5 @@
 set allow-duplicate-variables
-set allow-duplicate-recipes
+# set allow-duplicate-recipes
 
 import "./util.just"
 
