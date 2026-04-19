@@ -1,7 +1,7 @@
 ---
 phases: 6
 created: 2026-04-18
-start_phase: 3
+start_phase: 6
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
   - claudine/features/2026-04-18-file-completion-supplement/plan.md
