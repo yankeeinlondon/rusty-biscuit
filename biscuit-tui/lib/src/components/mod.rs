@@ -1,3 +1,11 @@
 //! Visual input components (text input, toggle, choice, text area, table).
 //!
-//! Phase 0 scaffold: individual components are added in later phases.
+//! Each component follows the same pattern: a zero-sized
+//! [`ratatui::widgets::StatefulWidget`] marker paired with a
+//! component-specific `*State` struct owned by the caller. Widgets
+//! implement [`crate::core::HandleEvent`] so they can be driven by
+//! [`crate::core::run_standalone`].
+
+pub mod text_input;
+
+pub use text_input::{TextInput, TextInputState};

@@ -21,6 +21,7 @@ pub mod core;
 pub mod helpers;
 pub mod prelude;
 
+pub use components::{TextInput, TextInputState};
 pub use core::{
     CANCELLED_KIND, ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, LabelPosition,
     StandaloneState, ValidationState, drive_event_loop, render_with_label, run_standalone,
