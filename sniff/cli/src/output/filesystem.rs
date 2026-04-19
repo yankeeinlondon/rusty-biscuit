@@ -532,12 +532,9 @@ fn build_git_status_items(
         .collect();
     for file in &conflicted {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
-        let line = if dir.is_empty() {
-            format!("<red>conflicted: <b>{}</b></red>", name)
-        } else {
-            format!("<red>conflicted: {}<b>{}</b></red>", dir, name)
-        };
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<red>conflicted: {linked_path}</red>");
         status_items.push(line);
     }
 
@@ -576,7 +573,8 @@ fn build_git_status_items(
     // Add staged files
     for file in &staged {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         // Only show diff stats for modified files (not created/deleted)
         let diff_stats = if file.action == FileAction::Modified {
@@ -584,48 +582,29 @@ fn build_git_status_items(
         } else {
             String::new()
         };
-        let line = if dir.is_empty() {
-            format!(
-                "<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>{diff_stats}",
-                name
-            )
-        } else {
-            format!(
-                "<lime>staged(<dim><i>{action}</i></dim>): {}<b>{}</b></lime>{diff_stats}",
-                dir, name
-            )
-        };
+        let line =
+            format!("<lime>staged(<dim><i>{action}</i></dim>): {linked_path}</lime>{diff_stats}");
         status_items.push(line);
     }
 
     // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
-        let line = if dir.is_empty() {
-            format!(
-                "<yellow>unstaged(<dim><i>{action}</i></dim>): <b>{}</b></yellow>{diff_stats}",
-                name
-            )
-        } else {
-            format!(
-                "<yellow>unstaged(<dim><i>{action}</i></dim>): {}<b>{}</b></yellow>{diff_stats}",
-                dir, name
-            )
-        };
+        let line = format!(
+            "<yellow>unstaged(<dim><i>{action}</i></dim>): {linked_path}</yellow>{diff_stats}"
+        );
         status_items.push(line);
     }
 
     for file in &untracked {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
-        let line = if dir.is_empty() {
-            format!("<dim>untracked: <b>{}</b></dim>", name)
-        } else {
-            format!("<dim>untracked: {}<b>{}</b></dim>", dir, name)
-        };
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<dim>untracked: {linked_path}</dim>");
         status_items.push(line);
     }
 
@@ -2976,6 +2955,15 @@ fn format_basename_filepath(relative: &str, absolute: &str) -> String {
     format!("<a href=\"{absolute}\"><blue>{basename}</blue></a>")
 }
 
+/// Format a git-status filepath preserving the existing visible text while
+/// making the path clickable through Prose OSC8 support.
+fn format_git_status_filepath(relative: &str, absolute: &str) -> String {
+    match relative.rsplit_once('/') {
+        Some((dir, file)) => format!("<a href=\"{absolute}\">{dir}/<b>{file}</b></a>"),
+        None => format!("<a href=\"{absolute}\"><b>{relative}</b></a>"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared path-list renderer
 // ---------------------------------------------------------------------------
@@ -3352,8 +3340,16 @@ mod tests {
 
             let items = build_git_status_items(&git, 10, 0);
 
-            assert!(items[0].starts_with("<red>conflicted:"));
-            assert!(items.iter().any(|item| item.starts_with("<dim>untracked:")));
+            assert!(items[0].starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
+            assert!(items[0].contains("<b>conflict.txt</b></a>"));
+            assert!(items.iter().any(|item| {
+                item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
+                    && item.contains("<b>notes.md</b></a>")
+            }));
+            assert!(items.iter().any(|item| {
+                item.starts_with("<lime>staged(")
+                    && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
+            }));
         }
 
         #[test]
