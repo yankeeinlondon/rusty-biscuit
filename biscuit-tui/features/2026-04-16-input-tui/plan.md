@@ -41,6 +41,17 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+  - biscuit-tui/lib/src/lib.rs
+  - biscuit-tui/lib/src/prelude.rs
+  - biscuit-tui/lib/src/components/mod.rs
+  - biscuit-tui/lib/src/components/boolean_switch.rs
+  - biscuit-tui/cli/src/main.rs
+  - biscuit-tui/cli/src/commands/mod.rs
+  - biscuit-tui/cli/src/commands/boolean_switch.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
 packages:
   - tui-chrome
   - tui-chrome-cli

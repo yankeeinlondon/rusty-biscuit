@@ -5,4 +5,5 @@
 //! [`tui_chrome::run_standalone`], then formats the resulting value
 //! per [`crate::output::OutputMode`].
 
+pub mod boolean_switch;
 pub mod text_input;
