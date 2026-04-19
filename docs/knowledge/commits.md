@@ -24,7 +24,7 @@
 - `git commit --only -m "message" -- path1 path2` is the safest explicit form when unrelated staged changes must remain untouched.
 - All options must come before the `--` pathspec separator. `git commit --only -- path -m "message"` is wrong because `-m` is then parsed as a path.
 - Quote paths that contain spaces when passing them to `git commit`.
-- Be careful with renames. Committing only the new path records an add and leaves the delete staged. To preserve the rename as one atomic change, include both sides or avoid path-limiting that rename.
+- Be careful with renames. Committing only the new path records an add and leaves the delete staged. Committing only the old path records the delete but leaves the new file staged as an add. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
 - `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
 
 ## History and Verification
