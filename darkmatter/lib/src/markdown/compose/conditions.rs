@@ -5,7 +5,7 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::interpolation::{ComparisonOp, Expr, parse};
+use super::interpolation::{ComparisonOp, Expr, parse_condition};
 use serde_json::Value;
 use tracing::{debug, trace};
 
@@ -36,7 +36,7 @@ pub fn evaluate_condition(
 ) -> Result<bool, ConditionError> {
     trace!(expr = %expr, line, "conditions: evaluating");
 
-    let parsed = parse(expr).map_err(|e| ConditionError::Parse {
+    let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
         expr: expr.to_string(),
         line,
         message: e.to_string(),
@@ -117,22 +117,22 @@ fn eval_function(name: &str, args: &[Expr], state: &EffectiveState) -> Result<Va
     let name = name.to_ascii_lowercase();
     match name.as_str() {
         "and" => {
-            let result = args
-                .iter()
-                .map(|arg| eval_expr(arg, state))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .all(is_truthy);
-            Ok(Value::Bool(result))
+            for arg in args {
+                let value = eval_expr(arg, state)?;
+                if !is_truthy(&value) {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            Ok(Value::Bool(true))
         }
         "or" => {
-            let result = args
-                .iter()
-                .map(|arg| eval_expr(arg, state))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .any(is_truthy);
-            Ok(Value::Bool(result))
+            for arg in args {
+                let value = eval_expr(arg, state)?;
+                if is_truthy(&value) {
+                    return Ok(Value::Bool(true));
+                }
+            }
+            Ok(Value::Bool(false))
         }
         "haskey" | "has_key" => {
             if args.len() < 2 {
@@ -374,5 +374,110 @@ mod tests {
         assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
         assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
         assert!(evaluate_condition("!env.AGENT", &state, 1).unwrap());
+    }
+
+    // ── Infix `&&` / `||` coverage ────────────────────────────────────────
+
+    #[test]
+    fn infix_and_both_true() {
+        let state = test_state(json!({ "a": true, "b": true }));
+        assert!(evaluate_condition("a && b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_one_false() {
+        let state = test_state(json!({ "a": true, "b": false }));
+        assert!(!evaluate_condition("a && b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_or_both_false() {
+        let state = test_state(json!({ "a": false, "b": false }));
+        assert!(!evaluate_condition("a || b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_or_one_true() {
+        let state = test_state(json!({ "a": false, "b": true }));
+        assert!(evaluate_condition("a || b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_binds_tighter_than_or() {
+        // (false && true) || true => true
+        let state = test_state(json!({ "a": false, "b": true, "c": true }));
+        assert!(evaluate_condition("a && b || c", &state, 1).unwrap());
+
+        // false || (true && false) => false
+        let state = test_state(json!({ "a": false, "b": true, "c": false }));
+        assert!(!evaluate_condition("a || b && c", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_parenthesized_or_then_and() {
+        // (a || b) && c
+        let state = test_state(json!({ "a": false, "b": true, "c": true }));
+        assert!(evaluate_condition("(a || b) && c", &state, 1).unwrap());
+
+        let state = test_state(json!({ "a": false, "b": true, "c": false }));
+        assert!(!evaluate_condition("(a || b) && c", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_fallback_inside_or() {
+        // a || (missing | "default") — Or short-circuits on `a`.
+        let state = test_state(json!({ "a": true }));
+        assert!(evaluate_condition(r#"a || (missing | "default")"#, &state, 1).unwrap());
+    }
+
+    #[test]
+    fn legacy_and_or_function_still_works() {
+        let state = test_state(json!({ "a": true, "b": false }));
+        assert!(!evaluate_condition("And(a, b)", &state, 1).unwrap());
+        assert!(evaluate_condition("Or(a, b)", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_short_circuits_on_false() {
+        // UnknownFn would raise `Unknown function` — but short-circuit on
+        // leading `false` means the rhs is never evaluated.
+        let state = test_state(json!({}));
+        assert!(!evaluate_condition("false_flag && UnknownFn(x)", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_or_short_circuits_on_true() {
+        let state = test_state(json!({ "truthy_flag": true }));
+        assert!(evaluate_condition("truthy_flag || UnknownFn(x)", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn function_and_short_circuits_on_false() {
+        let state = test_state(json!({}));
+        assert!(!evaluate_condition("And(false_flag, UnknownFn(x))", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn function_or_short_circuits_on_true() {
+        let state = test_state(json!({ "truthy_flag": true }));
+        assert!(evaluate_condition("Or(truthy_flag, UnknownFn(x))", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_without_short_circuit_propagates_eval_error() {
+        // When short-circuit doesn't kick in, unknown functions must surface
+        // as an evaluation error.
+        let state = test_state(json!({ "truthy_flag": true }));
+        let result = evaluate_condition("truthy_flag && UnknownFn(x)", &state, 1);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ConditionError::Eval { .. }));
+    }
+
+    #[test]
+    fn infix_with_comparison_operands() {
+        let state = test_state(json!({ "count": 5, "name": "alice" }));
+        assert!(evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1).unwrap());
+        assert!(!evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1).unwrap());
+        assert!(evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1).unwrap());
     }
 }

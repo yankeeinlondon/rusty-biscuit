@@ -1,5 +1,7 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+import "../just/features.just"
+
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
@@ -314,16 +316,6 @@ gem *args="":
 deps:
     @echo "Dependencies:"
     @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
-
-# review this package using the Codex CLI
-review *args="":
-    @clear
-    @echo -e "Performing a code review on the {{BOLD}}{{LIB_NAME}}{{RESET}} package"
-    @echo ""
-    @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
-    @echo
-    @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
-    @just _speak "Review for {{LIB_NAME}} package has completed."
 
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":

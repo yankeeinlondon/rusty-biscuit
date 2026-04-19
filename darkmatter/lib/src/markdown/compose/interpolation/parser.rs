@@ -42,7 +42,7 @@
 //! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
-use super::{Lexer, LexerError, Token, ast::Expr};
+use super::{Lexer, LexerError, ParseMode, Token, ast::Expr};
 use std::fmt;
 
 #[cfg(test)]
@@ -101,21 +101,36 @@ pub struct Parser<'a> {
     current: Token,
     /// Approximate position for error reporting.
     position: usize,
+    mode: ParseMode,
 }
 
 impl<'a> Parser<'a> {
-    /// Creates a new parser for the given expression.
+    /// Creates a new parser for the given expression in interpolation mode.
     ///
     /// ## Errors
     ///
     /// Returns an error if the lexer fails on the first token.
     pub fn new(input: &'a str) -> Result<Self, ParseError> {
-        let mut lexer = Lexer::new(input);
+        Self::with_mode(input, ParseMode::Interpolation)
+    }
+
+    /// Creates a new parser for the given expression with a specific parse mode.
+    ///
+    /// Condition mode enables `&&` and `||` as logical operators following the
+    /// condition-mode precedence ladder. Interpolation mode keeps the default
+    /// interpolation grammar.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the lexer fails on the first token.
+    pub fn with_mode(input: &'a str, mode: ParseMode) -> Result<Self, ParseError> {
+        let mut lexer = Lexer::with_mode(input, mode);
         let current = lexer.next_token()?;
         Ok(Self {
             lexer,
             current,
             position: 0,
+            mode,
         })
     }
 
@@ -170,21 +185,76 @@ impl<'a> Parser<'a> {
         self.parse_ternary()
     }
 
-    /// Parses a ternary expression: `fallback ("?" fallback ":" fallback)?`
+    /// Parses a ternary expression.
+    ///
+    /// In interpolation mode: `fallback ("?" fallback ":" fallback)?`
+    ///
+    /// In condition mode: `logical_or ("?" logical_or ":" logical_or)?`
     fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_fallback()?;
+        let mut expr = self.parse_ternary_branch()?;
 
         if matches!(self.current, Token::Question) {
             self.advance()?; // consume ?
-            let then_branch = self.parse_fallback()?;
+            let then_branch = self.parse_ternary_branch()?;
 
             self.expect(&Token::Colon, "':'")?;
-            let else_branch = self.parse_fallback()?;
+            let else_branch = self.parse_ternary_branch()?;
 
             expr = Expr::Ternary {
                 condition: Box::new(expr),
                 then_branch: Box::new(then_branch),
                 else_branch: Box::new(else_branch),
+            };
+        }
+
+        Ok(expr)
+    }
+
+    /// Parses a ternary branch — the level immediately below ternary.
+    ///
+    /// This is `logical_or` in condition mode and `fallback` in interpolation mode.
+    fn parse_ternary_branch(&mut self) -> Result<Expr, ParseError> {
+        match self.mode {
+            ParseMode::Condition => self.parse_logical_or(),
+            ParseMode::Interpolation => self.parse_fallback(),
+        }
+    }
+
+    /// Parses a logical OR expression (condition mode only):
+    /// `logical_and ("||" logical_and)*`.
+    ///
+    /// Infix `a || b` is lowered into the existing function-call AST as
+    /// `Or(a, b)` so downstream evaluation and AST consumers do not need to
+    /// learn a new variant.
+    fn parse_logical_or(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_logical_and()?;
+
+        while matches!(self.current, Token::OrOr) {
+            self.advance()?; // consume ||
+            let rhs = self.parse_logical_and()?;
+            expr = Expr::FunctionCall {
+                name: "Or".to_string(),
+                args: vec![expr, rhs],
+            };
+        }
+
+        Ok(expr)
+    }
+
+    /// Parses a logical AND expression (condition mode only):
+    /// `fallback ("&&" fallback)*`.
+    ///
+    /// Infix `a && b` is lowered into the existing function-call AST as
+    /// `And(a, b)`.
+    fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_fallback()?;
+
+        while matches!(self.current, Token::AndAnd) {
+            self.advance()?; // consume &&
+            let rhs = self.parse_fallback()?;
+            expr = Expr::FunctionCall {
+                name: "And".to_string(),
+                args: vec![expr, rhs],
             };
         }
 
@@ -311,6 +381,35 @@ impl<'a> Parser<'a> {
 /// Returns an error for invalid syntax.
 pub fn parse(input: &str) -> Result<Expr, ParseError> {
     Parser::new(input)?.parse()
+}
+
+/// Parses an expression string using condition-mode grammar.
+///
+/// In condition mode, `&&` and `||` are recognized as infix logical operators
+/// and lowered into `And(...)` / `Or(...)` function-call nodes. Single `|`
+/// still parses as the fallback operator. Use this entrypoint for every
+/// `when="..."` expression so interpolation parsing elsewhere is unaffected.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::interpolation::{parse_condition, Expr};
+///
+/// let expr = parse_condition("a && b").unwrap();
+/// match expr {
+///     Expr::FunctionCall { name, args } => {
+///         assert_eq!(name, "And");
+///         assert_eq!(args.len(), 2);
+///     }
+///     _ => panic!("expected And(...) function call"),
+/// }
+/// ```
+///
+/// ## Errors
+///
+/// Returns an error for invalid syntax.
+pub fn parse_condition(input: &str) -> Result<Expr, ParseError> {
+    Parser::with_mode(input, ParseMode::Condition)?.parse()
 }
 
 #[cfg(test)]
@@ -924,6 +1023,145 @@ mod tests {
         fn roundtrip_function() {
             let expr = parse("length(items)").unwrap();
             assert_eq!(expr.to_string(), "length(items)");
+        }
+    }
+
+    mod condition_mode_logic {
+        use super::*;
+
+        fn extract_call(expr: &Expr) -> (&str, &[Expr]) {
+            match expr {
+                Expr::FunctionCall { name, args } => (name.as_str(), args.as_slice()),
+                other => panic!("expected FunctionCall, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn condition_parses_infix_and() {
+            let expr = parse_condition("a && b").unwrap();
+            let (name, args) = extract_call(&expr);
+            assert_eq!(name, "And");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn condition_parses_infix_or() {
+            let expr = parse_condition("a || b").unwrap();
+            let (name, args) = extract_call(&expr);
+            assert_eq!(name, "Or");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn condition_and_binds_tighter_than_or_left() {
+            // a && b || c parses as (a && b) || c
+            let expr = parse_condition("a && b || c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            let (inner, inner_args) = extract_call(&args[0]);
+            assert_eq!(inner, "And");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_and_binds_tighter_than_or_right() {
+            // a || b && c parses as a || (b && c)
+            let expr = parse_condition("a || b && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            let (inner, inner_args) = extract_call(&args[1]);
+            assert_eq!(inner, "And");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_parenthesized_or_then_and() {
+            // (a || b) && c parses as And(Or(a, b), c)
+            let expr = parse_condition("(a || b) && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "And");
+            assert_eq!(args.len(), 2);
+            let (inner, inner_args) = extract_call(&args[0]);
+            assert_eq!(inner, "Or");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_fallback_inside_or() {
+            // a || (b | c) — fallback parses tighter than ||, and parens
+            // preserve the fallback as the rhs of the Or.
+            let expr = parse_condition("a || (b | c)").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Fallback { .. }));
+        }
+
+        #[test]
+        fn condition_fallback_binds_tighter_than_and() {
+            // a | b && c parses as And(Fallback(a, b), c)
+            let expr = parse_condition("a | b && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "And");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Fallback { .. }));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn interpolation_double_pipe_still_fallback() {
+            let expr = parse(r#"plan || "plan.md""#).unwrap();
+            match expr {
+                Expr::Fallback { primary, fallback } => {
+                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "plan"));
+                    assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "plan.md"));
+                }
+                _ => panic!("Expected Fallback"),
+            }
+        }
+
+        #[test]
+        fn interpolation_rejects_infix_and() {
+            let result = parse("a && b");
+            assert!(result.is_err(), "&& must be rejected in interpolation mode");
+        }
+
+        #[test]
+        fn condition_chained_and_left_associative() {
+            // a && b && c parses as And(And(a, b), c)
+            let expr = parse_condition("a && b && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "And");
+            assert_eq!(args.len(), 2);
+            let (inner, inner_args) = extract_call(&args[0]);
+            assert_eq!(inner, "And");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_chained_or_left_associative() {
+            // a || b || c parses as Or(Or(a, b), c)
+            let expr = parse_condition("a || b || c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            let (inner, _) = extract_call(&args[0]);
+            assert_eq!(inner, "Or");
         }
     }
 }

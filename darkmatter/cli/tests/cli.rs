@@ -712,6 +712,118 @@ fn test_compose_set_requires_json_object() {
 }
 
 // =============================================================================
+//              SET OVERLAY TRANCLUSION CLI TESTS
+// =============================================================================
+
+#[test]
+fn test_set_overlay_child_interpolation() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set.name="Bob""#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("child.md"),
+        "---\nname: Alice\n---\n\nHello {{ name }}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello Bob"))
+        .stdout(predicate::str::contains("Alice").not());
+}
+
+#[test]
+fn test_set_overlay_strict_rejects_invalid() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set=42"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("child.md"), "body\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid frontmatter assignment"));
+}
+
+#[test]
+fn test_set_overlay_permissive_invalid_warns() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set=42 set.name="Bob""#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("child.md"),
+        "---\nname: Alice\n---\n\n{{ name }}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .arg("--allow-invalid-frontmatter-assignment")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Bob"))
+        .stdout(predicate::str::contains("Alice").not());
+}
+
+#[test]
+fn test_set_overlay_strict_rejects_reassigned() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set.name="Bob" set.name="Mary""#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("child.md"), "---\n---\nbody\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid reassigned frontmatter property"));
+}
+
+#[test]
+fn test_set_overlay_permissive_reassigned_warns_and_rightmost_wins() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set.name="Bob" set.name="Mary""#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("child.md"),
+        "---\nname: Alice\n---\n\n{{ name }}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .arg("--allow-reassigned-frontmatter-property")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Mary"))
+        .stdout(predicate::str::contains("Bob").not())
+        .stdout(predicate::str::contains("Alice").not());
+}
+
+// =============================================================================
 //                  FRONTMATTER INTERPOLATION TESTS
 // =============================================================================
 

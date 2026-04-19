@@ -293,6 +293,18 @@ pub struct ComposeOptions {
     /// to a warning and the runtime context is used instead.
     pub(crate) allow_ctx_override: bool,
 
+    // ── Transclusion set-override permissive flags ─────────────────
+    /// When `true`, a `::file` directive whose `set=<value>` RHS fails
+    /// to parse as a JSON5 object is downgraded from `InvalidFrontmatterAssignment`
+    /// to a `ComposeWarning`; sibling valid set clauses still apply.
+    pub(crate) allow_invalid_frontmatter_assignment: bool,
+
+    /// When `true`, a `::file` directive that reassigns the same set
+    /// property (or duplicates the object form) is downgraded from
+    /// `InvalidReassignedFrontmatterProperty` to a `ComposeWarning`; the
+    /// rightmost assignment wins.
+    pub(crate) allow_reassigned_frontmatter_property: bool,
+
     // ── Source context ─────────────────────────────────────────────
     /// Source location of the document being composed.
     ///
@@ -502,6 +514,14 @@ impl std::fmt::Debug for ComposeOptions {
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("interpolate_code_spans", &self.interpolate_code_spans)
+            .field(
+                "allow_invalid_frontmatter_assignment",
+                &self.allow_invalid_frontmatter_assignment,
+            )
+            .field(
+                "allow_reassigned_frontmatter_property",
+                &self.allow_reassigned_frontmatter_property,
+            )
             .field("context", &self.context)
             .finish()
     }
@@ -527,6 +547,8 @@ impl ComposeOptions {
             enabled_operations: ComposeOperation::all(),
             fail_fast: false,
             allow_ctx_override: false,
+            allow_invalid_frontmatter_assignment: false,
+            allow_reassigned_frontmatter_property: false,
             source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
@@ -664,6 +686,29 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_allow_ctx_override(mut self, allow: bool) -> Self {
         self.allow_ctx_override = allow;
+        self
+    }
+
+    /// Downgrades `InvalidFrontmatterAssignment` to a compose warning.
+    ///
+    /// When `true`, a `::file` directive whose `set=<value>` RHS is not
+    /// a JSON5 object is dropped with a warning instead of failing the
+    /// pipeline. Sibling `set.NAME=<value>` clauses on the same directive
+    /// line are unaffected and still apply.
+    #[must_use]
+    pub fn with_allow_invalid_frontmatter_assignment(mut self, allow: bool) -> Self {
+        self.allow_invalid_frontmatter_assignment = allow;
+        self
+    }
+
+    /// Downgrades `InvalidReassignedFrontmatterProperty` to a compose warning.
+    ///
+    /// When `true`, a duplicate `set.NAME=` assignment (or duplicate
+    /// `set=<object>`) on the same `::file` directive emits a warning
+    /// instead of failing the pipeline. The rightmost assignment wins.
+    #[must_use]
+    pub fn with_allow_reassigned_frontmatter_property(mut self, allow: bool) -> Self {
+        self.allow_reassigned_frontmatter_property = allow;
         self
     }
 

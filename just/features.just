@@ -266,7 +266,8 @@ clarify filter="":
     fi
 
     agent="$(just _choose_agent)"
-    claudine compose "@prompts/clarify.md" --${agent} doc="@"$(sniff repo package-area)"/${file}" -y -i
+    doc_path="$(sniff repo package-area)/${file}"
+    claudine compose "@prompts/clarify.md" --${agent} -y -i --set "{ doc: \"@${doc_path}\" }"
     link="$(just _link $(basename "${file}") "${file}")"
     echo -e "The {{blue}}${link}{{reset}} file has been {{italic}}clarified{{reset}}"
 
@@ -428,6 +429,8 @@ feature feat:
         rm -f "${file}"
         echo -e "the feature had no content so was removed"
     fi
+
+
 
 # adds a new fix topic to the package area
 fix name:
