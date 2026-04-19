@@ -129,6 +129,12 @@ pub(crate) struct AttemptLaunch {
     pub(crate) env: HashMap<OsString, OsString>,
     pub(crate) stdin_seed: Option<String>,
     pub(crate) timeout: Option<u64>,
+    /// Silence-detection step timeout in seconds, if configured.
+    ///
+    /// Enforced by the streaming wait loop against `LiveMetrics.last_event_at`.
+    /// Dropped (with a stderr warning) for capture and passthrough paths
+    /// because those modes have no stream events to observe.
+    pub(crate) step_timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1513,6 +1519,7 @@ fn run_provider_wrapper_inner(
                 child_cwd,
                 effective_non_interactive,
                 args.timeout,
+                None,
                 &harness_base_args,
                 &env_plan.env,
                 &mut prompt_state,
@@ -1564,6 +1571,7 @@ fn run_provider_wrapper_inner(
                 &env_plan.env,
                 child_cwd,
                 args.timeout,
+                None,
                 stderr_noise,
                 profile.suppress_structured_stderr_on_success(),
                 stream_verbosity != Verbosity::Silent,
@@ -1891,10 +1899,39 @@ fn materialize_harness_prompt(
     })
 }
 
-fn launch_timeout_secs(cli_timeout: Option<u64>, plan_timeout: Option<std::time::Duration>) -> u64 {
-    cli_timeout
-        .or_else(|| plan_timeout.map(|timeout| timeout.as_secs()))
-        .unwrap_or(0)
+/// Resolved timeouts for a single harness attempt.
+///
+/// Combines optional CLI overrides with frontmatter-declared values using the
+/// standard "CLI wins" precedence rule. Each field is an `Option<u64>` of
+/// seconds so the wait loop can skip enforcement when neither source supplies
+/// a value.
+#[derive(Debug, Clone, Copy, Default)]
+struct LaunchTimeouts {
+    timeout: Option<u64>,
+    step_timeout: Option<u64>,
+}
+
+impl LaunchTimeouts {
+    fn timeout_secs_for_span(self) -> u64 {
+        self.timeout.unwrap_or(0)
+    }
+
+    fn step_timeout_secs_for_span(self) -> u64 {
+        self.step_timeout.unwrap_or(0)
+    }
+}
+
+fn resolve_launch_timeouts(
+    cli_timeout: Option<u64>,
+    plan_timeout: Option<std::time::Duration>,
+    cli_step_timeout: Option<u64>,
+    plan_step_timeout: Option<std::time::Duration>,
+) -> LaunchTimeouts {
+    LaunchTimeouts {
+        timeout: cli_timeout.or_else(|| plan_timeout.map(|timeout| timeout.as_secs())),
+        step_timeout: cli_step_timeout
+            .or_else(|| plan_step_timeout.map(|timeout| timeout.as_secs())),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1908,6 +1945,8 @@ fn build_harness_launch(
     effective_non_interactive: bool,
     cli_timeout: Option<u64>,
     plan_timeout: Option<std::time::Duration>,
+    cli_step_timeout: Option<u64>,
+    plan_step_timeout: Option<std::time::Duration>,
 ) -> Result<AttemptLaunch> {
     let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
         let mut args = normalize_resume_args(profile, profile.build_resume_args(&session_id)?);
@@ -1930,11 +1969,19 @@ fn build_harness_launch(
         env.insert(key.clone().into(), value.clone().into());
     }
 
+    let timeouts = resolve_launch_timeouts(
+        cli_timeout,
+        plan_timeout,
+        cli_step_timeout,
+        plan_step_timeout,
+    );
+
     Ok(AttemptLaunch {
         args,
         env,
         stdin_seed,
-        timeout: cli_timeout.or_else(|| plan_timeout.map(|timeout| timeout.as_secs())),
+        timeout: timeouts.timeout,
+        step_timeout: timeouts.step_timeout,
     })
 }
 
@@ -1971,6 +2018,28 @@ fn execute_harness_attempt(
         use_structured,
     )
     .entered();
+    // Step-silence enforcement requires live `SemanticEvent` ticks, which only
+    // exist in the structured-stream path. Capture and passthrough attempts
+    // drop the value with a warning rather than silently ignoring it.
+    let launch = if !use_structured && launch.step_timeout.is_some() {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::status::{Status, StatusState};
+        let rendered = Status::new(
+            "step_timeout is only enforced in structured-stream mode; \
+             ignoring for this capture/passthrough attempt"
+                .to_string(),
+        )
+        .state(StatusState::Warning)
+        .render(term);
+        eprintln!("{rendered}");
+        AttemptLaunch {
+            step_timeout: None,
+            ..launch.clone()
+        }
+    } else {
+        launch.clone()
+    };
+    let launch = &launch;
     let (exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
@@ -1993,6 +2062,7 @@ fn execute_harness_attempt(
             &launch.env,
             child_cwd,
             launch.timeout,
+            launch.step_timeout,
             stderr_noise,
             suppress_stderr_on_success,
             stream_verbosity != Verbosity::Silent,
@@ -2573,6 +2643,7 @@ pub(crate) fn run_harness_loop(
     child_cwd: &Path,
     effective_non_interactive: bool,
     cli_timeout: Option<u64>,
+    cli_step_timeout: Option<u64>,
     base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
@@ -2856,10 +2927,17 @@ pub(crate) fn run_harness_loop(
         )
         .in_scope(|| claudine::harness::capture_pre_run_snapshot(&plan))
         .map_err(|e| eyre!("harness snapshot: {e}"))?;
+        let resolved_timeouts = resolve_launch_timeouts(
+            cli_timeout,
+            plan.timeout,
+            cli_step_timeout,
+            plan.step_timeout,
+        );
         let launch = info_span!(
             "harness_launch_plan",
             attempt,
-            timeout_secs = launch_timeout_secs(cli_timeout, plan.timeout),
+            timeout_secs = resolved_timeouts.timeout_secs_for_span(),
+            step_timeout_secs = resolved_timeouts.step_timeout_secs_for_span(),
         )
         .in_scope(|| {
             build_harness_launch(
@@ -2872,6 +2950,8 @@ pub(crate) fn run_harness_loop(
                 effective_non_interactive,
                 cli_timeout,
                 plan.timeout,
+                cli_step_timeout,
+                plan.step_timeout,
             )
         })?;
 

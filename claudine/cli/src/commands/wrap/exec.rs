@@ -655,6 +655,7 @@ fn wait_with_signal_handling(
 /// Isolated to the bridge path so non-OpenCode runs keep the existing
 /// `child.wait()`-based helper.
 #[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
 fn wait_with_signal_and_early_termination(
     child: &mut Child,
     child_in_own_pgroup: bool,
@@ -662,6 +663,8 @@ fn wait_with_signal_and_early_termination(
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
     silent_stall_threshold: Duration,
+    wall_clock_timeout: Option<Duration>,
+    step_timeout: Option<Duration>,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
@@ -701,9 +704,11 @@ fn wait_with_signal_and_early_termination(
     }?;
 
     let mut early_termination: Option<EarlyTermination> = None;
+    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
     let grace_period = Duration::from_secs(5);
+    let loop_start = Instant::now();
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -714,6 +719,8 @@ fn wait_with_signal_and_early_termination(
             let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
             let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
+            } else if wall_clock_tripped {
+                claudine::harness::ProcessTermination::TimedOut
             } else if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
@@ -722,7 +729,32 @@ fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
-        if early_termination.is_none() {
+        // Wall-clock timeout check: short-circuits directly to TimedOut
+        // without routing through the EarlyTermination surface (matches
+        // the legacy wait_with_timeout behavior for the streaming path).
+        if !wall_clock_tripped
+            && early_termination.is_none()
+            && let Some(budget) = wall_clock_timeout
+            && loop_start.elapsed() >= budget
+        {
+            tracing::warn!(
+                child_pid,
+                timeout_secs = budget.as_secs(),
+                "wall-clock timeout exceeded; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            wall_clock_tripped = true;
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     tracing::info!(
@@ -748,6 +780,7 @@ fn wait_with_signal_and_early_termination(
         }
 
         if early_termination.is_none()
+            && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
             && let Some(signal) = detect_opencode_hang_termination(
                 metrics,
@@ -760,6 +793,33 @@ fn wait_with_signal_and_early_termination(
                 child_pid,
                 early_termination = ?signal,
                 "OpenCode silent-stall recovery triggered; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        // Step-silence timeout check: user-configured hard kill that
+        // maps to ProcessTermination::TimedOut. Fires after every other
+        // early-termination branch so wall-clock and rate-limit recoveries
+        // keep precedence when they happen in the same poll tick.
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(silence_budget) = step_timeout
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
+        {
+            tracing::warn!(
+                child_pid,
+                step_timeout_secs = silence_budget.as_secs(),
+                "step_timeout exceeded; sending SIGTERM to child process group",
             );
             let kill_pid = if child_in_own_pgroup {
                 -(child_pid as i32)
@@ -796,6 +856,7 @@ fn wait_with_signal_and_early_termination(
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::too_many_arguments)]
 fn wait_with_signal_and_early_termination(
     child: &mut Child,
     _child_in_own_pgroup: bool,
@@ -803,20 +864,26 @@ fn wait_with_signal_and_early_termination(
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
     silent_stall_threshold: Duration,
+    wall_clock_timeout: Option<Duration>,
+    step_timeout: Option<Duration>,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
     let mut early_termination: Option<EarlyTermination> = None;
+    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
     let grace_period = Duration::from_secs(5);
+    let loop_start = Instant::now();
 
     loop {
         if let Some(status) = child.try_wait()? {
             let code = exit_code_from_status(status);
-            let termination = if early_termination.is_some() {
+            let termination = if wall_clock_tripped {
+                claudine::harness::ProcessTermination::TimedOut
+            } else if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
                 claudine::harness::ProcessTermination::Completed
@@ -824,7 +891,17 @@ fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
-        if early_termination.is_none() {
+        if !wall_clock_tripped
+            && early_termination.is_none()
+            && let Some(budget) = wall_clock_timeout
+            && loop_start.elapsed() >= budget
+        {
+            let _ = child.kill();
+            wall_clock_tripped = true;
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     let _ = child.kill();
@@ -837,6 +914,7 @@ fn wait_with_signal_and_early_termination(
         }
 
         if early_termination.is_none()
+            && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
             && let Some(signal) = detect_opencode_hang_termination(
                 metrics,
@@ -844,6 +922,17 @@ fn wait_with_signal_and_early_termination(
                 stop_threshold,
                 silent_stall_threshold,
             )
+        {
+            let _ = child.kill();
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(silence_budget) = step_timeout
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
         {
             let _ = child.kill();
             early_termination = Some(signal);
@@ -900,6 +989,12 @@ fn apply_early_termination_to_summary(
             summary.exit_code = 1;
             summary.is_error = true;
             summary.error_kind = Some("provider_stalled".into());
+            summary.error_message = Some(message.clone());
+        }
+        EarlyTermination::StepTimeout { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("step_timeout".into());
             summary.error_message = Some(message.clone());
         }
     }
@@ -1342,6 +1437,36 @@ fn format_stall_duration(secs: u64) -> String {
     }
 }
 
+/// Detect a step-silence timeout for the harness `step_timeout` field.
+///
+/// Returns `Some(EarlyTermination::StepTimeout)` when the time since the last
+/// stream event exceeds `step_timeout`. Returns `None` when `last_event_at`
+/// is not yet populated (first-event grace so provider startup does not
+/// trip a kill) or when silence is still under budget.
+///
+/// Unlike [`detect_opencode_hang_termination`], this helper does not gate on
+/// `in_flight` state or `provider_status`: any silence past the budget is a
+/// hard kill. The caller is responsible for SIGTERM escalation.
+fn detect_step_timeout(
+    metrics: &LiveMetrics,
+    now: Instant,
+    step_timeout: Duration,
+) -> Option<EarlyTermination> {
+    let state = metrics.lock().ok()?;
+    let last_event_at = state.last_event_at?;
+    let silence = now.saturating_duration_since(last_event_at);
+    if silence >= step_timeout {
+        let silence_text = format_stall_duration(silence.as_secs());
+        Some(EarlyTermination::StepTimeout {
+            message: format!(
+                "no stream activity for {silence_text}; terminating due to step_timeout"
+            ),
+        })
+    } else {
+        None
+    }
+}
+
 fn detect_opencode_hang_termination(
     metrics: &LiveMetrics,
     now: Instant,
@@ -1380,6 +1505,9 @@ fn early_termination_process_outcome(
     early_termination: Option<&EarlyTermination>,
 ) -> claudine::harness::ProcessTermination {
     match early_termination {
+        Some(EarlyTermination::StepTimeout { .. }) => {
+            claudine::harness::ProcessTermination::TimedOut
+        }
         Some(EarlyTermination::CompletedButHung { .. }) => {
             claudine::harness::ProcessTermination::Completed
         }
@@ -1462,6 +1590,7 @@ pub(crate) fn run_child_stream_semantic(
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
+    step_timeout: Option<u64>,
     stderr_noise_prefixes: &[&str],
     suppress_stderr_on_success: bool,
     show_progress_heartbeat: bool,
@@ -1661,10 +1790,19 @@ pub(crate) fn run_child_stream_semantic(
 
     let stall_threshold = stall_threshold_from_env(heartbeat_policy);
     let opencode_hang_threshold = opencode_hang_threshold_from_env();
-    let (exit_code, termination, early_termination) = if let Some(seconds) = timeout {
-        let (code, term) = wait_with_timeout(&mut child, seconds)?;
-        (code, term, None)
-    } else if let Some(rx) = early_terminate_rx {
+    let wall_clock_timeout = timeout.map(Duration::from_secs);
+    let step_timeout_duration = step_timeout.map(Duration::from_secs);
+    let needs_advanced_wait = wall_clock_timeout.is_some()
+        || step_timeout_duration.is_some()
+        || early_terminate_rx.is_some();
+    let (exit_code, termination, early_termination) = if needs_advanced_wait {
+        // Synthesize a disconnected receiver when no stderr bridge is
+        // installed so the wait loop can still enforce wall-clock and
+        // step timeouts for non-OpenCode providers.
+        let rx = early_terminate_rx.unwrap_or_else(|| {
+            let (_tx, rx) = std::sync::mpsc::channel();
+            rx
+        });
         wait_with_signal_and_early_termination(
             &mut child,
             true,
@@ -1672,6 +1810,8 @@ pub(crate) fn run_child_stream_semantic(
             Some(wait_loop_metrics),
             stall_threshold,
             opencode_hang_threshold,
+            wall_clock_timeout,
+            step_timeout_duration,
         )?
     } else {
         let (code, term) = wait_with_signal_handling(&mut child, true)?;
@@ -1679,7 +1819,9 @@ pub(crate) fn run_child_stream_semantic(
     };
 
     if let Some(
-        EarlyTermination::CompletedButHung { message } | EarlyTermination::SilentStall { message },
+        EarlyTermination::CompletedButHung { message }
+        | EarlyTermination::SilentStall { message }
+        | EarlyTermination::StepTimeout { message },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)
@@ -2350,5 +2492,82 @@ mod tests {
             detected,
             Some(EarlyTermination::SilentStall { .. })
         ));
+    }
+
+    #[test]
+    fn detect_step_timeout_fires_after_silence_exceeds_budget() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(6));
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::StepTimeout { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_recent() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(1));
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_last_event_at_is_none() {
+        // First-event grace: a fresh session with no observed SemanticEvent
+        // must never trip the deadline, even if the budget is tiny.
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(1));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn early_termination_process_outcome_maps_step_timeout_to_timed_out() {
+        let termination = EarlyTermination::StepTimeout {
+            message: "no stream activity for 6s; terminating due to step_timeout".into(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::TimedOut);
+    }
+
+    #[test]
+    fn apply_early_termination_step_timeout_sets_step_timeout_error() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::StepTimeout {
+                message: "no stream activity for 6s; terminating due to step_timeout".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("step_timeout"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("no stream activity"),
+        );
     }
 }
