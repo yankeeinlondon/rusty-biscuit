@@ -10,6 +10,7 @@ pub mod boolean_switch;
 pub mod choose;
 pub mod choose_many;
 pub mod choose_one;
+pub mod input_table;
 pub mod text_area_input;
 pub mod text_input;
 
@@ -17,5 +18,6 @@ pub use boolean_switch::{BooleanSwitch, BooleanSwitchState};
 pub use choose::{ChoiceInput, ChoiceOption, SelectionMode};
 pub use choose_many::{ChooseMany, ChooseManyState};
 pub use choose_one::{ChooseOne, ChooseOneState};
+pub use input_table::{CellState, InputTable, InputTableColumn, InputTableState};
 pub use text_area_input::{TextAreaInput, TextAreaInputState};
 pub use text_input::{TextInput, TextInputState};
