@@ -38,8 +38,21 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase5: []
+source_files_during_phase_6:
+  - biscuit-terminal/lib/src/discovery/detection.rs
+docs_updated_during_phase_6:
+  - messenger/docs/user-guide.md
+  - messenger/README.md
+  - messenger/lib/README.md
+  - messenger/cli/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase6:
+  - .claude/skills/messenger/SKILL.md
+  - .claude/skills/messenger/providers.md
+  - .claude/skills/messenger/cli-reference.md
 packages:
   - messenger
+  - biscuit-terminal
 ---
 
 # Discord Webhook Provider — Execution Plan
