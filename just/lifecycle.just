@@ -110,24 +110,28 @@ complete name="":
     selected=""
 
     if [[ -n "${name}" ]]; then
-        mapfile -t matches < <(for dir in features fixes; do
-            [[ -d "${dir}" ]] && fd --type d --max-depth 1 --exact . "${dir}" | while read -r d; do
+        if [[ "${name}" == "fixes" || "${name}" == "features" ]]; then
+            mapfile -t matches < <(fd --type d --max-depth 1 --exclude '_completed' --exclude '_unscheduled' . "${name}" | while read -r d; do
                 base="$(basename "${d}")"
-                if [[ "${base}" == ?????-??-??-*"${name}" ]]; then
-                    echo "${d}"
-                fi
-            done
-        done)
+                [[ "${base}" == ????-??-??-* ]] && echo "${d}"
+            done)
+        else
+            mapfile -t matches < <(for dir in features fixes; do
+                [[ -d "${dir}" ]] && fd --type d --max-depth 1 --exclude '_completed' --exclude '_unscheduled' . "${dir}" | while read -r d; do
+                    base="$(basename "${d}")"
+                    if [[ "${base}" == ????-??-??-*"${name}"* ]]; then
+                        echo "${d}"
+                    fi
+                done
+            done)
+        fi
         if [[ ${#matches[@]} -eq 0 ]]; then
             echo -e "{{red}}No directory matching{{reset}} {{blue}}*${name}{{reset}} {{red}}found under features/ or fixes/{{reset}}"
             exit 1
         elif [[ ${#matches[@]} -eq 1 ]]; then
             selected="${matches[0]}"
         else
-            echo -e "{{yellow}}Multiple matches for{{reset}} {{blue}}${name}{{reset}}:"
-            printf '  %s\n' "${matches[@]}"
-            echo -e "{{yellow}}Please be more specific.{{reset}}"
-            exit 1
+            selected="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Multiple matches found. Choose one')"
         fi
     fi
 
@@ -174,8 +178,15 @@ complete name="":
     dest="${completed_dir}/${base}"
 
     if [[ -e "${dest}" ]]; then
-        echo -e "{{red}}Destination already exists:{{reset}} {{blue}}${dest}{{reset}}"
-        exit 1
+        rm -rf "${selected}"
+        abs_dest="$(just _abs_path "${dest}")"
+        link_dest="$(just _link "${dest}" "${abs_dest}")"
+        title="$(just _title_case "${base#????-??-??-}")"
+        echo
+        echo -e "{{green}}Already completed:{{reset}} {{bold}}{{yellow}}${title}{{reset}}"
+        echo -e "  {{dim}}→{{reset}} {{blue}}${link_dest}{{reset}}"
+        echo
+        exit 0
     fi
 
     mv "${selected}" "${dest}"
