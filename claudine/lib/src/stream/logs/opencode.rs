@@ -501,6 +501,11 @@ pub enum EarlyTermination {
     /// work left. The wrapper terminates the hung process and reports a
     /// synthetic `provider_stalled` failure.
     SilentStall { message: String },
+    /// The harness-configured step-silence budget elapsed with no stream
+    /// event observed. The wrapper terminates the child process and maps
+    /// the outcome to [`crate::harness::ProcessTermination::TimedOut`] so
+    /// the standard `handle_timeout` failure handler runs.
+    StepTimeout { message: String },
 }
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.
