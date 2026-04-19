@@ -45,3 +45,9 @@
 ## Shell Gotchas
 
 - Literal backticks inside a double-quoted shell command trigger command substitution in `zsh`. If a commit message contains Markdown code spans, escape the backticks or build the message with a single-quoted heredoc first.
+- In scripts that run `git add .`, use `git add . || exit 0` to prevent CI failure when there is nothing to commit.
+
+## Rust Idioms
+
+- Prefer `sort_by_key` over `sort_by(|a, b| key(a).cmp(&key(b)))` for single-key sorts — it is more idiomatic and slightly more efficient.
+- Prefer guard clauses (`if condition =>`) in pattern matches over nested `if` blocks inside match arms.
