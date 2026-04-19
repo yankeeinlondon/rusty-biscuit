@@ -172,9 +172,27 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn handle_error(&mut self, env: CodexErrorEnvelope, raw_kind: &str) {
+        let new_kind = env.resolved_kind();
+        let new_message = env.resolved_message();
+
+        // Codex commonly emits more than one terminal error for a single
+        // failure — typically `turn.failed` plus a top-level `error` carrying
+        // the same kind/message (rate-limit hits and auth failures both
+        // surface this way). Without dedup the live stderr surface renders
+        // two identical "Agent Error" blocks. Suppress sink emission when
+        // the new error is byte-for-byte identical to the previously emitted
+        // one, while still keeping summary state fresh.
+        let is_duplicate = self.is_error
+            && self.error_kind == new_kind
+            && self.error_message == new_message;
+
         self.is_error = true;
-        self.error_kind = env.resolved_kind();
-        self.error_message = env.resolved_message();
+        self.error_kind = new_kind;
+        self.error_message = new_message;
+
+        if is_duplicate {
+            return;
+        }
 
         let mut extra = self.base_extra(raw_kind);
         if let Some(kind) = &self.error_kind {
@@ -1090,6 +1108,57 @@ mod tests {
             }
             other => panic!("expected Error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn duplicate_terminal_errors_are_deduplicated() {
+        let (events, mut parser) = new_parser();
+        // Simulate the real Codex rate-limit transcript: `turn.failed`
+        // followed by a top-level `error` carrying the same resolved
+        // kind + message. The live stderr surface previously rendered
+        // both as identical "Agent Error" blocks.
+        parser
+            .feed_line(
+                r#"{"type":"turn.failed","error":{"type":"rate_limit","message":"You've hit your usage limit."}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"error","error_type":"rate_limit","error_message":"You've hit your usage limit."}"#,
+            )
+            .unwrap();
+        let error_count = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, SemanticEvent::Error { .. }))
+            .count();
+        assert_eq!(error_count, 1, "duplicate errors should collapse to one");
+        let summary = parser.finish(1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("rate_limit"));
+    }
+
+    #[test]
+    fn distinct_terminal_errors_are_both_emitted() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"stream.error","error":{"type":"network","message":"socket closed"}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+            )
+            .unwrap();
+        let error_count = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, SemanticEvent::Error { .. }))
+            .count();
+        assert_eq!(error_count, 2);
     }
 
     #[test]
