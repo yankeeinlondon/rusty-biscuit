@@ -252,6 +252,7 @@ pub(crate) fn execute_sequence(
             output: shared.output,
             system_prompt_args,
             timeout: shared.timeout,
+            step_timeout: None,
             operation: shared.operation.clone(),
             sandbox: shared.sandbox,
             repo: shared.repo,
