@@ -205,6 +205,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_missing_transclusions,
             allow_any_missing_reference,
             allow_ctx_override,
+            allow_invalid_frontmatter_assignment,
+            allow_reassigned_frontmatter_property,
             timeout,
             allow_shell_timeout,
             perf,
@@ -228,6 +230,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 indent,
                 &allow,
                 allow_ctx_override,
+                allow_invalid_frontmatter_assignment,
+                allow_reassigned_frontmatter_property,
                 timeout,
                 allow_shell_timeout,
                 perf,
@@ -430,6 +434,8 @@ pub fn run_compose(
     indent: Option<usize>,
     allow: &ComposeAllowFlags,
     allow_ctx_override: bool,
+    allow_invalid_frontmatter_assignment: bool,
+    allow_reassigned_frontmatter_property: bool,
     timeout_secs: Option<u64>,
     allow_shell_timeout: bool,
     perf: bool,
@@ -601,6 +607,10 @@ pub fn run_compose(
     }
     options = options.with_list_spacing(list_spacing);
     options = options.with_allow_ctx_override(allow_ctx_override);
+    options = options
+        .with_allow_invalid_frontmatter_assignment(allow_invalid_frontmatter_assignment);
+    options = options
+        .with_allow_reassigned_frontmatter_property(allow_reassigned_frontmatter_property);
     options = options.with_perf(perf);
     if let Some(size) = indent {
         options = options.with_indent_size(size);
