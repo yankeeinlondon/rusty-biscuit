@@ -252,9 +252,11 @@ impl<S: SemanticEventSink> Clone for SharedSemanticSink<S> {
 
 impl<S: SemanticEventSink> SemanticEventSink for SharedSemanticSink<S> {
     fn on_semantic_event(&mut self, event: SemanticEvent) {
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.on_semantic_event(event);
-        }
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.on_semantic_event(event);
     }
 }
 
@@ -604,6 +606,57 @@ mod tests {
         });
         let guard = sink.inner().lock().unwrap();
         assert_eq!(guard.events.len(), 2);
+    }
+
+    struct PanicOnceSink {
+        events: Vec<SemanticEvent>,
+        has_panicked: bool,
+    }
+
+    impl Default for PanicOnceSink {
+        fn default() -> Self {
+            Self {
+                events: Vec::new(),
+                has_panicked: false,
+            }
+        }
+    }
+
+    impl SemanticEventSink for PanicOnceSink {
+        fn on_semantic_event(&mut self, event: SemanticEvent) {
+            if !self.has_panicked {
+                self.has_panicked = true;
+                panic!("intentional panic to poison shared sink mutex");
+            }
+            self.events.push(event);
+        }
+    }
+
+    #[test]
+    fn shared_sink_recovers_after_poisoned_lock() {
+        let sink = SharedSemanticSink::new(PanicOnceSink::default());
+        let mut first = sink.clone();
+        let mut second = sink.clone();
+
+        let first_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            first.on_semantic_event(SemanticEvent::Info {
+                message: "boom".into(),
+                extra: json!({}),
+            });
+        }));
+        assert!(first_result.is_err());
+
+        second.on_semantic_event(SemanticEvent::Warning {
+            message: "still alive".into(),
+            extra: json!({}),
+        });
+
+        let guard = match sink.inner().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        assert_eq!(guard.events.len(), 1);
+        assert_eq!(guard.events[0].kind_str(), "warning");
     }
 
     #[test]

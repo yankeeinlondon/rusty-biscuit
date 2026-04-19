@@ -186,3 +186,12 @@ _get_spec_doc dir:
         [[ "${spec}" == "NONE" ]] && spec=""
     fi
     echo "${spec}"
+
+# Convert the passed string to kebab-case: "hello_world" or "helloWorld" → "hello-world"
+_dasherize str:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    s="{{str}}"
+    s="${s//_/-}"
+    s="${s// /-}"
+    echo "${s}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_ ]+/-/g' | sed -E 's/^-//'

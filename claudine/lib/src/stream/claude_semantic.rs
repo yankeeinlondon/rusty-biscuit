@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use chrono::Local;
 use serde_json::{Map, Value};
 
 use super::parser::{SemanticStreamParser, StreamParseError};
@@ -31,6 +32,17 @@ use crate::events::Provider;
 /// over cosmetic ordering (spec: "preserving streaming wins over
 /// cosmetic ordering").
 const MAX_PRE_INIT_HOOK_EVENTS: usize = 32;
+
+/// Maximum number of bytes we will accumulate in a single pending
+/// `tool_use.input_json` buffer before giving up.
+///
+/// Claude streams tool inputs as a series of `input_json_delta` events
+/// that the parser concatenates until the accumulated string parses as
+/// JSON. A malformed or truncated stream that never closes the JSON
+/// would otherwise grow the buffer without bound and OOM a long-lived
+/// wrapper process. At 1 MiB we're well past any legitimate tool-input
+/// payload but still small enough to recover from a transient outage.
+const MAX_PENDING_TOOL_USE_INPUT_BYTES: usize = 1 << 20;
 
 /// Known raw event `type` strings that are NOT modeled by [`ClaudeEvent`] but
 /// should still map to specific semantic events rather than
@@ -745,6 +757,49 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         let Some(pending) = self.pending_tool_use.as_mut() else {
             return false;
         };
+        // Cap the accumulated buffer so a malformed / unterminated stream
+        // cannot drive the wrapper to OOM. If we exceed the cap, drop the
+        // pending entry and emit a terminal semantic error so operators
+        // see why the tool call never landed.
+        if pending.input_json.len().saturating_add(partial_json.len())
+            > MAX_PENDING_TOOL_USE_INPUT_BYTES
+        {
+            let dropped = self
+                .pending_tool_use
+                .take()
+                .expect("pending tool use present");
+            let tool_name = dropped.name.as_deref().unwrap_or("<unknown>").to_string();
+            let message = format!(
+                "Dropping pending tool_use `{tool_name}`: input_json exceeded {} bytes without \
+                 closing JSON",
+                MAX_PENDING_TOOL_USE_INPUT_BYTES
+            );
+            self.is_error = true;
+            if self.error_message.is_none() {
+                self.error_message = Some(message.clone());
+            }
+            if !self.terminal_error_emitted {
+                let mut extra = self.base_extra();
+                extra.insert("raw_kind".into(), Value::from("input_json_overflow"));
+                if let Some(id) = dropped.id.as_deref() {
+                    extra.insert("tool_id".into(), Value::from(id));
+                }
+                if let Some(name) = dropped.name.as_deref() {
+                    extra.insert("tool_name".into(), Value::from(name));
+                }
+                extra.insert(
+                    "input_bytes_seen".into(),
+                    Value::from(dropped.input_json.len()),
+                );
+                self.sink.on_semantic_event(SemanticEvent::Error {
+                    message,
+                    terminal: false,
+                    kind: SemanticErrorKind::AgentNative,
+                    extra: Value::Object(extra),
+                });
+            }
+            return true;
+        }
         pending.input_json.push_str(partial_json);
         let Ok(input) = serde_json::from_str::<Value>(&pending.input_json) else {
             return true;
@@ -948,6 +1003,39 @@ fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticEr
     SemanticErrorKind::AgentNative
 }
 
+fn format_reset_hint(reset_at: chrono::DateTime<chrono::Utc>) -> String {
+    let local = reset_at.with_timezone(&Local);
+    format!(
+        "Window resets on {} at {}",
+        local.format("%Y-%m-%d"),
+        local.format("%H:%M")
+    )
+}
+
+/// Map an Anthropic `rateLimitType` string to a human-readable window label.
+///
+/// Anthropic's documented value is `"usage"`, but in practice the stream also
+/// emits bucket-specific hints (e.g. `"five_hour"`, `"seven_day"`). Unknown or
+/// generic types fall back to the bucket-agnostic phrase so the message stays
+/// accurate for limits that aren't session-scoped.
+fn rate_limit_window_label(rate_limit_type: Option<&str>) -> &'static str {
+    let Some(kind) = rate_limit_type else {
+        return "current rate limit window";
+    };
+    let lower = kind.to_ascii_lowercase();
+    let is_week = lower.contains("week") || lower.contains("7d") || lower.contains("seven");
+    let is_session = lower.contains("session") || lower.contains("5h") || lower.contains("five");
+    if is_week && lower.contains("opus") {
+        "weekly Opus usage window"
+    } else if is_week {
+        "weekly usage window"
+    } else if is_session {
+        "5-hour session window"
+    } else {
+        "current rate limit window"
+    }
+}
+
 fn render_claude_rate_limit_message(event: &ClaudeRateLimit) -> Option<String> {
     if let Some(message) = event
         .resolved_message()
@@ -957,29 +1045,33 @@ fn render_claude_rate_limit_message(event: &ClaudeRateLimit) -> Option<String> {
         return Some(message.to_string());
     }
 
+    let window = rate_limit_window_label(event.resolved_rate_limit_type());
     let reset_hint = event
         .resolved_reset_at()
-        .map(|reset| {
-            format!(
-                "; next session window opens at {}",
-                reset.format("%Y-%m-%d %H:%M:%S UTC")
-            )
-        })
+        .map(format_reset_hint)
+        .map(|hint| format!(". {hint}"))
         .unwrap_or_default();
 
     if event.resolved_overage_status() == Some("blocked")
         || event.resolved_status() == Some("limited")
         || event.resolved_is_throttled() == Some(true)
     {
-        return Some(format!("Claude session usage limit reached{reset_hint}"));
+        return Some(format!(
+            "Claude rate limit reached: your {window} is fully consumed{reset_hint}"
+        ));
     }
 
     match event.resolved_status() {
         Some("approaching_limit") => Some(format!(
-            "Claude session usage limit approaching{reset_hint}"
+            "Claude rate limit warning: your {window} is approaching the cap{reset_hint}"
+        )),
+        Some("allowed_warning") => Some(format!(
+            "Claude rate limit notice: your {window} is past the halfway mark{reset_hint}"
         )),
         Some("allowed") | None => None,
-        Some(status) => Some(format!("Claude rate limit status: {status}{reset_hint}")),
+        Some(status) => Some(format!(
+            "Claude rate limit notice ({status}): {window} status update{reset_hint}"
+        )),
     }
 }
 
@@ -1237,8 +1329,9 @@ mod tests {
         let events = sink.snapshot();
         match &events[0] {
             SemanticEvent::Warning { message, extra } => {
-                assert!(message.contains("approaching"));
-                assert!(message.contains("next session window opens at"));
+                assert!(message.contains("rate limit warning"));
+                assert!(message.contains("approaching the cap"));
+                assert!(message.contains("Window resets on"));
                 assert_eq!(
                     extra.get("rate_limit_status").and_then(Value::as_str),
                     Some("approaching_limit")
@@ -1253,16 +1346,57 @@ mod tests {
         let summary = parser.finish(0);
         let rate_limit = summary.rate_limit.expect("rate limit summary");
         assert_eq!(rate_limit.is_throttled, Some(false));
-        assert_eq!(
-            rate_limit.message.as_deref(),
-            Some(
-                "Claude session usage limit approaching; next session window opens at 2024-04-01 19:33:20 UTC"
-            )
+        let msg = rate_limit.message.as_deref().expect("rate limit message");
+        assert!(
+            msg.starts_with(
+                "Claude rate limit warning: your current rate limit window is approaching the cap"
+            ),
+            "unexpected message: {msg}"
+        );
+        assert!(
+            msg.contains("Window resets on"),
+            "unexpected message: {msg}"
         );
         assert_eq!(
             rate_limit.reset_at.map(|dt| dt.timestamp()),
             Some(1712000000)
         );
+    }
+
+    #[test]
+    fn allowed_warning_status_renders_soft_notice_with_correct_window() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1712000000,"rateLimitType":"seven_day","overageStatus":"allowed"}}"#,
+            )
+            .unwrap();
+        let events = sink.snapshot();
+        match &events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert!(
+                    message.starts_with("Claude rate limit notice"),
+                    "expected soft notice, got: {message}"
+                );
+                assert!(
+                    message.contains("weekly usage window"),
+                    "expected weekly window label, got: {message}"
+                );
+                assert!(
+                    !message.contains("capped soon") && !message.contains("almost fully"),
+                    "allowed_warning must not use cap-imminent language: {message}"
+                );
+                assert_eq!(
+                    extra.get("rate_limit_status").and_then(Value::as_str),
+                    Some("allowed_warning")
+                );
+                assert_eq!(
+                    extra.get("rate_limit_type").and_then(Value::as_str),
+                    Some("seven_day")
+                );
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1697,6 +1831,45 @@ mod tests {
             "captured Claude fixture must produce zero non-hook ProviderExtension events; found {}: {:#?}",
             ext.len(),
             ext.iter().take(3).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn unterminated_input_json_delta_is_bounded() {
+        let (sink, mut parser) = new_parser();
+        // Open a pending tool_use but never close the JSON.
+        parser
+            .feed_line(
+                r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"bash"}}"#,
+            )
+            .unwrap();
+
+        // Craft a chunk larger than the cap to trigger the overflow path
+        // in a single delta.
+        let junk = "x".repeat(MAX_PENDING_TOOL_USE_INPUT_BYTES + 10);
+        let line = serde_json::json!({
+            "type": "content_block_delta",
+            "delta": {"type": "input_json_delta", "partial_json": junk},
+        })
+        .to_string();
+        parser.feed_line(&line).unwrap();
+
+        let events = sink.snapshot();
+        let overflow: Vec<&SemanticEvent> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    SemanticEvent::Error { extra, .. }
+                        if extra.get("raw_kind").and_then(Value::as_str)
+                            == Some("input_json_overflow")
+                )
+            })
+            .collect();
+        assert_eq!(
+            overflow.len(),
+            1,
+            "expected exactly one overflow Error event; got {events:#?}"
         );
     }
 

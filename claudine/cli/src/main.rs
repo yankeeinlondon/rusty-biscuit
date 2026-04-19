@@ -7,6 +7,7 @@ mod args;
 mod argv;
 mod cli_utils;
 mod commands;
+mod completion;
 mod log;
 mod output;
 mod provider_values;
@@ -102,9 +103,16 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     color_eyre::install()?;
+
+    // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
+    // `maybe_complete` writes either a registration snippet or candidate
+    // list to stdout and exits before returning. In normal runs it is a
+    // no-op and control falls through to argv normalization. Must run
+    // *before* `argv::normalize(...)` so the normalizer's COMPLETE guard
+    // never has to absorb a completion subprocess on the happy path.
+    completion::maybe_complete();
 
     let argv: Vec<OsString> = argv::normalize(std::env::args_os().collect());
 
@@ -112,10 +120,23 @@ async fn main() -> Result<()> {
     // disabled before parsing. Uses the same token stream the parse will see.
     let is_plain = argv.iter().any(|tok| tok.to_str() == Some("--plain"));
     if is_plain {
-        // NO_COLOR is a well-established convention for disabling terminal colors
-        unsafe { std::env::set_var("NO_COLOR", "1") };
+        // SAFETY: this runs during single-threaded process bootstrap, before
+        // the Tokio runtime is constructed and before any worker threads or
+        // background tasks exist. No concurrent environment access is possible
+        // yet, so mutating the process environment upholds Rust 2024's
+        // `std::env::set_var` safety contract.
+        unsafe {
+            std::env::set_var("NO_COLOR", "1");
+        }
     }
 
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async_main(argv))
+}
+
+async fn async_main(argv: Vec<OsString>) -> Result<()> {
     let cli = parse_cli_from(&argv);
     log::set_plain(cli.plain);
     telemetry::init_tracing(cli.debug);
@@ -136,8 +157,12 @@ async fn main() -> Result<()> {
     };
 
     // Commands that must work without config (handle is a hook callback,
-    // completions is shell setup). Everything else requires config.
-    let needs_config = !matches!(command, Commands::Handle(_) | Commands::Completions(_));
+    // completions is shell setup, __complete runs under a shell completion
+    // pipeline). Everything else requires config.
+    let needs_config = !matches!(
+        command,
+        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_)
+    );
     if needs_config {
         ensure_config_exists().await?;
     }
@@ -145,6 +170,7 @@ async fn main() -> Result<()> {
     match command {
         Commands::Handle(args) => commands::handle::run(args).await,
         Commands::Completions(args) => commands::completions::run(args),
+        Commands::Complete(args) => commands::completions::run_complete(args),
         Commands::Config(args) => commands::config_tui::run(args).await,
         Commands::Sync(args) => commands::sync::run(args).await,
         Commands::Hooks(args) => commands::hooks::run(args, cli.verbose > 0),

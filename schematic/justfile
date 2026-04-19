@@ -221,18 +221,6 @@ deps:
 readme:
     _readme_files schematic
 
-# review this package using the Codex CLI
-review *args="":
-    @clear
-    @echo -e "Performing a code review on the {{BOLD}}{{DEFINE_NAME}}{{RESET}} package"
-    @echo ""
-    @cd .. && codex exec "/code-review the code in the {{DEFINE_NAME}} package; use the rust, {{DEFINE}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{DEFINE}}/docs/{YYYY}-{MM}. {{DEFINE}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{DEFINE_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{DEFINE_NAME}} review."  && exit 1 )
-    @echo
-    @echo -e "Code Review for the {{BLUE}}{{DEFINE_NAME}}{{RESET}} package has completed"
-    @just _speak "Review for {{DEFINE_NAME}} package has completed."
-
-
-
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:

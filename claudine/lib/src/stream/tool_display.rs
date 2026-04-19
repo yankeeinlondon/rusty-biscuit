@@ -23,9 +23,11 @@ pub enum ToolStatus {
     Pending,
 }
 
-/// Display-ready tool event. Per spec: status wins over summary on incoming
-/// events; the formatter NEVER writes a glyph literally — it populates a
-/// biscuit-terminal `Status::ToolUse` instead.
+/// Display-ready tool event. Status and summary can both be populated on
+/// incoming events so successful tool results can surface the same slot
+/// content the paired outgoing `→ Name(...)` arrow used. The formatter
+/// NEVER writes a glyph literally — it populates a biscuit-terminal
+/// `Status::ToolUse` instead.
 ///
 /// `error_detail` carries a short, human-readable snippet describing *why*
 /// an incoming event failed. Populated only when `status == Some(Error)`.
@@ -516,10 +518,14 @@ impl ToolCallDisplay {
         })
     }
 
-    /// Build an incoming display from a `SemanticEvent::ToolResult`. Per
-    /// spec: status always wins over summary in the dim slot when present;
-    /// summary is consulted as a fallback only when status is absent. When
-    /// status resolves to [`ToolStatus::Error`], a short `error_detail`
+    /// Build an incoming display from a `SemanticEvent::ToolResult`. Status
+    /// and summary can co-exist so that successful incoming events surface
+    /// the same slot content (e.g. file path, shell command) that the
+    /// paired outgoing `→ Name(...)` arrow used. The summary is derived
+    /// from `extra["input"]` when present, then from `output`, so unknown
+    /// tool shapes still degrade gracefully to a slot-less rendering.
+    ///
+    /// When status resolves to [`ToolStatus::Error`], a short `error_detail`
     /// snippet is derived from `exit_code` + the tail of `output` so the
     /// user sees the failure reason alongside the red `error` label.
     pub fn from_result(event: &SemanticEvent) -> Option<Self> {
@@ -551,26 +557,20 @@ impl ToolCallDisplay {
             "pending" | "running" | "in_progress" => Some(ToolStatus::Pending),
             _ => None,
         });
-        let summary = if is_file_tool_name(raw_name) {
-            // File tools carry the file path as their summary. Keep it
-            // populated regardless of status so renderers can annotate
-            // `← Read(successful, <path>)` and `← Read(error, <path>)`
-            // with the same file reference the outgoing `→ Read(<path>)`
-            // used. The raw output body is never used here — only the
-            // structured `file_path` input — so there is no risk of
-            // leaking raw bytes into the status slot.
-            extra
-                .get("input")
-                .and_then(|v| extract_tool_summary(raw_name, v))
-        } else if parsed_status.is_some() {
-            None
-        } else {
-            // Status absent: fall back to a derived output summary.
-            output
-                .as_ref()
-                .or_else(|| extra.get("input"))
-                .and_then(|v| extract_tool_summary(raw_name, v))
-        };
+        // Prefer the structured input captured alongside the paired tool
+        // call so successful results render with the same slot content the
+        // outgoing arrow used. Fall back to the raw output body when no
+        // input summary is available — `extract_tool_summary` returns
+        // `None` gracefully for shapes it does not know, which keeps the
+        // slot empty for tools that never had a meaningful input.
+        let summary = extra
+            .get("input")
+            .and_then(|v| extract_tool_summary(raw_name, v))
+            .or_else(|| {
+                output
+                    .as_ref()
+                    .and_then(|v| extract_tool_summary(raw_name, v))
+            });
         let error_detail = if parsed_status == Some(ToolStatus::Error) {
             extract_error_detail(*exit_code, output.as_ref(), extra)
         } else {
@@ -741,18 +741,44 @@ mod from_event_tests {
     }
 
     #[test]
-    fn from_result_uses_status_and_drops_summary_when_status_present() {
+    fn from_result_keeps_summary_alongside_status_for_shell_success() {
+        // Per the 2026-04-18 OpenCode reporting contract, a successful
+        // shell result must surface the same slot content the outgoing
+        // arrow carried. Status and summary are co-equal: both populate
+        // so the rendered line reads `← Bash(successful, bash ls -la)`.
         let event = SemanticEvent::ToolResult {
             name: Some("Bash".into()),
             id: None,
             status: Some("success".into()),
             exit_code: None,
-            output: Some(json!({"stdout": "ok"})),
+            output: None,
+            extra: json!({"input": {"command": "ls -la"}}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(display.status, Some(ToolStatus::Success));
+        assert_eq!(
+            display.summary.as_deref(),
+            Some("bash ls -la"),
+            "successful shell results must keep the cached command summary"
+        );
+    }
+
+    #[test]
+    fn from_result_falls_back_to_output_when_input_absent() {
+        // Unknown / synthetic tools without a cached input still surface a
+        // best-effort output-derived summary so the slot is not silently
+        // dropped.
+        let event = SemanticEvent::ToolResult {
+            name: Some("Bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: None,
+            output: Some(json!({"command": "pwd"})),
             extra: json!({}),
         };
         let display = ToolCallDisplay::from_result(&event).unwrap();
         assert_eq!(display.status, Some(ToolStatus::Success));
-        assert!(display.summary.is_none(), "status wins over summary");
+        assert_eq!(display.summary.as_deref(), Some("bash pwd"));
     }
 
     #[test]

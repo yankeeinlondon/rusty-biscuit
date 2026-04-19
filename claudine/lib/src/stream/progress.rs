@@ -91,6 +91,13 @@ pub struct LiveMetricsState {
     pub token_usage: Option<NormalizedTokenUsage>,
     /// Latest known cost-in-USD for the session.
     pub cost_usd: Option<f64>,
+    /// Latest provider-reported completion / stop status.
+    ///
+    /// OpenCode often stops at `step_finish.part.reason = "stop"` without a
+    /// dedicated terminal event. The wrapper's hang-recovery path inspects
+    /// this field to distinguish "answer finished but process never exited"
+    /// from a generic silent stall.
+    pub provider_status: Option<String>,
     /// Wall-clock time of the most recent observed event of any kind (tool
     /// start, tool end, or assistant text delta). The heartbeat suppresses
     /// ticks when this is recent so busy streams stay quiet; a stale value
@@ -109,6 +116,28 @@ pub struct LiveMetricsState {
 }
 
 impl LiveMetricsState {
+    fn remove_in_flight_tool(&mut self, id: Option<&str>, name: Option<&str>) {
+        if let Some(id) = id
+            && self.in_flight.remove(id).is_some()
+        {
+            return;
+        }
+        if let Some(name) = name {
+            self.in_flight.remove(name);
+        }
+    }
+
+    fn remove_in_flight_subagent(&mut self, id: Option<&str>, name: Option<&str>) {
+        if let Some(id) = id
+            && self.in_flight_subagents.remove(id).is_some()
+        {
+            return;
+        }
+        if let Some(name) = name {
+            self.in_flight_subagents.remove(name);
+        }
+    }
+
     pub fn record_tool_start(&mut self, id: String, name: Option<String>, now: Instant) {
         self.in_flight.insert(
             id,
@@ -190,9 +219,11 @@ impl LiveMetricsState {
                 );
             }
             SemanticEvent::ToolResult { id, .. } => {
-                if let Some(id) = id {
-                    self.in_flight.remove(id.as_str());
-                }
+                let name = match event {
+                    SemanticEvent::ToolResult { name, .. } => name.as_deref(),
+                    _ => None,
+                };
+                self.remove_in_flight_tool(id.as_deref(), name);
                 self.done_count += 1;
             }
             SemanticEvent::SubagentStart { id, name, .. } => {
@@ -209,21 +240,36 @@ impl LiveMetricsState {
                 );
             }
             SemanticEvent::SubagentStop { id, .. } => {
-                if let Some(id) = id {
-                    self.in_flight_subagents.remove(id.as_str());
-                }
+                let name = match event {
+                    SemanticEvent::SubagentStop { name, .. } => name.as_deref(),
+                    _ => None,
+                };
+                self.remove_in_flight_subagent(id.as_deref(), name);
                 self.subagent_done_count += 1;
             }
             SemanticEvent::TurnComplete {
+                provider_status,
                 token_usage,
                 cost_usd,
                 ..
             } => {
+                if let Some(status) = provider_status {
+                    self.provider_status = Some(status.clone());
+                }
                 if let Some(usage) = token_usage {
                     self.token_usage = Some(usage.clone());
                 }
                 if let Some(cost) = cost_usd {
                     self.cost_usd = Some(*cost);
+                }
+            }
+            SemanticEvent::Info { extra, .. } => {
+                let step_phase = extra.get("step_phase").and_then(serde_json::Value::as_str);
+                let reason = extra.get("reason").and_then(serde_json::Value::as_str);
+                if step_phase == Some("finish")
+                    && let Some(reason) = reason.filter(|reason| !reason.is_empty())
+                {
+                    self.provider_status = Some(reason.to_string());
                 }
             }
             _ => {}
@@ -647,6 +693,38 @@ mod tests {
         }
 
         #[test]
+        fn tool_result_without_id_uses_name_fallback_to_clear_in_flight() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::ToolCall {
+                    name: Some("Task".into()),
+                    id: None,
+                    input: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.in_flight.len(), 1);
+            state.observe_event(
+                &SemanticEvent::ToolResult {
+                    name: Some("Task".into()),
+                    id: None,
+                    status: Some("success".into()),
+                    exit_code: None,
+                    output: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert!(
+                state.in_flight.is_empty(),
+                "id-less completion should clear the name-keyed in-flight tool"
+            );
+            assert_eq!(state.done_count, 1);
+        }
+
+        #[test]
         fn subagent_start_stop_tracked() {
             let mut state = LiveMetricsState::default();
             let now = Instant::now();
@@ -673,12 +751,41 @@ mod tests {
         }
 
         #[test]
+        fn subagent_stop_without_id_uses_name_fallback() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::SubagentStart {
+                    name: Some("researcher".into()),
+                    id: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.in_flight_subagents.len(), 1);
+            state.observe_event(
+                &SemanticEvent::SubagentStop {
+                    name: Some("researcher".into()),
+                    id: None,
+                    status: Some("success".into()),
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert!(
+                state.in_flight_subagents.is_empty(),
+                "id-less stop should clear the name-keyed in-flight subagent"
+            );
+            assert_eq!(state.subagent_done_count, 1);
+        }
+
+        #[test]
         fn turn_complete_updates_token_usage_and_cost() {
             let mut state = LiveMetricsState::default();
             let now = Instant::now();
             state.observe_event(
                 &SemanticEvent::TurnComplete {
-                    provider_status: None,
+                    provider_status: Some("stop".into()),
                     token_usage: Some(NormalizedTokenUsage {
                         input: Some(100),
                         output: Some(50),
@@ -692,8 +799,26 @@ mod tests {
                 now,
             );
             assert_eq!(state.cost_usd, Some(0.01));
+            assert_eq!(state.provider_status.as_deref(), Some("stop"));
             let tu = state.token_usage.unwrap();
             assert_eq!(tu.input, Some(100));
+        }
+
+        #[test]
+        fn step_finish_info_updates_provider_status() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::Info {
+                    message: "step_finish".into(),
+                    extra: serde_json::json!({
+                        "step_phase": "finish",
+                        "reason": "tool-calls"
+                    }),
+                },
+                now,
+            );
+            assert_eq!(state.provider_status.as_deref(), Some("tool-calls"));
         }
 
         #[test]

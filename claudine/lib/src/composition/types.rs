@@ -171,6 +171,12 @@ pub struct CompositionExecutionRequest {
     pub system_prompt_args: crate::system_prompt::SystemPromptArgs,
     /// Timeout in seconds for non-interactive mode.
     pub timeout: Option<u64>,
+    /// Step-silence timeout in seconds for structured streaming runs.
+    ///
+    /// Resets on every stream event; when silence exceeds this budget the
+    /// child is killed with `TimedOut`. Ignored in capture and passthrough
+    /// modes (warning emitted). `None` means no silence deadline is applied.
+    pub step_timeout: Option<u64>,
     /// OPERATION env var value for the composed session.
     pub operation: Option<String>,
     /// Enable provider-specific sandboxing.

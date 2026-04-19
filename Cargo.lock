@@ -1312,7 +1312,6 @@ dependencies = [
  "criterion",
  "darkmatter",
  "dirs",
- "fs2",
  "indexmap 2.13.0",
  "messenger",
  "playa",

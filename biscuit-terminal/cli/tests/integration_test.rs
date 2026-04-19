@@ -1569,10 +1569,7 @@ fn test_image_nonexistent_file_errors_to_stderr() {
         "should fail with nonexistent file"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.is_empty(),
-        "stderr should contain an error message"
-    );
+    assert!(!stderr.is_empty(), "stderr should contain an error message");
 }
 
 #[test]
@@ -1583,10 +1580,7 @@ fn test_bar_chart_invalid_data_errors_to_stderr() {
         .output()
         .expect("Failed to execute command");
 
-    assert!(
-        !output.status.success(),
-        "should fail with invalid data"
-    );
+    assert!(!output.status.success(), "should fail with invalid data");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("Invalid number"),

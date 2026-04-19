@@ -1,4 +1,6 @@
-# TODAY := `date +%F`
+Today := `date +%F`
+set allow-duplicate-variables
+set allow-duplicate-recipes
 
 import "./util.just"
 
@@ -52,7 +54,7 @@ implement-plan filter="":
     while true; do
         claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y
         echo
-        git add .
+        git add . || exit 0
         just commit
         echo
         [[ ${current} -ge ${phases} ]] && break
@@ -60,6 +62,103 @@ implement-plan filter="":
     done
     echo
     echo -e "The {{blue}}${link}{{reset}} plan has completed ({{dim}}{{italic}}${phases} phases{{reset}})"
+    echo
+
+
+
+# Specify a feature with a spec file, a design file, or both which has now been implemented
+# and you want to run a review on.
+review iteration="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    doc="$(just _choose_feature)"
+    dir="$(dirname "${doc}")"
+    if [[ "${doc}" == *"design"* ]]; then
+        design="${doc}"
+        mapfile -t files < <(fd -g '*spec*.md' "${dir}")
+        if [[ ${#files[@]} -eq 1 ]]; then
+            spec="${files[0]}"
+        elif [[ ${#files[@]} -eq 0 ]]; then
+            spec=""
+        else
+            spec="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
+            [[ "${spec}" == "NONE" ]] && spec=""
+        fi
+    else
+        spec="${doc}"
+        mapfile -t files < <(fd -g '*design*.md' "${dir}")
+        if [[ ${#files[@]} -eq 1 ]]; then
+            design="${files[0]}"
+        elif [[ ${#files[@]} -eq 0 ]]; then
+            design=""
+        else
+            design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
+            [[ "${design}" == "NONE" ]] && design=""
+        fi
+    fi
+    feature="$(basename "${dir}")"
+    feature="$(just _title_case ${feature#????-??-??-})"
+
+    echo
+    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
+    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
+
+    agent="$(just _choose_agent)"
+
+    echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
+    echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
+
+    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" iteration={{iteration}}
+    review_file="${dir}/review-${iteration}.md"
+    link="$(just _link "${review_file}" "$(_abs_path "${review_file}")")"
+    echo
+    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: ${link}"
+    echo
+
+
+implement-review-suggestions feat="" iteration="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    doc="$(just _choose_feature {{feat}}'')"
+    dir="$(dirname "${doc}")"
+    if [[ "${doc}" == *"design"* ]]; then
+        design="${doc}"
+        mapfile -t files < <(fd -g '*spec*.md' "${dir}")
+        if [[ ${#files[@]} -eq 1 ]]; then
+            spec="${files[0]}"
+        elif [[ ${#files[@]} -eq 0 ]]; then
+            spec=""
+        else
+            spec="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
+            [[ "${spec}" == "NONE" ]] && spec=""
+        fi
+    else
+        spec="${doc}"
+        mapfile -t files < <(fd -g '*design*.md' "${dir}")
+        if [[ ${#files[@]} -eq 1 ]]; then
+            design="${files[0]}"
+        elif [[ ${#files[@]} -eq 0 ]]; then
+            design=""
+        else
+            design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
+            [[ "${design}" == "NONE" ]] && design=""
+        fi
+    fi
+    feature="$(basename "${dir}")"
+    feature="$(just _title_case ${feature#????-??-??-})"
+
+    review="review-{{iteration}}.md"
+
+    echo -e "🏃‍♂️ Starting the {{italic}}implementation{{reset}} of the review suggestions on the {{bold}}{{yellow}}${feature}{{reset}} feature ({{dim}}{{blue}}${review}{{reset}})"
+    echo
+    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
+    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
+    echo -e "    - Design File: {{dim}}$(basename ${review}){{reset}}"
+    echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
+
+    claudine compose "@prompts/implement-review-suggestions.md" -y --set "{ dir: \"${dir}\", spec: \"$(basename ${spec})\", design: \"$(basename ${design})\" }"
+    echo
+    echo -e "🎉 the {{italic}}implementation{{reset}} of the review ({{dim}}{{blue}}${review}{{reset}}) for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
 
 # adds a complimentary tech design to the specification file
@@ -83,7 +182,7 @@ design filter="":
     link="$()"
     echo -e "We now have a {{bold}}technical design{{reset}} document for this specification"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
-        plan-feature "${file}" "${dir}/tech-design.md"
+        just plan-feature "${file}" "${dir}/tech-design.md"
     fi
 
 clarify filter="":
@@ -97,7 +196,8 @@ clarify filter="":
     fi
 
     agent="$(just _choose_agent)"
-    claudine compose "@prompts/clarify.md" --${agent} doc="@"$(sniff repo package-area)"/${file}" -y -i
+    doc_path="$(sniff repo package-area)/${file}"
+    claudine compose "@prompts/clarify.md" --${agent} -y -i --set "{ doc: \"@${doc_path}\" }"
     link="$(just _link $(basename "${file}") "${file}")"
     echo -e "The {{blue}}${link}{{reset}} file has been {{italic}}clarified{{reset}}"
 
@@ -259,6 +359,36 @@ feature feat:
         rm -f "${file}"
         echo -e "the feature had no content so was removed"
     fi
+
+
+
+# adds a new fix topic to the package area
+fix name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    descriptive="$(just _title_case "{{name}}")"
+    dir="{{Today}}-$(just _dasherize "{{name}}")"
+    relative_dir="fixes/${dir}"
+    mkdir -p "${relative_dir}"
+    spec="${relative_dir}/spec.md"
+    link="$(just _link "${spec}" "$(just _abs_path "${relative_dir}")" )"
+    if md edit "${spec}"; then
+        echo -e "Fix spec file created at {{blue}}${link}{{reset}}!"
+        echo
+        agent="$(just _choose_agent)"
+        claudine compose @prompts/fix.md dir="${relative_dir}" spec="spec.md" -y --${agent} && (
+            mv -r "${relative_dir}" "fixes/_completed/${dir}"
+            link="$(just _link "spec.md" "$(just _abs_path "fixes/_completed/${dir}/spec.md")" )"
+            echo
+            echo -e "The {{bold}}${descriptive}"
+        )
+
+    else
+        # rm -rf "${relative_dir}"
+        echo -e "No content was added to the spec file for {{bold}}$(just _title_case "${name}"){{reset}}!"
+    fi
+
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

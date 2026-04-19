@@ -65,20 +65,17 @@ fn resolve_deadline() -> Duration {
 ///
 /// ## Exit discipline
 ///
-/// Hook handlers run as short-lived children of an interactive agent. After
-/// the response payload is emitted we call [`std::process::exit`] to bypass
-/// the multi-threaded runtime's drop sequence, which otherwise waits for all
-/// in-flight `spawn_blocking` tasks (sound effects, etc.) to complete. This
-/// is defensible because (a) every side-effect action we support is already
-/// fire-and-forget and (b) we have already flushed stdout/stderr so the
-/// parent has the full response.
+/// Hook handlers run as short-lived children of an interactive agent. The
+/// top-level command owns stdout/stderr flushing plus the final
+/// [`std::process::exit`] so inner async helpers never bypass buffered
+/// machine-readable output.
 pub async fn run(args: HandleArgs) -> Result<()> {
     let deadline = resolve_deadline();
 
     match tokio::time::timeout(deadline, run_inner(args)).await {
-        Ok(Ok(())) => {
+        Ok(Ok(exit_code)) => {
             flush_streams();
-            std::process::exit(0);
+            std::process::exit(exit_code);
         }
         Ok(Err(error)) => {
             flush_streams();
@@ -103,7 +100,7 @@ fn flush_streams() {
     let _ = std::io::stderr().flush();
 }
 
-async fn run_inner(args: HandleArgs) -> Result<()> {
+async fn run_inner(args: HandleArgs) -> Result<i32> {
     // Run the sync stdin read on a blocking-pool thread so the outer
     // `tokio::time::timeout` can fire even if the parent agent never closes
     // its end of the pipe. If we ran this on the async runtime thread,
@@ -152,10 +149,8 @@ async fn run_inner(args: HandleArgs) -> Result<()> {
     } else if let Some(payload) = outcome.response {
         println!("{}", serde_json::to_string(&payload)?);
     }
-    if let Some(exit_code) = outcome.exit_code {
-        std::process::exit(exit_code);
-    }
-    Ok(())
+
+    Ok(outcome.exit_code.unwrap_or(0))
 }
 
 fn read_stdin_json() -> Result<Value> {

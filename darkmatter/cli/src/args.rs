@@ -143,6 +143,14 @@ pub enum Command {
         #[arg(long)]
         allow_ctx_override: bool,
 
+        /// Allow invalid set= RHS on ::file directives (downgrade error to warning; sibling valid set clauses still apply)
+        #[arg(long)]
+        allow_invalid_frontmatter_assignment: bool,
+
+        /// Allow duplicate set.NAME= assignments on ::file directives (downgrade error to warning; rightmost wins)
+        #[arg(long)]
+        allow_reassigned_frontmatter_property: bool,
+
         /// Global shell command timeout in seconds (default: 10)
         #[arg(long, value_name = "SECONDS")]
         timeout: Option<u64>,

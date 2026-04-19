@@ -131,7 +131,9 @@ pub use self::json5::{Json5, Json5Error, Json5Source};
 pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 
 #[cfg(feature = "file-reference")]
-pub use self::file_reference::{FileReference, FileReferenceError, PathPosition};
+pub use self::file_reference::{
+    CompletionEntryForm, FileReference, FileReferenceError, PartialCompletion, PathPosition,
+};
 
 // Re-export underlying crate types for convenience
 // This allows consumers to use `use biscuit_file::serde_yaml::Value`

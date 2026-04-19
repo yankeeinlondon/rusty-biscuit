@@ -1060,6 +1060,61 @@ impl Markdown {
                 );
             }
 
+            for error in &directive.options.deferred_set_errors {
+                match error {
+                    transclusion::DeferredSetError::InvalidAssignment { raw, reason } => {
+                        if options.allow_invalid_frontmatter_assignment {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
+                                        directive.kind.as_str(),
+                                        directive.line,
+                                        reason,
+                                        raw
+                                    ),
+                                )
+                                .at_line(directive.line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidFrontmatterAssignment {
+                                    line: directive.line,
+                                    raw: raw.clone(),
+                                    reason: reason.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                    transclusion::DeferredSetError::ReassignedProperty { name } => {
+                        if options.allow_reassigned_frontmatter_property {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
+                                        name,
+                                        directive.kind.as_str(),
+                                        directive.line
+                                    ),
+                                )
+                                .at_line(directive.line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidReassignedFrontmatterProperty {
+                                    line: directive.line,
+                                    name: name.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+
             if let Some(expr) = &directive.options.when_expr {
                 let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
                 if !should_include {
@@ -1494,18 +1549,27 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
         // ── Core compose (cacheable via single-flight) ─────────────
+        let overlay_hash = cache::hashing::set_overlay_hash(
+            directive_options.set_object.as_ref(),
+            &directive_options.set_properties,
+        );
+        let options_hash = cache::hashing::combine_options_overlay_hash(
+            cache::hashing::options_hash(options),
+            overlay_hash,
+        );
         let persistent_ctx = cache::PersistentContext {
             source_id: cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_hash: cache::hashing::effective_state_hash(state),
             context_hash: cache::hashing::context_hash(state.context()),
-            options_hash: cache::hashing::options_hash(options),
+            options_hash,
         };
         let cache_key = format!(
-            "compose:{:016x}:{:016x}:{:016x}:{:016x}",
+            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}",
             persistent_ctx.source_id,
             persistent_ctx.state_hash,
             persistent_ctx.context_hash,
-            persistent_ctx.options_hash
+            persistent_ctx.options_hash,
+            overlay_hash,
         );
         let cache_handle = runtime.cache.clone();
 
@@ -1519,6 +1583,13 @@ impl Markdown {
             _ => None,
         };
         let path_buf = path.to_path_buf();
+
+        // Snapshot the per-directive set overlay. The overlay is applied to
+        // the child's authored frontmatter before any of the child's pre-op
+        // stages run; it does NOT propagate through `child_options` so
+        // grandchildren do not inherit it.
+        let set_object = directive_options.set_object.clone();
+        let set_properties = directive_options.set_properties.clone();
 
         let cached = cache_handle.get_or_compute_compose(
             &cache_key,
@@ -1534,6 +1605,26 @@ impl Markdown {
 
                 let mut compose_runtime = runtime.clone_for_child();
                 let mut child = compose_runtime.load_markdown(path)?;
+
+                // Apply the three-layer set overlay on the child's frontmatter
+                // before any of its pre-op stages observe it. Keeping this
+                // scoped inside the closure preserves the rule that
+                // grandchildren referenced by the child's own `::file`
+                // directives do NOT inherit this parent-applied overlay.
+                if set_object.is_some() || !set_properties.is_empty() {
+                    let base_indexmap =
+                        std::mem::take(child.frontmatter_mut().as_map_mut());
+                    let base_map: serde_json::Map<String, Value> =
+                        base_indexmap.into_iter().collect();
+                    let overlaid = state::apply_set_overrides(
+                        &base_map,
+                        set_object.as_ref(),
+                        &set_properties,
+                    );
+                    *child.frontmatter_mut().as_map_mut() =
+                        overlaid.into_iter().collect();
+                }
+
                 let child_report =
                     child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
                 runtime.merge_child(&compose_runtime);
@@ -3965,6 +4056,125 @@ Rounded: {{ round(pi) }}"#;
                 err.to_string()
                     .contains("Frontmatter shell executable may not come from interpolation")
             );
+        }
+    }
+
+    mod infix_logic_conditions {
+        use super::*;
+
+        fn compose_with_page_blocks(content: &str) -> (String, ComposeReport) {
+            let md: Markdown = content.into();
+            let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
+            let (composed, report) = md.compose_with(options).unwrap();
+            (composed.content().to_string(), report)
+        }
+
+        #[test]
+        fn page_block_with_infix_and_true() {
+            let content =
+                "---\na: true\nb: true\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 1);
+            assert_eq!(report.page_blocks_skipped, 0);
+        }
+
+        #[test]
+        fn page_block_with_infix_and_false() {
+            let content =
+                "---\na: true\nb: false\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(!output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 0);
+            assert_eq!(report.page_blocks_skipped, 1);
+        }
+
+        #[test]
+        fn page_block_with_infix_or_one_true() {
+            let content =
+                "---\na: false\nb: true\n---\n::block when=\"a || b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 1);
+        }
+
+        #[test]
+        fn page_block_with_infix_or_both_false() {
+            let content =
+                "---\na: false\nb: false\n---\n::block when=\"a || b\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(!output.contains("inside"));
+        }
+
+        #[test]
+        fn page_block_with_grouped_precedence() {
+            // (a || b) && c — grouping overrides default precedence
+            let content = "---\na: false\nb: true\nc: true\n---\n::block when=\"(a || b) && c\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+
+            let content_false = "---\na: false\nb: true\nc: false\n---\n::block when=\"(a || b) && c\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content_false);
+            assert!(!output.contains("inside"));
+        }
+
+        #[test]
+        fn page_block_fallback_mixed_with_infix() {
+            // Fallback `|` binds tighter than `||`. When `missing_var` is unset,
+            // the fallback yields "go" which matches the literal, and `|| b`
+            // short-circuits to true.
+            let content = "---\nb: false\n---\n::block when=\"(missing_var | \\\"go\\\") == \\\"go\\\" || b\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+        }
+
+        #[test]
+        fn transclusion_directive_with_mixed_infix_logic() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Child loaded only if (enabled || fallback) && !skip
+            std::fs::write(&child, "child body").unwrap();
+            std::fs::write(
+                &root,
+                "---\nenabled: true\nskip: false\n---\nbefore\n\n::file child.md when=\"enabled && !skip\"\n\nafter\n",
+            )
+            .unwrap();
+
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .only(&[ComposeOperation::BlockTransclusion]);
+
+            let (composed, _) = Markdown::try_from(root.as_path())
+                .unwrap()
+                .compose_with(options)
+                .unwrap();
+            assert!(composed.content().contains("child body"));
+        }
+
+        #[test]
+        fn transclusion_skipped_when_infix_condition_false() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            std::fs::write(&child, "child body").unwrap();
+            std::fs::write(
+                &root,
+                "---\nenabled: true\nskip: true\n---\nbefore\n\n::file child.md when=\"enabled && !skip\"\n\nafter\n",
+            )
+            .unwrap();
+
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .only(&[ComposeOperation::BlockTransclusion]);
+
+            let (composed, _) = Markdown::try_from(root.as_path())
+                .unwrap()
+                .compose_with(options)
+                .unwrap();
+            assert!(!composed.content().contains("child body"));
         }
     }
 }
