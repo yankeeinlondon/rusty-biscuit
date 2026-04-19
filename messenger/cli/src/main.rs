@@ -352,6 +352,19 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 ),
             ));
         }
+        RouteConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)?;
+            messenger.register(Box::new(
+                messenger::provider::discord_webhook::DiscordWebhookProvider::new(
+                    messenger::provider::discord_webhook::DiscordWebhookConfig {
+                        webhook_url: SecretString::from(url),
+                    },
+                ),
+            ));
+        }
         RouteConfig::Slack {
             bot_token,
             bot_token_env,
@@ -423,6 +436,9 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
         RouteConfig::Discord { channel_id, .. } => {
             Ok(messenger::Target::discord_channel(channel_id))
         }
+        // TODO: Support thread_id for Discord webhook routes when the CLI
+        // introduces a thread-routing flag (e.g. `--thread <id>`).
+        RouteConfig::DiscordWebhook { .. } => Ok(messenger::Target::discord_webhook()),
         RouteConfig::Slack { channel_id, .. } => Ok(messenger::Target::slack_channel(channel_id)),
         RouteConfig::Signal { recipient, .. } => {
             if recipient.starts_with('+') {

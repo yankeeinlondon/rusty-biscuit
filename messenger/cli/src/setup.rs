@@ -163,11 +163,34 @@ fn configure_provider(provider: &RouteProvider, route_name: Option<&str>) -> Res
 
     match provider {
         RouteProvider::Discord => configure_discord(),
+        RouteProvider::DiscordWebhook => configure_discord_webhook(),
         RouteProvider::Slack => configure_slack(),
         RouteProvider::Signal => configure_signal(),
         RouteProvider::WhatsApp => configure_whatsapp(),
         RouteProvider::Telegram => configure_telegram(),
     }
+}
+
+fn configure_discord_webhook() -> Result<RouteConfig> {
+    // Phase 5 replaces this stub with the full interactive walkthrough;
+    // Phase 4 only needs compilation + send-path wiring, so keep a minimal
+    // placeholder that still produces a round-trippable RouteConfig.
+    let webhook_url = Text::new("Webhook URL:")
+        .with_help_message("Full webhook URL (leave empty to use env var instead)")
+        .prompt()
+        .map(|s| s.trim().to_string())?;
+    let webhook_url = if webhook_url.is_empty() {
+        None
+    } else {
+        Some(webhook_url)
+    };
+    let webhook_url_env = Text::new("Environment variable for webhook URL:")
+        .with_default("DISCORD_WEBHOOK_URL")
+        .prompt()?;
+    Ok(RouteConfig::DiscordWebhook {
+        webhook_url,
+        webhook_url_env,
+    })
 }
 
 fn configure_discord() -> Result<RouteConfig> {

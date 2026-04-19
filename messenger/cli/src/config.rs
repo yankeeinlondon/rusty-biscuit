@@ -21,6 +21,9 @@ pub struct Config {
 pub enum RouteProvider {
     #[value(name = "discord")]
     Discord,
+    #[serde(rename = "discord-webhook")]
+    #[value(name = "discord-webhook")]
+    DiscordWebhook,
     #[value(name = "slack")]
     Slack,
     #[value(name = "signal")]
@@ -32,8 +35,9 @@ pub enum RouteProvider {
 }
 
 impl RouteProvider {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Discord,
+        Self::DiscordWebhook,
         Self::Slack,
         Self::Signal,
         Self::WhatsApp,
@@ -43,6 +47,7 @@ impl RouteProvider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Discord => "discord",
+            Self::DiscordWebhook => "discord-webhook",
             Self::Slack => "slack",
             Self::Signal => "signal",
             Self::WhatsApp => "whatsapp",
@@ -68,6 +73,10 @@ pub enum RouteConfig {
         channel_id: String,
         bot_token: Option<String>,
         bot_token_env: String,
+    },
+    DiscordWebhook {
+        webhook_url: Option<String>,
+        webhook_url_env: String,
     },
     Slack {
         channel_id: String,
@@ -104,6 +113,13 @@ enum RouteConfigRepr {
         bot_token: Option<String>,
         #[serde(default = "default_discord_token_env")]
         bot_token_env: String,
+    },
+    #[serde(rename = "discord-webhook")]
+    DiscordWebhook {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_url: Option<String>,
+        #[serde(default = "default_discord_webhook_url_env")]
+        webhook_url_env: String,
     },
     Slack {
         channel_id: String,
@@ -162,6 +178,7 @@ impl RouteConfig {
     pub fn provider(&self) -> RouteProvider {
         match self {
             Self::Discord { .. } => RouteProvider::Discord,
+            Self::DiscordWebhook { .. } => RouteProvider::DiscordWebhook,
             Self::Slack { .. } => RouteProvider::Slack,
             Self::Signal { .. } => RouteProvider::Signal,
             Self::WhatsApp { .. } => RouteProvider::WhatsApp,
@@ -176,6 +193,10 @@ impl RouteConfig {
                 channel_id: target_id,
                 bot_token: None,
                 bot_token_env: default_discord_token_env(),
+            },
+            RouteProvider::DiscordWebhook => Self::DiscordWebhook {
+                webhook_url: Some(target_id),
+                webhook_url_env: default_discord_webhook_url_env(),
             },
             RouteProvider::Slack => Self::Slack {
                 channel_id: target_id,
@@ -239,6 +260,13 @@ impl From<RouteConfigRepr> for RouteConfig {
                 bot_token,
                 bot_token_env,
             },
+            RouteConfigRepr::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => Self::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            },
             RouteConfigRepr::Slack {
                 channel_id,
                 bot_token,
@@ -298,6 +326,13 @@ impl From<RouteConfig> for RouteConfigRepr {
                 channel_id,
                 bot_token,
                 bot_token_env,
+            },
+            RouteConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => Self::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
             },
             RouteConfig::Slack {
                 channel_id,
@@ -361,6 +396,10 @@ impl From<LegacyRouteConfig> for RouteConfig {
                 bot_token: None,
                 bot_token_env: token_env.unwrap_or_else(default_discord_token_env),
             },
+            RouteProvider::DiscordWebhook => Self::DiscordWebhook {
+                webhook_url: None,
+                webhook_url_env: token_env.unwrap_or_else(default_discord_webhook_url_env),
+            },
             RouteProvider::Slack => Self::Slack {
                 channel_id: value.channel_id,
                 bot_token: None,
@@ -391,6 +430,10 @@ impl From<LegacyRouteConfig> for RouteConfig {
 
 fn default_discord_token_env() -> String {
     "DISCORD_BOT_TOKEN".into()
+}
+
+fn default_discord_webhook_url_env() -> String {
+    "DISCORD_WEBHOOK_URL".into()
 }
 
 fn default_slack_token_env() -> String {
