@@ -90,6 +90,10 @@ pub const CANCELLED_KIND: io::ErrorKind = io::ErrorKind::Interrupted;
 ///
 /// ## Notes
 ///
+/// - The initial draw happens before the first event read. After that,
+///   the terminal only redraws when an event is [`EventOutcome::Consumed`]
+///   or when the terminal emits a resize. [`EventOutcome::Ignored`] and
+///   key release events skip the redraw.
 /// - Key release events (sent by crossterm on some platforms) are
 ///   silently skipped.
 /// - `Ctrl-C` is mapped to cancellation at the runner layer so that
@@ -106,12 +110,16 @@ where
     B: Backend,
     F: FnMut() -> io::Result<Event>,
 {
+    let mut needs_redraw = true;
     loop {
-        terminal.draw(|f| {
-            let area = f.area();
-            let widget = component.clone();
-            f.render_stateful_widget(widget, area, state);
-        })?;
+        if needs_redraw {
+            terminal.draw(|f| {
+                let area = f.area();
+                let widget = component.clone();
+                f.render_stateful_widget(widget, area, state);
+            })?;
+            needs_redraw = false;
+        }
 
         match read_event()? {
             Event::Key(key) => {
@@ -124,12 +132,14 @@ where
                 match component.handle_event(state, key) {
                     EventOutcome::Submitted => return Ok(Some(state.value())),
                     EventOutcome::Cancelled => return Ok(None),
-                    _ => {}
+                    EventOutcome::Consumed => {
+                        needs_redraw = true;
+                    }
+                    EventOutcome::Ignored => {}
                 }
             }
             Event::Resize(..) => {
-                // terminal.draw on the next iteration picks up the
-                // new size automatically; nothing else to do.
+                needs_redraw = true;
             }
             _ => {}
         }
@@ -230,12 +240,14 @@ mod tests {
     struct EchoState {
         buffer: String,
         validation_error: Option<String>,
+        render_count: usize,
     }
 
     impl StatefulWidget for Echo {
         type State = EchoState;
 
         fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+            state.render_count += 1;
             buf.set_string(area.x, area.y, &state.buffer, Style::default());
         }
     }
@@ -283,6 +295,18 @@ mod tests {
             iter.next()
                 .ok_or_else(|| io::Error::other("no more events"))
         })
+    }
+
+    fn run_capturing_state(events: Vec<Event>) -> (io::Result<Option<String>>, EchoState) {
+        let backend = TestBackend::new(20, 3);
+        let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
+        let mut state = EchoState::default();
+        let mut iter = events.into_iter();
+        let result = drive_event_loop(&mut terminal, Echo, &mut state, || {
+            iter.next()
+                .ok_or_else(|| io::Error::other("no more events"))
+        });
+        (result, state)
     }
 
     #[test]
@@ -339,6 +363,45 @@ mod tests {
         ];
         let result = run(events).expect("drive loop");
         assert_eq!(result, Some("b".to_string()));
+    }
+
+    #[test]
+    fn ignored_events_do_not_trigger_a_redraw() {
+        let events = vec![
+            key_event(KeyCode::F(5)),
+            key_event(KeyCode::F(6)),
+            key_event(KeyCode::Enter),
+        ];
+        let (result, state) = run_capturing_state(events);
+        assert_eq!(result.expect("drive loop"), Some(String::new()));
+        // Initial draw (1). F5/F6 are Ignored — no extra draws. Enter
+        // submits and exits the loop without a further draw.
+        assert_eq!(state.render_count, 1);
+    }
+
+    #[test]
+    fn consumed_events_trigger_a_redraw() {
+        let events = vec![
+            key_event(KeyCode::Char('a')),
+            key_event(KeyCode::Char('b')),
+            key_event(KeyCode::Enter),
+        ];
+        let (result, state) = run_capturing_state(events);
+        assert_eq!(result.expect("drive loop"), Some("ab".to_string()));
+        // Initial draw + 2 Consumed events = 3 draws.
+        assert_eq!(state.render_count, 3);
+    }
+
+    #[test]
+    fn resize_events_trigger_a_redraw() {
+        let events = vec![
+            Event::Resize(40, 10),
+            key_event(KeyCode::Enter),
+        ];
+        let (result, state) = run_capturing_state(events);
+        assert_eq!(result.expect("drive loop"), Some(String::new()));
+        // Initial draw + resize redraw = 2 draws.
+        assert_eq!(state.render_count, 2);
     }
 
     #[test]

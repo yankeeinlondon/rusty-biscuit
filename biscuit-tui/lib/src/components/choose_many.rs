@@ -39,7 +39,7 @@ use crate::core::{
 };
 
 use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
-use super::choose_one::{build_hotkeys, first_enabled_index};
+use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
 
 const CHECKED_GLYPH: &str = "☑";
 const UNCHECKED_GLYPH: &str = "☐";
@@ -281,6 +281,14 @@ impl HandleEvent for ChooseMany {
             }
             KeyCode::Home | KeyCode::Char('g') => {
                 jump_to(state, first_enabled_index(&state.input.options).unwrap_or(0));
+                EventOutcome::Consumed
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                jump_to(
+                    state,
+                    last_enabled_index(&state.input.options)
+                        .unwrap_or(state.input.options.len().saturating_sub(1)),
+                );
                 EventOutcome::Consumed
             }
             KeyCode::Char(c) => {
@@ -594,6 +602,20 @@ mod tests {
         let mut buf = Buffer::empty(area);
         ChooseMany.render(area, &mut buf, &mut state);
         assert_eq!(buffer_row(&buf, 3), "Please make a selection");
+    }
+
+    #[test]
+    fn end_key_jumps_hover_to_last_enabled_option() {
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany.handle_event(&mut state, press(KeyCode::End));
+        assert_eq!(state.hover(), Some(2));
+    }
+
+    #[test]
+    fn vim_capital_g_jumps_hover_to_last_enabled_option() {
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany.handle_event(&mut state, press(KeyCode::Char('G')));
+        assert_eq!(state.hover(), Some(2));
     }
 
     #[test]
