@@ -1,6 +1,4 @@
 # TODAY := `date +%F`
-set allow-duplicate-variables
-set allow-duplicate-recipes
 
 import "./util.just"
 
@@ -14,76 +12,6 @@ yellow := '\033[33m'
 blue := '\033[34m'
 magenta := '\033[35m'
 cyan := '\033[36m'
-
-agents := "claude\ncodex\nopencode\ngemini\nqwen\nroo\nkimi\n"
-
-
-# chooses a spec or design file to identify the feature
-_choose_feature feat="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    file="$(fd -g '*{spec,design}\.md' features/ | {{ if feat == ""  { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
-    echo "${file}"
-
-_choose_agent:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    agent="$(echo "{{agents}}" | fzf --height=15 --border --border-label 'Choose the Agent to use')"
-    echo "${agent}"
-
-
-# ask user to choose a spec file
-_choose_spec filter="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ -z "{{filter}}" ]]; then
-        file="$(fd -g '*spec*\.md'  |  fzf --height=15 --border --border-label 'Choose a spec file' )"
-    else
-        file="$(fd -g '*spec*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the spec file' )"
-    fi
-    echo "${file}"
-
-# ask user to choose a plan file
-_choose_plan filter="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ -z "{{filter}}" ]]; then
-        file="$(fd -g '*plan*\.md'  |  fzf --height=15 --border --border-label 'Choose a plan file' )"
-    else
-        file="$(fd -g '*plan*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the plan file' )"
-    fi
-    echo "${file}"
-
-_get_design_doc dir:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    mapfile -t files < <(fd -g '*design*.md' "{{dir}}")
-    if [[ ${#files[@]} -eq 1 ]]; then
-        design="${files[0]}"
-    elif [[ ${#files[@]} -eq 0 ]]; then
-        design=""
-    else
-        design="$( ( echo "NONE"; fd -g '*design*.md' "{{dir}}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
-        [[ "${design}" == "NONE" ]] && design=""
-    fi
-    echo "${design}"
-
-_get_spec_doc dir:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    mapfile -t files < <(fd -g '*spec*.md' "{{dir}}")
-    if [[ ${#files[@]} -eq 1 ]]; then
-        spec="${files[0]}"
-    elif [[ ${#files[@]} -eq 0 ]]; then
-        spec=""
-    else
-        spec="$( ( echo "NONE"; fd -g '*spec*.md' "{{dir}}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
-        [[ "${spec}" == "NONE" ]] && spec=""
-    fi
-    echo "${spec}"
-
 
 
 # implements a plan, phase by phase
@@ -134,99 +62,6 @@ implement-plan filter="":
     echo -e "The {{blue}}${link}{{reset}} plan has completed ({{dim}}{{italic}}${phases} phases{{reset}})"
     echo
 
-
-
-# Specify a feature with a spec file, a design file, or both which has now been implemented
-# and you want to run a review on.
-review feat="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    doc="$(just _choose_feature {{feat}}'')"
-    dir="$(dirname "${doc}")"
-    if [[ "${doc}" == *"design"* ]]; then
-        design="${doc}"
-        mapfile -t files < <(fd -g '*spec*.md' "${dir}")
-        if [[ ${#files[@]} -eq 1 ]]; then
-            spec="${files[0]}"
-        elif [[ ${#files[@]} -eq 0 ]]; then
-            spec=""
-        else
-            spec="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
-            [[ "${spec}" == "NONE" ]] && spec=""
-        fi
-    else
-        spec="${doc}"
-        mapfile -t files < <(fd -g '*design*.md' "${dir}")
-        if [[ ${#files[@]} -eq 1 ]]; then
-            design="${files[0]}"
-        elif [[ ${#files[@]} -eq 0 ]]; then
-            design=""
-        else
-            design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
-            [[ "${design}" == "NONE" ]] && design=""
-        fi
-    fi
-    feature="$(basename "${dir}")"
-    feature="$(just _title_case ${feature#????-??-??-})"
-    agent="$(just _choose_agent)"
-
-    echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
-    echo
-    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
-    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
-    echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
-
-    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})"
-    echo
-    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
-    echo
-
-
-implement-review-suggestions feat="" iteration="1":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    doc="$(just _choose_feature {{feat}}'')"
-    dir="$(dirname "${doc}")"
-    if [[ "${doc}" == *"design"* ]]; then
-        design="${doc}"
-        mapfile -t files < <(fd -g '*spec*.md' "${dir}")
-        if [[ ${#files[@]} -eq 1 ]]; then
-            spec="${files[0]}"
-        elif [[ ${#files[@]} -eq 0 ]]; then
-            spec=""
-        else
-            spec="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
-            [[ "${spec}" == "NONE" ]] && spec=""
-        fi
-    else
-        spec="${doc}"
-        mapfile -t files < <(fd -g '*design*.md' "${dir}")
-        if [[ ${#files[@]} -eq 1 ]]; then
-            design="${files[0]}"
-        elif [[ ${#files[@]} -eq 0 ]]; then
-            design=""
-        else
-            design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
-            [[ "${design}" == "NONE" ]] && design=""
-        fi
-    fi
-    feature="$(basename "${dir}")"
-    feature="$(just _title_case ${feature#????-??-??-})"
-
-    review="review-{{iteration}}.md"
-
-    echo -e "🏃‍♂️ Starting the {{italic}}implementation{{reset}} of the review suggestions on the {{bold}}{{yellow}}${feature}{{reset}} feature ({{dim}}{{blue}}${review}{{reset}})"
-    echo
-    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
-    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
-    echo -e "    - Design File: {{dim}}$(basename ${review}){{reset}}"
-    echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
-
-    claudine compose "@prompts/implement-review-suggestions.md" -y --set "{ dir: \"${dir}\", spec: \"$(basename ${spec})\", design: \"$(basename ${design})\" }"
-    echo
-    echo "🎉 the {{italic}}implementation{{reset}} of the review ({{dim}}{{blue}}${review}{{reset}}) for {{bold}}{{yellow}}${feature}{{reset}} has completed"
-    echo
-
 # adds a complimentary tech design to the specification file
 design filter="":
     #!/usr/bin/env bash
@@ -238,7 +73,7 @@ design filter="":
         file="$(just _choose_spec "{{filter}}")"
     fi
 
-    use_agent="$(echo "{{agents}}" | fzf --border --border-label "Choose an Agent")"
+    use_agent="$(just _choose_agent)"
 
     dir="$(dirname ${file})"
     echo
