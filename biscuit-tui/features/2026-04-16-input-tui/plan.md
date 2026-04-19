@@ -81,6 +81,20 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase5: []
+source_files_during_phase_6:
+  - biscuit-tui/lib/src/lib.rs
+  - biscuit-tui/lib/src/prelude.rs
+  - biscuit-tui/lib/src/components/mod.rs
+  - biscuit-tui/lib/src/components/input_table/mod.rs
+  - biscuit-tui/lib/src/components/input_table/column.rs
+  - biscuit-tui/lib/src/components/input_table/cell.rs
+  - biscuit-tui/lib/src/components/input_table/table.rs
+  - biscuit-tui/cli/src/main.rs
+  - biscuit-tui/cli/src/commands/mod.rs
+  - biscuit-tui/cli/src/commands/input_table.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase6: []
 packages:
   - tui-chrome
   - tui-chrome-cli
