@@ -38,6 +38,13 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/validations-and-handlers.md
+  - claudine/docs/topics/non-interactive-sessions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - claudine
   - claudine-cli
