@@ -14,6 +14,7 @@ mod output;
 use commands::boolean_switch::{BooleanSwitchArgs, run as run_boolean_switch};
 use commands::choose_many::{ChooseManyArgs, run as run_choose_many};
 use commands::choose_one::{ChooseOneArgs, run as run_choose_one};
+use commands::text_area_input::{TextAreaInputArgs, run as run_text_area_input};
 use commands::text_input::{TextInputArgs, run as run_text_input};
 use output::OutputMode;
 
@@ -33,6 +34,8 @@ struct Cli {
 enum Commands {
     /// Single-line text input.
     TextInput(TextInputArgs),
+    /// Multi-line text area editor.
+    TextAreaInput(TextAreaInputArgs),
     /// Boolean toggle switch.
     BooleanSwitch(BooleanSwitchArgs),
     /// Single-selection list.
@@ -55,6 +58,7 @@ fn main() -> ExitCode {
 fn dispatch(cli: Cli) -> std::io::Result<i32> {
     match cli.command {
         Commands::TextInput(args) => run_text_input(args, cli.output),
+        Commands::TextAreaInput(args) => run_text_area_input(args, cli.output),
         Commands::BooleanSwitch(args) => run_boolean_switch(args, cli.output),
         Commands::ChooseOne(args) => run_choose_one(args, cli.output),
         Commands::ChooseMany(args) => run_choose_many(args, cli.output),

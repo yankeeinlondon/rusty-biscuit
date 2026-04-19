@@ -8,4 +8,5 @@
 pub mod boolean_switch;
 pub mod choose_many;
 pub mod choose_one;
+pub mod text_area_input;
 pub mod text_input;
