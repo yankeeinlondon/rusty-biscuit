@@ -6,4 +6,6 @@
 //! per [`crate::output::OutputMode`].
 
 pub mod boolean_switch;
+pub mod choose_many;
+pub mod choose_one;
 pub mod text_input;
