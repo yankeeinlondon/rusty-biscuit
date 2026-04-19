@@ -186,7 +186,7 @@ impl EchogardenProvider {
         }
 
         // Sort by quality (highest first)
-        candidates.sort_by(|a, b| a.quality.rank().cmp(&b.quality.rank()));
+        candidates.sort_by_key(|a| a.quality.rank());
 
         candidates.first().cloned().cloned()
     }

@@ -19,22 +19,31 @@ We have just completed a feature defined in "{{dir}}":
 - technical design: "{{dir}}/{{design}}"
 ::end-block
 
-::block when="spec && design"
+::block when="And(spec, design)"
 Read both the specification and design documents and then perform a review on the implementation:
-::endblock
+::end-block
 ::block when="spec"
 Read both the specification document and then perform a review on the implementation:
-::endblock
+::end-block
 ::block when="design"
 Read both the specification document and then perform a review on the implementation:
-::endblock
+::end-block
+
+::block when="iteration != 1"
+> **Note:** this is _not_ the first review we've done on this functionality but the prior review's
+> suggestions have now all been implemented.
+
+::end-block
 
 - look for gaps in functionality that were designed but not implemented
 - features who's implementation is broken or incomplete
 - functionality which is light on test coverage (we expect strong unit and integration testing for everything)
 - are there any changes which would make the code more ergonomic, more performant, or both?
 
-Save your review suggestions to "{{dir}}/{{review}}-{{iteration}}.md"
+## Closure
+
+- Save your review suggestions to "{{dir}}/{{review}}-{{iteration}}.md"
+- based on your review suggestions indicate whether you think this feature is ready for production by setting the `ready` frontmatter property on "{{dir}}/{{review}}-{{iteration}}.md"
 
 **IMPORTANT:**
 

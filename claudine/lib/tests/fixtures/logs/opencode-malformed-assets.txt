@@ -1,0 +1,6 @@
+ERROR 2026-04-15T21:28:30 +315ms service=config command=/Users/ken/.config/opencode/commands/catalog.md err=ENOENT: no such file or directory, open '/Users/ken/.config/opencode/commands/catalog.md' failed to load command
+ERROR 2026-04-15T21:28:30 +1ms service=config command=/Users/ken/.config/opencode/commands/meta:get-smart.md err=ENOENT: no such file or directory, open '/Users/ken/.config/opencode/commands/meta:get-smart.md' failed to load command
+ERROR 2026-04-15T21:28:30 +0ms service=config command=/Users/ken/.config/opencode/commands/SUB-AGENT-ARCHITECTURE.md err=ENOENT: no such file or directory, open '/Users/ken/.config/opencode/commands/SUB-AGENT-ARCHITECTURE.md' failed to load command
+ERROR 2026-04-15T21:28:30 +0ms service=config command=/Users/ken/.config/opencode/commands/add-feature.md err=ENOENT: no such file or directory, open '/Users/ken/.config/opencode/commands/add-feature.md' failed to load command
+ERROR 2026-04-15T21:28:30 +0ms service=config skill=/Users/ken/.config/opencode/skills/bad-skill.md err=ENOENT: no such file or directory, open '/Users/ken/.config/opencode/skills/bad-skill.md' failed to load skill
+ERROR 2026-04-15T21:28:30 +0ms service=config agent=/Users/ken/.config/opencode/agent/bad-agent.md err=ENOENT: no such file or directory failed to load agent

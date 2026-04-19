@@ -168,14 +168,12 @@ fn extract_elements(
                     });
                 }
             }
-            Event::Start(Tag::Link { dest_url, .. }) => {
-                // Check if it's an internal link (starts with #)
-                if dest_url.starts_with('#') {
-                    let target = dest_url.trim_start_matches('#').to_string();
-                    current_link = Some((target, String::new(), range.start));
-                    in_link = true;
-                    link_text.clear();
-                }
+            // Check if it's an internal link (starts with #)
+            Event::Start(Tag::Link { dest_url, .. }) if dest_url.starts_with('#') => {
+                let target = dest_url.trim_start_matches('#').to_string();
+                current_link = Some((target, String::new(), range.start));
+                in_link = true;
+                link_text.clear();
             }
             Event::End(TagEnd::Link) => {
                 if let Some((target_slug, _, byte_offset)) = current_link.take() {

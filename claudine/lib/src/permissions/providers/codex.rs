@@ -995,7 +995,9 @@ fn ensure_toml_table_path<'a>(
         if current.get(segment).is_none() || !current[segment].is_table() {
             current[segment] = Item::Table(Default::default());
         }
-        current = current[segment].as_table_mut().expect("table");
+        current = current[segment]
+            .as_table_mut()
+            .expect("ensure_toml_table_path: segment was just set to Item::Table above");
     }
     current
 }

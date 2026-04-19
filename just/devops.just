@@ -6,8 +6,9 @@ italic := '\033[3m'
 red := '\033[31m'
 green := '\033[32m'
 yellow := '\033[33m'
+blue := '\033[34m'
 
-dim := '\033[2m'
+# dim := '\033[2m'
 
 # Build the package
 _build package pkg_name *args="":
@@ -21,30 +22,38 @@ _build package pkg_name *args="":
     echo
 
 
-_install path pkg_name *args="":
+_install path pkg_name binary="" *args="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     echo
-    echo -e "Installing {{yellow}}{{bold}}{{pkg_name}}{{reset}}"
+    if [[ -z "{{binary}}" ]]; then
+        echo -e "Installing {{yellow}}{{bold}}{{pkg_name}}{{reset}}"
+    else
+        echo -e "Installing {{yellow}}{{bold}}{{pkg_name}}{{reset}} ({{italic}}{{blue}}{{binary}}{{reset}})"
+    fi
+
     echo
     cargo install --path {{path}} {{args}} || ( just _play error-2 && just _speak "Problems encountered when trying to install {{pkg_name}}" && exit 1 )
     echo
-    echo -e "✅ {{bold}}{{green}}{{pkg_name}} installed!{{reset}}"
+    if [[ -z "{{binary}}" ]]; then
+        echo -e "✅ {{bold}}{{green}}{{pkg_name}} installed!{{reset}}"
+    else
+        echo -e "✅ {{bold}}{{green}}{{pkg_name}} installed!{{reset}} ({{italic}}{{blue}}{{binary}}{{reset}})"
+    fi
     just _play drop-4 || exit 0
 
 
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
-commit *args="":
+commit agent="opencode" *args="":
     @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{reset}} monorepo to git"
-    @echo -e "{{dim}}{{ITALIC}}- using the {{reset}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{dim}}model{{reset}}"
+    @echo -e "Committing staged changes in the {{bold}}Rusty Biscuit{{reset}} monorepo to git"
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{reset}}"
+    @echo -e "{{bold}}{{blue}}Staged Files:{{reset}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y {{args}}
+    @claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
+    @sniff repo git-status --compact 2>/dev/null || exit 0
     @echo
 
 
@@ -56,7 +65,7 @@ _lint pkg:
     echo
     echo -e "Linting {{bold}}{{pkg}}{{reset}}"
     echo
-    cargo clippy -p {{pkg}} -- -D warnings || ( just _speak "The {{pkg}} has failing lints" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing lints!" && exit 1 )
+    cargo clippy -p {{pkg}} -- -D warnings || ( just _speak "The {{pkg}} package has failing lints" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing lints!" && exit 1 )
 
 _fix_lint pkg agent="claude" *args="":
     #!/usr/bin/env bash
@@ -70,3 +79,36 @@ _fix_lint pkg agent="claude" *args="":
     echo -e "✅ {{green}}The {{bold}}{{pkg}}{{reset}}{{green}} has had all lints now fixed!"
     echo
     sniff repo git-status
+
+# Show dependencies for this package area
+deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    sniff repo deps "$(sniff repo package-area)"
+
+# Run tests with `cargo test` or `cargo nextest run`
+_test pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "Testing {{bold}}{{pkg}}{{reset}} package"
+    echo
+    if cargo nextest --version >/dev/null 2>&1; then
+        echo -e "ℹ️ using {{green}}cargo nextest run{{reset}}"
+        cargo nextest run -p {{pkg}} {{args}} || ( echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+    else
+        echo -e "ℹ️ using {{green}}cargo test{{reset}}"
+        cargo test -p {{pkg}} {{args}} || ( echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+    fi
+    echo
+    echo -e "✅ {{green}} all tests passing in {{bold}}{{pkg}}{{reset}}{{green}} package{{reset}}"
+    echo
+
+
+# Show all README.md files in the package
+_readme_files:
+    @sniff docs --readme --json "$(sniff repo package-area)"
+

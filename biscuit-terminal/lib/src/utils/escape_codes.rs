@@ -45,9 +45,8 @@ pub fn strip_cursor_movement_codes<T: Into<String>>(content: T) -> String {
 ///
 /// Query codes include Device Attributes (`c`) and Device Status Report (`n`).
 pub fn strip_query_codes<T: Into<String>>(content: T) -> String {
-    static QUERY_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\x1b\[[0-9;>]*[cn]").expect("Invalid query code regex")
-    });
+    static QUERY_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\x1b\[[0-9;>]*[cn]").expect("Invalid query code regex"));
 
     let content = content.into();
     QUERY_RE.replace_all(&content, "").into_owned()
@@ -57,9 +56,8 @@ pub fn strip_query_codes<T: Into<String>>(content: T) -> String {
 ///
 /// SGR sequences end with `m` (e.g., `\x1b[31m` for red, `\x1b[0m` for reset).
 pub fn strip_color_codes<T: Into<String>>(content: T) -> String {
-    static SGR_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\x1b\[[0-9;]*m").expect("Invalid SGR regex")
-    });
+    static SGR_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*m").expect("Invalid SGR regex"));
 
     let content = content.into();
     SGR_RE.replace_all(&content, "").into_owned()

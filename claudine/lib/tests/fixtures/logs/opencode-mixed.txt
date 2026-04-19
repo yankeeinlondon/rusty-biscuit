@@ -1,0 +1,6 @@
+INFO 2026-04-15T21:28:29 +0ms service=default msg=starting opencode
+ERROR 2026-04-15T21:28:30 +315ms service=config command=/Users/ken/.config/opencode/commands/catalog.md err=ENOENT: no such file or directory failed to load command
+some unstructured stderr chatter emitted by a child process
+ERROR 2026-04-15T21:28:30 +33ms service=default name=TypeError message=U.split is not a function stack=TypeError: U.split is not a function fatal
+[91m[1mError: [0mUnexpected error, check log file at /tmp/opencode.log for more details
+ERROR 2026-04-15T21:28:35 +5000ms service=llm providerID=zai modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}

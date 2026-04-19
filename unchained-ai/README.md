@@ -26,15 +26,15 @@ Note: the `unchained-ai` workspace includes `lib`, `cli`, and `gen`; `model_id` 
 ## Current Status
 
 - Implemented:
-  - pipeline/state primitives and validation
-  - provider registry and generated provider model enums
-  - Parsera-backed metadata generation and runtime metadata lookup
-  - OpenCode delegation primitive
-  - agent cap monitoring for Claude Code and Codex
-  - rig tools for web search and scraping
+    - pipeline/state primitives and validation
+    - provider registry and generated provider model enums
+    - Parsera-backed metadata generation and runtime metadata lookup
+    - OpenCode delegation primitive
+    - agent cap monitoring for Claude Code and Codex
+    - rig tools for web search and scraping
 - Not fully implemented:
-  - `Prompt::execute` (currently returns fatal "LLM execution not yet implemented")
-  - placeholder scaffolds (`UserContent`, `Transcribe`, `foreign_agent`, parts of functional grouping)
+    - `Prompt::execute` (currently returns fatal "LLM execution not yet implemented")
+    - placeholder scaffolds (`UserContent`, `Transcribe`, `foreign_agent`, parts of functional grouping)
 
 ## Development
 

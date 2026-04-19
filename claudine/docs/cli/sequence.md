@@ -13,8 +13,25 @@ The `sequence` command allows you to run a serial sequence of composition steps 
 ## Usage
 
 ```bash
-claudine sequence <file> [flags]
+claudine sequence [flags] <arg>...
 ```
+
+Positional arguments are one file reference plus optional `key=value` setters
+in any order:
+
+```bash
+claudine sequence @research.md topic="async traits" retries=3
+claudine sequence topic="async traits" @research.md
+```
+
+Setter values are parsed as JSON5 first and fall back to strings when parsing
+fails. Setter keys must start with an ASCII letter or `_` and may contain
+letters, digits, `_`, or `-`. Dot-paths and path-like tokens such as
+`foo.bar=baz` are not valid setters and are treated as file-reference
+candidates.
+
+Inline setters override matching keys from `--set`, but reserved overlay keys
+listed in [Reserved Overlay Keys](#reserved-overlay-keys) still win over both.
 
 ## Frontmatter Configuration
 
@@ -142,4 +159,9 @@ Research the following topic using {{state.name}}:
 {{topic || 'Rust 2024 Edition changes'}}
 ```
 
-Run with: `claudine sequence research.md --set '{"topic": "Async traits in Rust"}'`
+Run with either form:
+
+```bash
+claudine sequence research.md --set '{"topic":"Async traits in Rust"}'
+claudine sequence research.md topic="Async traits in Rust"
+```

@@ -105,7 +105,7 @@ fn opencode_capabilities() -> AgentCapabilities {
             logging: LoggingCapabilities {
                 session_locations: vec![],
                 log_locations: vec![],
-                debug_controls: vec![],
+                debug_controls: vec!["--print-logs", "--log-level ERROR"],
                 telemetry_controls: vec![],
             },
             billing: BillingCapabilities {

@@ -167,7 +167,7 @@ impl clap::builder::TypedValueParser for AudioFileParser {
         }
 
         let mut values = Vec::new();
-        
+
         if let Ok(entries) = std::fs::read_dir(&dir_path) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -190,7 +190,6 @@ impl clap::builder::TypedValueParser for AudioFileParser {
 
         Some(Box::new(values.into_iter()))
     }
-
 }
 
 /// Value parser that suggests common volume levels for shell completion
@@ -860,8 +859,7 @@ async fn print_duck_info() {
                     } else {
                         println!("Sessions that would be ducked ({}):", snap.len());
                         for entry in &snap.entries {
-                            if let playa::ducking::SessionId::WasapiSession { pid, key } =
-                                &entry.id
+                            if let playa::ducking::SessionId::WasapiSession { pid, key } = &entry.id
                             {
                                 let vol = entry.channels.first().copied().unwrap_or(0.0) * 100.0;
                                 println!("  PID {} [{}] - {:.0}%", pid, key, vol);

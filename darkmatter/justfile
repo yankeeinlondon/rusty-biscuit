@@ -1,3 +1,8 @@
+import "../just/features.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 BOLD := '\033[1m'
@@ -36,203 +41,22 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_sound_effect effect="drop4":
-    @playa effect "{{effect}}" --background 2>/dev/null || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_opencode prompt:
-    #!/usr/bin/env bash
-    if command -v opencode &> /dev/null; then
-        local MODEL
-        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
-        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
-        echo
-        opencode run "{{prompt}}" --model "$MODEL"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_codex prompt:
-    #!/usr/bin/env bash
-    if command -v codex &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        codex exec "{{prompt}}"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-
-# use an AI agent to respond to a question (uses `AGENT`)
-ask prompt:
-    #!/usr/bin/env bash
-    if [[ "${AGENT,,}" == "opencode" ]]; then
-        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    elif [[ "${AGENT,,}" == "codex"  ]]; then
-        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    else
-        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
-    fi
-
-# Ask Claude Code via a prompt file in a non-interactive session
-# NOTE: just hangs when large multi-line strings are passed via {{PROMPT}} parameters.
-# All callers should write their prompt to a temp file and call this recipe instead.
-_claude_file PROMPT_FILE:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo -e "\033[2m⏳ claude is working (max 30 turns)...\033[0m" >&2
-    (while true; do sleep 30; printf "." >&2; done) &
-    DOTS_PID=$!
-    trap 'kill $DOTS_PID 2>/dev/null || true' EXIT
-    unset ANTHROPIC_API_KEY
-    PROMPT_CONTENT="$(cat "{{PROMPT_FILE}}")"
-    cd .. && claude --dangerously-skip-permissions --max-turns 30 -p "$PROMPT_CONTENT"
-    echo -e "\n\033[2m✓ claude finished\033[0m" >&2
-
-
 
 
 # Build the library and CLI
 build *args="":
-    @echo -e "Building {{LIB_NAME}}"
-    @echo
-    cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{LIB_NAME}}{{RESET}} built successfully"
-    @echo
-    @echo -e "Building {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
-    @echo
+    @just _build darkmatter "{{LIB_NAME}}" {{args}}
+    @just _build darkmatter-cli "CLI_NAME" {{args}}
 
-# Test both library and CLI
-test:
-    @echo
-    @echo -e "Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @echo -e "{{DIM}}Running unit and integration tests for {{BOLD}}{{LIB_NAME}}{{RESET}}{{DIM}}...{{RESET}}"
-    @cargo test -p {{LIBRARY}} --lib --tests || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "{{DIM}}Running doctests for {{BOLD}}{{LIB_NAME}}{{RESET}}{{DIM}}. This phase can stay quiet while merged doctests compile.{{RESET}}"
-    @cargo test -p {{LIBRARY}} --doc || ( just _speak "The {{LIB_NAME}} doctests have failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} doctests have failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
-    @echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @echo -e "{{DIM}}Running unit, binary, and integration tests for {{BOLD}}{{CLI_NAME}}{{RESET}}{{DIM}}...{{RESET}}"
-    @cargo test -p "{{CLI}}" --lib --bins --tests || ( just _speak "The {{CLI_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "{{DIM}}Running doctests for {{BOLD}}{{CLI_NAME}}{{RESET}}{{DIM}}. This phase can stay quiet while merged doctests compile.{{RESET}}"
-    @cargo test -p "{{CLI}}" --doc || ( just _speak "The {{CLI_NAME}} doctests have failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} doctests have failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
+# Test both library and CLI.
+test *args="":
+    @just _test darkmatter {{args}}
+    @just _test darkmatter-cli {{args}}
 
 # Lint both the library and CLI
 lint:
-    @echo
-    @echo -e "Linting {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
-    @echo
-    @echo -e "Linting {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
-
-# Lint (and fix) both the library and CLI
-lint-fix:
-    @echo
-    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy --fix -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints even after attempt to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
-    @echo
-    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
-
-_lint_fix_library ERR_FILE:
-    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
-    @echo "/{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
-    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
-    @just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
-    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
-
-_lint_fix_cli ERR_FILE:
-    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{CLI_NAME}}{{RESET}}; kicking off AI to fix.\n"
-    @echo "/{{CLI}} Fix the lint errors in {{CLI_NAME}}:" > "/tmp/{{CLI}}_claude_prompt.txt"
-    @echo "" >> "/tmp/{{CLI}}_claude_prompt.txt"
-    @cat {{ERR_FILE}} >> "/tmp/{{CLI}}_claude_prompt.txt"
-    @just _claude_file "/tmp/{{CLI}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
-    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} are now fixed"
-    @just _speak "Claude Code believes it has fixed all lint errors in {{CLI_NAME}}"
-    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
-    @echo -e "✅ It has been confirmed that all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} have been fixed"
-
-# Fix lint errors with AI
-lint-fix-ai:
-    @echo
-    @echo -e "Checking {{BOLD}}{{LIB_NAME}}{{RESET}} for lint errors"
-    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || just _lint_fix_library "/tmp/{{LIBRARY}}_clippy_errors.txt"
-    @echo -e "✅ No lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @echo -e "Checking {{BOLD}}{{CLI_NAME}}{{RESET}} for lint errors"
-    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || just _lint_fix_cli "/tmp/{{CLI}}_clippy_errors.txt"
-    @echo -e "✅ No lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @just _speak "No lint errors were found in {{PACKAGE}}"
+    @just _lint darkmatter
+    @just _lint darkmatter-cli
 
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
@@ -261,7 +85,7 @@ install *args="":
     @echo
     @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
-    @just _sound_effect drop4
+    @just _play drop4
 
 # Validate the source code without doing a full build
 check:
@@ -271,55 +95,6 @@ check:
 cli *args="":
     @cargo run -p {{CLI}} {{args}}
 
-# Open Opencode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
-
-# Show the dependencies for this package
-deps:
-    @echo "Dependencies:"
-    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
-
-readme_files:
-    @sniff docs --readme --json | jq -r '[.[] | select(.relative | startswith("{{LIBRARY}}")) | "@" + .relative ] | join(" ")'
-
-implement topic phase plan="":
-    @echo
-    @echo -e "{{BOLD}}Phase {{phase}}:{{RESET}} {{DIM}}{{topic}}{{RESET}}"
-    @echo
-    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }' || ( just _play error2 && exit 1 )
-
-_implement-spec spec:
-    @DIR="$(dirname "{{spec}}")" claudine compose @prompts/design.md --set '{ spec: "{{spec}}", dir: "${DIR}" }' --codex -y -v
-    @claudine compose @prompts/clarify.md --set '{  dir: "${DIR}" }' -y -i --codex
-
-
-spec:
-    #!/usr/bin/env bash
-    just _implement-spec "$(fd spec.md | rg "features/2" | fzf --border --border-label "Specification File" --header "choose the specification file" --height=15)" || ( echo "bye" && exit 1 )
-
-# Create a technical design document from a specification file
-design feat="":
-    #!/usr/bin/env bash
-    echo -e "We will create a tech-design.md document in the same directory as your specification file"
-    if [[ -z "${feat}" ]]; then
-        fd spec.md | rg "features|fixes" | rg "{{feat}}"
-    else
-        fd spec.md | rg "features|fixes"
-    fi
-
 # review this package using the Codex CLI
 review *args="":
     @clear
@@ -328,7 +103,7 @@ review *args="":
     @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
     @echo
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
-    @just _sound_effect confirmation
+    @just _play confirmation
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
 
@@ -338,7 +113,7 @@ docs_cli:
     @echo -e "Updating the CLI documents for {{BOLD}}Darkmatter{{RESET}}"
     @echo
     @just _claude_file ./prompts/update-cli-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
-    @just _sound_effect confirmation
+    @just _play confirmation
     @echo
     @echo -e "{{BOLD}}Darkmatter {{GREEN}}CLI Docs{{RESET}} were updated!"
 
@@ -347,7 +122,10 @@ docs_library:
     @echo -e "Updating the documentation for the {{BOLD}}Darkmatter Library{{RESET}}"
     @echo
     @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
-    @just _sound_effect confirmation
+    @just _play confirmation
+
+readme:
+    _readme_files darkmatter
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

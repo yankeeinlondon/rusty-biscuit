@@ -1,4 +1,11 @@
+set dotenv-load
+set positional-arguments
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/features.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -12,14 +19,8 @@ MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 
 PACKAGE := "Biscuit Speaks"
-LIB_NAME := PACKAGE + " Library"
-CLI_BINARY := "so-you-say"
-CLI_NAME := PACKAGE + " CLI " + RESET + "(" + DIM + BLUE + ITALIC + CLI_BINARY + RESET + ")" + RESET
-CLI_NAME_SPEAK := PACKAGE + " CLI (called " + CLI_BINARY + ")"
 LIBRARY := replace(lowercase(PACKAGE), " ", "-")
 CLI := replace(lowercase(PACKAGE) + "-cli", " ", "-")
-CLI_PATH := "./cli"
-DOCS := ""
 
 
 default:
@@ -38,218 +39,31 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_opencode prompt:
-    #!/usr/bin/env bash
-    if command -v opencode &> /dev/null; then
-        local MODEL
-        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
-        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
-        echo
-        opencode run "{{prompt}}" --model "$MODEL"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_codex prompt:
-    #!/usr/bin/env bash
-    if command -v codex &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        codex exec "{{prompt}}"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-
-# use an AI agent to respond to a question (uses `AGENT`)
-ask prompt:
-    #!/usr/bin/env bash
-    if [[ "${AGENT,,}" == "opencode" ]]; then
-        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    elif [[ "${AGENT,,}" == "codex"  ]]; then
-        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    else
-        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
-    fi
-
-# Ask Claude Code via a prompt file in a non-interactive session
-# NOTE: just hangs when large multi-line strings are passed via {{PROMPT}} parameters.
-# All callers should write their prompt to a temp file and call this recipe instead.
-_claude_file PROMPT_FILE:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo -e "\033[2m⏳ claude is working (max 30 turns)...\033[0m" >&2
-    (while true; do sleep 30; printf "." >&2; done) &
-    DOTS_PID=$!
-    trap 'kill $DOTS_PID 2>/dev/null || true' EXIT
-    unset ANTHROPIC_API_KEY
-    PROMPT_CONTENT="$(cat "{{PROMPT_FILE}}")"
-    cd .. && claude --dangerously-skip-permissions --max-turns 30 -p "$PROMPT_CONTENT"
-    echo -e "\n\033[2m✓ claude finished\033[0m" >&2
-
-
-
-
 # Build the library and CLI
 build *args="":
-    @echo -e "Building {{LIB_NAME}}"
-    @echo
-    cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{LIB_NAME}}{{RESET}} built successfully"
-    @echo
-    @echo -e "Building {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
-    @echo
+    @just _build biscuit-speaks "Biscuit Speaks Library" {{args}}
+    @just _build biscuit-speaks-cli "Biscuit Speaks CLI" {{args}}
 
-# Test both library and CLI
-test:
-    @echo
-    @echo -e "Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo test -p {{LIBRARY}} || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
-    @echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo test -p "{{CLI}}" || ( just _speak "The {{CLI_NAME_SPEAK}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
+# Test both library and CLI.
+test *args="":
+    @just _test claudine {{args}}
+    @just _test claudine-cli {{args}}
 
 # Lint both the library and CLI
 lint:
-    @echo
-    @echo -e "Linting {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
-    @echo
-    @echo -e "Linting {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME_SPEAK}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+    @just _lint biscuit-speaks
+    @just _lint biscuit-speaks-cli
 
 # Lint (and fix) both the library and CLI
 lint-fix:
-    @echo
-    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy --fix -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints even after attempt to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
-    @echo
-    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+    @just _lint biscuit-speaks || just _fix_lint biscuit-speaks
+    @just _lint biscuit-speaks-cli || just _fix_lint biscuit-speaks-cli
 
-_lint_fix_library ERR_FILE:
-    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
-    @echo -e "/{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    @just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
-    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
-    @just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
-    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
-
-_lint_fix_cli ERR_FILE:
-    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{CLI_NAME}}{{RESET}}; kicking off AI to fix.\n"
-    @echo -e "/{{CLI}} Fix the lint errors in {{CLI_NAME}}:" > "/tmp/{{CLI}}_claude_prompt.txt"
-    @echo "" >> "/tmp/{{CLI}}_claude_prompt.txt"
-    @cat {{ERR_FILE}} >> "/tmp/{{CLI}}_claude_prompt.txt"
-    @just _claude_file "/tmp/{{CLI}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
-    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} are now fixed"
-    @just _speak "Claude Code believes it has fixed all lint errors in {{CLI_NAME}}"
-    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
-    @echo -e "✅ It has been confirmed that all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} have been fixed"
-
-# Fix lint errors with AI
-lint-fix-ai:
-    @echo
-    @echo -e "Checking {{BOLD}}{{LIB_NAME}}{{RESET}} for lint errors"
-    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || just _lint_fix_library "/tmp/{{LIBRARY}}_clippy_errors.txt"
-    @echo -e "✅ No lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @echo -e "Checking {{BOLD}}{{CLI_NAME}}{{RESET}} for lint errors"
-    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || just _lint_fix_cli "/tmp/{{CLI}}_clippy_errors.txt"
-    @echo -e "✅ No lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @just _speak "No lint errors were found in {{PACKAGE}}"
-
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
 
 # Install the CLI
 install *args="":
-    @echo
-    @echo -e "{{BOLD}}Building {{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo build -p {{LIBRARY}} --release  || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo
-    @echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
-    @playa effect drop-4 2>/dev/null || exit 0
+    @just build --release
+    @just _install "./cli" "Biscuit Speaks" {{args}}
 
 # Validate the source code without doing a full build
 check:
@@ -259,128 +73,17 @@ check:
 cli *args="":
     @cargo run -p {{CLI}} {{args}}
 
-# Open Opencode in yolo mode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
-
 # Show the dependencies for this package
 deps:
     @echo "Dependencies:"
     @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
 
-readme_files:
-    @sniff docs --readme --json | jq -r '[.[] | select(.relative | startswith("{{LIBRARY}}")) | "@" + .relative ] | join(" ")'
-
-# review this package using the Codex CLI
-review *args="":
-    @clear
-    @echo -e "Performing a code review on the {{BOLD}}{{LIB_NAME}}{{RESET}} package"
-    @echo ""
-    @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
-    @echo
-    @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
-    @just _speak "Review for {{LIB_NAME}} package has completed."
-
-
-TODAY := `date +%F`
-# the temp file for the documents prompt
-DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + LIBRARY + "_docs_prompt.md"
-# the temp file for the skills prompt
-SKILL_PROMPT := "../.ai/logs/" + TODAY + ". skill_prompt_for_" + LIBRARY + "_skill_prompt.md"
-# the captured summary from the docs refresh step
-DOCS_SUMMARY := "../.ai/logs/" + TODAY +  ". doc_update_summary_for_" + LIBRARY + "_docs_summary.md"
-
-# Render the documentation refresh prompt template.
-#
-# Placeholder keys in the template: DOCS, ARGS, LIBRARY, CLI, LIB_NAME, DEPS
-_docs_prompt TEMPLATE DOCS ARGS LIBRARY CLI LIB_NAME DEPS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    CLI_VALUE={{quote(CLI)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DEPS_VALUE={{quote(DEPS)}}
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}CLI${CLOSE}/${CLI_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DEPS${CLOSE}/${DEPS_VALUE}}"
-    mkdir -p "$(dirname "{{DOCS_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{DOCS_PROMPT}}"
-
-# Render the skill refresh prompt template.
-#
-# Placeholder keys in the template: LIBRARY, LIB_NAME, DOCS, SUMMARY, ARGS
-_skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    SUMMARY_VALUE="$(cat "{{SUMMARY_FILE}}")"
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}SUMMARY${CLOSE}/${SUMMARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    mkdir -p "$(dirname "{{SKILL_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{SKILL_PROMPT}}"
-
-_refresh_docs *args="":
-    @echo >&2
-    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
-    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{LIBRARY}}" "{{CLI}}" "{{LIB_NAME}}" "$(just deps)"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{DOCS_PROMPT}}"
-
-
-_refresh_skill SUMMARY_FILE *args:
-    @just _speak "The documentation files for {{PACKAGE}} were updated and now we're starting the update of the skill files"
-    @echo >&2
-    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}" >&2
-    @echo >&2
-    @just _skill_prompt "../.ai/prompts/agent-skills.md" "{{LIBRARY}}" "{{LIB_NAME}}" "$(just readme_files)" "{{SUMMARY_FILE}}" "{{args}}"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{SKILL_PROMPT}}"
-
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
-    @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}{{LIBRARY}}{{RESET}} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
-    @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{DOCS}} {{args}}
-    @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+readme:
+    _readme_files claudine
 
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} {{DOCS_SUMMARY}} >/dev/null || true
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true

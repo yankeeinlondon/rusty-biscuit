@@ -1,4 +1,8 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+import "../just/features.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -12,11 +16,8 @@ MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 
 PACKAGE := "Worktree"
-LIB_NAME := PACKAGE + " Library"
-CLI_NAME := PACKAGE + " CLI"
 LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
-CLI_PATH := "./cli"
 DOCS := ""
 TODAY := `date +%F`
 
@@ -36,135 +37,31 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_sound_effect effect="drop4":
-    @playa effect "{{effect}}" --background 2>/dev/null || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
+# Build the library and CLI
 # Build the library and CLI
 build *args="":
-    @echo -e "Building {{LIB_NAME}}"
-    @echo
-    cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{LIB_NAME}}{{RESET}} built successfully"
-    @echo
-    @echo -e "Building {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
-    @echo
+    @just _build worktree "Worktree Library" {{args}}
+    @just _build worktree-cli "Worktree CLI" {{args}}
 
-# Test both library and CLI
+# Test both library and CLI.
 test:
-    @echo
-    @echo -e "Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @echo -e "{{DIM}}Running unit and integration tests for {{BOLD}}{{LIB_NAME}}{{RESET}}{{DIM}}...{{RESET}}"
-    @cargo test -p {{LIBRARY}} --lib --tests || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "{{DIM}}Running doctests for {{BOLD}}{{LIB_NAME}}{{RESET}}{{DIM}}. This phase can stay quiet while merged doctests compile.{{RESET}}"
-    @cargo test -p {{LIBRARY}} --doc || ( just _speak "The {{LIB_NAME}} doctests have failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} doctests have failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
-    @echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @echo -e "{{DIM}}Running unit, binary, and integration tests for {{BOLD}}{{CLI_NAME}}{{RESET}}{{DIM}}...{{RESET}}"
-    @cargo test -p "{{CLI}}" --lib --bins --tests || ( just _speak "The {{CLI_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "{{DIM}}Running doctests for {{BOLD}}{{CLI_NAME}}{{RESET}}{{DIM}}. This phase can stay quiet while merged doctests compile.{{RESET}}"
-    @cargo test -p "{{CLI}}" --doc || ( just _speak "The {{CLI_NAME}} doctests have failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} doctests have failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
+    @just _test worktree
+    @just _test worktree-cli
 
 # Lint both the library and CLI
+
 lint:
-    @echo
-    @echo -e "Linting {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
-    @echo
-    @echo -e "Linting {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+    @just _lint worktree
+    @just _lint worktree-cli
 
 # Lint (and fix) both the library and CLI
 lint-fix:
-    @echo
-    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo clippy --fix -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints even after attempt to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
-    @echo
-    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
-
-# Install the CLI
-install *args="":
-    @echo
-    @echo -e "{{BOLD}}Building {{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo build -p {{LIBRARY}} --release  || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo
-    @echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
-    @just _sound_effect drop4
+    @just _lint worktree || just _fix_lint worktree
+    @just _lint worktree-cli || just _fix_lint worktree-cli
 
 # Validate the source code without doing a full build
 check:
     @cargo check -p {{LIBRARY}} -p {{CLI}}
-
-# Run the latest debug build of the CLI
-cli *args="":
-    @cargo run -p {{CLI}} {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Opencode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Gemini in YOLO mode
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 # Show the dependencies for this package
 deps:
@@ -175,18 +72,6 @@ deps:
 docs:
     @cargo doc -p {{LIBRARY}} --open
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 _colors:

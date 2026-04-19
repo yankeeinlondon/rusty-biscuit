@@ -94,10 +94,7 @@ fn send_receipt_discord_json_roundtrip() {
             message_id: "456".into(),
         },
         raw_id: "456".into(),
-        metadata: BTreeMap::from([
-            ("foo".into(), "bar".into()),
-            ("baz".into(), "qux".into()),
-        ]),
+        metadata: BTreeMap::from([("foo".into(), "bar".into()), ("baz".into(), "qux".into())]),
     };
     let json = receipt.to_pretty_json().unwrap();
     let parsed = SendReceipt::from_json_str(&json).unwrap();

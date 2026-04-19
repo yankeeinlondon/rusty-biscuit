@@ -4,10 +4,79 @@ Claudine supports the ability to _compose_ content by leveraging the Darkmatter 
 
 Two canonical commands:
 
-- **`claudine compose <file-ref>`** — direct (chained) composition
-- **`claudine inline-compose <file-ref>`** — inline composition
+- **`claudine compose [flags] <arg>...`** — direct (chained) composition
+- **`claudine inline-compose [flags] <arg>...`** — inline composition
 
 Both commands share the same five-stage pipeline and inherit full wrapper-grade behavior: environment setup, harness detection, structured streaming, and handler-driven recovery.
+
+Because composition flows through the same execution path as `claudine claude` / `codex` / etc., it inherits every behavior of the live stderr surface documented in [Non-Interactive Sessions](non-interactive-sessions.md):
+
+- **Tool call rendering** — `→ Name(summary)` / `← Name(slot)` with shell-name prefixing for `Bash` / `shell` / `run_command` and `description → subject → prompt → task` field order for `Task`.
+- **Idle flush** — buffered assistant markdown is flushed before the next heartbeat status line whenever the block buffer has been idle for at least the heartbeat silence window (default 30 s), so a dangling final paragraph never sits invisible while a slow-to-close provider waits to exit.
+- **Typed error rendering** — `SemanticEvent::Error` is rendered as a colored `BlockQuote` whose label and border come from `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`).
+- **Reasoning / thinking** — provider reasoning (Claude, Codex, OpenCode, Gemini, Qwen) renders into `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border that matches the System Prompt and Agent Prompt sections.
+
+### Positional Arguments
+
+Each command accepts exactly one file reference plus zero or more `key=value`
+setters, in any order:
+
+```sh
+claudine compose @prompts/review.md review=review.md
+claudine compose review=review.md @prompts/review.md
+claudine inline-compose draft=false @notes/update.md
+```
+
+A token is a setter when it contains `=` and its key starts with an ASCII
+letter or `_` and contains only letters, digits, `_`, or `-`. Dot-paths and
+path-like tokens (for example `foo.bar=baz`) are not setters and are treated
+as file-reference candidates.
+
+Setter values are parsed as JSON5 first and fall back to strings when JSON5
+parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
+`review=review.md` all resolve to their natural types.
+
+Inline setters override matching keys from `--set`. For `sequence`, reserved
+per-step overlay keys still win over both `--set` and shorthand setters.
+
+### Shell Completion
+
+Dynamic completion fires at markdown-expecting argument positions on all
+three composition commands and on the `--append-system-prompt` /
+`--replace-system-prompt` flag values — both on compose/inline-compose/
+sequence themselves and on every wrapped provider subcommand (`claude`,
+`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`). All three
+composition commands share one markdown-only contract; there is no
+per-command frontmatter validation at completion time.
+
+The generated bash/zsh/fish scripts shell out to `claudine __complete` on
+every `<TAB>`. The supplement engine applies these rules in order:
+
+- **Candidates are markdown files only** (`*.md`). Directories,
+  non-markdown files, `./`/`../` traversal tokens, `!` package sigils,
+  `vault:`, `/abs`, `%`, and `{{…}}` prefixes all return zero candidates.
+- **Two supported entry forms**: `@`-prefixed magic paths (enumerated
+  against repo root + user home) and implicit-relative paths like
+  `prompts/…` (enumerated against the repo root only).
+- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+  segments before a `/` don't count) use the curated scope only —
+  `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
+  `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend
+  to a `.gitignore`-aware walk of the enclosing git repo.
+- **Case-insensitive substring matching** on the filename with `.md`
+  stripped for matching only. `@omp<TAB>` matches `prompt.md`.
+- **`KEY=<TAB>` setters** return zero candidates so shell default
+  behavior kicks in.
+
+Install with `claudine completions <shell>` — regenerate and reinstall
+after a Claudine upgrade that changes the callback wiring. The hidden
+`claudine __complete` subprocess always tracks the running binary, so
+the completion candidates themselves never go stale. PowerShell and
+Elvish retain the legacy one-line `COMPLETE=<shell>` bootstrap; users
+who installed an older `COMPLETE=<shell>` snippet continue to reach the
+legacy completion path on every shell until they regenerate. See
+[shell-completions.md](../shell-completions.md) for the full install
+matrix, supported token shapes, and the open-questions list.
 
 ## Direct Composition
 
@@ -66,11 +135,17 @@ Steps:
 
 Both commands use a deterministic precedence chain:
 
-1. **Explicit flag** (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--roo`) — highest priority
 2. **Single installed** — if only one provider remains after `--exclude` filtering
 3. **Frontmatter hint** — the `agent` property in the effective (composed) frontmatter, fuzzy-matched against provider names
 4. **Config favorite** — `settings.linking.preference[0]` from `~/.claudine/config.json` or `<repo>/.claudine/config.json`
 5. **Interactive chooser** — if a TTY is available, prompt the user; otherwise error
+
+The shorthand booleans and the `--provider` value both accept fuzzy
+input (`cl` → `claude`, `gem` → `gemini`, `oc` → `open_code`). The
+[argv normalizer](argv-normalization.md) rewrites every shorthand into
+a canonical `--provider <slug>` pair before clap runs, so runtime
+provider selection only ever reads the single `--provider` field.
 
 ### The `--interactive` Flag
 
@@ -105,13 +180,45 @@ Available validations include filesystem checks (`file_exists`, `dir_exists`, `j
 
 ### Timeouts
 
-The `timeout` frontmatter property sets a per-execution deadline:
+Claudine supports two independent timeout properties that share the same
+human-readable duration syntax (`s`/`sec`/`seconds`, `m`/`min`/`minutes`,
+`h`/`hr`/`hours`):
 
 ```yaml
 timeout: 5m
+step_timeout: 30s
 ```
 
-Accepts `s`/`sec`/`seconds`, `m`/`min`/`minutes`, `h`/`hr`/`hours` units.
+- **`timeout`** is a wall-clock deadline for the entire provider run. When the
+  elapsed time since launch exceeds this budget, Claudine sends SIGTERM (then
+  SIGKILL after a short grace period).
+- **`step_timeout`** is a silence deadline. The timer resets on every
+  `SemanticEvent` observed on the provider's structured stream (tool call,
+  tool result, reasoning chunk, assistant text, info/warning, etc.). If no
+  event is observed for longer than the budget, Claudine kills the child.
+
+Both timeouts surface as the same `FailureEvent::Timeout` variant, so a
+single `handle_timeout` handler matches either one.
+
+**Streaming-only.** `step_timeout` requires structured streaming. If the
+selected provider runs in capture or passthrough mode, Claudine emits a
+warning and ignores the field. The non-streaming Goose wrapper is the
+primary example.
+
+**Relational validation.** When both properties are present,
+`step_timeout` must be less than or equal to `timeout`. Documents that
+violate this invariant fail parse-time validation with
+`HarnessError::InvalidTimeout`.
+
+**Precedence.** The CLI flags `--timeout` and `--step-timeout` override
+frontmatter when provided. Wall-clock enforcement is checked before
+step-silence on each poll, so if both budgets expire in the same tick the
+run is reported as the wall-clock timeout.
+
+```yaml
+timeout: 10m          # hard ceiling on total runtime
+step_timeout: 45s     # kill the child if it goes silent for 45s
+```
 
 ### Handlers
 

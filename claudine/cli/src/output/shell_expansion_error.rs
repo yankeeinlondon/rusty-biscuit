@@ -53,10 +53,7 @@ pub(crate) fn render(source_path: &Path, error: &ShellExpansionError) {
 /// `eyre!("{err}")`.
 pub(crate) fn pretty_or_report(err: CompositionError) -> Report {
     match err {
-        CompositionError::ShellExpansionFailed {
-            source_path,
-            error,
-        } => {
+        CompositionError::ShellExpansionFailed { source_path, error } => {
             render(&source_path, error.as_ref());
             eyre!("{}", PRE_RENDERED_MARKER)
         }
@@ -125,11 +122,7 @@ impl ShellExpansionReport {
         let body = build_body(source_path, error, origin_kind);
         let hint = build_hint(error);
 
-        Self {
-            header,
-            body,
-            hint,
-        }
+        Self { header, body, hint }
     }
 }
 
@@ -213,10 +206,7 @@ fn build_body(
     }
 }
 
-fn build_body_body_origin(
-    source_text: &str,
-    error: &ShellExpansionError,
-) -> Option<BlockQuote> {
+fn build_body_body_origin(source_text: &str, error: &ShellExpansionError) -> Option<BlockQuote> {
     let body_text = body_content(source_text);
     let body_lines: Vec<&str> = body_text.lines().collect();
 
@@ -228,10 +218,7 @@ fn build_body_body_origin(
     Some(render_fence_into_block(&fence))
 }
 
-fn build_frontmatter_body(
-    source_text: &str,
-    error: &ShellExpansionError,
-) -> Option<BlockQuote> {
+fn build_frontmatter_body(source_text: &str, error: &ShellExpansionError) -> Option<BlockQuote> {
     let frontmatter_text = frontmatter_content(source_text)?;
     let key = match origin_of(error) {
         Some(ShellCommandOrigin::Frontmatter { key }) => key.as_str(),
@@ -291,12 +278,7 @@ fn trim_trailing_blank_lines(rendered: &str) -> String {
 
 /// Build the Status header with the "prompt referenced {file} provided an
 /// invalid shell expansion command in the {body|frontmatter}" text.
-fn build_header(
-    absolute: &Path,
-    relative: &Path,
-    kind: OriginKind,
-    reason: &str,
-) -> Status {
+fn build_header(absolute: &Path, relative: &Path, kind: OriginKind, reason: &str) -> Status {
     let rel_display = prose_escape(&relative.display().to_string());
     let abs_display = absolute.display().to_string();
     let kind_label = match kind {
@@ -338,8 +320,7 @@ fn build_hint(error: &ShellExpansionError) -> Option<String> {
                 .to_string(),
         ),
         ShellExpansionError::Denied { .. } => Some(
-            "  <dim>Hint: this command was denied during pre-flight approval.</dim>"
-                .to_string(),
+            "  <dim>Hint: this command was denied during pre-flight approval.</dim>".to_string(),
         ),
         ShellExpansionError::NotPreApproved { .. } => Some(
             "  <dim>Hint: this is a claudine pre-flight bug — the command was \
@@ -358,10 +339,7 @@ fn build_hint(error: &ShellExpansionError) -> Option<String> {
 /// Find the line within the markdown body that most likely hosts the
 /// offending `::shell` directive. Uses the error's `command` field as a
 /// substring search anchor.
-fn find_body_directive_line(
-    body_lines: &[&str],
-    error: &ShellExpansionError,
-) -> Option<usize> {
+fn find_body_directive_line(body_lines: &[&str], error: &ShellExpansionError) -> Option<usize> {
     let command = command_of(error)?;
 
     // Prefer lines that start with `::shell` and contain the command text

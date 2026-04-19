@@ -30,12 +30,13 @@ use sniff::programs::InstalledAiClients;
 
 use super::env;
 use super::exec;
+use super::live_semantic_sink::LiveSemanticSink;
 use super::profile::{self, WrapperProfile};
 use super::{
-    HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
+    HarnessPromptMode, HarnessPromptState, StreamSummaryContext, StructuredCodexOutput,
     StructuredSummaryDetails, WrapperHarnessPermissionProbe,
-    build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
-    emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
+    build_harness_shell_options_with_cache, emit_stream_summary_with_context, format_summary_prose,
+    format_verbose_summary_details_prose, materialized_harness_prompt_from_prepared,
     resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
@@ -46,6 +47,39 @@ pub(crate) struct SingleCompositionOutcome {
     pub exit_code: i32,
     /// The provider that ran the step.
     pub provider: Provider,
+}
+
+/// Result of running a structured composition stream.
+///
+/// Produced by [`run_structured_composition`] and consumed by both the
+/// compose and inline-compose callers. The shared function does not emit
+/// the summary; callers decide the timing and routing.
+struct CompositionStreamResult {
+    exit_code: i32,
+    assistant_text: String,
+    summary: claudine::stream::summary::StreamExecutionSummary,
+    details: StructuredSummaryDetails,
+    had_streamed_assistant: bool,
+    /// Shares a `SectionTracker` with the live sink so post-stream trailer
+    /// emitters see consistent section state. Only the compose caller uses
+    /// this; inline-compose ignores it.
+    section_stream: super::section::SectionStream,
+}
+
+/// Mode-specific inputs for [`execute_without_harness`].
+///
+/// Carries the inline-only parameters (closure plan, target path,
+/// interactivity, stderr verbosity) so the merged function can branch its
+/// post-execution logic without dragging optional parameters through every
+/// call.
+enum CompositionExecutionMode<'a> {
+    Direct,
+    Inline {
+        closure_plan: &'a InlineClosurePlan,
+        resolved_path: &'a std::path::Path,
+        session_interactive: bool,
+        show_checks: bool,
+    },
 }
 
 fn composition_dispatch_context(
@@ -105,6 +139,9 @@ pub(crate) fn execute_composition_request_inner(
     let silent = request.silent;
     let show_checks = !silent;
 
+    let source_repo_root = request.prepared.source_repo_root.as_deref();
+    let launch_workspace = env::resolve_launch_workspace_context(&launch_cwd, source_repo_root);
+
     // -- Provider detection and selection ---------------------------------
 
     let clients = InstalledAiClients::new();
@@ -121,7 +158,6 @@ pub(crate) fn execute_composition_request_inner(
     .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
     .collect();
 
-    let source_repo_root = request.prepared.source_repo_root.as_deref();
     let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
 
     let selected = match select_provider(
@@ -179,6 +215,11 @@ pub(crate) fn execute_composition_request_inner(
     let compose_source_hint = request.file_ref.clone();
 
     if !silent {
+        let header_env_plan = env::EnvPlan {
+            package_context: launch_workspace.package_context.clone(),
+            ..Default::default()
+        };
+
         crate::output::log_wrapper_header(
             profile,
             request.yolo,
@@ -191,7 +232,7 @@ pub(crate) fn execute_composition_request_inner(
             request.operation.as_deref(),
             None, // no inline prompt text for compose
             Some(&compose_source_hint),
-            &Default::default(), // env_plan not built yet; header doesn't need it for compose
+            &header_env_plan,
             &term,
         );
     }
@@ -346,8 +387,11 @@ pub(crate) fn execute_composition_request_inner(
 
     if request.yolo {
         let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)?
-            && !silent
+        if let Some(warn) = profile.apply_yolo_for_mode(
+            &mut child_args,
+            &mut env_overrides,
+            !effective_non_interactive,
+        )? && !silent
             && !quiet
         {
             log::warn(&warn);
@@ -362,14 +406,46 @@ pub(crate) fn execute_composition_request_inner(
 
     if effective_non_interactive {
         profile.apply_non_interactive_flags(&mut child_args)?;
-        // Only apply default model if --model was not explicitly provided.
-        if request.model.is_none() {
-            profile.apply_non_interactive_defaults(&mut child_args);
-        }
     }
 
-    // Universal --model flag
-    if let Some(ref model) = request.model {
+    // OpenCode model resolution (replaces apply_non_interactive_defaults +
+    // validate_non_interactive_requirements).
+    let _opencode_model_source: Option<super::profile::OpenCodeModelSource> =
+        if provider == Provider::OpenCode {
+            let has_model = env_plan
+                .env
+                .contains_key(&std::ffi::OsString::from("MODEL"));
+            super::profile::apply_opencode_model_resolution(
+                &mut child_args,
+                &mut |k, v| {
+                    env_plan.env.insert(k.into(), v.into());
+                },
+                has_model,
+                request.model.as_deref(),
+                effective_non_interactive,
+                &super::profile::OpenCodeEnvSnapshot::from_system(),
+            )?
+        } else {
+            None
+        };
+
+    // Universal --model flag (non-OpenCode providers, and OpenCode interactive).
+    if provider != Provider::OpenCode {
+        if let Some(ref model) = request.model {
+            let mut env_overrides = Vec::new();
+            if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
+                && !silent
+                && !quiet
+            {
+                log::warn(&warn);
+            }
+            for (key, value) in env_overrides {
+                env_plan.env.insert(key.into(), value.into());
+            }
+        }
+    } else if let Some(ref model) = request.model
+        && !effective_non_interactive
+    {
         let mut env_overrides = Vec::new();
         if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
             && !silent
@@ -380,21 +456,10 @@ pub(crate) fn execute_composition_request_inner(
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
         }
-        // OpenCode needs MODEL env var when --model is passed via passthrough
-        if provider == Provider::OpenCode && effective_non_interactive {
-            env_plan.env.insert("MODEL".into(), model.clone().into());
-        }
     }
 
-    if provider == Provider::OpenCode
-        && effective_non_interactive
-        && request.model.is_none()
-        && let Some(model) = super::model_value_from_args(&child_args)
-    {
-        env_plan.env.insert("MODEL".into(), model.into());
-    }
-
-    if effective_non_interactive {
+    // Non-OpenCode providers still use the trait-based validation.
+    if provider != Provider::OpenCode && effective_non_interactive {
         profile.validate_non_interactive_requirements(&child_args)?;
     }
 
@@ -409,19 +474,32 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
-    let launch_context = claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd)
-        .unwrap_or_else(|_| claudine::system_prompt::LaunchContext {
-            cwd: launch_cwd.clone(),
-            repo_root: None,
-            package_area_root: None,
-            package_root: None,
-        });
+    let launch_context = match claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd) {
+        Ok(context) => context,
+        Err(error) => {
+            if request.repo {
+                return Err(eyre!(
+                    "--repo requires startup repo detection, but launch-context detection failed: {error}"
+                ));
+            }
+            if !silent && !quiet {
+                log::warn(&format!(
+                    "launch-context detection failed; continuing without repo/package context: {error}"
+                ));
+            }
+            claudine::system_prompt::LaunchContext {
+                cwd: launch_cwd.clone(),
+                repo_root: None,
+                package_area_root: None,
+                package_root: None,
+            }
+        }
+    };
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &request.system_prompt_args,
         &launch_context,
         effective_non_interactive,
-    )
-    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    )?;
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
@@ -474,7 +552,15 @@ pub(crate) fn execute_composition_request_inner(
     } else {
         &[]
     };
-    let stderr_noise = profile.stderr_noise_prefixes();
+    // Interactive TUIs (Codex, OpenCode, etc.) must inherit stderr directly.
+    // A non-empty stderr filter causes `exec::run_child` to pipe stderr,
+    // which flips `isolate_process_group` on and leaves the child in a
+    // background pgroup — it then hangs on SIGTTIN when reading the TTY.
+    let stderr_noise = if effective_non_interactive {
+        profile.stderr_noise_prefixes()
+    } else {
+        &[]
+    };
 
     let use_structured = profile.supports_structured_stream() && effective_non_interactive;
     let stream_verbosity = structured_verbosity(silent, quiet);
@@ -514,6 +600,10 @@ pub(crate) fn execute_composition_request_inner(
         &prompt_source,
     )?;
 
+    if tracing::enabled!(tracing::Level::WARN) {
+        super::profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
+    }
+
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
 
     // --dry-run: print what would be executed and exit
@@ -536,6 +626,16 @@ pub(crate) fn execute_composition_request_inner(
     }
 
     switch_process_cwd(child_cwd)?;
+
+    if !silent && !quiet {
+        use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
+        use biscuit_terminal::prelude::Renderable as _;
+
+        let status = Status::from_prose("Starting pre-flight checks".to_string())
+            .state(StatusState::Info)
+            .theme(StatusTheme::Circular);
+        crate::log::message(&status.render(&term));
+    }
 
     // -- Harness detection from effective frontmatter ---------------------
     // THE key architectural fix: harness properties are read from the
@@ -734,6 +834,7 @@ pub(crate) fn execute_composition_request_inner(
             child_cwd,
             effective_non_interactive,
             request.timeout,
+            request.step_timeout,
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -759,15 +860,27 @@ pub(crate) fn execute_composition_request_inner(
             exit_code,
             provider,
         })
-    } else if is_inline {
+    } else {
         guard.emit_start_once();
 
-        let closure_plan = match &request.prepared.closure {
-            CompositionClosurePlan::Inline(plan) => plan,
-            _ => unreachable!("is_inline is true but closure is not Inline"),
+        let mode = if is_inline {
+            let closure_plan = match &request.prepared.closure {
+                CompositionClosurePlan::Inline(plan) => plan,
+                _ => unreachable!("is_inline is true but closure is not Inline"),
+            };
+            CompositionExecutionMode::Inline {
+                closure_plan,
+                resolved_path: &request.prepared.resolved_path,
+                session_interactive: request.session_interactive,
+                show_checks,
+            }
+        } else {
+            CompositionExecutionMode::Direct
         };
+
         let mut child_spawned = false;
-        let exit_result = execute_inline_without_harness(
+        let exit_result = execute_without_harness(
+            mode,
             provider,
             profile,
             &binary_path,
@@ -775,16 +888,12 @@ pub(crate) fn execute_composition_request_inner(
             &env_plan.env,
             child_cwd,
             stdin_seed.as_deref(),
-            request.session_interactive,
-            closure_plan,
-            &request.prepared.resolved_path,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
             stderr_noise,
             stream_verbosity,
             detail_requested,
-            show_checks,
             &env_context,
             &dispatch_context,
             &term,
@@ -809,54 +918,28 @@ pub(crate) fn execute_composition_request_inner(
             exit_code,
             provider,
         })
-    } else {
-        guard.emit_start_once();
-
-        let mut child_spawned = false;
-        let exit_result = execute_direct_without_harness(
-            provider,
-            profile,
-            &binary_path,
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            stdin_seed.as_deref(),
-            use_structured,
-            structured_codex_output.as_ref(),
-            stdout_noise,
-            stderr_noise,
-            stream_verbosity,
-            detail_requested,
-            &env_context,
-            &dispatch_context,
-            &mut child_spawned,
-        );
-
-        // Mark launched as soon as spawn succeeded — before propagating
-        // any post-spawn error — so the guard correctly classifies
-        // subsequent failures as `Failure` rather than `Blocked`.
-        if child_spawned {
-            guard.mark_provider_launched();
-        }
-        let exit_code = exit_result?;
-
-        if exit_code == 0 {
-            guard.emit_terminal(LifecycleSignal::Success);
-        } else {
-            guard.emit_terminal(LifecycleSignal::Failure);
-        }
-
-        Ok(SingleCompositionOutcome {
-            exit_code,
-            provider,
-        })
     }
 }
 
-// -- Inline closure execution (non-harness) -------------------------------
+// -- Composition execution (non-harness) ----------------------------------
 
+/// Execute a composition request without the harness loop.
+///
+/// Shared implementation for both `compose` (Direct) and `inline-compose`
+/// (Inline). Mode-specific behavior is gated by [`CompositionExecutionMode`]:
+///
+/// - **Direct (compose)**: post-hoc assistant text is routed through the live
+///   sink's section stream so the trailer summary sees consistent state, and
+///   the summary is emitted immediately after the run.
+/// - **Inline (inline-compose)**: assistant text is written straight to
+///   stdout (the body is also captured for closure write-back), the agent
+///   response is validated against the configured closure plan, the target
+///   file is rewritten and cleaned, and the summary is deferred until after
+///   closure validation messages so the section separator does not split
+///   that block.
 #[allow(clippy::too_many_arguments)]
-fn execute_inline_without_harness(
+fn execute_without_harness(
+    mode: CompositionExecutionMode<'_>,
     provider: Provider,
     profile: &dyn WrapperProfile,
     binary_path: &std::path::Path,
@@ -864,24 +947,22 @@ fn execute_inline_without_harness(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
-    session_interactive: bool,
-    closure_plan: &InlineClosurePlan,
-    resolved_path: &std::path::Path,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
     detail_requested: bool,
-    show_checks: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
     child_spawned: &mut bool,
 ) -> Result<i32> {
-    // Run the provider and capture output.
-    let (agent_exit, _agent_termination, final_response, deferred_summary) = if use_structured {
-        run_structured_inline(
+    let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
+
+    // -- Run the provider --------------------------------------------------
+    let (agent_exit, final_response, deferred_summary) = if use_structured {
+        let result = run_structured_composition(
             provider,
             profile,
             binary_path,
@@ -894,34 +975,170 @@ fn execute_inline_without_harness(
             stream_verbosity,
             env_context,
             dispatch_context,
-            term,
             child_spawned,
-        )?
+        )?;
+
+        // Render assistant text to stdout when the provider did not stream
+        // it live. Compose routes through the section stream so the trailer
+        // summary sees a consistent section state; inline writes directly
+        // because the body will be captured into the target file.
+        if !result.had_streamed_assistant && !result.summary.assistant_text.trim().is_empty() {
+            if !is_inline {
+                result.section_stream.enter_final_stdout();
+            }
+            let text = &result.summary.assistant_text;
+            if std::io::stdout().is_terminal() {
+                let rendered = crate::output::render_assistant_markdown(text, term);
+                std::io::stdout().write_all(rendered.as_bytes())?;
+                if !rendered.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            } else {
+                std::io::stdout().write_all(text.as_bytes())?;
+                if !text.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            }
+            std::io::stdout().flush()?;
+        }
+
+        let exit = result.exit_code;
+        let response = result.assistant_text.clone();
+        (exit, response, Some(result))
     } else {
-        run_legacy_inline(
-            provider,
-            profile,
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            stdin_seed,
-            session_interactive,
-            structured_codex_output,
-            stdout_noise,
-            stderr_noise,
-            term,
-            child_spawned,
-        )?
+        // Legacy (non-structured) path. Inline must capture the response so
+        // the closure plan can rewrite the target file; direct just runs the
+        // child and lets it write to stdout on its own.
+        match &mode {
+            CompositionExecutionMode::Inline {
+                session_interactive,
+                ..
+            } => {
+                if *session_interactive {
+                    let result = exec::run_child(
+                        binary_path,
+                        child_args,
+                        child_env,
+                        child_cwd,
+                        None,
+                        exec::ChildIoOptions {
+                            stdout_noise_prefixes: stdout_noise,
+                            stderr_noise_prefixes: stderr_noise,
+                            stdin_seed,
+                        },
+                        child_spawned,
+                    )?;
+                    let response = if provider == Provider::Codex {
+                        if let Some(output) = structured_codex_output {
+                            let text = std::fs::read_to_string(&output.last_message_path)
+                                .unwrap_or_default();
+                            let _ = std::fs::remove_file(&output.last_message_path);
+                            text
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    (result.data, response, None)
+                } else {
+                    let mut capture_args = child_args.to_vec();
+                    profile.prepare_captured_output(&mut capture_args);
+                    let capture = exec::run_child_capture(
+                        binary_path,
+                        &capture_args,
+                        child_env,
+                        child_cwd,
+                        None,
+                        exec::ChildIoOptions {
+                            stdout_noise_prefixes: stdout_noise,
+                            stderr_noise_prefixes: stderr_noise,
+                            stdin_seed,
+                        },
+                        child_spawned,
+                    )?;
+                    let response = profile.parse_captured_output(&capture.data.stdout);
+                    if !response.trim().is_empty() {
+                        if std::io::stdout().is_terminal() {
+                            let rendered =
+                                crate::output::render_assistant_markdown(&response, term);
+                            std::io::stdout().write_all(rendered.as_bytes())?;
+                            if !rendered.ends_with('\n') {
+                                std::io::stdout().write_all(b"\n")?;
+                            }
+                        } else {
+                            std::io::stdout().write_all(response.as_bytes())?;
+                            if !response.ends_with('\n') {
+                                std::io::stdout().write_all(b"\n")?;
+                            }
+                        }
+                        std::io::stdout().flush()?;
+                    }
+                    if !capture.data.stderr.trim().is_empty() {
+                        eprintln!("{}", capture.data.stderr);
+                    }
+                    (capture.data.exit_code, response, None)
+                }
+            }
+            CompositionExecutionMode::Direct => {
+                let result = exec::run_child(
+                    binary_path,
+                    child_args,
+                    child_env,
+                    child_cwd,
+                    None,
+                    exec::ChildIoOptions {
+                        stdout_noise_prefixes: stdout_noise,
+                        stderr_noise_prefixes: stderr_noise,
+                        stdin_seed,
+                    },
+                    child_spawned,
+                )?;
+                (result.data, String::new(), None)
+            }
+        }
     };
 
-    // -- Post-execution: validate disk state and apply closure -------------
+    // -- Direct mode: emit summary immediately and return -------------------
+    let (closure_plan, resolved_path, show_checks) = match mode {
+        CompositionExecutionMode::Direct => {
+            if let Some(result) = deferred_summary {
+                emit_composition_summary(
+                    &result.summary,
+                    &result.details,
+                    profile,
+                    env_context,
+                    stream_verbosity,
+                    detail_requested,
+                    dispatch_context,
+                    Some(&result.section_stream),
+                    false,
+                );
+            } else {
+                emit_minimal_composition_summary(
+                    provider,
+                    agent_exit,
+                    profile,
+                    env_context,
+                    dispatch_context,
+                );
+            }
+            return Ok(agent_exit);
+        }
+        CompositionExecutionMode::Inline {
+            closure_plan,
+            resolved_path,
+            show_checks,
+            ..
+        } => (closure_plan, resolved_path, show_checks),
+    };
 
+    // -- Inline mode: validate disk state and apply closure -----------------
     let mut final_exit = agent_exit;
     let provider_name = crate::output::capitalize_provider(provider);
     let should_separate_checks = deferred_summary
         .as_ref()
-        .is_some_and(|(summary, _, _)| !summary.assistant_text.trim().is_empty());
+        .is_some_and(|result| !result.summary.assistant_text.trim().is_empty());
 
     if show_checks && should_separate_checks {
         eprintln!();
@@ -952,7 +1169,6 @@ fn execute_inline_without_harness(
         .unwrap_or(resolved_path)
         .display();
 
-    // Interrupted: report partial state and bail
     if was_interrupted {
         report_interruption(&display_path, final_response.trim(), term);
         return Ok(1);
@@ -978,7 +1194,6 @@ fn execute_inline_without_harness(
         };
 
         if final_exit == 0 {
-            // Read post-run frontmatter for comparison (best-effort)
             let post_run_fm = std::fs::read_to_string(resolved_path).ok().map(|text| {
                 let md: darkmatter::markdown::Markdown = text.into();
                 md.frontmatter().as_map().clone()
@@ -1019,8 +1234,6 @@ fn execute_inline_without_harness(
                         }
                     }
 
-                    // Post-processing: run Darkmatter cleanup on the
-                    // generated markdown for higher-quality output.
                     match cleanup_inline_output(resolved_path) {
                         Ok(true) => {
                             if show_checks {
@@ -1030,7 +1243,7 @@ fn execute_inline_without_harness(
                                 ));
                             }
                         }
-                        Ok(false) => {} // no changes needed
+                        Ok(false) => {}
                         Err(error) => {
                             if show_checks {
                                 log::message(&crate::output::fm_check_fail(
@@ -1038,8 +1251,6 @@ fn execute_inline_without_harness(
                                     term,
                                 ));
                             }
-                            // Non-fatal: the document was already written
-                            // successfully, cleanup is a quality pass.
                         }
                     }
                 }
@@ -1056,42 +1267,43 @@ fn execute_inline_without_harness(
         }
     }
 
-    // Emit deferred metadata summary
-    if let Some((summary, details, _)) = deferred_summary {
+    if let Some(result) = deferred_summary {
         if stream_verbosity != Verbosity::Silent {
             eprintln!();
         }
-        emit_stream_summary_no_separator_with_context(
-            &summary,
+        emit_composition_summary(
+            &result.summary,
+            &result.details,
             profile,
             env_context,
             stream_verbosity,
             detail_requested,
-            &details,
-            Some(dispatch_context),
+            dispatch_context,
+            None,
+            true,
         );
     } else {
-        // Legacy (non-structured) inline path: emit synthetic session-end
-        // event so composition metadata is consistently logged.
-        emit_legacy_composition_session_event(provider, final_exit, env_context, dispatch_context);
+        emit_minimal_composition_summary(
+            provider,
+            final_exit,
+            profile,
+            env_context,
+            dispatch_context,
+        );
     }
 
     Ok(final_exit)
 }
 
-type InlineRunResult = (
-    i32,
-    claudine::harness::ProcessTermination,
-    String,
-    Option<(
-        claudine::stream::summary::StreamExecutionSummary,
-        StructuredSummaryDetails,
-        bool,
-    )>,
-);
-
+/// Run a provider through the structured stream pipeline shared by both
+/// `compose` and `inline-compose`.
+///
+/// The function builds the live semantic sink, runs the child process, and
+/// applies any Codex-captured post-hoc text to the resulting summary. It
+/// does not emit the summary and does not render assistant text to stdout;
+/// callers decide both timing and section-stream routing.
 #[allow(clippy::too_many_arguments)]
-fn run_structured_inline(
+fn run_structured_composition(
     provider: Provider,
     profile: &dyn WrapperProfile,
     binary_path: &std::path::Path,
@@ -1104,12 +1316,11 @@ fn run_structured_inline(
     stream_verbosity: Verbosity,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
-    term: &Terminal,
     child_spawned: &mut bool,
-) -> Result<InlineRunResult> {
+) -> Result<CompositionStreamResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
-    let sink = LiveStreamSink::new(
+    let sink = LiveSemanticSink::with_default_wiring(
         provider,
         env_context.clone(),
         child_cwd,
@@ -1119,23 +1330,27 @@ fn run_structured_inline(
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
-    let parser = claudine::stream::create_parser(provider, sink, parser_config);
-    let stream_result = exec::run_child_stream(
+    let section_stream = sink.section_stream();
+    let (build_parser, stderr_bridge) =
+        super::build_structured_plumbing(provider, sink, parser_config);
+    let stream_result = exec::run_child_stream_semantic(
         binary_path,
         child_args,
         child_env,
         child_cwd,
         None,
+        None,
         stderr_noise,
         profile.suppress_structured_stderr_on_success(),
         stream_verbosity != Verbosity::Silent,
         stdin_seed,
-        parser,
+        build_parser,
         child_spawned,
-        Some(live_metrics),
-        Some(stream_output),
+        live_metrics,
+        stream_output,
+        claudine::stream::progress::HeartbeatPolicy::default(),
+        stderr_bridge,
     )?;
-    let termination = stream_result.termination;
     let mut summary = stream_result.data;
 
     let had_streamed_assistant =
@@ -1143,116 +1358,119 @@ fn run_structured_inline(
     if let Some(codex_output) = structured_codex_output {
         codex_output.apply_to_summary(&mut summary);
     }
-    if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
-        let text = &summary.assistant_text;
-        if std::io::stdout().is_terminal() {
-            let rendered = crate::output::render_assistant_markdown(text, term);
-            std::io::stdout().write_all(rendered.as_bytes())?;
-            if !rendered.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        } else {
-            std::io::stdout().write_all(text.as_bytes())?;
-            if !text.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        }
-        std::io::stdout().flush()?;
-    }
 
-    if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
-        log::warn("the agent did not provide a summarized message on their completed work!");
-    }
-
-    let exit = summary.exit_code;
     let details = summary_details.lock().unwrap().clone();
-    Ok((
-        exit,
-        termination,
-        summary.assistant_text.clone(),
-        Some((summary, details, had_streamed_assistant)),
-    ))
+    Ok(CompositionStreamResult {
+        exit_code: summary.exit_code,
+        assistant_text: summary.assistant_text.clone(),
+        summary,
+        details,
+        had_streamed_assistant,
+        section_stream,
+    })
 }
 
+/// Emit the structured-stream summary trailer for a composition run.
+///
+/// Unifies the two previous paths:
+/// - `defer_section_separator = false` (compose): routes through
+///   [`emit_stream_summary_with_context`] so the section tracker inserts the
+///   separator blank exactly once.
+/// - `defer_section_separator = true` (inline-compose): prints the trailer
+///   directly so the caller controls the blank-line spacing (e.g. around
+///   closure validation output).
+///
+/// Both paths write the JSONL summary event.
 #[allow(clippy::too_many_arguments)]
-fn run_legacy_inline(
-    provider: Provider,
+fn emit_composition_summary(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    details: &StructuredSummaryDetails,
     profile: &dyn WrapperProfile,
-    binary_path: &std::path::Path,
-    child_args: &[String],
-    child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
-    child_cwd: &std::path::Path,
-    stdin_seed: Option<&str>,
-    session_interactive: bool,
-    structured_codex_output: Option<&StructuredCodexOutput>,
-    stdout_noise: &[&str],
-    stderr_noise: &[&str],
-    term: &Terminal,
-    child_spawned: &mut bool,
-) -> Result<InlineRunResult> {
-    if session_interactive {
-        let result = exec::run_child(
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            None,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed,
-            },
-            child_spawned,
-        )?;
-        let final_response = if provider == Provider::Codex {
-            if let Some(output) = structured_codex_output {
-                let text = std::fs::read_to_string(&output.last_message_path).unwrap_or_default();
-                let _ = std::fs::remove_file(&output.last_message_path);
-                text
-            } else {
-                String::new()
+    env_context: &claudine::events::EnvironmentContext,
+    verbosity: Verbosity,
+    verbose: bool,
+    dispatch_context: &HashMap<String, serde_json::Value>,
+    section_stream: Option<&super::section::SectionStream>,
+    defer_section_separator: bool,
+) {
+    if defer_section_separator {
+        use biscuit_terminal::components::prose::Prose;
+
+        if verbosity != Verbosity::Silent
+            && let Some(markup) = format_summary_prose(summary)
+        {
+            let term = crate::log::terminal();
+            let rendered = Prose::new(markup).render(&term);
+            eprintln!("{rendered}");
+        }
+        if verbosity != Verbosity::Silent
+            && verbose
+            && let Some(markup) = format_verbose_summary_details_prose(summary, details)
+        {
+            let term = crate::log::terminal();
+            let rendered = Prose::new(markup).render(&term);
+            eprintln!("  {rendered}");
+        }
+
+        if let Some(protocol) = profile.stream_protocol() {
+            let meta = claudine::stream::reporting::summary_to_event_meta_with_context(
+                summary,
+                protocol,
+                env_context,
+                Some(dispatch_context),
+            );
+            if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
+                tracing::warn!("Failed to write stream summary event: {e}");
             }
-        } else {
-            String::new()
-        };
-        Ok((result.data, result.termination, final_response, None))
+        }
     } else {
-        let mut capture_args = child_args.to_vec();
-        profile.prepare_captured_output(&mut capture_args);
-        let capture = exec::run_child_capture(
-            binary_path,
-            &capture_args,
-            child_env,
-            child_cwd,
-            None,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed,
+        emit_stream_summary_with_context(
+            StreamSummaryContext {
+                summary,
+                profile,
+                env_context,
+                verbosity,
+                verbose,
+                details,
+                section_stream,
             },
-            child_spawned,
-        )?;
-        let response = profile.parse_captured_output(&capture.data.stdout);
-        if !response.trim().is_empty() {
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(&response, term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(response.as_bytes())?;
-                if !response.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
-        }
-        if !capture.data.stderr.trim().is_empty() {
-            eprintln!("{}", capture.data.stderr);
-        }
-        Ok((capture.data.exit_code, capture.termination, response, None))
+            dispatch_context,
+        );
     }
+}
+
+/// Emit a minimal composition summary for legacy (non-structured) runs.
+///
+/// Builds a minimal [`StreamExecutionSummary`] (exit_code, is_error, provider)
+/// and routes through [`emit_composition_summary`] with no section stream and
+/// deferred section separators. This delivers the same stderr trailer and
+/// JSONL event that structured runs emit, so legacy paths reach full parity
+/// with structured runs.
+fn emit_minimal_composition_summary(
+    provider: Provider,
+    exit_code: i32,
+    profile: &dyn WrapperProfile,
+    env_context: &claudine::events::EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
+) {
+    let summary = claudine::stream::summary::StreamExecutionSummary {
+        provider,
+        exit_code,
+        is_error: exit_code != 0,
+        ..Default::default()
+    };
+    let details = StructuredSummaryDetails::default();
+    emit_composition_summary(
+        &summary,
+        &details,
+        profile,
+        env_context,
+        Verbosity::Normal,
+        false,
+        dispatch_context,
+        None,
+        true,
+    );
 }
 
 fn report_interruption(
@@ -1345,114 +1563,6 @@ fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
     ("", text)
 }
 
-// -- Direct execution (non-harness) ---------------------------------------
-
-#[allow(clippy::too_many_arguments)]
-fn execute_direct_without_harness(
-    provider: Provider,
-    profile: &dyn WrapperProfile,
-    binary_path: &std::path::Path,
-    child_args: &[String],
-    child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
-    child_cwd: &std::path::Path,
-    stdin_seed: Option<&str>,
-    use_structured: bool,
-    structured_codex_output: Option<&StructuredCodexOutput>,
-    stdout_noise: &[&str],
-    stderr_noise: &[&str],
-    stream_verbosity: Verbosity,
-    detail_requested: bool,
-    env_context: &claudine::events::EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-    child_spawned: &mut bool,
-) -> Result<i32> {
-    if use_structured {
-        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-        let parser_config = claudine::stream::ParserConfig::default();
-        let sink = LiveStreamSink::new(
-            provider,
-            env_context.clone(),
-            child_cwd,
-            stream_verbosity,
-            summary_details.clone(),
-        )
-        .with_context_extra(dispatch_context.clone());
-        let live_metrics = sink.live_metrics();
-        let stream_output = sink.stream_output();
-        let parser = claudine::stream::create_parser(provider, sink, parser_config);
-        let stream_result = exec::run_child_stream(
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            None,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            stream_verbosity != Verbosity::Silent,
-            stdin_seed,
-            parser,
-            child_spawned,
-            Some(live_metrics),
-            Some(stream_output),
-        )?;
-        let mut summary = stream_result.data;
-        if let Some(codex_output) = structured_codex_output {
-            codex_output.apply_to_summary(&mut summary);
-        }
-
-        // Codex doesn't stream text; render its captured response
-        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-            let text = &summary.assistant_text;
-            let term = wrap_terminal();
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(text, &term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(text.as_bytes())?;
-                if !text.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
-        }
-
-        emit_stream_summary_with_context(
-            &summary,
-            profile,
-            env_context,
-            stream_verbosity,
-            detail_requested,
-            &summary_details.lock().unwrap().clone(),
-            dispatch_context,
-        );
-
-        Ok(summary.exit_code)
-    } else {
-        let result = exec::run_child(
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            None,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed,
-            },
-            child_spawned,
-        )?;
-
-        // Emit a synthetic session-end event for non-structured composition
-        // runs so that composition metadata is consistently logged.
-        emit_legacy_composition_session_event(provider, result.data, env_context, dispatch_context);
-
-        Ok(result.data)
-    }
-}
-
 // -- Interactive provider selection ---------------------------------------
 
 fn interactive_select(
@@ -1507,59 +1617,6 @@ fn load_config_favorite(cwd: &Path) -> Option<Provider> {
     let config =
         claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
     Some(config.preferred_agent)
-}
-
-// -- Legacy composition session event --------------------------------------
-
-/// Emit a synthetic `SessionEnd` event for non-structured composition runs.
-///
-/// Structured runs emit this via `emit_stream_summary_with_context`, but
-/// legacy (non-structured) paths return raw process results without any
-/// event emission. This ensures composition metadata is consistently logged
-/// across all execution paths for future resume/reporting UX.
-fn emit_legacy_composition_session_event(
-    provider: Provider,
-    exit_code: i32,
-    env_context: &claudine::events::EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-) {
-    use claudine::events::{AgenticEvent, EventMeta};
-
-    let mut extra = HashMap::new();
-    extra.insert("synthetic".into(), serde_json::Value::Bool(true));
-    extra.insert(
-        "synthetic_kind".into(),
-        serde_json::Value::String("composition_legacy_summary".into()),
-    );
-    extra.insert(
-        "exit_code".into(),
-        serde_json::Value::Number(exit_code.into()),
-    );
-    for (key, value) in dispatch_context {
-        extra.insert(key.clone(), value.clone());
-    }
-
-    let meta = EventMeta {
-        provider,
-        event: AgenticEvent::SessionEnd,
-        timestamp: chrono::Utc::now(),
-        session_id: None,
-        cwd: None,
-        tool_name: None,
-        tool_input: None,
-        tool_response: None,
-        error: None,
-        prompt: None,
-        agent_type: None,
-        notification_type: None,
-        notification_message: None,
-        extra,
-        env: env_context.clone(),
-    };
-
-    if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
-        tracing::warn!("Failed to write legacy composition session event: {e}");
-    }
 }
 
 #[cfg(test)]

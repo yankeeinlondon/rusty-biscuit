@@ -39,6 +39,8 @@ pub enum CodexEvent {
     ItemStarted(CodexItemEnvelope),
     #[serde(rename = "item.completed")]
     ItemCompleted(CodexItemEnvelope),
+    #[serde(rename = "item.updated")]
+    ItemUpdated(CodexItemEnvelope),
     #[serde(rename = "item.tool_use")]
     ItemToolUse(CodexToolItemFields),
     #[serde(rename = "tool_use")]
@@ -174,6 +176,7 @@ pub enum CodexItem {
     ToolCall(CodexToolItemFields),
     McpToolCall(CodexToolItemFields),
     WebSearch(CodexToolItemFields),
+    #[serde(alias = "command_execution")]
     CommandExec(CodexToolItemFields),
     PatchApply(CodexToolItemFields),
     ImageGeneration(CodexToolItemFields),
@@ -182,8 +185,151 @@ pub enum CodexItem {
     ApprovalRequest(CodexPermissionItem),
     UserInputRequest(CodexPermissionItem),
     Reasoning(CodexReasoning),
+    FileChange(CodexFileChange),
+    PlanUpdate(CodexPlanUpdate),
+    TodoList(CodexPlanUpdate),
     #[serde(other)]
     Unknown,
+}
+
+/// Typed `file_change` item emitted by Codex when a command or patch modifies
+/// files on disk. Shape is intentionally tolerant of field drift — real Codex
+/// builds emit the paths inside a `changes: [{path, kind}]` array on
+/// completion, while older/legacy builds have used flat `path` / `file_path`
+/// and `change_kind` / `operation` fields. All shapes are captured; callers
+/// iterate [`resolved_entries`] to get one entry per touched path.
+///
+/// [`resolved_entries`]: CodexFileChange::resolved_entries
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexFileChange {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub change_kind: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub operation: Option<String>,
+    /// Array of per-path change entries — the canonical shape Codex emits
+    /// on `item.completed` for patch applies.
+    #[serde(default)]
+    pub changes: Option<Vec<CodexFileChangeEntry>>,
+    /// Completion status (e.g. `completed`, `failed`, `declined`) carried
+    /// alongside the `changes` array.
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+/// Single entry inside [`CodexFileChange::changes`].
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexFileChangeEntry {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub change_kind: Option<String>,
+    #[serde(default)]
+    pub operation: Option<String>,
+}
+
+impl CodexFileChangeEntry {
+    pub fn resolved_path(&self) -> Option<&str> {
+        self.path.as_deref().or(self.file_path.as_deref())
+    }
+
+    pub fn resolved_kind(&self) -> Option<&str> {
+        self.kind
+            .as_deref()
+            .or(self.change_kind.as_deref())
+            .or(self.operation.as_deref())
+    }
+}
+
+impl CodexFileChange {
+    /// First flat-field resolution — kept for callers that only need a
+    /// single path. Prefers the `changes[0]` entry when present.
+    pub fn resolved_path(&self) -> Option<&str> {
+        if let Some(entries) = self.changes.as_ref()
+            && let Some(p) = entries.iter().find_map(|e| e.resolved_path())
+        {
+            return Some(p);
+        }
+        self.path.as_deref().or(self.file_path.as_deref())
+    }
+
+    /// First flat-field resolution for the change kind. Prefers the
+    /// `changes[0]` entry when present.
+    pub fn resolved_kind(&self) -> Option<&str> {
+        if let Some(entries) = self.changes.as_ref()
+            && let Some(k) = entries.iter().find_map(|e| e.resolved_kind())
+        {
+            return Some(k);
+        }
+        self.change_kind
+            .as_deref()
+            .or(self.kind.as_deref())
+            .or(self.operation.as_deref())
+    }
+
+    /// Iterate all (path, kind) pairs this file_change event reports. When
+    /// the canonical `changes[]` array is present, yields one pair per
+    /// entry; otherwise falls back to the flat fields. Entries whose path
+    /// is both missing and empty are filtered out so callers never see a
+    /// meaningless empty rendering.
+    pub fn resolved_entries(&self) -> Vec<(Option<String>, Option<String>)> {
+        if let Some(entries) = self.changes.as_ref()
+            && !entries.is_empty()
+        {
+            return entries
+                .iter()
+                .map(|e| {
+                    (
+                        e.resolved_path().map(str::to_string),
+                        e.resolved_kind().map(str::to_string),
+                    )
+                })
+                .filter(|(p, k)| p.as_deref().is_some_and(|s| !s.is_empty()) || k.is_some())
+                .collect();
+        }
+        let path = self.resolved_path().map(str::to_string);
+        let kind = self.resolved_kind().map(str::to_string);
+        if path.as_deref().is_some_and(|s| !s.is_empty()) || kind.is_some() {
+            vec![(path, kind)]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Typed `plan_update` / `todo_list` item. Codex emits plan-tracking data under
+/// various shapes; this struct accepts the common fields and lets anything else
+/// survive through `extra` on the resulting [`super::super::semantic::SemanticEvent::PlanUpdate`].
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexPlanUpdate {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+impl CodexPlanUpdate {
+    pub fn resolved_message(&self) -> Option<String> {
+        self.message
+            .clone()
+            .or_else(|| self.summary.clone())
+            .or_else(|| self.title.clone())
+    }
 }
 
 impl CodexItem {
@@ -397,29 +543,76 @@ pub struct CodexToolItemFields {
     pub result: Option<Value>,
     #[serde(default)]
     pub content: Option<Value>,
+    /// Command-execution status reported on `command_execution` completions
+    /// (e.g. "success", "failure", "timeout").
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Process exit code for shell-tool completions.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    /// Raw shell command string emitted by Codex's `command_execution` items
+    /// (both `item.started` and `item.completed`). Exposed as a synthesized
+    /// `{"command": ...}` fallback via [`resolved_input`].
+    ///
+    /// [`resolved_input`]: CodexToolItemFields::resolved_input
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Aggregated stdout+stderr buffer emitted by Codex's `command_execution`
+    /// items on completion. Exposed as a string fallback via
+    /// [`resolved_output`].
+    ///
+    /// [`resolved_output`]: CodexToolItemFields::resolved_output
+    #[serde(default)]
+    pub aggregated_output: Option<String>,
 }
 
 impl CodexToolItemFields {
     pub fn resolved_tool_name(&self) -> Option<&str> {
-        self.tool_name.as_deref().or(self.name.as_deref())
+        self.tool_name
+            .as_deref()
+            .or(self.name.as_deref())
+            .or_else(|| {
+                self.command
+                    .as_deref()
+                    .map(|cmd| detect_shell_from_command(cmd).unwrap_or("shell"))
+            })
     }
 
     pub fn resolved_tool_id(&self) -> Option<&str> {
         self.id.as_deref()
     }
 
-    pub fn resolved_input(&self) -> Option<&Value> {
-        self.input
-            .as_ref()
-            .or(self.arguments.as_ref())
-            .or(self.parameters.as_ref())
+    pub fn resolved_input(&self) -> Option<Value> {
+        if let Some(v) = self.input.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.arguments.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.parameters.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(cmd) = self.command.as_deref() {
+            let trimmed = strip_shell_path_prefix(cmd);
+            return Some(serde_json::json!({ "command": trimmed }));
+        }
+        None
     }
 
-    pub fn resolved_output(&self) -> Option<&Value> {
-        self.output
-            .as_ref()
-            .or(self.result.as_ref())
-            .or(self.content.as_ref())
+    pub fn resolved_output(&self) -> Option<Value> {
+        if let Some(v) = self.output.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.result.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.content.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(agg) = self.aggregated_output.as_ref() {
+            return Some(Value::String(agg.clone()));
+        }
+        None
     }
 
     /// Fold a previously-seen `item.started` snapshot into this completed
@@ -453,6 +646,53 @@ impl CodexToolItemFields {
         if self.content.is_none() {
             self.content = started.content;
         }
+        if self.command.is_none() {
+            self.command = started.command;
+        }
+        if self.aggregated_output.is_none() {
+            self.aggregated_output = started.aggregated_output;
+        }
+    }
+}
+
+/// Detect the shell binary name from the leading token of a `command` string
+/// emitted by Codex's `command_execution` items.
+///
+/// Codex wraps every shell command in an absolute invocation such as
+/// `/bin/zsh -lc '<script>'`. Returning `"zsh"` (rather than the generic
+/// `"shell"`) gives the live surface an accurate label and lets
+/// [`tool_display`](crate::stream::tool_display) treat the command as a
+/// shell tool with the right prefix. Returns `None` when the leading token
+/// does not look like a shell path we recognize.
+pub(crate) fn detect_shell_from_command(command: &str) -> Option<&'static str> {
+    let first = command.split_whitespace().next()?;
+    let basename = first.rsplit('/').next().unwrap_or(first);
+    match basename {
+        "zsh" => Some("zsh"),
+        "bash" => Some("bash"),
+        "sh" => Some("sh"),
+        "fish" => Some("fish"),
+        "dash" => Some("dash"),
+        "ksh" => Some("ksh"),
+        _ => None,
+    }
+}
+
+/// Strip a leading `/path/to/<shell>` token from a command string so the
+/// rendered summary reads as `zsh -lc '…'` rather than
+/// `zsh /bin/zsh -lc '…'` after `tool_display` prepends the detected shell
+/// name. When the first token does not name a recognized shell the command
+/// is returned unchanged.
+pub(crate) fn strip_shell_path_prefix(command: &str) -> String {
+    let trimmed = command.trim_start();
+    let Some((first, rest)) = trimmed.split_once(char::is_whitespace) else {
+        return command.to_string();
+    };
+    let basename = first.rsplit('/').next().unwrap_or(first);
+    if detect_shell_from_command(basename).is_some() && first.contains('/') {
+        rest.trim_start().to_string()
+    } else {
+        command.to_string()
     }
 }
 
@@ -555,14 +795,16 @@ mod tests {
         assert!(item.is_tool_item());
         let fields = item.as_tool_fields().expect("tool fields");
         assert_eq!(fields.resolved_tool_name(), Some("bash"));
+        let input = fields.resolved_input();
         assert_eq!(
-            fields
-                .resolved_input()
+            input
+                .as_ref()
                 .and_then(|v| v.get("command"))
                 .and_then(Value::as_str),
             Some("ls")
         );
-        assert_eq!(fields.resolved_output().and_then(Value::as_str), Some("ok"));
+        let output = fields.resolved_output();
+        assert_eq!(output.as_ref().and_then(Value::as_str), Some("ok"));
     }
 
     #[test]
@@ -639,22 +881,215 @@ mod tests {
         let merged = completed.merge_started(started);
         let fields = merged.as_tool_fields().expect("tool fields");
         assert_eq!(fields.name.as_deref(), Some("bash"));
+        let input = fields.resolved_input();
         assert_eq!(
-            fields
-                .resolved_input()
+            input
+                .as_ref()
                 .and_then(|v| v.get("command"))
                 .and_then(Value::as_str),
             Some("ls")
         );
-        assert_eq!(
-            fields.resolved_output().and_then(Value::as_str),
-            Some("clean")
-        );
+        let output = fields.resolved_output();
+        assert_eq!(output.as_ref().and_then(Value::as_str), Some("clean"));
     }
 
     #[test]
     fn codex_unknown_event_type_fails_typed() {
         let err = serde_json::from_str::<CodexEvent>(r#"{"type":"session.not_a_real_event"}"#);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn codex_command_execution_started_deserializes() {
+        let line = r#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'ls'","aggregated_output":""}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemStarted(env) = event else {
+            panic!("expected ItemStarted");
+        };
+        let item = env.item.expect("item");
+        assert!(
+            matches!(item, CodexItem::CommandExec(_)),
+            "expected CommandExec variant (with command_execution alias), got {item:?}"
+        );
+        let fields = item.as_tool_fields().expect("tool fields");
+        let input = fields.resolved_input();
+        let extracted = input
+            .as_ref()
+            .and_then(|v| v.as_str().map(String::from))
+            .or_else(|| {
+                input
+                    .as_ref()
+                    .and_then(|v| v.get("command"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            });
+        assert_eq!(
+            extracted.as_deref(),
+            Some("-lc 'ls'"),
+            "command must be exposed via resolved_input with the `/bin/<shell>` path stripped so the rendered summary reads as `zsh -lc '…'`: fields = {fields:?}"
+        );
+    }
+
+    #[test]
+    fn codex_file_change_completion_with_changes_array() {
+        let line = r#"{"type":"item.completed","item":{"id":"item_4","type":"file_change","changes":[{"path":"src/lib.rs","kind":"update"},{"path":"tests/smoke.rs","kind":"add"}],"status":"completed"}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemCompleted(env) = event else {
+            panic!("expected ItemCompleted");
+        };
+        let item = env.item.expect("item");
+        let CodexItem::FileChange(fc) = item else {
+            panic!("expected FileChange item");
+        };
+        assert_eq!(fc.status.as_deref(), Some("completed"));
+        let entries = fc.resolved_entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0.as_deref(), Some("src/lib.rs"));
+        assert_eq!(entries[0].1.as_deref(), Some("update"));
+        assert_eq!(entries[1].0.as_deref(), Some("tests/smoke.rs"));
+        assert_eq!(entries[1].1.as_deref(), Some("add"));
+        assert_eq!(fc.resolved_path(), Some("src/lib.rs"));
+        assert_eq!(fc.resolved_kind(), Some("update"));
+    }
+
+    #[test]
+    fn codex_file_change_flat_fields_fallback() {
+        let line = r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","path":"src/lib.rs","change_kind":"modified"}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemCompleted(env) = event else {
+            panic!("expected ItemCompleted");
+        };
+        let CodexItem::FileChange(fc) = env.item.expect("item") else {
+            panic!("expected FileChange item");
+        };
+        let entries = fc.resolved_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0.as_deref(), Some("src/lib.rs"));
+        assert_eq!(entries[0].1.as_deref(), Some("modified"));
+    }
+
+    #[test]
+    fn codex_file_change_empty_payload_produces_no_entries() {
+        let line = r#"{"type":"item.started","item":{"id":"f1","type":"file_change"}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemStarted(env) = event else {
+            panic!("expected ItemStarted");
+        };
+        let CodexItem::FileChange(fc) = env.item.expect("item") else {
+            panic!("expected FileChange item");
+        };
+        assert!(
+            fc.resolved_entries().is_empty(),
+            "empty file_change must yield zero entries"
+        );
+    }
+
+    #[test]
+    fn codex_command_execution_completed_exposes_output_and_status() {
+        let line = r#"{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"ls","aggregated_output":"file.txt\n","exit_code":0,"status":"success"}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemCompleted(env) = event else {
+            panic!("expected ItemCompleted");
+        };
+        let item = env.item.expect("item");
+        let fields = item.as_tool_fields().expect("tool fields");
+        assert_eq!(fields.exit_code, Some(0));
+        assert_eq!(fields.status.as_deref(), Some("success"));
+        let output = fields.resolved_output().expect("output");
+        let s = output.as_str().map(String::from).or_else(|| {
+            output
+                .get("aggregated_output")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        });
+        assert_eq!(
+            s.as_deref(),
+            Some("file.txt\n"),
+            "aggregated_output must be exposed via resolved_output"
+        );
+    }
+
+    #[test]
+    fn detect_shell_from_command_recognizes_absolute_paths() {
+        assert_eq!(detect_shell_from_command("/bin/zsh -lc 'ls'"), Some("zsh"));
+        assert_eq!(
+            detect_shell_from_command("/usr/local/bin/bash -c 'ls'"),
+            Some("bash")
+        );
+        assert_eq!(detect_shell_from_command("/bin/fish -c 'ls'"), Some("fish"));
+    }
+
+    #[test]
+    fn detect_shell_from_command_returns_none_for_non_shell_commands() {
+        assert_eq!(detect_shell_from_command("ls -la"), None);
+        assert_eq!(detect_shell_from_command("/usr/bin/git status"), None);
+        assert_eq!(detect_shell_from_command(""), None);
+    }
+
+    #[test]
+    fn strip_shell_path_prefix_removes_absolute_shell_token() {
+        assert_eq!(
+            strip_shell_path_prefix("/bin/zsh -lc 'sed -n 1,5p file'"),
+            "-lc 'sed -n 1,5p file'"
+        );
+        assert_eq!(
+            strip_shell_path_prefix("/usr/local/bin/bash -c 'ls -la'"),
+            "-c 'ls -la'"
+        );
+    }
+
+    #[test]
+    fn strip_shell_path_prefix_preserves_commands_without_shell_path() {
+        assert_eq!(strip_shell_path_prefix("ls -la"), "ls -la");
+        assert_eq!(strip_shell_path_prefix("git status"), "git status");
+        // Bare `zsh` without a path prefix is preserved — the prefix handler
+        // only activates on absolute paths so the "zsh -lc ..." summary
+        // emitted by tool_display still reads sensibly.
+        assert_eq!(strip_shell_path_prefix("zsh -lc 'x'"), "zsh -lc 'x'");
+    }
+
+    #[test]
+    fn codex_command_execution_resolves_shell_name_from_command() {
+        let line = r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"/bin/zsh -lc 'ls'"}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemStarted(env) = event else {
+            panic!("expected ItemStarted");
+        };
+        let fields = env.item.expect("item").as_tool_fields().cloned_via_merge();
+        assert_eq!(fields.resolved_tool_name(), Some("zsh"));
+        let input = fields.resolved_input().expect("synthesized input");
+        assert_eq!(
+            input.get("command").and_then(Value::as_str),
+            Some("-lc 'ls'"),
+            "shell path prefix must be stripped from the synthesized command",
+        );
+    }
+
+    // Tiny helper so the test above can borrow-then-clone the fields without
+    // adding a public clone method to the production API.
+    trait CloneViaMerge {
+        fn cloned_via_merge(self) -> CodexToolItemFields;
+    }
+    impl CloneViaMerge for Option<&CodexToolItemFields> {
+        fn cloned_via_merge(self) -> CodexToolItemFields {
+            let src = self.expect("tool fields");
+            let mut dst = CodexToolItemFields::default();
+            dst.merge_started(CodexToolItemFields {
+                id: src.id.clone(),
+                name: src.name.clone(),
+                tool_name: src.tool_name.clone(),
+                input: src.input.clone(),
+                arguments: src.arguments.clone(),
+                parameters: src.parameters.clone(),
+                output: src.output.clone(),
+                result: src.result.clone(),
+                content: src.content.clone(),
+                status: src.status.clone(),
+                exit_code: src.exit_code,
+                command: src.command.clone(),
+                aggregated_output: src.aggregated_output.clone(),
+            });
+            dst
+        }
     }
 }

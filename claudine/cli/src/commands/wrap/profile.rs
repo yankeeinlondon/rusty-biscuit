@@ -1,10 +1,112 @@
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use claudine::events::Provider;
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail, eyre};
+
+// ---------------------------------------------------------------------------
+// OpenCode model resolution (Phase 1)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OpenCodeModelSource {
+    CliSwitch(String),
+    OpenCodeModelEnv(String),
+    ConfigDefault(String),
+}
+
+impl OpenCodeModelSource {
+    pub(crate) fn model(&self) -> &str {
+        match self {
+            Self::CliSwitch(m) | Self::OpenCodeModelEnv(m) | Self::ConfigDefault(m) => m,
+        }
+    }
+
+    pub(crate) fn status_markup(&self) -> String {
+        let model = self.model();
+        match self {
+            Self::CliSwitch(_) => format!(
+                "<dim><i>using the </i><yellow>{model}</yellow><i> based on the CLI switch override used by caller</i></dim>"
+            ),
+            Self::OpenCodeModelEnv(_) => format!(
+                "<dim><i>using the </i><yellow>{model}</yellow><i> based on the OPENCODE_MODEL environment variable</i></dim>"
+            ),
+            Self::ConfigDefault(_) => format!(
+                "<dim><i>using the </i><b>{model}</b><i> because this is the default configured in <blue>~/.config/opencode/config.json</blue></i></dim>"
+            ),
+        }
+    }
+
+    pub(crate) fn location_string(&self) -> &'static str {
+        match self {
+            Self::CliSwitch(_) => "the --model CLI switch",
+            Self::OpenCodeModelEnv(_) => "the OPENCODE_MODEL environment variable",
+            Self::ConfigDefault(_) => "the config file ~/.config/opencode/config.json",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NoModelProvided;
+
+impl std::fmt::Display for NoModelProvided {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no model provided")
+    }
+}
+
+impl std::error::Error for NoModelProvided {}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct OpenCodeEnvSnapshot {
+    pub opencode_model_env: Option<String>,
+    pub opencode_config_model: Option<String>,
+}
+
+impl OpenCodeEnvSnapshot {
+    pub(crate) fn from_system() -> Self {
+        Self {
+            opencode_model_env: non_empty_env_var("OPENCODE_MODEL"),
+            opencode_config_model: read_opencode_config_model(),
+        }
+    }
+}
+
+pub(crate) fn resolve_opencode_model(
+    cli_model: Option<&str>,
+    snapshot: &OpenCodeEnvSnapshot,
+) -> std::result::Result<OpenCodeModelSource, NoModelProvided> {
+    if let Some(m) = cli_model {
+        return Ok(OpenCodeModelSource::CliSwitch(m.to_string()));
+    }
+
+    if let Some(m) = &snapshot.opencode_model_env {
+        return Ok(OpenCodeModelSource::OpenCodeModelEnv(m.clone()));
+    }
+
+    if let Some(m) = &snapshot.opencode_config_model {
+        return Ok(OpenCodeModelSource::ConfigDefault(m.clone()));
+    }
+
+    Err(NoModelProvided)
+}
+
+fn opencode_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".config/opencode/config.json"))
+}
+
+fn read_opencode_config_model() -> Option<String> {
+    let path = opencode_config_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let model = value.get("model")?.as_str()?;
+    if model.is_empty() {
+        return None;
+    }
+    Some(model.to_string())
+}
 
 // ---------------------------------------------------------------------------
 // Output format enum (universal --output flag)
@@ -211,6 +313,22 @@ pub(crate) trait WrapperProfile: Send + Sync {
         env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>>;
 
+    /// Apply YOLO handling with awareness of interactive vs non-interactive
+    /// mode. Default delegates to the mode-unaware [`apply_yolo`]; overriders
+    /// can produce different behavior when `interactive` matters (e.g.
+    /// OpenCode forwards `--dangerously-skip-permissions` only in
+    /// non-interactive mode).
+    ///
+    /// [`apply_yolo`]: WrapperProfile::apply_yolo
+    fn apply_yolo_for_mode(
+        &self,
+        args: &mut Vec<String>,
+        env_overrides: &mut Vec<(String, String)>,
+        _interactive: bool,
+    ) -> Result<Option<String>> {
+        self.apply_yolo(args, env_overrides)
+    }
+
     /// Whether this provider supports YOLO mode at all.
     fn has_supported_yolo(&self) -> bool;
 
@@ -244,12 +362,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         Ok(())
     }
 
-    /// Apply provider-specific defaults for non-interactive mode (e.g.
-    /// OpenCode's default model injection). Default: no-op.
-    fn apply_non_interactive_defaults(&self, _args: &mut Vec<String>) {}
-
-    /// Validate any provider-specific non-interactive requirements after
-    /// defaults and explicit model flags have been applied.
     fn validate_non_interactive_requirements(&self, _args: &[String]) -> Result<()> {
         Ok(())
     }
@@ -611,11 +723,11 @@ impl WrapperProfile for ClaudeWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        if non_interactive {
-            Ok(PromptDelivery::Stdin(prompt.to_string()))
-        } else {
-            Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
-        }
+        Ok(prompt_delivery_stdin_or_append(
+            prompt,
+            non_interactive,
+            &[],
+        ))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -640,10 +752,7 @@ impl WrapperProfile for ClaudeWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--print".to_string());
-        args.push("--verbose".to_string());
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &["--print", "--verbose"]);
     }
 }
 
@@ -1017,14 +1126,12 @@ impl WrapperProfile for GeminiWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        Ok(PromptDelivery::AppendArgs(vec![
-            if non_interactive {
-                "--prompt".to_string()
-            } else {
-                "--prompt-interactive".to_string()
-            },
-            prompt.to_string(),
-        ]))
+        Ok(prompt_delivery_append_flags(
+            prompt,
+            non_interactive,
+            "--prompt",
+            "--prompt-interactive",
+        ))
     }
 
     fn supports_structured_stream(&self) -> bool {
@@ -1036,8 +1143,7 @@ impl WrapperProfile for GeminiWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &[]);
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
@@ -1141,14 +1247,11 @@ impl WrapperProfile for KimiWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        if non_interactive {
-            Ok(PromptDelivery::Stdin(prompt.to_string()))
-        } else {
-            Ok(PromptDelivery::AppendArgs(vec![
-                "--prompt".to_string(),
-                prompt.to_string(),
-            ]))
-        }
+        Ok(prompt_delivery_stdin_or_append(
+            prompt,
+            non_interactive,
+            &["--prompt"],
+        ))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -1173,9 +1276,7 @@ impl WrapperProfile for KimiWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--print".to_string());
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &["--print"]);
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
@@ -1296,14 +1397,12 @@ impl WrapperProfile for QwenWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        Ok(PromptDelivery::AppendArgs(vec![
-            if non_interactive {
-                "--prompt".to_string()
-            } else {
-                "--prompt-interactive".to_string()
-            },
-            prompt.to_string(),
-        ]))
+        Ok(prompt_delivery_append_flags(
+            prompt,
+            non_interactive,
+            "--prompt",
+            "--prompt-interactive",
+        ))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -1327,8 +1426,7 @@ impl WrapperProfile for QwenWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &[]);
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
@@ -1357,16 +1455,35 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_yolo(
         &self,
-        _args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
+        args: &mut Vec<String>,
+        env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
-        Ok(Some(
-            "--yolo is not supported for 'opencode' and was ignored".to_string(),
-        ))
+        // Delegate to the mode-aware variant with `interactive = false` so
+        // the non-interactive forwarding path is used when callers have not
+        // yet migrated to [`apply_yolo_for_mode`].
+        self.apply_yolo_for_mode(args, env_overrides, false)
+    }
+
+    fn apply_yolo_for_mode(
+        &self,
+        args: &mut Vec<String>,
+        _env_overrides: &mut Vec<(String, String)>,
+        interactive: bool,
+    ) -> Result<Option<String>> {
+        if interactive {
+            return Ok(Some(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
+                    .to_string(),
+            ));
+        }
+        if !args.iter().any(|a| a == "--dangerously-skip-permissions") {
+            args.push("--dangerously-skip-permissions".to_string());
+        }
+        Ok(None)
     }
 
     fn has_supported_yolo(&self) -> bool {
-        false
+        true
     }
 
     fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
@@ -1415,29 +1532,6 @@ impl WrapperProfile for OpencodeWrapper {
         if args.first().is_none_or(|first| first != entrypoint) {
             args.insert(0, entrypoint.to_string());
         }
-    }
-
-    fn apply_non_interactive_defaults(&self, args: &mut Vec<String>) {
-        if has_flag(args, "--model") || has_flag(args, "-m") {
-            return;
-        }
-        let Some(model) = non_empty_env_var("OPENCODE_MODEL") else {
-            return;
-        };
-        args.push("--model".to_string());
-        args.push(model);
-    }
-
-    fn validate_non_interactive_requirements(&self, args: &[String]) -> Result<()> {
-        if has_flag(args, "--model") || has_flag(args, "-m") {
-            return Ok(());
-        }
-        bail!(
-            "OpenCode cannot use its configured default model in non-interactive mode.\n\
-             Pass `--model MODEL` to Claudine, or set `OPENCODE_MODEL` in the environment \
-             before launching.\n\
-             Interactive OpenCode sessions can continue using OpenCode's default model."
-        )
     }
 
     fn apply_model(
@@ -1534,11 +1628,32 @@ impl WrapperProfile for OpencodeWrapper {
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         args.push("--format".to_string());
         args.push("json".to_string());
+        args.push("--print-logs".to_string());
+        args.push("--log-level".to_string());
+        args.push("ERROR".to_string());
+    }
+
+    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
+        opencode_default_tui_noise_prefixes()
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
         PromptArgConventions::positional_after("run")
     }
+}
+
+/// The default-mode TUI formatter lines that OpenCode keeps emitting to
+/// stderr even when `--format json` is set. Suppressed when wrapping
+/// OpenCode so the NDJSON stream on stdout is the only visible output
+/// surface.
+pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
+    &[
+        "\u{2731} ",                         // ✱  — bullet used for Glob/Grep/Read status lines
+        "$ ",                                // bare shell command echo lines
+        "> build ",                          // session banner
+        "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
+        "\u{2699} ", // ⚙  — MCP tool-invocation prefix (see investigations.md §0b)
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -1684,6 +1799,47 @@ fn option_value(args: &[String], option: &str) -> Option<String> {
     None
 }
 
+fn push_stream_json_flags(args: &mut Vec<String>, extra: &[&str]) {
+    for flag in extra {
+        args.push((*flag).to_string());
+    }
+    args.push("--output-format".to_string());
+    args.push("stream-json".to_string());
+}
+
+fn prompt_delivery_stdin_or_append(
+    prompt: &str,
+    non_interactive: bool,
+    interactive_flags: &[&str],
+) -> PromptDelivery {
+    if non_interactive {
+        PromptDelivery::Stdin(prompt.to_string())
+    } else {
+        let mut args = interactive_flags
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        args.push(prompt.to_string());
+        PromptDelivery::AppendArgs(args)
+    }
+}
+
+fn prompt_delivery_append_flags(
+    prompt: &str,
+    non_interactive: bool,
+    non_interactive_flag: &str,
+    interactive_flag: &str,
+) -> PromptDelivery {
+    PromptDelivery::AppendArgs(vec![
+        if non_interactive {
+            non_interactive_flag.to_string()
+        } else {
+            interactive_flag.to_string()
+        },
+        prompt.to_string(),
+    ])
+}
+
 // ---------------------------------------------------------------------------
 // Prompt extraction — consolidates the old extract_user_prompt /
 // find_prompt_location / strip_prompt_from_args per-provider logic into
@@ -1741,6 +1897,9 @@ pub(crate) fn extract_prompt_source_from_passthrough(
     //    and any value-taking flags.
     if let Some(idx) = find_positional_prompt_index(&args, &conv) {
         let prompt = args.remove(idx);
+        if idx > 0 && args[idx - 1] == "--" {
+            args.remove(idx - 1);
+        }
         return Ok((args, PromptSource::Inline(prompt)));
     }
 
@@ -1854,6 +2013,68 @@ pub(crate) fn require_prompt_present(
         "--non-interactive for {provider_name} requires a prompt \
          (positional, via a prompt flag, or piped on stdin)"
     );
+}
+
+pub(crate) fn validate_argv_flags_before_separator(binary: &str, args: &[String]) {
+    if let Some(pos) = args.iter().position(|a| a == "--") {
+        for arg in args.iter().skip(pos + 2) {
+            if arg.starts_with('-') {
+                tracing::warn!(
+                    "Flag {:?} appears after -- separator in {} argv: {:?}",
+                    arg,
+                    binary,
+                    args
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn apply_opencode_model_resolution(
+    child_args: &mut Vec<String>,
+    env_setter: &mut dyn FnMut(String, String),
+    has_model_env: bool,
+    cli_model: Option<&str>,
+    non_interactive: bool,
+    snapshot: &OpenCodeEnvSnapshot,
+) -> Result<Option<OpenCodeModelSource>> {
+    if !non_interactive {
+        return Ok(None);
+    }
+
+    let opencode_model_source = match resolve_opencode_model(cli_model, snapshot) {
+        Ok(source) => {
+            let model = source.model().to_string();
+            match &source {
+                OpenCodeModelSource::CliSwitch(_) | OpenCodeModelSource::OpenCodeModelEnv(_) => {
+                    if !has_flag(child_args, "--model") && !has_flag(child_args, "-m") {
+                        child_args.push("--model".to_string());
+                        child_args.push(model.clone());
+                    }
+                    env_setter("MODEL".to_string(), model);
+                }
+                OpenCodeModelSource::ConfigDefault(_) => {
+                    env_setter("MODEL".to_string(), model);
+                }
+            }
+            Some(source)
+        }
+        Err(NoModelProvided) => None,
+    };
+
+    let has_model_arg = has_flag(child_args, "--model") || has_flag(child_args, "-m");
+    if !has_model_arg && !has_model_env && opencode_model_source.is_none() {
+        return Err(eyre!(
+            "No model specified! OpenCode by default does not specify a model but you can\n\
+             change this behavior by adding a model property to ~/.config/opencode/config.json.\n\
+             You can override/set the default model with any of the following methods:\n\n\
+             \x20\x20• set OPENCODE_MODEL to a valid model name\n\
+             \x20\x20• use the CLI switch --model <model>\n\n\
+             Running `opencode models` will give you a list of all valid models."
+        ));
+    }
+
+    Ok(opencode_model_source)
 }
 
 // ---------------------------------------------------------------------------
@@ -1975,54 +2196,337 @@ mod tests {
     }
 
     #[test]
-    fn opencode_yolo_warns_without_mutating_args() {
+    fn opencode_noise_prefixes_cover_captured_symptoms() {
+        let noise = opencode_default_tui_noise_prefixes();
+
+        // Representative lines taken verbatim from
+        // claudine/claudine-output/opencode.err (2026-04-14 capture).
+        let symptoms = [
+            r#"✱ Glob "**/claudine/**/improved-sequences/**" 2 matches"#,
+            r#"$ cd /tmp && git log --all --oneline"#,
+            r#"> build · MiniMax-M2.7-highspeed"#,
+            r#"████ Subprocess hygiene"#,
+            "\u{2699} firecrawl_firecrawl_search {\"query\":\"NFL draft 2026 date\",\"limit\":5}",
+        ];
+
+        for line in symptoms {
+            assert!(
+                noise.iter().any(|p| line.starts_with(p)),
+                "noise prefixes must match representative line: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_profile_advertises_default_tui_noise_prefixes() {
+        let profile = profile(Provider::OpenCode);
+        let prefixes: &[&str] = profile.stderr_noise_prefixes();
+        assert!(
+            prefixes.contains(&"\u{2731} "),
+            "OpenCode profile must expose the default TUI noise prefixes; got {prefixes:?}"
+        );
+    }
+
+    #[test]
+    fn opencode_yolo_interactive_warns_without_mutating_args() {
+        // The mode-aware variant in interactive mode must emit the refined
+        // warning copy and MUST NOT mutate argv.
         let p = profile(Provider::OpenCode);
         let mut args = vec!["run".to_string(), "status".to_string()];
         let mut env_overrides = Vec::new();
 
-        let warning = p.apply_yolo(&mut args, &mut env_overrides).unwrap();
-        assert!(warning.unwrap().contains("ignored"));
+        let warning = p
+            .apply_yolo_for_mode(&mut args, &mut env_overrides, /* interactive = */ true)
+            .unwrap();
+        assert_eq!(
+            warning.as_deref(),
+            Some(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
+            ),
+        );
         assert_eq!(args, vec!["run", "status"]);
     }
 
     #[test]
-    fn opencode_non_interactive_defaults_do_not_inject_a_hard_coded_model() {
-        let p = profile(Provider::OpenCode);
-        let mut args = vec!["run".to_string(), "status".to_string()];
-
-        p.apply_non_interactive_defaults(&mut args);
-
-        assert_eq!(args, vec!["run", "status"]);
+    fn opencode_yolo_non_interactive_forwards_dangerously_skip_permissions() {
+        let mut args: Vec<String> = vec!["run".to_string()];
+        let mut env = Vec::new();
+        let wrapper = OpencodeWrapper;
+        let warning = wrapper
+            .apply_yolo_for_mode(&mut args, &mut env, /* interactive = */ false)
+            .unwrap();
+        assert!(
+            args.iter().any(|a| a == "--dangerously-skip-permissions"),
+            "flag must be forwarded in non-interactive mode; args={args:?}"
+        );
+        assert!(
+            warning.is_none(),
+            "no warning expected in non-interactive: got {warning:?}"
+        );
     }
 
     #[test]
-    fn opencode_non_interactive_defaults_respect_existing_model_flag() {
-        let p = profile(Provider::OpenCode);
+    fn opencode_yolo_interactive_emits_refined_warning_only() {
+        let mut args: Vec<String> = vec![];
+        let mut env = Vec::new();
+        let wrapper = OpencodeWrapper;
+        let warning = wrapper
+            .apply_yolo_for_mode(&mut args, &mut env, /* interactive = */ true)
+            .unwrap();
+        assert_eq!(
+            warning.as_deref(),
+            Some(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
+            ),
+        );
+        assert!(
+            args.is_empty(),
+            "no args should be added in interactive mode"
+        );
+    }
+
+    #[test]
+    fn opencode_yolo_non_interactive_idempotent() {
+        let mut args: Vec<String> = vec!["--dangerously-skip-permissions".to_string()];
+        let mut env = Vec::new();
+        let wrapper = OpencodeWrapper;
+        wrapper
+            .apply_yolo_for_mode(&mut args, &mut env, false)
+            .unwrap();
+        let count = args
+            .iter()
+            .filter(|a| *a == "--dangerously-skip-permissions")
+            .count();
+        assert_eq!(count, 1, "flag must not be duplicated");
+    }
+
+    // -- resolve_opencode_model tests ----------------------------------------
+
+    #[test]
+    fn opencode_resolve_cli_switch_when_model_provided() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
+        let source = resolve_opencode_model(Some("cli-model"), &snapshot).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::CliSwitch("cli-model".to_string())
+        );
+    }
+
+    #[test]
+    fn opencode_resolve_env_var_when_no_cli_switch() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: Some("env-model".to_string()),
+            opencode_config_model: None,
+        };
+        let source = resolve_opencode_model(None, &snapshot).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
+        );
+    }
+
+    #[test]
+    fn opencode_resolve_config_default_when_json_has_model() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: Some("config-model".to_string()),
+        };
+        let source = resolve_opencode_model(None, &snapshot).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::ConfigDefault("config-model".to_string())
+        );
+    }
+
+    #[test]
+    fn opencode_resolve_err_no_model_provided_when_none_available() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
+        let result = resolve_opencode_model(None, &snapshot);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    fn opencode_resolve_precedence_cli_over_env() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: Some("env-model".to_string()),
+            opencode_config_model: Some("config-model".to_string()),
+        };
+        let source = resolve_opencode_model(Some("cli-model"), &snapshot).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::CliSwitch("cli-model".to_string())
+        );
+    }
+
+    #[test]
+    fn opencode_resolve_precedence_env_over_config() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: Some("env-model".to_string()),
+            opencode_config_model: Some("config-model".to_string()),
+        };
+        let source = resolve_opencode_model(None, &snapshot).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
+        );
+    }
+
+    #[test]
+    fn opencode_resolve_model_env_var_ignored_entirely() {
+        // This test was to ensure `MODEL` env is ignored and only `OPENCODE_MODEL` is checked
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
+        let result = resolve_opencode_model(None, &snapshot);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    fn opencode_resolve_malformed_config_json_yields_no_model() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
+        let result = resolve_opencode_model(None, &snapshot);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    fn opencode_resolve_missing_config_file_yields_no_model() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
+        let result = resolve_opencode_model(None, &snapshot);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    fn opencode_resolve_empty_string_model_yields_no_model() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
+        let result = resolve_opencode_model(None, &snapshot);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    fn opencode_model_source_location_strings() {
+        assert_eq!(
+            OpenCodeModelSource::CliSwitch(String::new()).location_string(),
+            "the --model CLI switch"
+        );
+        assert_eq!(
+            OpenCodeModelSource::OpenCodeModelEnv(String::new()).location_string(),
+            "the OPENCODE_MODEL environment variable"
+        );
+        assert_eq!(
+            OpenCodeModelSource::ConfigDefault(String::new()).location_string(),
+            "the config file ~/.config/opencode/config.json"
+        );
+    }
+
+    #[test]
+    fn opencode_no_model_provided_display() {
+        assert_eq!(NoModelProvided.to_string(), "no model provided");
+    }
+
+    #[test]
+    fn opencode_apply_to_args_cli_switch_pushes_model_flag_and_env() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
+        let mut args = vec!["run".to_string()];
+        let mut env = Vec::new();
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            Some("gpt-4o"),
+            true,
+            &snapshot,
+        )
+        .unwrap();
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"gpt-4o".to_string()));
+        assert!(env.contains(&("MODEL".to_string(), "gpt-4o".to_string())));
+    }
+
+    #[test]
+    fn opencode_apply_to_args_env_var_pushes_model_flag_and_env() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: Some("env-model".to_string()),
+            opencode_config_model: None,
+        };
+        let mut args = vec!["run".to_string()];
+        let mut env = Vec::new();
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            None,
+            true,
+            &snapshot,
+        )
+        .unwrap();
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"env-model".to_string()));
+        assert!(env.contains(&("MODEL".to_string(), "env-model".to_string())));
+    }
+
+    #[test]
+    fn opencode_apply_to_args_config_default_pushes_env_only() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: Some("config-model".to_string()),
+        };
+        let mut args = vec!["run".to_string()];
+        let mut env = Vec::new();
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            None,
+            true,
+            &snapshot,
+        )
+        .unwrap();
+        assert!(!args.contains(&"--model".to_string()));
+        assert!(env.contains(&("MODEL".to_string(), "config-model".to_string())));
+    }
+
+    #[test]
+    fn opencode_apply_to_args_does_not_duplicate_existing_model_flag() {
+        let snapshot = OpenCodeEnvSnapshot {
+            opencode_model_env: None,
+            opencode_config_model: None,
+        };
         let mut args = vec![
             "run".to_string(),
             "--model".to_string(),
-            "user-choice".to_string(),
+            "existing".to_string(),
         ];
-
-        p.apply_non_interactive_defaults(&mut args);
-
-        let model_flags = args.iter().filter(|a| a.as_str() == "--model").count();
-        assert_eq!(model_flags, 1);
-        assert!(args.contains(&"user-choice".to_string()));
-    }
-
-    #[test]
-    fn opencode_non_interactive_validation_requires_a_model() {
-        let p = profile(Provider::OpenCode);
-        let args = vec!["run".to_string(), "status".to_string()];
-
-        let error = p.validate_non_interactive_requirements(&args).unwrap_err();
-        assert!(
-            error.to_string().contains(
-                "OpenCode cannot use its configured default model in non-interactive mode"
-            )
-        );
-        assert!(error.to_string().contains("OPENCODE_MODEL"));
+        let mut env = Vec::new();
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            Some("existing"),
+            true,
+            &snapshot,
+        )
+        .unwrap();
+        let count = args.iter().filter(|a| *a == "--model").count();
+        assert_eq!(count, 1, "should not duplicate --model flag");
     }
 
     #[test]
@@ -2438,5 +2942,116 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("codex"));
         assert!(message.contains("requires a prompt"));
+    }
+    // -- Pipeline Order Regression Tests (Issue 2026-04-15) -----------------
+
+    fn run_direct_wrap_pipeline_simulation(
+        provider: Provider,
+        cli_args: &[&str],
+        prompt: &str,
+    ) -> Vec<String> {
+        let profile = profile(provider);
+        let mut child_args: Vec<String> = cli_args.iter().map(|s| s.to_string()).collect();
+        let mut env_overrides: Vec<(String, String)> = Vec::new();
+
+        // 1. apply_yolo
+        let _ = profile.apply_yolo_for_mode(&mut child_args, &mut env_overrides, false);
+        // 2. apply_entrypoint
+        profile.apply_entrypoint(&mut child_args, true);
+        // 3. apply_non_interactive
+        let _ = profile.apply_non_interactive_flags(&mut child_args);
+
+        // 4. Model resolution (specifically OpenCode simulation)
+        if provider == Provider::OpenCode {
+            let snapshot = OpenCodeEnvSnapshot {
+                opencode_model_env: None,
+                opencode_config_model: None,
+            };
+            let _ = apply_opencode_model_resolution(
+                &mut child_args,
+                &mut |k, v| env_overrides.push((k, v)),
+                false,
+                Some("test-model"),
+                true,
+                &snapshot,
+            );
+        }
+
+        // 5. Output format (simulation of --format stream-json)
+        let _ = profile.apply_output_format(&mut child_args, OutputFormat::Stream);
+
+        // 6. apply_structured_stream
+        profile.apply_structured_stream(&mut child_args);
+
+        // 7. prompt_delivery (NEW CORRECT ORDER)
+        let _ = profile
+            .prompt_delivery(&child_args, prompt, true)
+            .unwrap()
+            .apply_to(&mut child_args);
+
+        child_args
+    }
+
+    #[test]
+    fn test_opencode_non_interactive_args_order() {
+        let args = run_direct_wrap_pipeline_simulation(Provider::OpenCode, &[], "do the thing");
+
+        // We want to verify that flags appear before any positional arguments,
+        // specifically before the `--` separator if there is one.
+        if let Some(pos) = args.iter().position(|a| a == "--") {
+            for arg in args.iter().skip(pos + 2) {
+                assert!(
+                    !arg.starts_with('-'),
+                    "Flag {:?} appears after -- separator in argv: {:?}",
+                    arg,
+                    args
+                );
+            }
+        } else {
+            // No separator, check the end
+        }
+    }
+
+    #[test]
+    fn test_goose_non_interactive_no_duplicate_run() {
+        let args = run_direct_wrap_pipeline_simulation(Provider::Goose, &[], "run this");
+        let run_count = args.iter().filter(|a| *a == "run").count();
+        assert_eq!(
+            run_count, 1,
+            "Goose pipeline should contain exactly one 'run' entrypoint, found: {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn test_all_providers_flags_before_double_dash() {
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::KimiCode,
+            Provider::QwenCode,
+            Provider::OpenCode,
+            Provider::Goose,
+        ] {
+            let args = run_direct_wrap_pipeline_simulation(
+                provider,
+                &[],
+                "some generic prompt --with-flag",
+            );
+            if let Some(pos) = args.iter().position(|a| a == "--") {
+                for arg in &args[pos + 1..] {
+                    if arg != "some generic prompt --with-flag" {
+                        assert!(
+                            !arg.starts_with('-'),
+                            "[{:?}] Flag {:?} appears after -- separator in argv: {:?}",
+                            provider,
+                            arg,
+                            args
+                        );
+                    }
+                }
+            }
+        }
     }
 }

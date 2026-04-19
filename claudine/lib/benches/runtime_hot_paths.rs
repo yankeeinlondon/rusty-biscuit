@@ -8,8 +8,8 @@ use claudine::services::protect::config::{
     CustomPattern, ProtectConfig, ProtectRuleToggles, RuleGroupConfig, RuleGroupDetailedConfig,
 };
 use claudine::services::protect::service::{ProtectRequest, ProtectService};
-use claudine::stream::parser::NullSink;
-use claudine::stream::{ParserConfig, create_parser};
+use claudine::stream::semantic::NullSemanticSink;
+use claudine::stream::{ParserConfig, create_semantic_parser};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use tempfile::TempDir;
 
@@ -67,17 +67,16 @@ fn bench_stream_parser(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(bytes));
     group.bench_function(BenchmarkId::new("opencode", lines.len()), |b| {
         b.iter(|| {
-            let mut parser = create_parser(
+            let mut parser = create_semantic_parser(
                 Provider::OpenCode,
-                NullSink,
+                NullSemanticSink,
                 ParserConfig {
                     model: Some("gpt-4o".into()),
                 },
             );
 
             for line in &lines {
-                let chunk = parser.feed_line(black_box(line)).unwrap();
-                black_box(chunk);
+                parser.feed_line(black_box(line)).unwrap();
             }
 
             let summary = parser.finish(0);

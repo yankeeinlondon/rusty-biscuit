@@ -357,7 +357,7 @@ fn detect_repo_root(cwd: &Path) -> Option<PathBuf> {
         .or_else(|| detect_repo(cwd).ok().flatten().map(|repo| repo.root))
 }
 
-fn resolve_launch_workspace_context(
+pub(crate) fn resolve_launch_workspace_context(
     launch_cwd: &Path,
     repo_root_hint: Option<&Path>,
 ) -> LaunchWorkspaceContext {

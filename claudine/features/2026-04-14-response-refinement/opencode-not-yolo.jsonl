@@ -1,0 +1,160 @@
+{
+	"type": "step_start",
+	"timestamp": 1776197699206,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"id": "prt_d8da205a8001cfjvCASD7dCWav",
+		"messageID": "msg_d8da1f9d9001fOxfcng6xr6z2w",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"snapshot": "561351c6cf1c98f14c57fdee12aabadeb9faac2a",
+		"type": "step-start"
+	}
+}
+{
+	"type": "reasoning",
+	"timestamp": 1776197700199,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"id": "prt_d8da20623001tDFQkKFwlQxlCs",
+		"messageID": "msg_d8da1f9d9001fOxfcng6xr6z2w",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"type": "reasoning",
+		"text": "The user is asking about the 2026 NFL Draft date. This is a factual question that requires current information. I should use web search to find this information.",
+		"time": {
+			"start": 1776197699107,
+			"end": 1776197699980
+		},
+		"metadata": {
+			"anthropic": {
+				"signature": "dcebabfa8224e242b6df7a47c5e14367186712062f46b78b3f9519eac5d59448"
+			}
+		}
+	}
+}
+{
+	"type": "tool_use",
+	"timestamp": 1776197701921,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"type": "tool",
+		"tool": "firecrawl_firecrawl_search",
+		"callID": "call_function_6lomxyeqf3yo_1",
+		"state": {
+			"status": "completed",
+			"input": {
+				"query": "2026 NFL Draft date schedule",
+				"limit": 5
+			},
+			"output": "{\n  \"web\": [\n    {\n      \"url\": \"https://operations.nfl.com/journey-to-the-nfl/the-nfl-draft/2026-nfl-draft/\",\n      \"title\": \"2026 NFL Draft - NFL Football Operations\",\n      \"description\": \"April 23-25 • Pittsburgh, PA.\",\n      \"position\": 1\n    },\n    {\n      \"url\": \"https://www.nfl.com/news/2026-nfl-draft-dates-times-location-how-to-watch-and-more\",\n      \"title\": \"2026 NFL Draft: Dates, times, location, how to watch and more\",\n      \"description\": \"When and where is the 2026 NFL Draft: · Thursday, April 23: Round 1, 8 p.m. ET · Friday, April 24: Rounds 2-3, 7 p.m. ET · Saturday, April 25: ...\",\n      \"position\": 2\n    },\n    {\n      \"url\": \"https://en.wikipedia.org/wiki/2026_NFL_draft\",\n      \"title\": \"2026 NFL draft - Wikipedia\",\n      \"description\": \"The event is scheduled to be held in Pittsburgh on April 23–25. 2026 NFL draft. General information. Date, April ...\",\n      \"position\": 3\n    },\n    {\n      \"url\": \"https://www.visitpittsburgh.com/nfl-draft-pittsburgh/\",\n      \"title\": \"2026 NFL Draft Pittsburgh | Official Fan Guide & Visitor Info\",\n      \"description\": \"See you in the city where champions are born, see you in Pittsburgh on April 23-25, 2026! Details. NFL Draft in ...\",\n      \"position\": 4\n    },\n    {\n      \"url\": \"https://operations.nfl.com/gameday/nfl-schedule/2026-important-nfl-dates/\",\n      \"title\": \"2026 Important NFL Dates | NFL Football Operations\",\n      \"description\": \"The first day of the 2026 League Year will end at 11:59:59 p.m. ET, on March 12. Clubs will receive a personnel notice that will include all transactions ...\",\n      \"position\": 5\n    }\n  ]\n}",
+			"metadata": {
+				"truncated": false
+			},
+			"title": "",
+			"time": {
+				"start": 1776197700293,
+				"end": 1776197701822
+			},
+			"attachments": []
+		},
+		"id": "prt_d8da209f4001uVEvKE0raFQLcu",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"messageID": "msg_d8da1f9d9001fOxfcng6xr6z2w"
+	}
+}
+{
+	"type": "step_finish",
+	"timestamp": 1776197702070,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"id": "prt_d8da21120001PD0osOEoGHUilF",
+		"reason": "tool-calls",
+		"snapshot": "561351c6cf1c98f14c57fdee12aabadeb9faac2a",
+		"messageID": "msg_d8da1f9d9001fOxfcng6xr6z2w",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"type": "step-finish",
+		"tokens": {
+			"total": 54077,
+			"input": 126,
+			"output": 81,
+			"reasoning": 0,
+			"cache": {
+				"write": 19923,
+				"read": 33947
+			}
+		},
+		"cost": 0.009777945
+	}
+}
+{
+	"type": "step_start",
+	"timestamp": 1776197703788,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"id": "prt_d8da217fe001BOBAnvAR6lPk9P",
+		"messageID": "msg_d8da211ea001afDIm6pMAiKcn4",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"snapshot": "561351c6cf1c98f14c57fdee12aabadeb9faac2a",
+		"type": "step-start"
+	}
+}
+{
+	"type": "reasoning",
+	"timestamp": 1776197704366,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"id": "prt_d8da2186d001e71OR2JNg7uZq6",
+		"messageID": "msg_d8da211ea001afDIm6pMAiKcn4",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"type": "reasoning",
+		"text": "The search results show the 2026 NFL Draft is scheduled for April 23-25, 2026 in Pittsburgh, PA.",
+		"time": {
+			"start": 1776197703789,
+			"end": 1776197704174
+		},
+		"metadata": {
+			"anthropic": {
+				"signature": "5b8d77815aa5c9236ff4106ecf7e4061bc55c0b1b107c625e2824e01dba12f17"
+			}
+		}
+	}
+}
+{
+	"type": "text",
+	"timestamp": 1776197705159,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"id": "prt_d8da21a55001P5S4k14ZWytiu7",
+		"messageID": "msg_d8da211ea001afDIm6pMAiKcn4",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"type": "text",
+		"text": "The 2026 NFL Draft is **April 23-25, 2026** in Pittsburgh, PA.\n\n- **Thursday, April 23**: Round 1, 8 p.m. ET\n- **Friday, April 24**: Rounds 2-3, 7 p.m. ET\n- **Saturday, April 25**: Rounds 4-7",
+		"time": {
+			"start": 1776197704277,
+			"end": 1776197705059
+		}
+	}
+}
+{
+	"type": "step_finish",
+	"timestamp": 1776197705307,
+	"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+	"part": {
+		"id": "prt_d8da21dc7001DowpjyyvE6RKTO",
+		"reason": "stop",
+		"snapshot": "561351c6cf1c98f14c57fdee12aabadeb9faac2a",
+		"messageID": "msg_d8da211ea001afDIm6pMAiKcn4",
+		"sessionID": "ses_2725e06f9ffegkuVqJadHBPZs7",
+		"type": "step-finish",
+		"tokens": {
+			"total": 54668,
+			"input": 603,
+			"output": 109,
+			"reasoning": 0,
+			"cache": {
+				"write": 105,
+				"read": 53851
+			}
+		},
+		"cost": 0.003893835
+	}
+}

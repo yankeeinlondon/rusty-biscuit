@@ -1,49 +1,47 @@
 # Knowledge Learned about Committing
 
-> This document is a bulleted list of things learned about commits which may not be intuitive and obvious with just a knowledge of git and this repo.
+> Consolidated commit guidance for this repo and this multi-agent workflow. Keep this focused on rules that were actually observed or verified.
 
-- I am not responsible for running tests, this will already have been done before i'm handed the job of making git commits
+## Repo Conventions
 
-- Do not stage additional files. The caller has already determined what files they want staged and adding more is a mistake! If there are NO files staged then simply exit with a message about no files being staged.
+- Do not stage additional files just to make a commit work. Commit exactly what the caller already staged. If nothing is staged, stop and report that.
+- Do not second-guess the staged set. The caller chose those files intentionally.
+- When viewing history, use `git log` directly. `sniff git commits` is not a valid command in this repo.
+- Conventional commit scopes and subjects in this repo use lowercase after the colon, for example `docs(darkmatter): update parser notes`.
+- For documentation restructuring in `.claude/` or skill files, prefer a `docs(<area>): ...` prefix.
 
-- When viewing commit history, use `git log --oneline -n` directly — `sniff git commits` is not a valid command in this repo
+## Check What Will Be Committed
 
-- The repo uses lowercase after the colon in conventional commits (e.g., `docs(darkmatter):` not `Docs(Darkmatter):`)
+- Use `git status --short` first to see what is staged, unstaged, untracked, or renamed.
+- Use `git diff --staged --name-status` to confirm the exact staged file set before committing.
+- Review staged source changes with `git diff --staged` before committing. Git will happily commit unresolved conflict markers if they are present in the staged content.
+- For new files, `git diff --staged` shows the file as a diff against `/dev/null`. That is normal; confirm the staging state with `git status --short`.
+- A file may appear in the staged list but have no actual content changes (e.g., auto-formatting that matched existing formatting). If `git diff --staged` shows no diff for a file, it has no actual changes and committing it is harmless but unnecessary.
 
-- When committing agent/skill files in `.claude/`, use `docs(<area>)` as the prefix for documentation restructuring changes
+## Path-Limited Commits
 
-- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, but the subagent should only commit those files the orchestrator has asked it to.
+- `git commit -m "message" -- path1 path2` commits only the listed paths and leaves other staged changes staged.
+- `git commit --only -m "message" -- path1 path2` is the safest explicit form when unrelated staged changes must remain untouched.
+- All options must come before the `--` pathspec separator. `git commit --only -- path -m "message"` is wrong because `-m` is then parsed as a path.
+- Quote paths that contain spaces when passing them to `git commit`.
+- Be careful with renames. Committing only the new path records an add and leaves the delete staged. To preserve the rename as one atomic change, include both sides or avoid path-limiting that rename.
+- `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
 
-- When multiple related files are staged together (e.g., a directory rename like `transform/` → `compose/`), git commits them as an atomic unit. In such cases, subagents will not be able to split them into separate granular commits even if semantically distinct groups were planned - the files must be committed together as they were staged
+## History and Verification
 
-- Using `git commit -- path/to/file` does NOT limit the commit to only those paths if other files are also staged. Git will commit ALL staged files. To commit only specific files, ensure ONLY those files are staged (not using `git add` broadly) or use `git commit -m "message" -- path1 path2` with explicit paths when you are certain only those files are staged
+- `git log --oneline -n <count>` can miss a relevant commit either because the count is too small or because the commit is reachable on the branch but not on the current ancestry path. Increase `-n` or use `git log --all --oneline` when needed.
+- Do not assume `HEAD` still points to your new commit in a concurrent workflow. Capture the commit hash from `git commit` output and verify that object directly.
+- A commit may be reachable from a branch without being an ancestor of the current `HEAD`. Use `git branch --contains <commit>` when you need reachability, not just local history order.
+- Lost commits can usually be found in `git reflog`. Treat reflog lookup as the recovery starting point instead of memorizing one rigid reset sequence.
 
-- When files are renamed and staged as renames (e.g., `old.md -> new.md`), specifying explicit paths to `git commit -m "..." -- new.md` only commits the "new" side; the "deleted" side remains staged even when rename detection is complete (R100). Always verify both sides of a rename are committed with `git diff --staged --name-status`
+## Multi-Agent Workflow
 
-- When committing files in directories with spaces in their names (e.g., `darkmatter/features/2026-03-24. reference-validation/`), paths must be properly quoted when passed to `git commit -m "..." -- "path with spaces/file.md"`. Failure to quote results in git treating each space-separated token as a separate path argument.
+- Subagents may see a different staged set than the prompt implies. Always verify the actual index state before committing.
+- In a shared worktree, concurrent agents share the same index. `git reset HEAD` without paths resets the entire staged set for everyone.
+- If multiple agents are committing from the same worktree, the orchestrator should stage groups sequentially or otherwise isolate the work. Shared staging is fragile.
+- If another worker already committed some assigned files, a later commit may legitimately report `nothing to commit`. That does not mean the earlier commit was missing.
+- Auto-formatting workflows (e.g., rustfmt on save) may pre-commit files before an orchestrator assigns them. If a subagent finds no staged changes for an assigned file, it was likely auto-committed by a formatting hook.
 
-- Do not second guess the files which were staged; the user intentionally chose which files they were interested in committing.
+## Shell Gotchas
 
-- Files can only be committed once. When multiple subagent groups are committing related files, later groups will get "nothing to commit" for files already committed by earlier groups, but can still commit any remaining files assigned to them.
-
-- When using `git commit -m "message" -- path1 path2`, the `--` separator before paths combined with `-m` can cause git to source the commit message from a cached staged template instead of the inline message. To avoid this, place paths before `-m` (e.g., `git commit file1 file2 -m "message"`) or use `git commit --only -- path1 path2 -m "message"` for explicit path-limited commits with a custom message.
-
-- The `--only` flag in `git commit --only -- path -m "message"` only works with already-tracked files. For new (untracked) files, `--only` will fail with "fatal: you must specify path to commit with -c or -C". For new files, ensure they are staged via `git add` before committing, then use `git commit file1 file2 -m "message"` with paths before `-m`.
-
-- A commit can be "on" a branch (reachable from it via `git branch --contains`) but NOT an ancestor of the current HEAD. This happens when HEAD has moved forward after the branch diverged. Subagents using `git log --oneline -n` only see ancestry-path commits and will miss reachable-but-not-ancestor commits. To see all commits on a branch regardless of ancestry, use `git log --all --oneline | head -n` or `git branch -v --contains <commit>` to check if a specific commit is reachable.
-
-- Lost commits can be recovered from the reflog. After `git reset` moves HEAD, the old commits remain in `git reflog` with timestamps. Use `git reflog | head -20` to find the hash, then `git cherry-pick -n <hash>` to replay the changes as unstaged working-tree modifications, then re-stage and commit properly. This is the rescue path when a subagent accidentally resets a commit that contained staged changes.
-
-- When a subagent accidentally commits files it shouldn't (e.g., because `git reset HEAD` unstaged only some files while working-tree changes were simultaneously modified), the recovery sequence is: `git reset HEAD~1` to undo the bad commit, then `git checkout -- .` to restore the working tree to match the previous commit, then re-`git add` only the intended files. This restores both the staging area and working tree to a clean state before retrying.
-
-- `git log --oneline -n` may not show a relevant commit if it's further back than `n`. Use a larger `-n` value or `--all` to ensure you see the full picture. A commit can exist on the branch but be deeper in history than a small `-n` count suggests.
-
-- When subagents operate concurrently on the same branch, their working trees share the same staging area. A `git reset HEAD` by one subagent affects what all other subagents see as "staged." Each subagent should verify staging state independently before committing, and use explicit `git add` of assigned files rather than relying on pre-existing staged state.
-
-- In this Claudine sandbox environment, a writable worktree can still have its git metadata stored outside the writable roots (for example under `/Volumes/.../.git/worktrees/...`). When that happens, `git commit` fails trying to create `index.lock` even though editing files in the worktree succeeds. Check the actual gitdir path before assuming commits are possible from the session.
-
-- When multiple subagents commit concurrently from a shared staging area, `git reset HEAD` (without paths) resets the ENTIRE index, destroying all staged changes from ALL subagents. This means if Subagent A does `git reset HEAD` to isolate its files, Subagent B's staged changes are also wiped out. The orchestrator should NOT have subagents use `git reset HEAD` when operating concurrently — instead, each subagent should verify what is actually staged and work with that state, or the orchestrator should stage files for each subagent sequentially rather than having all subagents manipulate the shared index simultaneously.
-
-- **Orchestrator sequential staging pattern**: To avoid subagent confusion from shared staging state, the orchestrator should stage files for each subagent sequentially before spawning them (e.g., `git add <group1_files> && spawn subagent1`, then `git add <group2_files> && spawn subagent2`). This ensures each subagent sees a clean, isolated staging state and avoids overlap issues where one subagent's files get committed with another subagent's batch.
-
-- **Check for merge conflict markers before committing source files**: When committing source code files, use `grep -r "<<<<<<" --staged` or review `git diff --staged` to ensure no unresolved merge conflict markers (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`) are present. A commit can succeed even when these markers are in the staged file content, which pollutes the repository history. If conflict markers are found, resolve them before committing.
+- Literal backticks inside a double-quoted shell command trigger command substitution in `zsh`. If a commit message contains Markdown code spans, escape the backticks or build the message with a single-quoted heredoc first.

@@ -5,6 +5,7 @@
 //! parser silently tolerates absent or extra fields, matching the existing
 //! `serde_json::Value`-based extraction behavior.
 
+use chrono::{DateTime, TimeZone, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -36,6 +37,8 @@ pub enum ClaudeEvent {
     ToolUse(ClaudeToolUse),
     #[serde(rename = "tool_result")]
     ToolResult(ClaudeToolResult),
+    #[serde(rename = "user")]
+    User(ClaudeUser),
 }
 
 /// Session metadata emitted by Claude Code's `init` and `system` events.
@@ -45,6 +48,8 @@ pub struct ClaudeInit {
     pub session_id: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default, rename = "apiKeySource")]
+    pub api_key_source: Option<String>,
     /// `subtype` is present on `system` events (e.g. `"init"`). Unused today
     /// but captured for future diagnostics.
     #[serde(default)]
@@ -60,6 +65,32 @@ pub struct ClaudeAssistant {
     pub message: Option<ClaudeAssistantMessage>,
     #[serde(default)]
     pub content: Option<Vec<ClaudeContentPart>>,
+    /// Newer Claude Code releases attach a top-level `error` discriminator to
+    /// `assistant` envelopes when the model's reply is a synthetic failure
+    /// (e.g. `"billing_error"`). The nested `message.content[0].text` then
+    /// carries the human-readable message.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// `user` event carrying a replay of the user's previous turn or a nested
+/// `tool_result` block. The parser extracts tool_result blocks into
+/// [`SemanticEvent::ToolResult`]; text blocks are silently dropped because
+/// they only echo input.
+#[derive(Debug, Default, Deserialize)]
+pub struct ClaudeUser {
+    #[serde(default)]
+    pub message: Option<ClaudeUserMessage>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub parent_tool_use_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ClaudeUserMessage {
+    #[serde(default)]
+    pub content: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -79,6 +110,31 @@ pub struct ClaudeContentPart {
     pub kind: Option<String>,
     #[serde(default)]
     pub text: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    #[serde(default)]
+    pub input: Option<Value>,
+}
+
+impl ClaudeContentPart {
+    pub fn into_tool_use(self) -> Option<ClaudeToolUse> {
+        if self.kind.as_deref() != Some("tool_use") {
+            return None;
+        }
+        Some(ClaudeToolUse {
+            id: self.id,
+            tool_use_id: self.tool_use_id,
+            name: self.name,
+            tool_name: self.tool_name,
+            input: self.input,
+        })
+    }
 }
 
 /// `content_block_start` event — when `content_block.kind == "tool_use"` the
@@ -87,6 +143,8 @@ pub struct ClaudeContentPart {
 pub struct ClaudeContentBlockStart {
     #[serde(default)]
     pub content_block: Option<ClaudeContentBlock>,
+    #[serde(default)]
+    pub index: Option<usize>,
 }
 
 /// Nested `content_block` payload on `content_block_start` events. Shares its
@@ -128,6 +186,8 @@ impl ClaudeContentBlock {
 pub struct ClaudeContentBlockDelta {
     #[serde(default)]
     pub delta: Option<ClaudeDelta>,
+    #[serde(default)]
+    pub index: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -164,6 +224,8 @@ pub struct ClaudeErrorDetail {
 #[derive(Debug, Default, Deserialize)]
 pub struct ClaudeResult {
     #[serde(default)]
+    pub subtype: Option<String>,
+    #[serde(default)]
     pub duration_ms: Option<u64>,
     #[serde(default)]
     pub duration_api_ms: Option<u64>,
@@ -179,6 +241,26 @@ pub struct ClaudeResult {
     pub cost_usd: Option<f64>,
     #[serde(default)]
     pub usage: Option<ClaudeUsage>,
+    /// Newer `result` envelopes flag overall failure independent of
+    /// `stop_reason` (e.g. `is_error=true` with `stop_reason="stop_sequence"`).
+    #[serde(default)]
+    pub is_error: Option<bool>,
+    /// Human-readable result text — carries the error message when
+    /// `is_error=true`.
+    #[serde(default)]
+    pub result: Option<String>,
+    /// List of permission-denial records; shape varies by provider release.
+    #[serde(default)]
+    pub permission_denials: Option<Vec<Value>>,
+    /// Terminal lifecycle reason (e.g. `"completed"`, `"cancelled"`).
+    #[serde(default)]
+    pub terminal_reason: Option<String>,
+    /// Presence of fast-mode state in the terminal envelope.
+    #[serde(default)]
+    pub fast_mode_state: Option<String>,
+    /// Per-model usage map; shape is provider-defined.
+    #[serde(default, rename = "modelUsage")]
+    pub model_usage: Option<Value>,
 }
 
 impl ClaudeResult {
@@ -208,6 +290,68 @@ pub struct ClaudeRateLimit {
     pub retry_after_ms: Option<u64>,
     #[serde(default)]
     pub message: Option<String>,
+    #[serde(default, rename = "rate_limit_info")]
+    pub rate_limit_info: Option<ClaudeRateLimitInfo>,
+    #[serde(default, rename = "resetsAt")]
+    pub resets_at: Option<i64>,
+    #[serde(default, rename = "reset_at")]
+    pub reset_at_seconds: Option<i64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ClaudeRateLimitInfo {
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, rename = "resetsAt")]
+    pub resets_at: Option<i64>,
+    #[serde(default, rename = "rateLimitType")]
+    pub rate_limit_type: Option<String>,
+    #[serde(default, rename = "overageStatus")]
+    pub overage_status: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+impl ClaudeRateLimit {
+    pub fn resolved_message(&self) -> Option<&str> {
+        self.message
+            .as_deref()
+            .or_else(|| self.rate_limit_info.as_ref()?.message.as_deref())
+    }
+
+    pub fn resolved_status(&self) -> Option<&str> {
+        self.rate_limit_info.as_ref()?.status.as_deref()
+    }
+
+    pub fn resolved_rate_limit_type(&self) -> Option<&str> {
+        self.rate_limit_info.as_ref()?.rate_limit_type.as_deref()
+    }
+
+    pub fn resolved_overage_status(&self) -> Option<&str> {
+        self.rate_limit_info.as_ref()?.overage_status.as_deref()
+    }
+
+    pub fn resolved_is_throttled(&self) -> Option<bool> {
+        self.is_throttled
+            .or_else(|| {
+                let status = self.resolved_status()?;
+                Some(matches!(status, "limited" | "blocked"))
+            })
+            .or_else(|| {
+                let overage = self.resolved_overage_status()?;
+                Some(matches!(overage, "blocked"))
+            })
+    }
+
+    pub fn resolved_reset_at(&self) -> Option<DateTime<Utc>> {
+        let seconds = self
+            .rate_limit_info
+            .as_ref()
+            .and_then(|info| info.resets_at)
+            .or(self.resets_at)
+            .or(self.reset_at_seconds)?;
+        Utc.timestamp_opt(seconds, 0).single()
+    }
 }
 
 /// Top-level `tool_use` event. For `content_block_start` events that wrap a
@@ -282,13 +426,15 @@ mod tests {
 
     #[test]
     fn claude_init_deserializes() {
-        let event =
-            parse(r#"{"type":"init","session_id":"sess-1","model":"claude-sonnet-4-20250514"}"#);
+        let event = parse(
+            r#"{"type":"init","session_id":"sess-1","model":"claude-sonnet-4-20250514","apiKeySource":"ANTHROPIC_API_KEY"}"#,
+        );
         let ClaudeEvent::Init(init) = event else {
             panic!("expected Init");
         };
         assert_eq!(init.session_id.as_deref(), Some("sess-1"));
         assert_eq!(init.model.as_deref(), Some("claude-sonnet-4-20250514"));
+        assert_eq!(init.api_key_source.as_deref(), Some("ANTHROPIC_API_KEY"));
     }
 
     #[test]
@@ -326,6 +472,33 @@ mod tests {
         assert_eq!(message.role.as_deref(), Some("assistant"));
         let parts = message.content.expect("content");
         assert_eq!(parts[0].text.as_deref(), Some("Nested"));
+    }
+
+    #[test]
+    fn claude_assistant_deserializes_nested_tool_use_content() {
+        let event = parse(
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"ls -la"}}]}}"#,
+        );
+        let ClaudeEvent::Assistant(assistant) = event else {
+            panic!("expected Assistant");
+        };
+        let message = assistant.message.expect("message");
+        let part = message
+            .content
+            .expect("content")
+            .into_iter()
+            .next()
+            .unwrap();
+        let tool = part.into_tool_use().expect("tool_use");
+        assert_eq!(tool.resolved_tool_id(), Some("tu_1"));
+        assert_eq!(tool.resolved_tool_name(), Some("Bash"));
+        assert_eq!(
+            tool.input
+                .as_ref()
+                .and_then(|v| v.get("command"))
+                .and_then(Value::as_str),
+            Some("ls -la")
+        );
     }
 
     #[test]
@@ -421,6 +594,24 @@ mod tests {
     }
 
     #[test]
+    fn claude_rate_limit_nested_metadata_deserializes() {
+        let event = parse(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"approaching_limit","resetsAt":1712000000,"rateLimitType":"usage","overageStatus":"allowed"}}"#,
+        );
+        let ClaudeEvent::RateLimit(rl) = event else {
+            panic!("expected RateLimit");
+        };
+        assert_eq!(rl.resolved_status(), Some("approaching_limit"));
+        assert_eq!(rl.resolved_rate_limit_type(), Some("usage"));
+        assert_eq!(rl.resolved_overage_status(), Some("allowed"));
+        assert_eq!(rl.resolved_is_throttled(), Some(false));
+        assert_eq!(
+            rl.resolved_reset_at().map(|dt| dt.timestamp()),
+            Some(1712000000)
+        );
+    }
+
+    #[test]
     fn claude_tool_use_deserializes() {
         let event =
             parse(r#"{"type":"tool_use","id":"tu-1","name":"bash","input":{"command":"ls"}}"#);
@@ -490,5 +681,55 @@ mod tests {
     fn claude_missing_type_fails_typed_deserialization() {
         let err = serde_json::from_str::<ClaudeEvent>(r#"{"session_id":"sess"}"#);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn claude_user_event_deserializes_with_tool_result_content() {
+        let line = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"hello","is_error":false}]},"session_id":"s1"}"#;
+        let event: ClaudeEvent = serde_json::from_str(line).expect("valid event");
+        let ClaudeEvent::User(user) = event else {
+            panic!("expected ClaudeEvent::User, got {event:?}");
+        };
+        let content = user.message.and_then(|m| m.content).expect("content");
+        assert!(
+            content
+                .iter()
+                .any(|c: &Value| c.get("type").and_then(Value::as_str) == Some("tool_result"))
+        );
+    }
+
+    #[test]
+    fn claude_system_hook_subtypes_deserialize() {
+        for subtype in ["hook_started", "hook_response"] {
+            let line = format!(
+                r#"{{"type":"system","subtype":"{subtype}","session_id":"s1","hook_name":"SessionStart"}}"#
+            );
+            let event: ClaudeEvent = serde_json::from_str(&line).expect("valid event");
+            assert!(
+                matches!(event, ClaudeEvent::System(_)),
+                "subtype {subtype} must parse as System event"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_assistant_error_field_preserved() {
+        let line = r#"{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Credit balance is too low"}]},"session_id":"s1","error":"billing_error"}"#;
+        let event: ClaudeEvent = serde_json::from_str(line).expect("valid event");
+        let ClaudeEvent::Assistant(a) = event else {
+            panic!("expected Assistant")
+        };
+        assert_eq!(a.error.as_deref(), Some("billing_error"));
+    }
+
+    #[test]
+    fn claude_result_fields_billing_error_surface() {
+        let line = r#"{"type":"result","subtype":"success","is_error":true,"result":"Credit balance is too low","session_id":"s1","permission_denials":[],"terminal_reason":"completed","fast_mode_state":"off","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard"},"modelUsage":{}}"#;
+        let event: ClaudeEvent = serde_json::from_str(line).expect("valid event");
+        let ClaudeEvent::Result(r) = event else {
+            panic!("expected Result")
+        };
+        assert_eq!(r.is_error, Some(true));
+        assert_eq!(r.result.as_deref(), Some("Credit balance is too low"));
     }
 }

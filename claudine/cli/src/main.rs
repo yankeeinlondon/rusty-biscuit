@@ -1,9 +1,13 @@
+use std::ffi::OsString;
+
 use claudine::events::Provider;
 use color_eyre::eyre::Result;
 
 mod args;
+mod argv;
 mod cli_utils;
 mod commands;
+mod completion;
 mod log;
 mod output;
 mod provider_values;
@@ -11,10 +15,6 @@ mod table_utils;
 mod telemetry;
 
 use args::{Cli, Commands};
-
-const WRAPPER_SUBCOMMANDS: &[&str] = &[
-    "claude", "codex", "gemini", "kimi", "qwen", "opencode", "goose",
-];
 
 fn wrapper_command(
     command: Commands,
@@ -55,55 +55,89 @@ async fn ensure_config_exists() -> Result<()> {
     }
 }
 
-/// Two-pass CLI parsing for wrapper subcommands.
+/// CLI parsing over an already-normalized argv.
 ///
-/// Pass 1: build the `Command` with `ignore_errors(true)` on the wrapper
-/// subcommands so that unknown flags (belonging to the underlying agent)
-/// are collected into the `passthrough` bucket instead of causing a clap
-/// error. Extract global flags and the subcommand name.
+/// Non-wrapper subcommands go through a single strict `Cli::parse_from`
+/// call — that's the common path and the one that produces rich clap
+/// errors on unknown args or invalid values.
 ///
-/// Pass 2: re-build with strict parsing for non-wrapper subcommands.
-fn parse_cli() -> Cli {
+/// Wrapper subcommands (`claude`, `codex`, …) need a lenient pass so that
+/// unknown flags destined for the wrapped agent CLI flow into the
+/// `passthrough` bucket instead of aborting with a clap error. That lenient
+/// pass is constructed by cloning the clap `Command` and marking each
+/// wrapper subcommand with `ignore_errors(true)`, then calling
+/// `try_get_matches_from` + `Cli::from_arg_matches`.
+///
+/// Both `unwrap_or_else` / `Err(_) =>` branches fall back to
+/// `Cli::parse_from(...)` on the same normalized argv. Those fallbacks are
+/// defensive: in practice the lenient pass cannot fail for
+/// wrapper-targeted argv, because `ignore_errors(true)` absorbs every
+/// unknown token. The fallbacks exist so a future clap upgrade that tightens
+/// `from_arg_matches` cannot silently drop into an `unwrap()` panic — the
+/// strict pass then produces the user-facing clap error message. This does
+/// mean the lenient diagnostic is swallowed on the rare failure path; if
+/// that becomes a problem, emit a `tracing::debug!` before falling through.
+fn parse_cli_from(argv: &[OsString]) -> Cli {
     use clap::{CommandFactory, FromArgMatches, Parser};
 
-    let raw_args: Vec<String> = std::env::args().collect();
-    let is_wrapper = raw_args
-        .get(1)
-        .is_some_and(|arg| WRAPPER_SUBCOMMANDS.contains(&arg.as_str()));
+    let is_wrapper = argv::find_subcommand(argv, argv::WRAPPER_SUBCOMMANDS).is_some();
 
     if !is_wrapper {
-        return Cli::parse();
+        return Cli::parse_from(argv.iter().cloned());
     }
 
     // Lenient pass: allow unknown args so they flow into passthrough.
     // Build a command tree where wrapper subcommands ignore unknown args.
     let mut cmd = <Cli as CommandFactory>::command();
-    let names: Vec<String> = WRAPPER_SUBCOMMANDS.iter().map(|s| s.to_string()).collect();
-    for name in &names {
-        if let Some(sub) = cmd.find_subcommand_mut(name) {
+    for name in argv::WRAPPER_SUBCOMMANDS {
+        if let Some(sub) = cmd.find_subcommand_mut(*name) {
             let muted = std::mem::replace(sub, clap::Command::new("__placeholder__"));
             let _ = std::mem::replace(sub, muted.ignore_errors(true));
         }
     }
 
-    match cmd.try_get_matches_from(&raw_args) {
-        Ok(matches) => Cli::from_arg_matches(&matches).unwrap_or_else(|_| Cli::parse()),
-        Err(_) => Cli::parse(),
+    match cmd.try_get_matches_from(argv.iter().cloned()) {
+        Ok(matches) => Cli::from_arg_matches(&matches)
+            .unwrap_or_else(|_| Cli::parse_from(argv.iter().cloned())),
+        Err(_) => Cli::parse_from(argv.iter().cloned()),
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     color_eyre::install()?;
 
-    // Pre-scan for --plain to disable clap ANSI styling before parsing
-    let is_plain = std::env::args().any(|a| a == "--plain");
+    // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
+    // `maybe_complete` writes either a registration snippet or candidate
+    // list to stdout and exits before returning. In normal runs it is a
+    // no-op and control falls through to argv normalization. Must run
+    // *before* `argv::normalize(...)` so the normalizer's COMPLETE guard
+    // never has to absorb a completion subprocess on the happy path.
+    completion::maybe_complete();
+
+    let argv: Vec<OsString> = argv::normalize(std::env::args_os().collect());
+
+    // Pre-scan the normalized argv for --plain so clap's ANSI styling is
+    // disabled before parsing. Uses the same token stream the parse will see.
+    let is_plain = argv.iter().any(|tok| tok.to_str() == Some("--plain"));
     if is_plain {
-        // NO_COLOR is a well-established convention for disabling terminal colors
-        unsafe { std::env::set_var("NO_COLOR", "1") };
+        // SAFETY: this runs during single-threaded process bootstrap, before
+        // the Tokio runtime is constructed and before any worker threads or
+        // background tasks exist. No concurrent environment access is possible
+        // yet, so mutating the process environment upholds Rust 2024's
+        // `std::env::set_var` safety contract.
+        unsafe {
+            std::env::set_var("NO_COLOR", "1");
+        }
     }
 
-    let cli = parse_cli();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async_main(argv))
+}
+
+async fn async_main(argv: Vec<OsString>) -> Result<()> {
+    let cli = parse_cli_from(&argv);
     log::set_plain(cli.plain);
     telemetry::init_tracing(cli.debug);
     let root_span = telemetry::root_span(&cli);
@@ -111,17 +145,6 @@ async fn main() -> Result<()> {
 
     if cli.help || cli.command.is_none() {
         return commands::help::run();
-    }
-
-    // Ensure config exists before dispatching any command that needs it.
-    // Commands like `completions` work without config; everything else
-    // (hooks, compose, wrap, etc.) requires an initialized config file.
-    let command_ref = cli.command.as_ref().unwrap();
-    if command_ref.requires_config() {
-        let config_path = claudine::dispatch::loader::user_config_path();
-        if !config_path.exists() {
-            return commands::init_wizard::run_initialization().await;
-        }
     }
 
     let command = match wrapper_command(cli.command.unwrap()) {
@@ -134,8 +157,12 @@ async fn main() -> Result<()> {
     };
 
     // Commands that must work without config (handle is a hook callback,
-    // completions is shell setup). Everything else requires config.
-    let needs_config = !matches!(command, Commands::Handle(_) | Commands::Completions(_));
+    // completions is shell setup, __complete runs under a shell completion
+    // pipeline). Everything else requires config.
+    let needs_config = !matches!(
+        command,
+        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_)
+    );
     if needs_config {
         ensure_config_exists().await?;
     }
@@ -143,6 +170,7 @@ async fn main() -> Result<()> {
     match command {
         Commands::Handle(args) => commands::handle::run(args).await,
         Commands::Completions(args) => commands::completions::run(args),
+        Commands::Complete(args) => commands::completions::run_complete(args),
         Commands::Config(args) => commands::config_tui::run(args).await,
         Commands::Sync(args) => commands::sync::run(args).await,
         Commands::Hooks(args) => commands::hooks::run(args, cli.verbose > 0),

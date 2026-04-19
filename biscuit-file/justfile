@@ -2,6 +2,10 @@ set dotenv-load
 set positional-arguments
 
 import "../just/features.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
 
 BOLD := '\033[1m'
 ITALIC := '\033[3m'
@@ -28,7 +32,7 @@ default:
     if command -v md &> /dev/null; then
         md just.md
     else
-        echo "Biscuit File"
+        echo "{{PACKAGE}}"
         echo "============"
     fi
 

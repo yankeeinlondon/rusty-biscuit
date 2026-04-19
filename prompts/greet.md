@@ -4,4 +4,4 @@ start:
 success:
     say: "winner, winner, winner, TV dinner"
 ---
-Hi how are you?
+Hi how are you? My name is {{name || "Bob"}}.

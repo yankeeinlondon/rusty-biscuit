@@ -128,6 +128,7 @@ sniff repo untracked-files       # Untracked files
 ```bash
 sniff repo git-status                # Git status with commit history
 sniff repo git-status --history 20   # Show more commits
+sniff repo git-status --compact      # Show only the Status section
 sniff repo hash HEAD                 # Show latest commit details
 sniff repo remote origin             # Inspect remote repository
 sniff repo deps                      # Text dependency list

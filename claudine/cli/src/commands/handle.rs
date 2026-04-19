@@ -1,14 +1,30 @@
 use std::io::{IsTerminal, Read};
+use std::time::Duration;
 
 use clap::Args;
 use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, info_span};
 
 use claudine::events::{Provider, detect_environment_fast};
 
 use crate::cli_utils::parse_provider;
 use crate::provider_values::provider_value_parser;
+
+/// Default overall execution deadline for a single `claudine handle` invocation.
+///
+/// Hook handlers run inside the parent agent's event pipeline. Claude Code,
+/// Gemini CLI, and others kill the handler at ~30s, so we cap ourselves well
+/// below that to stop blocking the agent session. The value is deliberately
+/// above the default 60s `Call` action timeout would imply — callers who run a
+/// long `Call` must raise the env override below.
+const DEFAULT_HANDLE_DEADLINE_SECONDS: u64 = 15;
+
+/// Exit code for deadline timeouts.
+///
+/// Matches the `coreutils timeout` convention so any shell or agent inspecting
+/// the exit code sees a recognizable "operation timed out" signal.
+const EXIT_CODE_DEADLINE_EXCEEDED: i32 = 124;
 
 /// Arguments for the handle subcommand.
 #[derive(Args)]
@@ -28,16 +44,98 @@ pub struct HandleArgs {
     pub json: bool,
 }
 
-/// Handle an incoming event from stdin.
+fn resolve_deadline() -> Duration {
+    let secs = std::env::var("CLAUDINE_HANDLE_DEADLINE_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_HANDLE_DEADLINE_SECONDS);
+    Duration::from_secs(secs)
+}
+
+/// Handle an incoming event from stdin under a hard execution deadline.
+///
+/// ## Deadline semantics
+///
+/// Real work runs inside [`run_inner`], wrapped in [`tokio::time::timeout`]
+/// sized by `CLAUDINE_HANDLE_DEADLINE_SECONDS` (default 15s). When the
+/// deadline elapses, the handler prints a one-line diagnostic to stderr and
+/// exits with code 124 (`coreutils timeout` convention) so the parent agent
+/// classifies the handler as "failed" instead of waiting for its own ~30s
+/// hook timeout.
+///
+/// ## Exit discipline
+///
+/// Hook handlers run as short-lived children of an interactive agent. The
+/// top-level command owns stdout/stderr flushing plus the final
+/// [`std::process::exit`] so inner async helpers never bypass buffered
+/// machine-readable output.
 pub async fn run(args: HandleArgs) -> Result<()> {
-    let raw = read_stdin_json()?;
-    let provider = resolve_provider(args.provider, &raw)?;
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let env = detect_environment_fast(&cwd);
+    let deadline = resolve_deadline();
+
+    match tokio::time::timeout(deadline, run_inner(args)).await {
+        Ok(Ok(exit_code)) => {
+            flush_streams();
+            std::process::exit(exit_code);
+        }
+        Ok(Err(error)) => {
+            flush_streams();
+            Err(error)
+        }
+        Err(_elapsed) => {
+            eprintln!(
+                "claudine handle: deadline exceeded after {}s; aborting hook handler \
+                 to prevent blocking the agent session (set \
+                 CLAUDINE_HANDLE_DEADLINE_SECONDS to override)",
+                deadline.as_secs()
+            );
+            flush_streams();
+            std::process::exit(EXIT_CODE_DEADLINE_EXCEEDED);
+        }
+    }
+}
+
+fn flush_streams() {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+}
+
+async fn run_inner(args: HandleArgs) -> Result<i32> {
+    // Run the sync stdin read on a blocking-pool thread so the outer
+    // `tokio::time::timeout` can fire even if the parent agent never closes
+    // its end of the pipe. If we ran this on the async runtime thread,
+    // `stdin.read_to_string` would block without yielding and the timer
+    // would never be polled.
+    let raw = tokio::task::spawn_blocking(|| {
+        let _span = info_span!("handle_stdin_read").entered();
+        read_stdin_json()
+    })
+    .await
+    .map_err(|e| color_eyre::eyre::eyre!("stdin read task panicked: {e}"))??;
+
+    let provider = {
+        let _span = info_span!("handle_provider_resolve").entered();
+        resolve_provider(args.provider, &raw)?
+    };
+    let env = {
+        let _span = info_span!("handle_env_detect").entered();
+        let cwd = std::env::current_dir().unwrap_or_default();
+        detect_environment_fast(&cwd)
+    };
 
     let event_label = args.event.as_deref().unwrap_or("event");
     debug!(%provider, event = %event_label, "Handling event");
-    let outcome = claudine::dispatch::dispatch_canonical(&raw, provider, &env).await?;
+
+    let outcome = {
+        let span = info_span!(
+            "handle_dispatch_canonical",
+            %provider,
+            event = %event_label,
+        );
+        let _enter = span.enter();
+        claudine::dispatch::dispatch_canonical(&raw, provider, &env).await?
+    };
+
     if args.json {
         let output = serde_json::json!({
             "provider": provider.as_slug(),
@@ -51,10 +149,8 @@ pub async fn run(args: HandleArgs) -> Result<()> {
     } else if let Some(payload) = outcome.response {
         println!("{}", serde_json::to_string(&payload)?);
     }
-    if let Some(exit_code) = outcome.exit_code {
-        std::process::exit(exit_code);
-    }
-    Ok(())
+
+    Ok(outcome.exit_code.unwrap_or(0))
 }
 
 fn read_stdin_json() -> Result<Value> {
