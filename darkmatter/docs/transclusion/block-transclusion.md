@@ -122,6 +122,41 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
             - a match is achieved when
         - or equal `!prelude` - any content _before_ the first heading tag (of any level)
 
+5. `set`
+
+    The `set` option allows the parent document to override frontmatter properties on the transcluded child document. This is useful for parameterizing transcluded content — the child's interpolation, page blocks, replace rules, and shell directives all observe the overridden values.
+
+    There are two forms:
+
+    **Object form** — pass a JSON5 dictionary that deep-merges onto the child's frontmatter:
+
+    ```md
+    ::file child.md set='{name: "Bob", age: 42}'
+    ```
+
+    **Property form** — set individual properties using dot-free identifiers:
+
+    ```md
+    ::file child.md set.name="Bob" set.age=42
+    ```
+
+    Both forms can coexist on the same directive; property-form values take precedence over the object form when keys overlap.
+
+    The merge uses a **three-layer precedence** model:
+
+    1. **Base** — the child's own frontmatter
+    2. **Middle** — the object-form `set=<dict>` payload (deep-merged onto the base)
+    3. **Top** — each `set.NAME=<value>` property (overrides both layers above)
+
+    Dict values deep-merge (union of keys, higher layer wins on leaf conflicts). Arrays and scalars (including `null`) hard-override. For example, `set.x=null` sets `x` to the literal null value — it does **not** delete the key.
+
+    The overlay is applied **before** any of the child's pre-op pipeline stages run, so child interpolation (`{{ name }}`), page blocks (`::block when="role == 'admin'"`), replace rules, and shell directives all see the overridden values. The overlay does **not** propagate to grandchildren — only the direct child sees it.
+
+    **Error handling:**
+
+    - `set=42` (non-object JSON5) raises `InvalidFrontmatterAssignment`. Use `--allow-invalid-frontmatter-assignment` to downgrade to a warning; sibling valid set clauses still apply.
+    - `set.name="Bob" set.name="Mary"` raises `InvalidReassignedFrontmatterProperty`. Use `--allow-reassigned-frontmatter-property` to downgrade to a warning; the rightmost assignment wins.
+
 And then finally the maybe most powerful option/key is `when` which provides _conditional_ transclusion.
 
 #### Conditional Transclusion

@@ -50,6 +50,8 @@ Three-phase pipeline for document preparation:
 - `::toc-linking ./doc.md` - Linked heading lists from another document's raw source headings
 - `prologue` / `epilogue` - Frontmatter-driven transclusion
 - `when="..."` conditions, ancestry-based cycle detection, depth limits
+- `set=` / `set.NAME=` - Override child frontmatter before child pipeline stages run (three-layer deep-merge: child FM < object-form `set=` < property-form `set.NAME=`). Overlay does not propagate to grandchildren.
+- `--allow-invalid-frontmatter-assignment` / `--allow-reassigned-frontmatter-property` - Permissive-mode CLI flags that downgrade set-override errors to warnings
 
 **Inline Post** (serial):
 1. **Cleanup** - Normalizes formatting (spacing, tables)
