@@ -52,6 +52,24 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3: []
+source_files_during_phase_4:
+  - biscuit-tui/lib/Cargo.toml
+  - biscuit-tui/lib/src/lib.rs
+  - biscuit-tui/lib/src/prelude.rs
+  - biscuit-tui/lib/src/components/mod.rs
+  - biscuit-tui/lib/src/components/choose.rs
+  - biscuit-tui/lib/src/components/choose_one.rs
+  - biscuit-tui/lib/src/components/choose_many.rs
+  - biscuit-tui/lib/src/helpers/mod.rs
+  - biscuit-tui/lib/src/helpers/choice_builders.rs
+  - biscuit-tui/cli/src/main.rs
+  - biscuit-tui/cli/src/output.rs
+  - biscuit-tui/cli/src/commands/mod.rs
+  - biscuit-tui/cli/src/commands/choose_one.rs
+  - biscuit-tui/cli/src/commands/choose_many.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 packages:
   - tui-chrome
   - tui-chrome-cli
