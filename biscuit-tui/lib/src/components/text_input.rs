@@ -29,20 +29,21 @@ use tui_input::{Input, InputRequest};
 use unicode_width::UnicodeWidthStr;
 
 use crate::core::{
-    ComponentTheme, EventOutcome, HandleEvent, Label, StandaloneState, ValidationState,
-    render_with_label,
+    ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, StandaloneState,
+    ValidationState, render_with_label,
 };
 
 /// Mutable state for a [`TextInput`] widget.
 ///
 /// Holds the edit buffer, optional label, optional max-length cap,
-/// theme, and any active validation error.
+/// theme, key bindings, and any active validation error.
 #[derive(Debug, Clone, Default)]
 pub struct TextInputState {
     inner: Input,
     label: Option<Label>,
     max_length: Option<usize>,
     theme: ComponentTheme,
+    bindings: KeyBindings,
     validation_error: Option<String>,
 }
 
@@ -80,6 +81,12 @@ impl TextInputState {
         self
     }
 
+    /// Replaces the key bindings.
+    pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
+        self.bindings = bindings;
+        self
+    }
+
     /// Returns the current buffer contents.
     pub fn value(&self) -> &str {
         self.inner.value()
@@ -103,6 +110,11 @@ impl TextInputState {
     /// Returns a reference to the attached label, if any.
     pub fn label(&self) -> Option<&Label> {
         self.label.as_ref()
+    }
+
+    /// Returns a reference to the key bindings.
+    pub fn key_bindings(&self) -> &KeyBindings {
+        &self.bindings
     }
 
     /// Sets an inline validation error. The message renders below the
@@ -206,9 +218,16 @@ fn grapheme_at(value: &str, cursor_chars: usize) -> Option<&str> {
 
 impl HandleEvent for TextInput {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
+        // Check bindings first.
+        if KeyBindings::matches(&state.bindings.cancel, &event) {
+            return EventOutcome::Cancelled;
+        }
+        if KeyBindings::matches(&state.bindings.submit, &event) {
+            return EventOutcome::Submitted;
+        }
+
+        // Navigation and editing keys handled by tui_input.
         match event.code {
-            KeyCode::Enter => EventOutcome::Submitted,
-            KeyCode::Esc => EventOutcome::Cancelled,
             KeyCode::Left => edit(state, InputRequest::GoToPrevChar),
             KeyCode::Right => edit(state, InputRequest::GoToNextChar),
             KeyCode::Home => edit(state, InputRequest::GoToStart),
@@ -216,7 +235,10 @@ impl HandleEvent for TextInput {
             KeyCode::Backspace => edit(state, InputRequest::DeletePrevChar),
             KeyCode::Delete => edit(state, InputRequest::DeleteNextChar),
             KeyCode::Char(c) => {
-                if event.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+                if event
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                {
                     return EventOutcome::Ignored;
                 }
                 if let Some(max) = state.max_length
@@ -411,5 +433,56 @@ mod tests {
         TextInput.render(area, &mut buf, &mut state);
         assert_eq!(buffer_row(&buf, 0), "hi");
         assert_eq!(buffer_row(&buf, 1), "required");
+    }
+
+    #[test]
+    fn custom_submit_binding_overrides_default() {
+        let bindings = KeyBindings {
+            submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
+            ..KeyBindings::default()
+        };
+        let mut state = TextInputState::new().with_key_bindings(bindings);
+
+        // Ctrl-S should submit.
+        let outcome = TextInput.handle_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(outcome, EventOutcome::Submitted);
+
+        // Enter should be ignored (no longer bound to submit).
+        let outcome = TextInput.handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Ignored);
+    }
+
+    #[test]
+    fn custom_cancel_binding_works() {
+        let bindings = KeyBindings {
+            cancel: vec![press(KeyCode::Char('q'))],
+            ..KeyBindings::default()
+        };
+        let mut state = TextInputState::new().with_key_bindings(bindings);
+
+        // q should cancel.
+        let outcome = TextInput.handle_event(&mut state, press(KeyCode::Char('q')));
+        assert_eq!(outcome, EventOutcome::Cancelled);
+
+        // Esc should be ignored (no longer bound to cancel).
+        let outcome = TextInput.handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Ignored);
+    }
+
+    #[test]
+    fn default_bindings_submit_with_enter() {
+        let mut state = TextInputState::new();
+        let outcome = TextInput.handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Submitted);
+    }
+
+    #[test]
+    fn default_bindings_cancel_with_esc() {
+        let mut state = TextInputState::new();
+        let outcome = TextInput.handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Cancelled);
     }
 }

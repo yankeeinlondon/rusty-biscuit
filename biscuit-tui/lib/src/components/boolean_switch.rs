@@ -17,7 +17,7 @@
 //! assert!(state.checked());
 //! ```
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -27,13 +27,14 @@ use ratatui::{
 };
 
 use crate::core::{
-    ComponentTheme, EventOutcome, HandleEvent, Label, StandaloneState, render_with_label,
+    ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, StandaloneState,
+    render_with_label,
 };
 
 /// Mutable state for a [`BooleanSwitch`] widget.
 ///
 /// Holds the current checked flag, an optional label, customisable
-/// on/off captions, and a theme reference.
+/// on/off captions, key bindings, and a theme reference.
 #[derive(Debug, Clone)]
 pub struct BooleanSwitchState {
     checked: bool,
@@ -41,6 +42,7 @@ pub struct BooleanSwitchState {
     on_label: String,
     off_label: String,
     theme: ComponentTheme,
+    bindings: KeyBindings,
 }
 
 impl Default for BooleanSwitchState {
@@ -51,6 +53,7 @@ impl Default for BooleanSwitchState {
             on_label: "ON".into(),
             off_label: "OFF".into(),
             theme: ComponentTheme::default(),
+            bindings: KeyBindings::default(),
         }
     }
 }
@@ -88,6 +91,12 @@ impl BooleanSwitchState {
         self
     }
 
+    /// Replaces the key bindings.
+    pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
+        self.bindings = bindings;
+        self
+    }
+
     /// Returns the current checked flag.
     pub fn checked(&self) -> bool {
         self.checked
@@ -121,6 +130,11 @@ impl BooleanSwitchState {
     /// Returns a reference to the component's theme.
     pub fn theme(&self) -> &ComponentTheme {
         &self.theme
+    }
+
+    /// Returns a reference to the key bindings.
+    pub fn key_bindings(&self) -> &KeyBindings {
+        &self.bindings
     }
 }
 
@@ -217,26 +231,27 @@ fn draw_body(
 
 impl HandleEvent for BooleanSwitch {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
-        if event.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-            return EventOutcome::Ignored;
+        // Check bindings first.
+        if KeyBindings::matches(&state.bindings.cancel, &event) {
+            return EventOutcome::Cancelled;
         }
-        match event.code {
-            KeyCode::Enter => EventOutcome::Submitted,
-            KeyCode::Esc => EventOutcome::Cancelled,
-            KeyCode::Char(' ') => {
-                state.toggle();
-                EventOutcome::Consumed
-            }
-            KeyCode::Left | KeyCode::Char('h') => {
-                state.set_checked(false);
-                EventOutcome::Consumed
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                state.set_checked(true);
-                EventOutcome::Consumed
-            }
-            _ => EventOutcome::Ignored,
+        if KeyBindings::matches(&state.bindings.submit, &event) {
+            return EventOutcome::Submitted;
         }
+        if KeyBindings::matches(&state.bindings.toggle, &event) {
+            state.toggle();
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.left, &event) {
+            state.set_checked(false);
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.right, &event) {
+            state.set_checked(true);
+            return EventOutcome::Consumed;
+        }
+
+        EventOutcome::Ignored
     }
 }
 
@@ -244,6 +259,7 @@ impl HandleEvent for BooleanSwitch {
 mod tests {
     use super::*;
     use crate::core::{Label, LabelPosition};
+    use crossterm::event::{KeyCode, KeyModifiers};
     use ratatui::buffer::Buffer;
 
     fn press(code: KeyCode) -> KeyEvent {
@@ -390,8 +406,8 @@ mod tests {
     fn render_with_label_above_draws_label_then_body() {
         let area = Rect::new(0, 0, 20, 2);
         let mut buf = Buffer::empty(area);
-        let mut state = BooleanSwitchState::new()
-            .with_label(Label::new("Enabled", LabelPosition::Above));
+        let mut state =
+            BooleanSwitchState::new().with_label(Label::new("Enabled", LabelPosition::Above));
         BooleanSwitch.render(area, &mut buf, &mut state);
         assert_eq!(buffer_row(&buf, 0), "Enabled");
         assert_eq!(buffer_row(&buf, 1), "[●OFF | ON ]");
@@ -407,5 +423,62 @@ mod tests {
         BooleanSwitch.render(area, &mut buf, &mut state);
         let row = buffer_row(&buf, 0);
         assert_eq!(row, "[ NO | ●YES]");
+    }
+
+    #[test]
+    fn custom_submit_binding_overrides_default() {
+        let bindings = KeyBindings {
+            submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
+            ..KeyBindings::default()
+        };
+        let mut state = BooleanSwitchState::new().with_key_bindings(bindings);
+
+        // Ctrl-S should submit.
+        let outcome = BooleanSwitch.handle_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(outcome, EventOutcome::Submitted);
+
+        // Enter should be ignored (no longer bound to submit).
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Ignored);
+    }
+
+    #[test]
+    fn custom_cancel_binding_works() {
+        let bindings = KeyBindings {
+            cancel: vec![press(KeyCode::Char('q'))],
+            ..KeyBindings::default()
+        };
+        let mut state = BooleanSwitchState::new().with_key_bindings(bindings);
+
+        // q should cancel.
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Char('q')));
+        assert_eq!(outcome, EventOutcome::Cancelled);
+
+        // Esc should be ignored.
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Ignored);
+    }
+
+    #[test]
+    fn custom_toggle_binding_works() {
+        let bindings = KeyBindings {
+            toggle: vec![press(KeyCode::Char('t'))],
+            ..KeyBindings::default()
+        };
+        let mut state = BooleanSwitchState::new().with_key_bindings(bindings);
+
+        // t should toggle.
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Char('t')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.checked());
+
+        // Space should be ignored (no longer bound to toggle).
+        state.set_checked(false);
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(outcome, EventOutcome::Ignored);
+        assert!(!state.checked());
     }
 }

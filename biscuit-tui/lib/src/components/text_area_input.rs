@@ -35,15 +35,15 @@ use ratatui::{
 use tui_textarea::TextArea;
 
 use crate::core::{
-    ComponentTheme, EventOutcome, HandleEvent, Label, StandaloneState, ValidationState,
-    render_with_label,
+    ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, StandaloneState,
+    ValidationState, render_with_label,
 };
 
 /// Mutable state for a [`TextAreaInput`] widget.
 ///
 /// Holds the multi-line edit buffer, optional label, preferred width
-/// and height, scrollbar preference, submit-key binding, theme, and
-/// any active validation error.
+/// and height, scrollbar preference, key bindings, theme, and any
+/// active validation error.
 #[derive(Debug, Clone)]
 pub struct TextAreaInputState {
     inner: TextArea<'static>,
@@ -52,7 +52,7 @@ pub struct TextAreaInputState {
     show_scrollbar: bool,
     preferred_width: u16,
     preferred_height: u16,
-    submit_key: SubmitKey,
+    bindings: KeyBindings,
     validation_error: Option<String>,
 }
 
@@ -65,7 +65,10 @@ impl Default for TextAreaInputState {
             show_scrollbar: false,
             preferred_width: 60,
             preferred_height: 10,
-            submit_key: SubmitKey::default(),
+            bindings: KeyBindings {
+                submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
+                ..KeyBindings::default()
+            },
             validation_error: None,
         }
     }
@@ -122,10 +125,19 @@ impl TextAreaInputState {
         self
     }
 
+    /// Replaces the key bindings.
+    pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
+        self.bindings = bindings;
+        self
+    }
+
     /// Overrides the submit key (the keystroke that completes editing
     /// and returns [`EventOutcome::Submitted`]). Default is `Ctrl-S`.
+    ///
+    /// This is a convenience wrapper over `with_key_bindings` for
+    /// backwards compatibility.
     pub fn with_submit_key(mut self, code: KeyCode, modifiers: KeyModifiers) -> Self {
-        self.submit_key = SubmitKey { code, modifiers };
+        self.bindings.submit = vec![KeyEvent::new(code, modifiers)];
         self
     }
 
@@ -169,6 +181,11 @@ impl TextAreaInputState {
     /// Returns a reference to the component's theme.
     pub fn theme(&self) -> &ComponentTheme {
         &self.theme
+    }
+
+    /// Returns a reference to the key bindings.
+    pub fn key_bindings(&self) -> &KeyBindings {
+        &self.bindings
     }
 
     /// Sets an inline validation error. The message renders below the
@@ -231,15 +248,10 @@ impl StatefulWidget for TextAreaInput {
             area
         };
 
-        let inner_area = render_with_label(
-            body_area,
-            buf,
-            label.as_ref(),
-            label_style,
-            |rect, b| {
+        let inner_area =
+            render_with_label(body_area, buf, label.as_ref(), label_style, |rect, b| {
                 draw_body(rect, b, &state.inner, show_scrollbar);
-            },
-        );
+            });
 
         if let Some(message) = error {
             let error_row = inner_area.y + inner_area.height;
@@ -281,40 +293,18 @@ fn draw_body(area: Rect, buf: &mut Buffer, textarea: &TextArea<'static>, show_sc
 
 impl HandleEvent for TextAreaInput {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
-        if state.submit_key.matches(&event) {
+        // Check bindings first.
+        if KeyBindings::matches(&state.bindings.cancel, &event) {
+            return EventOutcome::Cancelled;
+        }
+        if KeyBindings::matches(&state.bindings.submit, &event) {
             return EventOutcome::Submitted;
         }
-        match event.code {
-            KeyCode::Esc => EventOutcome::Cancelled,
-            _ => {
-                state.clear_validation_error();
-                state.inner.input(event);
-                EventOutcome::Consumed
-            }
-        }
-    }
-}
 
-/// Keystroke that completes editing and returns
-/// [`EventOutcome::Submitted`]. Default: `Ctrl-S`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SubmitKey {
-    code: KeyCode,
-    modifiers: KeyModifiers,
-}
-
-impl Default for SubmitKey {
-    fn default() -> Self {
-        Self {
-            code: KeyCode::Char('s'),
-            modifiers: KeyModifiers::CONTROL,
-        }
-    }
-}
-
-impl SubmitKey {
-    fn matches(&self, event: &KeyEvent) -> bool {
-        event.code == self.code && event.modifiers == self.modifiers
+        // Forward everything else to tui_textarea.
+        state.clear_validation_error();
+        state.inner.input(event);
+        EventOutcome::Consumed
     }
 }
 
@@ -517,7 +507,12 @@ mod tests {
         for y in area.top()..area.bottom() {
             let sym = buf[(area.right() - 1, y)].symbol();
             assert!(
-                sym.is_empty() || sym == " " || sym == "w" || sym == "o" || sym == "e" || sym == "n",
+                sym.is_empty()
+                    || sym == " "
+                    || sym == "w"
+                    || sym == "o"
+                    || sym == "e"
+                    || sym == "n",
                 "unexpected glyph {sym:?} on rightmost column at y={y}",
             );
         }
