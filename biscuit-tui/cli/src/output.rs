@@ -63,11 +63,7 @@ pub fn write_scalar<W: Write>(writer: &mut W, value: &str, mode: OutputMode) -> 
 /// ## Errors
 ///
 /// Returns any I/O error produced while writing to `writer`.
-pub fn write_list<W: Write>(
-    writer: &mut W,
-    values: &[String],
-    mode: OutputMode,
-) -> io::Result<()> {
+pub fn write_list<W: Write>(writer: &mut W, values: &[String], mode: OutputMode) -> io::Result<()> {
     match mode {
         OutputMode::Raw => {
             for value in values {
@@ -77,8 +73,7 @@ pub fn write_list<W: Write>(
             Ok(())
         }
         OutputMode::Json => {
-            let encoded =
-                serde_json::to_string(values).unwrap_or_else(|_| String::from("[]"));
+            let encoded = serde_json::to_string(values).unwrap_or_else(|_| String::from("[]"));
             writer.write_all(encoded.as_bytes())?;
             writer.write_all(b"\n")
         }

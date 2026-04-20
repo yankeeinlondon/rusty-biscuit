@@ -27,6 +27,10 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = OutputMode::Raw, global = true)]
     output: OutputMode,
 
+    /// Render inline in `N` rows below the cursor instead of fullscreen.
+    #[arg(long, global = true)]
+    height: Option<u16>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -60,11 +64,11 @@ fn main() -> ExitCode {
 
 fn dispatch(cli: Cli) -> std::io::Result<i32> {
     match cli.command {
-        Commands::TextInput(args) => run_text_input(args, cli.output),
-        Commands::TextAreaInput(args) => run_text_area_input(args, cli.output),
-        Commands::BooleanSwitch(args) => run_boolean_switch(args, cli.output),
-        Commands::ChooseOne(args) => run_choose_one(args, cli.output),
-        Commands::ChooseMany(args) => run_choose_many(args, cli.output),
-        Commands::InputTable(args) => run_input_table(args, cli.output),
+        Commands::TextInput(args) => run_text_input(args, cli.output, cli.height),
+        Commands::TextAreaInput(args) => run_text_area_input(args, cli.output, cli.height),
+        Commands::BooleanSwitch(args) => run_boolean_switch(args, cli.output, cli.height),
+        Commands::ChooseOne(args) => run_choose_one(args, cli.output, cli.height),
+        Commands::ChooseMany(args) => run_choose_many(args, cli.output, cli.height),
+        Commands::InputTable(args) => run_input_table(args, cli.output, cli.height),
     }
 }
