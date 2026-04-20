@@ -7,54 +7,54 @@ This document is the engineering companion to the [spec](./spec.md). Where the s
 ## 1. Crate Structure
 
 ```
-tui-chrome/                          # library crate (tui-chrome)
-├── Cargo.toml
-└── src/
-    ├── lib.rs
-    ├── prelude.rs
-    ├── core/
-    │   ├── mod.rs
-    │   ├── event.rs                 # EventOutcome, KeyEvent bridging
-    │   ├── validation.rs            # ValidationState shared trait
-    │   ├── label.rs                 # LabelPosition, Label rendering
-    │   ├── theme.rs                 # ComponentTheme (colors, indicators)
-    │   └── standalone.rs            # run_standalone()
-    ├── components/
-    │   ├── mod.rs
-    │   ├── text_input.rs            # TextInput widget + TextInputState
-    │   ├── text_area_input.rs       # TextAreaInput widget + TextAreaInputState
-    │   ├── boolean_switch.rs        # BooleanSwitch widget + BooleanSwitchState
-    │   ├── choose.rs                # ChooseOne / ChooseMany shared types
-    │   ├── choose_one.rs            # ChooseOne widget + ChooseOneState
-    │   ├── choose_many.rs           # ChooseMany widget + ChooseManyState
-    │   └── input_table/
-    │       ├── mod.rs
-    │       ├── table.rs             # InputTable widget + InputTableState
-    │       ├── column.rs            # InputTableColumn enum
-    │       └── cell.rs              # CellState enum (per-cell mutable state)
-    └── helpers/
-        ├── mod.rs
-        └── choice_builders.rs       # from_csv, from_markdown, from_dictionary
-
-tui-chrome-cli/                      # binary crate (question)
-├── Cargo.toml
-└── src/
-    ├── main.rs
-    ├── commands/
-    │   ├── mod.rs
-    │   ├── text_input.rs
-    │   ├── text_area_input.rs
-    │   ├── boolean_switch.rs
-    │   ├── choose_one.rs
-    │   ├── choose_many.rs
-    │   └── input_table.rs
-    └── output.rs                    # OutputMode, format_value()
+biscuit-tui/                         # package area
+├── lib/                             # library crate (package: tui-chrome)
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs
+│       ├── prelude.rs
+│       ├── core/
+│       │   ├── mod.rs
+│       │   ├── event.rs             # EventOutcome, KeyEvent bridging
+│       │   ├── validation.rs        # ValidationState shared trait
+│       │   ├── label.rs             # LabelPosition, Label rendering
+│       │   ├── theme.rs             # ComponentTheme (colors, indicators)
+│       │   └── standalone.rs        # run_standalone()
+│       ├── components/
+│       │   ├── mod.rs
+│       │   ├── text_input.rs        # TextInput widget + TextInputState
+│       │   ├── text_area_input.rs   # TextAreaInput widget + TextAreaInputState
+│       │   ├── boolean_switch.rs    # BooleanSwitch widget + BooleanSwitchState
+│       │   ├── choose.rs            # ChooseOne / ChooseMany shared types
+│       │   ├── choose_one.rs        # ChooseOne widget + ChooseOneState
+│       │   ├── choose_many.rs       # ChooseMany widget + ChooseManyState
+│       │   └── input_table/
+│       │       ├── mod.rs
+│       │       ├── table.rs         # InputTable widget + InputTableState
+│       │       ├── column.rs        # InputTableColumn enum
+│       │       └── cell.rs          # CellState enum (per-cell mutable state)
+│       └── helpers/
+│           ├── mod.rs
+│           └── choice_builders.rs   # from_csv, from_markdown, from_dictionary
+└── cli/                             # binary crate (package: tui-chrome-cli, bin: question)
+    ├── Cargo.toml
+    └── src/
+        ├── main.rs
+        ├── commands/
+        │   ├── mod.rs
+        │   ├── text_input.rs
+        │   ├── text_area_input.rs
+        │   ├── boolean_switch.rs
+        │   ├── choose_one.rs
+        │   ├── choose_many.rs
+        │   └── input_table.rs
+        └── output.rs                # OutputMode, format_value()
 ```
 
 ### Dependencies
 
 ```toml
-# tui-chrome/Cargo.toml
+# biscuit-tui/lib/Cargo.toml
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
@@ -65,7 +65,7 @@ tui-widget-list = "0.13"    # private, optional — rendering helper for ChooseM
 thiserror = "2"
 unicode-width = "0.2"       # label/column width measurement
 
-# tui-chrome-cli/Cargo.toml
+# biscuit-tui/cli/Cargo.toml
 [dependencies]
 tui-chrome = { path = "../lib" }
 clap = { version = "4", features = ["derive"] }
