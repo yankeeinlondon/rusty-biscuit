@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
@@ -1399,9 +1400,7 @@ fn emit_timing_header(
     stream_output: &StreamOutput,
 ) {
     let body = prompt_timing_mod::render_header_prose(kind, elapsed, prompt_timing);
-    let rendered = Status::from_prose(body)
-        .state(StatusState::Info)
-        .render(term);
+    let rendered = Prose::new(body).render(term);
     stream_output.emit_stderr_line(&rendered);
     tracing::info!(
         prompt_path = %prompt_path_display,
