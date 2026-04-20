@@ -13,16 +13,19 @@ pub enum ProviderKind {
     #[serde(rename = "discord-webhook")]
     DiscordWebhook,
     Slack,
+    #[serde(rename = "slack-webhook")]
+    SlackWebhook,
     Signal,
     WhatsApp,
     Telegram,
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Discord,
         Self::DiscordWebhook,
         Self::Slack,
+        Self::SlackWebhook,
         Self::Signal,
         Self::WhatsApp,
         Self::Telegram,
@@ -33,6 +36,7 @@ impl ProviderKind {
             Self::Discord => "discord",
             Self::DiscordWebhook => "discord-webhook",
             Self::Slack => "slack",
+            Self::SlackWebhook => "slack-webhook",
             Self::Signal => "signal",
             Self::WhatsApp => "whatsapp",
             Self::Telegram => "telegram",
@@ -54,6 +58,7 @@ impl fmt::Display for ProviderKind {
             Self::Discord => write!(f, "Discord"),
             Self::DiscordWebhook => write!(f, "Discord-Webhook"),
             Self::Slack => write!(f, "Slack"),
+            Self::SlackWebhook => write!(f, "Slack-Webhook"),
             Self::Signal => write!(f, "Signal"),
             Self::WhatsApp => write!(f, "WhatsApp"),
             Self::Telegram => write!(f, "Telegram"),
@@ -80,6 +85,10 @@ pub enum MessageRef {
         channel_id: String,
         thread_ts: String,
     },
+    #[serde(rename = "slack-webhook")]
+    SlackWebhook {
+        thread_ts: Option<String>,
+    },
     Signal {
         thread: SignalThreadKey,
         author: SignalAuthor,
@@ -102,6 +111,7 @@ impl MessageRef {
             Self::Discord { .. } => ProviderKind::Discord,
             Self::DiscordWebhook { .. } => ProviderKind::DiscordWebhook,
             Self::Slack { .. } => ProviderKind::Slack,
+            Self::SlackWebhook { .. } => ProviderKind::SlackWebhook,
             Self::Signal { .. } => ProviderKind::Signal,
             Self::WhatsApp { .. } => ProviderKind::WhatsApp,
             Self::Telegram { .. } => ProviderKind::Telegram,

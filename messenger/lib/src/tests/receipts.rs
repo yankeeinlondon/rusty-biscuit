@@ -28,6 +28,22 @@ fn message_ref_provider_kind_slack() {
     assert_eq!(msg_ref.provider_kind(), ProviderKind::Slack);
 }
 
+#[cfg(feature = "slack")]
+#[test]
+fn message_ref_provider_kind_slack_webhook() {
+    let msg_ref = MessageRef::SlackWebhook { thread_ts: None };
+    assert_eq!(msg_ref.provider_kind(), ProviderKind::SlackWebhook);
+}
+
+#[cfg(feature = "slack")]
+#[test]
+fn message_ref_provider_kind_slack_webhook_with_thread() {
+    let msg_ref = MessageRef::SlackWebhook {
+        thread_ts: Some("123.456".into()),
+    };
+    assert_eq!(msg_ref.provider_kind(), ProviderKind::SlackWebhook);
+}
+
 #[cfg(feature = "signal")]
 #[test]
 fn message_ref_provider_kind_signal() {
@@ -82,6 +98,43 @@ fn message_ref_slack_json_roundtrip() {
     let json = msg_ref.to_pretty_json().unwrap();
     let parsed = MessageRef::from_json_str(&json).unwrap();
     assert_eq!(msg_ref, parsed);
+}
+
+#[cfg(feature = "slack")]
+#[test]
+fn message_ref_slack_webhook_json_roundtrip() {
+    let msg_ref = MessageRef::SlackWebhook { thread_ts: None };
+    let json = msg_ref.to_pretty_json().unwrap();
+    let parsed = MessageRef::from_json_str(&json).unwrap();
+    assert_eq!(msg_ref, parsed);
+}
+
+#[cfg(feature = "slack")]
+#[test]
+fn message_ref_slack_webhook_with_thread_json_roundtrip() {
+    let msg_ref = MessageRef::SlackWebhook {
+        thread_ts: Some("1234567890.123456".into()),
+    };
+    let json = msg_ref.to_pretty_json().unwrap();
+    let parsed = MessageRef::from_json_str(&json).unwrap();
+    assert_eq!(msg_ref, parsed);
+}
+
+#[cfg(feature = "slack")]
+#[test]
+fn send_receipt_slack_webhook_json_roundtrip() {
+    let receipt = SendReceipt {
+        provider: ProviderKind::SlackWebhook,
+        message_ref: MessageRef::SlackWebhook { thread_ts: None },
+        raw_id: String::new(),
+        metadata: BTreeMap::from([(
+            "delivery_confirmed".into(),
+            "true".into(),
+        )]),
+    };
+    let json = receipt.to_pretty_json().unwrap();
+    let parsed = SendReceipt::from_json_str(&json).unwrap();
+    assert_eq!(receipt, parsed);
 }
 
 #[cfg(feature = "discord")]
