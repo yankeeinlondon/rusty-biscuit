@@ -1,4 +1,6 @@
 #[cfg(feature = "discord")]
+pub(crate) mod attachment_helpers;
+#[cfg(feature = "discord")]
 pub mod discord;
 #[cfg(feature = "discord")]
 pub mod discord_webhook;

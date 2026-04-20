@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs;
 
 use secrecy::{ExposeSecret, SecretString};
 use twilight_http::Client;
@@ -7,7 +6,6 @@ use twilight_model::http::attachment::Attachment as DiscordAttachment;
 use twilight_model::id::Id;
 use twilight_model::id::marker::{ChannelMarker, MessageMarker};
 
-use crate::attachment::AttachmentSource;
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
@@ -35,39 +33,10 @@ impl DiscordProvider {
         attachment: &crate::attachment::Attachment,
         id: u64,
     ) -> Result<DiscordAttachment, MessengerError> {
-        let (filename, file) = match &attachment.source {
-            AttachmentSource::Path(path) => {
-                let filename = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .ok_or_else(|| {
-                        MessengerError::InvalidMessage(format!(
-                            "Discord attachment path has no valid filename: {}",
-                            path.display()
-                        ))
-                    })?
-                    .to_owned();
-                let file = fs::read(path).map_err(|error| {
-                    MessengerError::InvalidMessage(format!(
-                        "Discord attachment path is not readable ({}): {error}",
-                        path.display()
-                    ))
-                })?;
-
-                (filename, file)
-            }
-            AttachmentSource::Bytes { filename, data, .. } => (filename.clone(), data.to_vec()),
-            AttachmentSource::Url(_) => {
-                return Err(MessengerError::InvalidMessage(
-                    "Discord attachments must come from a local path or bytes payload".into(),
-                ));
-            }
-            AttachmentSource::ProviderFileId(_) => {
-                return Err(MessengerError::InvalidMessage(
-                    "Discord does not support provider file ID attachments".into(),
-                ));
-            }
-        };
+        let (filename, file) = super::attachment_helpers::read_local_or_bytes_attachment(
+            &attachment.source,
+            "Discord",
+        )?;
 
         let mut discord_attachment = DiscordAttachment::from_bytes(filename, file, id);
 
@@ -103,6 +72,95 @@ impl DiscordProvider {
         s.parse::<u64>()
             .map(Id::new)
             .map_err(|_| MessengerError::InvalidMessage(format!("invalid Discord message ID: {s}")))
+    }
+}
+
+#[async_trait::async_trait]
+impl super::Provider for DiscordProvider {
+    fn kind(&self) -> ProviderKind {
+        ProviderKind::Discord
+    }
+
+    fn capabilities(&self) -> CapabilitySet {
+        const DISCORD_CAPABILITIES: CapabilitySet = CapabilitySet {
+            supports_markdown_rendering: true,
+            supports_reply: true,
+            supports_attachments: true,
+            supports_location: true,
+            supports_silent_delivery: false,
+            supports_link_preview_control: false,
+        };
+        DISCORD_CAPABILITIES
+    }
+
+    #[tracing::instrument(skip_all, fields(provider = "discord", channel = tracing::field::Empty))]
+    async fn send_prepared(
+        &self,
+        dispatch: &Dispatch,
+        message: &PreparedMessage,
+    ) -> Result<SendReceipt, MessengerError> {
+        let channel_id = match &dispatch.target {
+            Target::Discord(t) => Self::parse_channel_id(&t.channel_id)?,
+            _ => {
+                return Err(MessengerError::InvalidMessage(
+                    "expected Discord target".into(),
+                ));
+            }
+        };
+        tracing::Span::current().record("channel", tracing::field::display(channel_id));
+
+        // Render the message body (with location text fallback)
+        let content = message.render_body_with_location(ProviderKind::Discord);
+        let attachments = Self::build_attachments(message)?;
+        let attachment_kinds: Vec<_> = message
+            .attachments()
+            .iter()
+            .map(|attachment| &attachment.kind)
+            .collect();
+        tracing::debug!(
+            has_reply = dispatch.reply_to.is_some(),
+            content_len = content.len(),
+            attachment_count = attachments.len(),
+            "sending Discord message"
+        );
+        tracing::trace!(attachment_kinds = ?attachment_kinds, "built Discord attachments");
+
+        // Build the message request
+        let mut req = self.client.create_message(channel_id);
+
+        if !content.is_empty() {
+            req = req.content(&content);
+        }
+        if !attachments.is_empty() {
+            req = req.attachments(&attachments);
+        }
+
+        // Handle reply_to
+        if let Some(MessageRef::Discord { message_id, .. }) = &dispatch.reply_to {
+            let msg_id = Self::parse_message_id(message_id)?;
+            req = req.reply(msg_id);
+        }
+        // Execute the request
+        let response = req.await.map_err(|e| {
+            tracing::warn!(error = %e, "Discord request failed");
+            ProviderKind::Discord.transport_error(e)
+        })?;
+
+        let msg = response.model().await.map_err(|e| {
+            tracing::warn!(error = %e, "Discord response decode failed");
+            ProviderKind::Discord.transport_error(e)
+        })?;
+        tracing::debug!(raw_id = %msg.id, "Discord message sent");
+
+        Ok(SendReceipt {
+            provider: ProviderKind::Discord,
+            message_ref: MessageRef::Discord {
+                channel_id: channel_id.to_string(),
+                message_id: msg.id.to_string(),
+            },
+            raw_id: msg.id.to_string(),
+            metadata: BTreeMap::new(),
+        })
     }
 }
 
@@ -222,94 +280,5 @@ mod tests {
             crate::MessengerError::InvalidMessage(message)
             if message.contains("provider file ID")
         ));
-    }
-}
-
-#[async_trait::async_trait]
-impl super::Provider for DiscordProvider {
-    fn kind(&self) -> ProviderKind {
-        ProviderKind::Discord
-    }
-
-    fn capabilities(&self) -> CapabilitySet {
-        const DISCORD_CAPABILITIES: CapabilitySet = CapabilitySet {
-            supports_markdown_rendering: true,
-            supports_reply: true,
-            supports_attachments: true,
-            supports_location: true,
-            supports_silent_delivery: false,
-            supports_link_preview_control: false,
-        };
-        DISCORD_CAPABILITIES
-    }
-
-    #[tracing::instrument(skip_all, fields(provider = "discord", channel = tracing::field::Empty))]
-    async fn send_prepared(
-        &self,
-        dispatch: &Dispatch,
-        message: &PreparedMessage,
-    ) -> Result<SendReceipt, MessengerError> {
-        let channel_id = match &dispatch.target {
-            Target::Discord(t) => Self::parse_channel_id(&t.channel_id)?,
-            _ => {
-                return Err(MessengerError::InvalidMessage(
-                    "expected Discord target".into(),
-                ));
-            }
-        };
-        tracing::Span::current().record("channel", tracing::field::display(channel_id));
-
-        // Render the message body (with location text fallback)
-        let content = message.render_body_with_location(ProviderKind::Discord);
-        let attachments = Self::build_attachments(message)?;
-        let attachment_kinds: Vec<_> = message
-            .attachments()
-            .iter()
-            .map(|attachment| &attachment.kind)
-            .collect();
-        tracing::debug!(
-            has_reply = dispatch.reply_to.is_some(),
-            content_len = content.len(),
-            attachment_count = attachments.len(),
-            "sending Discord message"
-        );
-        tracing::trace!(attachment_kinds = ?attachment_kinds, "built Discord attachments");
-
-        // Build the message request
-        let mut req = self.client.create_message(channel_id);
-
-        if !content.is_empty() {
-            req = req.content(&content);
-        }
-        if !attachments.is_empty() {
-            req = req.attachments(&attachments);
-        }
-
-        // Handle reply_to
-        if let Some(MessageRef::Discord { message_id, .. }) = &dispatch.reply_to {
-            let msg_id = Self::parse_message_id(message_id)?;
-            req = req.reply(msg_id);
-        }
-        // Execute the request
-        let response = req.await.map_err(|e| {
-            tracing::warn!(error = %e, "Discord request failed");
-            ProviderKind::Discord.transport_error(e)
-        })?;
-
-        let msg = response.model().await.map_err(|e| {
-            tracing::warn!(error = %e, "Discord response decode failed");
-            ProviderKind::Discord.transport_error(e)
-        })?;
-        tracing::debug!(raw_id = %msg.id, "Discord message sent");
-
-        Ok(SendReceipt {
-            provider: ProviderKind::Discord,
-            message_ref: MessageRef::Discord {
-                channel_id: channel_id.to_string(),
-                message_id: msg.id.to_string(),
-            },
-            raw_id: msg.id.to_string(),
-            metadata: BTreeMap::new(),
-        })
     }
 }
