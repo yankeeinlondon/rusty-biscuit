@@ -87,12 +87,12 @@ let block = StatusBlock::new(StatusState::Error)
 
 Default behavior:
 
-- `border = "▌ "`
+- `border = "┃ "`
 - `left_margin = 0`
 - `right_margin = 5`
 - `word_wrap = WordWrap::WrapProse(Some(8), None)`
 
-Those defaults are chosen so the `▌` border aligns visually with a preceding `Status` icon/header
+Those defaults are chosen so the `┃` border aligns visually with a preceding `Status` icon/header
 line. You can override the border color with `.border_color(...)` and the glyph with
 `.border(...)` when a call site needs a different visual treatment.
 
@@ -106,7 +106,7 @@ Severity defaults:
 | `Success` | `Tailwind::Green500` |
 | `NotStarted` | `Tailwind::Gray500` |
 | `Active` | `Tailwind::Gray600` |
-| `ToolUse` | `Tailwind::Purple500` |
+| `ToolUse` | `Tailwind::Purple700` |
 | `Subagent` | `Tailwind::Violet500` |
 
 Use `StatusState::default_color()` when you want the canonical accent or border color for a

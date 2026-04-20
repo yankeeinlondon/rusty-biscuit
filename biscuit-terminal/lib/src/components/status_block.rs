@@ -39,7 +39,7 @@ impl StatusBlock {
             body: None,
             hint: None,
             border_color: None,
-            border: "▌ ".to_string(),
+            border: "┃ ".to_string(),
             layout: Layout {
                 left_margin: Margin::Chars(0),
                 right_margin: Margin::Chars(5),
@@ -180,7 +180,7 @@ mod tests {
         let term = no_color_terminal(80);
         let block = StatusBlock::new(StatusState::Error).body("Body text");
         let rendered = strip_ansi(&block.render(&term));
-        assert_eq!(rendered, "▌ Body text");
+        assert_eq!(rendered, "┃ Body text");
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
             .body("Check the config");
         let rendered = strip_ansi(&block.render(&term));
         assert!(rendered.contains("⚠ Warning"));
-        assert!(rendered.contains("\n▌ Check the config"));
+        assert!(rendered.contains("\n┃ Check the config"));
         assert_eq!(rendered.lines().count(), 2);
     }
 
@@ -202,7 +202,7 @@ mod tests {
             .body("Primary message")
             .hint("Try again with `--json`.");
         let rendered = strip_ansi(&block.render(&term));
-        assert!(rendered.contains("▌ Primary message"));
+        assert!(rendered.contains("┃ Primary message"));
         assert!(rendered.ends_with("Try again with `--json`."));
         assert_eq!(rendered.lines().count(), 2);
     }
@@ -218,7 +218,7 @@ mod tests {
         let lines: Vec<_> = rendered.lines().collect();
         assert_eq!(lines.len(), 3);
         assert!(lines[0].contains("Shell expansion failed"));
-        assert_eq!(lines[1], "▌ Missing closing brace");
+        assert_eq!(lines[1], "┃ Missing closing brace");
         assert_eq!(lines[2], "Check the template syntax and retry.");
     }
 
@@ -294,7 +294,7 @@ mod tests {
         let term = no_color_terminal(80);
         let block = StatusBlock::new(StatusState::Error).body("plain text");
         let rendered = strip_ansi(&block.render(&term));
-        assert!(rendered.contains("▌ plain text"));
+        assert!(rendered.contains("┃ plain text"));
     }
 
     #[test]
@@ -315,7 +315,7 @@ mod tests {
         compose.add_prose(Prose::new("<b>second</b>"));
         let block = StatusBlock::new(StatusState::Success).body(compose);
         let rendered = strip_ansi(&block.render(&term));
-        assert!(rendered.contains("▌ first second"));
+        assert!(rendered.contains("┃ first second"));
     }
 
     #[test]
@@ -328,7 +328,7 @@ mod tests {
         let rendered = strip_ansi(&block.render(&term));
         let lines: Vec<_> = rendered.lines().collect();
         assert!(lines.len() > 1, "expected wrapped output: {rendered:?}");
-        assert!(lines.iter().all(|line| line.starts_with("    ▌ ")));
+        assert!(lines.iter().all(|line| line.starts_with("    ┃ ")));
     }
 
     #[test]
@@ -380,6 +380,6 @@ mod tests {
         let rendered = strip_ansi(&block.render(&term));
         assert!(rendered.contains("ℹ Header"));
         assert!(rendered.contains("Hint only"));
-        assert!(!rendered.contains("▌ "));
+        assert!(!rendered.contains("┃"));
     }
 }

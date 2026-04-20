@@ -109,7 +109,7 @@ let block = StatusBlock::new(StatusState::Error)
 ```
 
 Use `StatusBlock` when you need the common Claudine-style `Status` header plus a colored
-`BlockQuote` body and optional hint as one renderable. It defaults to a `▌ ` border,
+`BlockQuote` body and optional hint as one renderable. It defaults to a `┃ ` border,
 `left_margin = 0`, `right_margin = 5`, and `WordWrap::WrapProse(Some(8), None)` so the
 body border lines up with the preceding `Status` icon/header line.
 

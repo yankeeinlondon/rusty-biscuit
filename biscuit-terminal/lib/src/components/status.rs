@@ -83,7 +83,7 @@ impl StatusState {
             Self::Failure => Color::Tailwind(Tailwind::Red500),
             Self::Warning => Color::Tailwind(Tailwind::Orange500),
             Self::Info => Color::Tailwind(Tailwind::Blue500),
-            Self::ToolUse => Color::Tailwind(Tailwind::Purple500),
+            Self::ToolUse => Color::Tailwind(Tailwind::Purple700),
             Self::Subagent => Color::Tailwind(Tailwind::Violet500),
         }
     }
@@ -186,7 +186,7 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             StatusIconDef {
                 nerd: NERD_CIRCULAR_TOOL_USE,
                 fallback: FB_TOOL_USE,
-                color: Tailwind::Purple500,
+                color: Tailwind::Purple700,
                 color_alt: None,
             },
         );
@@ -270,7 +270,7 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             StatusIconDef {
                 nerd: NERD_ROUNDED_TOOL_USE,
                 fallback: FB_TOOL_USE,
-                color: Tailwind::Purple500,
+                color: Tailwind::Purple700,
                 color_alt: None,
             },
         );
@@ -354,7 +354,7 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             StatusIconDef {
                 nerd: NERD_TIMELINE_TOOL_USE,
                 fallback: FB_TOOL_USE,
-                color: Tailwind::Purple500,
+                color: Tailwind::Purple700,
                 color_alt: None,
             },
         );
@@ -410,7 +410,7 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
 /// | Failure    | ⤫        | red-500    |
 /// | Warning    | ⚠        | orange-500 |
 /// | Info       | ℹ        | blue-500   |
-/// | ToolUse    | 🔧        | purple-500 |
+/// | ToolUse    | 🔧        | purple-700 |
 /// | Subagent   | 🤖        | violet-500 |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
