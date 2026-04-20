@@ -10,8 +10,14 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - darkmatter/cli/src/main.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - biscuit-terminal
+  - darkmatter-cli
 ---
 
 # Better Errors — Execution Plan
@@ -47,10 +53,10 @@ This plan outlines the steps to implement the `BlockError` trait and adopt it ac
     - Modify `darkmatter/cli/src/main.rs`.
     - Detect if the caught error implements `BlockError` using `as_block_error`.
     - Render via `report_block_error` if TTY, or `report_block_error_optimistic` if piped.
-    - [ ] *Parallelizable:* No (depends on Phase 1).
+    - [x] *Parallelizable:* No (depends on Phase 1).
 2.  **Step 2: Validation**
     - Run `md` with a triggered error (e.g., missing file) and verify it still prints the old `Display` message (since no `BlockError` impls exist yet in `darkmatter`).
-    - [ ] *Validation Checkpoint:* `md` CLI continues to function correctly with existing errors.
+    - [x] *Validation Checkpoint:* `md` CLI continues to function correctly with existing errors.
 
 ## Phase 3: High-Value Variants (darkmatter/lib)
 
