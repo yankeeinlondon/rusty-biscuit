@@ -197,9 +197,13 @@ fn two_char_curated_match_finds_multiple_files_by_substring() {
 
     let got = run_complete_trailing(root, &["compose", "@pr"]);
 
-    for expected in ["@prompts/plain.md", "@prompts/with-prompt.md", "@prompts/seq.md"]
-        .iter()
-        .copied()
+    for expected in [
+        "@prompts/plain.md",
+        "@prompts/with-prompt.md",
+        "@prompts/seq.md",
+    ]
+    .iter()
+    .copied()
     {
         // Curated-scope markdown whose filename contains `pr` (stripped of
         // `.md`) must appear. `plain.md`/`seq.md` match via the parent
@@ -489,7 +493,14 @@ fn unsupported_prefix_returns_no_candidates() {
     let root = workspace.path();
     seed_curated_fixtures(root);
 
-    for prefix in ["!pkg", "vault:x", "./local", "/abs/path", "%recursive", "{{HOME}}"] {
+    for prefix in [
+        "!pkg",
+        "vault:x",
+        "./local",
+        "/abs/path",
+        "%recursive",
+        "{{HOME}}",
+    ] {
         let got = run_complete_trailing(root, &["compose", prefix]);
         assert!(
             got.is_empty(),
