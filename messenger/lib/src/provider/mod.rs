@@ -8,6 +8,8 @@ pub mod discord_webhook;
 pub mod signal;
 #[cfg(feature = "slack")]
 pub mod slack;
+#[cfg(feature = "slack")]
+pub mod slack_webhook;
 #[cfg(feature = "telegram")]
 pub mod telegram;
 #[cfg(feature = "whatsapp")]
