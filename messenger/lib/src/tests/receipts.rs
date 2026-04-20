@@ -127,10 +127,7 @@ fn send_receipt_slack_webhook_json_roundtrip() {
         provider: ProviderKind::SlackWebhook,
         message_ref: MessageRef::SlackWebhook { thread_ts: None },
         raw_id: String::new(),
-        metadata: BTreeMap::from([(
-            "delivery_confirmed".into(),
-            "true".into(),
-        )]),
+        metadata: BTreeMap::from([("delivery_confirmed".into(), "true".into())]),
     };
     let json = receipt.to_pretty_json().unwrap();
     let parsed = SendReceipt::from_json_str(&json).unwrap();

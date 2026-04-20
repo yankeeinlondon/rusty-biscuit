@@ -523,7 +523,12 @@ mod tests {
 
     #[test]
     fn map_webhook_error_authentication_codes() {
-        for code in ["invalid_token", "no_service", "no_team", "action_prohibited"] {
+        for code in [
+            "invalid_token",
+            "no_service",
+            "no_team",
+            "action_prohibited",
+        ] {
             let err = map_webhook_error(code);
             assert!(
                 matches!(err, MessengerError::Authentication { .. }),
@@ -534,7 +539,11 @@ mod tests {
 
     #[test]
     fn map_webhook_error_invalid_message_codes() {
-        for code in ["invalid_payload", "channel_is_archived", "channel_not_found"] {
+        for code in [
+            "invalid_payload",
+            "channel_is_archived",
+            "channel_not_found",
+        ] {
             let err = map_webhook_error(code);
             assert!(
                 matches!(err, MessengerError::InvalidMessage(_)),
