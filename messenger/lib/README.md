@@ -19,12 +19,13 @@ The built-in providers follow the provider API models currently implemented in t
 
 - Discord (bot): bot token + channel ID
 - Discord (webhook): full webhook URL (binds channel + authentication)
-- Slack: bot token + channel ID
+- Slack (bot): bot token + channel ID
+- Slack (webhook): full webhook URL (binds channel + authentication)
 - Signal: JSON-RPC URL + sending account + recipient/group ID
 - WhatsApp: Cloud API access token + phone number ID + recipient
 - Telegram: bot token + chat ID
 
-Slack is not modeled as an incoming-webhook transport in the current library API. Discord ships both a bot-token adapter and a webhook-URL adapter; the webhook adapter is notification-only and does not support replies.
+Discord and Slack each ship both a bot-token adapter and a webhook-URL adapter. The Discord webhook adapter is notification-only and does not support replies. The Slack webhook adapter supports mrkdwn and reply threading, but does not support attachments, and successful sends produce receipts with an empty `raw_id` and no `thread_ts` since Slack incoming webhooks do not return a message identifier.
 
 ## Prelude
 
@@ -89,6 +90,7 @@ If you want visibility before sending, use `plan_send` and inspect `SendPlan::wa
 | Discord         | Markdown rendering  | Yes     | Yes         | Appends text fallback   | No     | No            |
 | Discord-Webhook | Markdown rendering  | No      | Yes         | Appends text fallback   | No     | No            |
 | Slack           | mrkdwn rendering    | Yes     | No          | Appends text fallback   | No     | Yes           |
+| Slack-Webhook   | mrkdwn rendering    | Yes     | No          | Appends text fallback   | No     | Yes           |
 | Signal          | Plain-text fallback | Yes     | No          | Appends text fallback   | No     | No            |
 | WhatsApp        | Plain-text fallback | Yes     | No          | Native location payload | No     | No            |
 | Telegram        | HTML rendering      | Yes     | No          | Native location payload | Yes    | Yes           |

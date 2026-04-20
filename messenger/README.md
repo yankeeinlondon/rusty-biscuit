@@ -14,23 +14,26 @@ Unified outbound messaging for Rust applications and shell workflows.
 | Discord | `discord` | Yes | Yes | Yes | Yes | Text fallback | No | No |
 | Discord-Webhook | `discord` | Yes | Yes | No | Yes | Text fallback | No | No |
 | Slack | `slack` | Yes | Yes | Yes | No | Text fallback | No | Yes |
+| Slack-Webhook | `slack` | Yes | Yes | Yes | No | Text fallback | No | Yes |
 | Signal | `signal` | No | Plain text fallback | Yes | No | Text fallback | No | No |
 | WhatsApp | `whatsapp` | No | Plain text fallback | Yes | No | Native | No | No |
 | Telegram | `telegram` | No | Yes | Yes | No | Native | Yes | Yes |
 
-The CLI enables every provider listed above. The library enables `discord` (both bot and webhook adapters) and `slack` by default, with the other providers behind opt-in Cargo features.
+The CLI enables every provider listed above. The library enables `discord` (both bot and webhook adapters) and `slack` (both bot and webhook adapters) by default, with the other providers behind opt-in Cargo features.
 
 For outbound sends, `messenger` uses provider API credentials plus an explicit destination identifier. In practice that means:
 
 - Discord (bot): bot token + channel ID
 - Discord (webhook): webhook URL (binds channel + authentication)
-- Slack: bot token + channel ID
+- Slack (bot): bot token + channel ID
+- Slack (webhook): webhook URL (binds channel + authentication)
 - Signal: JSON-RPC account + recipient/group ID
 - WhatsApp: Cloud API credentials + recipient phone number
 - Telegram: bot token + chat ID
 
-Slack is modeled only as a bot-token adapter — `messenger` does not currently send via Slack incoming webhooks. The Discord-Webhook adapter is notification-only: `plan_send()` and `send()` reject `reply_to` with `MessengerError::UnsupportedFeature` before any network call.
-Discord bot sends and Discord webhook sends share the same Markdown renderer; the practical difference is transport capability, not formatting syntax.
+Both Slack adapters share the Slack mrkdwn renderer and link-preview controls. Receipts from the webhook adapter have an empty `raw_id` and no `thread_ts`, because Slack incoming webhooks do not return a message identifier; successful delivery is confirmed via `metadata["delivery_confirmed"] = "true"`.
+
+The Discord-Webhook adapter is notification-only: `plan_send()` and `send()` reject `reply_to` with `MessengerError::UnsupportedFeature` before any network call. Discord bot sends and Discord webhook sends share the same Markdown renderer; the practical difference is transport capability, not formatting syntax.
 
 ## How It Works
 
