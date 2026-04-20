@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
-use std::fs;
 
 use reqwest::multipart::{Form, Part};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use crate::attachment::{Attachment, AttachmentSource};
+use crate::attachment::Attachment;
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
@@ -31,21 +30,17 @@ pub struct DiscordWebhookConfig {
 pub struct DiscordWebhookProvider {
     client: reqwest::Client,
     webhook_id: String,
-    /// The base URL up to and including the webhook token, without any query
-    /// string. Used as the POST target — the token itself is embedded in
-    /// the path, so no separate credential field is needed.
-    base_url: String,
+    /// The webhook endpoint prefix up to `/webhooks/{id}`. The token is stored
+    /// separately so routine field logging cannot accidentally expose it.
+    webhook_url_prefix: String,
+    webhook_token: SecretString,
 }
 
 /// Fields extracted from a Discord webhook URL.
 struct ParsedWebhook {
     webhook_id: String,
-    /// Captured for diagnostics and future callers that may need it in
-    /// isolation; the live provider currently embeds the token inside
-    /// `base_url` for `reqwest` POSTs.
-    #[allow(dead_code)]
-    token: String,
-    base_url: String,
+    webhook_token: SecretString,
+    webhook_url_prefix: String,
 }
 
 impl DiscordWebhookProvider {
@@ -60,57 +55,53 @@ impl DiscordWebhookProvider {
         Ok(Self {
             client: reqwest::Client::new(),
             webhook_id: parsed.webhook_id,
-            base_url: parsed.base_url,
+            webhook_url_prefix: parsed.webhook_url_prefix,
+            webhook_token: parsed.webhook_token,
         })
     }
 
-    /// Construct a provider from a webhook URL, panicking on malformed input.
-    ///
-    /// Mirrors `DiscordProvider::new` for ergonomic parity. Use `try_new` when
-    /// you need fallible construction (for example, a CLI loading config at
-    /// runtime).
-    ///
-    /// ## Panics
-    ///
-    /// Panics if the URL does not contain `/webhooks/{id}/{token}` segments.
-    pub fn new(config: DiscordWebhookConfig) -> Self {
-        Self::try_new(config).expect("DiscordWebhookProvider::new given a malformed webhook URL")
+    fn parse_thread_id(thread_id: &str) -> Result<u64, MessengerError> {
+        thread_id.parse::<u64>().map_err(|_| {
+            MessengerError::InvalidMessage(format!(
+                "invalid Discord webhook thread ID: {thread_id}"
+            ))
+        })
+    }
+
+    fn build_request_url(&self, thread_id: Option<&str>) -> Result<reqwest::Url, MessengerError> {
+        let mut url = reqwest::Url::parse(&self.webhook_url_prefix).map_err(|error| {
+            MessengerError::InvalidMessage(format!(
+                "Discord webhook URL became invalid after parsing: {error}"
+            ))
+        })?;
+
+        {
+            let mut path_segments = url.path_segments_mut().map_err(|_| {
+                MessengerError::InvalidMessage(
+                    "Discord webhook URL cannot be used as a base URL".into(),
+                )
+            })?;
+            path_segments.pop_if_empty();
+            path_segments.push(self.webhook_token.expose_secret());
+        }
+
+        {
+            let mut query_pairs = url.query_pairs_mut();
+            query_pairs.append_pair("wait", "true");
+            if let Some(thread_id) = thread_id {
+                let thread_id = Self::parse_thread_id(thread_id)?.to_string();
+                query_pairs.append_pair("thread_id", &thread_id);
+            }
+        }
+
+        Ok(url)
     }
 
     fn build_part(attachment: &Attachment) -> Result<(String, Part), MessengerError> {
-        let (filename, bytes) = match &attachment.source {
-            AttachmentSource::Path(path) => {
-                let filename = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .ok_or_else(|| {
-                        MessengerError::InvalidMessage(format!(
-                            "Discord webhook attachment path has no valid filename: {}",
-                            path.display()
-                        ))
-                    })?
-                    .to_owned();
-                let bytes = fs::read(path).map_err(|error| {
-                    MessengerError::InvalidMessage(format!(
-                        "Discord webhook attachment path is not readable ({}): {error}",
-                        path.display()
-                    ))
-                })?;
-                (filename, bytes)
-            }
-            AttachmentSource::Bytes { filename, data, .. } => (filename.clone(), data.to_vec()),
-            AttachmentSource::Url(_) => {
-                return Err(MessengerError::InvalidMessage(
-                    "Discord webhook attachments must come from a local path or bytes payload"
-                        .into(),
-                ));
-            }
-            AttachmentSource::ProviderFileId(_) => {
-                return Err(MessengerError::InvalidMessage(
-                    "Discord webhook does not support provider file ID attachments".into(),
-                ));
-            }
-        };
+        let (filename, bytes) = super::attachment_helpers::read_local_or_bytes_attachment(
+            &attachment.source,
+            "Discord webhook",
+        )?;
 
         let part = Part::bytes(bytes).file_name(filename.clone());
         Ok((filename, part))
@@ -125,16 +116,20 @@ fn parse_webhook_url(url: &str) -> Result<ParsedWebhook, MessengerError> {
         ));
     }
 
-    // Strip any query string / fragment before dissecting the path.
-    let without_query = trimmed.split(['?', '#']).next().unwrap_or(trimmed);
-    let base = without_query.trim_end_matches('/');
+    let mut parsed_url = reqwest::Url::parse(trimmed).map_err(|error| {
+        MessengerError::InvalidMessage(format!("Discord webhook URL is invalid: {error}"))
+    })?;
+    parsed_url.set_query(None);
+    parsed_url.set_fragment(None);
 
-    let idx = base.find("/webhooks/").ok_or_else(|| {
+    let normalized_path = parsed_url.path().trim_end_matches('/').to_owned();
+
+    let idx = normalized_path.find("/webhooks/").ok_or_else(|| {
         MessengerError::InvalidMessage(
             "Discord webhook URL must contain a /webhooks/{id}/{token} segment".into(),
         )
     })?;
-    let tail = &base[idx + "/webhooks/".len()..];
+    let tail = &normalized_path[idx + "/webhooks/".len()..];
     let mut segments = tail.splitn(3, '/');
     let webhook_id = segments.next().unwrap_or("");
     let token = segments.next().unwrap_or("");
@@ -154,10 +149,21 @@ fn parse_webhook_url(url: &str) -> Result<ParsedWebhook, MessengerError> {
         )));
     }
 
+    let mut webhook_url_prefix = parsed_url;
+    {
+        let mut path_segments = webhook_url_prefix.path_segments_mut().map_err(|_| {
+            MessengerError::InvalidMessage(
+                "Discord webhook URL cannot be used as a base URL".into(),
+            )
+        })?;
+        path_segments.pop_if_empty();
+        path_segments.pop();
+    }
+
     Ok(ParsedWebhook {
         webhook_id: webhook_id.to_owned(),
-        token: token.to_owned(),
-        base_url: base.to_owned(),
+        webhook_token: SecretString::from(token.to_owned()),
+        webhook_url_prefix: webhook_url_prefix.as_str().trim_end_matches('/').to_owned(),
     })
 }
 
@@ -167,16 +173,16 @@ struct WebhookJsonBody<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    attachments: Option<Vec<AttachmentMeta<'a>>>,
+    attachments: Option<Vec<AttachmentMeta>>,
 }
 
 /// Attachment metadata included in the JSON or `payload_json` field.
 #[derive(Serialize)]
-struct AttachmentMeta<'a> {
+struct AttachmentMeta {
     id: u64,
-    filename: &'a str,
+    filename: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<&'a str>,
+    description: Option<String>,
 }
 
 /// Subset of Discord's webhook-execute response we care about.
@@ -243,39 +249,31 @@ impl super::Provider for DiscordWebhookProvider {
             "sending Discord webhook message"
         );
 
-        // Build the request URL with `wait=true` so we always receive the
-        // created message payload (id/channel_id/webhook_id).
-        let mut url = format!("{}?wait=true", self.base_url);
-        if let Some(thread) = thread_id.as_deref() {
-            url.push_str("&thread_id=");
-            url.push_str(thread);
-        }
+        // `wait=true` ensures Discord returns the created message payload
+        // instead of an empty 204.
+        let url = self.build_request_url(thread_id.as_deref())?;
 
         let response = if attachments.is_empty() {
             let body = WebhookJsonBody {
                 content: content_opt,
                 attachments: None,
             };
-            self.client.post(&url).json(&body).send().await
+            self.client.post(url).json(&body).send().await
         } else {
             let mut form = Form::new();
-            let mut metas: Vec<AttachmentMeta<'_>> = Vec::with_capacity(attachments.len());
-            let mut owned: Vec<(String, Option<String>)> = Vec::with_capacity(attachments.len());
+            let mut metas: Vec<AttachmentMeta> = Vec::with_capacity(attachments.len());
             for (index, attachment) in attachments.iter().enumerate() {
                 let (filename, part) = Self::build_part(attachment)?;
                 let description = attachment
                     .alt_text
                     .clone()
                     .or_else(|| attachment.caption.clone());
-                owned.push((filename, description));
-                form = form.part(format!("files[{index}]"), part);
-            }
-            for (index, (filename, description)) in owned.iter().enumerate() {
                 metas.push(AttachmentMeta {
                     id: index as u64,
-                    filename: filename.as_str(),
-                    description: description.as_deref(),
+                    filename,
+                    description,
                 });
+                form = form.part(format!("files[{index}]"), part);
             }
             let payload = WebhookJsonBody {
                 content: content_opt,
@@ -285,7 +283,7 @@ impl super::Provider for DiscordWebhookProvider {
                 .map_err(|e| ProviderKind::DiscordWebhook.transport_error(e))?;
             form = form.text("payload_json", payload_json);
 
-            self.client.post(&url).multipart(form).send().await
+            self.client.post(url).multipart(form).send().await
         };
 
         let response = response.map_err(|e| {
@@ -356,10 +354,10 @@ mod tests {
         let parsed =
             parse_webhook_url("https://discord.com/api/v10/webhooks/1234567890/abc-token").unwrap();
         assert_eq!(parsed.webhook_id, "1234567890");
-        assert_eq!(parsed.token, "abc-token");
+        assert_eq!(parsed.webhook_token.expose_secret(), "abc-token");
         assert_eq!(
-            parsed.base_url,
-            "https://discord.com/api/v10/webhooks/1234567890/abc-token"
+            parsed.webhook_url_prefix,
+            "https://discord.com/api/v10/webhooks/1234567890"
         );
     }
 
@@ -367,17 +365,17 @@ mod tests {
     fn parses_webhook_url_with_trailing_slash() {
         let parsed = parse_webhook_url("https://discord.com/api/v10/webhooks/1/tok/").unwrap();
         assert_eq!(parsed.webhook_id, "1");
-        assert_eq!(parsed.token, "tok");
+        assert_eq!(parsed.webhook_token.expose_secret(), "tok");
     }
 
     #[test]
     fn parses_webhook_url_with_query_string() {
         let parsed =
             parse_webhook_url("https://discord.com/api/v10/webhooks/1/tok?foo=bar").unwrap();
-        assert_eq!(parsed.token, "tok");
+        assert_eq!(parsed.webhook_token.expose_secret(), "tok");
         assert_eq!(
-            parsed.base_url,
-            "https://discord.com/api/v10/webhooks/1/tok"
+            parsed.webhook_url_prefix,
+            "https://discord.com/api/v10/webhooks/1"
         );
     }
 
@@ -445,14 +443,6 @@ mod tests {
         assert!(matches!(err, MessengerError::InvalidMessage(_)));
     }
 
-    #[test]
-    #[should_panic(expected = "malformed webhook URL")]
-    fn new_panics_on_malformed_url() {
-        let _ = DiscordWebhookProvider::new(DiscordWebhookConfig {
-            webhook_url: SecretString::from("http://example.com/".to_string()),
-        });
-    }
-
     #[tokio::test]
     async fn capabilities_disable_replies() {
         let provider = DiscordWebhookProvider::try_new(DiscordWebhookConfig {
@@ -483,5 +473,52 @@ mod tests {
             super::super::Provider::kind(&provider),
             ProviderKind::DiscordWebhook
         );
+    }
+
+    #[test]
+    fn rejects_invalid_thread_id() {
+        let err = DiscordWebhookProvider::parse_thread_id("abc123").unwrap_err();
+        assert!(matches!(
+            err,
+            MessengerError::InvalidMessage(message)
+            if message.contains("invalid Discord webhook thread ID")
+        ));
+    }
+
+    #[test]
+    fn build_request_url_adds_wait_and_thread_query_parameters() {
+        let provider = DiscordWebhookProvider::try_new(DiscordWebhookConfig {
+            webhook_url: SecretString::from(
+                "https://discord.com/api/v10/webhooks/123/token".to_string(),
+            ),
+        })
+        .unwrap();
+
+        let url = provider.build_request_url(Some("456")).unwrap();
+
+        assert_eq!(
+            url.as_str(),
+            "https://discord.com/api/v10/webhooks/123/token?wait=true&thread_id=456"
+        );
+    }
+
+    #[test]
+    fn build_request_url_rejects_invalid_thread_id_before_request() {
+        let provider = DiscordWebhookProvider::try_new(DiscordWebhookConfig {
+            webhook_url: SecretString::from(
+                "https://discord.com/api/v10/webhooks/123/token".to_string(),
+            ),
+        })
+        .unwrap();
+
+        let err = provider
+            .build_request_url(Some("123&wait=false"))
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            MessengerError::InvalidMessage(message)
+            if message.contains("invalid Discord webhook thread ID")
+        ));
     }
 }

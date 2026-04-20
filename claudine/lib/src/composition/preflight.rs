@@ -239,6 +239,8 @@ mod tests {
             source_path: PathBuf::from("/tmp/test.md"),
             timeout: None,
             step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: Vec::new(),
             post_checks: Vec::new(),
             handlers: HandlerTable::default(),
@@ -589,6 +591,8 @@ mod tests {
             source_path: source.to_path_buf(),
             timeout: None,
             step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: vec![ValidationRule {
                 id: ValidationRuleId(0),
                 event: ValidationEvent::ShellCommand,

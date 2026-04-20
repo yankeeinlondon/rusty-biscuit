@@ -12,8 +12,11 @@ pub mod prose;
 pub mod renderable;
 pub mod section;
 pub mod status;
+pub mod status_block;
 pub mod table;
 pub mod terminal_image;
 pub mod text_block;
 pub mod todo;
 pub mod two_column;
+
+pub use status_block::StatusBlock;

@@ -35,6 +35,32 @@ fn mismatched_reply_to_target() {
     assert!(matches!(err, MessengerError::InvalidMessage(_)));
 }
 
+#[cfg(feature = "slack")]
+#[test]
+fn mismatched_reply_to_target_slack_webhook_with_slack_ref() {
+    let dispatch = Dispatch::to(Target::slack_webhook()).reply_to(MessageRef::Slack {
+        channel_id: "C123".into(),
+        thread_ts: "123.456".into(),
+    });
+    let msg = Message::text("hi");
+    let caps = CapabilitySet::all();
+
+    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::SlackWebhook).unwrap_err();
+    assert!(matches!(err, MessengerError::InvalidMessage(_)));
+}
+
+#[cfg(feature = "slack")]
+#[test]
+fn matched_reply_to_target_slack_webhook_ok() {
+    let dispatch = Dispatch::to(Target::slack_webhook()).reply_to(MessageRef::SlackWebhook {
+        thread_ts: Some("123.456".into()),
+    });
+    let msg = Message::text("hi");
+    let caps = CapabilitySet::all();
+
+    assert!(validate_dispatch(&dispatch, &msg, &caps, ProviderKind::SlackWebhook).is_ok());
+}
+
 #[cfg(feature = "discord")]
 #[test]
 fn matched_reply_to_target_ok() {

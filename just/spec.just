@@ -18,10 +18,14 @@ feature feat:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    file="features/_unscheduled/{{feat}}/spec.md"
-    file_link="$(just _link "{{blue}}{{feat}}{{reset}}" "$(just _abs_path "{{feat}}")")"
+    descriptive="$(just _title_case "{{feat}}")"
+    dasherized="$(just _dasherize "{{feat}}")"
+
+    dir="features/_unscheduled/${dasherized}"
+    file="${dir}/spec.md"
 
     if [[ -f "${file}" ]]; then
+        file_link="$(just _link "${descriptive}" "${file}")"
         echo
         echo -e "A {{italic}}spec{{reset}} file for the feature {{blue}}${file_link}{{reset}} already exists inside the {{italic}}_unscheduled{{reset}} folder"
         echo
@@ -29,33 +33,33 @@ feature feat:
         echo
 
         if just _file_has_content "${file}" 2>/dev/null; then
-            if [[ "$(just _confirm "Would you like to have us to {{bold}}{{italic}}clarify{{reset}} the requirements in this spec file?")" == y ]]; then
-                just clarify-spec "${file}"
+            if [[ "$(just _confirm "Would you like to {{bold}}{{italic}}clarify{{reset}} the requirements in this spec file?")" == y ]]; then
+                clarify_agent="$(just _choose_agent)"
+                abs_spec="$(just _abs_path "${file}")"
+                claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+            fi
+            if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
+                just design "${dasherized}"
             else
-                if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
-                    just design-feature "${file}"
-                else
-                    echo "Ok. Bye."
-                    exit 0
-                fi
+                echo "Ok. Bye."
+                exit 0
             fi
         else
             if [[ "$(just _confirm "The spec file is {{italic}}empty{{reset}}; do you want to edit the specification now?")" == y ]]; then
                 if md edit "${file}" 2>/dev/null; then
                     echo
-                    echo "Now that the spec file has content, do you want to run a {{bold}}{{italic}}clarifying{{reset}} agent to"
-                    if [[ "$(just _confirm "make the specification clearer before building a technical design?")" == y ]]; then
-                        just clarify "${file}"
+                    if [[ "$(just _confirm "Do you want to run a {{bold}}{{italic}}clarifying{{reset}} agent to make the specification clearer?")" == y ]]; then
+                        clarify_agent="$(just _choose_agent)"
+                        abs_spec="$(just _abs_path "${file}")"
+                        claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+                    fi
+                    if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
+                        just design "${dasherized}"
                     else
-                        if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
-                            just design-feature "${file}"
-                        else
-                            echo "Ok. Bye."
-                            exit 0
-                        fi
+                        echo "Ok. Bye."
+                        exit 0
                     fi
                 fi
-
             else
                 echo "Ok. Empty spec file left in place."
                 exit 0
@@ -63,22 +67,27 @@ feature feat:
         fi
         exit 0
     fi
-    if md edit "${file}"; then
-        echo -e "The spec file has been created at {{blue}}${file}{{reset}}"
 
-        if [[ "$(just _confirm "make the specification clearer before building a technical design?")" == y ]]; then
-            just clarify-spec "${file}"
+    mkdir -p "${dir}"
+
+    if md edit "${file}"; then
+        link="$(just _link "${file}")"
+        echo -e "The spec file has been created at {{blue}}${link}{{reset}}"
+
+        if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
+            clarify_agent="$(just _choose_agent)"
+            abs_spec="$(just _abs_path "${file}")"
+            claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+        fi
+        if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == "y" ]]; then
+            just design "${dasherized}"
         else
-            if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
-                just design-feature "${file}"
-            else
-                echo "Ok. Bye."
-                exit 0
-            fi
+            echo "Ok. Bye."
+            exit 0
         fi
     else
-        rm -f "${file}"
-        echo -e "the feature had no content so was removed"
+        # rm -rf "${dir}"
+        echo -e "No content was added to the spec file for {{bold}}${descriptive}{{reset}}!"
     fi
 
 

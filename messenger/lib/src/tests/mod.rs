@@ -6,6 +6,8 @@ mod receipts;
 mod signal_integration;
 #[cfg(feature = "slack")]
 mod slack_integration;
+#[cfg(feature = "slack")]
+mod slack_webhook_integration;
 #[cfg(feature = "telegram")]
 mod telegram_integration;
 mod validation;

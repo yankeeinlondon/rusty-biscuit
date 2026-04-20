@@ -8,12 +8,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
-use claudine::stream::progress::{self, HeartbeatPolicy, LiveMetrics};
+use claudine::stream::progress::{self, LiveMetrics};
+use claudine::stream::prompt_timing as prompt_timing_mod;
+use claudine::stream::prompt_timing::{HeaderKind, PromptTimingContext};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -1247,68 +1250,35 @@ pub(crate) fn run_child_capture(
     })
 }
 
-fn spawn_progress_heartbeat(
-    enabled: bool,
-    started_at: Instant,
-    live_metrics: Option<LiveMetrics>,
+/// Spawn a dedicated ticker that runs [`StreamTextRenderer::flush_if_idle`]
+/// every 30 seconds.
+///
+/// Independent from the prompt-scoped timing monitor so buffered markdown
+/// reaches stdout even on runs that have no prompt context (wrapper
+/// passthrough) and regardless of whether any periodic header is being
+/// emitted. The 30-second cadence and 30-second silence window are the
+/// tuning preserved from the previous heartbeat thread.
+fn spawn_flush_if_idle_ticker(
     stream_output: Arc<StreamOutput>,
-    text_renderer: Option<Arc<std::sync::Mutex<StreamTextRenderer>>>,
-    policy: HeartbeatPolicy,
-) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
-    if !enabled {
-        return None;
-    }
+    text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>>,
+) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+    const SILENCE_WINDOW: Duration = Duration::from_secs(30);
+    const CADENCE: Duration = Duration::from_secs(30);
 
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = Arc::clone(&done);
-    let stall_threshold = stall_threshold_from_env(policy);
     let handle = thread::spawn(move || {
-        let mut next_tick = started_at + policy.interval;
-        let term = crate::log::terminal();
-
+        let mut next_tick = Instant::now() + CADENCE;
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
             if now >= next_tick {
-                // Flush any buffered markdown that has been idle for at
-                // least the silence window. This guarantees a dangling
-                // paragraph reaches stdout before the heartbeat status
-                // line reaches stderr, so the heartbeat never appears
-                // above stale assistant text.
-                if let Some(renderer) = &text_renderer
-                    && let Ok(mut r) = renderer.lock()
-                {
+                if let Ok(mut r) = text_renderer.lock() {
                     let mut writer = stream_output.stdout_writer();
-                    r.flush_if_idle(&mut writer, policy.silence_window);
+                    r.flush_if_idle(&mut writer, SILENCE_WINDOW);
                 }
-
-                // Stalled-stream warning: when the provider has gone fully
-                // silent for `stall_threshold`, emit one warning per stall
-                // episode so the user knows the run may be hung. Routed
-                // through the same stderr surface as the heartbeat status
-                // line for spacing consistency.
-                if let Some(metrics) = live_metrics.as_ref() {
-                    let stall_output = stream_output.clone();
-                    let stall_term = term.clone();
-                    let mut emit = move |msg: &str| {
-                        let rendered = Status::new(msg.to_string())
-                            .state(StatusState::Warning)
-                            .render(&stall_term);
-                        stall_output.emit_stderr_line(&rendered);
-                    };
-                    maybe_emit_stall_warning(metrics, now, stall_threshold, &mut emit);
-                }
-
-                emit_progress_heartbeat(
-                    started_at,
-                    live_metrics.as_ref(),
-                    policy,
-                    &term,
-                    &stream_output,
-                );
-                next_tick += policy.interval;
+                next_tick += CADENCE;
                 continue;
             }
-
             let sleep_for = next_tick
                 .saturating_duration_since(now)
                 .min(Duration::from_secs(1));
@@ -1316,64 +1286,245 @@ fn spawn_progress_heartbeat(
         }
     });
 
-    Some((done, handle))
+    (done, handle)
 }
 
-fn emit_progress_heartbeat(
+/// Spawn the prompt-scoped timing monitor.
+///
+/// Emits the periodic timing header anchored on the prompt's start time
+/// (`t=0`, `t=10m`, `t=20m`, …) plus two fire-once `Status::Warning`
+/// messages when the user-configured `timeout_warn` / `step_timeout_warn`
+/// thresholds cross. Only spawned for structured runs that carry a
+/// prompt context (every `claudine compose` / `inline-compose` /
+/// `sequence` run); wrapper passthrough runs skip the monitor entirely.
+///
+/// When both warnings cross on the same poll cycle, the step-scoped
+/// warning is emitted first per the feature spec.
+fn spawn_prompt_timing_monitor(
     started_at: Instant,
-    live_metrics: Option<&LiveMetrics>,
-    policy: HeartbeatPolicy,
+    started_at_wall: chrono::DateTime<chrono::Local>,
+    prompt_timing: PromptTimingContext,
+    hard_timeout: Option<Duration>,
+    hard_step_timeout: Option<Duration>,
+    live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
+) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&done);
+    let prompt_path_display = prompt_timing.absolute_path.display().to_string();
+
+    let handle = thread::spawn(move || {
+        let term = crate::log::terminal();
+
+        emit_timing_header(
+            HeaderKind::Zero,
+            Duration::ZERO,
+            &prompt_timing,
+            &prompt_path_display,
+            &term,
+            &stream_output,
+        );
+
+        let mut next_header_tick = started_at + prompt_timing_mod::HEADER_CADENCE;
+        let mut timeout_warn_fired = false;
+        let poll_interval = Duration::from_secs(1);
+
+        while !done_flag.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            let elapsed = now.saturating_duration_since(started_at);
+
+            if now >= next_header_tick {
+                emit_timing_header(
+                    HeaderKind::Tick,
+                    elapsed,
+                    &prompt_timing,
+                    &prompt_path_display,
+                    &term,
+                    &stream_output,
+                );
+                next_header_tick += prompt_timing_mod::HEADER_CADENCE;
+            }
+
+            // Step-scoped warning must be emitted BEFORE the prompt-scoped
+            // warning when both cross on the same poll cycle (feature spec
+            // §2, "Ordering when both cross in the same cycle").
+            if let Some(threshold) = prompt_timing.step_timeout_warn {
+                maybe_emit_step_timeout_warn(
+                    &prompt_timing,
+                    &prompt_path_display,
+                    &live_metrics,
+                    threshold,
+                    hard_step_timeout,
+                    started_at_wall,
+                    started_at,
+                    now,
+                    &term,
+                    &stream_output,
+                );
+            }
+
+            if let Some(threshold) = prompt_timing.timeout_warn
+                && !timeout_warn_fired
+                && elapsed >= threshold
+            {
+                emit_timeout_warn(
+                    &prompt_timing,
+                    &prompt_path_display,
+                    elapsed,
+                    threshold,
+                    hard_timeout,
+                    started_at_wall,
+                    started_at,
+                    &term,
+                    &stream_output,
+                );
+                timeout_warn_fired = true;
+            }
+
+            let sleep_for = next_header_tick
+                .saturating_duration_since(now)
+                .min(poll_interval);
+            thread::sleep(sleep_for);
+        }
+    });
+
+    (done, handle)
+}
+
+fn emit_timing_header(
+    kind: HeaderKind,
+    elapsed: Duration,
+    prompt_timing: &PromptTimingContext,
+    prompt_path_display: &str,
     term: &Terminal,
     stream_output: &StreamOutput,
 ) {
-    let elapsed = started_at.elapsed();
-    let now = Instant::now();
-
-    let description = match live_metrics {
-        Some(metrics) => {
-            let Ok(mut state) = metrics.lock() else {
-                return;
-            };
-            let desc = progress::describe_heartbeat(
-                &state,
-                elapsed,
-                now,
-                policy.silence_window,
-                policy.force_window,
-            );
-            if desc.is_some() {
-                state.last_heartbeat_at = Some(now);
-            }
-            desc
-        }
-        None => progress::describe_heartbeat(
-            &claudine::stream::progress::LiveMetricsState::default(),
-            elapsed,
-            now,
-            policy.silence_window,
-            policy.force_window,
-        ),
-    };
-
-    if let Some(desc) = description {
-        let rendered = Status::new(desc).state(StatusState::Info).render(term);
-        stream_output.emit_stderr_line(&rendered);
-    }
+    let body = prompt_timing_mod::render_header_prose(kind, elapsed, prompt_timing);
+    let rendered = Prose::new(body).render(term);
+    stream_output.emit_stderr_line(&rendered);
+    tracing::info!(
+        prompt_path = %prompt_path_display,
+        elapsed_secs = elapsed.as_secs(),
+        tick_kind = match kind {
+            HeaderKind::Zero => "zero",
+            HeaderKind::Tick => "tick",
+        },
+        "prompt timing header emitted",
+    );
 }
 
-/// Resolve the stall-warning threshold. Defaults to `policy.force_window`
-/// (so a stall warning fires after the same window that already forces a
-/// heartbeat tick during sustained activity), and can be overridden via
-/// the `CLAUDINE_STALL_TIMEOUT_SECONDS` environment variable. Invalid or
-/// non-positive values fall back to the default.
-fn stall_threshold_from_env(policy: HeartbeatPolicy) -> Duration {
-    match std::env::var("CLAUDINE_STALL_TIMEOUT_SECONDS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|secs| *secs > 0)
-    {
-        Some(secs) => Duration::from_secs(secs),
-        None => policy.force_window,
+#[allow(clippy::too_many_arguments)]
+fn emit_timeout_warn(
+    prompt_timing: &PromptTimingContext,
+    prompt_path_display: &str,
+    elapsed: Duration,
+    threshold: Duration,
+    hard_timeout: Option<Duration>,
+    started_at_wall: chrono::DateTime<chrono::Local>,
+    started_at: Instant,
+    term: &Terminal,
+    stream_output: &StreamOutput,
+) {
+    let hard_remaining = hard_timeout.and_then(|hard| {
+        let deadline_instant = started_at + hard;
+        let remaining = deadline_instant.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            None
+        } else {
+            let deadline_wall = started_at_wall + chrono::Duration::from_std(hard).ok()?;
+            Some((remaining, deadline_wall))
+        }
+    });
+    let body = prompt_timing_mod::render_timeout_warn_prose(elapsed, hard_remaining, prompt_timing);
+    let rendered = Status::from_prose(body)
+        .state(StatusState::Warning)
+        .render(term);
+    stream_output.emit_stderr_line(&rendered);
+    tracing::info!(
+        prompt_path = %prompt_path_display,
+        elapsed_secs = elapsed.as_secs(),
+        threshold_secs = threshold.as_secs(),
+        remaining_secs = hard_remaining.map(|(r, _)| r.as_secs()).unwrap_or(0),
+        hard_timeout_set = hard_timeout.is_some(),
+        "timeout_warn emitted",
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn maybe_emit_step_timeout_warn(
+    prompt_timing: &PromptTimingContext,
+    prompt_path_display: &str,
+    live_metrics: &LiveMetrics,
+    threshold: Duration,
+    hard_step_timeout: Option<Duration>,
+    started_at_wall: chrono::DateTime<chrono::Local>,
+    started_at: Instant,
+    now: Instant,
+    term: &Terminal,
+    stream_output: &StreamOutput,
+) {
+    let (silence, last_event_at) = {
+        let mut state = match live_metrics.lock() {
+            Ok(state) => state,
+            Err(_) => return,
+        };
+        if !progress::should_warn_stall(&state, now, threshold) {
+            return;
+        }
+        state.last_stall_warning_at = Some(now);
+        let Some(last_event) = state.last_event_at else {
+            return;
+        };
+        (now.saturating_duration_since(last_event), last_event)
+    };
+
+    let hard_remaining = hard_step_timeout.and_then(|hard| {
+        let deadline_instant = last_event_at + hard;
+        let remaining = deadline_instant.saturating_duration_since(now);
+        if remaining.is_zero() {
+            None
+        } else {
+            let last_event_wall = instant_to_local(started_at_wall, started_at, last_event_at);
+            let deadline_wall = last_event_wall + chrono::Duration::from_std(hard).ok()?;
+            Some((remaining, deadline_wall))
+        }
+    });
+
+    let body =
+        prompt_timing_mod::render_step_timeout_warn_prose(silence, hard_remaining, prompt_timing);
+    let rendered = Status::from_prose(body)
+        .state(StatusState::Warning)
+        .render(term);
+    stream_output.emit_stderr_line(&rendered);
+    tracing::info!(
+        prompt_path = %prompt_path_display,
+        silence_secs = silence.as_secs(),
+        threshold_secs = threshold.as_secs(),
+        remaining_secs = hard_remaining.map(|(r, _)| r.as_secs()).unwrap_or(0),
+        hard_step_timeout_set = hard_step_timeout.is_some(),
+        "step_timeout_warn emitted",
+    );
+}
+
+/// Translate a monotonic [`Instant`] into a wall-clock `DateTime<Local>`
+/// using the prompt-scoped anchor (`started_at_wall` / `started_at`).
+fn instant_to_local(
+    anchor_wall: chrono::DateTime<chrono::Local>,
+    anchor_instant: Instant,
+    sample: Instant,
+) -> chrono::DateTime<chrono::Local> {
+    if sample >= anchor_instant {
+        let delta = sample.duration_since(anchor_instant);
+        match chrono::Duration::from_std(delta) {
+            Ok(d) => anchor_wall + d,
+            Err(_) => anchor_wall,
+        }
+    } else {
+        let delta = anchor_instant.duration_since(sample);
+        match chrono::Duration::from_std(delta) {
+            Ok(d) => anchor_wall - d,
+            Err(_) => anchor_wall,
+        }
     }
 }
 
@@ -1394,40 +1545,13 @@ fn opencode_hang_threshold_from_env() -> Duration {
     }
 }
 
-/// Check the live metrics for a stalled stream and emit one warning per
-/// stall episode. Returns `true` when a warning was emitted on this call.
+/// Format a duration in seconds for internal early-termination messages.
 ///
-/// Dedup logic lives in [`progress::should_warn_stall`]; this helper is
-/// the side-effecting wrapper that updates `last_stall_warning_at` and
-/// invokes the caller-provided emitter exactly once per episode.
-fn maybe_emit_stall_warning<F: FnMut(&str)>(
-    metrics: &LiveMetrics,
-    now: Instant,
-    threshold: Duration,
-    emit: &mut F,
-) -> bool {
-    let mut state = match metrics.lock() {
-        Ok(state) => state,
-        Err(_) => return false,
-    };
-    if !progress::should_warn_stall(&state, now, threshold) {
-        return false;
-    }
-    state.last_stall_warning_at = Some(now);
-    let elapsed = now.saturating_duration_since(state.last_event_at.unwrap_or(now));
-    let secs = elapsed.as_secs();
-    drop(state);
-    let message = format!(
-        "no provider activity in {} \u{2014} provider may be hung; press Ctrl+C to abort",
-        format_stall_duration(secs)
-    );
-    emit(&message);
-    true
-}
-
-/// Format a duration in seconds for the stall warning message.
-/// Mirrors the heartbeat duration formatter at coarse granularity.
-fn format_stall_duration(secs: u64) -> String {
+/// Used by the step-silence and OpenCode-hang detectors to compose their
+/// `EarlyTermination::*` messages (these feed the summary, not the
+/// user-visible timing surface). Kept as a small local helper so the
+/// internal format stays stable.
+fn format_internal_duration(secs: u64) -> String {
     if secs < 60 {
         format!("{secs}s")
     } else if secs < 3_600 {
@@ -1456,7 +1580,7 @@ fn detect_step_timeout(
     let last_event_at = state.last_event_at?;
     let silence = now.saturating_duration_since(last_event_at);
     if silence >= step_timeout {
-        let silence_text = format_stall_duration(silence.as_secs());
+        let silence_text = format_internal_duration(silence.as_secs());
         Some(EarlyTermination::StepTimeout {
             message: format!(
                 "no stream activity for {silence_text}; terminating due to step_timeout"
@@ -1481,7 +1605,7 @@ fn detect_opencode_hang_termination(
         return None;
     }
 
-    let silence_text = format_stall_duration(silence.as_secs());
+    let silence_text = format_internal_duration(silence.as_secs());
     if silence >= stop_threshold && state.provider_status.as_deref() == Some("stop") {
         return Some(EarlyTermination::CompletedButHung {
             message: format!(
@@ -1518,8 +1642,14 @@ fn early_termination_process_outcome(
     }
 }
 
-fn stop_progress_heartbeat(heartbeat: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
-    if let Some((done, handle)) = heartbeat {
+/// Signal a timing ticker thread to stop and join it.
+///
+/// Shared by the flush-if-idle ticker and the prompt-timing monitor —
+/// both return the same `(done_flag, handle)` pair and need identical
+/// teardown. `None` is accepted so callers can pass through optional
+/// handles without an extra match.
+fn stop_timing_ticker(ticker: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
+    if let Some((done, handle)) = ticker {
         done.store(true, Ordering::Relaxed);
         let _ = handle.join();
     }
@@ -1593,20 +1723,21 @@ pub(crate) fn run_child_stream_semantic(
     step_timeout: Option<u64>,
     stderr_noise_prefixes: &[&str],
     suppress_stderr_on_success: bool,
-    show_progress_heartbeat: bool,
+    show_timing_output: bool,
     stdin_seed: Option<&str>,
     build_parser: SemanticParserBuilder,
     child_spawned: &mut bool,
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
-    heartbeat_policy: HeartbeatPolicy,
     stderr_bridge: Option<StderrBridgeHandle>,
+    prompt_timing: Option<PromptTimingContext>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
     let needs_stdin_pipe = stdin_seed.is_some();
     let started_at = Instant::now();
+    let started_at_wall = chrono::Local::now();
 
     let mut command = Command::new(binary);
     command
@@ -1635,8 +1766,9 @@ pub(crate) fn run_child_stream_semantic(
     // Terminal-local renderer for OutputText (stdout markdown). Wrapped
     // in Arc<Mutex<_>> so the builder closures can retain independent
     // handles without untangling lifetimes across the FnMut boundary of
-    // the sink's callback storage. Shared with the heartbeat thread so
-    // buffered markdown can be flushed when the provider stalls.
+    // the sink's callback storage. Shared with the flush-if-idle ticker
+    // so buffered markdown can be surfaced even when the provider stalls
+    // without closing stdout.
     //
     // Note: reasoning rendering is owned entirely by LiveSemanticSink,
     // which emits BlockQuote-formatted thinking text through the
@@ -1645,17 +1777,36 @@ pub(crate) fn run_child_stream_semantic(
     let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
         Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
 
-    let heartbeat_output = stream_output.clone();
     let stdout_output = stream_output.clone();
     let wait_loop_metrics = live_metrics.clone();
-    let heartbeat = spawn_progress_heartbeat(
-        show_progress_heartbeat,
-        started_at,
-        Some(live_metrics),
-        heartbeat_output,
-        Some(text_renderer.clone()),
-        heartbeat_policy,
-    );
+
+    // Dedicated 30-second ticker that flushes any buffered markdown the
+    // provider has not terminated with a paragraph boundary. Independent
+    // from the prompt-timing monitor per feature spec.
+    let flush_ticker = Some(spawn_flush_if_idle_ticker(
+        stream_output.clone(),
+        text_renderer.clone(),
+    ));
+
+    // Prompt-scoped periodic header + warnings. Only started when the
+    // caller provided a prompt context (every composition run) and when
+    // the CLI is rendering timing output at all. Wrapper passthrough
+    // runs pass `prompt_timing = None` and skip the monitor entirely.
+    let timing_monitor = if show_timing_output {
+        prompt_timing.map(|ctx| {
+            spawn_prompt_timing_monitor(
+                started_at,
+                started_at_wall,
+                ctx,
+                timeout.map(Duration::from_secs),
+                step_timeout.map(Duration::from_secs),
+                live_metrics.clone(),
+                stream_output.clone(),
+            )
+        })
+    } else {
+        None
+    };
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
     let stdout_pipe = child
@@ -1788,8 +1939,15 @@ pub(crate) fn run_child_stream_semantic(
         stdin_pipe.write_all(seed.as_bytes())?;
     }
 
-    let stall_threshold = stall_threshold_from_env(heartbeat_policy);
-    let opencode_hang_threshold = opencode_hang_threshold_from_env();
+    // OpenCode silent-stall recovery has two thresholds:
+    // `opencode_stop_threshold` is the post-"stop" grace window, kept at
+    // the previous 120s default so provider kill behavior does not shift
+    // with this feature; `opencode_silent_stall_threshold` is the hard
+    // "any silence" budget (defaults to five minutes, overridable via
+    // `CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS`). Neither drives a
+    // user-visible timing line.
+    let opencode_stop_threshold = Duration::from_secs(120);
+    let opencode_silent_stall_threshold = opencode_hang_threshold_from_env();
     let wall_clock_timeout = timeout.map(Duration::from_secs);
     let step_timeout_duration = step_timeout.map(Duration::from_secs);
     let needs_advanced_wait = wall_clock_timeout.is_some()
@@ -1808,8 +1966,8 @@ pub(crate) fn run_child_stream_semantic(
             true,
             rx,
             Some(wait_loop_metrics),
-            stall_threshold,
-            opencode_hang_threshold,
+            opencode_stop_threshold,
+            opencode_silent_stall_threshold,
             wall_clock_timeout,
             step_timeout_duration,
         )?
@@ -1831,7 +1989,8 @@ pub(crate) fn run_child_stream_semantic(
     }
 
     kill_process_group(&mut child);
-    stop_progress_heartbeat(heartbeat);
+    stop_timing_ticker(flush_ticker);
+    stop_timing_ticker(timing_monitor);
 
     let thread_join_timeout = Duration::from_secs(5);
     let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(
@@ -2200,113 +2359,15 @@ mod tests {
     }
 
     #[test]
-    fn maybe_emit_stall_warning_fires_once_per_episode() {
-        use std::cell::Cell;
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let base = Instant::now();
-        let threshold = Duration::from_secs(60);
-
-        // Stall episode 1: last activity 180 s before "now".
-        {
-            let mut s = metrics.lock().unwrap();
-            s.last_event_at = Some(base - Duration::from_secs(180));
-        }
-
-        let count = Cell::new(0u32);
-        let mut emit = |_msg: &str| count.set(count.get() + 1);
-
-        // First call past the threshold emits and marks the warning timestamp.
-        assert!(maybe_emit_stall_warning(
-            &metrics, base, threshold, &mut emit
-        ));
-        assert_eq!(count.get(), 1);
-
-        // Same-now call: deduped within the same stall episode.
-        assert!(!maybe_emit_stall_warning(
-            &metrics, base, threshold, &mut emit
-        ));
-        assert_eq!(count.get(), 1);
-
-        // Activity resumes — last_event_at advances past the stored warning.
-        {
-            let mut s = metrics.lock().unwrap();
-            s.last_event_at = Some(base + Duration::from_secs(1));
-        }
-        // Still within threshold from the resumed event: no warning.
-        assert!(!maybe_emit_stall_warning(
-            &metrics,
-            base + Duration::from_secs(2),
-            threshold,
-            &mut emit,
-        ));
-        assert_eq!(count.get(), 1);
-
-        // 180 s later the stream is silent again — fresh stall episode warns.
-        assert!(maybe_emit_stall_warning(
-            &metrics,
-            base + Duration::from_secs(180),
-            threshold,
-            &mut emit,
-        ));
-        assert_eq!(count.get(), 2);
-    }
-
-    #[serial_test::serial(stall_env)]
-    #[test]
-    fn stall_threshold_from_env_defaults_to_force_window() {
-        // SAFETY: tests run in a single-threaded test harness section but env
-        // mutation is global. We unset right after to keep adjacent tests
-        // unaffected.
-        // SAFETY: env mutation is process-global; tests in this module don't
-        // touch this var concurrently.
-        unsafe {
-            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
-        }
-        let policy = HeartbeatPolicy::default();
-        assert_eq!(stall_threshold_from_env(policy), policy.force_window);
-    }
-
-    #[serial_test::serial(stall_env)]
-    #[test]
-    fn stall_threshold_from_env_uses_override_when_set() {
-        // SAFETY: env mutation is process-global; tests in this module don't
-        // touch this var concurrently.
-        unsafe {
-            std::env::set_var("CLAUDINE_STALL_TIMEOUT_SECONDS", "45");
-        }
-        let policy = HeartbeatPolicy::default();
-        assert_eq!(stall_threshold_from_env(policy), Duration::from_secs(45));
-        unsafe {
-            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
-        }
-    }
-
-    #[serial_test::serial(stall_env)]
-    #[test]
-    fn stall_threshold_from_env_ignores_invalid_value() {
-        // SAFETY: env mutation is process-global; tests in this module don't
-        // touch this var concurrently.
-        unsafe {
-            std::env::set_var("CLAUDINE_STALL_TIMEOUT_SECONDS", "not-a-number");
-        }
-        let policy = HeartbeatPolicy::default();
-        assert_eq!(stall_threshold_from_env(policy), policy.force_window);
-        unsafe {
-            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
-        }
-    }
-
-    #[test]
-    fn heartbeat_driven_flush_emits_dangling_paragraph_before_status() {
-        // End-to-end invariant for Phase 2: when the heartbeat thread runs
-        // its idle check against a shared renderer, any buffered assistant
-        // text must reach stdout before the heartbeat emits its own status
-        // line to stderr. We simulate the heartbeat tick with a direct call
-        // rather than spinning a real thread so the test runs deterministically.
+    fn flush_if_idle_ticker_contract_surfaces_dangling_paragraph() {
+        // Contract exercised by `spawn_flush_if_idle_ticker`: when the
+        // 30-second ticker fires idle, buffered assistant text must reach
+        // stdout so the next stderr status line never appears above stale
+        // paragraphs. Simulated directly rather than through the real
+        // thread for deterministic timing.
         let renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
             Arc::new(std::sync::Mutex::new(test_renderer()));
         let mut stdout_bytes: Vec<u8> = Vec::new();
-        let mut stderr_lines: Vec<String> = Vec::new();
 
         // Provider emits a final paragraph without a trailing blank line.
         {
@@ -2318,7 +2379,6 @@ mod tests {
             "buffered text must not escape before the idle window elapses"
         );
 
-        // Simulate the heartbeat thread's wake-up after the silence window.
         std::thread::sleep(Duration::from_millis(15));
         let flushed = {
             let mut r = renderer.lock().unwrap();
@@ -2326,13 +2386,8 @@ mod tests {
         };
         assert!(flushed, "idle flush should have fired");
 
-        // Heartbeat emits its status line strictly after the flush.
-        stderr_lines.push("120s · 0 done".into());
-
         let stdout_text = String::from_utf8(stdout_bytes).unwrap();
         assert!(stdout_text.contains("final summary line"));
-        assert_eq!(stderr_lines.len(), 1);
-        assert!(stderr_lines[0].contains("120s"));
     }
 
     #[test]

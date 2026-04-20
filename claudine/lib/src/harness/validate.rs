@@ -1457,6 +1457,8 @@ mod tests {
             source_path: dir.path().join("source.md"),
             timeout: None,
             step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,
@@ -1484,6 +1486,8 @@ mod tests {
             source_path: dir.path().join("source.md"),
             timeout: None,
             step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,

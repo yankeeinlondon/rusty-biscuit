@@ -8,6 +8,7 @@ pub mod opencode_semantic;
 pub mod parser;
 pub mod path_link;
 pub mod progress;
+pub mod prompt_timing;
 pub mod protocol;
 pub mod qwen_semantic;
 pub mod reporting;

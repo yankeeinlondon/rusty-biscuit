@@ -56,10 +56,11 @@ pub struct DiscordWebhookConfig {
 **Attachment support**: Local paths or in-memory bytes only (no URLs or provider file IDs).
 **Target**: `Target::discord_webhook()` (no thread) or `Target::discord_webhook_thread("thread_id")`.
 **MessageRef**: `MessageRef::DiscordWebhook { webhook_id, channel_id, message_id, thread_id }`.
+**Markdown renderer**: Shares the same `markdown/discord.rs` renderer as the bot adapter.
 
 **Reply enforcement**: `validate::normalize_dispatch` returns `MessengerError::UnsupportedFeature { provider: DiscordWebhook, feature: "replies" }` before any network call when `reply_to` is set — this hard-error fires in both strict and best-effort modes.
 
-**URL parsing**: The constructor parses `/webhooks/{id}/{token}` segments out of the full URL. `try_new` returns `MessengerError::InvalidMessage` for malformed input; `new` panics with the same message (mirrors `DiscordProvider::new`).
+**URL parsing**: `try_new` parses `/webhooks/{id}/{token}` segments out of the full URL, validates the webhook id, and returns `MessengerError::InvalidMessage` for malformed input. Optional `thread_id` values are validated as numeric Discord snowflakes before a request is sent.
 
 ## Slack
 

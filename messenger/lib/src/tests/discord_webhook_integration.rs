@@ -1,7 +1,11 @@
+use bytes::Bytes;
 use secrecy::SecretString;
-use wiremock::matchers::{header, method, path, query_param};
+use wiremock::matchers::{
+    body_json, body_string_contains, header, header_regex, method, path, query_param,
+};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use crate::attachment::{Attachment, AttachmentKind, AttachmentSource};
 use crate::dispatch::Dispatch;
 use crate::message::Message;
 use crate::provider::discord_webhook::{DiscordWebhookConfig, DiscordWebhookProvider};
@@ -28,6 +32,16 @@ fn webhook_message_response() -> serde_json::Value {
         "id": "987654321098765432",
         "channel_id": "111222333444555666",
         "webhook_id": WEBHOOK_ID,
+        "type": 0,
+        "content": "hello",
+        "timestamp": "2026-04-19T00:00:00.000000+00:00",
+    })
+}
+
+fn webhook_message_response_without_webhook_id() -> serde_json::Value {
+    serde_json::json!({
+        "id": "987654321098765432",
+        "channel_id": "111222333444555666",
         "type": 0,
         "content": "hello",
         "timestamp": "2026-04-19T00:00:00.000000+00:00",
@@ -141,6 +155,9 @@ async fn sends_text_message_with_expected_payload() {
         )))
         .and(query_param("wait", "true"))
         .and(header("Content-Type", "application/json"))
+        .and(body_json(serde_json::json!({
+            "content": "hello",
+        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(webhook_message_response()))
         .expect(1)
         .mount(&server)
@@ -170,6 +187,32 @@ async fn sends_text_message_with_expected_payload() {
 }
 
 #[tokio::test]
+async fn sends_markdown_message_with_expected_payload() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/api/v10/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+        )))
+        .and(query_param("wait", "true"))
+        .and(body_json(serde_json::json!({
+            "content": "**bold**",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_message_response()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = webhook_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::discord_webhook());
+    let message = Message::markdown("**bold**");
+
+    let receipt = provider.send(&dispatch, &message).await.unwrap();
+    assert_eq!(receipt.provider, ProviderKind::DiscordWebhook);
+    assert_eq!(receipt.raw_id, "987654321098765432");
+}
+
+#[tokio::test]
 async fn sends_with_thread_id_query_parameter() {
     let server = MockServer::start().await;
 
@@ -195,6 +238,88 @@ async fn sends_with_thread_id_query_parameter() {
         }
         other => panic!("expected DiscordWebhook message ref, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn invalid_thread_id_errors_before_network_call() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let provider = webhook_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::discord_webhook_thread("555666&wait=false"));
+    let message = Message::text("hello");
+
+    let err = provider.send(&dispatch, &message).await.unwrap_err();
+    assert!(matches!(
+        err,
+        crate::MessengerError::InvalidMessage(message)
+        if message.contains("invalid Discord webhook thread ID")
+    ));
+}
+
+#[tokio::test]
+async fn sends_attachments_as_multipart_with_payload_json_and_file_part() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/api/v10/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+        )))
+        .and(query_param("wait", "true"))
+        .and(header_regex("Content-Type", r"multipart/form-data;\s*boundary=.*"))
+        .and(body_string_contains("name=\"payload_json\""))
+        .and(body_string_contains("\"content\":\"hello\""))
+        .and(body_string_contains(
+            "\"attachments\":[{\"id\":0,\"filename\":\"report.txt\",\"description\":\"diagram alt\"}]",
+        ))
+        .and(body_string_contains("name=\"files[0]\""))
+        .and(body_string_contains("filename=\"report.txt\""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_message_response()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = webhook_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::discord_webhook());
+    let message = Message::text("hello").attachment(Attachment {
+        kind: AttachmentKind::Document,
+        source: AttachmentSource::Bytes {
+            filename: "report.txt".into(),
+            mime_type: "text/plain".into(),
+            data: Bytes::from_static(b"attachment-bytes"),
+        },
+        caption: Some("diagram caption".into()),
+        alt_text: Some("diagram alt".into()),
+    });
+
+    let receipt = provider.send(&dispatch, &message).await.unwrap();
+    assert_eq!(receipt.provider, ProviderKind::DiscordWebhook);
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+
+    let content_type = request
+        .headers
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap();
+    assert!(
+        content_type.starts_with("multipart/form-data; boundary="),
+        "expected multipart content type, got: {content_type}"
+    );
+    assert!(
+        request
+            .body
+            .windows(b"attachment-bytes".len())
+            .any(|window| window == b"attachment-bytes"),
+        "multipart body should contain the raw attachment bytes"
+    );
 }
 
 #[tokio::test]
@@ -232,6 +357,39 @@ async fn rate_limit_maps_to_rate_limited_with_retry_after() {
         }
         other => panic!("expected RateLimited, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn generic_client_error_maps_to_provider_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/api/v10/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+        )))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "message": "Invalid Form Body",
+            "code": 50006,
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = webhook_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::discord_webhook());
+    let message = Message::text("hello");
+
+    let err = provider.send(&dispatch, &message).await.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            crate::MessengerError::Provider {
+                provider: ProviderKind::DiscordWebhook,
+                code: Some(ref code),
+                ..
+            } if code == "400"
+        ),
+        "expected Provider error with HTTP 400 code, got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -293,6 +451,33 @@ async fn server_error_maps_to_transport() {
         ),
         "expected Transport, got {err:?}"
     );
+}
+
+#[tokio::test]
+async fn falls_back_to_provider_webhook_id_when_response_omits_it() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/api/v10/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+        )))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(webhook_message_response_without_webhook_id()),
+        )
+        .mount(&server)
+        .await;
+
+    let provider = webhook_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::discord_webhook());
+    let message = Message::text("hello");
+
+    let receipt = provider.send(&dispatch, &message).await.unwrap();
+    match receipt.message_ref {
+        MessageRef::DiscordWebhook { webhook_id, .. } => {
+            assert_eq!(webhook_id, WEBHOOK_ID);
+        }
+        other => panic!("expected DiscordWebhook message ref, got {other:?}"),
+    }
 }
 
 #[tokio::test]
