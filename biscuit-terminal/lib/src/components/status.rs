@@ -7,7 +7,7 @@ use crate::components::prose::Prose;
 use crate::components::renderable::Renderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
-use crate::utils::color::{Tailwind, TailwindColorWrapper};
+use crate::utils::color::{Color, Tailwind, TailwindColorWrapper};
 use crate::utils::layout::{Layout, RenderableWrapper, WordWrap};
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
@@ -60,11 +60,33 @@ pub enum StatusState {
     NotStarted,
     Active,
     Success,
+    #[serde(alias = "Failure")]
+    Error,
+    #[serde(skip_deserializing)]
+    #[deprecated(note = "use StatusState::Error instead")]
     Failure,
     Warning,
     Info,
     ToolUse,
     Subagent,
+}
+
+impl StatusState {
+    /// Canonical Tailwind color for this variant.
+    pub fn default_color(&self) -> Color {
+        match self {
+            Self::NotStarted => Color::Tailwind(Tailwind::Gray500),
+            Self::Active => Color::Tailwind(Tailwind::Gray600),
+            Self::Success => Color::Tailwind(Tailwind::Green500),
+            Self::Error => Color::Tailwind(Tailwind::Red500),
+            #[allow(deprecated)]
+            Self::Failure => Color::Tailwind(Tailwind::Red500),
+            Self::Warning => Color::Tailwind(Tailwind::Orange500),
+            Self::Info => Color::Tailwind(Tailwind::Blue500),
+            Self::ToolUse => Color::Tailwind(Tailwind::Purple500),
+            Self::Subagent => Color::Tailwind(Tailwind::Violet500),
+        }
+    }
 }
 
 /// Visual theme controlling the icon set used by [`Status`].
@@ -122,6 +144,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
                 color_alt: None,
             },
         );
+        m.insert(
+            (StatusTheme::Circular, StatusState::Error),
+            StatusIconDef {
+                nerd: NERD_CIRCULAR_FAILURE,
+                fallback: FB_FAILURE,
+                color: Tailwind::Red500,
+                color_alt: None,
+            },
+        );
+        #[allow(deprecated)]
         m.insert(
             (StatusTheme::Circular, StatusState::Failure),
             StatusIconDef {
@@ -197,6 +229,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             },
         );
         m.insert(
+            (StatusTheme::Rounded, StatusState::Error),
+            StatusIconDef {
+                nerd: NERD_ROUNDED_FAILURE,
+                fallback: FB_FAILURE,
+                color: Tailwind::Red500,
+                color_alt: None,
+            },
+        );
+        #[allow(deprecated)]
+        m.insert(
             (StatusTheme::Rounded, StatusState::Failure),
             StatusIconDef {
                 nerd: NERD_ROUNDED_FAILURE,
@@ -270,6 +312,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
                 color_alt: None,
             },
         );
+        m.insert(
+            (StatusTheme::Timeline, StatusState::Error),
+            StatusIconDef {
+                nerd: NERD_TIMELINE_FAILURE,
+                fallback: FB_FAILURE,
+                color: Tailwind::Red500,
+                color_alt: None,
+            },
+        );
+        #[allow(deprecated)]
         m.insert(
             (StatusTheme::Timeline, StatusState::Failure),
             StatusIconDef {
@@ -500,6 +552,7 @@ impl Renderable for Status {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -728,5 +781,19 @@ mod tests {
         let status = Status::new("Newline test");
         let result = status.display(&term);
         assert!(result.ends_with('\n'));
+    }
+
+    #[test]
+    fn default_color_error_is_red500() {
+        assert_eq!(
+            StatusState::Error.default_color(),
+            Color::Tailwind(Tailwind::Red500)
+        );
+    }
+
+    #[test]
+    fn failure_alias_deserializes_as_error() {
+        let state = serde_json::from_str::<StatusState>("\"Failure\"").unwrap();
+        assert_eq!(state, StatusState::Error);
     }
 }
