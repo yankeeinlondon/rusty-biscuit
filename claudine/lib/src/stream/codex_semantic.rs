@@ -182,9 +182,8 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         // two identical "Agent Error" blocks. Suppress sink emission when
         // the new error is byte-for-byte identical to the previously emitted
         // one, while still keeping summary state fresh.
-        let is_duplicate = self.is_error
-            && self.error_kind == new_kind
-            && self.error_message == new_message;
+        let is_duplicate =
+            self.is_error && self.error_kind == new_kind && self.error_message == new_message;
 
         self.is_error = true;
         self.error_kind = new_kind;
@@ -336,6 +335,9 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
         if let Some(exit_code) = fields.exit_code {
             extra.insert("exit_code".into(), Value::from(exit_code));
+        }
+        if let Some(input) = fields.resolved_input() {
+            extra.insert("input".into(), input);
         }
         SemanticEvent::ToolResult {
             name: fields.resolved_tool_name().map(String::from),
@@ -1287,6 +1289,7 @@ mod tests {
             status,
             exit_code,
             output,
+            extra,
             ..
         } = &captured[1]
         else {
@@ -1299,6 +1302,12 @@ mod tests {
             output.as_str(),
             Some("file.txt\n"),
             "aggregated_output must be preserved as the ToolResult output"
+        );
+        assert_eq!(
+            extra.get("input"),
+            Some(&json!({"command": "ls"})),
+            "ToolResult extra must preserve the original command input so the live sink \
+             does not fall back to rendering aggregated stdout in the status line"
         );
     }
 

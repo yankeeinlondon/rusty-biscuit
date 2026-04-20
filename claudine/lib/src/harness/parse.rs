@@ -1323,10 +1323,7 @@ mod tests {
     fn parse_harness_plan_extracts_step_timeout() {
         let fm = json!({ "step_timeout": "2m" });
         let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
-        assert_eq!(
-            plan.step_timeout,
-            Some(std::time::Duration::from_secs(120))
-        );
+        assert_eq!(plan.step_timeout, Some(std::time::Duration::from_secs(120)));
         assert!(plan.timeout.is_none());
     }
 
@@ -1384,10 +1381,7 @@ mod tests {
         });
         let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
         assert_eq!(plan.timeout, Some(std::time::Duration::from_secs(120)));
-        assert_eq!(
-            plan.step_timeout,
-            Some(std::time::Duration::from_secs(120))
-        );
+        assert_eq!(plan.step_timeout, Some(std::time::Duration::from_secs(120)));
     }
 
     #[test]

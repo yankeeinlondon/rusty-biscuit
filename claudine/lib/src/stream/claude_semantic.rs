@@ -239,12 +239,20 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             return;
         }
 
+        let has_tool_use = content
+            .iter()
+            .any(|part| part.kind.as_deref() == Some("tool_use"));
+
         for part in content {
             let part_kind = part.kind.clone();
             match part_kind.as_deref() {
                 Some("tool_use") => {
                     if let Some(tool_use) = part.into_tool_use() {
-                        self.flush_assistant_text(&mut text_parts, raw_kind);
+                        if has_tool_use {
+                            self.flush_assistant_reasoning(&mut text_parts, raw_kind);
+                        } else {
+                            self.flush_assistant_text(&mut text_parts, raw_kind);
+                        }
                         self.handle_tool_use(tool_use, raw_kind);
                     }
                 }
@@ -256,7 +264,11 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 _ => {}
             }
         }
-        self.flush_assistant_text(&mut text_parts, raw_kind);
+        if has_tool_use {
+            self.flush_assistant_reasoning(&mut text_parts, raw_kind);
+        } else {
+            self.flush_assistant_text(&mut text_parts, raw_kind);
+        }
     }
 
     fn handle_content_block_delta(&mut self, event: ClaudeContentBlockDelta, raw_kind: &str) {
@@ -723,6 +735,23 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         self.sink.on_semantic_event(SemanticEvent::OutputText {
             text: super::ensure_message_newline(text),
             extra: self.extra_with(raw_kind),
+        });
+    }
+
+    fn flush_assistant_reasoning(&mut self, text_parts: &mut String, raw_kind: &str) {
+        if text_parts.is_empty() {
+            return;
+        }
+        let text = std::mem::take(text_parts);
+        let mut extra = self.base_extra();
+        extra.insert("raw_kind".into(), Value::from(raw_kind));
+        extra.insert(
+            "reasoning_source".into(),
+            Value::from("assistant_tool_preface"),
+        );
+        self.sink.on_semantic_event(SemanticEvent::Reasoning {
+            text,
+            extra: Value::Object(extra),
         });
     }
 
@@ -1276,7 +1305,7 @@ mod tests {
     }
 
     #[test]
-    fn assistant_envelope_tool_use_emits_tool_call_in_order() {
+    fn assistant_envelope_tool_use_preface_becomes_reasoning_then_tool_call() {
         let (sink, mut parser) = new_parser();
         parser
             .feed_line(
@@ -1285,7 +1314,16 @@ mod tests {
             .unwrap();
         let events = sink.snapshot();
         assert_eq!(events.len(), 2);
-        assert!(matches!(events[0], SemanticEvent::OutputText { .. }));
+        match &events[0] {
+            SemanticEvent::Reasoning { text, extra } => {
+                assert_eq!(text, "Checking tests.");
+                assert_eq!(
+                    extra.get("reasoning_source").and_then(Value::as_str),
+                    Some("assistant_tool_preface")
+                );
+            }
+            other => panic!("expected Reasoning, got {other:?}"),
+        }
         match &events[1] {
             SemanticEvent::ToolCall {
                 name, id, input, ..
@@ -1296,6 +1334,11 @@ mod tests {
             }
             other => panic!("expected ToolCall, got {other:?}"),
         }
+        let summary = parser.finish(0);
+        assert_eq!(
+            summary.assistant_text, "",
+            "pre-tool Claude narration must not leak into final stdout"
+        );
     }
 
     #[test]
