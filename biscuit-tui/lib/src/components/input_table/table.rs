@@ -14,11 +14,11 @@
 //! };
 //!
 //! let columns = vec![
-//!     InputTableColumn::StaticText("Row".into()),
-//!     InputTableColumn::TextInput(TextInputConfig::default()),
-//!     InputTableColumn::BooleanSwitch(BooleanSwitchConfig::default()),
+//!     InputTableColumn::StaticText { id: "row".into(), text: "Row".into() },
+//!     InputTableColumn::TextInput { id: "name".into(), config: TextInputConfig::default() },
+//!     InputTableColumn::BooleanSwitch { id: "active".into(), config: BooleanSwitchConfig::default() },
 //! ];
-//! let state = InputTableState::new(columns, 2);
+//! let state = InputTableState::with_blank_rows(columns, 2);
 //! let _widget = InputTable::new();
 //! let _ = state; // built successfully
 //! ```
@@ -32,22 +32,18 @@ use ratatui::{
     widgets::StatefulWidget,
 };
 
-use crate::components::{
-    BooleanSwitch, ChooseMany, ChooseOne, TextAreaInput, TextInput,
+use crate::components::{BooleanSwitch, ChooseMany, ChooseOne, TextAreaInput, TextInput};
+use crate::core::{
+    ComponentTheme, EventOutcome, HandleEvent, KeyBindings, StandaloneState, ValidationState,
 };
-use crate::core::{ComponentTheme, EventOutcome, HandleEvent, StandaloneState, ValidationState};
 
-use super::cell::CellState;
+use super::cell::{CellState, CellValue, Row, RowCell};
 use super::column::InputTableColumn;
-
-/// Default submit key — `Ctrl-S`.
-const DEFAULT_SUBMIT_CODE: KeyCode = KeyCode::Char('s');
-const DEFAULT_SUBMIT_MODIFIERS: KeyModifiers = KeyModifiers::CONTROL;
 
 /// Mutable state for an [`InputTable`] widget.
 ///
 /// Holds the column schema, the cell matrix, focus coordinates,
-/// theme, submit-key binding, and any aggregated validation error.
+/// theme, key bindings, and any aggregated validation error.
 #[derive(Debug, Clone)]
 pub struct InputTableState {
     columns: Vec<InputTableColumn>,
@@ -55,19 +51,95 @@ pub struct InputTableState {
     focus_row: usize,
     focus_col: usize,
     theme: ComponentTheme,
-    submit_code: KeyCode,
-    submit_modifiers: KeyModifiers,
+    bindings: KeyBindings,
     validation_error: Option<String>,
 }
 
 impl InputTableState {
-    /// Creates a new state with `row_count` rows, each seeded from
-    /// the column configuration payloads.
+    /// Creates a new state from typed row data.
+    ///
+    /// Each inner `Vec<CellValue>` must have exactly `columns.len()`
+    /// elements. Column identity comes from
+    /// [`InputTableColumn::id`](InputTableColumn::id) and is paired
+    /// with each cell value in the returned
+    /// [`Row`](super::cell::Row)s.
+    ///
+    /// ## Panics
+    ///
+    /// Panics with a clear message when any row's length does not
+    /// match `columns.len()`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use tui_chrome::prelude::*;
+    /// use tui_chrome::components::input_table::{
+    ///     CellValue, InputTable, InputTableColumn, InputTableState,
+    ///     TextInputConfig,
+    /// };
+    ///
+    /// let columns = vec![
+    ///     InputTableColumn::StaticText { id: "row".into(), text: "1".into() },
+    ///     InputTableColumn::TextInput { id: "name".into(), config: TextInputConfig::default() },
+    /// ];
+    /// let initial_rows = vec![
+    ///     vec![CellValue::StaticText("1".into()), CellValue::Text("Alice".into())],
+    ///     vec![CellValue::StaticText("2".into()), CellValue::Text("Bob".into())],
+    /// ];
+    /// let state = InputTableState::new(columns, initial_rows);
+    /// assert_eq!(state.row_count(), 2);
+    /// ```
+    pub fn new(columns: Vec<InputTableColumn>, initial_rows: Vec<Vec<CellValue>>) -> Self {
+        let col_count = columns.len();
+        for (row_idx, row) in initial_rows.iter().enumerate() {
+            if row.len() != col_count {
+                panic!(
+                    "InputTableState::new: row {row_idx} has {} cells, expected {col_count}",
+                    row.len()
+                );
+            }
+        }
+
+        let rows: Vec<Vec<CellState>> = initial_rows
+            .iter()
+            .map(|row_values| {
+                columns
+                    .iter()
+                    .zip(row_values.iter())
+                    .map(|(column, cell_value)| {
+                        let mut cell = CellState::from_column(column);
+                        apply_cell_value(&mut cell, cell_value);
+                        cell
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let (focus_row, focus_col) = first_focusable_cell(&rows).unwrap_or((0, 0));
+        Self {
+            columns,
+            rows,
+            focus_row,
+            focus_col,
+            theme: ComponentTheme::default(),
+            bindings: KeyBindings {
+                submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
+                ..KeyBindings::default()
+            },
+            validation_error: None,
+        }
+    }
+
+    /// Creates a new state with `row_count` blank rows.
+    ///
+    /// Each cell is seeded from its column's default configuration.
+    /// This is a convenience constructor for the common "N empty rows"
+    /// case.
     ///
     /// The initial focus lands on the first focusable cell (columns
     /// of type [`InputTableColumn::StaticText`] are skipped). When no
     /// column is focusable, focus defaults to `(0, 0)`.
-    pub fn new(columns: Vec<InputTableColumn>, row_count: usize) -> Self {
+    pub fn with_blank_rows(columns: Vec<InputTableColumn>, row_count: usize) -> Self {
         let rows: Vec<Vec<CellState>> = (0..row_count)
             .map(|_| columns.iter().map(CellState::from_column).collect())
             .collect();
@@ -78,8 +150,10 @@ impl InputTableState {
             focus_row,
             focus_col,
             theme: ComponentTheme::default(),
-            submit_code: DEFAULT_SUBMIT_CODE,
-            submit_modifiers: DEFAULT_SUBMIT_MODIFIERS,
+            bindings: KeyBindings {
+                submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
+                ..KeyBindings::default()
+            },
             validation_error: None,
         }
     }
@@ -90,10 +164,18 @@ impl InputTableState {
         self
     }
 
+    /// Replaces the key bindings.
+    pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
+        self.bindings = bindings;
+        self
+    }
+
     /// Overrides the submit key.
+    ///
+    /// This is a convenience wrapper over `with_key_bindings` for
+    /// backwards compatibility.
     pub fn with_submit_key(mut self, code: KeyCode, modifiers: KeyModifiers) -> Self {
-        self.submit_code = code;
-        self.submit_modifiers = modifiers;
+        self.bindings.submit = vec![KeyEvent::new(code, modifiers)];
         self
     }
 
@@ -146,17 +228,45 @@ impl InputTableState {
         &self.theme
     }
 
+    /// Returns a reference to the key bindings.
+    pub fn key_bindings(&self) -> &KeyBindings {
+        &self.bindings
+    }
+
+    /// Returns the captured rows as typed [`Row`] values.
+    ///
+    /// Each [`Row`] contains a vector of [`RowCell`]s pairing column
+    /// ids with typed [`CellValue`]s. Preferred for library consumers
+    /// who need to preserve semantic types (booleans, multi-line text,
+    /// multi-select arrays).
+    ///
+    /// [`Row`]: super::cell::Row
+    /// [`RowCell`]: super::cell::RowCell
+    /// [`CellValue`]: super::cell::CellValue
+    pub fn rows_typed(&self) -> Vec<Row> {
+        self.rows
+            .iter()
+            .map(|row| Row {
+                cells: row
+                    .iter()
+                    .zip(self.columns.iter())
+                    .map(|(cell, column)| RowCell {
+                        column_id: column.id().to_string(),
+                        value: cell.to_cell_value(),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
     /// Returns the captured values as `Vec<Vec<String>>`, one inner
     /// vec per row, one `String` per column.
+    #[deprecated(note = "use `rows_typed` and map to the desired shape")]
     pub fn values(&self) -> Vec<Vec<String>> {
         self.rows
             .iter()
             .map(|row| row.iter().map(CellState::value_string).collect())
             .collect()
-    }
-
-    fn is_submit_key(&self, event: &KeyEvent) -> bool {
-        event.code == self.submit_code && event.modifiers == self.submit_modifiers
     }
 }
 
@@ -171,10 +281,10 @@ impl ValidationState for InputTableState {
 }
 
 impl StandaloneState for InputTableState {
-    type Value = Vec<Vec<String>>;
+    type Value = Vec<Row>;
 
     fn value(&self) -> Self::Value {
-        self.values()
+        self.rows_typed()
     }
 
     fn validation_error(&self) -> Option<&str> {
@@ -207,7 +317,13 @@ impl StatefulWidget for InputTable {
         let row_heights: Vec<u16> = state
             .rows
             .iter()
-            .map(|row| row.iter().map(CellState::min_height).max().unwrap_or(1).max(1))
+            .map(|row| {
+                row.iter()
+                    .map(CellState::min_height)
+                    .max()
+                    .unwrap_or(1)
+                    .max(1)
+            })
             .collect();
 
         let total_height: u16 = row_heights.iter().copied().sum();
@@ -234,10 +350,7 @@ impl StatefulWidget for InputTable {
             && error_row
         {
             let y = area.y + total_height.min(area.height.saturating_sub(1));
-            let error_line = Line::from(Span::styled(
-                message.to_string(),
-                state.theme.error_style,
-            ));
+            let error_line = Line::from(Span::styled(message.to_string(), state.theme.error_style));
             buf.set_line(area.x, y, &error_line, area.width);
         }
     }
@@ -245,30 +358,32 @@ impl StatefulWidget for InputTable {
 
 impl HandleEvent for InputTable {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
-        if event.code == KeyCode::Esc && event.modifiers == KeyModifiers::NONE {
+        // Check bindings first.
+        if KeyBindings::matches(&state.bindings.cancel, &event) {
             return EventOutcome::Cancelled;
         }
-
-        if state.is_submit_key(&event) {
+        if KeyBindings::matches(&state.bindings.submit, &event) {
             return submit(state);
         }
 
+        // Tab/BackTab navigation.
         match (event.code, event.modifiers) {
             (KeyCode::Tab, m) if m == KeyModifiers::NONE => {
                 move_tab(state, 1);
-                EventOutcome::Consumed
+                return EventOutcome::Consumed;
             }
             (KeyCode::BackTab, _) => {
                 move_tab(state, -1);
-                EventOutcome::Consumed
+                return EventOutcome::Consumed;
             }
-            _ => {
-                if let Some(outcome) = try_navigate(state, event) {
-                    outcome
-                } else {
-                    route_to_focus(state, event)
-                }
-            }
+            _ => {}
+        }
+
+        // Arrow navigation / delegate to focused cell.
+        if let Some(outcome) = try_navigate(state, event) {
+            outcome
+        } else {
+            route_to_focus(state, event)
         }
     }
 }
@@ -317,8 +432,7 @@ fn submit(state: &mut InputTableState) -> EventOutcome {
                     } else if let Some(min) = choose_state.min_selections()
                         && selected.len() < min
                     {
-                        choose_state
-                            .set_validation_error(format!("Please select at least {min}"));
+                        choose_state.set_validation_error(format!("Please select at least {min}"));
                         if offender.is_none() {
                             offender = Some((r, c));
                         }
@@ -331,8 +445,7 @@ fn submit(state: &mut InputTableState) -> EventOutcome {
     if let Some((r, c)) = offender {
         state.focus_row = r;
         state.focus_col = c;
-        state.validation_error =
-            Some("One or more cells need your attention".into());
+        state.validation_error = Some("One or more cells need your attention".into());
         return EventOutcome::Consumed;
     }
 
@@ -363,11 +476,17 @@ fn route_to_focus(state: &mut InputTableState, event: KeyEvent) -> EventOutcome 
 }
 
 fn try_navigate(state: &mut InputTableState, event: KeyEvent) -> Option<EventOutcome> {
-    if event.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+    if event
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
         return None;
     }
     let inside_text_cell = matches!(
-        state.rows.get(state.focus_row).and_then(|r| r.get(state.focus_col)),
+        state
+            .rows
+            .get(state.focus_row)
+            .and_then(|r| r.get(state.focus_col)),
         Some(CellState::TextInput(_)) | Some(CellState::TextAreaInput(_))
     );
     match event.code {
@@ -489,6 +608,43 @@ fn move_tab(state: &mut InputTableState, delta: i32) {
     }
 }
 
+/// Applies a typed [`CellValue`] to an existing [`CellState`].
+///
+/// Used by [`InputTableState::new`] to seed cells from caller-provided
+/// row data.
+fn apply_cell_value(cell: &mut CellState, value: &CellValue) {
+    match (cell, value) {
+        (CellState::StaticText(text), CellValue::StaticText(v)) => {
+            *text = v.clone();
+        }
+        (CellState::BooleanSwitch(state), CellValue::Boolean(b)) => {
+            state.set_checked(*b);
+        }
+        (CellState::TextInput(state), CellValue::Text(v)) => {
+            *state = state.clone().with_value(v);
+        }
+        (CellState::TextAreaInput(state), CellValue::TextArea(lines)) => {
+            let line_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+            *state = state.clone().with_value(&line_refs);
+        }
+        (CellState::ChooseOne(state), CellValue::ChosenOne(Some(id))) => {
+            *state = state.clone().with_initial_selection(id);
+        }
+        (CellState::ChooseOne(_), CellValue::ChosenOne(None)) => {
+            // No selection to set; no-op
+        }
+        (CellState::ChooseMany(state), CellValue::ChosenMany(ids)) => {
+            let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+            *state = state.clone().with_initial_selection(&id_refs);
+        }
+        _ => {
+            // Type mismatch: silently no-op. The panic in `new()` already
+            // guards row length; mismatched types within a row are the
+            // caller's responsibility. We default to the column's seed value.
+        }
+    }
+}
+
 fn first_focusable_cell(rows: &[Vec<CellState>]) -> Option<(usize, usize)> {
     for (r, row) in rows.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
@@ -515,8 +671,7 @@ fn layout_rows(area: Rect, row_heights: &[u16], available: u16) -> Vec<Rect> {
     if row_heights.is_empty() || available == 0 {
         return Vec::new();
     }
-    let constraints: Vec<Constraint> =
-        row_heights.iter().map(|h| Constraint::Length(*h)).collect();
+    let constraints: Vec<Constraint> = row_heights.iter().map(|h| Constraint::Length(*h)).collect();
     let row_area = Rect::new(area.x, area.y, area.width, available);
     Layout::default()
         .direction(Direction::Vertical)
@@ -570,10 +725,10 @@ fn draw_cell(
             TextAreaInput.render(area, buf, state);
         }
         CellState::ChooseOne(state) => {
-            ChooseOne.render(area, buf, state);
+            ChooseOne::new().render(area, buf, state);
         }
         CellState::ChooseMany(state) => {
-            ChooseMany.render(area, buf, state);
+            ChooseMany::new().render(area, buf, state);
         }
     }
 }
@@ -591,6 +746,7 @@ fn paint_focus_background(area: Rect, buf: &mut Buffer, theme: &ComponentTheme) 
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::components::choose::{ChoiceInput, ChoiceOption};
@@ -608,21 +764,31 @@ mod tests {
 
     fn sample_columns() -> Vec<InputTableColumn> {
         vec![
-            InputTableColumn::StaticText("label".into()),
-            InputTableColumn::TextInput(TextInputConfig::default()),
-            InputTableColumn::BooleanSwitch(BooleanSwitchConfig::default()),
+            InputTableColumn::StaticText {
+                id: "label".into(),
+                text: "Row".into(),
+            },
+            InputTableColumn::TextInput {
+                id: "name".into(),
+                config: TextInputConfig::default(),
+            },
+            InputTableColumn::BooleanSwitch {
+                id: "active".into(),
+                config: BooleanSwitchConfig::default(),
+            },
         ]
     }
 
     #[test]
-    fn new_places_focus_on_first_focusable_cell() {
-        let state = InputTableState::new(sample_columns(), 2);
+    fn with_blank_rows_places_focus_on_first_focusable_cell() {
+        let state = InputTableState::with_blank_rows(sample_columns(), 2);
         assert_eq!(state.focus(), (0, 1));
     }
 
     #[test]
-    fn new_populates_row_count_by_column_schema() {
-        let state = InputTableState::new(sample_columns(), 3);
+    #[allow(deprecated)]
+    fn with_blank_rows_populates_row_count_by_column_schema() {
+        let state = InputTableState::with_blank_rows(sample_columns(), 3);
         assert_eq!(state.row_count(), 3);
         assert_eq!(state.col_count(), 3);
         assert_eq!(state.values().len(), 3);
@@ -631,7 +797,7 @@ mod tests {
 
     #[test]
     fn right_arrow_moves_focus_to_next_focusable_column() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         // initial focus is (0,1). Right should move to (0,2).
         let outcome = InputTable.handle_event(&mut state, press(KeyCode::Right));
         // Right inside a TextInput is consumed for cursor; not navigation.
@@ -642,7 +808,7 @@ mod tests {
 
     #[test]
     fn tab_moves_to_next_focusable_cell_across_rows() {
-        let mut state = InputTableState::new(sample_columns(), 2);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 2);
         assert_eq!(state.focus(), (0, 1));
         InputTable.handle_event(&mut state, press(KeyCode::Tab));
         assert_eq!(state.focus(), (0, 2));
@@ -653,7 +819,7 @@ mod tests {
 
     #[test]
     fn tab_wraps_to_first_cell() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         InputTable.handle_event(&mut state, press(KeyCode::Tab));
         assert_eq!(state.focus(), (0, 2));
         InputTable.handle_event(&mut state, press(KeyCode::Tab));
@@ -662,7 +828,7 @@ mod tests {
 
     #[test]
     fn backtab_moves_to_previous_focusable_cell() {
-        let mut state = InputTableState::new(sample_columns(), 2);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 2);
         // focus: (0,1) → Tab → (0,2) → BackTab → (0,1)
         InputTable.handle_event(&mut state, press(KeyCode::Tab));
         let event = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
@@ -672,7 +838,7 @@ mod tests {
 
     #[test]
     fn up_and_down_arrows_change_row() {
-        let mut state = InputTableState::new(sample_columns(), 3);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 3);
         // Start at (0,1). Down should go to (1,1).
         InputTable.handle_event(&mut state, press(KeyCode::Down));
         assert_eq!(state.focus(), (1, 1));
@@ -682,28 +848,28 @@ mod tests {
 
     #[test]
     fn up_from_first_row_wraps_to_last_row() {
-        let mut state = InputTableState::new(sample_columns(), 3);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 3);
         InputTable.handle_event(&mut state, press(KeyCode::Up));
         assert_eq!(state.focus(), (2, 1));
     }
 
     #[test]
     fn esc_cancels() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         let outcome = InputTable.handle_event(&mut state, press(KeyCode::Esc));
         assert_eq!(outcome, EventOutcome::Cancelled);
     }
 
     #[test]
     fn ctrl_s_submits_when_all_cells_valid() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         let outcome = InputTable.handle_event(&mut state, ctrl(KeyCode::Char('s')));
         assert_eq!(outcome, EventOutcome::Submitted);
     }
 
     #[test]
     fn typing_into_focused_text_input_updates_value() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         InputTable.handle_event(&mut state, press(KeyCode::Char('h')));
         InputTable.handle_event(&mut state, press(KeyCode::Char('i')));
         assert_eq!(state.values()[0][1], "hi");
@@ -711,7 +877,7 @@ mod tests {
 
     #[test]
     fn space_in_focused_boolean_switch_toggles() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         // Move focus from TextInput (col 1) to BooleanSwitch (col 2).
         InputTable.handle_event(&mut state, press(KeyCode::Tab));
         assert_eq!(state.focus(), (0, 2));
@@ -725,10 +891,13 @@ mod tests {
             .with_options(vec![ChoiceOption::new("a", "A", "alpha")])
             .required();
         let columns = vec![
-            InputTableColumn::TextInput(TextInputConfig::default()),
+            InputTableColumn::TextInput {
+                id: "field".into(),
+                config: TextInputConfig::default(),
+            },
             InputTableColumn::ChooseOne(input),
         ];
-        let mut state = InputTableState::new(columns, 1);
+        let mut state = InputTableState::with_blank_rows(columns, 1);
         assert_eq!(state.focus(), (0, 0));
         let outcome = InputTable.handle_event(&mut state, ctrl(KeyCode::Char('s')));
         assert_eq!(outcome, EventOutcome::Consumed);
@@ -742,37 +911,44 @@ mod tests {
             .with_options(vec![ChoiceOption::new("a", "A", "alpha")])
             .required();
         let columns = vec![InputTableColumn::ChooseOne(input)];
-        let mut state = InputTableState::new(columns, 1);
+        let mut state = InputTableState::with_blank_rows(columns, 1);
         InputTable.handle_event(&mut state, ctrl(KeyCode::Char('s')));
         // Fix: select the single option.
         InputTable.handle_event(&mut state, press(KeyCode::Char(' ')));
         let outcome = InputTable.handle_event(&mut state, ctrl(KeyCode::Char('s')));
         assert_eq!(outcome, EventOutcome::Submitted);
-        assert_eq!(state.values()[0][0], "alpha");
+        let rows = state.rows_typed();
+        assert_eq!(
+            rows[0].cells[0].value,
+            CellValue::ChosenOne(Some("alpha".into()))
+        );
     }
 
     #[test]
+    #[allow(deprecated)]
     fn set_cell_initial_replaces_text_input_value() {
-        let mut state = InputTableState::new(sample_columns(), 2);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 2);
         state.set_cell_initial(1, 1, "hello");
         assert_eq!(state.values()[1][1], "hello");
     }
 
     #[test]
+    #[allow(deprecated)]
     fn set_cell_initial_on_static_text_overrides_display() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         state.set_cell_initial(0, 0, "custom");
         assert_eq!(state.values()[0][0], "custom");
     }
 
     #[test]
+    #[allow(deprecated)]
     fn values_joins_choose_many_with_comma() {
         let input = ChoiceInput::new("c", "p").with_options(vec![
             ChoiceOption::new("a", "A", "alpha"),
             ChoiceOption::new("b", "B", "beta"),
         ]);
         let columns = vec![InputTableColumn::ChooseMany(input)];
-        let mut state = InputTableState::new(columns, 1);
+        let mut state = InputTableState::with_blank_rows(columns, 1);
         state.set_cell_initial(0, 0, "a,b");
         assert_eq!(state.values()[0][0], "alpha,beta");
     }
@@ -780,14 +956,23 @@ mod tests {
     #[test]
     fn render_mixed_cell_table_paints_static_and_body() {
         let columns = vec![
-            InputTableColumn::StaticText("ID".into()),
-            InputTableColumn::TextInput(TextInputConfig {
-                initial: "alpha".into(),
-                ..TextInputConfig::default()
-            }),
-            InputTableColumn::BooleanSwitch(BooleanSwitchConfig::default()),
+            InputTableColumn::StaticText {
+                id: "row".into(),
+                text: "ID".into(),
+            },
+            InputTableColumn::TextInput {
+                id: "name".into(),
+                config: TextInputConfig {
+                    initial: "alpha".into(),
+                    ..TextInputConfig::default()
+                },
+            },
+            InputTableColumn::BooleanSwitch {
+                id: "active".into(),
+                config: BooleanSwitchConfig::default(),
+            },
         ];
-        let mut state = InputTableState::new(columns, 1);
+        let mut state = InputTableState::with_blank_rows(columns, 1);
         let area = Rect::new(0, 0, 36, 1);
         let mut buf = Buffer::empty(area);
         InputTable.render(area, &mut buf, &mut state);
@@ -798,18 +983,24 @@ mod tests {
         }
         let row = row.trim_end();
         assert!(row.starts_with("ID"), "expected static text, got {row:?}");
-        assert!(row.contains("alpha"), "expected text-input value, got {row:?}");
+        assert!(
+            row.contains("alpha"),
+            "expected text-input value, got {row:?}"
+        );
     }
 
     #[test]
     fn render_supports_text_area_cell_with_preferred_height() {
-        let columns = vec![InputTableColumn::TextAreaInput(TextAreaInputConfig {
-            preferred_width: 10,
-            preferred_height: 2,
-            initial: vec!["a".into(), "b".into()],
-            scrollbar: false,
-        })];
-        let mut state = InputTableState::new(columns, 1);
+        let columns = vec![InputTableColumn::TextAreaInput {
+            id: "notes".into(),
+            config: TextAreaInputConfig {
+                preferred_width: 10,
+                preferred_height: 2,
+                initial: vec!["a".into(), "b".into()],
+                scrollbar: false,
+            },
+        }];
+        let mut state = InputTableState::with_blank_rows(columns, 1);
         let area = Rect::new(0, 0, 10, 3);
         let mut buf = Buffer::empty(area);
         InputTable.render(area, &mut buf, &mut state);
@@ -825,8 +1016,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn values_encodes_boolean_as_true_or_false() {
-        let mut state = InputTableState::new(sample_columns(), 1);
+        let mut state = InputTableState::with_blank_rows(sample_columns(), 1);
         // Focus on BooleanSwitch (col 2), toggle on.
         InputTable.handle_event(&mut state, press(KeyCode::Tab));
         InputTable.handle_event(&mut state, press(KeyCode::Char(' ')));
@@ -835,11 +1027,84 @@ mod tests {
 
     #[test]
     fn custom_submit_key_replaces_default() {
-        let columns = vec![InputTableColumn::TextInput(TextInputConfig::default())];
-        let mut state = InputTableState::new(columns, 1)
+        let columns = vec![InputTableColumn::TextInput {
+            id: "field".into(),
+            config: TextInputConfig::default(),
+        }];
+        let mut state = InputTableState::with_blank_rows(columns, 1)
             .with_submit_key(KeyCode::F(2), KeyModifiers::NONE);
         let outcome =
             InputTable.handle_event(&mut state, KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
         assert_eq!(outcome, EventOutcome::Submitted);
+    }
+
+    #[test]
+    fn new_accepts_typed_row_vec() {
+        let columns = vec![
+            InputTableColumn::StaticText {
+                id: "row".into(),
+                text: "1".into(),
+            },
+            InputTableColumn::BooleanSwitch {
+                id: "active".into(),
+                config: BooleanSwitchConfig::default(),
+            },
+        ];
+        let initial_rows = vec![vec![
+            CellValue::StaticText("1".into()),
+            CellValue::Boolean(true),
+        ]];
+        let state = InputTableState::new(columns, initial_rows);
+        assert_eq!(state.row_count(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "row 0 has 1 cells, expected 2")]
+    fn new_panics_on_length_mismatch() {
+        let columns = vec![
+            InputTableColumn::StaticText {
+                id: "a".into(),
+                text: "A".into(),
+            },
+            InputTableColumn::StaticText {
+                id: "b".into(),
+                text: "B".into(),
+            },
+        ];
+        let initial_rows = vec![vec![CellValue::StaticText("only_one".into())]];
+        let _state = InputTableState::new(columns, initial_rows);
+    }
+
+    #[test]
+    fn rows_typed_returns_boolean_cell_value() {
+        let columns = vec![InputTableColumn::BooleanSwitch {
+            id: "active".into(),
+            config: BooleanSwitchConfig {
+                initial: true,
+                ..BooleanSwitchConfig::default()
+            },
+        }];
+        let state = InputTableState::with_blank_rows(columns, 1);
+        let rows = state.rows_typed();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cells[0].column_id, "active");
+        assert_eq!(rows[0].cells[0].value, CellValue::Boolean(true));
+    }
+
+    #[test]
+    fn rows_typed_returns_chosen_many_as_vec() {
+        let input = ChoiceInput::new("c", "p").with_options(vec![
+            ChoiceOption::new("a", "A", "alpha"),
+            ChoiceOption::new("b", "B", "beta"),
+        ]);
+        let columns = vec![InputTableColumn::ChooseMany(input)];
+        let mut state = InputTableState::with_blank_rows(columns, 1);
+        state.set_cell_initial(0, 0, "a,b");
+        let rows = state.rows_typed();
+        assert_eq!(rows[0].cells[0].column_id, "c");
+        assert_eq!(
+            rows[0].cells[0].value,
+            CellValue::ChosenMany(vec!["alpha".into(), "beta".into()])
+        );
     }
 }

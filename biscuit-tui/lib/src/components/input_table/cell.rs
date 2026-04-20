@@ -7,15 +7,114 @@
 
 use crossterm::event::KeyEvent;
 
+/// Typed value captured by a single cell.
+///
+/// This enum preserves the semantic type of each cell's captured value
+/// rather than flattening everything to strings. Library consumers
+/// should call [`InputTableState::rows_typed`] to retrieve values in
+/// this format.
+///
+/// [`InputTableState::rows_typed`]: super::InputTableState::rows_typed
+#[derive(Debug, Clone, PartialEq)]
+pub enum CellValue {
+    /// Display-only text from a [`CellState::StaticText`] cell.
+    StaticText(String),
+    /// Boolean value from a [`CellState::BooleanSwitch`] cell.
+    Boolean(bool),
+    /// Single-line text from a [`CellState::TextInput`] cell.
+    Text(String),
+    /// Multi-line text from a [`CellState::TextAreaInput`] cell
+    /// (one `String` per line).
+    TextArea(Vec<String>),
+    /// Selected option value from a [`CellState::ChooseOne`] cell
+    /// (`None` when no option is selected).
+    ChosenOne(Option<String>),
+    /// Selected option values from a [`CellState::ChooseMany`] cell
+    /// (in option order).
+    ChosenMany(Vec<String>),
+}
+
+/// One captured row from an [`InputTable`](super::InputTable).
+///
+/// A row is a vector of [`RowCell`]s in column order, pairing each
+/// column's id with its typed [`CellValue`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    /// Cells in column order.
+    pub cells: Vec<RowCell>,
+}
+
+/// A single cell within a [`Row`], pairing a column id with its typed value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RowCell {
+    /// The column identifier from the corresponding [`InputTableColumn`](super::InputTableColumn).
+    pub column_id: String,
+    /// The captured, typed value.
+    pub value: CellValue,
+}
+
+impl Row {
+    /// Retrieves the cell value for a given column id.
+    ///
+    /// ## Returns
+    ///
+    /// `Some(&CellValue)` when the column id matches a cell in this row,
+    /// `None` otherwise.
+    pub fn get(&self, column_id: &str) -> Option<&CellValue> {
+        self.cells
+            .iter()
+            .find(|c| c.column_id == column_id)
+            .map(|c| &c.value)
+    }
+
+    /// Retrieves a boolean value by column id.
+    ///
+    /// ## Returns
+    ///
+    /// `Some(bool)` when the column exists and contains a
+    /// [`CellValue::Boolean`], `None` otherwise.
+    pub fn get_boolean(&self, column_id: &str) -> Option<bool> {
+        match self.get(column_id)? {
+            CellValue::Boolean(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Retrieves a text value by column id.
+    ///
+    /// ## Returns
+    ///
+    /// `Some(&str)` when the column exists and contains
+    /// [`CellValue::Text`] or [`CellValue::StaticText`], `None`
+    /// otherwise.
+    pub fn get_text(&self, column_id: &str) -> Option<&str> {
+        match self.get(column_id)? {
+            CellValue::Text(s) | CellValue::StaticText(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Retrieves a multi-select value by column id.
+    ///
+    /// ## Returns
+    ///
+    /// `Some(&[String])` when the column exists and contains
+    /// [`CellValue::ChosenMany`], `None` otherwise.
+    pub fn get_chosen_many(&self, column_id: &str) -> Option<&[String]> {
+        match self.get(column_id)? {
+            CellValue::ChosenMany(vec) => Some(vec.as_slice()),
+            _ => None,
+        }
+    }
+}
+
 use crate::components::{
     BooleanSwitch, BooleanSwitchState, ChooseMany, ChooseManyState, ChooseOne, ChooseOneState,
     TextAreaInput, TextAreaInputState, TextInput, TextInputState,
 };
 use crate::core::{EventOutcome, HandleEvent, ValidationState};
 
-use super::column::{
-    BooleanSwitchConfig, InputTableColumn, TextAreaInputConfig, TextInputConfig,
-};
+use super::column::{BooleanSwitchConfig, InputTableColumn, TextAreaInputConfig, TextInputConfig};
 
 /// Runtime state for a single cell of an [`InputTable`].
 ///
@@ -46,14 +145,14 @@ impl CellState {
     /// payload.
     pub fn from_column(column: &InputTableColumn) -> Self {
         match column {
-            InputTableColumn::StaticText(text) => CellState::StaticText(text.clone()),
-            InputTableColumn::BooleanSwitch(config) => CellState::BooleanSwitch(
-                build_boolean_switch_state(config),
-            ),
-            InputTableColumn::TextInput(config) => {
+            InputTableColumn::StaticText { text, .. } => CellState::StaticText(text.clone()),
+            InputTableColumn::BooleanSwitch { config, .. } => {
+                CellState::BooleanSwitch(build_boolean_switch_state(config))
+            }
+            InputTableColumn::TextInput { config, .. } => {
                 CellState::TextInput(build_text_input_state(config))
             }
-            InputTableColumn::TextAreaInput(config) => {
+            InputTableColumn::TextAreaInput { config, .. } => {
                 CellState::TextAreaInput(build_text_area_input_state(config))
             }
             InputTableColumn::ChooseOne(input) => {
@@ -95,8 +194,33 @@ impl CellState {
             CellState::StaticText(_) | CellState::BooleanSwitch(_) => None,
             CellState::TextInput(state) => state.validation_error(),
             CellState::TextAreaInput(state) => state.validation_error(),
-            CellState::ChooseOne(state) => <ChooseOneState as ValidationState>::validation_error(state),
-            CellState::ChooseMany(state) => <ChooseManyState as ValidationState>::validation_error(state),
+            CellState::ChooseOne(state) => {
+                <ChooseOneState as ValidationState>::validation_error(state)
+            }
+            CellState::ChooseMany(state) => {
+                <ChooseManyState as ValidationState>::validation_error(state)
+            }
+        }
+    }
+
+    /// Returns the cell's captured value as a typed [`CellValue`].
+    ///
+    /// Preferred for library consumers who need to preserve semantic
+    /// types (booleans, multi-line text, multi-select arrays).
+    pub fn to_cell_value(&self) -> CellValue {
+        match self {
+            CellState::StaticText(text) => CellValue::StaticText(text.clone()),
+            CellState::BooleanSwitch(state) => CellValue::Boolean(state.checked()),
+            CellState::TextInput(state) => CellValue::Text(state.value().to_string()),
+            CellState::TextAreaInput(state) => CellValue::TextArea(state.lines().to_vec()),
+            CellState::ChooseOne(state) => CellValue::ChosenOne(state.selected_value().cloned()),
+            CellState::ChooseMany(state) => CellValue::ChosenMany(
+                state
+                    .selected_values()
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<String>>(),
+            ),
         }
     }
 
@@ -116,19 +240,20 @@ impl CellState {
         match self {
             CellState::StaticText(text) => text.clone(),
             CellState::BooleanSwitch(state) => {
-                if state.checked() { "true".into() } else { "false".into() }
+                if state.checked() {
+                    "true".into()
+                } else {
+                    "false".into()
+                }
             }
             CellState::TextInput(state) => state.value().to_string(),
             CellState::TextAreaInput(state) => state.value(),
-            CellState::ChooseOne(state) => state
-                .selected_value()
-                .map(str::to_string)
-                .unwrap_or_default(),
+            CellState::ChooseOne(state) => state.selected_value().cloned().unwrap_or_default(),
             CellState::ChooseMany(state) => state
                 .selected_values()
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect::<Vec<_>>()
+                .into_iter()
+                .cloned()
+                .collect::<Vec<String>>()
                 .join(","),
         }
     }
@@ -143,8 +268,8 @@ impl CellState {
             CellState::BooleanSwitch(state) => BooleanSwitch.handle_event(state, event),
             CellState::TextInput(state) => TextInput.handle_event(state, event),
             CellState::TextAreaInput(state) => TextAreaInput.handle_event(state, event),
-            CellState::ChooseOne(state) => ChooseOne.handle_event(state, event),
-            CellState::ChooseMany(state) => ChooseMany.handle_event(state, event),
+            CellState::ChooseOne(state) => ChooseOne::new().handle_event(state, event),
+            CellState::ChooseMany(state) => ChooseMany::new().handle_event(state, event),
         }
     }
 
@@ -231,19 +356,28 @@ mod tests {
 
     #[test]
     fn static_text_cell_is_not_focusable_and_ignores_events() {
-        let column = InputTableColumn::StaticText("Name".into());
+        let column = InputTableColumn::StaticText {
+            id: "row".into(),
+            text: "Name".into(),
+        };
         let mut cell = CellState::from_column(&column);
         assert!(!cell.is_focusable());
         assert_eq!(cell.value_string(), "Name");
-        assert_eq!(cell.handle_event(press(KeyCode::Char('x'))), EventOutcome::Ignored);
+        assert_eq!(
+            cell.handle_event(press(KeyCode::Char('x'))),
+            EventOutcome::Ignored
+        );
     }
 
     #[test]
     fn boolean_switch_cell_reflects_config_initial() {
-        let column = InputTableColumn::BooleanSwitch(BooleanSwitchConfig {
-            initial: true,
-            ..BooleanSwitchConfig::default()
-        });
+        let column = InputTableColumn::BooleanSwitch {
+            id: "active".into(),
+            config: BooleanSwitchConfig {
+                initial: true,
+                ..BooleanSwitchConfig::default()
+            },
+        };
         let cell = CellState::from_column(&column);
         assert!(cell.is_focusable());
         assert_eq!(cell.value_string(), "true");
@@ -251,7 +385,10 @@ mod tests {
 
     #[test]
     fn boolean_switch_cell_accepts_space_toggle() {
-        let column = InputTableColumn::BooleanSwitch(BooleanSwitchConfig::default());
+        let column = InputTableColumn::BooleanSwitch {
+            id: "toggle".into(),
+            config: BooleanSwitchConfig::default(),
+        };
         let mut cell = CellState::from_column(&column);
         cell.handle_event(press(KeyCode::Char(' ')));
         assert_eq!(cell.value_string(), "true");
@@ -259,7 +396,10 @@ mod tests {
 
     #[test]
     fn text_input_cell_accepts_typing() {
-        let column = InputTableColumn::TextInput(TextInputConfig::default());
+        let column = InputTableColumn::TextInput {
+            id: "name".into(),
+            config: TextInputConfig::default(),
+        };
         let mut cell = CellState::from_column(&column);
         cell.handle_event(press(KeyCode::Char('h')));
         cell.handle_event(press(KeyCode::Char('i')));
@@ -268,10 +408,13 @@ mod tests {
 
     #[test]
     fn text_input_cell_honours_max_length() {
-        let column = InputTableColumn::TextInput(TextInputConfig {
-            initial: String::new(),
-            max_length: Some(2),
-        });
+        let column = InputTableColumn::TextInput {
+            id: "code".into(),
+            config: TextInputConfig {
+                initial: String::new(),
+                max_length: Some(2),
+            },
+        };
         let mut cell = CellState::from_column(&column);
         for c in "abcdef".chars() {
             cell.handle_event(press(KeyCode::Char(c)));
@@ -281,10 +424,13 @@ mod tests {
 
     #[test]
     fn text_area_input_cell_returns_joined_lines() {
-        let column = InputTableColumn::TextAreaInput(TextAreaInputConfig {
-            initial: vec!["alpha".into(), "beta".into()],
-            ..TextAreaInputConfig::default()
-        });
+        let column = InputTableColumn::TextAreaInput {
+            id: "notes".into(),
+            config: TextAreaInputConfig {
+                initial: vec!["alpha".into(), "beta".into()],
+                ..TextAreaInputConfig::default()
+            },
+        };
         let cell = CellState::from_column(&column);
         assert_eq!(cell.value_string(), "alpha\nbeta");
     }
@@ -342,5 +488,113 @@ mod tests {
         let column = InputTableColumn::ChooseOne(input);
         let cell = CellState::from_column(&column);
         assert_eq!(cell.min_height(), 3);
+    }
+
+    #[test]
+    fn cell_value_boolean_preserves_type() {
+        let column = InputTableColumn::BooleanSwitch {
+            id: "active".into(),
+            config: BooleanSwitchConfig {
+                initial: true,
+                ..BooleanSwitchConfig::default()
+            },
+        };
+        let cell = CellState::from_column(&column);
+        assert_eq!(cell.to_cell_value(), CellValue::Boolean(true));
+    }
+
+    #[test]
+    fn cell_value_chosen_many_preserves_array() {
+        let input = ChoiceInput::new("c", "p").with_options(vec![
+            ChoiceOption::new("a", "A", "alpha"),
+            ChoiceOption::new("b", "B", "beta"),
+            ChoiceOption::new("c", "C", "gamma"),
+        ]);
+        let column = InputTableColumn::ChooseMany(input);
+        let mut cell = CellState::from_column(&column);
+        cell.set_initial_value("a, c");
+        assert_eq!(
+            cell.to_cell_value(),
+            CellValue::ChosenMany(vec!["alpha".into(), "gamma".into()])
+        );
+    }
+
+    #[test]
+    fn cell_value_text_area_preserves_lines() {
+        let column = InputTableColumn::TextAreaInput {
+            id: "notes".into(),
+            config: TextAreaInputConfig {
+                initial: vec!["line1".into(), "line2".into()],
+                ..TextAreaInputConfig::default()
+            },
+        };
+        let cell = CellState::from_column(&column);
+        assert_eq!(
+            cell.to_cell_value(),
+            CellValue::TextArea(vec!["line1".into(), "line2".into()])
+        );
+    }
+
+    #[test]
+    fn row_get_retrieves_by_column_id() {
+        let row = Row {
+            cells: vec![
+                RowCell {
+                    column_id: "name".into(),
+                    value: CellValue::Text("Alice".into()),
+                },
+                RowCell {
+                    column_id: "active".into(),
+                    value: CellValue::Boolean(true),
+                },
+            ],
+        };
+        assert_eq!(row.get("name"), Some(&CellValue::Text("Alice".into())));
+        assert_eq!(row.get("active"), Some(&CellValue::Boolean(true)));
+        assert_eq!(row.get("missing"), None);
+    }
+
+    #[test]
+    fn row_get_boolean_extracts_bool_value() {
+        let row = Row {
+            cells: vec![RowCell {
+                column_id: "active".into(),
+                value: CellValue::Boolean(true),
+            }],
+        };
+        assert_eq!(row.get_boolean("active"), Some(true));
+        assert_eq!(row.get_boolean("missing"), None);
+    }
+
+    #[test]
+    fn row_get_text_extracts_string() {
+        let row = Row {
+            cells: vec![
+                RowCell {
+                    column_id: "name".into(),
+                    value: CellValue::Text("Bob".into()),
+                },
+                RowCell {
+                    column_id: "label".into(),
+                    value: CellValue::StaticText("Row 1".into()),
+                },
+            ],
+        };
+        assert_eq!(row.get_text("name"), Some("Bob"));
+        assert_eq!(row.get_text("label"), Some("Row 1"));
+    }
+
+    #[test]
+    fn row_get_chosen_many_extracts_vec() {
+        let row = Row {
+            cells: vec![RowCell {
+                column_id: "choices".into(),
+                value: CellValue::ChosenMany(vec!["a".into(), "b".into()]),
+            }],
+        };
+        assert_eq!(
+            row.get_chosen_many("choices"),
+            Some(["a".to_string(), "b".to_string()].as_slice())
+        );
     }
 }

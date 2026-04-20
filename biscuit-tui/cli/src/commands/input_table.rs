@@ -21,19 +21,19 @@
 //! ]
 //! ```
 //!
-//! `--rows` is a JSON array of arrays of strings; each inner array
-//! supplies per-cell initial values matching the column order.
+//! `--rows` is a JSON array of per-row cell arrays; each inner array
+//! supplies typed per-cell initial values matching the column order.
 
 use std::io::{self, Write};
 
 use clap::Args;
 use serde_json::{Value, json};
-use tui_chrome::{
-    CANCELLED_KIND, ChoiceInput, ChoiceOption, InputTable, InputTableColumn, InputTableState,
-    run_standalone,
-};
 use tui_chrome::components::input_table::{
-    BooleanSwitchConfig, TextAreaInputConfig, TextInputConfig,
+    BooleanSwitchConfig, CellValue, TextAreaInputConfig, TextInputConfig,
+};
+use tui_chrome::{
+    CANCELLED_KIND, ChoiceInput, ChoiceOption, InputTable, InputTableColumn, InputTableState, Row,
+    run_standalone,
 };
 
 use crate::output::OutputMode;
@@ -45,15 +45,10 @@ pub struct InputTableArgs {
     #[arg(long)]
     pub columns: String,
 
-    /// JSON array of row value arrays (strings). When omitted a
+    /// JSON array of row value arrays. When omitted a
     /// single empty row is created.
     #[arg(long)]
     pub rows: Option<String>,
-
-    /// Render inline in `N` rows below the cursor instead of
-    /// fullscreen.
-    #[arg(long)]
-    pub height: Option<u16>,
 }
 
 /// Runs the `input-table` subcommand.
@@ -62,26 +57,40 @@ pub struct InputTableArgs {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error or an invalid JSON payload.
-pub fn run(args: InputTableArgs, output: OutputMode) -> io::Result<i32> {
+pub fn run(args: InputTableArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+    let stdout = io::stdout();
+    let mut lock = stdout.lock();
+    run_with_writer(args, output, height, &mut lock, |state, height| {
+        run_standalone(InputTable::new(), state, height)
+    })
+}
+
+fn run_with_writer<F, W>(
+    args: InputTableArgs,
+    output: OutputMode,
+    height: Option<u16>,
+    writer: &mut W,
+    run_prompt: F,
+) -> io::Result<i32>
+where
+    F: FnOnce(InputTableState, Option<u16>) -> io::Result<Vec<Row>>,
+    W: Write,
+{
     let column_specs = parse_columns(&args.columns)?;
-    let columns: Vec<InputTableColumn> =
-        column_specs.iter().map(|spec| spec.to_column()).collect();
-    let row_values = parse_rows(args.rows.as_deref())?;
+    let columns: Vec<InputTableColumn> = column_specs.iter().map(|spec| spec.to_column()).collect();
+    let row_values = parse_rows_typed(&column_specs, args.rows.as_deref())?;
 
     let row_count = row_values.len().max(1);
-    let mut state = InputTableState::new(columns, row_count);
-    for (row_idx, row) in row_values.iter().enumerate() {
-        for (col_idx, value) in row.iter().enumerate() {
-            state.set_cell_initial(row_idx, col_idx, value);
-        }
-    }
+    let state = if row_values.is_empty() {
+        InputTableState::with_blank_rows(columns, row_count)
+    } else {
+        InputTableState::new(columns, row_values)
+    };
 
-    match run_standalone(InputTable::new(), state, args.height) {
-        Ok(matrix) => {
-            let stdout = io::stdout();
-            let mut lock = stdout.lock();
-            write_matrix(&mut lock, &column_specs, &matrix, output)?;
-            lock.flush()?;
+    match run_prompt(state, height) {
+        Ok(rows) => {
+            write_matrix(writer, &rows, output)?;
+            writer.flush()?;
             Ok(0)
         }
         Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
@@ -90,6 +99,7 @@ pub fn run(args: InputTableArgs, output: OutputMode) -> io::Result<i32> {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum ColumnSpec {
     StaticText {
         id: String,
@@ -118,6 +128,7 @@ enum ColumnSpec {
 }
 
 impl ColumnSpec {
+    #[allow(dead_code)]
     fn id(&self) -> &str {
         match self {
             Self::StaticText { id, .. }
@@ -131,10 +142,10 @@ impl ColumnSpec {
 
     fn to_column(&self) -> InputTableColumn {
         match self.clone() {
-            Self::StaticText { text, .. } => InputTableColumn::StaticText(text),
-            Self::TextInput { config, .. } => InputTableColumn::TextInput(config),
-            Self::BooleanSwitch { config, .. } => InputTableColumn::BooleanSwitch(config),
-            Self::TextAreaInput { config, .. } => InputTableColumn::TextAreaInput(config),
+            Self::StaticText { id, text } => InputTableColumn::StaticText { id, text },
+            Self::TextInput { id, config } => InputTableColumn::TextInput { id, config },
+            Self::BooleanSwitch { id, config } => InputTableColumn::BooleanSwitch { id, config },
+            Self::TextAreaInput { id, config } => InputTableColumn::TextAreaInput { id, config },
             Self::ChooseOne { input, .. } => InputTableColumn::ChooseOne(input),
             Self::ChooseMany { input, .. } => InputTableColumn::ChooseMany(input),
         }
@@ -164,15 +175,12 @@ fn parse_column(index: usize, value: &Value) -> io::Result<ColumnSpec> {
             format!("column {index}: expected object"),
         )
     })?;
-    let kind = object
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("column {index}: missing 'type' string"),
-            )
-        })?;
+    let kind = object.get("type").and_then(Value::as_str).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("column {index}: missing 'type' string"),
+        )
+    })?;
     let id = object
         .get("id")
         .and_then(Value::as_str)
@@ -212,7 +220,10 @@ fn parse_column(index: usize, value: &Value) -> io::Result<ColumnSpec> {
             })
         }
         "boolean-switch" => {
-            let initial = object.get("initial").and_then(Value::as_bool).unwrap_or(false);
+            let initial = object
+                .get("initial")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let on_label = object
                 .get("on_label")
                 .and_then(Value::as_str)
@@ -298,19 +309,18 @@ fn build_choice_input(
         .iter()
         .map(|item| -> io::Result<ChoiceOption<String>> {
             match item {
-                Value::String(label) => {
-                    Ok(ChoiceOption::new(label.clone(), label.clone(), label.clone()))
-                }
+                Value::String(label) => Ok(ChoiceOption::new(
+                    label.clone(),
+                    label.clone(),
+                    label.clone(),
+                )),
                 Value::Object(map) => {
-                    let label = map
-                        .get("label")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| {
-                            io::Error::new(
-                                io::ErrorKind::InvalidInput,
-                                "option object missing 'label' string",
-                            )
-                        })?;
+                    let label = map.get("label").and_then(Value::as_str).ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "option object missing 'label' string",
+                        )
+                    })?;
                     let option_id = map
                         .get("id")
                         .and_then(Value::as_str)
@@ -331,9 +341,12 @@ fn build_choice_input(
         })
         .collect::<io::Result<_>>()?;
 
-    let mut input: ChoiceInput<String> =
-        ChoiceInput::new(id.to_string(), "").with_options(options);
-    if object.get("required").and_then(Value::as_bool).unwrap_or(false) {
+    let mut input: ChoiceInput<String> = ChoiceInput::new(id.to_string(), "").with_options(options);
+    if object
+        .get("required")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         input = input.required();
     }
     if let Some(min) = object.get("min_selections").and_then(Value::as_u64) {
@@ -345,7 +358,11 @@ fn build_choice_input(
     Ok(input)
 }
 
-fn parse_rows(json: Option<&str>) -> io::Result<Vec<Vec<String>>> {
+/// Parses `--rows` JSON into typed `Vec<Vec<CellValue>>`.
+///
+/// Each inner array is interpreted column-aware: boolean columns accept
+/// truthy/falsy values, choose-many accepts arrays or comma-strings, etc.
+fn parse_rows_typed(columns: &[ColumnSpec], json: Option<&str>) -> io::Result<Vec<Vec<CellValue>>> {
     let Some(source) = json else {
         return Ok(Vec::new());
     };
@@ -354,58 +371,139 @@ fn parse_rows(json: Option<&str>) -> io::Result<Vec<Vec<String>>> {
     let array = value.as_array().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "--rows must be a JSON array")
     })?;
+
     array
         .iter()
         .map(|row| {
             let inner = row.as_array().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "each row must be a JSON array of strings",
-                )
+                io::Error::new(io::ErrorKind::InvalidInput, "each row must be a JSON array")
             })?;
+            if inner.len() != columns.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("row has {} cells, expected {}", inner.len(), columns.len()),
+                ));
+            }
             Ok(inner
                 .iter()
-                .map(|v| match v {
-                    Value::String(s) => s.clone(),
-                    Value::Null => String::new(),
-                    other => other.to_string(),
-                })
+                .zip(columns.iter())
+                .map(|(val, col)| parse_cell_value(val, col))
                 .collect())
         })
         .collect()
 }
 
-fn write_matrix<W: Write>(
-    writer: &mut W,
-    columns: &[ColumnSpec],
-    matrix: &[Vec<String>],
-    mode: OutputMode,
-) -> io::Result<()> {
-    // InputTable always emits JSON-shaped data. `Raw`/`Json` both
-    // produce pretty JSON; `Null` emits NUL-separated `k=v` tokens for
-    // shell consumption.
+/// Parses a single JSON cell value into the appropriate `CellValue` variant
+/// based on the column type.
+fn parse_cell_value(val: &Value, col: &ColumnSpec) -> CellValue {
+    match col {
+        ColumnSpec::StaticText { .. } => CellValue::StaticText(value_to_string(val)),
+        ColumnSpec::BooleanSwitch { .. } => {
+            let truthy = match val {
+                Value::Bool(b) => *b,
+                Value::String(s) => {
+                    let lower = s.trim().to_ascii_lowercase();
+                    matches!(lower.as_str(), "true" | "on" | "yes" | "1")
+                }
+                Value::Number(n) => n.as_i64().unwrap_or(0) != 0,
+                _ => false,
+            };
+            CellValue::Boolean(truthy)
+        }
+        ColumnSpec::TextInput { .. } => CellValue::Text(value_to_string(val)),
+        ColumnSpec::TextAreaInput { .. } => {
+            if let Value::Array(arr) = val {
+                CellValue::TextArea(arr.iter().map(value_to_string).collect())
+            } else {
+                let text = value_to_string(val);
+                CellValue::TextArea(text.split('\n').map(|s| s.to_string()).collect())
+            }
+        }
+        ColumnSpec::ChooseOne { .. } => {
+            let id = value_to_string(val);
+            if id.is_empty() {
+                CellValue::ChosenOne(None)
+            } else {
+                CellValue::ChosenOne(Some(id))
+            }
+        }
+        ColumnSpec::ChooseMany { .. } => {
+            if let Value::Array(arr) = val {
+                CellValue::ChosenMany(arr.iter().map(value_to_string).collect())
+            } else {
+                let text = value_to_string(val);
+                CellValue::ChosenMany(
+                    text.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                )
+            }
+        }
+    }
+}
+
+fn value_to_string(val: &Value) -> String {
+    match val {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+/// Writes typed rows as JSON or NUL-separated key=value pairs.
+fn write_matrix<W: Write>(writer: &mut W, rows: &[Row], mode: OutputMode) -> io::Result<()> {
     match mode {
         OutputMode::Raw | OutputMode::Json => {
-            let rows: Vec<Value> = matrix
+            let json_rows: Vec<Value> = rows
                 .iter()
                 .map(|row| {
                     let mut object = serde_json::Map::new();
-                    for (col, value) in columns.iter().zip(row.iter()) {
-                        object.insert(col.id().to_string(), json!(value));
+                    for cell in &row.cells {
+                        let json_value = match &cell.value {
+                            CellValue::StaticText(s) | CellValue::Text(s) => json!(s),
+                            CellValue::Boolean(b) => json!(b),
+                            CellValue::TextArea(lines) => json!(lines.join("\n")),
+                            CellValue::ChosenOne(opt) => {
+                                opt.as_ref().map_or(Value::Null, |s| json!(s))
+                            }
+                            CellValue::ChosenMany(vec) => json!(vec),
+                        };
+                        object.insert(cell.column_id.clone(), json_value);
                     }
                     Value::Object(object)
                 })
                 .collect();
-            let encoded = serde_json::to_string(&Value::Array(rows))
+            let encoded = serde_json::to_string(&Value::Array(json_rows))
                 .unwrap_or_else(|_| String::from("[]"));
             writer.write_all(encoded.as_bytes())?;
             writer.write_all(b"\n")
         }
         OutputMode::Null => {
-            for row in matrix {
-                for (col, value) in columns.iter().zip(row.iter()) {
-                    writer.write_all(format!("{}={}", col.id(), value).as_bytes())?;
-                    writer.write_all(&[0])?;
+            for row in rows {
+                for cell in &row.cells {
+                    match &cell.value {
+                        CellValue::ChosenMany(vec) => {
+                            for item in vec {
+                                writer
+                                    .write_all(format!("{}={}", cell.column_id, item).as_bytes())?;
+                                writer.write_all(&[0])?;
+                            }
+                        }
+                        other => {
+                            let value_str = match other {
+                                CellValue::StaticText(s) | CellValue::Text(s) => s.clone(),
+                                CellValue::Boolean(b) => b.to_string(),
+                                CellValue::TextArea(lines) => lines.join("\n"),
+                                CellValue::ChosenOne(opt) => opt.clone().unwrap_or_default(),
+                                CellValue::ChosenMany(_) => unreachable!(),
+                            };
+                            writer.write_all(
+                                format!("{}={}", cell.column_id, value_str).as_bytes(),
+                            )?;
+                            writer.write_all(&[0])?;
+                        }
+                    }
                 }
             }
             Ok(())
@@ -491,53 +589,178 @@ mod tests {
     }
 
     #[test]
-    fn parse_rows_reads_2d_string_array() {
-        let rows = parse_rows(Some(r#"[["a","b"],["c","d"]]"#)).unwrap();
-        assert_eq!(rows, vec![vec!["a", "b"], vec!["c", "d"]]);
+    fn parse_rows_typed_parses_boolean_truthy() {
+        let columns = vec![
+            ColumnSpec::BooleanSwitch {
+                id: "a".into(),
+                config: BooleanSwitchConfig::default(),
+            },
+            ColumnSpec::BooleanSwitch {
+                id: "b".into(),
+                config: BooleanSwitchConfig::default(),
+            },
+        ];
+        let rows = parse_rows_typed(&columns, Some(r#"[[true, "yes"]]"#)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], CellValue::Boolean(true));
+        assert_eq!(rows[0][1], CellValue::Boolean(true));
     }
 
     #[test]
-    fn parse_rows_coerces_null_to_empty_string() {
-        let rows = parse_rows(Some(r#"[[null,"x"]]"#)).unwrap();
-        assert_eq!(rows, vec![vec!["", "x"]]);
+    fn parse_rows_typed_parses_chosen_many_from_array() {
+        let columns = vec![ColumnSpec::ChooseMany {
+            id: "choices".into(),
+            input: ChoiceInput::new("c", "p").with_options(vec![
+                ChoiceOption::new("a", "A", "alpha"),
+                ChoiceOption::new("b", "B", "beta"),
+            ]),
+        }];
+        let rows = parse_rows_typed(&columns, Some(r#"[[["a","b"]]]"#)).unwrap();
+        assert_eq!(
+            rows[0][0],
+            CellValue::ChosenMany(vec!["a".into(), "b".into()])
+        );
     }
 
     #[test]
-    fn parse_rows_without_input_returns_empty_vec() {
-        let rows = parse_rows(None).unwrap();
-        assert!(rows.is_empty());
+    fn parse_rows_typed_parses_chosen_many_from_comma_string() {
+        let columns = vec![ColumnSpec::ChooseMany {
+            id: "choices".into(),
+            input: ChoiceInput::new("c", "p").with_options(vec![]),
+        }];
+        let rows = parse_rows_typed(&columns, Some(r#"[["a,b"]]"#)).unwrap();
+        assert_eq!(
+            rows[0][0],
+            CellValue::ChosenMany(vec!["a".into(), "b".into()])
+        );
     }
 
     #[test]
     fn write_matrix_raw_emits_array_of_row_objects() {
-        let columns = vec![
-            ColumnSpec::TextInput {
-                id: "name".into(),
-                config: TextInputConfig::default(),
-            },
-            ColumnSpec::BooleanSwitch {
-                id: "active".into(),
-                config: BooleanSwitchConfig::default(),
-            },
-        ];
-        let matrix = vec![vec!["alice".to_string(), "true".to_string()]];
+        use tui_chrome::RowCell;
+
+        let rows = vec![Row {
+            cells: vec![
+                RowCell {
+                    column_id: "name".into(),
+                    value: CellValue::Text("alice".into()),
+                },
+                RowCell {
+                    column_id: "active".into(),
+                    value: CellValue::Boolean(true),
+                },
+            ],
+        }];
         let mut buf = Vec::new();
-        write_matrix(&mut buf, &columns, &matrix, OutputMode::Raw).unwrap();
+        write_matrix(&mut buf, &rows, OutputMode::Raw).unwrap();
         let text = String::from_utf8(buf).unwrap();
         assert!(text.contains("\"name\":\"alice\""), "got {text}");
-        assert!(text.contains("\"active\":\"true\""), "got {text}");
+        assert!(text.contains("\"active\":true"), "got {text}");
         assert!(text.ends_with('\n'));
     }
 
     #[test]
     fn write_matrix_null_emits_key_equals_value_nul_separated() {
-        let columns = vec![ColumnSpec::TextInput {
-            id: "name".into(),
-            config: TextInputConfig::default(),
+        use tui_chrome::RowCell;
+
+        let rows = vec![Row {
+            cells: vec![RowCell {
+                column_id: "name".into(),
+                value: CellValue::Text("alice".into()),
+            }],
         }];
-        let matrix = vec![vec!["alice".to_string()]];
         let mut buf = Vec::new();
-        write_matrix(&mut buf, &columns, &matrix, OutputMode::Null).unwrap();
+        write_matrix(&mut buf, &rows, OutputMode::Null).unwrap();
         assert_eq!(buf, b"name=alice\0");
+    }
+
+    #[test]
+    fn write_matrix_boolean_emits_json_bool_not_string() {
+        use tui_chrome::RowCell;
+
+        let rows = vec![Row {
+            cells: vec![RowCell {
+                column_id: "active".into(),
+                value: CellValue::Boolean(true),
+            }],
+        }];
+        let mut buf = Vec::new();
+        write_matrix(&mut buf, &rows, OutputMode::Json).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        // Should be JSON `true`, not `"true"`
+        assert!(text.contains("\"active\":true"), "got {text}");
+    }
+
+    #[test]
+    fn write_matrix_chosen_many_emits_json_array() {
+        use tui_chrome::RowCell;
+
+        let rows = vec![Row {
+            cells: vec![RowCell {
+                column_id: "choices".into(),
+                value: CellValue::ChosenMany(vec!["a".into(), "b".into()]),
+            }],
+        }];
+        let mut buf = Vec::new();
+        write_matrix(&mut buf, &rows, OutputMode::Json).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        // Should be JSON array, not `"a,b"`
+        assert!(text.contains("[\"a\",\"b\"]"), "got {text}");
+    }
+
+    #[test]
+    fn run_writes_typed_row_json_from_initial_rows() {
+        let args = InputTableArgs {
+            columns: r#"[{"type":"text-input","id":"name"},{"type":"boolean-switch","id":"active"},{"type":"choose-many","id":"tags","options":["alpha","beta"]}]"#.into(),
+            rows: Some(r#"[["alice", true, ["alpha","beta"]]]"#.into()),
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            Some(8),
+            &mut output,
+            |state, height| {
+                assert_eq!(height, Some(8));
+                let rows = state.rows_typed();
+                assert_eq!(rows[0].get_text("name"), Some("alice"));
+                assert_eq!(rows[0].get_boolean("active"), Some(true));
+                assert_eq!(
+                    rows[0].get_chosen_many("tags"),
+                    Some(&["alpha".to_string(), "beta".to_string()][..])
+                );
+                Ok(rows)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        let rendered: Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            rendered,
+            json!([{ "name": "alice", "active": true, "tags": ["alpha", "beta"] }])
+        );
+    }
+
+    #[test]
+    fn run_returns_130_without_output_on_cancel() {
+        let args = InputTableArgs {
+            columns: r#"[{"type":"text-input","id":"name"}]"#.into(),
+            rows: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Json,
+            None,
+            &mut output,
+            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "cancelled")),
+        )
+        .unwrap();
+
+        assert_eq!(status, 130);
+        assert!(output.is_empty());
     }
 }

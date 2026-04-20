@@ -72,6 +72,11 @@ impl Default for TextAreaInputConfig {
 
 /// Column schema — both the cell *type* and its seed configuration.
 ///
+/// Each variant carries a unique `id` that identifies the column for
+/// value extraction. For [`ChooseOne`](Self::ChooseOne) and
+/// [`ChooseMany`](Self::ChooseMany), the id comes from the
+/// [`ChoiceInput::id`] field.
+///
 /// ## Variants
 ///
 /// - [`InputTableColumn::StaticText`] — a display-only column whose
@@ -93,13 +98,33 @@ impl Default for TextAreaInputConfig {
 pub enum InputTableColumn {
     /// Display-only column. The string is rendered identically for
     /// every row.
-    StaticText(String),
+    StaticText {
+        /// Column identifier for value extraction.
+        id: String,
+        /// Text rendered in every cell of this column.
+        text: String,
+    },
     /// Boolean toggle-switch column.
-    BooleanSwitch(BooleanSwitchConfig),
+    BooleanSwitch {
+        /// Column identifier for value extraction.
+        id: String,
+        /// Cell configuration.
+        config: BooleanSwitchConfig,
+    },
     /// Single-line text input column.
-    TextInput(TextInputConfig),
+    TextInput {
+        /// Column identifier for value extraction.
+        id: String,
+        /// Cell configuration.
+        config: TextInputConfig,
+    },
     /// Multi-line text editor column.
-    TextAreaInput(TextAreaInputConfig),
+    TextAreaInput {
+        /// Column identifier for value extraction.
+        id: String,
+        /// Cell configuration.
+        config: TextAreaInputConfig,
+    },
     /// Single-select choice column.
     ChooseOne(ChoiceInput<String>),
     /// Multi-select choice column.
@@ -107,9 +132,20 @@ pub enum InputTableColumn {
 }
 
 impl InputTableColumn {
+    /// Returns the column's unique identifier.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::StaticText { id, .. }
+            | Self::BooleanSwitch { id, .. }
+            | Self::TextInput { id, .. }
+            | Self::TextAreaInput { id, .. } => id,
+            Self::ChooseOne(input) | Self::ChooseMany(input) => &input.id,
+        }
+    }
+
     /// Returns `true` when cells in this column accept keyboard focus.
     pub fn is_focusable(&self) -> bool {
-        !matches!(self, Self::StaticText(_))
+        !matches!(self, Self::StaticText { .. })
     }
 }
 
@@ -120,14 +156,22 @@ mod tests {
 
     #[test]
     fn static_text_column_is_not_focusable() {
-        let column = InputTableColumn::StaticText("Name".into());
+        let column = InputTableColumn::StaticText {
+            id: "row".into(),
+            text: "Name".into(),
+        };
         assert!(!column.is_focusable());
+        assert_eq!(column.id(), "row");
     }
 
     #[test]
     fn boolean_switch_column_is_focusable() {
-        let column = InputTableColumn::BooleanSwitch(BooleanSwitchConfig::default());
+        let column = InputTableColumn::BooleanSwitch {
+            id: "active".into(),
+            config: BooleanSwitchConfig::default(),
+        };
         assert!(column.is_focusable());
+        assert_eq!(column.id(), "active");
     }
 
     #[test]
@@ -156,8 +200,7 @@ mod tests {
 
     #[test]
     fn choose_one_column_carries_input() {
-        let input = ChoiceInput::new("c", "p")
-            .with_options(vec![ChoiceOption::new("a", "A", "a")]);
+        let input = ChoiceInput::new("c", "p").with_options(vec![ChoiceOption::new("a", "A", "a")]);
         let column = InputTableColumn::ChooseOne(input);
         assert!(column.is_focusable());
     }
@@ -166,8 +209,8 @@ mod tests {
     fn choose_many_column_selection_mode_is_not_required_here() {
         // The column constructor accepts any ChoiceInput; ChooseManyState
         // forces selection mode on its own when the cell is built.
-        let input: ChoiceInput = ChoiceInput::new("c", "p")
-            .with_selection_mode(SelectionMode::Single);
+        let input: ChoiceInput =
+            ChoiceInput::new("c", "p").with_selection_mode(SelectionMode::Single);
         let column = InputTableColumn::ChooseMany(input);
         assert!(column.is_focusable());
     }
