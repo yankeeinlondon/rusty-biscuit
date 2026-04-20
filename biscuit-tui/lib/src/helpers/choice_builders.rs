@@ -162,8 +162,8 @@ fn strip_numbered_prefix(line: &str) -> Option<&str> {
 }
 
 fn options_from_dictionary(input: &str) -> Result<Vec<ChoiceOption<String>>, ChoiceBuilderError> {
-    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(input)
-        .map_err(|e| ChoiceBuilderError::Parse(e.to_string()))?;
+    let value: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(input).map_err(|e| ChoiceBuilderError::Parse(e.to_string()))?;
     let mapping = match value {
         serde_yaml_ng::Value::Mapping(m) => m,
         _ => return Err(ChoiceBuilderError::NotAMapping),
@@ -185,7 +185,10 @@ fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {
         serde_yaml_ng::Value::Bool(b) => b.to_string(),
         serde_yaml_ng::Value::Number(n) => n.to_string(),
         serde_yaml_ng::Value::String(s) => s.clone(),
-        other => serde_yaml_ng::to_string(other).unwrap_or_default().trim().to_string(),
+        other => serde_yaml_ng::to_string(other)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
     }
 }
 
