@@ -55,10 +55,7 @@ fn child_page_block_sees_set_property_override() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.role="admin""#,
-            ),
+            ("parent.md", r#"::file child.md set.role="admin""#),
             (
                 "child.md",
                 r#"---
@@ -100,14 +97,8 @@ fn child_interpolation_sees_set_property() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.name="Bob""#,
-            ),
-            (
-                "child.md",
-                "---\nname: Alice\n---\n\nHello {{ name }}\n",
-            ),
+            ("parent.md", r#"::file child.md set.name="Bob""#),
+            ("child.md", "---\nname: Alice\n---\n\nHello {{ name }}\n"),
         ],
     );
 
@@ -154,10 +145,7 @@ fn child_replace_sees_set_overrides() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.greeting="Hello""#,
-            ),
+            ("parent.md", r#"::file child.md set.greeting="Hello""#),
             (
                 "child.md",
                 r#"---
@@ -191,10 +179,7 @@ fn set_overlay_does_not_propagate_to_grandchild() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.name="Bob""#,
-            ),
+            ("parent.md", r#"::file child.md set.name="Bob""#),
             (
                 "child.md",
                 "---\nname: Alice\n---\n\nChild sees: {{ name }}\n\n::file grandchild.md\n",
@@ -283,10 +268,7 @@ fn three_layer_precedence_property_wins_over_object() {
                 "parent.md",
                 r#"::file child.md set='{name: "Carol"}' set.name="Bob""#,
             ),
-            (
-                "child.md",
-                "---\nname: Alice\n---\n\n{{ name }}\n",
-            ),
+            ("child.md", "---\nname: Alice\n---\n\n{{ name }}\n"),
         ],
     );
 
@@ -313,14 +295,8 @@ fn null_rhs_is_literal_not_deletion() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.x=null"#,
-            ),
-            (
-                "child.md",
-                "---\nx: 5\n---\n\nValue: {{ x }}\n",
-            ),
+            ("parent.md", r#"::file child.md set.x=null"#),
+            ("child.md", "---\nx: 5\n---\n\nValue: {{ x }}\n"),
         ],
     );
 
@@ -337,10 +313,7 @@ fn null_in_quoted_object_deep_merge_is_literal() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.author='{name: null}'"#,
-            ),
+            ("parent.md", r#"::file child.md set.author='{name: null}'"#),
             (
                 "child.md",
                 r#"---
@@ -370,10 +343,7 @@ fn strict_mode_rejects_invalid_assignment() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set=42"#,
-            ),
+            ("parent.md", r#"::file child.md set=42"#),
             ("child.md", "body\n"),
         ],
     );
@@ -421,14 +391,8 @@ fn permissive_invalid_assignment_warns_and_keeps_siblings() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set=42 set.name="Bob""#,
-            ),
-            (
-                "child.md",
-                "---\nname: Alice\n---\n\n{{ name }}\n",
-            ),
+            ("parent.md", r#"::file child.md set=42 set.name="Bob""#),
+            ("child.md", "---\nname: Alice\n---\n\n{{ name }}\n"),
         ],
     );
 
@@ -467,10 +431,7 @@ fn permissive_reassigned_property_warns_and_rightmost_wins() {
                 "parent.md",
                 r#"::file child.md set.name="Bob" set.name="Mary""#,
             ),
-            (
-                "child.md",
-                "---\nname: Alice\n---\n\n{{ name }}\n",
-            ),
+            ("child.md", "---\nname: Alice\n---\n\n{{ name }}\n"),
         ],
     );
 
@@ -489,10 +450,7 @@ fn permissive_reassigned_property_warns_and_rightmost_wins() {
         output.contains("Mary"),
         "rightmost assignment should win under permissive mode, got: {output:?}"
     );
-    assert!(
-        !output.contains("Bob"),
-        "Bob should be overridden by Mary"
-    );
+    assert!(!output.contains("Bob"), "Bob should be overridden by Mary");
     assert!(
         !output.contains("Alice"),
         "original Alice should be overridden"
@@ -515,10 +473,7 @@ fn different_set_overlays_produce_different_outputs() {
                 "parent.md",
                 "::file child.md set.name=\"Alice\"\n\n::file child.md set.name=\"Bob\"\n",
             ),
-            (
-                "child.md",
-                "---\nname: default\n---\n\n{{ name }}\n",
-            ),
+            ("child.md", "---\nname: default\n---\n\n{{ name }}\n"),
         ],
     );
 
@@ -545,10 +500,7 @@ fn array_valued_set_replaces_entire_array() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.tags='["blue"]'"#,
-            ),
+            ("parent.md", r#"::file child.md set.tags='["blue"]'"#),
             (
                 "child.md",
                 "---\ntags:\n  - red\n  - green\n---\n\nTags: {{ tags }}\n",
@@ -575,10 +527,7 @@ fn deep_merge_preserves_unoverlapped_keys() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.a='{y: 2}'"#,
-            ),
+            ("parent.md", r#"::file child.md set.a='{y: 2}'"#),
             (
                 "child.md",
                 "---\na:\n  x: 1\n---\n\na.x={{ a.x }} a.y={{ a.y }}\n",
@@ -605,10 +554,7 @@ fn quoted_property_object_form_deep_merge() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.author='{name: null}'"#,
-            ),
+            ("parent.md", r#"::file child.md set.author='{name: null}'"#),
             (
                 "child.md",
                 r#"---
@@ -639,10 +585,7 @@ fn multiple_set_properties_all_apply() {
     write_files(
         &dir,
         &[
-            (
-                "parent.md",
-                r#"::file child.md set.x=1 set.y=2 set.z=3"#,
-            ),
+            ("parent.md", r#"::file child.md set.x=1 set.y=2 set.z=3"#),
             (
                 "child.md",
                 "---\nx: 0\ny: 0\n---\n\n{{ x }} {{ y }} {{ z }}\n",

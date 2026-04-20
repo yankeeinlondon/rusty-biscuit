@@ -741,11 +741,7 @@ fn test_set_overlay_child_interpolation() {
 #[test]
 fn test_set_overlay_strict_rejects_invalid() {
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("parent.md"),
-        r#"::file child.md set=42"#,
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("parent.md"), r#"::file child.md set=42"#).unwrap();
     std::fs::write(dir.path().join("child.md"), "body\n").unwrap();
 
     md_cmd()
@@ -795,7 +791,9 @@ fn test_set_overlay_strict_rejects_reassigned() {
         .arg(dir.path().join("parent.md"))
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Invalid reassigned frontmatter property"));
+        .stderr(predicate::str::contains(
+            "Invalid reassigned frontmatter property",
+        ));
 }
 
 #[test]
