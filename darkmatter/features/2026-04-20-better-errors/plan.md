@@ -2,6 +2,16 @@
 phases: 4
 created: 2026-04-20
 start_phase: 1
+source_files_during_phase_1:
+  - biscuit-terminal/lib/src/errors/mod.rs
+  - biscuit-terminal/lib/src/errors/block_error.rs
+  - biscuit-terminal/lib/src/lib.rs
+  - biscuit-terminal/lib/src/prelude.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
+packages:
+  - biscuit-terminal
 ---
 
 # Better Errors — Execution Plan
@@ -15,19 +25,19 @@ This plan outlines the steps to implement the `BlockError` trait and adopt it ac
 1.  **Step 1: Implement `BlockError` Trait**
     - Create `biscuit-terminal/lib/src/errors/block_error.rs`.
     - Define `BlockError` trait with `status_block`, `severity`, `report_block_error`, and `report_block_error_optimistic` methods.
-    - [ ] *Parallelizable:* No.
+    - [x] *Parallelizable:* No.
 2.  **Step 2: Implement Rendering Helpers**
     - Implement `ErrorHeader` struct for standardized `<b>Name:</b> <b>Title</b>` formatting.
     - Implement `StatusBlockExt` trait to provide `.error_header(ErrorHeader)` on `StatusBlock`.
-    - [ ] *Parallelizable:* Yes (with Step 1).
+    - [x] *Parallelizable:* Yes (with Step 1).
 3.  **Step 3: Implement Cause Chain Rendering**
     - Implement `render_with_causes` helper to handle nested `BlockError` instances.
     - Implement internal `as_block_error` helper for dynamic trait object discovery.
-    - [ ] *Parallelizable:* No (depends on Step 1).
+    - [x] *Parallelizable:* No (depends on Step 1).
 4.  **Step 4: Validation & Exports**
     - Add unit tests in `biscuit-terminal` covering optimistic rendering and severity defaults.
     - Export `BlockError` and helpers in `biscuit-terminal/lib/src/prelude.rs` and `lib.rs`.
-    - [ ] *Validation Checkpoint:* `cargo test -p biscuit-terminal` passes.
+    - [x] *Validation Checkpoint:* `cargo test -p biscuit-terminal` passes.
 
 ## Phase 2: CLI Plumbing (darkmatter/cli)
 
