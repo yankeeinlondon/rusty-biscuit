@@ -377,6 +377,18 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 },
             )));
         }
+        RouteConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)?;
+            let provider = messenger::provider::slack_webhook::SlackWebhookProvider::try_new(
+                messenger::provider::slack_webhook::SlackWebhookConfig {
+                    webhook_url: SecretString::from(url),
+                },
+            )?;
+            messenger.register(Box::new(provider));
+        }
         RouteConfig::Signal {
             rpc_url,
             rpc_url_env,
@@ -439,6 +451,7 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
         // introduces a thread-routing flag (e.g. `--thread <id>`).
         RouteConfig::DiscordWebhook { .. } => Ok(messenger::Target::discord_webhook()),
         RouteConfig::Slack { channel_id, .. } => Ok(messenger::Target::slack_channel(channel_id)),
+        RouteConfig::SlackWebhook { .. } => Ok(messenger::Target::slack_webhook()),
         RouteConfig::Signal { recipient, .. } => {
             if recipient.starts_with('+') {
                 Ok(messenger::Target::signal_user(
@@ -462,9 +475,17 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
     }
 }
 
-/// Resolve a secret: use the direct value if present, otherwise look up the env var.
+/// Resolve a secret: use the direct value if present and non-empty, otherwise
+/// look up the env var.
+///
+/// Empty and whitespace-only direct values fall through to the env var lookup
+/// so that a config entry like `"webhook_url": ""` does not shadow a valid env
+/// var. This matches the secret-resolution precedence described in the
+/// `messenger/features/2026-04-19-slack-webhook/spec.md` CLI requirements.
 fn resolve_secret(value: Option<&str>, env_name: &str) -> Result<String> {
-    if let Some(v) = value {
+    if let Some(v) = value
+        && !v.trim().is_empty()
+    {
         tracing::trace!("using direct config value");
         return Ok(v.to_string());
     }
@@ -698,6 +719,173 @@ mod tests {
         assert!(
             msg.contains("Discord webhook URL"),
             "error should surface webhook URL validation, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn build_target_maps_slack_webhook_route_to_webhook_target() {
+        let target = build_target(&RouteConfig::SlackWebhook {
+            webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        })
+        .unwrap();
+
+        assert!(matches!(target, messenger::Target::SlackWebhook(_)));
+    }
+
+    #[test]
+    fn resolve_route_builds_slack_webhook_ad_hoc_route() {
+        let resolved = resolve_route(
+            Some(RouteProvider::SlackWebhook),
+            Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+            None,
+            &Config::default(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.name, None);
+        assert_eq!(
+            resolved.route,
+            RouteConfig::SlackWebhook {
+                webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    // Setup-flow smoke test: the interactive `inquire` prompt chain cannot run
+    // unattended, so we verify the non-interactive postcondition — a pre-built
+    // RouteConfig::SlackWebhook is preserved through a save/load cycle and
+    // reports the correct provider kind.
+    #[test]
+    fn slack_webhook_route_survives_config_save_load_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let route = RouteConfig::SlackWebhook {
+            webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        };
+
+        let mut config = Config {
+            default_route: Some("slack.webhook.alerts".into()),
+            routes: HashMap::new(),
+        };
+        config
+            .routes
+            .insert("slack.webhook.alerts".into(), route.clone());
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
+        let stored = loaded.routes.get("slack.webhook.alerts").unwrap();
+        assert_eq!(stored, &route);
+        assert_eq!(stored.provider(), RouteProvider::SlackWebhook);
+    }
+
+    #[test]
+    fn register_provider_returns_error_for_malformed_slack_webhook_url() {
+        let route = RouteConfig::SlackWebhook {
+            webhook_url: Some("not a url".into()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        };
+
+        let mut messenger = messenger::Messenger::new();
+        let err = register_provider(&mut messenger, &route).unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Slack webhook"),
+            "error should surface webhook URL validation, got: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_empty_direct_value_falls_back_to_env() {
+        unsafe {
+            std::env::set_var(
+                "SLACK_WEBHOOK_URL",
+                "https://hooks.slack.com/services/T000/B000/FROM-ENV",
+            );
+        }
+        let resolved = resolve_secret(Some(""), "SLACK_WEBHOOK_URL").unwrap();
+        assert_eq!(
+            resolved,
+            "https://hooks.slack.com/services/T000/B000/FROM-ENV"
+        );
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_whitespace_only_direct_value_falls_back_to_env() {
+        unsafe {
+            std::env::set_var(
+                "SLACK_WEBHOOK_URL",
+                "https://hooks.slack.com/services/T000/B000/FROM-ENV",
+            );
+        }
+        let resolved = resolve_secret(Some("   "), "SLACK_WEBHOOK_URL").unwrap();
+        assert_eq!(
+            resolved,
+            "https://hooks.slack.com/services/T000/B000/FROM-ENV"
+        );
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_falls_back_to_default_env_name_for_slack_webhook() {
+        // Deserializing `{"provider":"slack-webhook"}` with both fields absent
+        // populates `webhook_url_env` via `default_slack_webhook_url_env()`,
+        // which must be `"SLACK_WEBHOOK_URL"` so env-only routes work out of
+        // the box.
+        unsafe {
+            std::env::set_var(
+                "SLACK_WEBHOOK_URL",
+                "https://hooks.slack.com/services/T000/B000/DEFAULT-ENV",
+            );
+        }
+        let parsed: RouteConfig =
+            serde_json::from_str(r#"{"provider":"slack-webhook"}"#).unwrap();
+        let env_name = match parsed {
+            RouteConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert!(webhook_url.is_none());
+                webhook_url_env
+            }
+            other => panic!("unexpected route: {other:?}"),
+        };
+        assert_eq!(env_name, "SLACK_WEBHOOK_URL");
+        let resolved = resolve_secret(None, &env_name).unwrap();
+        assert_eq!(
+            resolved,
+            "https://hooks.slack.com/services/T000/B000/DEFAULT-ENV"
+        );
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_errors_when_neither_direct_value_nor_env_for_slack_webhook() {
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+        let err = resolve_secret(None, "SLACK_WEBHOOK_URL").unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("SLACK_WEBHOOK_URL"),
+            "error should mention the missing env var, got: {msg}"
         );
     }
 
