@@ -1,7 +1,7 @@
 ---
 dir: ""
-spec: ""
-design: ""
+spec: "spec.md"
+design: "tech-design.md"
 iteration: 1
 ---
 ## Context
@@ -17,10 +17,10 @@ You are a **senior-level Rust developer and project manager** with extensive exp
 Your team has completed the implementation of:
 
 ::block when="{{spec}}"
-- spec: {{dir}}/{{spec || "spec.md"}}
+- spec: {{dir}}/{{spec}}
 ::end-block
 ::block when="{{design}}"
-- tech-design: {{dir}}/{{design || "tech-design.md"}}
+- tech-design: {{dir}}/{{design}}
 ::end-block
 
 And we subsequently performed a review to check if our implementation was complete and came up with the following recommendations:
@@ -31,9 +31,9 @@ You are to act as an orchestrator and follow these steps serially and precisely:
 
 1. Instantiate a `planner` subagent. 
       - Provide the following file references for them:
-          - spec: {{dir}}/{{spec || "spec.md"}}
-          :block when="file_exists({{dir}}/{{design || "tech-design.md"}})"
-          - tech-design: {{dir}}/{{design || "tech-design.md"}}
+          - spec: {{dir}}/{{spec}}
+          ::block when="file_exists({{dir}}/{{design }})"
+          - tech-design: {{dir}}/{{design }}
           ::end-block
           - review: {{dir}}/review-{{iteration}}.md
       - Ask them to build a high confidence plan to implement all the fixes suggested in the review along with ensuring test coverage is high and all tests pass and no lint warnings or errors exist. 
@@ -41,9 +41,9 @@ You are to act as an orchestrator and follow these steps serially and precisely:
       - Ask them to provide you a summary of the plan including how many phases (if phases are used) are included in the plan
 2. Instantiate a `rust-developer` subagent.
     - Provide them with references to:
-        - spec: {{dir}}/{{spec || "spec.md"}}
-        :block when="file_exists({{dir}}/{{design || "tech-design.md"}})"
-        - tech-design: {{dir}}/{{design || "tech-design.md"}}
+        - spec: {{dir}}/{{spec}}
+        ::block when="file_exists({{dir}}/{{design }})"
+        - tech-design: {{dir}}/{{design }}
         ::end-block
         - review: {{dir}}/review-{{iteration}}.md
         - plan: {{dir}}/review-plan-{{iteration}}.md

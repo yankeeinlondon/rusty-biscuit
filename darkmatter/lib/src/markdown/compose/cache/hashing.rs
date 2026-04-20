@@ -592,8 +592,7 @@ mod tests {
         let mut m = Map::new();
         m.insert("name".to_string(), Value::from("Bob"));
         let obj_form = set_overlay_hash(Some(&m), &[]);
-        let prop_form =
-            set_overlay_hash(None, &[("name".to_string(), Value::from("Bob"))]);
+        let prop_form = set_overlay_hash(None, &[("name".to_string(), Value::from("Bob"))]);
         assert_ne!(obj_form, prop_form);
     }
 

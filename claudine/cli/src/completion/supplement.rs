@@ -152,7 +152,10 @@ fn classify_completion_target_relaxed(
 
     // File-flag value slot: the previous argv token is exactly a file flag.
     if current_index >= sub_idx + 2 {
-        let prev = argv.get(current_index - 1).map(String::as_str).unwrap_or("");
+        let prev = argv
+            .get(current_index - 1)
+            .map(String::as_str)
+            .unwrap_or("");
         if FILE_FLAGS.contains(&prev) {
             return Some(CompletionTarget::FileFlag);
         }
@@ -302,13 +305,9 @@ pub(crate) fn emit_candidates(partial: &str, cwd: &Path) -> Vec<String> {
         if !seen_canonical.insert(canonical) {
             continue;
         }
-        if let Some(value) = render_candidate(
-            &path,
-            form,
-            cwd,
-            enclosing_repo.as_deref(),
-            home.as_deref(),
-        ) {
+        if let Some(value) =
+            render_candidate(&path, form, cwd, enclosing_repo.as_deref(), home.as_deref())
+        {
             rendered.insert(value);
         }
     }
@@ -374,9 +373,7 @@ fn curated_roots(
         }
     }
 
-    if include_user_scope
-        && let Some(home_dir) = home
-    {
+    if include_user_scope && let Some(home_dir) = home {
         let claudine = home_dir.join(".claudine");
         push_scope(&mut roots, &claudine);
     }
@@ -644,7 +641,8 @@ mod tests {
         );
         // No @ prefix for repo matches in ImplicitRelative form.
         assert!(
-            got.iter().all(|c| !c.starts_with('@') || !c.contains("prompts/a.md")),
+            got.iter()
+                .all(|c| !c.starts_with('@') || !c.contains("prompts/a.md")),
             "implicit-relative repo match must not gain an @ prefix: {got:?}"
         );
     }

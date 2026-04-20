@@ -82,7 +82,11 @@ Every emission flows through a [`SectionTracker`](../../cli/src/commands/wrap/se
 | 8 | `FinalStdout` | The agent's final response, on stdout (markdown-rendered when TTY, raw otherwise) |
 | 9 | `TrailerMetadata` | The summary line + verbose details |
 
-Sections do not interleave: once `FinalStdout` opens, no `ToolUseAndEvents` lines emit. Within a section, consecutive blank lines collapse to one.
+Within a section, consecutive blank lines collapse to one.
+
+Section interleaving is provider-dependent. Claude and Codex keep `FinalStdout` strictly at the end of the turn, so `ToolUseAndEvents` never re-opens once stdout starts. For Claude specifically, assistant prose that shares an envelope with a `tool_use` is reclassified to `Reasoning` instead of `OutputText`; this keeps "Let me investigate..." style tool-preface narration in `Section::Thinking` and avoids opening `FinalStdout` mid-run. OpenCode (and any provider that emits true assistant text mid-turn) interleaves `FinalStdout` with `ToolUseAndEvents` — the sink re-enters `FinalStdout` on each `OutputText` event and returns to `ToolUseAndEvents` on the next tool call.
+
+Because interleaving is supported, the transition separator rule has one suppression: when the stdout stream already ends on a blank line (the provider's text ended with `\n\n` or more), the transition from `FinalStdout` back to a stderr section does **not** insert a separator blank. The stdout trailing blank already provides the visual gap; adding another would produce a double-blank gutter around every interleaved prose paragraph. `LiveSemanticSink` tracks cumulative trailing `\n` bytes across `OutputText` events and clears the counter whenever non-blank stderr content emits, so a stderr line between two stdout blocks still forces a full separator on the return trip into `FinalStdout`.
 
 ## Tool Call Rendering
 
@@ -139,6 +143,8 @@ Provider coverage:
 | Qwen | _not yet surfaced_ — when `enable_thinking` is on, the model emits `<think>…</think>` blocks inline inside normal message content rather than as a separate event |
 
 Goose and Kimi do not surface reasoning in their stream protocols; nothing is rendered for them. Adding a typed `Reasoning` variant for Gemini or Qwen requires first observing the wire format; contributions welcome.
+
+Claude also promotes assistant prose from mixed `assistant` envelopes that contain both `text` and `tool_use` into `Reasoning`. Those "tool preface" lines are planning narration, not final answer text, and rendering them in `Section::Thinking` avoids stray stdout paragraphs and extra section separators during tool-heavy turns.
 
 ## Warning Rendering
 

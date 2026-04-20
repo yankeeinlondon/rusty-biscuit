@@ -3,6 +3,8 @@
 pub enum Target {
     #[cfg(feature = "discord")]
     Discord(DiscordTarget),
+    #[cfg(feature = "discord")]
+    DiscordWebhook(DiscordWebhookTarget),
     #[cfg(feature = "slack")]
     Slack(SlackTarget),
     #[cfg(feature = "signal")]
@@ -18,6 +20,17 @@ pub enum Target {
 #[derive(Debug, Clone)]
 pub struct DiscordTarget {
     pub channel_id: String,
+}
+
+/// Discord webhook target.
+///
+/// The webhook URL (configured on the provider) binds the channel and
+/// authentication. Only `thread_id` is a dispatch-time concern: supplying it
+/// routes the message into a specific thread within the webhook's channel.
+#[cfg(feature = "discord")]
+#[derive(Debug, Clone, Default)]
+pub struct DiscordWebhookTarget {
+    pub thread_id: Option<String>,
 }
 
 /// Slack channel target.
@@ -73,6 +86,20 @@ impl Target {
     pub fn discord_channel(channel_id: impl Into<String>) -> Self {
         Self::Discord(DiscordTarget {
             channel_id: channel_id.into(),
+        })
+    }
+
+    /// Build a Discord webhook target with no thread routing.
+    #[cfg(feature = "discord")]
+    pub fn discord_webhook() -> Self {
+        Self::DiscordWebhook(DiscordWebhookTarget { thread_id: None })
+    }
+
+    /// Build a Discord webhook target routed to a specific thread.
+    #[cfg(feature = "discord")]
+    pub fn discord_webhook_thread(thread_id: impl Into<String>) -> Self {
+        Self::DiscordWebhook(DiscordWebhookTarget {
+            thread_id: Some(thread_id.into()),
         })
     }
 

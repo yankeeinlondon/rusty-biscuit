@@ -20,11 +20,10 @@
 
 ## Path-Limited Commits
 
-- `git commit -m "message" -- path1 path2` commits only the listed paths and leaves other staged changes staged.
-- `git commit --only -m "message" -- path1 path2` is the safest explicit form when unrelated staged changes must remain untouched.
+- `git commit --only -m "message" -- path1 path2` is the recommended form when committing a specific subset of staged files. Always use `--only` to explicitly limit the commit to only the named paths.
 - All options must come before the `--` pathspec separator. `git commit --only -- path -m "message"` is wrong because `-m` is then parsed as a path.
 - Quote paths that contain spaces when passing them to `git commit`.
-- Be careful with renames. Committing only the new path records an add and leaves the delete staged. To preserve the rename as one atomic change, include both sides or avoid path-limiting that rename.
+- Be careful with renames. Committing only the new path records an add and leaves the delete staged. Committing only the old path records the delete but leaves the new file staged as an add. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
 - `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
 
 ## History and Verification
@@ -38,7 +37,7 @@
 
 - Subagents may see a different staged set than the prompt implies. Always verify the actual index state before committing.
 - In a shared worktree, concurrent agents share the same index. `git reset HEAD` without paths resets the entire staged set for everyone.
-- If multiple agents are committing from the same worktree, the orchestrator should stage groups sequentially or otherwise isolate the work. Shared staging is fragile.
+- **Orchestrator staging discipline:** When committing from the same worktree with multiple subagents, the orchestrator MUST stage each group's files and have the subagent commit them BEFORE staging the next group. Never run concurrent commit subagents from the same worktree — the shared staging area means once one agent commits, other agents' staged files disappear from the index. All 4 of this session's commits succeeded but one included unintended files because concurrent subagents raced on the shared staging area.
 - If another worker already committed some assigned files, a later commit may legitimately report `nothing to commit`. That does not mean the earlier commit was missing.
 - Auto-formatting workflows (e.g., rustfmt on save) may pre-commit files before an orchestrator assigns them. If a subagent finds no staged changes for an assigned file, it was likely auto-committed by a formatting hook.
 

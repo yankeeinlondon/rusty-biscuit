@@ -1,11 +1,15 @@
 set dotenv-load
 set positional-arguments
+set allow-duplicate-recipes
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-import "../just/features.just"
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
+import "../just/spec.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'

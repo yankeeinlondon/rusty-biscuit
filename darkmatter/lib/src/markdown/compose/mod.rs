@@ -1612,17 +1612,12 @@ impl Markdown {
                 // grandchildren referenced by the child's own `::file`
                 // directives do NOT inherit this parent-applied overlay.
                 if set_object.is_some() || !set_properties.is_empty() {
-                    let base_indexmap =
-                        std::mem::take(child.frontmatter_mut().as_map_mut());
+                    let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
                     let base_map: serde_json::Map<String, Value> =
                         base_indexmap.into_iter().collect();
-                    let overlaid = state::apply_set_overrides(
-                        &base_map,
-                        set_object.as_ref(),
-                        &set_properties,
-                    );
-                    *child.frontmatter_mut().as_map_mut() =
-                        overlaid.into_iter().collect();
+                    let overlaid =
+                        state::apply_set_overrides(&base_map, set_object.as_ref(), &set_properties);
+                    *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
                 }
 
                 let child_report =

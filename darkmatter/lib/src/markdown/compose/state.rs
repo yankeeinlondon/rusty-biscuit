@@ -78,8 +78,7 @@ pub(crate) fn apply_set_overrides(
     let mut accumulator = Value::Object(base_fm.clone());
 
     if let Some(object_overlay) = set_object {
-        accumulator =
-            deep_merge_override(&accumulator, &Value::Object(object_overlay.clone()));
+        accumulator = deep_merge_override(&accumulator, &Value::Object(object_overlay.clone()));
     }
 
     for (name, value) in set_properties {
@@ -807,11 +806,9 @@ mod tests {
             "author": { "handle": "@bob" },
             "tags": ["blue"],
         }));
-        let set_properties: Vec<(String, Value)> =
-            vec![("name".to_string(), json!("Bob"))];
+        let set_properties: Vec<(String, Value)> = vec![("name".to_string(), json!("Bob"))];
 
-        let effective =
-            apply_set_overrides(&base, Some(&set_object), &set_properties);
+        let effective = apply_set_overrides(&base, Some(&set_object), &set_properties);
 
         assert_eq!(effective.get("name"), Some(&json!("Bob")));
         assert_eq!(
@@ -825,11 +822,9 @@ mod tests {
     fn test_apply_set_overrides_three_layer_precedence() {
         let base = to_map(json!({"name": "Alice"}));
         let set_object = to_map(json!({"name": "Carol"}));
-        let set_properties: Vec<(String, Value)> =
-            vec![("name".to_string(), json!("Bob"))];
+        let set_properties: Vec<(String, Value)> = vec![("name".to_string(), json!("Bob"))];
 
-        let effective =
-            apply_set_overrides(&base, Some(&set_object), &set_properties);
+        let effective = apply_set_overrides(&base, Some(&set_object), &set_properties);
 
         assert_eq!(effective.get("name"), Some(&json!("Bob")));
     }
@@ -837,8 +832,7 @@ mod tests {
     #[test]
     fn test_apply_set_overrides_null_property_is_literal() {
         let base = to_map(json!({"x": 5}));
-        let set_properties: Vec<(String, Value)> =
-            vec![("x".to_string(), Value::Null)];
+        let set_properties: Vec<(String, Value)> = vec![("x".to_string(), Value::Null)];
 
         let effective = apply_set_overrides(&base, None, &set_properties);
 
@@ -848,8 +842,7 @@ mod tests {
     #[test]
     fn test_apply_set_overrides_dict_deep_merge_via_property() {
         let base = to_map(json!({"a": {"x": 1}}));
-        let set_properties: Vec<(String, Value)> =
-            vec![("a".to_string(), json!({"y": 2}))];
+        let set_properties: Vec<(String, Value)> = vec![("a".to_string(), json!({"y": 2}))];
 
         let effective = apply_set_overrides(&base, None, &set_properties);
 
@@ -859,8 +852,7 @@ mod tests {
     #[test]
     fn test_apply_set_overrides_leaf_override() {
         let base = to_map(json!({"name": "Alice"}));
-        let set_properties: Vec<(String, Value)> =
-            vec![("name".to_string(), json!("Bob"))];
+        let set_properties: Vec<(String, Value)> = vec![("name".to_string(), json!("Bob"))];
 
         let effective = apply_set_overrides(&base, None, &set_properties);
 
@@ -870,8 +862,7 @@ mod tests {
     #[test]
     fn test_apply_set_overrides_array_is_leaf() {
         let base = to_map(json!({"tags": ["a", "b"]}));
-        let set_properties: Vec<(String, Value)> =
-            vec![("tags".to_string(), json!(["c"]))];
+        let set_properties: Vec<(String, Value)> = vec![("tags".to_string(), json!(["c"]))];
 
         let effective = apply_set_overrides(&base, None, &set_properties);
 

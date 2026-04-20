@@ -401,6 +401,7 @@ async fn send_payload(
 fn provider_kind_label(kind: &ProviderKind) -> &'static str {
     match kind {
         ProviderKind::Discord => "discord",
+        ProviderKind::DiscordWebhook => "discord_webhook",
         ProviderKind::Slack => "slack",
         ProviderKind::Signal => "signal",
         ProviderKind::WhatsApp => "whatsapp",

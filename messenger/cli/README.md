@@ -48,7 +48,7 @@ messenger send \
 
 Supported `send` flags:
 
-- `--provider <discord|slack|signal|whatsapp|telegram>`
+- `--provider <discord|discord-webhook|slack|signal|whatsapp|telegram>`
 - `--channel <target>`
 - `--route <name>`
 - `--reply-to <path-or-json>`
@@ -74,7 +74,15 @@ Two provider-specific route behaviors are worth calling out:
 - Signal targets starting with `+` are treated as direct recipients. Any other value is treated as a Signal group ID.
 - Telegram targets are parsed as numeric chat IDs when possible, otherwise they are treated as usernames such as `@ops`.
 
-For clarity, the CLI is routing against the provider API models implemented in the library, not webhook URLs. Discord and Slack routes identify a channel plus bot token, while Signal and WhatsApp routes identify a recipient plus the provider-specific API credentials.
+For clarity, the CLI is routing against the provider API models implemented in the library. Discord (bot) and Slack routes identify a channel plus bot token; Discord-webhook routes carry only a webhook URL (no `channel_id`); Signal and WhatsApp routes identify a recipient plus the provider-specific API credentials.
+
+For ad-hoc `discord-webhook` sends, pass the full webhook URL as `--channel`:
+
+```bash
+messenger send --provider discord-webhook \
+  --channel "https://discord.com/api/v10/webhooks/123456789012345678/abc-token" \
+  "Deploy succeeded"
+```
 
 ## Configuration
 
@@ -108,7 +116,8 @@ Top-level shape:
 
 Supported route shapes:
 
-- Discord: `channel_id`, optional `bot_token`, `bot_token_env`
+- Discord (bot): `channel_id`, optional `bot_token`, `bot_token_env`
+- Discord (webhook): `provider: "discord-webhook"`, optional `webhook_url`, `webhook_url_env`
 - Slack: `channel_id`, optional `bot_token`, `bot_token_env`
 - Signal: `recipient`, optional `rpc_url`, `rpc_url_env`, optional `account`, `account_env`
 - WhatsApp: `recipient`, optional `access_token`, `access_token_env`, optional `phone_number_id`, `phone_number_id_env`
@@ -119,6 +128,7 @@ When both an inline secret and an environment variable name are present, the inl
 Default environment variable names:
 
 - `DISCORD_BOT_TOKEN`
+- `DISCORD_WEBHOOK_URL`
 - `SLACK_BOT_TOKEN`
 - `SIGNAL_RPC_URL`
 - `SIGNAL_ACCOUNT`
@@ -182,7 +192,8 @@ By default, sends use best-effort compatibility:
 
 Some practical examples:
 
-- Only Discord supports attachments today. Slack, Signal, WhatsApp, and Telegram drop them in best-effort mode or fail in strict mode.
+- Only the Discord adapters (bot and webhook) support attachments today. Slack, Signal, WhatsApp, and Telegram drop them in best-effort mode or fail in strict mode.
+- The Discord-webhook adapter does not support replies. `--reply-to` against a `discord-webhook` route returns `MessengerError::UnsupportedFeature { feature: "replies" }` at plan time — before any network call.
 - Signal and WhatsApp fall back to plain text when you send Markdown.
 - Telegram and WhatsApp send native location messages. If you pass both body text and `--location`, the location is sent and the text body is ignored.
 - Telegram is the only CLI-exposed provider that supports silent delivery.

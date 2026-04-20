@@ -1,5 +1,7 @@
 #[cfg(feature = "discord")]
 pub mod discord;
+#[cfg(feature = "discord")]
+pub mod discord_webhook;
 #[cfg(feature = "signal")]
 pub mod signal;
 #[cfg(feature = "slack")]
@@ -14,6 +16,7 @@ use std::collections::HashMap;
 use futures::future::join_all;
 
 #[cfg(any(
+    feature = "discord",
     feature = "slack",
     feature = "signal",
     feature = "whatsapp",

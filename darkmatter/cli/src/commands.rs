@@ -607,10 +607,10 @@ pub fn run_compose(
     }
     options = options.with_list_spacing(list_spacing);
     options = options.with_allow_ctx_override(allow_ctx_override);
-    options = options
-        .with_allow_invalid_frontmatter_assignment(allow_invalid_frontmatter_assignment);
-    options = options
-        .with_allow_reassigned_frontmatter_property(allow_reassigned_frontmatter_property);
+    options =
+        options.with_allow_invalid_frontmatter_assignment(allow_invalid_frontmatter_assignment);
+    options =
+        options.with_allow_reassigned_frontmatter_property(allow_reassigned_frontmatter_property);
     options = options.with_perf(perf);
     if let Some(size) = indent {
         options = options.with_indent_size(size);
