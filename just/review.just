@@ -60,7 +60,9 @@ review feat="":
     echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
 
-# implements the suggestions from a review
+
+
+# implements the suggestions from a review of a feature or fix
 implement-suggestions filter="" spec="" design="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -111,7 +113,7 @@ implement-suggestions filter="" spec="" design="" agent="":
     confirm="$(just _confirm "Ready to start?")"
 
     echo -e "🏃‍♂️ Starting the {{bold}}implementation{{reset}} of the review suggestions"
-    if claudine compose "@prompts/implement-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="$(basename "${spec_file}")" design="$(basename "${design_file}")"; then
+    if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="$(basename "${spec_file}")" design="$(basename "${design_file}")"; then
         echo
         echo -e "🎉 Implemented all the suggestions found in the $(just _link "${review}") review!"
         echo
