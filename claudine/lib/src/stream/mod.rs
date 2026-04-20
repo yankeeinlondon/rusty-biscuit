@@ -100,6 +100,13 @@ pub fn stream_protocol_for(provider: Provider) -> Option<StreamProtocol> {
 }
 
 pub(crate) fn trace_parser_event(provider: Provider, event_type: &str, line_num: usize) {
+    let _span = tracing::info_span!(
+        "stream_parse_event",
+        provider = %provider,
+        event_type,
+        line_num,
+    )
+    .entered();
     trace!(
         provider = %provider,
         event_type,
@@ -113,6 +120,13 @@ pub(crate) fn trace_session_metadata(
     session_id: Option<&str>,
     model: Option<&str>,
 ) {
+    let _span = tracing::info_span!(
+        "stream_session_metadata",
+        provider = %provider,
+        session_id = session_id.unwrap_or(""),
+        model = model.unwrap_or(""),
+    )
+    .entered();
     trace!(
         provider = %provider,
         session_id = session_id.unwrap_or(""),
@@ -122,6 +136,13 @@ pub(crate) fn trace_session_metadata(
 }
 
 pub(crate) fn trace_tool_event(provider: Provider, tool_calls: u32, tool_name: Option<&str>) {
+    let _span = tracing::info_span!(
+        "stream_tool_event",
+        provider = %provider,
+        tool_calls,
+        tool_name = tool_name.unwrap_or(""),
+    )
+    .entered();
     trace!(
         provider = %provider,
         tool_calls,
@@ -136,6 +157,12 @@ pub(crate) fn trace_summary_update(
     duration_ms: Option<u64>,
     cost_usd: Option<f64>,
 ) {
+    let _span = tracing::info_span!(
+        "stream_summary",
+        provider = %provider,
+        duration_ms = duration_ms.unwrap_or(0),
+    )
+    .entered();
     trace!(
         provider = %provider,
         provider_status = provider_status.unwrap_or(""),
@@ -152,6 +179,14 @@ pub(crate) fn trace_parser_finish(
     num_turns: u32,
     provider_status: Option<&str>,
 ) {
+    let _span = tracing::info_span!(
+        "stream_parser_finish",
+        provider = %provider,
+        exit_code,
+        tool_calls,
+        num_turns,
+    )
+    .entered();
     trace!(
         provider = %provider,
         exit_code,
@@ -163,6 +198,12 @@ pub(crate) fn trace_parser_finish(
 }
 
 pub(crate) fn trace_malformed_line(provider: Provider, line_num: usize, message: &str) {
+    let _span = tracing::info_span!(
+        "stream_malformed",
+        provider = %provider,
+        line_num,
+    )
+    .entered();
     trace!(
         provider = %provider,
         line_num,

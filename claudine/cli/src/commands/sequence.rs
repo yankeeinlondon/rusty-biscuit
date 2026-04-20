@@ -3,6 +3,7 @@
 use clap::Args;
 use claudine::composition::{self, SequenceExecutionOptions};
 use color_eyre::eyre::{Result, eyre};
+use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
 use crate::log;
@@ -74,6 +75,13 @@ fn run_sequence_inner(args: SequenceArgs, verbose: u8) -> Result<i32> {
     })?;
 
     let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
+
+    let _sequence_span = info_span!(
+        "sequence",
+        file = %source.resolved_path.display(),
+        fail_fast = ?fail_fast,
+    )
+    .entered();
 
     let plan = composition::resolve_sequence_plan(&source)
         .map_err(|e| eyre!("{e}"))?

@@ -177,7 +177,15 @@ pub async fn dispatch_canonical(
                 debug!(%provider, "Adapter returned unknown event, skipping canonical dispatch");
                 return Ok(DispatchOutcome::default());
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                let _fail_span = info_span!(
+                    "dispatch_adapter_parse_failed",
+                    %provider,
+                    error = %error,
+                )
+                .entered();
+                return Err(error.into());
+            }
         }
     };
 
