@@ -278,6 +278,7 @@ fn trim_trailing_blank_lines(rendered: &str) -> String {
 
 /// Build the Status header with the "prompt referenced {file} provided an
 /// invalid shell expansion command in the {body|frontmatter}" text.
+#[allow(deprecated)]
 fn build_header(absolute: &Path, relative: &Path, kind: OriginKind, reason: &str) -> Status {
     let rel_display = prose_escape(&relative.display().to_string());
     let abs_display = absolute.display().to_string();

@@ -425,6 +425,7 @@ impl LifecycleSignal {
     /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Failure);
     /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Failure);
     /// ```
+    #[allow(deprecated)]
     pub fn status_state(&self) -> StatusState {
         match self {
             Self::Start => StatusState::Info,

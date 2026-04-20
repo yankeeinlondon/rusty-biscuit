@@ -12,7 +12,8 @@ Both commands share the same five-stage pipeline and inherit full wrapper-grade 
 Because composition flows through the same execution path as `claudine claude` / `codex` / etc., it inherits every behavior of the live stderr surface documented in [Non-Interactive Sessions](non-interactive-sessions.md):
 
 - **Tool call rendering** — `→ Name(summary)` / `← Name(slot)` with shell-name prefixing for `Bash` / `shell` / `run_command` and `description → subject → prompt → task` field order for `Task`.
-- **Idle flush** — buffered assistant markdown is flushed before the next heartbeat status line whenever the block buffer has been idle for at least the heartbeat silence window (default 30 s), so a dangling final paragraph never sits invisible while a slow-to-close provider waits to exit.
+- **Idle flush** — buffered assistant markdown is flushed by an independent 30-second ticker whenever the block buffer has been idle for 30 s, so a dangling final paragraph never sits invisible while a slow-to-close provider waits to exit.
+- **Prompt-scoped timing header** — every 10 minutes the stderr surface emits `⏱️ {HH:MM} {TZ} running the <prompt> prompt for <duration>` anchored on the prompt's start time (and a `t=0` header without the duration at run start). See [Timing Surface](#timing-surface) below.
 - **Typed error rendering** — `SemanticEvent::Error` is rendered as a colored `BlockQuote` whose label and border come from `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`).
 - **Reasoning / thinking** — provider reasoning (Claude, Codex, OpenCode, Gemini, Qwen) renders into `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border that matches the System Prompt and Agent Prompt sections.
 
@@ -219,6 +220,70 @@ run is reported as the wall-clock timeout.
 timeout: 10m          # hard ceiling on total runtime
 step_timeout: 45s     # kill the child if it goes silent for 45s
 ```
+
+## Timing Surface
+
+Every composition run (whether harness-enabled or not) shares a single
+user-visible timing surface rendered to stderr. Two emitters drive it:
+
+1. **Periodic prompt-scoped header.** Emitted at `t=0` when the prompt
+   begins and then at monotonic offsets from `t=0` (`t=10m`, `t=20m`,
+   `t=30m`, …). Ticks are anchored on the prompt's start time, not on
+   wall-clock `:00 :10 :20` boundaries.
+
+    - The `t=0` header reads `⏱️ {HH:MM} {TZ} running the {prompt} prompt`
+      (no duration segment).
+    - Subsequent ticks read `⏱️ {HH:MM} {TZ} running the {prompt} prompt
+      for {duration}`.
+    - `{prompt}` is an OSC8 link whose visible text is the path relative
+      to the repo root (falling back to CWD, `$HOME`, then absolute).
+
+2. **Fire-once warnings** (harness frontmatter only):
+
+    - **`timeout_warn`** — prompt-scoped. Fires once when the prompt has
+      been running for this long. Message variants:
+        - *With `timeout` also set:* `the {prompt} has been running for
+          {elapsed}, this is longer than we'd expect it to take but we
+          won't timeout this prompt until we reach {HH:MM} in
+          {remaining}.`
+        - *Without `timeout`:* `the {prompt} has been running for
+          {elapsed}, this is longer than we'd expect it to take. Press
+          CTRL+C to terminate this prompt if you're convinced that the
+          prompt has hung.`
+    - **`step_timeout_warn`** — step-scoped, fires once per stall episode
+      using the same silence clock as `step_timeout`. Message variants:
+        - *With `step_timeout` also set:* `the {prompt} has not produced
+          output for {silence}, this is longer than we'd expect, but we
+          won't abort this step until we reach {HH:MM} in {remaining}.`
+        - *Without `step_timeout`:* `the {prompt} has not produced output
+          for {silence}, this is longer than we'd expect. Press CTRL+C to
+          terminate this prompt if you're convinced that the prompt has
+          hung.`
+
+```yaml
+timeout: 10m
+timeout_warn: 5m         # warn at 5m; still kill at 10m
+step_timeout: 45s
+step_timeout_warn: 20s   # warn at 20s silence; still kill at 45s silence
+```
+
+**Duration rendering.** All user-visible durations use a single format:
+`{N}s` under 60 seconds (e.g. `45s`), `{N}m` between 1 and 59 minutes
+(e.g. `12m`), `{H}h {M}m` at 60 minutes or more (e.g. `1h 30m`, `2h 5m`).
+No zero-padding, no colon-separated forms.
+
+**Preflight validation.** Each `*_warn` must be strictly less than its
+corresponding hard threshold when both are present. `timeout_warn >=
+timeout` or `step_timeout_warn >= step_timeout` is rejected at parse
+time with `HarnessError::InvalidTimeout`. `*_warn` values `<= 0` are
+also rejected (the underlying duration parser requires positive values).
+A warn set without its corresponding hard threshold is legal — the
+"without hard threshold" message variant applies.
+
+**Fire-once semantics.** `timeout_warn` fires at most once per prompt
+run. `step_timeout_warn` fires at most once per stall episode; once
+activity resumes it re-arms for the next stall. Neither emission blocks
+the provider or affects hard-timeout behavior.
 
 ### Handlers
 

@@ -82,6 +82,47 @@ enum CompositionExecutionMode<'a> {
     },
 }
 
+/// Build a [`PromptTimingContext`] from a resolved prompt path, the
+/// effective repo root (when any), and the optional warn thresholds
+/// parsed from harness frontmatter.
+///
+/// `display_path` is resolved in the order repo root → CWD → `$HOME`
+/// (falling back to the absolute path when none apply) per the feature
+/// spec's "relative path" rules for the OSC8 link text.
+pub(crate) fn build_prompt_timing_context(
+    absolute_path: &std::path::Path,
+    repo_root: Option<&std::path::Path>,
+    timeout_warn: Option<std::time::Duration>,
+    step_timeout_warn: Option<std::time::Duration>,
+) -> claudine::stream::prompt_timing::PromptTimingContext {
+    let display_path = resolve_prompt_display_path(absolute_path, repo_root);
+    claudine::stream::prompt_timing::PromptTimingContext {
+        absolute_path: absolute_path.to_path_buf(),
+        display_path,
+        timeout_warn,
+        step_timeout_warn,
+    }
+}
+
+fn resolve_prompt_display_path(path: &std::path::Path, repo_root: Option<&std::path::Path>) -> String {
+    if let Some(root) = repo_root
+        && let Ok(rel) = path.strip_prefix(root)
+    {
+        return rel.display().to_string();
+    }
+    if let Ok(cwd) = std::env::current_dir()
+        && let Ok(rel) = path.strip_prefix(&cwd)
+    {
+        return rel.display().to_string();
+    }
+    if let Some(home) = dirs::home_dir()
+        && let Ok(rel) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", rel.display());
+    }
+    path.display().to_string()
+}
+
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
     selection_reason: &SelectionReason,
@@ -855,6 +896,7 @@ pub(crate) fn execute_composition_request_inner(
             lifecycle,
             &lifecycle_ctx,
             &emitter,
+            true,
         )?;
         Ok(SingleCompositionOutcome {
             exit_code,
@@ -878,6 +920,17 @@ pub(crate) fn execute_composition_request_inner(
             CompositionExecutionMode::Direct
         };
 
+        // Non-harness compose: no `*_warn` thresholds are parseable from
+        // frontmatter (no harness block), but we still anchor the
+        // periodic `t=0` / `t=10m` timing header on this prompt so users
+        // see their composition running.
+        let prompt_timing = Some(build_prompt_timing_context(
+            &request.prepared.resolved_path,
+            effective_repo_root,
+            None,
+            None,
+        ));
+
         let mut child_spawned = false;
         let exit_result = execute_without_harness(
             mode,
@@ -898,6 +951,7 @@ pub(crate) fn execute_composition_request_inner(
             &dispatch_context,
             &term,
             &mut child_spawned,
+            prompt_timing,
         );
 
         // Mark launched as soon as spawn succeeded — before propagating
@@ -957,6 +1011,7 @@ fn execute_without_harness(
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
     child_spawned: &mut bool,
+    prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
 
@@ -976,6 +1031,7 @@ fn execute_without_harness(
             env_context,
             dispatch_context,
             child_spawned,
+            prompt_timing,
         )?;
 
         // Render assistant text to stdout when the provider did not stream
@@ -1317,6 +1373,7 @@ fn run_structured_composition(
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     child_spawned: &mut bool,
+    prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
 ) -> Result<CompositionStreamResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
@@ -1348,8 +1405,8 @@ fn run_structured_composition(
         child_spawned,
         live_metrics,
         stream_output,
-        claudine::stream::progress::HeartbeatPolicy::default(),
         stderr_bridge,
+        prompt_timing,
     )?;
     let mut summary = stream_result.data;
 

@@ -32,6 +32,7 @@ struct StepContext {
 }
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
+#[allow(deprecated)]
 pub(crate) fn execute_sequence(
     source: &ResolvedCompositionSource,
     plan: SequencePlan,

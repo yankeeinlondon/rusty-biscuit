@@ -1,56 +1,21 @@
-//! Live progress reporting shared between stream parsers and the heartbeat
-//! thread.
+//! Live progress reporting collected while stream parsers emit semantic
+//! events.
 //!
 //! Parsers push tool lifecycle and token/cost deltas into [`LiveMetrics`];
-//! the CLI heartbeat reads the snapshot to render a `Status::Info` line when
-//! the stream goes quiet. Per-tool announcements (`Status::ToolUse`) are
-//! rendered through the same formatters so every provider surfaces the same
-//! visual vocabulary regardless of which fields its stream exposes.
+//! the CLI's prompt-scoped timing monitor reads the silence clock (via
+//! [`should_warn_stall`]) to decide whether to emit a `step_timeout_warn`
+//! line. Per-tool announcements (`Status::ToolUse`) are rendered through
+//! the same formatters so every provider surfaces the same visual
+//! vocabulary regardless of which fields its stream exposes.
 //!
-//! The announcer only *formats* descriptions. Callers are responsible for
-//! wrapping the descriptions in `Status`, rendering against a `Terminal`, and
-//! writing to stderr so unit tests can assert on plain text.
+//! Callers wrap the descriptions in `Status`, render against a `Terminal`,
+//! and write to stderr — this module only tracks state.
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::semantic::SemanticEvent;
 use super::token_usage::NormalizedTokenUsage;
-
-/// Named constants for the heartbeat-emission policy.
-///
-/// - `interval`: granularity at which the heartbeat thread wakes up.
-/// - `silence_window`: time of stream inactivity required before a heartbeat
-///   tick is allowed to emit.
-/// - `force_window`: hard cadence that overrides `silence_window` — once this
-///   much time has passed since the last heartbeat, the next tick fires even
-///   if the stream is busy, so long-running subagents still surface progress.
-///
-/// Moving the timing into a named struct keeps the exec-loop policy explicit
-/// and testable, and establishes a single place to tune behavior across every
-/// provider.
-#[derive(Debug, Clone, Copy)]
-pub struct HeartbeatPolicy {
-    pub interval: Duration,
-    pub silence_window: Duration,
-    pub force_window: Duration,
-}
-
-impl HeartbeatPolicy {
-    pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
-    pub const DEFAULT_SILENCE_WINDOW: Duration = Duration::from_secs(30);
-    pub const DEFAULT_FORCE_WINDOW: Duration = Duration::from_secs(120);
-}
-
-impl Default for HeartbeatPolicy {
-    fn default() -> Self {
-        Self {
-            interval: Self::DEFAULT_INTERVAL,
-            silence_window: Self::DEFAULT_SILENCE_WINDOW,
-            force_window: Self::DEFAULT_FORCE_WINDOW,
-        }
-    }
-}
 
 /// Shared, thread-safe handle to the live metrics snapshot.
 pub type LiveMetrics = Arc<Mutex<LiveMetricsState>>;
@@ -99,15 +64,10 @@ pub struct LiveMetricsState {
     /// from a generic silent stall.
     pub provider_status: Option<String>,
     /// Wall-clock time of the most recent observed event of any kind (tool
-    /// start, tool end, or assistant text delta). The heartbeat suppresses
-    /// ticks when this is recent so busy streams stay quiet; a stale value
-    /// means the provider is silent and the user deserves a status update.
+    /// start, tool end, or assistant text delta). The step-timeout warning
+    /// compares against this to measure silence; a stale value means the
+    /// provider has gone quiet.
     pub last_event_at: Option<Instant>,
-    /// Wall-clock time of the most recent heartbeat emission. Ensures the
-    /// heartbeat surfaces at a hard cadence even during sustained activity —
-    /// otherwise a flood of tool events can hide a long-running subagent
-    /// indefinitely.
-    pub last_heartbeat_at: Option<Instant>,
     /// Wall-clock time of the most recent stalled-stream warning emission.
     /// Used by [`should_warn_stall`] to dedupe warnings within a single
     /// stall episode — once activity resumes (`last_event_at` advances past
@@ -277,95 +237,7 @@ impl LiveMetricsState {
     }
 }
 
-/// Build the `Status::Info` description for a heartbeat tick.
-///
-/// Returns `None` when the caller should suppress the tick because the stream
-/// has been actively producing output within `quiet_window`. The suppression
-/// is overridden by `force_window`: once that much time has passed since the
-/// last heartbeat, a tick is emitted regardless of ongoing activity so busy
-/// streams still surface progress to the user.
-///
-/// `elapsed` is the session duration since the provider launched.
-pub fn describe_heartbeat(
-    state: &LiveMetricsState,
-    elapsed: Duration,
-    now: Instant,
-    quiet_window: Duration,
-    force_window: Duration,
-) -> Option<String> {
-    let should_force = state
-        .last_heartbeat_at
-        .map(|last| now.saturating_duration_since(last) >= force_window)
-        .unwrap_or(false);
-
-    if !should_force
-        && let Some(last) = state.last_event_at
-        && now.saturating_duration_since(last) < quiet_window
-    {
-        return None;
-    }
-
-    let mut parts = Vec::new();
-    parts.push(format_duration(elapsed));
-
-    if !state.in_flight.is_empty() {
-        let mut names: Vec<&str> = state
-            .in_flight
-            .values()
-            .filter_map(|t| t.name.as_deref())
-            .collect();
-        names.sort_unstable();
-        let running = state.in_flight.len();
-        let label = if names.is_empty() {
-            format!("{running} running")
-        } else {
-            format!("{running} running ({})", names.join(", "))
-        };
-        parts.push(label);
-    }
-
-    if !state.in_flight_subagents.is_empty() {
-        let mut names: Vec<&str> = state
-            .in_flight_subagents
-            .values()
-            .filter_map(|s| s.name.as_deref())
-            .collect();
-        names.sort_unstable();
-        let count = state.in_flight_subagents.len();
-        let label = if names.is_empty() {
-            format!("{count} subagent(s)")
-        } else {
-            format!("{count} subagent(s) ({})", names.join(", "))
-        };
-        parts.push(label);
-    }
-
-    if state.done_count > 0 {
-        parts.push(format!("{} done", state.done_count));
-    }
-
-    if let Some(usage) = &state.token_usage {
-        if let (Some(i), Some(o)) = (usage.input, usage.output) {
-            parts.push(format!(
-                "{}\u{2192}{} tok",
-                format_number(i),
-                format_number(o)
-            ));
-        } else if let Some(i) = usage.input {
-            parts.push(format!("{} in", format_number(i)));
-        } else if let Some(o) = usage.output {
-            parts.push(format!("{} out", format_number(o)));
-        }
-    }
-
-    if let Some(cost) = state.cost_usd {
-        parts.push(format_cost(cost));
-    }
-
-    Some(parts.join(" \u{00b7} "))
-}
-
-/// Decide whether the heartbeat should emit a stalled-stream warning.
+/// Decide whether the step-silence warning should emit.
 ///
 /// Returns `true` when:
 /// - some activity has been observed (`last_event_at.is_some()`),
@@ -377,7 +249,7 @@ pub fn describe_heartbeat(
 ///
 /// Callers are expected to set `last_stall_warning_at = Some(now)` after a
 /// successful warning emission so the same stall does not re-fire on every
-/// subsequent heartbeat tick. Once activity resumes, `last_event_at`
+/// subsequent timing tick. Once activity resumes, `last_event_at`
 /// naturally advances past the stored warning timestamp and the next stall
 /// is again eligible to warn.
 pub fn should_warn_stall(
@@ -397,32 +269,6 @@ pub fn should_warn_stall(
     }
 }
 
-fn format_duration(d: Duration) -> String {
-    let secs = d.as_secs_f64();
-    if secs < 10.0 {
-        format!("{secs:.1}s")
-    } else {
-        format!("{:.0}s", secs)
-    }
-}
-
-fn format_number(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.0}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
-}
-
-fn format_cost(cost: f64) -> String {
-    if cost < 0.01 {
-        format!("${cost:.4}")
-    } else {
-        format!("${cost:.2}")
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -439,121 +285,6 @@ mod tests {
         assert_eq!(removed.unwrap().name.as_deref(), Some("Bash"));
         assert_eq!(state.in_flight.len(), 0);
         assert_eq!(state.done_count, 1);
-    }
-
-    #[test]
-    fn heartbeat_suppresses_when_activity_is_recent() {
-        let mut state = LiveMetricsState::default();
-        let now = Instant::now();
-        state.last_event_at = Some(now);
-        assert!(
-            describe_heartbeat(
-                &state,
-                Duration::from_secs(90),
-                now,
-                Duration::from_secs(30),
-                Duration::from_secs(120),
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn heartbeat_emits_when_activity_is_stale() {
-        let mut state = LiveMetricsState::default();
-        let now = Instant::now();
-        state.last_event_at = Some(now - Duration::from_secs(60));
-        state.done_count = 3;
-        let desc = describe_heartbeat(
-            &state,
-            Duration::from_secs(90),
-            now,
-            Duration::from_secs(30),
-            Duration::from_secs(120),
-        )
-        .unwrap();
-        assert!(desc.contains("90s"));
-        assert!(desc.contains("3 done"));
-    }
-
-    #[test]
-    fn heartbeat_lists_running_tool_names() {
-        let mut state = LiveMetricsState::default();
-        let now = Instant::now() - Duration::from_secs(60);
-        state.record_tool_start("a".into(), Some("Bash".into()), now);
-        state.record_tool_start("b".into(), Some("Read".into()), now);
-        let later = Instant::now();
-        let desc = describe_heartbeat(
-            &state,
-            Duration::from_secs(120),
-            later,
-            Duration::from_secs(30),
-            Duration::from_secs(120),
-        )
-        .unwrap();
-        assert!(desc.contains("2 running"));
-        assert!(desc.contains("Bash"));
-        assert!(desc.contains("Read"));
-    }
-
-    #[test]
-    fn heartbeat_includes_tokens_and_cost() {
-        let mut state = LiveMetricsState::default();
-        let now = Instant::now() - Duration::from_secs(60);
-        state.last_event_at = Some(now);
-        state.update_token_usage(NormalizedTokenUsage {
-            input: Some(12_000),
-            output: Some(3_000),
-            total: None,
-            cache_read: None,
-        });
-        state.update_cost(0.0215);
-        let later = Instant::now();
-        let desc = describe_heartbeat(
-            &state,
-            Duration::from_secs(90),
-            later,
-            Duration::from_secs(30),
-            Duration::from_secs(120),
-        )
-        .unwrap();
-        assert!(desc.contains("12K\u{2192}3K tok"));
-        assert!(desc.contains("$0.02"));
-    }
-
-    #[test]
-    fn heartbeat_always_emits_when_no_events_observed() {
-        let state = LiveMetricsState::default();
-        let now = Instant::now();
-        let desc = describe_heartbeat(
-            &state,
-            Duration::from_secs(30),
-            now,
-            Duration::from_secs(30),
-            Duration::from_secs(120),
-        )
-        .unwrap();
-        assert!(desc.starts_with("30s"));
-    }
-
-    #[test]
-    fn heartbeat_forces_emission_when_last_heartbeat_is_stale() {
-        let mut state = LiveMetricsState::default();
-        let now = Instant::now();
-        // Busy stream: an event happened just now, so the quiet window would
-        // normally suppress. But the last heartbeat was 3 minutes ago and the
-        // force window is 2 minutes — the tick must fire anyway.
-        state.last_event_at = Some(now);
-        state.last_heartbeat_at = Some(now - Duration::from_secs(180));
-        let desc = describe_heartbeat(
-            &state,
-            Duration::from_secs(200),
-            now,
-            Duration::from_secs(30),
-            Duration::from_secs(120),
-        )
-        .unwrap();
-        assert!(desc.contains("200s"));
     }
 
     #[test]
@@ -625,14 +356,6 @@ mod tests {
     mod observe_event_tests {
         use super::*;
         use crate::stream::semantic::SemanticEvent;
-
-        #[test]
-        fn heartbeat_policy_defaults_match_contract() {
-            let p = HeartbeatPolicy::default();
-            assert_eq!(p.interval, Duration::from_secs(30));
-            assert_eq!(p.silence_window, Duration::from_secs(30));
-            assert_eq!(p.force_window, Duration::from_secs(120));
-        }
 
         #[test]
         fn activity_event_refreshes_last_event_at() {
@@ -822,9 +545,9 @@ mod tests {
         }
 
         #[test]
-        fn heartbeat_lists_in_flight_subagents() {
+        fn subagent_start_tracks_in_flight() {
             let mut state = LiveMetricsState::default();
-            let now = Instant::now() - Duration::from_secs(60);
+            let now = Instant::now();
             state.observe_event(
                 &SemanticEvent::SubagentStart {
                     name: Some("researcher".into()),
@@ -833,17 +556,9 @@ mod tests {
                 },
                 now,
             );
-            let later = Instant::now();
-            let desc = describe_heartbeat(
-                &state,
-                Duration::from_secs(120),
-                later,
-                Duration::from_secs(30),
-                Duration::from_secs(120),
-            )
-            .unwrap();
-            assert!(desc.contains("1 subagent"));
-            assert!(desc.contains("researcher"));
+            assert_eq!(state.in_flight_subagents.len(), 1);
+            let entry = state.in_flight_subagents.get("sa1").unwrap();
+            assert_eq!(entry.name.as_deref(), Some("researcher"));
         }
     }
 }
