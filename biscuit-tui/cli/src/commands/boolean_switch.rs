@@ -30,11 +30,6 @@ pub struct BooleanSwitchArgs {
     /// Custom on/off captions in `"on,off"` form (e.g. `--labels YES,NO`).
     #[arg(long)]
     pub labels: Option<String>,
-
-    /// Render inline in `N` rows below the cursor instead of
-    /// fullscreen.
-    #[arg(long)]
-    pub height: Option<u16>,
 }
 
 /// Runs the `boolean-switch` subcommand.
@@ -43,7 +38,25 @@ pub struct BooleanSwitchArgs {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error.
-pub fn run(args: BooleanSwitchArgs, output: OutputMode) -> io::Result<i32> {
+pub fn run(args: BooleanSwitchArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+    let stdout = io::stdout();
+    let mut lock = stdout.lock();
+    run_with_writer(args, output, height, &mut lock, |state, height| {
+        run_standalone(BooleanSwitch::new(), state, height)
+    })
+}
+
+fn run_with_writer<F, W>(
+    args: BooleanSwitchArgs,
+    output: OutputMode,
+    height: Option<u16>,
+    writer: &mut W,
+    run_prompt: F,
+) -> io::Result<i32>
+where
+    F: FnOnce(BooleanSwitchState, Option<u16>) -> io::Result<bool>,
+    W: Write,
+{
     let mut state = BooleanSwitchState::new().with_value(args.initial.unwrap_or(false));
 
     if let Some(text) = args.label {
@@ -54,12 +67,10 @@ pub fn run(args: BooleanSwitchArgs, output: OutputMode) -> io::Result<i32> {
         state = state.with_labels(on, off);
     }
 
-    match run_standalone(BooleanSwitch::new(), state, args.height) {
+    match run_prompt(state, height) {
         Ok(value) => {
-            let stdout = io::stdout();
-            let mut lock = stdout.lock();
-            write_scalar(&mut lock, bool_to_str(value), output)?;
-            lock.flush()?;
+            write_scalar(writer, bool_to_str(value), output)?;
+            writer.flush()?;
             Ok(0)
         }
         Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
@@ -118,5 +129,128 @@ mod tests {
     fn parse_labels_rejects_empty_on() {
         let err = parse_labels(",NO").unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn run_writes_json_boolean_string_from_initial_state() {
+        let args = BooleanSwitchArgs {
+            label: Some("Enabled".into()),
+            label_position: LabelPositionArg::Right,
+            initial: Some(true),
+            labels: Some("YES,NO".into()),
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Json,
+            Some(3),
+            &mut output,
+            |state, height| {
+                assert_eq!(height, Some(3));
+                assert!(state.checked());
+                assert_eq!(
+                    state.label().map(|label| label.text.as_str()),
+                    Some("Enabled")
+                );
+                Ok(state.checked())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(String::from_utf8(output).unwrap(), "\"true\"\n");
+    }
+
+    #[test]
+    fn run_writes_raw_true_with_newline() {
+        let args = BooleanSwitchArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            initial: Some(true),
+            labels: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| Ok(state.checked()),
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"true\n");
+    }
+
+    #[test]
+    fn run_writes_raw_false_with_newline() {
+        let args = BooleanSwitchArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            initial: Some(false),
+            labels: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| Ok(state.checked()),
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"false\n");
+    }
+
+    #[test]
+    fn run_writes_null_output_with_nul_terminator() {
+        let args = BooleanSwitchArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            initial: Some(true),
+            labels: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Null,
+            None,
+            &mut output,
+            |state, _height| Ok(state.checked()),
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"true\0");
+    }
+
+    #[test]
+    fn run_returns_130_without_output_on_cancel() {
+        let args = BooleanSwitchArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            initial: Some(false),
+            labels: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "cancelled")),
+        )
+        .unwrap();
+
+        assert_eq!(status, 130);
+        assert!(output.is_empty());
     }
 }

@@ -7,9 +7,7 @@
 use std::io::{self, Write};
 
 use clap::Args;
-use tui_chrome::{
-    CANCELLED_KIND, Label, TextAreaInput, TextAreaInputState, run_standalone,
-};
+use tui_chrome::{CANCELLED_KIND, Label, TextAreaInput, TextAreaInputState, run_standalone};
 
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_scalar};
@@ -29,11 +27,6 @@ pub struct TextAreaInputArgs {
     #[arg(long, default_value_t = 60)]
     pub width: u16,
 
-    /// Render inline in `N` rows below the cursor instead of
-    /// fullscreen.
-    #[arg(long)]
-    pub height: Option<u16>,
-
     /// Show a vertical scrollbar when content exceeds the editor
     /// height.
     #[arg(long, default_value_t = false)]
@@ -51,8 +44,26 @@ pub struct TextAreaInputArgs {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error.
-pub fn run(args: TextAreaInputArgs, output: OutputMode) -> io::Result<i32> {
-    let editor_height = args.height.unwrap_or(10);
+pub fn run(args: TextAreaInputArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+    let stdout = io::stdout();
+    let mut lock = stdout.lock();
+    run_with_writer(args, output, height, &mut lock, |state, height| {
+        run_standalone(TextAreaInput::new(), state, height)
+    })
+}
+
+fn run_with_writer<F, W>(
+    args: TextAreaInputArgs,
+    output: OutputMode,
+    height: Option<u16>,
+    writer: &mut W,
+    run_prompt: F,
+) -> io::Result<i32>
+where
+    F: FnOnce(TextAreaInputState, Option<u16>) -> io::Result<String>,
+    W: Write,
+{
+    let editor_height = height.unwrap_or(10);
     let mut state = TextAreaInputState::new(args.width, editor_height);
 
     if let Some(text) = args.label {
@@ -66,12 +77,10 @@ pub fn run(args: TextAreaInputArgs, output: OutputMode) -> io::Result<i32> {
         state = state.with_value(&lines);
     }
 
-    match run_standalone(TextAreaInput::new(), state, args.height) {
+    match run_prompt(state, height) {
         Ok(value) => {
-            let stdout = io::stdout();
-            let mut lock = stdout.lock();
-            write_scalar(&mut lock, &value, output)?;
-            lock.flush()?;
+            write_scalar(writer, &value, output)?;
+            writer.flush()?;
             Ok(0)
         }
         Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
@@ -91,11 +100,111 @@ mod tests {
             label: None,
             label_position: LabelPositionArg::Above,
             width: 60,
-            height: None,
             scrollbar: false,
             initial: None,
         };
         assert_eq!(args.width, 60);
         assert!(!args.scrollbar);
+    }
+
+    #[test]
+    fn run_writes_json_output_from_initial_lines() {
+        let args = TextAreaInputArgs {
+            label: Some("Notes".into()),
+            label_position: LabelPositionArg::Above,
+            width: 72,
+            scrollbar: true,
+            initial: Some("alpha\nbeta".into()),
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Json,
+            Some(6),
+            &mut output,
+            |state, height| {
+                assert_eq!(height, Some(6));
+                assert_eq!(state.preferred_width(), 72);
+                assert_eq!(state.lines(), ["alpha".to_string(), "beta".to_string()]);
+                Ok(state.value())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(String::from_utf8(output).unwrap(), "\"alpha\\nbeta\"\n");
+    }
+
+    #[test]
+    fn run_writes_raw_output_preserving_newlines() {
+        let args = TextAreaInputArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            width: 60,
+            scrollbar: false,
+            initial: Some("line1\nline2\nline3".into()),
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| Ok(state.value()),
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn run_writes_null_output_with_nul_terminator() {
+        let args = TextAreaInputArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            width: 60,
+            scrollbar: false,
+            initial: Some("multi\nline".into()),
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Null,
+            None,
+            &mut output,
+            |state, _height| Ok(state.value()),
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"multi\nline\0");
+    }
+
+    #[test]
+    fn run_returns_130_without_output_on_cancel() {
+        let args = TextAreaInputArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            width: 60,
+            scrollbar: false,
+            initial: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "cancelled")),
+        )
+        .unwrap();
+
+        assert_eq!(status, 130);
+        assert!(output.is_empty());
     }
 }
