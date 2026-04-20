@@ -88,17 +88,29 @@ mod tests {
         assert!(KeyBindings::matches(&bindings.up, &key(KeyCode::Up)));
         assert!(KeyBindings::matches(&bindings.up, &key(KeyCode::Char('k'))));
         assert!(KeyBindings::matches(&bindings.down, &key(KeyCode::Down)));
-        assert!(KeyBindings::matches(&bindings.down, &key(KeyCode::Char('j'))));
+        assert!(KeyBindings::matches(
+            &bindings.down,
+            &key(KeyCode::Char('j'))
+        ));
         assert!(KeyBindings::matches(&bindings.left, &key(KeyCode::Left)));
-        assert!(KeyBindings::matches(&bindings.left, &key(KeyCode::Char('h'))));
+        assert!(KeyBindings::matches(
+            &bindings.left,
+            &key(KeyCode::Char('h'))
+        ));
         assert!(KeyBindings::matches(&bindings.right, &key(KeyCode::Right)));
-        assert!(KeyBindings::matches(&bindings.right, &key(KeyCode::Char('l'))));
+        assert!(KeyBindings::matches(
+            &bindings.right,
+            &key(KeyCode::Char('l'))
+        ));
     }
 
     #[test]
     fn defaults_bind_toggle_submit_and_cancel() {
         let bindings = KeyBindings::default();
-        assert!(KeyBindings::matches(&bindings.toggle, &key(KeyCode::Char(' '))));
+        assert!(KeyBindings::matches(
+            &bindings.toggle,
+            &key(KeyCode::Char(' '))
+        ));
         assert!(KeyBindings::matches(&bindings.submit, &key(KeyCode::Enter)));
         assert!(KeyBindings::matches(&bindings.cancel, &key(KeyCode::Esc)));
     }
@@ -106,15 +118,23 @@ mod tests {
     #[test]
     fn matches_is_false_for_unbound_keys() {
         let bindings = KeyBindings::default();
-        assert!(!KeyBindings::matches(&bindings.submit, &key(KeyCode::Char('z'))));
+        assert!(!KeyBindings::matches(
+            &bindings.submit,
+            &key(KeyCode::Char('z'))
+        ));
     }
 
     #[test]
     fn custom_bindings_override_defaults() {
-        let mut bindings = KeyBindings::default();
-        bindings.submit = vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)];
+        let bindings = KeyBindings {
+            submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
+            ..KeyBindings::default()
+        };
         let ctrl_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert!(KeyBindings::matches(&bindings.submit, &ctrl_s));
-        assert!(!KeyBindings::matches(&bindings.submit, &key(KeyCode::Enter)));
+        assert!(!KeyBindings::matches(
+            &bindings.submit,
+            &key(KeyCode::Enter)
+        ));
     }
 }
