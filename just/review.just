@@ -49,13 +49,19 @@ review feat="":
     feature="$(just _title_case ${feature#????-??-??-})"
     agent="$(just _choose_agent)"
 
+    iteration=1
+    while [[ -f "${dir}/review-${iteration}.md" ]]; do
+        (( iteration++ ))
+    done
+
     echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
     [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
     [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
+    echo -e "    - Review Iteration:  {{dim}}${iteration}{{reset}}"
 
-    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" --${agent}
+    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" iteration="${iteration}" --${agent}
     echo
     echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo

@@ -1,3 +1,5 @@
+# set allow-duplicate-variables
+set allow-duplicate-recipes
 import "./util.just"
 
 bold := '\033[1m'
