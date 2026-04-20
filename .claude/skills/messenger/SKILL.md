@@ -39,12 +39,15 @@ let receipt = messenger.send(dispatch, &message).await?;
 | Discord | `discord` (default) | Markdown | Yes | Yes | Text fallback | No | No |
 | Discord-Webhook | `discord` (default) | Markdown | No | Yes | Text fallback | No | No |
 | Slack | `slack` (default) | mrkdwn | Yes | No | Text fallback | No | Yes |
+| Slack-Webhook | `slack` (default) | mrkdwn | Yes | No | Text fallback | No | Yes |
 | Signal | `signal` | Plain text | Yes | No | Text fallback | No | No |
 | WhatsApp | `whatsapp` | Plain text | Yes | No | Native | No | No |
 | Telegram | `telegram` | HTML | Yes | No | Native | Yes | Yes |
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.
+
+Slack also ships two adapters behind the `slack` feature: `SlackProvider` (bot token, full capability with addressable receipts) and `SlackWebhookProvider` (webhook URL, notification-only). The webhook adapter reuses the same Slack mrkdwn renderer and supports reply threading via `MessageRef::SlackWebhook { thread_ts: Some(...) }`, but rejects attachments (file uploads require the Web API). Successful webhook sends produce receipts with `raw_id == ""`, `message_ref.thread_ts == None`, and `metadata["delivery_confirmed"] = "true"` because Slack incoming webhooks do not return a message identifier.
 
 ## Key Types
 
@@ -80,7 +83,7 @@ Use `plan_send()` to inspect `SendPlan::warnings` before sending. Use `send_many
 messenger/
   lib/           # Reusable library crate
     src/
-      provider/  # Discord, Discord-Webhook, Slack, Signal, WhatsApp, Telegram adapters
+      provider/  # Discord, Discord-Webhook, Slack, Slack-Webhook, Signal, WhatsApp, Telegram adapters
       markdown/  # AST, parser, per-provider renderers
       tests/     # Unit + wiremock integration tests
   cli/           # messenger binary (send, setup, completions)

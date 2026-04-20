@@ -21,7 +21,7 @@ pub trait Provider: Send + Sync {
 }
 ```
 
-`ProviderKind` enum: `Discord`, `DiscordWebhook`, `Slack`, `Signal`, `WhatsApp`, `Telegram`.
+`ProviderKind` enum: `Discord`, `DiscordWebhook`, `Slack`, `SlackWebhook`, `Signal`, `WhatsApp`, `Telegram`.
 
 ## Discord
 
@@ -79,6 +79,31 @@ pub struct SlackConfig {
 **API**: `chat.postMessage` with `thread_ts` for replies, `unfurl_links`/`unfurl_media` for link previews
 **Target**: `Target::slack_channel("C01234567")`
 **MessageRef**: `MessageRef::Slack { channel_id, thread_ts }`
+
+## Slack-Webhook
+
+**Feature**: `slack` (default, same flag as the bot adapter)
+**HTTP crate**: `reqwest`
+**Module**: `provider/slack_webhook.rs`
+
+```rust
+pub struct SlackWebhookConfig {
+    pub webhook_url: SecretString,
+}
+```
+
+**Capabilities**: markdown_rendering (mrkdwn), reply, location (text fallback), link_preview_control — **no attachments**, no silent delivery. File uploads require the Web API; incoming webhooks do not accept multipart.
+**API**: `POST` to the incoming webhook URL (`https://hooks.slack.com/services/{T}/{B}/{token}`) with a JSON body. The same mrkdwn renderer is shared with the bot adapter; `disable_link_preview` sets `unfurl_links` and `unfurl_media` to `false`.
+**Target**: `Target::slack_webhook()` — the webhook URL binds the channel, so the target carries no channel id.
+**MessageRef**: `MessageRef::SlackWebhook { thread_ts: Option<String> }`. Webhook responses never return a `thread_ts`, so a webhook receipt always carries `thread_ts: None`; reply threading requires a `thread_ts` sourced from a Slack bot receipt (or any external channel that surfaces Slack thread timestamps).
+
+**Receipt semantics**: Successful webhook sends produce `SendReceipt { provider: SlackWebhook, raw_id: "", message_ref: MessageRef::SlackWebhook { thread_ts: None }, metadata: {"delivery_confirmed": "true"} }`. Because the Slack response does not carry a message id, webhook receipts cannot be used on their own as the `reply_to` target of a later send.
+
+**URL parsing**: `try_new` enforces `https` scheme, case-insensitive host `hooks.slack.com` (no subdomains), path prefix `/services/` followed by exactly three non-empty decoded segments, and rejects trailing slash, query strings, fragments, and whitespace-only segments. Malformed URLs produce `MessengerError::InvalidMessage`; absent configuration surfaces as `MessengerError::MissingConfiguration` from the CLI resolution layer.
+
+**Error mapping**: Slack webhook `ok: false` responses map `invalid_token`/`action_prohibited` to `MessengerError::Authentication`, `invalid_payload`/`channel_is_archived` to `MessengerError::InvalidMessage`, and any other response code to `MessengerError::Provider`. HTTP `429` with `Retry-After` maps to `MessengerError::RateLimited`; HTTP `5xx` maps to `MessengerError::Transport`.
+
+**Plan-time validation**: `Messenger::plan_send()` with `Target::SlackWebhook` and `reply_to = MessageRef::Slack { .. }` returns `MessengerError::InvalidMessage` (provider mismatch) before transport execution.
 
 ## Signal
 
