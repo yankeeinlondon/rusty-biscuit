@@ -357,13 +357,12 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
             webhook_url_env,
         } => {
             let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)?;
-            messenger.register(Box::new(
-                messenger::provider::discord_webhook::DiscordWebhookProvider::new(
-                    messenger::provider::discord_webhook::DiscordWebhookConfig {
-                        webhook_url: SecretString::from(url),
-                    },
-                ),
-            ));
+            let provider = messenger::provider::discord_webhook::DiscordWebhookProvider::try_new(
+                messenger::provider::discord_webhook::DiscordWebhookConfig {
+                    webhook_url: SecretString::from(url),
+                },
+            )?;
+            messenger.register(Box::new(provider));
         }
         RouteConfig::Slack {
             bot_token,
@@ -683,6 +682,23 @@ mod tests {
         let stored = loaded.routes.get("discord.webhook.alerts").unwrap();
         assert_eq!(stored, &route);
         assert_eq!(stored.provider(), RouteProvider::DiscordWebhook);
+    }
+
+    #[test]
+    fn register_provider_returns_error_for_malformed_discord_webhook_url() {
+        let route = RouteConfig::DiscordWebhook {
+            webhook_url: Some("not a url".into()),
+            webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+        };
+
+        let mut messenger = messenger::Messenger::new();
+        let err = register_provider(&mut messenger, &route).unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Discord webhook URL"),
+            "error should surface webhook URL validation, got: {msg}"
+        );
     }
 
     #[test]
