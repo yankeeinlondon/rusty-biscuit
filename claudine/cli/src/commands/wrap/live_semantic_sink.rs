@@ -35,6 +35,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::components::status::{Status, StatusState};
+use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Margin, WordWrap};
@@ -406,11 +407,11 @@ impl LiveSemanticSink {
         let escaped = escape_prose(message);
         let body = format!("<red><b>{label}</b></red>\n{escaped}");
         let prose = Prose::new(body).with_word_wrap(WordWrap::WrapProse(None, None));
-        let mut block = BlockQuote::new(RenderableContent::from(prose), None::<&str>)
-            .with_left_block_color(border_color)
-            .with_border("\u{258c} ");
-        block.layout_mut().left_margin = Margin::Chars(0);
-        block.layout_mut().right_margin = Margin::Chars(0);
+        let block = StatusBlock::new(StatusState::Error)
+            .body(prose)
+            .border_color(border_color)
+            .left_margin(Margin::Chars(0))
+            .right_margin(Margin::Chars(0));
         let rendered = block.render(&self.terminal);
         for line in rendered.lines() {
             self.emit_section_line(section, line);
@@ -452,22 +453,17 @@ impl LiveSemanticSink {
         body_prose: &str,
     ) {
         let border_color = Color::Tailwind(Tailwind::Orange700);
-        let header_rendered = Status::from_prose(header_prose)
-            .state(StatusState::Warning)
-            .render(&self.terminal);
-        for line in header_rendered.lines() {
-            self.emit_section_line(section, line);
-        }
-
         let body =
             Prose::new(body_prose.to_string()).with_word_wrap(WordWrap::WrapProse(None, None));
-        let mut block = BlockQuote::new(RenderableContent::from(body), None::<&str>)
-            .with_left_block_color(border_color)
-            .with_border("\u{2503} ");
-        block.layout_mut().left_margin = Margin::Chars(0);
-        block.layout_mut().right_margin = Margin::Chars(0);
-        let body_rendered = block.render(&self.terminal);
-        for line in body_rendered.lines() {
+        let block = StatusBlock::new(StatusState::Warning)
+            .header(header_prose)
+            .body(body)
+            .border_color(border_color)
+            .border("\u{2503} ")
+            .left_margin(Margin::Chars(0))
+            .right_margin(Margin::Chars(0));
+        let rendered = block.render(&self.terminal);
+        for line in rendered.lines() {
             self.emit_section_line(section, line);
         }
     }

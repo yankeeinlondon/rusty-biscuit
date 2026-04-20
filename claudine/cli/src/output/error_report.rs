@@ -1,12 +1,12 @@
-use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::renderable::RenderableContent;
 use biscuit_terminal::components::status::{Status, StatusState};
+use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
+use biscuit_terminal::utils::layout::Margin;
 use claudine::events::Provider;
 use claudine::stream::semantic::SemanticErrorKind;
 
@@ -206,11 +206,11 @@ impl AgentErrorReport {
             }
         }
 
-        let mut block = BlockQuote::new(RenderableContent::from(compose), None::<&str>)
-            .with_left_block_color(border_color)
-            .with_border("▌ ");
-        block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-        block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+        let block = StatusBlock::new(StatusState::Error)
+            .body(compose)
+            .border_color(border_color)
+            .left_margin(Margin::Chars(2))
+            .right_margin(Margin::Chars(2));
 
         log::message("");
         log::message(&block.render(term));
