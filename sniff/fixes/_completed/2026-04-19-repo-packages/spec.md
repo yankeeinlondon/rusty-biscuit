@@ -1,3 +1,8 @@
+---
+fixed: 2026-04-20
+agent: claude
+---
+
 # Fix `sniff repo packages`
 
 There are a few problems we need to fix when running the `sniff repo packages` command:
