@@ -104,7 +104,10 @@ pub(crate) fn build_prompt_timing_context(
     }
 }
 
-fn resolve_prompt_display_path(path: &std::path::Path, repo_root: Option<&std::path::Path>) -> String {
+fn resolve_prompt_display_path(
+    path: &std::path::Path,
+    repo_root: Option<&std::path::Path>,
+) -> String {
     if let Some(root) = repo_root
         && let Ok(rel) = path.strip_prefix(root)
     {
