@@ -12,7 +12,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, TimeZone};
+use chrono_tz::Tz;
 
 /// Everything a streaming run needs to emit the prompt-scoped timing
 /// header and its associated warnings.
@@ -76,18 +77,36 @@ pub fn format_timing_duration(d: Duration) -> String {
 
 /// Render the current local time as `{HH}:{MM} {TZ}` (e.g. `14:13 PDT`).
 ///
-/// `chrono::Local::now()` is sampled once per call so the string is
-/// consistent even when wall-clock time changes mid-format.
+/// Resolves the system's IANA timezone once per call via
+/// `iana_time_zone::get_timezone()` so `%Z` yields a three-letter
+/// abbreviation (PDT/EST/CET/…) rather than the numeric offset that
+/// `chrono::Local` alone would produce. Falls back to the numeric
+/// offset form `{HH}:{MM} {±HH:MM}` if the system timezone cannot be
+/// resolved.
 pub fn format_local_time_now() -> String {
-    format_local_time_at(Local::now())
+    match system_timezone() {
+        Some(tz) => format_local_time_at(Local::now().with_timezone(&tz)),
+        None => Local::now().format("%H:%M %:z").to_string(),
+    }
 }
 
-/// Render a specific local timestamp as `{HH}:{MM} {TZ}`.
+/// Render a specific timestamp as `{HH}:{MM} {TZ}`.
 ///
 /// Exposed primarily for deterministic testing; production call sites
-/// should prefer [`format_local_time_now`].
-pub fn format_local_time_at(now: DateTime<Local>) -> String {
+/// should prefer [`format_local_time_now`]. The caller is responsible
+/// for picking a timezone whose `%Z` format yields the desired
+/// abbreviation (use `chrono_tz::Tz` for named zones; `chrono::Local`
+/// will render a numeric offset).
+pub fn format_local_time_at<Z>(now: DateTime<Z>) -> String
+where
+    Z: TimeZone,
+    Z::Offset: std::fmt::Display,
+{
     now.format("%H:%M %Z").to_string()
+}
+
+fn system_timezone() -> Option<Tz> {
+    iana_time_zone::get_timezone().ok()?.parse().ok()
 }
 
 /// Render the prompt-scoped periodic header in Prose markup.
@@ -330,5 +349,32 @@ mod tests {
         let rendered = render_step_timeout_warn_prose(silence, None, &ctx());
         assert!(rendered.contains("not produced output for 1m"));
         assert!(rendered.contains("Press CTRL+C"));
+    }
+
+    #[test]
+    fn format_local_time_at_named_tz_yields_abbreviation() {
+        let tz: Tz = "America/Los_Angeles".parse().expect("valid IANA name");
+        let when = tz
+            .with_ymd_and_hms(2026, 7, 15, 14, 13, 0)
+            .single()
+            .expect("unambiguous local time");
+        let rendered = format_local_time_at(when);
+        assert_eq!(
+            rendered, "14:13 PDT",
+            "named-zone DateTime must render %Z as a short abbreviation"
+        );
+    }
+
+    #[test]
+    fn format_local_time_now_renders_non_numeric_tz_on_host() {
+        let rendered = format_local_time_now();
+        let tz_segment = rendered
+            .rsplit_once(' ')
+            .map(|(_, tz)| tz)
+            .expect("expected 'HH:MM TZ' layout");
+        assert!(
+            !tz_segment.starts_with('-') && !tz_segment.starts_with('+'),
+            "expected a TZ abbreviation (e.g. PDT), got numeric offset: {rendered}"
+        );
     }
 }
