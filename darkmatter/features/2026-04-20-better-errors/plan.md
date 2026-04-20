@@ -1,0 +1,84 @@
+---
+phases: 4
+created: 2026-04-20
+start_phase: 1
+---
+
+# Better Errors — Execution Plan
+
+This plan outlines the steps to implement the `BlockError` trait and adopt it across the `darkmatter` library for high-quality, terminal-aware error reporting.
+
+## Phase 1: Foundation (biscuit-terminal)
+
+**Goal:** Establish the core trait and rendering helpers in the shared `biscuit-terminal` library.
+
+1.  **Step 1: Implement `BlockError` Trait**
+    - Create `biscuit-terminal/lib/src/errors/block_error.rs`.
+    - Define `BlockError` trait with `status_block`, `severity`, `report_block_error`, and `report_block_error_optimistic` methods.
+    - [ ] *Parallelizable:* No.
+2.  **Step 2: Implement Rendering Helpers**
+    - Implement `ErrorHeader` struct for standardized `<b>Name:</b> <b>Title</b>` formatting.
+    - Implement `StatusBlockExt` trait to provide `.error_header(ErrorHeader)` on `StatusBlock`.
+    - [ ] *Parallelizable:* Yes (with Step 1).
+3.  **Step 3: Implement Cause Chain Rendering**
+    - Implement `render_with_causes` helper to handle nested `BlockError` instances.
+    - Implement internal `as_block_error` helper for dynamic trait object discovery.
+    - [ ] *Parallelizable:* No (depends on Step 1).
+4.  **Step 4: Validation & Exports**
+    - Add unit tests in `biscuit-terminal` covering optimistic rendering and severity defaults.
+    - Export `BlockError` and helpers in `biscuit-terminal/lib/src/prelude.rs` and `lib.rs`.
+    - [ ] *Validation Checkpoint:* `cargo test -p biscuit-terminal` passes.
+
+## Phase 2: CLI Plumbing (darkmatter/cli)
+
+**Goal:** Wire the `md` CLI to prefer `BlockError` rendering.
+
+1.  **Step 1: Update Top-level Error Handler**
+    - Modify `darkmatter/cli/src/main.rs`.
+    - Detect if the caught error implements `BlockError` using `as_block_error`.
+    - Render via `report_block_error` if TTY, or `report_block_error_optimistic` if piped.
+    - [ ] *Parallelizable:* No (depends on Phase 1).
+2.  **Step 2: Validation**
+    - Run `md` with a triggered error (e.g., missing file) and verify it still prints the old `Display` message (since no `BlockError` impls exist yet in `darkmatter`).
+    - [ ] *Validation Checkpoint:* `md` CLI continues to function correctly with existing errors.
+
+## Phase 3: High-Value Variants (darkmatter/lib)
+
+**Goal:** Implement `BlockError` for the most impactful error types.
+
+1.  **Step 1: MarkdownError Wrapper Implementation**
+    - Implement `BlockError` for `MarkdownError` in `darkmatter/lib/src/markdown/types.rs`.
+    - Use the delegation strategy for sub-errors and implement initial leaf blocks for `FileLoad` and `UrlFetch`.
+    - [ ] *Parallelizable:* No (depends on Phase 1).
+2.  **Step 2: Priority Group 1 (Transclusion & Shell)**
+    - Implement `BlockError` for `TransclusionError` and `ShellExpansionError`.
+    - Add enrichments: `CycleDetected` (line numbers), `ExecutionFailed` (stdout/stderr).
+    - [ ] *Parallelizable:* Yes.
+3.  **Step 3: Priority Group 2 (Blocks & Conditions)**
+    - Implement `BlockError` for `PageBlockError`, `ConditionError`, and `TocLinkingError`.
+    - Add enrichments: `UnterminatedBlock` (echo directive), `Parse` (caret support).
+    - [ ] *Parallelizable:* Yes.
+4.  **Step 4: Priority Group 3 (Reference & Editor)**
+    - Implement `BlockError` for `ReferenceError`, `EditorError`, `FileTreeError`, and `MermaidThemeError`.
+    - Add enrichments: `NoEditorFound` (discovery list), `PathNotFound` (absolute path).
+    - [ ] *Parallelizable:* Yes.
+5.  **Step 5: Validation Checkpoint**
+    - Manually trigger one error from each group using the `md` CLI.
+    - Verify visual alignment and color application in the terminal.
+
+## Phase 4: Coverage & Polish
+
+**Goal:** Complete the remaining implementations and finalize documentation.
+
+1.  **Step 1: Remaining Enums Coverage**
+    - Implement `BlockError` for `DeferredSetError`, `NormalizationError`, `StylesheetError`, `LinkError`, and `ImageRefError`.
+    - Add remaining enrichments as defined in the Technical Design (§2.3).
+    - [ ] *Parallelizable:* Yes.
+2.  **Step 2: Snapshot Testing Suite**
+    - Create `darkmatter/lib/tests/error_snapshots/`.
+    - Implement a test harness to generate and verify snapshots for all 100+ error variants.
+    - [ ] *Validation Checkpoint:* `cargo test -p darkmatter-lib` includes snapshot coverage.
+3.  **Step 3: Documentation & Skills Update**
+    - Update `biscuit-terminal/README.md` and `darkmatter/docs/error-rendering.md`.
+    - Update `biscuit-terminal` and `darkmatter` skill definitions.
+    - [ ] *Parallelizable:* Yes.
