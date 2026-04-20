@@ -13,15 +13,23 @@ source_files_during_phase_2:
   - biscuit-terminal/lib/src/components/status_block.rs
   - biscuit-terminal/lib/src/components/mod.rs
   - biscuit-terminal/lib/src/prelude.rs
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/live_semantic_sink.rs
+  - claudine/cli/src/output/shell_expansion_error.rs
+  - claudine/cli/src/output/error_report.rs
 docs_updated_during_phase_1:
   - claudine/features/_unscheduled/status-block/plan.md
 docs_updated_during_phase_2:
   - claudine/features/_unscheduled/status-block/plan.md
+docs_updated_during_phase_3:
+  - claudine/features/_unscheduled/status-block/plan.md
 docs_created_during_phase_2: []
 docs_created_during_phase_1: []
+docs_created_during_phase_3: []
 skills_files_updated_during_phase1: []
 skills_files_updated_during_phase2: []
-packages: [biscuit-terminal]
+skills_files_updated_during_phase3: []
+packages: [biscuit-terminal, claudine-cli]
 ---
 
 # StatusBlock Execution Plan
