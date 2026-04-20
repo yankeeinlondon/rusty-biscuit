@@ -58,7 +58,7 @@ The `SemanticEvent` model is the cross-provider contract:
 
 The CLI-side consumer is [`LiveSemanticSink`](../../cli/src/commands/wrap/live_semantic_sink.rs). For every `SemanticEvent` it receives, it does five things in order:
 
-1. Updates [`LiveMetricsState`](../../lib/src/stream/progress.rs) for the heartbeat thread.
+1. Updates [`LiveMetricsState`](../../lib/src/stream/progress.rs) so the prompt-scoped timing monitor (and the step-silence detector behind `step_timeout`) can observe the activity clock.
 2. Updates the cached session ID and model from envelope events.
 3. Updates the structured-summary tool-name rollup.
 4. Forwards `OutputText` to the stdout text renderer and `Reasoning` to the stderr `BlockQuote` renderer.
@@ -208,21 +208,15 @@ For non-fenced prose, the renderer additionally flushes when the buffered block 
 
 ### Idle Flush
 
-Block buffers are also flushed when the heartbeat thread observes the renderer has been quiet longer than the heartbeat silence window (default **30 s**). This guarantees that a final paragraph emitted by a slow-to-close provider never sits invisible in the buffer waiting for an EOF that may never arrive.
+Block buffers are also flushed when a dedicated **flush-if-idle ticker** observes the renderer has been quiet longer than the silence window (fixed **30 s**). This guarantees that a final paragraph emitted by a slow-to-close provider never sits invisible in the buffer waiting for an EOF that may never arrive.
 
-When the heartbeat thread runs, it acquires the renderer lock, calls `flush_if_idle(silence_window)`, and only then renders its own status line. Buffered content always appears above the next heartbeat.
+The ticker runs independently from the prompt-scoped timing monitor (described in the next section). On every 30-second wake-up it acquires the renderer lock, calls `flush_if_idle(Duration::from_secs(30))`, and releases the lock. There is no `Status::Info` line emitted from this ticker — its sole purpose is stdout correctness.
 
-### Stalled-Stream Warning
+### Prompt-Scoped Timing Surface
 
-When the heartbeat thread observes that `last_event_at` has been stale for at least `policy.force_window` (default **120 s**), it emits a `Status::Warning` line to stderr exactly once per stall episode:
+Composition runs emit a prompt-scoped timing header anchored on the prompt's start time, plus two optional fire-once warnings configured via harness frontmatter (`timeout_warn`, `step_timeout_warn`). See the "Timing Surface" section of [`composition.md`](composition.md) for the full grammar, duration rendering rules, and frontmatter contract.
 
-```text
-⚠ no provider activity in 2m — provider may be hung; press Ctrl+C to abort
-```
-
-Dedup uses [`progress::should_warn_stall`](../../lib/src/stream/progress.rs): the warning re-fires only after activity resumes (`last_event_at` advances past the stored `last_stall_warning_at`) and the stream stalls again. Override the threshold with `CLAUDINE_STALL_TIMEOUT_SECONDS=<seconds>`.
-
-The current implementation is stderr-only — the warning does not yet flow through `SemanticEventSink` for dispatch / JSONL logging, because the heartbeat thread does not own the sink. Promoting it to a real `SemanticEvent::Warning` is a follow-up that requires plumbing a thread-safe event injector through the parser-thread / heartbeat-thread boundary.
+Wrapper passthrough runs with no prompt file skip the header entirely; their only timing output (beyond the structured event sink) is whatever the provider prints.
 
 ### OpenCode Silent-Stall Recovery
 
@@ -238,18 +232,14 @@ To avoid indefinite hangs in those cases, Claudine's OpenCode wait loop now poll
 
 Set `CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS=<seconds>` to override the hard silent-stall recovery window.
 
-## Heartbeat
+## Timing Threads
 
-The heartbeat thread emits a `Status::Info` line approximately every 30 s while the provider is running, formatted from the live metrics snapshot:
+Each structured-stream run spawns up to two dedicated timing threads:
 
-```text
-ⓘ 60s · 1 running (Bash) · 2 done · 12K→3K tok · $0.02
-```
+1. **Flush-if-idle ticker** (always on for structured runs): wakes every 30 s and surfaces any buffered markdown that has been idle for 30 s. Emits no status line itself.
+2. **Prompt-scoped timing monitor** (composition runs only): anchored on the prompt's start time, emits a `⏱️ {HH:MM} {TZ} running the <prompt> prompt[ for <duration>]` header at `t=0` and every 10 minutes thereafter. The same thread also watches for the fire-once `timeout_warn` and `step_timeout_warn` thresholds and emits Status WARN lines when those cross. Full grammar is documented in [`composition.md`](composition.md).
 
-Suppression rules:
-
-- A heartbeat tick is **suppressed** when `last_event_at` is more recent than the silence window (provider is actively producing).
-- A heartbeat tick is **forced** when `last_heartbeat_at` is older than the force window (default 120 s) regardless of activity, so long-running subagents stay visible.
+The legacy heartbeat tick (`240s · 10 done`) and the stall-threshold stderr warning (`no provider activity in 2m — …`) were removed as part of the 2026-04-19 timing revamp; the prompt-scoped surface replaces them.
 
 ## Agent Session ID
 
