@@ -1,6 +1,6 @@
-set dotenv-load
-set positional-arguments
-set allow-duplicate-recipes
+set dotenv-load := true
+set positional-arguments := true
+set allow-duplicate-recipes := true
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
@@ -8,6 +8,7 @@ import "../just/plan.just"
 import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
+import "../just/spec.just"
 import "../just/devops.just"
 
 BOLD := '\033[1m'
@@ -20,7 +21,6 @@ YELLOW := '\033[33m'
 BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
-
 PACKAGE := "Darkmatter"
 LIB_NAME := PACKAGE + " Library"
 CLI_NAME := PACKAGE + " CLI"
@@ -29,7 +29,6 @@ CLI := lowercase(PACKAGE) + "-cli"
 CLI_PATH := "./cli"
 DOCS := ""
 TODAY := `date +%F`
-
 
 default:
     #!/usr/bin/env bash
@@ -40,23 +39,21 @@ default:
     fi
 
     echo
-    echo -e "{{BOLD}}{{PACKAGE}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
+    echo -e "{{ BOLD }}{{ PACKAGE }} ({{ RESET }}Library & CLI{{ BOLD }}){{ RESET }}"
     echo "======================================================================================"
     echo ""
     just --list | grep -v 'default'
     echo
 
-
-
 # Build the library and CLI
 build *args="":
-    @just _build darkmatter "{{LIB_NAME}}" {{args}}
-    @just _build darkmatter-cli "CLI_NAME" {{args}}
+    @just _build darkmatter "{{ LIB_NAME }}" {{ args }}
+    @just _build darkmatter-cli "CLI_NAME" {{ args }}
 
 # Test both library and CLI.
 test *args="":
-    @just _test darkmatter {{args}}
-    @just _test darkmatter-cli {{args}}
+    @just _test darkmatter {{ args }}
+    @just _test darkmatter-cli {{ args }}
 
 # Lint both the library and CLI
 lint:
@@ -66,53 +63,52 @@ lint:
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
     @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
+    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{ DIM }}model{{ RESET }}"
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
+    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
     @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
 
-
 # Install the CLI
 install *args="":
-    @echo -e "Building {{BOLD}}biscuit-terminal{{RESET}} library"
+    @echo -e "Building {{ BOLD }}biscuit-terminal{{ RESET }} library"
     @cargo build -p biscuit-terminal --release || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo
-    @echo -e "Building {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo -e "Building {{ BOLD }}{{ LIB_NAME }}{{ RESET }}"
     @echo
-    @cargo build -p {{LIBRARY}} --release  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo build -p {{ LIBRARY }} --release  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo
-    @echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
+    @echo -e "{{ BOLD }}{{ YELLOW }}Installing {{ CLI_NAME }}{{ RESET }}"
     @echo
-    @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
+    @cargo install --path {{ CLI_PATH }} {{ args }} || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo -e "{{ BOLD }}{{ BLUE }}{{ CLI_NAME }} installed{{ RESET }}"
     @just _play drop4
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p {{LIBRARY}} -p {{CLI}}
+    @cargo check -p {{ LIBRARY }} -p {{ CLI }}
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":
-    @cargo run -p {{CLI}} {{args}}
+    @cargo run -p {{ CLI }} {{ args }}
 
 # update the CLI documents
 docs_cli:
     @echo
-    @echo -e "Updating the CLI documents for {{BOLD}}Darkmatter{{RESET}}"
+    @echo -e "Updating the CLI documents for {{ BOLD }}Darkmatter{{ RESET }}"
     @echo
     @just _claude_file ./prompts/update-cli-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
     @just _play confirmation
     @echo
-    @echo -e "{{BOLD}}Darkmatter {{GREEN}}CLI Docs{{RESET}} were updated!"
+    @echo -e "{{ BOLD }}Darkmatter {{ GREEN }}CLI Docs{{ RESET }} were updated!"
 
 docs_library:
     @echo
-    @echo -e "Updating the documentation for the {{BOLD}}Darkmatter Library{{RESET}}"
+    @echo -e "Updating the documentation for the {{ BOLD }}Darkmatter Library{{ RESET }}"
     @echo
     @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
     @just _play confirmation
@@ -121,6 +117,7 @@ readme:
     _readme_files darkmatter
 
 # No-op recipe: reference color vars so linters won't report them as unused.
+
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} {{TODAY}} {{DOCS}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} {{ TODAY }} {{ DOCS }} >/dev/null || true
