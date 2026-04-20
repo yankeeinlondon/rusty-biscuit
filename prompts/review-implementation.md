@@ -33,6 +33,7 @@ You MUST follow these steps exactly:
         - plan: {{dir}}/plan-for-{{basename}}
         - phases: the `phases` property of the plan
         - starting_phase: the `starting_phase` property of the plan
+    - Tell them to use the '{{ctx.current_package_area}}' skill
     - Ask them to implement the "starting_phase" of the plan
     - The subagent is responsible for:
         - implementing all the recommendations/fixes discussed in this phase

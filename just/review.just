@@ -60,14 +60,33 @@ review feat="":
     echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
 
+# implement a review that was conducted (not a feature review)
+implement-review filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "Preparing to implement all {{italic}}suggestions{{reset}} found in a Review"
+    review="$(just _choose_review "{{filter}}")"
+    agent="$(just _choose_agent)"
+    model=""
+    if [[ "${agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
+    fi
+    claudine compose prompts/review-implementation.md review="${review}" -y --${agent} ${model} || (
+        echo
+        echo -e "{{red}}ERROR:{{reset}} failed to complete the implementation of the {{blue}}${review}{{reset}} review"
+        echo
+        just _speak "Failed to complete the implementation of a review's suggestions in the $(sniff repo package-area) area"
+    )
 
 
 # implements the suggestions from a review of a feature or fix
-implement-suggestions filter="" spec="" design="" agent="":
+implement-feature-review filter="" spec="" design="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo -e "Preparing to {{italic}}implement{{reset}} all of suggestions from a review."
-    review="$(just _choose_review "{{filter}}")"
+    review="$(just _choose_spec_review "{{filter}}")"
     dir="$(dirname "${review}")"
     spec_file="{{spec}}"
     design_file="{{design}}"
@@ -93,6 +112,10 @@ implement-suggestions filter="" spec="" design="" agent="":
     else
         use_agent="{{agent}}"
     fi
+    model=""
+    if [[ "${use_agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
+    fi
 
     echo
     echo -e "About to {{bold}}implement{{reset}} the {{blue}}$(just _link "${review}"){{reset}} review suggestions"
@@ -107,7 +130,11 @@ implement-suggestions filter="" spec="" design="" agent="":
     fi
 
     echo
-    echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used for the implementation"
+    if [[ -z "${model}" ]];then
+        echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used for the implementation"
+    else
+        echo -e "The {{yellow}}${use_agent}{{reset}}({{italic}}${model}{{reset}}) agent will be used for the implementation"
+    fi
     echo
 
     confirm="$(just _confirm "Ready to start?")"
