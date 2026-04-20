@@ -1596,6 +1596,7 @@ fn run_provider_wrapper_inner(
                 &default_lifecycle,
                 &default_lifecycle_ctx,
                 &default_lifecycle_emitter,
+                true,
             )?;
             (harness_code, None)
         } else if use_structured {
@@ -1636,8 +1637,8 @@ fn run_provider_wrapper_inner(
                 &mut _spawned,
                 live_metrics,
                 stream_output,
-                claudine::stream::progress::HeartbeatPolicy::default(),
                 stderr_bridge,
+                None,
             )?;
             let mut summary = stream_result.data;
             if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -1737,9 +1738,7 @@ fn append_resume_passthrough_args(resume_args: &mut Vec<String>, base_args: &[St
     let mut index = 0;
     while index < base_args.len() {
         match base_args[index].as_str() {
-            "--json" | "--verbose"
-                if !resume_args.iter().any(|arg| arg == &base_args[index]) =>
-            {
+            "--json" | "--verbose" if !resume_args.iter().any(|arg| arg == &base_args[index]) => {
                 resume_args.push(base_args[index].clone());
             }
             "--output-format" | "--format" | "--output-last-message" => {
@@ -2064,6 +2063,7 @@ fn execute_harness_attempt(
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
     child_spawned: &mut bool,
+    prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
 ) -> Result<claudine::harness::AttemptOutcome> {
     let _attempt_span = info_span!(
         "harness_attempt",
@@ -2127,8 +2127,8 @@ fn execute_harness_attempt(
             child_spawned,
             live_metrics,
             stream_output,
-            claudine::stream::progress::HeartbeatPolicy::default(),
             stderr_bridge,
+            prompt_timing,
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
@@ -2720,6 +2720,13 @@ pub(crate) fn run_harness_loop(
     lifecycle: &claudine::composition::LifecycleConfig,
     lifecycle_ctx: &claudine::composition::LifecycleRuntimeContext<'_>,
     lifecycle_emitter: &dyn claudine::composition::LifecycleEmitter,
+    // When `true`, every structured-stream attempt in the harness loop
+    // emits the prompt-scoped timing header and — if the parsed plan
+    // carries `timeout_warn` / `step_timeout_warn` — their fire-once
+    // warning lines. Wrapper passthrough callers with no prompt file
+    // pass `false` to suppress the header entirely; composition callers
+    // pass `true`.
+    emit_prompt_timing: bool,
 ) -> Result<i32> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
     let mut guard =
@@ -3011,6 +3018,23 @@ pub(crate) fn run_harness_loop(
             )
         })?;
 
+        // Build the prompt-scoped timing context for this attempt. The
+        // warn thresholds are re-read from each parsed plan so a
+        // handler that redirects to a different source document picks
+        // up the replacement document's warn values, not the original's.
+        let prompt_timing = if emit_prompt_timing {
+            Some(
+                crate::commands::wrap::composition::build_prompt_timing_context(
+                    &prompt_state.source_path,
+                    repo_root,
+                    plan.timeout_warn,
+                    plan.step_timeout_warn,
+                ),
+            )
+        } else {
+            None
+        };
+
         let mut child_spawned = false;
         let outcome = execute_harness_attempt(
             attempt,
@@ -3034,6 +3058,7 @@ pub(crate) fn run_harness_loop(
             dispatch_context,
             term,
             &mut child_spawned,
+            prompt_timing,
         );
 
         // Mark launched as soon as spawn succeeded — before propagating

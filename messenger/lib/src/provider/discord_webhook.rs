@@ -263,7 +263,10 @@ impl super::Provider for DiscordWebhookProvider {
             let mut owned: Vec<(String, Option<String>)> = Vec::with_capacity(attachments.len());
             for (index, attachment) in attachments.iter().enumerate() {
                 let (filename, part) = Self::build_part(attachment)?;
-                let description = attachment.alt_text.clone().or_else(|| attachment.caption.clone());
+                let description = attachment
+                    .alt_text
+                    .clone()
+                    .or_else(|| attachment.caption.clone());
                 owned.push((filename, description));
                 form = form.part(format!("files[{index}]"), part);
             }
@@ -372,7 +375,10 @@ mod tests {
         let parsed =
             parse_webhook_url("https://discord.com/api/v10/webhooks/1/tok?foo=bar").unwrap();
         assert_eq!(parsed.token, "tok");
-        assert_eq!(parsed.base_url, "https://discord.com/api/v10/webhooks/1/tok");
+        assert_eq!(
+            parsed.base_url,
+            "https://discord.com/api/v10/webhooks/1/tok"
+        );
     }
 
     fn expect_parse_err(url: &str) -> MessengerError {

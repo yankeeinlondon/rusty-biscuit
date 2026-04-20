@@ -14,7 +14,7 @@
         <li>terminal-facing Mermaid rendering via <code>MermaidDiagram</code>, backed by <code>biscuit-visualized</code> (pure Rust)</li>
         <li>terminal-facing graph rendering via <code>GraphExpression</code>, with arrow, dash, and DOT syntax support</li>
         <li>color system: BasicColor (16 ANSI), RgbColor, WebColor (148 CSS), Tailwind (22 families × 11 shades)</li>
-        <li>composable rendering components: Prose, Table, List, Section, FileSystem, TwoColumn, and more</li>
+        <li>composable rendering components: Prose, Table, List, Section, StatusBlock, FileSystem, TwoColumn, and more</li>
       </ul>
     </td>
   </tr>
@@ -57,6 +57,7 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`Prose`](./docs/components/prose.md)
     - [`Section`](./docs/components/section.md)
     - [`Status`](./docs/components/status.md)
+    - `StatusBlock`
     - [`Table`](./docs/components/table.md)
     - [`TerminalImage`](./docs/components/terminal_image.md)
     - [`TextBlock`](./docs/components/text_block.md)
@@ -68,6 +69,51 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`Compose`](./docs/components/compose.md) and [`InlineContent`](./docs/components/inline_content.md)
 
     These components all respect the `Layout` struct's ideas of margins, word-wrap, and other useful features.
+
+## StatusBlock
+
+`StatusBlock` is the canonical composite for Claudine-style warning and error surfaces. It
+combines an optional `Status` header, an optional bordered body, and an optional hint into a
+single renderable with severity-derived defaults.
+
+```rust
+use biscuit_terminal::prelude::{Prose, StatusBlock, StatusState};
+
+let block = StatusBlock::new(StatusState::Error)
+    .header("<b>Shell Expansion Failed</b>")
+    .body(Prose::new("Missing closing brace in `${...}` directive."))
+    .hint("Check the template syntax and retry.");
+```
+
+Default behavior:
+
+- `border = "┃ "`
+- `left_margin = 0`
+- `right_margin = 5`
+- `word_wrap = WordWrap::WrapProse(Some(8), None)`
+
+Those defaults are chosen so the `┃` border aligns visually with a preceding `Status` icon/header
+line. You can override the border color with `.border_color(...)` and the glyph with
+`.border(...)` when a call site needs a different visual treatment.
+
+Severity defaults:
+
+| StatusState | Default color |
+|-------------|---------------|
+| `Error` | `Tailwind::Red500` |
+| `Warning` | `Tailwind::Orange500` |
+| `Info` | `Tailwind::Blue500` |
+| `Success` | `Tailwind::Green500` |
+| `NotStarted` | `Tailwind::Gray500` |
+| `Active` | `Tailwind::Gray600` |
+| `ToolUse` | `Tailwind::Purple700` |
+| `Subagent` | `Tailwind::Violet500` |
+
+Use `StatusState::default_color()` when you want the canonical accent or border color for a
+severity without duplicating the mapping yourself.
+
+`StatusState::Failure` is deprecated in favor of `StatusState::Error`. Persisted JSON using
+`"Failure"` remains compatible because it deserializes through the alias on `Error`.
 
 ## More Information
 

@@ -3596,7 +3596,7 @@ exit 0
         assert!(plain.contains("--model"));
         assert!(plain.contains("opencode models"));
 
-        let block_quote_start = plain.find("▌").unwrap();
+        let block_quote_start = plain.find("┃").unwrap();
         let before_block = &plain[..block_quote_start];
         let trimmed_before = before_block.trim();
         assert!(

@@ -3,6 +3,8 @@
 //! All output uses `Status::from_prose` with `StatusTheme::Circular` and
 //! writes to stderr. Every public function takes `&Terminal` for rendering.
 
+#![allow(deprecated)]
+
 use std::path::Path;
 
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};

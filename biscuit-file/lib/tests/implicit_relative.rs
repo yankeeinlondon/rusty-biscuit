@@ -407,10 +407,7 @@ mod partial_completion {
         assert_eq!(completion.active_segment(), "ab");
         assert_eq!(
             completion.roots(),
-            &[
-                repo_root_canon.join("prompts"),
-                home_canon.join("prompts"),
-            ],
+            &[repo_root_canon.join("prompts"), home_canon.join("prompts"),],
         );
     }
 

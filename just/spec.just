@@ -89,20 +89,99 @@ fix name:
     set -euo pipefail
 
     descriptive="$(just _title_case "{{name}}")"
-    dir="{{Today}}-$(just _dasherize "{{name}}")"
+    dasherized="$(just _dasherize "{{name}}")"
+
+    mapfile -t matches < <(find fixes -maxdepth 1 -not -path "fixes/_completed*" -type d -name "*-${dasherized}" 2>/dev/null)
+    relative_dir=""
+
+    if [[ ${#matches[@]} -eq 1 && -n "${matches[0]}" ]]; then
+        relative_dir="${matches[0]}"
+    elif [[ ${#matches[@]} -gt 1 ]]; then
+        choices=()
+        has_today=false
+        for m in "${matches[@]}"; do
+            bname="${m##*/}"
+            [[ "${bname}" == "{{Today}}-"* ]] && has_today=true
+            choices+=("${m}")
+        done
+        if [[ "${has_today}" == false ]]; then
+            choices=("NEW" "${choices[@]}")
+        fi
+        chosen="$(printf '%s\n' "${choices[@]}" | fzf --height=15 --border --border-label 'Choose an existing fix or create new')"
+        if [[ "${chosen}" != "NEW" ]]; then
+            relative_dir="${chosen}"
+        fi
+    else
+        mapfile -t matches < <(find fixes -maxdepth 1 -not -path "fixes/_completed*" -type d -name "*${dasherized}*" 2>/dev/null)
+        if [[ ${#matches[@]} -ge 1 ]]; then
+            choices=()
+            has_today=false
+            for m in "${matches[@]}"; do
+                bname="${m##*/}"
+                [[ "${bname}" == "{{Today}}-"* ]] && has_today=true
+                choices+=("${m}")
+            done
+            if [[ "${has_today}" == false ]]; then
+                choices=("NEW" "${choices[@]}")
+            fi
+            chosen="$(printf '%s\n' "${choices[@]}" | fzf --height=15 --border --border-label 'Choose an existing fix or create new')"
+            if [[ "${chosen}" != "NEW" ]]; then
+                relative_dir="${chosen}"
+            fi
+        fi
+    fi
+
+    if [[ -n "${relative_dir}" ]]; then
+        spec="${relative_dir}/spec.md"
+        abs_dir="$(just _abs_path "${relative_dir}")"
+        complete_name="${relative_dir#fixes/}"
+        complete_name="${complete_name#[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-}"
+        link="$(just _link "${spec}")"
+        echo -e "Editing existing fix: {{blue}}${link}{{reset}}"
+        if md edit "${spec}"; then
+            if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
+                clarify_agent="$(just _choose_agent)"
+                abs_spec="$(just _abs_path "${spec}")"
+                claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+            fi
+            if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
+                echo "Ok. Bye."
+                exit 0
+            fi
+            agent="$(just _choose_agent)"
+            claudine compose @prompts/fix.md dir="${abs_dir}" spec="spec.md" -y --${agent} && (
+                just complete "${complete_name}"
+                link="$(just _link "spec.md" "$(just _abs_path "fixes/_completed/${relative_dir##*/}/spec.md")")"
+                echo
+                echo -e "The {{bold}}${descriptive}{{reset}} fix has been completed"
+            )
+        fi
+        exit 0
+    fi
+
+    dir="{{Today}}-${dasherized}"
     relative_dir="fixes/${dir}"
     mkdir -p "${relative_dir}"
     spec="${relative_dir}/spec.md"
-    link="$(just _link "${spec}" "$(just _abs_path "${relative_dir}")" )"
+    link="$(just _link "${spec}"  )"
     if md edit "${spec}"; then
         echo -e "Fix spec file created at {{blue}}${link}{{reset}}!"
         echo
+        if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
+            clarify_agent="$(just _choose_agent)"
+            abs_spec="$(just _abs_path "${spec}")"
+            claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+        fi
+        if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
+            echo "Ok. Bye."
+            exit 0
+        fi
         agent="$(just _choose_agent)"
-        claudine compose @prompts/fix.md dir="${relative_dir}" spec="spec.md" -y --${agent} && (
-            mv -r "${relative_dir}" "fixes/_completed/${dir}"
+        claudine compose @prompts/fix.md dir="$(just _abs_path "${relative_dir}")" spec="spec.md" -y --${agent} && (
+            just complete "${dasherized}"
             link="$(just _link "spec.md" "$(just _abs_path "fixes/_completed/${dir}/spec.md")" )"
             echo
-            echo -e "The {{bold}}${descriptive}"
+            echo -e "The {{bold}}${descriptive}{{reset}} fix has been completed"
         )
 
     else

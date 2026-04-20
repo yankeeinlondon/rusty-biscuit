@@ -72,13 +72,12 @@ async fn plan_send_with_reply_to_errors_before_network_call() {
     let mut messenger = Messenger::new();
     messenger.register(Box::new(webhook_provider(&server.uri())));
 
-    let dispatch =
-        Dispatch::to(Target::discord_webhook()).reply_to(MessageRef::DiscordWebhook {
-            webhook_id: WEBHOOK_ID.into(),
-            channel_id: "111222333444555666".into(),
-            message_id: "900".into(),
-            thread_id: None,
-        });
+    let dispatch = Dispatch::to(Target::discord_webhook()).reply_to(MessageRef::DiscordWebhook {
+        webhook_id: WEBHOOK_ID.into(),
+        channel_id: "111222333444555666".into(),
+        message_id: "900".into(),
+        thread_id: None,
+    });
     let message = Message::text("hello");
 
     let err = messenger.plan_send(dispatch, &message).unwrap_err();
@@ -110,13 +109,12 @@ async fn plan_send_with_reply_hard_errors_in_best_effort_mode() {
     messenger.register(Box::new(webhook_provider(&server.uri())));
 
     // `Dispatch::to()` defaults to `CompatibilityMode::BestEffort`.
-    let dispatch =
-        Dispatch::to(Target::discord_webhook()).reply_to(MessageRef::DiscordWebhook {
-            webhook_id: WEBHOOK_ID.into(),
-            channel_id: "111222333444555666".into(),
-            message_id: "900".into(),
-            thread_id: None,
-        });
+    let dispatch = Dispatch::to(Target::discord_webhook()).reply_to(MessageRef::DiscordWebhook {
+        webhook_id: WEBHOOK_ID.into(),
+        channel_id: "111222333444555666".into(),
+        message_id: "900".into(),
+        thread_id: None,
+    });
     assert_eq!(
         dispatch.options.compatibility,
         crate::CompatibilityMode::BestEffort

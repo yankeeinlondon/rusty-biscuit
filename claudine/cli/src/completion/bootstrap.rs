@@ -342,8 +342,7 @@ mod tests {
     fn elvish_script_retains_legacy_bootstrap() {
         let out = render(Shell::Elvish);
         assert_eq!(
-            out,
-            "eval (E:COMPLETE=elvish claudine | slurp)\n",
+            out, "eval (E:COMPLETE=elvish claudine | slurp)\n",
             "elvish must retain the legacy COMPLETE bootstrap — the \
              supplement matrix covers bash/zsh/fish only"
         );
@@ -385,4 +384,3 @@ mod tests {
         }
     }
 }
-

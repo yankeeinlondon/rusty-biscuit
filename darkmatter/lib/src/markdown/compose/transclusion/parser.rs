@@ -581,8 +581,7 @@ mod tests {
 
     #[test]
     fn set_property_duplicate_defers_error_and_rightmost_wins() {
-        let directive =
-            parse_single(r#"::file ./foo.md set.name="Bob" set.name="Mary""#);
+        let directive = parse_single(r#"::file ./foo.md set.name="Bob" set.name="Mary""#);
         assert!(
             directive
                 .options

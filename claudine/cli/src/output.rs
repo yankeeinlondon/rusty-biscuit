@@ -718,6 +718,7 @@ pub(crate) fn format_session_start(
 /// Rendered with the circular failure theme so the icon matches Claudine's
 /// other terminal-error surfaces. Intended for stderr in the wrap command's
 /// `ProcessTermination::Interrupted` short-circuit.
+#[allow(deprecated)]
 pub(crate) fn format_user_interrupt_status() -> String {
     Status::new("User terminated non-interactive session with CTRL+C")
         .state(StatusState::Failure)

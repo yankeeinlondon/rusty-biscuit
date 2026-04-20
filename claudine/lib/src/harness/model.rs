@@ -21,6 +21,16 @@ pub struct HarnessPlan {
     /// modes. Parse-time validation requires `step_timeout <= timeout` when
     /// both are present.
     pub step_timeout: Option<std::time::Duration>,
+    /// Wall-clock warning threshold. When the prompt has been running for
+    /// this long, claudine emits a single `Status::Warning` line instead
+    /// of killing the child. Parse-time validation requires
+    /// `timeout_warn < timeout` when both are present.
+    pub timeout_warn: Option<std::time::Duration>,
+    /// Step-silence warning threshold. When the provider has been silent
+    /// for this long, claudine emits a single `Status::Warning` line per
+    /// stall episode instead of killing the child. Parse-time validation
+    /// requires `step_timeout_warn < step_timeout` when both are present.
+    pub step_timeout_warn: Option<std::time::Duration>,
     /// Validations that must pass before launching the provider.
     pub pre_checks: Vec<ValidationRule>,
     /// Validations that must pass after the provider completes.
