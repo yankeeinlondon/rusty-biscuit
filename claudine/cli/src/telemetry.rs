@@ -211,6 +211,7 @@ where
     ) -> fmt::Result {
         let event_fields = collect_event_fields(event);
         let scope_fields = collect_scope_fields(ctx);
+        let span_names = collect_span_names(ctx);
         let message = event_fields
             .get("message")
             .map(String::as_str)
@@ -248,6 +249,9 @@ where
         let meta = event.metadata();
         write_level(&mut writer, *meta.level())?;
         write!(writer, " ")?;
+        if !span_names.is_empty() {
+            write!(writer, "[{}] ", span_names.join(">"))?;
+        }
         write_message(&mut writer, message)?;
 
         if detail_event.is_some()
@@ -302,6 +306,22 @@ where
     }
 
     fields
+}
+
+fn collect_span_names<S, N>(ctx: &FmtContext<'_, S, N>) -> Vec<String>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+{
+    let mut names = Vec::new();
+
+    if let Some(scope) = ctx.event_scope() {
+        for span in scope.from_root() {
+            names.push(span.name().to_string());
+        }
+    }
+
+    names
 }
 
 fn parse_formatted_fields(input: &str) -> Vec<(String, String)> {

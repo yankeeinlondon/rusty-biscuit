@@ -22,7 +22,7 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tracing::{Span, debug, info_span};
+use tracing::{debug, info_span};
 
 use crate::log;
 
@@ -915,13 +915,11 @@ fn run_provider_wrapper_inner(
     let wrapper_span = info_span!(
         "wrapper_session",
         binary_path = %binary_path.display(),
-        structured_mode = tracing::field::Empty,
         has_prompt,
         interactive_requested,
         edit_requested,
         yolo_requested,
         model_override = %args.model.as_deref().unwrap_or(""),
-        child_pid = tracing::field::Empty,
     );
     let _wrapper_guard = wrapper_span.enter();
 
@@ -1431,7 +1429,6 @@ fn run_provider_wrapper_inner(
         && effective_non_interactive
         && args.output.is_none()
         && !has_explicit_native_output_request(provider, &child_args);
-    Span::current().record("structured_mode", use_structured);
     let stream_verbosity = structured_verbosity(silent_requested, quiet_requested);
 
     // `step_timeout` is only enforceable in structured-stream mode because
