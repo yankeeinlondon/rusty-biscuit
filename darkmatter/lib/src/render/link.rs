@@ -62,6 +62,68 @@ pub enum LinkError {
     },
 }
 
+impl biscuit_terminal::errors::BlockError for LinkError {
+    fn status_block(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::EmptyHref => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "empty href"))
+                .body("Link href cannot be empty or whitespace-only.")
+                .hint("Pass a non-empty URL, relative path, or anchor to <cyan>Link::new</cyan>."),
+
+            Self::UnrecognizedFormat => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "unrecognized link format"))
+                .body("Input did not look like an HTML `<a>` tag or a Markdown `[text](href)` link.")
+                .hint(
+                    "Use <cyan>[display](url)</cyan> for Markdown or <cyan>&lt;a href=\"url\"&gt;text&lt;/a&gt;</cyan> for HTML.",
+                ),
+
+            Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "malformed HTML link"))
+                .body(format!("<dim>Message:</dim> {message}"))
+                .hint(
+                    "Ensure the link opens with <cyan>&lt;a ...&gt;</cyan> and closes with <cyan>&lt;/a&gt;</cyan> and has an <cyan>href</cyan> attribute.",
+                ),
+
+            Self::MalformedMarkdown(message) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "malformed markdown link"))
+                .body(format!("<dim>Message:</dim> {message}"))
+                .hint(
+                    "Use the pattern <cyan>[display](url \"optional title\")</cyan> with balanced brackets and parentheses.",
+                ),
+
+            Self::MissingHref => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "missing href"))
+                .body("Link has no `href`/`url` attribute.")
+                .hint("Add an <cyan>href=\"...\"</cyan> attribute (HTML) or a URL inside <cyan>( )</cyan> (Markdown)."),
+
+            Self::InvalidStyle(source) => {
+                biscuit_terminal::errors::BlockError::status_block(source, term)
+            }
+
+            Self::InvalidTarget { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "invalid target"))
+                .body(format!("<dim>Target:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Valid targets: <cyan>_self</cyan>, <cyan>_blank</cyan>, <cyan>_parent</cyan>, <cyan>_top</cyan>, or a named context.",
+                ),
+        }
+    }
+
+    fn block_source(&self) -> Option<&(dyn biscuit_terminal::errors::BlockError + 'static)> {
+        match self {
+            Self::InvalidStyle(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
 /// Backward-compatible parse error alias.
 pub type LinkParseError = LinkError;
 

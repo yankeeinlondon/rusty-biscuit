@@ -22,9 +22,14 @@ use crate::markdown::compose::TransclusionError;
 use crate::markdown::compose::conditions::ConditionError;
 use crate::markdown::compose::context::merge::CtxMergeError;
 use crate::markdown::compose::page_blocks::PageBlockError;
+use crate::markdown::compose::transclusion::DeferredSetError;
+use crate::markdown::normalize::NormalizationError;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::file_tree::FileTreeError;
 use crate::mermaid::MermaidThemeError;
+use crate::render::image_ref::ImageRefError;
+use crate::render::link::LinkError;
+use crate::render::stylesheet::StylesheetError;
 
 /// Try to view `err` as a reference to one of darkmatter's known
 /// [`BlockError`] implementations.
@@ -80,6 +85,21 @@ pub fn as_block_error<'a>(
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<CtxMergeError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<DeferredSetError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<NormalizationError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<StylesheetError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<LinkError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<ImageRefError>() {
         return Some(v);
     }
     None

@@ -92,9 +92,10 @@ pub struct BlockOptions {
 /// a JSON5 object or when the same `set.NAME=` appears twice on one
 /// directive line. Resolution into a hard error or a warning happens
 /// during transclusion when the governing `ComposeOptions` are in scope.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DeferredSetError {
     /// Object-form RHS did not parse as a JSON5 object.
+    #[error("invalid set assignment: {reason} (value: {raw})")]
     InvalidAssignment {
         /// Raw RHS as seen on the directive line (with any stripped quotes re-wrapped).
         raw: String,
@@ -103,10 +104,46 @@ pub enum DeferredSetError {
     },
 
     /// A property-form name (or `"<object>"`) was assigned more than once.
+    #[error("reassigned set property '{name}'")]
     ReassignedProperty {
         /// The conflicting property name, or `"<object>"` for object-form.
         name: String,
     },
+}
+
+impl biscuit_terminal::errors::BlockError for DeferredSetError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::InvalidAssignment { raw, reason } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "DeferredSetError",
+                    "invalid set assignment",
+                ))
+                .body(format!(
+                    "<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
+                ))
+                .hint(
+                    "Use a JSON5 object like <cyan>set={ key: \"value\" }</cyan> or a property form like <cyan>set.key=\"value\"</cyan>.",
+                ),
+
+            Self::ReassignedProperty { name } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "DeferredSetError",
+                    "reassigned set property",
+                ))
+                .body(format!("<dim>Property:</dim> <cyan>{name}</cyan>"))
+                .hint(
+                    "Each <cyan>set.NAME=</cyan> clause must appear only once per directive line.",
+                ),
+        }
+    }
 }
 
 /// Parsed directive from markdown body.
