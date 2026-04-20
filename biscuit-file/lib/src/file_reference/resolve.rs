@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, trace};
 use walkdir::WalkDir;
 
-use crate::file_reference::context::{ResolutionContext, find_git_root, find_package_area, home_dir};
+use crate::file_reference::context::{
+    ResolutionContext, find_git_root, find_package_area, home_dir,
+};
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::{
     CompletionEntryForm, MagicPathList, ParsedReference, PartialCompletion, PathTemplate,
@@ -319,7 +321,9 @@ pub(crate) fn complete_partial(
 
     let roots = match form {
         CompletionEntryForm::Magic => magic_completion_roots(scope, &base_abs)?,
-        CompletionEntryForm::ImplicitRelative => implicit_relative_completion_roots(scope, &base_abs)?,
+        CompletionEntryForm::ImplicitRelative => {
+            implicit_relative_completion_roots(scope, &base_abs)?
+        }
     };
 
     let rendered_prefix = match form {
@@ -356,11 +360,7 @@ fn classify_token(token: &str) -> Option<(CompletionEntryForm, &str)> {
     if token.starts_with('/') {
         return None;
     }
-    if token.starts_with("./")
-        || token.starts_with("../")
-        || token == "."
-        || token == ".."
-    {
+    if token.starts_with("./") || token.starts_with("../") || token == "." || token == ".." {
         return None;
     }
     if token.starts_with("{{") {
@@ -388,10 +388,7 @@ fn split_scope_and_active(path: &str) -> (&str, &str) {
 
 /// Compute the absolute roots implied by a `@`-prefixed token at the given
 /// scope.
-fn magic_completion_roots(
-    scope: &str,
-    base: &Path,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
+fn magic_completion_roots(scope: &str, base: &Path) -> Result<Vec<PathBuf>, FileReferenceError> {
     let mut roots: Vec<PathBuf> = Vec::new();
 
     if let Some(git_root) = find_git_root(base)? {
@@ -633,10 +630,7 @@ mod tests {
             append_scope(Path::new("/root"), "prompts/"),
             PathBuf::from("/root/prompts")
         );
-        assert_eq!(
-            append_scope(Path::new("/root"), ""),
-            PathBuf::from("/root")
-        );
+        assert_eq!(append_scope(Path::new("/root"), ""), PathBuf::from("/root"));
         assert_eq!(
             append_scope(Path::new("/root"), "/"),
             PathBuf::from("/root"),
@@ -673,7 +667,9 @@ mod tests {
     #[test]
     fn complete_partial_implicit_relative_outside_repo() {
         let base = Path::new("/tmp");
-        let result = complete_partial("prompts/p", base).unwrap().expect("supported");
+        let result = complete_partial("prompts/p", base)
+            .unwrap()
+            .expect("supported");
         assert_eq!(result.entry_form(), CompletionEntryForm::ImplicitRelative);
         assert_eq!(result.active_segment(), "p");
         assert_eq!(result.rendered_prefix(), "prompts/");
