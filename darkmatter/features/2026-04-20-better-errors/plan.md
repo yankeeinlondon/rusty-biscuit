@@ -15,8 +15,28 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/src/markdown/errors/mod.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/page_blocks/types.rs
+  - darkmatter/lib/src/markdown/compose/conditions.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/types.rs
+  - darkmatter/lib/src/markdown/compose/context/merge.rs
+  - darkmatter/lib/src/markdown/reference/errors.rs
+  - darkmatter/lib/src/markdown/reference/file_tree/mod.rs
+  - darkmatter/lib/src/editor/mod.rs
+  - darkmatter/lib/src/mermaid/theme.rs
+  - darkmatter/cli/src/main.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
 packages:
   - biscuit-terminal
+  - darkmatter
   - darkmatter-cli
 ---
 
@@ -65,22 +85,23 @@ This plan outlines the steps to implement the `BlockError` trait and adopt it ac
 1.  **Step 1: MarkdownError Wrapper Implementation**
     - Implement `BlockError` for `MarkdownError` in `darkmatter/lib/src/markdown/types.rs`.
     - Use the delegation strategy for sub-errors and implement initial leaf blocks for `FileLoad` and `UrlFetch`.
-    - [ ] *Parallelizable:* No (depends on Phase 1).
+    - [x] *Parallelizable:* No (depends on Phase 1).
 2.  **Step 2: Priority Group 1 (Transclusion & Shell)**
     - Implement `BlockError` for `TransclusionError` and `ShellExpansionError`.
     - Add enrichments: `CycleDetected` (line numbers), `ExecutionFailed` (stdout/stderr).
-    - [ ] *Parallelizable:* Yes.
+    - [x] *Parallelizable:* Yes.
 3.  **Step 3: Priority Group 2 (Blocks & Conditions)**
     - Implement `BlockError` for `PageBlockError`, `ConditionError`, and `TocLinkingError`.
     - Add enrichments: `UnterminatedBlock` (echo directive), `Parse` (caret support).
-    - [ ] *Parallelizable:* Yes.
+    - [x] *Parallelizable:* Yes.
 4.  **Step 4: Priority Group 3 (Reference & Editor)**
     - Implement `BlockError` for `ReferenceError`, `EditorError`, `FileTreeError`, and `MermaidThemeError`.
     - Add enrichments: `NoEditorFound` (discovery list), `PathNotFound` (absolute path).
-    - [ ] *Parallelizable:* Yes.
+    - [x] *Parallelizable:* Yes.
 5.  **Step 5: Validation Checkpoint**
     - Manually trigger one error from each group using the `md` CLI.
     - Verify visual alignment and color application in the terminal.
+    - [x] *Validation Checkpoint:* `just test` and `just lint` both pass for the `darkmatter` package area; new unit tests cover every variant enrichment.
 
 ## Phase 4: Coverage & Polish
 
