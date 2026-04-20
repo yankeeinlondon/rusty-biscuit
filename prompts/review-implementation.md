@@ -1,8 +1,7 @@
 ---
 review: ""
 dir: "$(dirname "{{review}}")"
-basename: "$(basename "{{review}}"%.*)"
-plan: "{{dir}}/plan-for-{{basename}}.md"
+basename: "$(basename "{{review}}")"
 ---
 
 ## Context
@@ -19,11 +18,11 @@ The review finding are found in: {{review}}
 
 ## Task
 
-You must follow these steps strictly:
+You MUST follow these steps exactly:
 
 1. Instantiate a `planner` subagent. 
       - Provide the subagent a file references for the review at '{{review}}' 
-      - Ask them to create a high confidence plan and save it to '{{plan}}'
+      - Ask them to create a high confidence plan and save it to '{{dir}}/plan-for-{{basename}}'
           - This plan file NEEDS to set following Frontmatter properties:
               - `phases` - the number of phases, use 1 if no phases are required
               - `starting_phase` - set to 1
@@ -31,7 +30,7 @@ You must follow these steps strictly:
 2. Instantiate a `rust-developer` subagent.
     - Provide them with file references to:
         - review: {{review}}
-        - plan: {{plan}}
+        - plan: {{dir}}/plan-for-{{basename}}
         - phases: the `phases` property of the plan
         - starting_phase: the `starting_phase` property of the plan
     - Ask them to implement the "starting_phase" of the plan
@@ -50,7 +49,7 @@ You must follow these steps strictly:
       - You will know if you're in the final phase of the plan if the `phases` and `starting_phase` are the same number
       - Communicate to the caller/user that all suggestions for the review are now complete
 4. If we still have more phases in the plan to implement then 
-       - Increment the `starting_phase` frontmatter property of the plan file: '{{plan}}'
+       - Increment the `starting_phase` frontmatter property of the plan file: '{{dir}}/plan-for-{{basename}}'
        - go back to step 2 and implement the next phase
 
 ## **IMPORTANT:**
