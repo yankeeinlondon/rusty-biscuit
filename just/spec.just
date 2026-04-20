@@ -139,6 +139,11 @@ fix name:
         link="$(just _link "${spec}")"
         echo -e "Editing existing fix: {{blue}}${link}{{reset}}"
         if md edit "${spec}"; then
+            if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
+                clarify_agent="$(just _choose_agent)"
+                abs_spec="$(just _abs_path "${spec}")"
+                claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+            fi
             if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
                 echo "Ok. Bye."
                 exit 0
@@ -162,6 +167,11 @@ fix name:
     if md edit "${spec}"; then
         echo -e "Fix spec file created at {{blue}}${link}{{reset}}!"
         echo
+        if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
+            clarify_agent="$(just _choose_agent)"
+            abs_spec="$(just _abs_path "${spec}")"
+            claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+        fi
         if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
             echo "Ok. Bye."
             exit 0
