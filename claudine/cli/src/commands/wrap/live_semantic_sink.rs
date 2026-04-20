@@ -88,6 +88,14 @@ pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
 pub(crate) type SemanticEventLoggerFn =
     Box<dyn Fn(&SemanticEvent, &DispatchEventMeta) + Send + Sync + 'static>;
 
+const TOOL_RESULT_BODY_MAX_LINES: usize = 10;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolResultBody {
+    text: String,
+    truncated: bool,
+}
+
 pub(crate) struct LiveSemanticSink {
     provider: Provider,
     env: EnvironmentContext,
@@ -490,6 +498,38 @@ impl LiveSemanticSink {
         self.render_warning_header_and_body(section, header, &body);
     }
 
+    /// Render the bounded body of a successful Codex tool result. The
+    /// header line stays terse (`← Zsh(successful)`), while the actual
+    /// stdout/stderr text is surfaced immediately below as a purple
+    /// BlockQuote with grey text.
+    fn render_tool_result_body(&mut self, section: Section, body: &ToolResultBody) {
+        let prose = Prose::new(escape_prose(&body.text))
+            .with_word_wrap(WordWrap::Truncate(Some("…".into())));
+        let mut block = BlockQuote::new(RenderableContent::from(prose), None::<&str>)
+            .with_text_color(Color::Tailwind(Tailwind::Gray500))
+            .with_left_block_color(Color::Tailwind(Tailwind::Purple600))
+            .with_border("\u{258c} ");
+        block.layout_mut().left_margin = Margin::Chars(0);
+        block.layout_mut().right_margin = Margin::Chars(0);
+        let rendered = block.render(&self.terminal);
+        for line in rendered.lines() {
+            self.emit_section_line(section, line);
+        }
+
+        if body.truncated {
+            let note = Prose::new("<b>tool call</b>'s response truncated for brevity".to_string());
+            let mut note_block = BlockQuote::new(RenderableContent::from(note), None::<&str>)
+                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                .with_border("\u{258c} ");
+            note_block.layout_mut().left_margin = Margin::Chars(0);
+            note_block.layout_mut().right_margin = Margin::Chars(0);
+            let rendered = note_block.render(&self.terminal);
+            for line in rendered.lines() {
+                self.emit_section_line(section, line);
+            }
+        }
+    }
+
     /// Render a `ToolCallDisplay` into prose-markup for
     /// [`Status::from_prose`]. Per spec:
     ///
@@ -742,8 +782,23 @@ impl LiveSemanticSink {
                     if display.is_file_tool() && display.status == Some(ToolStatus::Error) {
                         self.render_file_tool_error(section, &display);
                     } else {
-                        let desc = self.render_tool_display(display);
+                        let body = tool_result_body(event);
+                        let mut header_display = display.clone();
+                        if self.provider == Provider::Codex
+                            && body.is_some()
+                            && header_display.status == Some(ToolStatus::Success)
+                            && !header_display.is_file_tool()
+                        {
+                            header_display.summary = None;
+                        }
+                        let desc = self.render_tool_display(header_display);
                         self.render_status_prose(section, StatusState::ToolUse, desc);
+                        if self.provider == Provider::Codex
+                            && self.verbosity == Verbosity::Normal
+                            && let Some(body) = body
+                        {
+                            self.render_tool_result_body(section, &body);
+                        }
                     }
                 }
             }
@@ -1038,6 +1093,79 @@ fn strip_progress_verb(message: &str) -> &str {
     message
 }
 
+fn tool_result_body(event: &SemanticEvent) -> Option<ToolResultBody> {
+    let SemanticEvent::ToolResult { status, output, .. } = event else {
+        return None;
+    };
+    let status = status.as_deref()?;
+    if !matches!(status, "success" | "completed" | "ok") {
+        return None;
+    }
+    let output = output.as_ref()?;
+    let text = tool_result_output_text(output)?;
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = normalized.trim_matches('\n');
+    if trimmed.trim().is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let truncated = lines.len() > TOOL_RESULT_BODY_MAX_LINES;
+    let body = lines
+        .into_iter()
+        .take(TOOL_RESULT_BODY_MAX_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if body.trim().is_empty() {
+        return None;
+    }
+    Some(ToolResultBody {
+        text: body,
+        truncated,
+    })
+}
+
+fn tool_result_output_text(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str().filter(|s| !s.is_empty()) {
+        return Some(s.to_string());
+    }
+    if let Some(obj) = value.as_object() {
+        for key in ["aggregated_output", "stderr", "stdout", "message", "text"] {
+            if let Some(Value::String(s)) = obj.get(key)
+                && !s.is_empty()
+            {
+                return Some(s.clone());
+            }
+        }
+        if let Some(Value::Array(parts)) = obj.get("content") {
+            let collected = parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !collected.is_empty() {
+                return Some(collected);
+            }
+        }
+    }
+    if let Some(arr) = value.as_array() {
+        let collected = arr
+            .iter()
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| part.as_str())
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !collected.is_empty() {
+            return Some(collected);
+        }
+    }
+    None
+}
+
 /// Escape user-controlled text so it can be safely interpolated into
 /// biscuit-terminal prose markup without being parsed as tags / tokens.
 ///
@@ -1248,6 +1376,20 @@ mod tests {
         captured_lines: Arc<StdMutex<Vec<String>>>,
         captured_dispatch: Arc<StdMutex<Vec<(AgenticEvent, String)>>>,
     ) -> LiveSemanticSink {
+        make_sink_for_provider(
+            Provider::Claude,
+            Verbosity::Normal,
+            captured_lines,
+            captured_dispatch,
+        )
+    }
+
+    fn make_sink_for_provider(
+        provider: Provider,
+        verbosity: Verbosity,
+        captured_lines: Arc<StdMutex<Vec<String>>>,
+        captured_dispatch: Arc<StdMutex<Vec<(AgenticEvent, String)>>>,
+    ) -> LiveSemanticSink {
         let dispatch = {
             let captured = captured_dispatch.clone();
             Box::new(move |event: AgenticEvent, meta: DispatchEventMeta| {
@@ -1264,10 +1406,10 @@ mod tests {
             })
         };
         LiveSemanticSink::new(
-            Provider::Claude,
+            provider,
             EnvironmentContext::default(),
             Path::new("/tmp"),
-            Verbosity::Normal,
+            verbosity,
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             dispatch,
             emit,
@@ -1894,6 +2036,99 @@ mod tests {
             blanks, 1,
             "exactly one separator blank (the one before the stdout text); \
              the transition back to stderr must reuse the stdout trailing blank: {captured:?}"
+        );
+    }
+
+    #[test]
+    fn codex_successful_tool_result_renders_response_block_and_truncates() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink_for_provider(
+            Provider::Codex,
+            Verbosity::Normal,
+            lines.clone(),
+            dispatched,
+        );
+
+        let output = (1..=12)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("zsh".into()),
+            id: Some("cmd1".into()),
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: Some(json!(output)),
+            extra: json!({"input": {"command": "-lc \"sed -n '1,260p' spec.md\""}}),
+        });
+
+        let captured = lines.lock().unwrap().clone();
+        let joined = captured.join("\n");
+        assert!(
+            joined.contains("Zsh") && joined.contains("successful"),
+            "successful header must still render: {joined:?}"
+        );
+        assert!(
+            !joined.contains("spec.md\")"),
+            "Codex successful result header should stay terse when a response body is rendered: {joined:?}"
+        );
+        assert!(
+            joined.contains("line 1"),
+            "body must include first line: {joined:?}"
+        );
+        assert!(
+            joined.contains("line 10"),
+            "body must include tenth line: {joined:?}"
+        );
+        assert!(
+            !joined.contains("line 11") && !joined.contains("line 12"),
+            "body must truncate after ten lines: {joined:?}"
+        );
+        assert!(
+            joined.contains("tool call") && joined.contains("truncated for brevity"),
+            "truncation note must render immediately after the body block: {joined:?}"
+        );
+
+        let mut prev_blank = false;
+        for line in &captured {
+            let is_blank = line.trim().is_empty();
+            assert!(
+                !(is_blank && prev_blank),
+                "no doubled blanks allowed around tool response blocks: {captured:?}"
+            );
+            prev_blank = is_blank;
+        }
+    }
+
+    #[test]
+    fn codex_quiet_tool_result_hides_response_body() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink =
+            make_sink_for_provider(Provider::Codex, Verbosity::Quiet, lines.clone(), dispatched);
+
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("zsh".into()),
+            id: Some("cmd1".into()),
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: Some(json!("first line\nsecond line\nthird line")),
+            extra: json!({"input": {"command": "-lc \"sed -n '1,20p' spec.md\""}}),
+        });
+
+        let joined = lines.lock().unwrap().join("\n");
+        assert!(
+            joined.contains("Zsh") && joined.contains("successful"),
+            "quiet mode must still show the compact success header: {joined:?}"
+        );
+        assert!(
+            !joined.contains("first line") && !joined.contains("truncated for brevity"),
+            "quiet mode must suppress the response body block: {joined:?}"
+        );
+        assert!(
+            !joined.contains("spec.md\")"),
+            "quiet mode header should not expand back into the original command text: {joined:?}"
         );
     }
 
@@ -3141,6 +3376,48 @@ mod tests {
             assert!(joined.contains("researcher"));
             assert!(joined.contains("Rate limited"));
             assert!(joined.contains("claude/some_future_event"));
+        }
+
+        #[test]
+        fn claude_tool_preface_stays_in_thinking_not_stdout() {
+            let combined = replay_to_combined(
+                Provider::Claude,
+                &[
+                    r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-4"}"#,
+                    r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Let me investigate the spacing issue first."},{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/tmp/section.rs"}}]}}"#,
+                ],
+                None,
+            );
+
+            assert!(
+                combined.iter().all(|(is_stdout, _)| !*is_stdout),
+                "Claude tool-preface narration must not open FinalStdout mid-turn: {combined:#?}"
+            );
+
+            let rendered: Vec<String> = combined.iter().map(|(_, line)| line.clone()).collect();
+            let joined = rendered.join("\n");
+            assert!(
+                joined.contains("Let me investigate the spacing issue first."),
+                "tool-preface narration must still render: {joined:?}"
+            );
+            assert!(
+                joined.contains('\u{258c}'),
+                "tool-preface narration must render through the thinking BlockQuote: {joined:?}"
+            );
+            assert!(
+                joined.contains("Read"),
+                "follow-up tool call must still render after the thinking block: {joined:?}"
+            );
+
+            let mut prev_blank = false;
+            for line in &rendered {
+                let is_blank = line.trim().is_empty();
+                assert!(
+                    !(is_blank && prev_blank),
+                    "tool-preface replay must not introduce doubled blanks: {rendered:?}"
+                );
+                prev_blank = is_blank;
+            }
         }
 
         #[test]
