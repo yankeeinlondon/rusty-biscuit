@@ -1,7 +1,7 @@
 ---
 dir: ""
-spec: "spec.md"
-design: "tech-design.md"
+spec: ""
+design: ""
 iteration: 1
 ---
 ## Context
@@ -16,10 +16,10 @@ You are a **senior-level Rust developer and project manager** with extensive exp
 
 Your team has completed the implementation of:
 
-::block when="{{spec}}"
+::block when="spec"
 - spec: {{dir}}/{{spec}}
 ::end-block
-::block when="{{design}}"
+::block when="design"
 - tech-design: {{dir}}/{{design}}
 ::end-block
 
@@ -31,8 +31,10 @@ You are to act as an orchestrator and follow these steps serially and precisely:
 
 1. Instantiate a `planner` subagent. 
       - Provide the following file references for them:
+          ::block when="spec"
           - spec: {{dir}}/{{spec}}
-          ::block when="file_exists({{dir}}/{{design }})"
+          ::end-block
+          ::block when="design"
           - tech-design: {{dir}}/{{design }}
           ::end-block
           - review: {{dir}}/review-{{iteration}}.md
@@ -41,8 +43,10 @@ You are to act as an orchestrator and follow these steps serially and precisely:
       - Ask them to provide you a summary of the plan including how many phases (if phases are used) are included in the plan
 2. Instantiate a `rust-developer` subagent.
     - Provide them with references to:
+        ::block when="spec"
         - spec: {{dir}}/{{spec}}
-        ::block when="file_exists({{dir}}/{{design }})"
+        ::end-block
+        ::block when="design"
         - tech-design: {{dir}}/{{design }}
         ::end-block
         - review: {{dir}}/review-{{iteration}}.md

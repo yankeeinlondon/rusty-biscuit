@@ -1435,8 +1435,7 @@ fn emit_timeout_warn(
             Some((remaining, deadline_wall))
         }
     });
-    let body =
-        prompt_timing_mod::render_timeout_warn_prose(elapsed, hard_remaining, prompt_timing);
+    let body = prompt_timing_mod::render_timeout_warn_prose(elapsed, hard_remaining, prompt_timing);
     let rendered = Status::from_prose(body)
         .state(StatusState::Warning)
         .render(term);
@@ -1491,11 +1490,8 @@ fn maybe_emit_step_timeout_warn(
         }
     });
 
-    let body = prompt_timing_mod::render_step_timeout_warn_prose(
-        silence,
-        hard_remaining,
-        prompt_timing,
-    );
+    let body =
+        prompt_timing_mod::render_step_timeout_warn_prose(silence, hard_remaining, prompt_timing);
     let rendered = Status::from_prose(body)
         .state(StatusState::Warning)
         .render(term);
