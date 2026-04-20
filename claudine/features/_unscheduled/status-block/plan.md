@@ -2,6 +2,18 @@
 phases: 4
 created: 2026-04-19
 start_phase: 1
+source_files_during_phase_1:
+  - biscuit-terminal/lib/src/components/status.rs
+  - claudine/lib/src/composition/lifecycle.rs
+  - claudine/lib/src/harness/report.rs
+  - claudine/cli/src/output/shell_expansion_error.rs
+  - claudine/cli/src/output.rs
+  - claudine/cli/src/commands/wrap/sequence.rs
+docs_updated_during_phase_1:
+  - claudine/features/_unscheduled/status-block/plan.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
+packages: [biscuit-terminal, claudine, claudine-cli]
 ---
 
 # StatusBlock Execution Plan
