@@ -64,6 +64,59 @@ pub enum EditorError {
     Io(#[from] std::io::Error),
 }
 
+impl biscuit_terminal::errors::BlockError for EditorError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            EditorError::NoEditorFound => {
+                let probed = DEFAULT_EDITOR_PRIORITY
+                    .iter()
+                    .map(|e| format!("<cyan>{}</cyan>", e.binary_name()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("EditorError", "no editor found"))
+                    .body(format!(
+                        "<dim>Checked env:</dim> <cyan>$EDITOR</cyan>, <cyan>$VISUAL</cyan>\n<dim>Probed binaries:</dim> {probed}"
+                    ))
+                    .hint("Set <cyan>$EDITOR</cyan> to your preferred editor, or install one of the probed binaries.")
+            }
+
+            EditorError::NonZeroExit(code) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("EditorError", "editor exited with error"))
+                .body(format!("<dim>Exit code:</dim> {code}"))
+                .hint("Re-run the editor manually to see its full diagnostic output."),
+
+            EditorError::Missing => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("EditorError", "edited file missing"))
+                .body("The temporary edit buffer was deleted before it could be re-read.".to_string())
+                .hint("Avoid deleting the buffer file while editing; save and close normally."),
+
+            EditorError::LaunchFailed { editor, source } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("EditorError", "launch failed"))
+                .body(format!(
+                    "<dim>Editor:</dim> <cyan>{editor}</cyan>\n<dim>Kind:</dim> {:?}\n{source}",
+                    source.kind()
+                ))
+                .hint("Check the editor binary is executable and on <cyan>$PATH</cyan>."),
+
+            EditorError::Io(source) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("EditorError", "I/O error"))
+                .body(format!(
+                    "<dim>Kind:</dim> {:?}\n{source}",
+                    source.kind()
+                ))
+                .hint("Confirm the temp-file location is writable and has space available."),
+        }
+    }
+}
+
 /// Resolve the editor command using `$EDITOR`, `$VISUAL`, then fallback probes.
 pub fn resolve_editor_command() -> Result<String, EditorError> {
     if let Ok(editor) = std::env::var("EDITOR") {
