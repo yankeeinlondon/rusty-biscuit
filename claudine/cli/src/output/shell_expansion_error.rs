@@ -34,7 +34,7 @@ const LEFT_MARGIN: u32 = 2;
 const RIGHT_MARGIN: u32 = 2;
 
 /// Border string used by the BlockQuote.
-const BORDER: &str = "▌ ";
+const BORDER: &str = "┃ ";
 
 /// Pretty-print a composition-time shell expansion error.
 ///
