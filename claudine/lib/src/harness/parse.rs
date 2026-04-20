@@ -24,13 +24,16 @@ const HARNESS_KEYS: &[&str] = &[
     "post_checks",
     "timeout",
     "step_timeout",
+    "timeout_warn",
+    "step_timeout_warn",
     "handle",
 ];
 
 /// Check whether composed frontmatter contains any harness-relevant keys.
 ///
 /// Returns `true` if any of `pre_checks`, `post_checks`, `timeout`,
-/// `step_timeout`, `handle`, or any `handle_*` key is present.
+/// `step_timeout`, `timeout_warn`, `step_timeout_warn`, `handle`, or any
+/// `handle_*` key is present.
 pub fn has_harness_properties(frontmatter: &Value) -> bool {
     let Some(obj) = frontmatter.as_object() else {
         return false;
@@ -125,6 +128,77 @@ pub fn parse_harness_plan(
         });
     }
 
+    // Parse timeout_warn (wall-clock warning threshold). Same syntax as
+    // `timeout`.
+    let timeout_warn = if let Some(v) = obj.get("timeout_warn") {
+        let raw = v.as_str().ok_or_else(|| HarnessError::InvalidFrontmatter {
+            source_path: source_path.to_path_buf(),
+            property: "timeout_warn".to_string(),
+            detail: "timeout_warn must be a string (e.g. \"30s\", \"5m\")".to_string(),
+        })?;
+        Some(parse_timeout(raw, source_path)?)
+    } else {
+        None
+    };
+
+    // Parse step_timeout_warn (silence warning threshold). Same syntax as
+    // `step_timeout`.
+    let step_timeout_warn = if let Some(v) = obj.get("step_timeout_warn") {
+        let raw = v.as_str().ok_or_else(|| HarnessError::InvalidFrontmatter {
+            source_path: source_path.to_path_buf(),
+            property: "step_timeout_warn".to_string(),
+            detail: "step_timeout_warn must be a string (e.g. \"30s\", \"5m\")".to_string(),
+        })?;
+        Some(parse_timeout(raw, source_path)?)
+    } else {
+        None
+    };
+
+    // Relational validation: each `*_warn` must be strictly less than its
+    // corresponding hard threshold when both are present. A warn equal
+    // to or greater than the hard timeout would never fire before the
+    // kill signal, defeating the purpose of an early warning. Rejection
+    // is a preflight hard error and emits a `tracing::error!` adjacent
+    // to the user-facing message per the timing feature spec.
+    if let (Some(warn), Some(hard)) = (timeout_warn, timeout)
+        && warn >= hard
+    {
+        tracing::error!(
+            source_path = %source_path.display(),
+            timeout_warn_secs = warn.as_secs(),
+            timeout_secs = hard.as_secs(),
+            "preflight rejection: timeout_warn must be less than timeout",
+        );
+        return Err(HarnessError::InvalidTimeout {
+            source_path: source_path.to_path_buf(),
+            raw: format_duration(warn),
+            detail: format!(
+                "timeout_warn ({}) must be less than timeout ({})",
+                format_duration(warn),
+                format_duration(hard),
+            ),
+        });
+    }
+    if let (Some(warn), Some(hard)) = (step_timeout_warn, step_timeout)
+        && warn >= hard
+    {
+        tracing::error!(
+            source_path = %source_path.display(),
+            step_timeout_warn_secs = warn.as_secs(),
+            step_timeout_secs = hard.as_secs(),
+            "preflight rejection: step_timeout_warn must be less than step_timeout",
+        );
+        return Err(HarnessError::InvalidTimeout {
+            source_path: source_path.to_path_buf(),
+            raw: format_duration(warn),
+            detail: format!(
+                "step_timeout_warn ({}) must be less than step_timeout ({})",
+                format_duration(warn),
+                format_duration(hard),
+            ),
+        });
+    }
+
     // Parse handlers
     let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx)?;
 
@@ -132,6 +206,8 @@ pub fn parse_harness_plan(
         source_path: source_path.to_path_buf(),
         timeout,
         step_timeout,
+        timeout_warn,
+        step_timeout_warn,
         pre_checks,
         post_checks,
         handlers,
@@ -1395,5 +1471,108 @@ mod tests {
         let fm = json!({});
         let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
         assert!(plan.step_timeout.is_none());
+    }
+
+    #[test]
+    fn parse_harness_plan_extracts_timeout_warn() {
+        let fm = json!({ "timeout_warn": "30s" });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(plan.timeout_warn, Some(std::time::Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn parse_harness_plan_extracts_step_timeout_warn() {
+        let fm = json!({ "step_timeout_warn": "45s" });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(
+            plan.step_timeout_warn,
+            Some(std::time::Duration::from_secs(45))
+        );
+    }
+
+    #[test]
+    fn parse_harness_plan_rejects_timeout_warn_equal_to_timeout() {
+        let fm = json!({ "timeout": "5m", "timeout_warn": "5m" });
+        let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
+        match err {
+            HarnessError::InvalidTimeout { detail, .. } => {
+                assert!(
+                    detail.contains("timeout_warn") && detail.contains("less than"),
+                    "detail must name both values: {detail}"
+                );
+            }
+            other => panic!("expected InvalidTimeout, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_harness_plan_rejects_timeout_warn_greater_than_timeout() {
+        let fm = json!({ "timeout": "1m", "timeout_warn": "2m" });
+        let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
+        match err {
+            HarnessError::InvalidTimeout { detail, .. } => {
+                assert!(detail.contains("1m"), "detail must contain 1m: {detail}");
+                assert!(detail.contains("2m"), "detail must contain 2m: {detail}");
+            }
+            other => panic!("expected InvalidTimeout, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_harness_plan_rejects_step_timeout_warn_greater_than_step_timeout() {
+        let fm = json!({ "step_timeout": "30s", "step_timeout_warn": "2m" });
+        let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
+        match err {
+            HarnessError::InvalidTimeout { detail, .. } => {
+                assert!(
+                    detail.contains("step_timeout_warn") && detail.contains("less than"),
+                    "detail must name both values: {detail}"
+                );
+            }
+            other => panic!("expected InvalidTimeout, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_harness_plan_rejects_zero_or_negative_warn_values() {
+        // Zero is rejected by the underlying timeout parser.
+        let fm_zero = json!({ "timeout_warn": "0s" });
+        assert!(parse_harness_plan(&fm_zero, source(), &test_ctx()).is_err());
+
+        // Strings without a number parse as errors — the parser requires
+        // a positive integer or float followed by a unit.
+        let fm_neg = json!({ "step_timeout_warn": "-5s" });
+        assert!(parse_harness_plan(&fm_neg, source(), &test_ctx()).is_err());
+    }
+
+    #[test]
+    fn parse_harness_plan_accepts_timeout_warn_without_timeout() {
+        let fm = json!({ "timeout_warn": "30s" });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(plan.timeout_warn, Some(std::time::Duration::from_secs(30)));
+        assert!(plan.timeout.is_none());
+    }
+
+    #[test]
+    fn parse_harness_plan_accepts_step_timeout_warn_without_step_timeout() {
+        let fm = json!({ "step_timeout_warn": "15s" });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(
+            plan.step_timeout_warn,
+            Some(std::time::Duration::from_secs(15))
+        );
+        assert!(plan.step_timeout.is_none());
+    }
+
+    #[test]
+    fn has_harness_properties_detects_timeout_warn() {
+        let fm = json!({ "timeout_warn": "30s" });
+        assert!(has_harness_properties(&fm));
+    }
+
+    #[test]
+    fn has_harness_properties_detects_step_timeout_warn() {
+        let fm = json!({ "step_timeout_warn": "15s" });
+        assert!(has_harness_properties(&fm));
     }
 }

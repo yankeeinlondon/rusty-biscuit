@@ -1,3 +1,8 @@
+---
+fixed: 2026-04-19
+agent: claude
+---
+
 # Timing Information
 
 ## Problem
