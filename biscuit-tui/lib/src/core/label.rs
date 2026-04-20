@@ -112,19 +112,8 @@ where
                 inner(area, buf);
                 return area;
             }
-            buf.set_stringn(
-                area.x,
-                area.y,
-                label_text,
-                area.width as usize,
-                label_style,
-            );
-            Rect::new(
-                area.x + reserve,
-                area.y,
-                area.width - reserve,
-                area.height,
-            )
+            buf.set_stringn(area.x, area.y, label_text, area.width as usize, label_style);
+            Rect::new(area.x + reserve, area.y, area.width - reserve, area.height)
         }
         LabelPosition::Right => {
             let gap: u16 = 1;
@@ -218,8 +207,14 @@ mod tests {
         // "Name" (4) + gap (1) = 5 reserved
         assert_eq!(inner, Rect::new(5, 0, 15, 1));
         let row = buffer_row_text(&buf, 0);
-        assert!(row.starts_with("Name"), "expected row to start with label, got {row:?}");
-        assert!(row.contains("BODY"), "expected row to contain body, got {row:?}");
+        assert!(
+            row.starts_with("Name"),
+            "expected row to start with label, got {row:?}"
+        );
+        assert!(
+            row.contains("BODY"),
+            "expected row to contain body, got {row:?}"
+        );
     }
 
     #[test]
@@ -233,7 +228,10 @@ mod tests {
         // Reserve on the right: width - 5 = 15
         assert_eq!(inner, Rect::new(0, 0, 15, 1));
         let row = buffer_row_text(&buf, 0);
-        assert!(row.starts_with("BODY"), "expected body at start, got {row:?}");
+        assert!(
+            row.starts_with("BODY"),
+            "expected body at start, got {row:?}"
+        );
         assert!(row.ends_with("Name"), "expected label at end, got {row:?}");
     }
 

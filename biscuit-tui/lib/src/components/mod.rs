@@ -18,6 +18,8 @@ pub use boolean_switch::{BooleanSwitch, BooleanSwitchState};
 pub use choose::{ChoiceInput, ChoiceOption, SelectionMode};
 pub use choose_many::{ChooseMany, ChooseManyState};
 pub use choose_one::{ChooseOne, ChooseOneState};
-pub use input_table::{CellState, InputTable, InputTableColumn, InputTableState};
+pub use input_table::{
+    CellState, CellValue, InputTable, InputTableColumn, InputTableState, Row, RowCell,
+};
 pub use text_area_input::{TextAreaInput, TextAreaInputState};
 pub use text_input::{TextInput, TextInputState};

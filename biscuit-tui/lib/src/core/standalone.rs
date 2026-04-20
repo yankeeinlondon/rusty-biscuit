@@ -166,11 +166,7 @@ where
 ///
 /// Returns [`io::ErrorKind::Interrupted`] on cancellation (Esc or
 /// `Ctrl-C`). Propagates any other terminal I/O error.
-pub fn run_standalone<C, S, V>(
-    component: C,
-    mut state: S,
-    height: Option<u16>,
-) -> io::Result<V>
+pub fn run_standalone<C, S, V>(component: C, mut state: S, height: Option<u16>) -> io::Result<V>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState<Value = V>,
@@ -222,12 +218,7 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{
-        backend::TestBackend,
-        buffer::Buffer,
-        layout::Rect,
-        style::Style,
-    };
+    use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, style::Style};
 
     /// Minimal widget used for Phase 1 integration tests.
     ///
@@ -394,10 +385,7 @@ mod tests {
 
     #[test]
     fn resize_events_trigger_a_redraw() {
-        let events = vec![
-            Event::Resize(40, 10),
-            key_event(KeyCode::Enter),
-        ];
+        let events = vec![Event::Resize(40, 10), key_event(KeyCode::Enter)];
         let (result, state) = run_capturing_state(events);
         assert_eq!(result.expect("drive loop"), Some(String::new()));
         // Initial draw + resize redraw = 2 draws.
@@ -412,5 +400,24 @@ mod tests {
             fn value(&self) -> Self::Value {}
         }
         assert!(Minimal.validation_error().is_none());
+    }
+
+    #[test]
+    fn standalone_runner_smoke_test_with_echo_widget() {
+        let backend = TestBackend::new(20, 3);
+        let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
+        let mut state = EchoState::default();
+        let events = vec![
+            key_event(KeyCode::Char('h')),
+            key_event(KeyCode::Char('i')),
+            key_event(KeyCode::Enter),
+        ];
+        let mut iter = events.into_iter();
+        let result = drive_event_loop(&mut terminal, Echo, &mut state, || {
+            iter.next()
+                .ok_or_else(|| io::Error::other("no more events"))
+        });
+        assert_eq!(result.expect("drive loop"), Some("hi".to_string()));
+        assert_eq!(state.render_count, 3);
     }
 }

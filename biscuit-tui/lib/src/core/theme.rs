@@ -51,6 +51,14 @@ pub struct ComponentTheme {
 
     /// Style applied to disabled options.
     pub disabled_style: Style,
+
+    /// Glyph rendered at the top of a list viewport when content is
+    /// scrolled above the visible window.
+    pub overflow_up_indicator: String,
+
+    /// Glyph rendered at the bottom of a list viewport when content is
+    /// scrolled below the visible window.
+    pub overflow_down_indicator: String,
 }
 
 impl Default for ComponentTheme {
@@ -67,13 +75,13 @@ impl Default for ComponentTheme {
                 .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
-            error_style: Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            error_style: Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             label_style: Style::default().add_modifier(Modifier::BOLD),
             disabled_style: Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
+            overflow_up_indicator: "▲".into(),
+            overflow_down_indicator: "▼".into(),
         }
     }
 }
@@ -110,12 +118,7 @@ mod tests {
     fn default_error_style_is_red_and_bold() {
         let theme = ComponentTheme::default();
         assert_eq!(theme.error_style.fg, Some(Color::Red));
-        assert!(
-            theme
-                .error_style
-                .add_modifier
-                .contains(Modifier::BOLD)
-        );
+        assert!(theme.error_style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -123,5 +126,19 @@ mod tests {
         let theme = ComponentTheme::default();
         let cloned = theme.clone();
         assert_eq!(theme, cloned);
+    }
+
+    #[test]
+    fn overflow_indicators_default_to_arrows() {
+        let theme = ComponentTheme::default();
+        assert_eq!(theme.overflow_up_indicator, "▲");
+        assert_eq!(theme.overflow_down_indicator, "▼");
+    }
+
+    #[test]
+    fn overflow_indicators_are_non_empty() {
+        let theme = ComponentTheme::default();
+        assert!(!theme.overflow_up_indicator.is_empty());
+        assert!(!theme.overflow_down_indicator.is_empty());
     }
 }
