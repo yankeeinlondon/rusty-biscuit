@@ -30,6 +30,7 @@ For outbound sends, `messenger` uses provider API credentials plus an explicit d
 - Telegram: bot token + chat ID
 
 Slack is modeled only as a bot-token adapter — `messenger` does not currently send via Slack incoming webhooks. The Discord-Webhook adapter is notification-only: `plan_send()` and `send()` reject `reply_to` with `MessengerError::UnsupportedFeature` before any network call.
+Discord bot sends and Discord webhook sends share the same Markdown renderer; the practical difference is transport capability, not formatting syntax.
 
 ## How It Works
 

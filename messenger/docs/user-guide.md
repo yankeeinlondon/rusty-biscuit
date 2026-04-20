@@ -264,6 +264,16 @@ Each secret can be provided in two ways:
 
 When both are present, the inline value takes priority. If neither is set, the CLI falls back to a default environment variable name per provider (see the table in [Platform Setup](#platform-setup)).
 
+### Discord Webhook Route Setup
+
+`messenger setup discord-webhook` follows the same secret-resolution model as the bot-token routes:
+
+1. Choose whether to store the webhook URL directly in `~/.messenger.json` or reference it via an environment variable.
+2. If you choose the env-var path, the default suggested variable is `DISCORD_WEBHOOK_URL`.
+3. The saved route contains only `webhook_url` or `webhook_url_env`; it never stores a `channel_id` because the webhook URL already selects the channel.
+
+Discord webhook thread routing is a dispatch-time concern, not a route field. CLI route config does not persist `thread_id`; library callers provide it with `Target::discord_webhook_thread(...)` when needed.
+
 ### Receipt Storage
 
 Every successful send writes a JSON receipt to:
@@ -378,9 +388,9 @@ use secrecy::SecretString;
 async fn main() -> Result<(), messenger::MessengerError> {
     let mut messenger = Messenger::new();
 
-    messenger.register(Box::new(DiscordWebhookProvider::new(DiscordWebhookConfig {
+    messenger.register(Box::new(DiscordWebhookProvider::try_new(DiscordWebhookConfig {
         webhook_url: SecretString::from(std::env::var("DISCORD_WEBHOOK_URL").unwrap()),
-    })));
+    })?));
 
     let message = Message::markdown("**Deploy succeeded**");
 
@@ -397,6 +407,7 @@ async fn main() -> Result<(), messenger::MessengerError> {
 ```
 
 The webhook adapter does not support replies. Attempting `Dispatch::reply_to(...)` against a `Target::DiscordWebhook` causes `plan_send()`/`send()` to return `MessengerError::UnsupportedFeature` before any network call.
+The webhook adapter uses the same Discord markdown renderer as the bot adapter, so Markdown formatting is identical between the two Discord transports.
 
 ### Ad-hoc CLI Usage
 
