@@ -483,7 +483,7 @@ pub enum StderrIngestOutcome {
 /// the child process early.
 ///
 /// Today this fires for pre-stream usage-cap failures plus wrapper-driven
-/// silent-stall recovery in OpenCode's structured non-interactive path.
+/// post-stop hang recovery in OpenCode's structured non-interactive path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EarlyTermination {
     /// The provider reported a rate-limit failure before any stdout
@@ -497,10 +497,6 @@ pub enum EarlyTermination {
     /// treats the run as successful because the semantic stream had already
     /// finished.
     CompletedButHung { message: String },
-    /// OpenCode went completely silent for too long with no visible in-flight
-    /// work left. The wrapper terminates the hung process and reports a
-    /// synthetic `provider_stalled` failure.
-    SilentStall { message: String },
     /// The harness-configured step-silence budget elapsed with no stream
     /// event observed. The wrapper terminates the child process and maps
     /// the outcome to [`crate::harness::ProcessTermination::TimedOut`] so
