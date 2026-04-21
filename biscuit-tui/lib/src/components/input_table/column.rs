@@ -126,8 +126,28 @@ pub enum InputTableColumn {
         config: TextAreaInputConfig,
     },
     /// Single-select choice column.
+    ///
+    /// Table choice columns always operate on `ChoiceInput<String>`,
+    /// unlike standalone [`ChooseOne<V>`](crate::components::ChooseOne)
+    /// which is generic over the value type. This is an intentional v1
+    /// limitation to keep the table's cell state management simpler.
+    ///
+    /// Consumers who need typed values can map via
+    /// [`ChoiceOption::map_value`](crate::components::choose::ChoiceOption::map_value)
+    /// on individual options before passing them to the table, or project
+    /// the extracted `String` values after reading the table's results.
     ChooseOne(ChoiceInput<String>),
     /// Multi-select choice column.
+    ///
+    /// Table choice columns always operate on `ChoiceInput<String>`,
+    /// unlike standalone [`ChooseMany<V>`](crate::components::ChooseMany)
+    /// which is generic over the value type. This is an intentional v1
+    /// limitation to keep the table's cell state management simpler.
+    ///
+    /// Consumers who need typed values can map via
+    /// [`ChoiceOption::map_value`](crate::components::choose::ChoiceOption::map_value)
+    /// on individual options before passing them to the table, or project
+    /// the extracted `String` values after reading the table's results.
     ChooseMany(ChoiceInput<String>),
 }
 

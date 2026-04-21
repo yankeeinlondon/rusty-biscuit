@@ -47,7 +47,7 @@ pub struct Row {
 /// A single cell within a [`Row`], pairing a column id with its typed value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowCell {
-    /// The column identifier from the corresponding [`InputTableColumn`](super::InputTableColumn).
+    /// The column identifier from the corresponding [`InputTableColumn`].
     pub column_id: String,
     /// The captured, typed value.
     pub value: CellValue,
@@ -131,11 +131,11 @@ use crate::core::{EventOutcome, HandleEvent, ValidationState};
 
 use super::column::{BooleanSwitchConfig, InputTableColumn, TextAreaInputConfig, TextInputConfig};
 
-/// Runtime state for a single cell of an [`InputTable`].
+/// Runtime state for a single cell of an [`InputTableState`](super::InputTableState).
 ///
 /// Each variant holds the corresponding component's state. Event
 /// handling and rendering are delegated to the wrapped state via the
-/// primitive widget (e.g. [`TextInput`](crate::components::TextInput)).
+/// primitive widget (e.g. [`TextInput`]).
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum CellState {
@@ -188,8 +188,8 @@ impl CellState {
 
     /// Returns the cell's preferred minimum render height in rows.
     ///
-    /// Single-line cells ([`TextInput`](crate::components::TextInput),
-    /// [`BooleanSwitch`](crate::components::BooleanSwitch), and
+    /// Single-line cells ([`TextInput`],
+    /// [`BooleanSwitch`], and
     /// [`StaticText`](Self::StaticText)) return `1`. Multi-line cells
     /// return their own natural extent.
     pub fn min_height(&self) -> u16 {

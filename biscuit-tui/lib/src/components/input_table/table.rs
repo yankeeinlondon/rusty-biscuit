@@ -810,19 +810,46 @@ fn compute_column_widths(columns: &[InputTableColumn], total_width: u16) -> Vec<
     let total_preferred: u32 = preferred.iter().map(|&w| w as u32).sum();
 
     if total_preferred <= total_width as u32 && total_preferred > 0 {
-        let leftover = (total_width as u32 - total_preferred) as u16;
-        let per_col = leftover / columns.len() as u16;
-        let remainder = leftover % columns.len() as u16;
-        preferred
+        let leftover = total_width as u32 - total_preferred;
+        let focusable_count = columns
             .iter()
+            .filter(|col| !matches!(col, InputTableColumn::StaticText { .. }))
+            .count() as u32;
+
+        if focusable_count == 0 {
+            return preferred;
+        }
+
+        let per_focusable = leftover / focusable_count;
+        let remainder = (leftover % focusable_count) as u16;
+        let mut focusable_idx = 0u16;
+
+        preferred
+            .into_iter()
             .enumerate()
-            .map(|(i, &p)| p + per_col + if (i as u16) < remainder { 1 } else { 0 })
+            .map(|(i, p)| {
+                if matches!(columns[i], InputTableColumn::StaticText { .. }) {
+                    p
+                } else {
+                    let extra = per_focusable as u16
+                        + if focusable_idx < remainder { 1 } else { 0 };
+                    focusable_idx += 1;
+                    p + extra
+                }
+            })
             .collect()
     } else {
         let base = total_width / columns.len() as u16;
         let remainder = total_width % columns.len() as u16;
         (0..columns.len())
-            .map(|i| base + if (i as u16) < remainder { 1 } else { 0 })
+            .map(|i| {
+                let base_w = base + if (i as u16) < remainder { 1 } else { 0 };
+                if matches!(columns[i], InputTableColumn::StaticText { .. }) {
+                    base_w.min(preferred[i])
+                } else {
+                    base_w
+                }
+            })
             .collect()
     }
 }
@@ -1505,5 +1532,106 @@ mod tests {
         assert_eq!(top_right, "▲");
         let bottom_right = buf[(area.x + area.width - 1, area.y + 2)].symbol();
         assert_eq!(bottom_right, "▼");
+    }
+
+    #[test]
+    fn static_text_columns_stay_at_natural_width_with_leftover() {
+        let columns = vec![
+            InputTableColumn::StaticText {
+                id: "hi".into(),
+                text: "Hello".into(),
+            },
+            InputTableColumn::TextInput {
+                id: "a".into(),
+                config: TextInputConfig::default(),
+            },
+            InputTableColumn::TextInput {
+                id: "b".into(),
+                config: TextInputConfig::default(),
+            },
+        ];
+        let widths = compute_column_widths(&columns, 60);
+        assert_eq!(
+            widths[0], 5,
+            "StaticText should get exactly its natural unicode width"
+        );
+        assert_eq!(
+            widths.iter().map(|&w| w as u32).sum::<u32>(),
+            60,
+            "widths should sum to total"
+        );
+        assert!(
+            widths[1] > 20,
+            "focusable columns should get leftover width"
+        );
+        assert!(
+            widths[2] > 20,
+            "focusable columns should get leftover width"
+        );
+    }
+
+    #[test]
+    fn static_text_does_not_shrink_below_natural_in_overflow() {
+        let columns = vec![
+            InputTableColumn::StaticText {
+                id: "lbl".into(),
+                text: "LongLabel".into(),
+            },
+            InputTableColumn::TextInput {
+                id: "a".into(),
+                config: TextInputConfig::default(),
+            },
+        ];
+        let widths = compute_column_widths(&columns, 10);
+        assert_eq!(
+            widths[0], 5,
+            "StaticText in overflow should get min(base, preferred)"
+        );
+        assert_eq!(widths.iter().map(|&w| w as u32).sum::<u32>(), 10);
+    }
+
+    #[test]
+    fn all_static_text_columns_use_preferred_widths() {
+        let columns = vec![
+            InputTableColumn::StaticText {
+                id: "a".into(),
+                text: "Alpha".into(),
+            },
+            InputTableColumn::StaticText {
+                id: "b".into(),
+                text: "Beta".into(),
+            },
+        ];
+        let widths = compute_column_widths(&columns, 40);
+        assert_eq!(widths[0], 5, "Alpha is 5 chars wide");
+        assert_eq!(widths[1], 4, "Beta is 4 chars wide");
+    }
+
+    #[test]
+    fn render_static_text_stays_tight() {
+        let columns = vec![
+            InputTableColumn::StaticText {
+                id: "lbl".into(),
+                text: "Label".into(),
+            },
+            InputTableColumn::TextInput {
+                id: "name".into(),
+                config: TextInputConfig::default(),
+            },
+        ];
+        let mut state = InputTableState::with_blank_rows(columns, 1);
+        let area = Rect::new(0, 0, 40, 1);
+        let mut buf = Buffer::empty(area);
+        InputTable.render(area, &mut buf, &mut state);
+
+        let widths = compute_column_widths(state.columns(), area.width);
+        assert_eq!(widths[0], 5, "StaticText 'Label' is 5 chars");
+
+        let static_end = widths[0] as usize;
+        let mut label = String::new();
+        for x in 0..static_end {
+            label.push_str(buf[(x as u16, 0)].symbol());
+        }
+        assert_eq!(label.trim_end(), "Label");
     }
 }
