@@ -26,6 +26,7 @@ Examples:
 "#;
 
 mod config;
+mod desktop_setup;
 mod receipt_store;
 mod setup;
 
