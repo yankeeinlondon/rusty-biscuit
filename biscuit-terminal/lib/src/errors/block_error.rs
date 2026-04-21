@@ -197,6 +197,7 @@ mod tests {
     use crate::components::renderable::Renderable;
     use crate::discovery::detection::ColorDepth;
     use crate::utils::color::{Color, Tailwind};
+    use crate::utils::escape_codes::strip_escape_codes;
     use std::fmt;
 
     // ── Test doubles ──────────────────────────────────────────────────
@@ -278,23 +279,6 @@ mod tests {
         }
     }
 
-    fn strip_ansi(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut in_escape = false;
-        for ch in s.chars() {
-            if in_escape {
-                if ch.is_ascii_alphabetic() {
-                    in_escape = false;
-                }
-            } else if ch == '\x1b' {
-                in_escape = true;
-            } else {
-                out.push(ch);
-            }
-        }
-        out
-    }
-
     fn no_color_term(width: u32) -> Terminal {
         let mut term = Terminal::builder()
             .width(width)
@@ -321,7 +305,7 @@ mod tests {
         let block = StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("MyError", "a problem"))
             .body("details here");
-        let rendered = strip_ansi(&block.render(&term));
+        let rendered = strip_escape_codes(block.render(&term));
         assert!(rendered.contains("MyError"));
         assert!(rendered.contains("a problem"));
         assert!(rendered.contains("┃ details here"));
@@ -360,7 +344,7 @@ mod tests {
         assert_eq!(err.severity(), StatusState::Warning);
         let block = err.status_block(&no_color_term(80));
         // The border colour comes from severity; warnings are orange.
-        let output = strip_ansi(&block.render(&no_color_term(80)));
+        let output = strip_escape_codes(block.render(&no_color_term(80)));
         assert!(output.contains("heads up"));
         // Sanity-check the Warning default colour is not Error's red.
         assert_ne!(
@@ -381,7 +365,7 @@ mod tests {
             severity: StatusState::Error,
         };
         let term = no_color_term(80);
-        let rendered = strip_ansi(&err.report_block_error(&term));
+        let rendered = strip_escape_codes(err.report_block_error(&term));
         assert!(rendered.contains("FileLoad"));
         assert!(rendered.contains("file not found"));
         assert!(rendered.contains("┃ checked ./docs/root.md"));
@@ -405,7 +389,7 @@ mod tests {
         let out = err.report_block_error_optimistic(None);
         // The optimistic render uses TrueColor, so ANSI sequences appear.
         // Strip them and confirm the human content survives.
-        let plain = strip_ansi(&out);
+        let plain = strip_escape_codes(out);
         assert!(plain.contains("OptimisticError"));
         assert!(plain.contains("default width"));
         assert!(plain.contains("body"));
@@ -426,7 +410,7 @@ mod tests {
             inner: sample("InnerError", "root cause", "inner body"),
         };
         let term = no_color_term(80);
-        let rendered = strip_ansi(&wrapper.report_block_error(&term));
+        let rendered = strip_escape_codes(wrapper.report_block_error(&term));
         assert!(rendered.contains("WrapperError"));
         assert!(rendered.contains("InnerError"));
         assert!(rendered.contains("Caused by:"));
@@ -447,7 +431,7 @@ mod tests {
     fn render_with_causes_stops_at_none() {
         let err = sample("Leaf", "lonely", "body only");
         let term = no_color_term(80);
-        let rendered = strip_ansi(&render_with_causes(&err, &term));
+        let rendered = strip_escape_codes(render_with_causes(&err, &term));
         assert!(rendered.contains("Leaf"));
         assert!(!rendered.contains("Caused by:"));
     }
