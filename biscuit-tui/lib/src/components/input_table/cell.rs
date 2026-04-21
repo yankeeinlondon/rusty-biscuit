@@ -54,6 +54,11 @@ pub struct RowCell {
 }
 
 impl Row {
+    /// Convenience constructor from a vector of [`RowCell`] values.
+    pub fn new(cells: Vec<RowCell>) -> Self {
+        Self { cells }
+    }
+
     /// Retrieves the cell value for a given column id.
     ///
     /// ## Returns
@@ -104,6 +109,16 @@ impl Row {
         match self.get(column_id)? {
             CellValue::ChosenMany(vec) => Some(vec.as_slice()),
             _ => None,
+        }
+    }
+}
+
+impl RowCell {
+    /// Convenience constructor from a column id and typed value.
+    pub fn new(column_id: impl Into<String>, value: CellValue) -> Self {
+        Self {
+            column_id: column_id.into(),
+            value,
         }
     }
 }

@@ -40,3 +40,23 @@ fn text_input_help_shows_height_as_inherited_global() {
         .success()
         .stdout(predicate::str::contains("--height"));
 }
+
+#[test]
+fn every_subcommand_accepts_height_before_subcommand_token() {
+    let subcommands = [
+        "text-input",
+        "text-area-input",
+        "boolean-switch",
+        "choose-one",
+        "choose-many",
+        "input-table",
+    ];
+
+    for subcommand in subcommands {
+        cargo_bin_cmd!("question")
+            .args(["--height", "5", subcommand, "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("--height"));
+    }
+}

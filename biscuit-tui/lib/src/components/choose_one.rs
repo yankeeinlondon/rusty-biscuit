@@ -626,6 +626,21 @@ mod tests {
     }
 
     #[test]
+    fn selecting_option_clears_required_validation_error() {
+        let input = fixture_input().required();
+        let mut state = ChooseOneState::new(input);
+
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(<ChooseOneState as ValidationState>::validation_error(&state).is_some());
+
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(<ChooseOneState as ValidationState>::validation_error(&state).is_none());
+        assert_eq!(state.selected_value(), Some(&"red".to_string()));
+    }
+
+    #[test]
     fn enter_without_selection_not_required_submits() {
         let mut state = ChooseOneState::new(fixture_input());
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));

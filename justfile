@@ -151,9 +151,9 @@ build *args="":
     echo ""
     for area in {{areas}}; do
         if [ -f "$area/justfile" ]; then
-            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
+            if (cd "$area" && just --summary 2>/dev/null) | grep -qw "build"; then
                 echo "Building $area..."
-                just -f "$area/justfile" build {{args}} || ( playa effect error-2 2>/dev/null && so-you-say "The ${area} package failed to build" 2>/dev/null && exit 1 )
+                (cd "$area" && just build {{args}}) || ( playa effect error-2 2>/dev/null && so-you-say "The ${area} package failed to build" 2>/dev/null && exit 1 )
             else
                 echo "- no BUILD command for the area **$area**" >&2
             fi
@@ -172,9 +172,9 @@ test *args="":
     echo ""
     for area in {{areas}}; do
         if [ -f "$area/justfile" ]; then
-            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "test"; then
+            if (cd "$area" && just --summary 2>/dev/null) | grep -qw "test"; then
                 echo "Testing $area..."
-                just -f "$area/justfile" test {{args}}  || ( playa effect error-2 2>/dev/null && just _speak "The ${area} package had failed tests" && exit 1 )
+                (cd "$area" && just test {{args}}) || ( playa effect error-2 2>/dev/null && just _speak "The ${area} package had failed tests" && exit 1 )
             else
                 echo "- no TEST command for the area **$area**" >&2
             fi
@@ -221,11 +221,11 @@ doctest *args="":
 
 # install the Claudine CLI
 install_claudine:
-    @just -f claudine/justfile install
+    @(cd claudine && just install)
 
 # install the Claudine CLI
 install_darkmatter:
-    @just -f claudine/darkmatter install
+    @(cd darkmatter && just install)
 
 # install binaries from all areas that have an install target
 install:
@@ -237,15 +237,15 @@ install:
     echo ""
     for area in {{areas}}; do
         if [ -f "$area/justfile" ]; then
-            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "install"; then
+            if (cd "$area" && just --summary 2>/dev/null) | grep -qw "install"; then
                 echo
                 echo "Installing from $area..."
-                just -f "$area/justfile" install || ( just _speak "The ${area} package failed during an attempt to install all packages!" && exit 1 )
+                (cd "$area" && just install) || ( just _speak "The ${area} package failed during an attempt to install all packages!" && exit 1 )
             else
-                if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
+                if (cd "$area" && just --summary 2>/dev/null) | grep -qw "build"; then
                     echo
                     echo "No INSTALL command for $area, doing release build..."
-                    just -f "$area/justfile" build --release || ( just _speak "The ${area} package failed to build while attempting a install on all packages." && exit 1 )
+                    (cd "$area" && just build --release) || ( just _speak "The ${area} package failed to build while attempting a install on all packages." && exit 1 )
                 else
                     echo
                     echo "- no INSTALL command for the area **$area**" >&2
@@ -322,11 +322,11 @@ lint:
     echo ""
     for area in {{areas}}; do
         if [ -f "$area/justfile" ]; then
-            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "lint"; then
+            if (cd "$area" && just --summary 2>/dev/null) | grep -qw "lint"; then
                 echo "Linting $area..."
-                just -f "$area/justfile" lint || ( so-you-say "The ${area} package has lint errors." )
+                (cd "$area" && just lint) || ( so-you-say "The ${area} package has lint errors." )
             else
-                if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "lint"; then
+                if (cd "$area" && just --summary 2>/dev/null) | grep -qw "lint"; then
                     echo "No lint command for $area"
                     so-you-say "The ${area} package does not define a lint command" 2>/dev/null || exit 0
                 else

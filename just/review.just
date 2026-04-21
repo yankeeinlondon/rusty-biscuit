@@ -107,6 +107,12 @@ implement-feature-review filter="" spec="" design="" agent="":
     has_spec="$(just _has_spec_file "${dir}")"
     has_design="$(just _has_design_file "${dir}")"
 
+    iteration=1
+    while [[ -f "${dir}/review-${iteration}.md" ]]; do
+        (( iteration++ ))
+    done
+    (( iteration > 1 )) && (( iteration-- ))
+
     if [[ "${has_spec}" == false && "${has_design}" == false ]]; then
         echo
         echo "No specification or design document available to compare the review against!"
@@ -125,6 +131,7 @@ implement-feature-review filter="" spec="" design="" agent="":
 
     echo
     echo -e "About to {{bold}}implement{{reset}} the {{blue}}$(just _link "${review}"){{reset}} review suggestions"
+    echo -e "    - Review Iteration:  {{dim}}${iteration}{{reset}}"
     echo -e "This review will compare against the {{italic}}requirements{{reset}} defined in:"
     if [[ "${has_spec}" == true && -n "${spec_file}" ]]; then
         link="$(just _link "${spec_file}")"
@@ -143,10 +150,14 @@ implement-feature-review filter="" spec="" design="" agent="":
     fi
     echo
 
-    confirm="$(just _confirm "Ready to start?")"
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
 
-    echo -e "🏃‍♂️ Starting the {{bold}}implementation{{reset}} of the review suggestions"
-    if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="$(basename "${spec_file}")" design="$(basename "${design_file}")"; then
+    echo -e "🏃‍♂️ Starting the {{bold}}implementation{{reset}} of the review suggestions (#${iteration})"
+    if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="$(basename "${spec_file}")" design="$(basename "${design_file}")" iteration="${iteration}" ${model}; then
         echo
         echo -e "🎉 Implemented all the suggestions found in the $(just _link "${review}") review!"
         echo
