@@ -9,9 +9,9 @@
 //! ```
 
 pub use crate::components::{
-    BooleanSwitch, BooleanSwitchState, CellState, ChoiceInput, ChoiceOption, ChooseMany,
-    ChooseManyState, ChooseOne, ChooseOneState, InputTable, InputTableColumn, InputTableState,
-    SelectionMode, TextAreaInput, TextAreaInputState, TextInput, TextInputState,
+    BooleanSwitch, BooleanSwitchState, CellState, CellValue, ChoiceInput, ChoiceOption, ChooseMany,
+    ChooseManyState, ChooseOne, ChooseOneState, InputTable, InputTableColumn, InputTableState, Row,
+    RowCell, SelectionMode, TextAreaInput, TextAreaInputState, TextInput, TextInputState,
 };
 pub use crate::core::{
     CANCELLED_KIND, ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, LabelPosition,

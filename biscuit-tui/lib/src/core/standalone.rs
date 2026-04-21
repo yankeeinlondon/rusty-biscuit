@@ -21,6 +21,8 @@ use crossterm::{
 use ratatui::{
     Terminal, TerminalOptions, Viewport,
     backend::{Backend, CrosstermBackend},
+    style::{Modifier, Style},
+    text::Line,
     widgets::StatefulWidget,
 };
 
@@ -46,6 +48,14 @@ pub trait StandaloneState {
     /// implement submit-time validation override it.
     fn validation_error(&self) -> Option<&str> {
         None
+    }
+
+    /// Returns a one-line help hint for the active key bindings.
+    ///
+    /// Rendered at the bottom of the terminal in [`run_standalone`].
+    /// Return an empty string to suppress the footer.
+    fn help_hint(&self) -> &str {
+        ""
     }
 }
 
@@ -102,7 +112,25 @@ pub fn drive_event_loop<C, S, B, F>(
     terminal: &mut Terminal<B>,
     component: C,
     state: &mut S,
+    read_event: F,
+) -> io::Result<Option<S::Value>>
+where
+    C: Clone + StatefulWidget<State = S> + HandleEvent,
+    S: StandaloneState,
+    B: Backend,
+    F: FnMut() -> io::Result<Event>,
+{
+    drive_event_loop_with_hint(terminal, component, state, read_event, None)
+}
+
+/// Like [`drive_event_loop`] but renders an optional help hint at the
+/// bottom of the terminal area.
+pub fn drive_event_loop_with_hint<C, S, B, F>(
+    terminal: &mut Terminal<B>,
+    component: C,
+    state: &mut S,
     mut read_event: F,
+    help_hint: Option<&str>,
 ) -> io::Result<Option<S::Value>>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
@@ -117,6 +145,17 @@ where
                 let area = f.area();
                 let widget = component.clone();
                 f.render_stateful_widget(widget, area, state);
+                if let Some(hint_text) = help_hint
+                    && !hint_text.is_empty()
+                    && area.height > 1
+                {
+                    let y = area.bottom().saturating_sub(1);
+                    let hint_line = Line::styled(
+                        hint_text.to_string(),
+                        Style::default().add_modifier(Modifier::DIM),
+                    );
+                    f.buffer_mut().set_line(area.x, y, &hint_line, area.width);
+                }
             })?;
             needs_redraw = false;
         }
@@ -171,6 +210,7 @@ where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState<Value = V>,
 {
+    let hint = state.help_hint().to_string();
     let fullscreen = height.is_none();
     prepare_terminal(fullscreen)?;
 
@@ -183,7 +223,12 @@ where
     };
     let mut terminal = Terminal::with_options(backend, options)?;
 
-    let loop_result = drive_event_loop(&mut terminal, component, &mut state, event::read);
+    let hint_opt = if hint.is_empty() {
+        None
+    } else {
+        Some(hint.as_str())
+    };
+    let loop_result = drive_event_loop_with_hint(&mut terminal, component, &mut state, event::read, hint_opt);
 
     restore_terminal(fullscreen);
 

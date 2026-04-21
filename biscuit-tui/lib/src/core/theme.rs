@@ -52,6 +52,11 @@ pub struct ComponentTheme {
     /// Style applied to disabled options.
     pub disabled_style: Style,
 
+    /// Style applied to the label of a selected option that is not
+    /// currently hovered (provides visual distinction beyond the
+    /// indicator glyph alone).
+    pub selected_label_style: Style,
+
     /// Glyph rendered at the top of a list viewport when content is
     /// scrolled above the visible window.
     pub overflow_up_indicator: String,
@@ -59,6 +64,11 @@ pub struct ComponentTheme {
     /// Glyph rendered at the bottom of a list viewport when content is
     /// scrolled below the visible window.
     pub overflow_down_indicator: String,
+
+    /// One-line help text rendered at the bottom of a standalone
+    /// component (e.g. `"Enter=Submit  Esc=Cancel"`). Set to empty
+    /// to suppress the footer.
+    pub help_hint: String,
 }
 
 impl Default for ComponentTheme {
@@ -80,8 +90,12 @@ impl Default for ComponentTheme {
             disabled_style: Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
+            selected_label_style: Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::UNDERLINED),
             overflow_up_indicator: "▲".into(),
             overflow_down_indicator: "▼".into(),
+            help_hint: "Enter=Submit  Esc=Cancel".into(),
         }
     }
 }
@@ -140,5 +154,11 @@ mod tests {
         let theme = ComponentTheme::default();
         assert!(!theme.overflow_up_indicator.is_empty());
         assert!(!theme.overflow_down_indicator.is_empty());
+    }
+
+    #[test]
+    fn default_help_hint_is_non_empty() {
+        let theme = ComponentTheme::default();
+        assert!(!theme.help_hint.is_empty());
     }
 }
