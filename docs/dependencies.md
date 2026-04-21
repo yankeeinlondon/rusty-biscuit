@@ -38,7 +38,8 @@ This is a Rust workspace with the following modules:
 - `tabby/ui/Cargo.toml` - Future UI module
 - `tree-hugger/lib/Cargo.toml` - Tree-sitter symbol extraction (16 languages)
 - `tree-hugger/cli/Cargo.toml` - Symbol extraction CLI (`hug`)
-- `tui/Cargo.toml` - Future TUI module (no dependencies)
+- `biscuit-tui/lib/Cargo.toml` - TUI chrome (input components built on Ratatui)
+- `biscuit-tui/cli/Cargo.toml` - TUI input CLI (`question`)
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
@@ -92,6 +93,18 @@ This is a Rust workspace with the following modules:
     _Shared visualization library for Mermaid diagrams and graph rendering. Pure Rust with no external dependencies._
 
     _Tags: workspace, library, visualization_
+
+- [tui-chrome](./biscuit-tui/lib) _v0.1.0_
+
+    _TUI input components (text input, toggle, choice, text area, grid) built on Ratatui. Embeddable widgets and a standalone runner._
+
+    _Tags: workspace, library, tui, inputs_
+
+- [tui-chrome-cli](./biscuit-tui/cli) _v0.1.0_
+
+    _Interactive prompt CLI (`question`) exposing tui-chrome components as subcommands with raw/json/null output modes._
+
+    _Tags: workspace, cli, tui, inputs_
 
 - [claudine](./claudine) _v0.1.0_
 
