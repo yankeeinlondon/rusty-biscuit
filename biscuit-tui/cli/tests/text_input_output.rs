@@ -1,3 +1,5 @@
+mod common;
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
@@ -17,4 +19,36 @@ fn text_input_rejects_unknown_flag() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("unexpected argument"));
+}
+
+#[test]
+fn text_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
+    cargo_bin_cmd!("question")
+        .args(["text-input", "--initial", "Ada", "--max-length", "10", "--output", "raw"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn text_input_accepts_output_flag_at_global_position() {
+    cargo_bin_cmd!("question")
+        .args(["--output", "json", "text-input", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+}
+
+#[test]
+fn text_input_submits_raw_output_via_real_tty() {
+    let output = common::run_question_in_pty(
+        &["--output", "raw", "text-input", "--initial", "Ada"],
+        r"\r",
+        0,
+    );
+    let stdout = common::clean_terminal_text(&output.stdout);
+
+    assert!(stdout.contains("Ada\r\n"), "stdout was {stdout:?}");
+    assert!(output.stderr.is_empty(), "stderr was {:?}", output.stderr);
 }

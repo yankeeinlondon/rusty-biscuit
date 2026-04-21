@@ -1,3 +1,5 @@
+mod common;
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
@@ -18,4 +20,36 @@ fn boolean_switch_rejects_unknown_flag() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("unexpected argument"));
+}
+
+#[test]
+fn boolean_switch_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
+    cargo_bin_cmd!("question")
+        .args(["boolean-switch", "--initial", "true", "--output", "raw"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn boolean_switch_accepts_output_flag_at_global_position() {
+    cargo_bin_cmd!("question")
+        .args(["--output", "json", "boolean-switch", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+}
+
+#[test]
+fn boolean_switch_submits_json_output_via_real_tty() {
+    let output = common::run_question_in_pty(
+        &["--output", "json", "boolean-switch", "--initial", "true"],
+        r"\r",
+        0,
+    );
+    let stdout = common::clean_terminal_text(&output.stdout);
+
+    assert!(stdout.contains("true\r\n"), "stdout was {stdout:?}");
+    assert!(output.stderr.is_empty(), "stderr was {:?}", output.stderr);
 }

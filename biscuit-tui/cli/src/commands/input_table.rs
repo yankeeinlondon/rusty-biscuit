@@ -33,6 +33,7 @@ use tui_chrome::components::input_table::{
 };
 use tui_chrome::{
     CANCELLED_KIND, ChoiceInput, ChoiceOption, InputTable, InputTableColumn, InputTableState, Row,
+    RowCell,
     run_standalone,
 };
 
@@ -99,7 +100,6 @@ where
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 enum ColumnSpec {
     StaticText {
         id: String,
@@ -128,7 +128,6 @@ enum ColumnSpec {
 }
 
 impl ColumnSpec {
-    #[allow(dead_code)]
     fn id(&self) -> &str {
         match self {
             Self::StaticText { id, .. }
@@ -358,11 +357,11 @@ fn build_choice_input(
     Ok(input)
 }
 
-/// Parses `--rows` JSON into typed `Vec<Vec<CellValue>>`.
+/// Parses `--rows` JSON into typed [`Row`] values keyed by column id.
 ///
 /// Each inner array is interpreted column-aware: boolean columns accept
 /// truthy/falsy values, choose-many accepts arrays or comma-strings, etc.
-fn parse_rows_typed(columns: &[ColumnSpec], json: Option<&str>) -> io::Result<Vec<Vec<CellValue>>> {
+fn parse_rows_typed(columns: &[ColumnSpec], json: Option<&str>) -> io::Result<Vec<Row>> {
     let Some(source) = json else {
         return Ok(Vec::new());
     };
@@ -384,11 +383,13 @@ fn parse_rows_typed(columns: &[ColumnSpec], json: Option<&str>) -> io::Result<Ve
                     format!("row has {} cells, expected {}", inner.len(), columns.len()),
                 ));
             }
-            Ok(inner
-                .iter()
-                .zip(columns.iter())
-                .map(|(val, col)| parse_cell_value(val, col))
-                .collect())
+            Ok(Row::new(
+                inner
+                    .iter()
+                    .zip(columns.iter())
+                    .map(|(val, col)| RowCell::new(col.id().to_string(), parse_cell_value(val, col)))
+                    .collect(),
+            ))
         })
         .collect()
 }
@@ -602,8 +603,8 @@ mod tests {
         ];
         let rows = parse_rows_typed(&columns, Some(r#"[[true, "yes"]]"#)).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0][0], CellValue::Boolean(true));
-        assert_eq!(rows[0][1], CellValue::Boolean(true));
+        assert_eq!(rows[0].get("a"), Some(&CellValue::Boolean(true)));
+        assert_eq!(rows[0].get("b"), Some(&CellValue::Boolean(true)));
     }
 
     #[test]
@@ -617,8 +618,8 @@ mod tests {
         }];
         let rows = parse_rows_typed(&columns, Some(r#"[[["a","b"]]]"#)).unwrap();
         assert_eq!(
-            rows[0][0],
-            CellValue::ChosenMany(vec!["a".into(), "b".into()])
+            rows[0].get("choices"),
+            Some(&CellValue::ChosenMany(vec!["a".into(), "b".into()]))
         );
     }
 
@@ -630,8 +631,8 @@ mod tests {
         }];
         let rows = parse_rows_typed(&columns, Some(r#"[["a,b"]]"#)).unwrap();
         assert_eq!(
-            rows[0][0],
-            CellValue::ChosenMany(vec!["a".into(), "b".into()])
+            rows[0].get("choices"),
+            Some(&CellValue::ChosenMany(vec!["a".into(), "b".into()]))
         );
     }
 
@@ -723,7 +724,7 @@ mod tests {
             &mut output,
             |state, height| {
                 assert_eq!(height, Some(8));
-                let rows = state.rows_typed();
+                let rows = state.value().to_vec();
                 assert_eq!(rows[0].get_text("name"), Some("alice"));
                 assert_eq!(rows[0].get_boolean("active"), Some(true));
                 assert_eq!(
