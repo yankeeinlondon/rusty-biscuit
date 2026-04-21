@@ -57,7 +57,8 @@ async fn capabilities_match_webhook_contract() {
     let caps = provider.capabilities();
     assert!(caps.supports_markdown_rendering);
     assert!(!caps.supports_reply);
-    assert!(caps.supports_attachments);
+    assert!(caps.supported_attachment_kinds.contains(&crate::AttachmentKind::Image));
+    assert!(caps.supported_attachment_kinds.contains(&crate::AttachmentKind::Document));
     assert!(caps.supports_location);
     assert!(!caps.supports_silent_delivery);
     assert!(!caps.supports_link_preview_control);

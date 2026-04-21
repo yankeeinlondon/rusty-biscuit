@@ -7,6 +7,7 @@ use crate::{
 #[test]
 fn empty_message_is_invalid() {
     let msg = Message {
+        title: None,
         body: None,
         attachments: vec![],
         location: None,
@@ -109,7 +110,7 @@ fn strict_mode_rejects_unsupported_attachments() {
         alt_text: None,
     });
     let caps = CapabilitySet {
-        supports_attachments: false,
+        supported_attachment_kinds: std::collections::BTreeSet::new(),
         ..CapabilitySet::none()
     };
 
@@ -273,10 +274,7 @@ fn best_effort_mode_errors_if_everything_is_dropped() {
 fn attachment_path_must_exist() {
     let dispatch = Dispatch::to(Target::discord_channel("123"));
     let msg = Message::text("hi").image("/definitely/missing/file.png");
-    let caps = CapabilitySet {
-        supports_attachments: true,
-        ..CapabilitySet::all()
-    };
+    let caps = CapabilitySet::all();
 
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(err, MessengerError::InvalidMessage(_)));
@@ -292,10 +290,7 @@ fn attachment_provider_file_id_must_be_non_empty() {
         caption: None,
         alt_text: None,
     });
-    let caps = CapabilitySet {
-        supports_attachments: true,
-        ..CapabilitySet::all()
-    };
+    let caps = CapabilitySet::all();
 
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(err, MessengerError::InvalidMessage(_)));
