@@ -2327,8 +2327,10 @@ mod tests {
 
     #[test]
     fn test_validate_not_remote_url_blocks_http() {
-        let mut img = TerminalImage::default();
-        img.filename = "http://example.com/image.png".to_string();
+        let img = TerminalImage {
+            filename: "http://example.com/image.png".to_string(),
+            ..Default::default()
+        };
 
         let result = img.validate_not_remote_url(false);
         assert!(matches!(
@@ -2339,8 +2341,10 @@ mod tests {
 
     #[test]
     fn test_validate_not_remote_url_blocks_https() {
-        let mut img = TerminalImage::default();
-        img.filename = "https://example.com/image.png".to_string();
+        let img = TerminalImage {
+            filename: "https://example.com/image.png".to_string(),
+            ..Default::default()
+        };
 
         let result = img.validate_not_remote_url(false);
         assert!(matches!(
@@ -2351,8 +2355,10 @@ mod tests {
 
     #[test]
     fn test_validate_not_remote_url_allows_when_permitted() {
-        let mut img = TerminalImage::default();
-        img.filename = "https://example.com/image.png".to_string();
+        let img = TerminalImage {
+            filename: "https://example.com/image.png".to_string(),
+            ..Default::default()
+        };
 
         // When allow_remote is true, should succeed
         assert!(img.validate_not_remote_url(true).is_ok());
@@ -2360,8 +2366,10 @@ mod tests {
 
     #[test]
     fn test_validate_not_remote_url_case_insensitive() {
-        let mut img = TerminalImage::default();
-        img.filename = "HTTPS://EXAMPLE.COM/IMAGE.PNG".to_string();
+        let img = TerminalImage {
+            filename: "HTTPS://EXAMPLE.COM/IMAGE.PNG".to_string(),
+            ..Default::default()
+        };
 
         let result = img.validate_not_remote_url(false);
         assert!(matches!(
