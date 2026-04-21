@@ -89,43 +89,78 @@ plan-feature spec="" design="":
         doc_dir="$(dirname "${doc}")"
         if [[ "$(basename "${doc}")" == *design* ]]; then
             design_file="${doc}"
-            if [[ "$(just _confirm "Do you want to include a matching {{bold}}spec{{reset}} file?")" == "y" ]]; then
-                spec_file="$(just _get_spec_doc "${doc_dir}")"
-            fi
+            spec_file="$(just _get_spec_doc "${doc_dir}")"
         else
             spec_file="${doc}"
-            if [[ "$(just _confirm "Do you want to include a matching {{bold}}design{{reset}} file?")" == "y" ]]; then
-                design_file="$(just _get_design_doc "${doc_dir}")"
+            design_file="$(just _get_design_doc "${doc_dir}")"
+        fi
+    else
+        # Validate provided paths — resolve partial matches via filter
+        if [[ -n "${spec_file}" && ! -f "${spec_file}" ]]; then
+            mapfile -t matches < <(fd -g '*spec*.md' | rg "${spec_file}" || true)
+            if [[ ${#matches[@]} -eq 0 ]]; then
+                echo -e "{{red}}No spec files matching '${spec_file}' found{{reset}}" >&2
+                exit 1
+            elif [[ ${#matches[@]} -eq 1 ]]; then
+                spec_file="${matches[0]}"
+            else
+                spec_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
             fi
+        fi
+
+        if [[ -n "${design_file}" && ! -f "${design_file}" ]]; then
+            mapfile -t matches < <(fd -g '*design*.md' | rg "${design_file}" || true)
+            if [[ ${#matches[@]} -eq 0 ]]; then
+                echo -e "{{red}}No design files matching '${design_file}' found{{reset}}" >&2
+                exit 1
+            elif [[ ${#matches[@]} -eq 1 ]]; then
+                design_file="${matches[0]}"
+            else
+                design_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
+            fi
+        fi
+
+        # Auto-find complementary doc from the same directory
+        if [[ -n "${spec_file}" && -z "${design_file}" ]]; then
+            doc_dir="$(dirname "${spec_file}")"
+            design_file="$(just _get_design_doc "${doc_dir}")"
+        elif [[ -n "${design_file}" && -z "${spec_file}" ]]; then
+            doc_dir="$(dirname "${design_file}")"
+            spec_file="$(just _get_spec_doc "${doc_dir}")"
         fi
     fi
 
     agent="$(just _choose_agent)"
+    model=""
+    if [[ "${agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
+    fi
 
-    spec_info=""
+
+    echo
+    echo -e "Creating a detailed {{bold}}plan{{reset}} from:"
     if [[ -n "${spec_file}" ]]; then
-        spec_filename="$(basename "${spec_file}")"
-        abs_spec_filename="$(just _abs_path "${spec_file}")"
-        link_spec="$(just _link "${spec_filename}" "${abs_spec_filename}")"
-        spec_info="{{blue}}${link_spec}{{reset}}"
+        echo -e "  Specification: {{blue}}$(just _link "${spec_file}"){{reset}}"
+        dir="$(dirname ${spec_file})"
     fi
-
-    design_info=""
     if [[ -n "${design_file}" ]]; then
-        design_filename="$(basename "${design_file}")"
-        abs_design_filename="$(just _abs_path "${design_file}")"
-        link_design="$(just _link "${design_filename}" "${abs_design_filename}")"
-        if [[ -n "${spec_info}" ]]; then
-            design_info=" {{italic}}and the{{reset}} {{blue}}${link_design}{{reset}}"
-        else
-            design_info="{{blue}}${link_design}{{reset}}"
-        fi
+        echo -e "  Design Document: {{blue}}$(just _link "${design_file}"){{reset}}"
+        dir="$(dirname ${design_file})"
     fi
-
     echo
-    echo -e "🏃‍♂️ creating a detailed {{bold}}plan{{reset}} from the ${spec_info}${design_info}"
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
     echo
-    claudine compose @prompts/plan.md -y --${agent} --set "{ spec: \"${spec_file}\", design: \"${design_file}\" }"
+    claudine compose @prompts/plan.md -y --${agent} spec="${spec_file}" design="${design_file}" ${model} || (
+        echo
+        echo "Planning failed for {{bold}}${dir}{{reset}}"
+        echo
+        just _speak "Planning failed in the $(sniff repo package-area) package area"
+        exit 1
+    )
     echo
     echo -e "🎉 planning is complete!"
 
