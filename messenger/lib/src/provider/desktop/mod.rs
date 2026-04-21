@@ -8,7 +8,13 @@
 //! public provider API with a swappable in-memory backend.
 
 mod backend;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 pub mod request;
+#[cfg(target_os = "windows")]
+mod windows;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -126,16 +132,20 @@ pub struct DesktopNotificationProvider {
 impl DesktopNotificationProvider {
     /// Build a provider bound to the host-OS backend chosen at runtime.
     ///
-    /// ## Notes
+    /// Backend selection matches the compile target:
     ///
-    /// Phase 3 does not yet ship the platform backends. Until Phase 4
-    /// lands, this constructor returns a provider whose sends fail with
-    /// [`MessengerError::MissingConfiguration`] so callers can register
-    /// the provider without panicking. Use
-    /// [`DesktopNotificationProvider::with_backend`] for tests and custom
-    /// backends.
+    /// - `target_os = "linux"` → `notify-rust` D-Bus backend
+    /// - `target_os = "macos"` → AppleScript / native `UserNotifications`
+    /// - `target_os = "windows"` → `winrt-notification` toast backend
+    /// - other targets → an unimplemented backend that fails every send with
+    ///   [`MessengerError::MissingConfiguration`], so desktop-aware callers
+    ///   can still register the provider and plan sends in best-effort tests.
+    ///
+    /// Use [`DesktopNotificationProvider::with_backend`] when you need to
+    /// inject a custom or fake backend (e.g. from unit tests).
     pub fn new(config: DesktopConfig) -> Self {
-        Self::with_backend(config, Arc::new(UnimplementedBackend))
+        let backend: Arc<dyn DesktopBackend> = select_backend(&config);
+        Self::with_backend(config, backend)
     }
 
     /// Build a provider with an explicit [`DesktopBackend`] implementation.
@@ -312,12 +322,50 @@ fn first_image_path(message: &PreparedMessage) -> Option<PathBuf> {
         })
 }
 
-/// Placeholder backend used until Phase 4 wires platform implementations.
+/// Choose the host-OS backend that best matches the compile target.
+///
+/// The function intentionally runs at construction time so each provider
+/// instance captures its backend eagerly. Backends are cheap — they hold
+/// their config snapshot and no live OS handles — so constructing one per
+/// [`DesktopNotificationProvider`] is fine.
+fn select_backend(config: &DesktopConfig) -> Arc<dyn DesktopBackend> {
+    #[cfg(target_os = "linux")]
+    {
+        Arc::new(linux::LinuxBackend::new(config.linux.clone()))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Arc::new(macos::MacOsBackend::new(
+            config.macos.strategy,
+            config.macos.bundle_id.clone(),
+        ))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Arc::new(windows::WindowsBackend::new(config.windows.clone()))
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )))]
+    {
+        let _ = config;
+        Arc::new(UnimplementedBackend)
+    }
+}
+
+/// Fallback backend used on operating systems without a wired platform
+/// implementation.
 ///
 /// Returning `MissingConfiguration` rather than panicking keeps
 /// [`DesktopNotificationProvider::new`] viable as a library entry point
-/// while providing a clear signal to callers that platform support has
-/// not yet been selected.
+/// while providing a clear signal to callers that platform support is
+/// unavailable on the current target.
+#[cfg_attr(
+    any(target_os = "linux", target_os = "macos", target_os = "windows"),
+    allow(dead_code)
+)]
 struct UnimplementedBackend;
 
 #[async_trait::async_trait]
