@@ -1,5 +1,5 @@
 # set allow-duplicate-variables
-set allow-duplicate-recipes
+# set allow-duplicate-recipes
 import "./util.just"
 
 bold := '\033[1m'
@@ -59,10 +59,30 @@ implement-plan filter="":
 
     echo
     while true; do
-        claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y
+        claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y ${model} || (
+            echo
+            echo -e "{{red}}{{bold}}ERROR:{{reset}} the implementation of the plan {{blue}}$(just _link "${plan}") was unable to complete phase {{yellow}}${current}{{reset}}" || echo "failed at phase ${current}"
+
+            echo
+            exit 5
+        )
         echo
-        git add . || exit 0
-        just commit
+        git add . || (
+            echo -e "- phase ${current} of the ${plan} plan appears to have had no changes to the $(sniff repo package-area) package area"
+            echo -e "- that might be ok and because we're in a long running process we will continue"
+            echo -e "- below you'll find the current git status:"
+            just repo git-status --compact
+            just _play_background two-tone
+        ) && just commit || (
+            echo
+            echo -e "- During phase {{yellow}}${current}{{reset}} of the ${plan} plan there was a failure running {{green}}just commit{{reset}}."
+            echo -e "- because this is a long running process we will continue with the plan."
+            echo -e "- below is the current git status:"
+            just repo git-status --compact
+            echo
+            just _play two-tone
+            just _speak "During phase ${current} of a plan implementation in the $(sniff repo package-area) package area there was a problem committing files but we will continue with the plan's implementation and commit during the next phase."
+        )
         echo
         [[ ${current} -ge ${phases} ]] && break
         ((current++))
