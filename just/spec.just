@@ -157,8 +157,19 @@ fix name:
                 echo "Ok. Bye."
                 exit 0
             fi
-            agent="$(just _choose_agent)"
-            claudine compose @prompts/fix.md dir="${abs_dir}" spec="spec.md" -y --${agent} && (
+            use_agent="$(just _choose_agent)"
+            model=""
+            if [[ "${use_agent}" == "opencode" ]];then
+                model="--model $(just _choose_model)"
+            fi
+
+            if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+                echo
+                echo -e "Ok bye"
+                exit 0
+            fi
+
+            claudine compose @prompts/fix.md dir="${abs_dir}" spec="spec.md" -y --${use_agent} ${model} && (
                 just complete "${complete_name}"
                 link="$(just _link "spec.md" "$(just _abs_path "fixes/_completed/${relative_dir##*/}/spec.md")")"
                 echo
