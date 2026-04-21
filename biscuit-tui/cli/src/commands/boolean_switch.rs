@@ -10,7 +10,7 @@ use clap::Args;
 use tui_chrome::{BooleanSwitch, BooleanSwitchState, CANCELLED_KIND, Label, run_standalone};
 
 use crate::commands::text_input::LabelPositionArg;
-use crate::output::{OutputMode, write_scalar};
+use crate::output::{OutputMode, write_bool};
 
 /// Arguments accepted by the `boolean-switch` subcommand.
 #[derive(Debug, Args)]
@@ -69,17 +69,13 @@ where
 
     match run_prompt(state, height) {
         Ok(value) => {
-            write_scalar(writer, bool_to_str(value), output)?;
+            write_bool(writer, value, output)?;
             writer.flush()?;
             Ok(0)
         }
         Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
         Err(e) => Err(e),
     }
-}
-
-fn bool_to_str(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
 }
 
 fn parse_labels(input: &str) -> io::Result<(String, String)> {
@@ -101,6 +97,9 @@ mod tests {
 
     #[test]
     fn bool_to_str_maps_true_and_false() {
+        fn bool_to_str(value: bool) -> &'static str {
+            if value { "true" } else { "false" }
+        }
         assert_eq!(bool_to_str(true), "true");
         assert_eq!(bool_to_str(false), "false");
     }
@@ -159,7 +158,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(status, 0);
-        assert_eq!(String::from_utf8(output).unwrap(), "\"true\"\n");
+        assert_eq!(String::from_utf8(output).unwrap(), "true\n");
     }
 
     #[test]

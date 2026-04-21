@@ -144,6 +144,10 @@ impl StandaloneState for BooleanSwitchState {
     fn value(&self) -> Self::Value {
         self.checked
     }
+
+    fn help_hint(&self) -> &str {
+        &self.theme.help_hint
+    }
 }
 
 /// Boolean toggle switch widget.
