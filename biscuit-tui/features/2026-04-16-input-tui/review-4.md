@@ -1,7 +1,7 @@
 ---
 date: 2026-04-20
 feature: biscuit-tui/features/2026-04-16-input-tui
-ready: false
+ready: true
 ---
 
 # Review 4: TUI Inputs Implementation
