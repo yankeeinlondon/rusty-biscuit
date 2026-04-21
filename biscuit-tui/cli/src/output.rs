@@ -87,6 +87,32 @@ pub fn write_list<W: Write>(writer: &mut W, values: &[String], mode: OutputMode)
     }
 }
 
+/// Writes a boolean submission result to `writer` per `mode`.
+///
+/// Unlike [`write_scalar`], this emits a JSON boolean (`true`/`false`)
+/// in JSON mode rather than a JSON string (`"true"`/`"false"`).
+///
+/// ## Errors
+///
+/// Returns any I/O error produced while writing to `writer`.
+pub fn write_bool<W: Write>(writer: &mut W, value: bool, mode: OutputMode) -> io::Result<()> {
+    match mode {
+        OutputMode::Raw => {
+            writer.write_all(if value { b"true" } else { b"false" })?;
+            writer.write_all(b"\n")
+        }
+        OutputMode::Json => {
+            let encoded = if value { "true" } else { "false" };
+            writer.write_all(encoded.as_bytes())?;
+            writer.write_all(b"\n")
+        }
+        OutputMode::Null => {
+            writer.write_all(if value { b"true" } else { b"false" })?;
+            writer.write_all(&[0])
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +182,36 @@ mod tests {
     fn write_list_empty_in_json_is_empty_array() {
         let bytes = capture_list(OutputMode::Json, &[]);
         assert_eq!(bytes, b"[]\n");
+    }
+
+    #[test]
+    fn write_bool_raw_true() {
+        let mut buf = Vec::new();
+        write_bool(&mut buf, true, OutputMode::Raw).unwrap();
+        assert_eq!(buf, b"true\n");
+    }
+
+    #[test]
+    fn write_bool_raw_false() {
+        let mut buf = Vec::new();
+        write_bool(&mut buf, false, OutputMode::Raw).unwrap();
+        assert_eq!(buf, b"false\n");
+    }
+
+    #[test]
+    fn write_bool_json_emits_unquoted_boolean() {
+        let mut buf = Vec::new();
+        write_bool(&mut buf, true, OutputMode::Json).unwrap();
+        assert_eq!(buf, b"true\n");
+        let mut buf2 = Vec::new();
+        write_bool(&mut buf2, false, OutputMode::Json).unwrap();
+        assert_eq!(buf2, b"false\n");
+    }
+
+    #[test]
+    fn write_bool_null_terminates() {
+        let mut buf = Vec::new();
+        write_bool(&mut buf, true, OutputMode::Null).unwrap();
+        assert_eq!(buf, b"true\0");
     }
 }
