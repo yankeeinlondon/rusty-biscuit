@@ -29,6 +29,32 @@ docs_updated_during_phase_3:
   - darkmatter/features/2026-04-20-better-errors/review-plan-1.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/compose/conditions.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/types.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/conditions.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/errors/mod.rs
+  - darkmatter/lib/src/markdown/normalize/types.rs
+  - darkmatter/lib/src/mermaid/theme.rs
+  - darkmatter/lib/src/render/image_ref.rs
+  - darkmatter/lib/src/render/link.rs
+  - darkmatter/lib/src/render/stylesheet.rs
+  - darkmatter/lib/tests/error_snapshots/condition.rs
+  - darkmatter/lib/tests/error_snapshots/deferred_set.rs
+  - darkmatter/lib/tests/error_snapshots/image_ref.rs
+  - darkmatter/lib/tests/error_snapshots/link.rs
+  - darkmatter/lib/tests/error_snapshots/mermaid_theme.rs
+  - darkmatter/lib/tests/error_snapshots/normalization.rs
+  - darkmatter/lib/tests/error_snapshots/page_block.rs
+  - darkmatter/lib/tests/error_snapshots/stylesheet.rs
+  - darkmatter/lib/tests/error_snapshots/toc_linking.rs
+docs_updated_during_phase_4:
+  - darkmatter/features/2026-04-20-better-errors/review-plan-1.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 packages:
   - darkmatter
 ---
