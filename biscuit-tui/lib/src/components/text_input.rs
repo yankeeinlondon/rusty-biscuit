@@ -140,6 +140,10 @@ impl StandaloneState for TextInputState {
     fn value(&self) -> Self::Value {
         self.inner.value().to_string()
     }
+
+    fn help_hint(&self) -> &str {
+        &self.theme.help_hint
+    }
 }
 
 /// Single-line text input widget.

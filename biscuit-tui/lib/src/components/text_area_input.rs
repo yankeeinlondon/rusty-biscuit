@@ -61,7 +61,10 @@ impl Default for TextAreaInputState {
         Self {
             inner: TextArea::default(),
             label: None,
-            theme: ComponentTheme::default(),
+            theme: ComponentTheme {
+                help_hint: "Ctrl+S=Submit  Esc=Cancel".into(),
+                ..ComponentTheme::default()
+            },
             show_scrollbar: false,
             preferred_width: 60,
             preferred_height: 10,
@@ -210,6 +213,10 @@ impl StandaloneState for TextAreaInputState {
 
     fn value(&self) -> Self::Value {
         TextAreaInputState::value(self)
+    }
+
+    fn help_hint(&self) -> &str {
+        &self.theme.help_hint
     }
 }
 
