@@ -521,10 +521,7 @@ fn test_compose_frontmatter_flag_emits_single_block_with_nested_quotes() {
 
     // Count frontmatter fence pairs: each frontmatter block has two `---`
     // lines. Before the fix we saw four (two fences). Expect exactly two.
-    let fence_count = stdout
-        .lines()
-        .filter(|line| line.trim() == "---")
-        .count();
+    let fence_count = stdout.lines().filter(|line| line.trim() == "---").count();
     assert_eq!(
         fence_count, 2,
         "expected exactly one frontmatter block (two fences), got {fence_count}.\nstdout:\n{stdout}"

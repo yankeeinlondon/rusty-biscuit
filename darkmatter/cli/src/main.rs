@@ -69,11 +69,9 @@ fn main() {
         // mask an inner BlockError implementation. Darkmatter's downcast registry
         // takes precedence; the terminal-local stub is checked only as a fallback
         // for non-darkmatter error types.
-        let block = e
-            .chain()
-            .find_map(|cause| {
-                as_darkmatter_block_error(cause).or_else(|| as_terminal_block_error(cause))
-            });
+        let block = e.chain().find_map(|cause| {
+            as_darkmatter_block_error(cause).or_else(|| as_terminal_block_error(cause))
+        });
 
         if let Some(block) = block {
             // TTY => full terminal detection; non-TTY => optimistic 80-column render.

@@ -1228,7 +1228,6 @@ fn read_from_stdin() -> Result<Markdown> {
     Ok(buffer.into())
 }
 
-
 #[instrument(skip_all, fields(command = "validate"))]
 fn run_validate(target: ValidateTarget) -> Result<()> {
     info!("starting reference validation");
