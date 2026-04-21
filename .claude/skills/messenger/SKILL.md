@@ -43,6 +43,7 @@ let receipt = messenger.send(dispatch, &message).await?;
 | Signal | `signal` | Plain text | Yes | No | Text fallback | No | No |
 | WhatsApp | `whatsapp` | Plain text | Yes | No | Native | No | No |
 | Telegram | `telegram` | HTML | Yes | No | Native | Yes | Yes |
+| Desktop | `desktop` | Plain text | No | Images only | No | Yes | No |
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.

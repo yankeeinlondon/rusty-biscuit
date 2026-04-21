@@ -21,7 +21,7 @@ pub trait Provider: Send + Sync {
 }
 ```
 
-`ProviderKind` enum: `Discord`, `DiscordWebhook`, `Slack`, `SlackWebhook`, `Signal`, `WhatsApp`, `Telegram`.
+`ProviderKind` enum: `Discord`, `DiscordWebhook`, `Slack`, `SlackWebhook`, `Signal`, `WhatsApp`, `Telegram`, `Desktop`.
 
 ## Discord
 
@@ -164,20 +164,51 @@ pub struct TelegramConfig {
 **Target**: `Target::telegram_chat(TelegramChatId::Id(-1001234567890))` or `TelegramChatId::Username("@ops")`
 **MessageRef**: `MessageRef::Telegram { chat_id, message_id, thread_id }`
 
+## Desktop
+
+**Feature**: `desktop`
+**Backend crates**: `notify-rust` (Linux), `winrt-notification` (Windows), `objc2-user-notifications` / `osascript` (macOS)
+**Module**: `provider/desktop/mod.rs`
+
+```rust
+pub struct DesktopConfig {
+    pub app_name: String,
+    pub default_title: Option<String>,
+    pub icon: Option<NotificationIcon>,
+    pub category: Option<String>,
+    pub urgency: Option<NotificationUrgency>,
+    pub timeout_ms: Option<u64>,
+    pub windows: Option<WindowsDesktopConfig>,
+    pub macos: Option<MacOsDesktopConfig>,
+    pub linux: Option<LinuxDesktopConfig>,
+}
+```
+
+**Capabilities**: `supported_attachment_kinds: { Image }` only, `silent_delivery: true` — no markdown, no replies, no location, no link preview.
+**Target**: `Target::desktop()` — no credentials, no destination identifier.
+**MessageRef**: `MessageRef::Desktop { platform: DesktopPlatform, notification_id: String }`.
+
+Title-only messages are valid. `Message::title(...)` is accepted without a body when the resolved provider is `Desktop`.
+
+Platform behavior:
+- **Linux**: D-Bus (freedesktop.org Notifications). No setup required.
+- **macOS**: `strategy: auto` (default) uses AppleScript — no authorization prompt. `strategy: native_user_notifications` uses `UserNotifications.framework` and requires a bundled app identity.
+- **Windows**: requires `messenger setup desktop` to create the Start Menu shortcut and register the AUMID. `send` never writes outside `~/.messenger/`. If the shortcut is missing, `send` returns `MessengerError::MissingConfiguration`.
+
 ## CapabilitySet
 
 ```rust
 pub struct CapabilitySet {
     pub markdown_rendering: bool,
     pub reply: bool,
-    pub attachments: bool,
+    pub supported_attachment_kinds: BTreeSet<AttachmentKind>,
     pub location: bool,
     pub silent_delivery: bool,
     pub link_preview_control: bool,
 }
 ```
 
-Location can be `true` without native API support (Discord, Slack, Signal append formatted text).
+`supported_attachment_kinds` declares exactly which kinds (`Image`, `Audio`, `Video`, `Document`, `Binary`) a provider accepts. Location can be `true` without native API support (Discord, Slack, Signal append formatted text).
 
 ## Capability Normalization
 
