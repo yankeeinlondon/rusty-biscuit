@@ -178,6 +178,15 @@ See
 [`darkmatter/docs/error-rendering.md`](../darkmatter/docs/error-rendering.md)
 for an end-to-end rendering contract and adoption guide.
 
+Each downstream crate that implements `BlockError` for its own error types is
+responsible for exposing its own downcast registry function (e.g.
+`darkmatter::markdown::errors::as_block_error`). The crate-level
+`as_block_error` in `biscuit_terminal::errors` returns `None` unconditionally
+so that callers can chain `.or_else(crate_local_registry)` without conflict.
+See the darkmatter registry in
+[`darkmatter/lib/src/markdown/errors/mod.rs`](../darkmatter/lib/src/markdown/errors/mod.rs)
+for a concrete example.
+
 ## More Information
 
 For more information on either the library or CLI refer to more detailed documents on each:
