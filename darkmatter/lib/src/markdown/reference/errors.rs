@@ -1,13 +1,21 @@
 //! Error types for the reference analysis subsystem.
 
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 /// Errors produced by reference analysis.
 #[derive(Debug, Error)]
 pub enum ReferenceError {
     /// Failed to parse a directive.
-    #[error("Failed to parse directive at line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    #[error("Failed to parse directive in {} at line {line}: {message}", .source_file.display())]
+    ParseDirective {
+        line: usize,
+        message: String,
+        source_file: PathBuf,
+        directive_text: String,
+        caret_col: Option<usize>,
+    },
 
     /// Reference requires source context that is not available.
     #[error("Missing source context for reference '{reference}' at line {line}")]
@@ -50,15 +58,32 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            ReferenceError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "ReferenceError",
-                    "directive parse failed",
-                ))
-                .body(format!(
-                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
-                .hint("Expected: <cyan>::file ./doc.md</cyan>, <cyan>::code ./file.rs</cyan>, or <cyan>::url https://…</cyan>."),
+            ReferenceError::ParseDirective {
+                line,
+                message,
+                source_file,
+                directive_text,
+                caret_col,
+            } => {
+                let caret_line = caret_col.map(|col| {
+                    format!(
+                        "\n  {}^",
+                        " ".repeat(col.saturating_sub(1))
+                    )
+                });
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "ReferenceError",
+                        "directive parse failed",
+                    ))
+                    .body(format!(
+                        "<dim>Source:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}\n<dim>Directive:</dim>\n  {directive_text}{}",
+                        source_file.display(),
+                        caret_line.unwrap_or_default()
+                    ))
+                    .hint("Expected: <cyan>::file ./doc.md</cyan>, <cyan>::code ./file.rs</cyan>, or <cyan>::url https://…</cyan>.")
+            }
 
             ReferenceError::MissingSourceContext { reference, line } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

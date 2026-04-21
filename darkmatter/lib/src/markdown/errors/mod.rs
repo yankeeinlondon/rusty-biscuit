@@ -108,28 +108,13 @@ pub fn as_block_error<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
     use crate::markdown::compose::ShellCommandOrigin;
 
-    fn strip_ansi(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut in_escape = false;
-        for ch in s.chars() {
-            if in_escape {
-                if ch.is_ascii_alphabetic() {
-                    in_escape = false;
-                }
-            } else if ch == '\x1b' {
-                in_escape = true;
-            } else {
-                out.push(ch);
-            }
-        }
-        out
-    }
-
     fn render(err: &dyn BlockError) -> String {
-        strip_ansi(&err.report_block_error_optimistic(Some(80)))
+        strip_escape_codes(err.report_block_error_optimistic(Some(80)))
     }
 
     #[test]
@@ -144,7 +129,11 @@ mod tests {
     #[test]
     fn markdown_error_delegates_transclusion_block_without_caused_by() {
         let inner = TransclusionError::CycleDetected {
-            chain: vec!["a.md".into(), "b.md".into(), "a.md".into()],
+            chain: vec![
+                (PathBuf::from("a.md"), 3),
+                (PathBuf::from("b.md"), 7),
+                (PathBuf::from("a.md"), 3),
+            ],
         };
         let err = MarkdownError::Transclusion(inner);
         let out = render(&err);
@@ -159,12 +148,18 @@ mod tests {
     #[test]
     fn transclusion_cycle_detected_lists_chain() {
         let err = TransclusionError::CycleDetected {
-            chain: vec!["a.md".into(), "b.md".into(), "a.md".into()],
+            chain: vec![
+                (PathBuf::from("a.md"), 3),
+                (PathBuf::from("b.md"), 7),
+                (PathBuf::from("a.md"), 3),
+            ],
         };
         let out = render(&err);
         assert!(out.contains("a.md"));
         assert!(out.contains("b.md"));
         assert!(out.contains("cycle detected"));
+        assert!(out.contains(":line 3"));
+        assert!(out.contains(":line 7"));
     }
 
     #[test]
@@ -200,10 +195,16 @@ mod tests {
 
     #[test]
     fn page_block_unterminated_has_opening_line() {
-        let err = PageBlockError::UnterminatedBlock { line: 14 };
+        let err = PageBlockError::UnterminatedBlock {
+            line: 14,
+            opening_text: "::block when=\"x\"".to_string(),
+            file_ends_at_line: 50,
+        };
         let out = render(&err);
         assert!(out.contains("unterminated"));
         assert!(out.contains("14"));
+        assert!(out.contains("::block when=\"x\""));
+        assert!(out.contains("50"));
         assert!(out.contains("::end-block"));
     }
 
@@ -251,9 +252,15 @@ mod tests {
         let err = ReferenceError::ParseDirective {
             line: 2,
             message: "unexpected end".into(),
+            source_file: PathBuf::from("docs/root.md"),
+            directive_text: "::file ./broken.md when=".to_string(),
+            caret_col: Some(27),
         };
         let out = render(&err);
         assert!(out.contains("ReferenceError"));
+        assert!(out.contains("docs/root.md"));
+        assert!(out.contains("::file ./broken.md when="));
+        assert!(out.contains("^"));
         assert!(out.contains("::file"));
     }
 

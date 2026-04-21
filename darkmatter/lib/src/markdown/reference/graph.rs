@@ -30,6 +30,14 @@ struct ReferenceAnalysisRuntime {
     cache: RunLocalCache,
 }
 
+fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
+    match source {
+        ComposeSource::File(path) => path.clone(),
+        ComposeSource::Url(url) => std::path::PathBuf::from(url.to_string()),
+        ComposeSource::Unknown => std::path::PathBuf::from("<unknown>"),
+    }
+}
+
 impl ReferenceAnalysisRuntime {
     /// Load a markdown document, using the shared cache.
     fn load_markdown(&self, path: &std::path::Path) -> Option<Markdown> {
@@ -72,7 +80,9 @@ fn build_graph_inner(
     // Seed the runtime with the root node so child documents that
     // transclude the root are detected as cycles immediately.
     let root_id = source_to_id(&source);
-    let _ = runtime.transclusion.enter(root_id.to_string());
+    let _ = runtime
+        .transclusion
+        .enter(root_id.to_string(), source_to_path(&source), 1);
 
     let (root, all_nodes) = build_node(md, &source, options, &mut runtime, extract_references)?;
 
@@ -317,7 +327,11 @@ fn build_node(
                     let child_id = source_to_id(&child_source);
 
                     // Cycle/depth check
-                    if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                    if runtime
+                        .transclusion
+                        .enter(child_id.to_string(), child_path.clone(), directive.line)
+                        .is_ok()
+                    {
                         if let Some(child_md) = runtime.load_markdown(&child_path) {
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
@@ -408,7 +422,11 @@ fn build_node(
                     }
                 }
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), path.clone(), directive.line)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -532,7 +550,11 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), child_path.clone(), 0)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -603,7 +625,11 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), child_path.clone(), 0)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
