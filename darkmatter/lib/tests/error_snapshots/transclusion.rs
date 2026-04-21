@@ -12,6 +12,7 @@ fn parse_directive_has_syntax_hint() {
     let err = TransclusionError::ParseDirective {
         line: 3,
         message: "unexpected token".into(),
+        caret_col: Some(8),
     };
     let out = render(&err);
     assert_contains_all(
@@ -28,14 +29,17 @@ fn parse_directive_has_syntax_hint() {
 
 #[test]
 fn invalid_reference_shows_reference() {
+    use darkmatter::markdown::compose::transclusion::DirectiveKind;
     let err = TransclusionError::InvalidReference {
         reference: "//weird".into(),
         line: 2,
+        source_file: PathBuf::from("doc.md"),
+        directive_kind: DirectiveKind::File,
     };
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "invalid reference", "//weird", "2"],
+        &["TransclusionError", "invalid reference", "//weird", "2", "doc.md", "::file"],
     );
 }
 
@@ -100,12 +104,16 @@ fn non_text_code_source_shows_path() {
 #[test]
 fn cycle_detected_lists_chain() {
     let err = TransclusionError::CycleDetected {
-        chain: vec!["a.md".into(), "b.md".into(), "a.md".into()],
+        chain: vec![
+            (PathBuf::from("a.md"), 3),
+            (PathBuf::from("b.md"), 7),
+            (PathBuf::from("a.md"), 3),
+        ],
     };
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "cycle detected", "a.md", "b.md"],
+        &["TransclusionError", "cycle detected", "a.md", "b.md", ":line 3", ":line 7"],
     );
 }
 

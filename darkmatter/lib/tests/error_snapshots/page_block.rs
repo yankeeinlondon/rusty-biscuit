@@ -42,7 +42,11 @@ fn unmatched_end_hints_at_block() {
 
 #[test]
 fn unterminated_block_shows_opening_line() {
-    let err = PageBlockError::UnterminatedBlock { line: 7 };
+    let err = PageBlockError::UnterminatedBlock {
+        line: 7,
+        opening_text: "::block when=\"condition\"".to_string(),
+        file_ends_at_line: 42,
+    };
     let out = render(&err);
     assert_contains_all(
         &out,
@@ -50,6 +54,8 @@ fn unterminated_block_shows_opening_line() {
             "PageBlockError",
             "unterminated ::block",
             "7",
+            "::block when=\"condition\"",
+            "42",
             "::end-block",
         ],
     );

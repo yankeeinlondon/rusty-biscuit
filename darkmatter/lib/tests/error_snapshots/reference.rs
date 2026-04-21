@@ -1,6 +1,7 @@
 //! `ReferenceError` variant snapshots.
 
 use std::io;
+use std::path::PathBuf;
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::reference::ReferenceError;
@@ -12,6 +13,9 @@ fn parse_directive_shows_line_and_syntax_hint() {
     let err = ReferenceError::ParseDirective {
         line: 5,
         message: "unexpected end".into(),
+        source_file: PathBuf::from("docs/root.md"),
+        directive_text: "::file ./broken.md when=".into(),
+        caret_col: Some(27),
     };
     let out = render(&err);
     assert_contains_all(
@@ -21,6 +25,9 @@ fn parse_directive_shows_line_and_syntax_hint() {
             "directive parse failed",
             "5",
             "unexpected end",
+            "docs/root.md",
+            "::file ./broken.md when=",
+            "^",
             "::file",
         ],
     );

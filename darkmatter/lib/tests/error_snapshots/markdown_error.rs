@@ -1,6 +1,7 @@
 //! `MarkdownError` variant snapshots.
 
 use std::io;
+use std::path::PathBuf;
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::TransclusionError;
@@ -94,13 +95,17 @@ fn serialization_renders_leaf_block_with_position() {
 #[test]
 fn transclusion_delegation_surfaces_inner_block_only() {
     let inner = TransclusionError::CycleDetected {
-        chain: vec!["a.md".into(), "b.md".into(), "a.md".into()],
+        chain: vec![
+            (PathBuf::from("a.md"), 3),
+            (PathBuf::from("b.md"), 7),
+            (PathBuf::from("a.md"), 3),
+        ],
     };
     let err = MarkdownError::Transclusion(inner);
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "cycle detected", "a.md", "b.md"],
+        &["TransclusionError", "cycle detected", "a.md", "b.md", ":line 3", ":line 7"],
     );
     assert!(
         !out.contains("Caused by:"),
