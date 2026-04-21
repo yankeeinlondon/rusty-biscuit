@@ -93,7 +93,7 @@ agents := "claude\ncodex\nopencode\ngemini\nqwen\nroo\nkimi\n"
 _choose_feature feat="":
     #!/usr/bin/env bash
     set -euo pipefail
-    file="$(fd -g '*{spec,design}\.md' features/ | {{ if feat == ""  { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+    file="$(fd -g '*{spec,design}\.md' features/ --exclude '_completed' | {{ if feat == ""  { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
     echo "${file}"
 
 _choose_agent:

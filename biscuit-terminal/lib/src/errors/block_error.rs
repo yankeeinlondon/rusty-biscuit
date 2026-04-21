@@ -178,10 +178,12 @@ pub fn render_with_causes<E: BlockError + ?Sized>(err: &E, term: &Terminal) -> S
 /// Attempt to view `err` as a [`BlockError`] reference.
 ///
 /// Generic upcasting from `&dyn StdError` to `&dyn BlockError` is not possible
-/// on stable Rust, so this helper currently returns [`None`]. It exists as the
-/// single detection seam callers (e.g. the `md` CLI top-level handler) can use
-/// today; a later phase of the rollout will extend it — via either a proc-macro
-/// registry or stable trait upcasting — without touching call sites.
+/// on stable Rust. This function exists as a single detection seam for callers;
+/// each crate that implements `BlockError` must expose its own downcast registry
+/// (e.g. [`darkmatter::markdown::errors::as_block_error`]).
+///
+/// This helper returns [`None`] unconditionally so that a downstream
+/// `.or_else(...)` fallback remains a valid extension point.
 ///
 /// Callers that already hold a typed reference to a concrete `BlockError`
 /// should call its methods directly instead of routing through this function.

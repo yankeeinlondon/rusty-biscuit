@@ -9,11 +9,10 @@ use darkmatter::markdown::compose::TransclusionError;
 use crate::helpers::{assert_contains_all, render};
 
 // NOTE: `MarkdownError::FrontmatterParse` wraps `biscuit_file::YamlParseError`
-// (an alias for `serde_yaml_ng::Error`). Constructing that error type directly
-// from darkmatter's test code would require adding `serde_yaml_ng` as a
-// dev-dependency just for one fixture. Since the rendering path for this
-// variant is covered by the inline tests in `darkmatter::markdown::errors`,
-// we skip it here to keep the integration-test dependency surface narrow.
+// (an alias for `serde_yaml_ng::Error`). The leaf-block renderer
+// `frontmatter_parse_block` is unit-tested directly in
+// `darkmatter::markdown::errors::blocks::tests::frontmatter_parse_block_renders_yaml_error`
+// so we do not duplicate that coverage here.
 
 #[test]
 fn frontmatter_merge_renders_leaf_block() {
@@ -92,8 +91,9 @@ fn serialization_renders_leaf_block_with_position() {
 }
 
 // NOTE: `MarkdownError::UrlFetch` wraps `reqwest::Error`, which cannot be
-// constructed directly without firing an actual request — the unit tests in
-// `darkmatter::markdown::errors::blocks` exercise that renderer instead.
+// constructed directly without firing an actual request. The leaf-block
+// renderer `url_fetch_block` is unit-tested via a live short-circuited
+// request in `darkmatter::markdown::errors::blocks::tests::url_fetch_block_renders_with_reqwest_error`.
 
 #[test]
 fn transclusion_delegation_surfaces_inner_block_only() {
