@@ -138,6 +138,8 @@ pub enum CellState {
     ChooseMany(ChooseManyState),
 }
 
+const CHOICE_CELL_MAX_HEIGHT: u16 = 5;
+
 impl CellState {
     /// Builds the initial [`CellState`] for a cell in `column`.
     ///
@@ -179,8 +181,8 @@ impl CellState {
         match self {
             CellState::StaticText(_) | CellState::BooleanSwitch(_) | CellState::TextInput(_) => 1,
             CellState::TextAreaInput(state) => state.preferred_height().max(1),
-            CellState::ChooseOne(state) => state.options().len().max(1) as u16,
-            CellState::ChooseMany(state) => state.options().len().max(1) as u16,
+            CellState::ChooseOne(state) => (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT),
+            CellState::ChooseMany(state) => (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT),
         }
     }
 
@@ -479,7 +481,18 @@ mod tests {
     }
 
     #[test]
-    fn choose_one_min_height_equals_option_count() {
+    fn choose_one_min_height_is_capped_at_five() {
+        let options: Vec<ChoiceOption<String>> = (0..10)
+            .map(|i| ChoiceOption::new(format!("id{i}"), format!("Option {i}"), format!("val{i}")))
+            .collect();
+        let input = ChoiceInput::new("c", "p").with_options(options);
+        let column = InputTableColumn::ChooseOne(input);
+        let cell = CellState::from_column(&column);
+        assert_eq!(cell.min_height(), 5);
+    }
+
+    #[test]
+    fn choose_one_min_height_equals_option_count_when_under_cap() {
         let input = ChoiceInput::new("c", "p").with_options(vec![
             ChoiceOption::new("a", "A", "a"),
             ChoiceOption::new("b", "B", "b"),

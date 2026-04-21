@@ -43,13 +43,15 @@ use super::column::InputTableColumn;
 /// Mutable state for an [`InputTable`] widget.
 ///
 /// Holds the column schema, the cell matrix, focus coordinates,
-/// theme, key bindings, and any aggregated validation error.
+/// row scroll offset, theme, key bindings, and any aggregated
+/// validation error.
 #[derive(Debug, Clone)]
 pub struct InputTableState {
     columns: Vec<InputTableColumn>,
     rows: Vec<Vec<CellState>>,
     focus_row: usize,
     focus_col: usize,
+    row_scroll_offset: usize,
     theme: ComponentTheme,
     bindings: KeyBindings,
     validation_error: Option<String>,
@@ -121,7 +123,11 @@ impl InputTableState {
             rows,
             focus_row,
             focus_col,
-            theme: ComponentTheme::default(),
+            row_scroll_offset: 0,
+            theme: ComponentTheme {
+                help_hint: "Ctrl+S=Submit  Esc=Cancel".into(),
+                ..ComponentTheme::default()
+            },
             bindings: KeyBindings {
                 submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
                 ..KeyBindings::default()
@@ -149,7 +155,11 @@ impl InputTableState {
             rows,
             focus_row,
             focus_col,
-            theme: ComponentTheme::default(),
+            row_scroll_offset: 0,
+            theme: ComponentTheme {
+                help_hint: "Ctrl+S=Submit  Esc=Cancel".into(),
+                ..ComponentTheme::default()
+            },
             bindings: KeyBindings {
                 submit: vec![KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)],
                 ..KeyBindings::default()
@@ -290,6 +300,10 @@ impl StandaloneState for InputTableState {
     fn validation_error(&self) -> Option<&str> {
         self.validation_error.as_deref()
     }
+
+    fn help_hint(&self) -> &str {
+        &self.theme.help_hint
+    }
 }
 
 /// Grid widget rendered via [`StatefulWidget`] against an
@@ -313,7 +327,7 @@ impl StatefulWidget for InputTable {
             return;
         }
 
-        let column_widths = compute_column_widths(area.width, state.columns.len());
+        let column_widths = compute_column_widths(&state.columns, area.width);
         let row_heights: Vec<u16> = state
             .rows
             .iter()
@@ -326,15 +340,26 @@ impl StatefulWidget for InputTable {
             })
             .collect();
 
-        let total_height: u16 = row_heights.iter().copied().sum();
-        let error_row = state.validation_error.is_some() && total_height < area.height;
-        let reserve_error = if error_row { 1u16 } else { 0u16 };
+        let reserve_error: u16 = if state.validation_error.is_some() { 1 } else { 0 };
+        let available = area.height.saturating_sub(reserve_error);
 
-        let available_rows = area.height.saturating_sub(reserve_error);
-        let row_rects = layout_rows(area, &row_heights, available_rows);
+        adjust_table_scroll(state, &row_heights, available);
 
-        for (row_idx, row_rect) in row_rects.iter().enumerate() {
-            let col_rects = layout_columns(*row_rect, &column_widths);
+        let mut visible_rows: Vec<(usize, Rect)> = Vec::new();
+        let mut y_offset: u16 = 0;
+        for (i, &h) in row_heights.iter().enumerate().skip(state.row_scroll_offset) {
+            if y_offset.saturating_add(h) > available {
+                break;
+            }
+            let rect = Rect::new(area.x, area.y + y_offset, area.width, h);
+            visible_rows.push((i, rect));
+            y_offset += h;
+        }
+
+        let last_visible_idx = visible_rows.last().map(|(i, _)| *i);
+
+        for (row_idx, row_rect) in visible_rows {
+            let col_rects = layout_columns(row_rect, &column_widths);
             for (col_idx, cell_rect) in col_rects.iter().enumerate() {
                 draw_cell(
                     *cell_rect,
@@ -346,12 +371,29 @@ impl StatefulWidget for InputTable {
             }
         }
 
+        let overflow_style = state.theme.selected_style.add_modifier(Modifier::DIM);
+
+        if state.row_scroll_offset > 0 && area.width > 0 {
+            let x = area.x + area.width - 1;
+            buf[(x, area.y)]
+                .set_symbol(&state.theme.overflow_up_indicator)
+                .set_style(overflow_style);
+        }
+
+        if last_visible_idx.is_some_and(|i| i < row_heights.len() - 1) && area.width > 0 {
+            let x = area.x + area.width - 1;
+            let y = area.y + y_offset.saturating_sub(1);
+            buf[(x, y)]
+                .set_symbol(&state.theme.overflow_down_indicator)
+                .set_style(overflow_style);
+        }
+
         if let Some(message) = state.validation_error.as_deref()
-            && error_row
+            && reserve_error > 0
         {
-            let y = area.y + total_height.min(area.height.saturating_sub(1));
+            let error_y = area.y + y_offset.min(area.height.saturating_sub(1));
             let error_line = Line::from(Span::styled(message.to_string(), state.theme.error_style));
-            buf.set_line(area.x, y, &error_line, area.width);
+            buf.set_line(area.x, error_y, &error_line, area.width);
         }
     }
 }
@@ -476,30 +518,48 @@ fn route_to_focus(state: &mut InputTableState, event: KeyEvent) -> EventOutcome 
 }
 
 fn try_navigate(state: &mut InputTableState, event: KeyEvent) -> Option<EventOutcome> {
-    if event
-        .modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-    {
+    // Alt+Up/Alt+Down always navigates rows regardless of cell type.
+    if event.modifiers.contains(KeyModifiers::ALT) {
+        match event.code {
+            KeyCode::Up => {
+                move_focus(state, -1, 0);
+                return Some(EventOutcome::Consumed);
+            }
+            KeyCode::Down => {
+                move_focus(state, 1, 0);
+                return Some(EventOutcome::Consumed);
+            }
+            _ => return None,
+        }
+    }
+
+    if event.modifiers.contains(KeyModifiers::CONTROL) {
         return None;
     }
+
+    let focused_cell = state
+        .rows
+        .get(state.focus_row)
+        .and_then(|r| r.get(state.focus_col));
+
     let inside_text_cell = matches!(
-        state
-            .rows
-            .get(state.focus_row)
-            .and_then(|r| r.get(state.focus_col)),
+        focused_cell,
         Some(CellState::TextInput(_)) | Some(CellState::TextAreaInput(_))
     );
+    let inside_choice_cell = matches!(
+        focused_cell,
+        Some(CellState::ChooseOne(_)) | Some(CellState::ChooseMany(_))
+    );
+
     match event.code {
-        KeyCode::Up => {
+        KeyCode::Up if !inside_choice_cell => {
             move_focus(state, -1, 0);
             Some(EventOutcome::Consumed)
         }
-        KeyCode::Down => {
+        KeyCode::Down if !inside_choice_cell => {
             move_focus(state, 1, 0);
             Some(EventOutcome::Consumed)
         }
-        // Horizontal arrows inside editable text cells are consumed by
-        // the cell for cursor movement; elsewhere they navigate.
         KeyCode::Left if !inside_text_cell => {
             move_focus(state, 0, -1);
             Some(EventOutcome::Consumed)
@@ -656,28 +716,77 @@ fn first_focusable_cell(rows: &[Vec<CellState>]) -> Option<(usize, usize)> {
     None
 }
 
-fn compute_column_widths(total_width: u16, column_count: usize) -> Vec<u16> {
-    if column_count == 0 {
+fn compute_column_widths(columns: &[InputTableColumn], total_width: u16) -> Vec<u16> {
+    use unicode_width::UnicodeWidthStr;
+
+    if columns.is_empty() {
         return Vec::new();
     }
-    let base = total_width / column_count as u16;
-    let remainder = total_width % column_count as u16;
-    (0..column_count)
-        .map(|i| base + if (i as u16) < remainder { 1 } else { 0 })
-        .collect()
+    let preferred: Vec<u16> = columns
+        .iter()
+        .map(|col| match col {
+            InputTableColumn::StaticText { text, .. } => {
+                (UnicodeWidthStr::width(text.as_str()) as u16).max(3)
+            }
+            InputTableColumn::BooleanSwitch { .. } => 8,
+            InputTableColumn::TextInput { .. } => 20,
+            InputTableColumn::TextAreaInput { config, .. } => config.preferred_width,
+            InputTableColumn::ChooseOne(_) | InputTableColumn::ChooseMany(_) => 20,
+        })
+        .collect();
+
+    let total_preferred: u32 = preferred.iter().map(|&w| w as u32).sum();
+
+    if total_preferred <= total_width as u32 && total_preferred > 0 {
+        let leftover = (total_width as u32 - total_preferred) as u16;
+        let per_col = leftover / columns.len() as u16;
+        let remainder = leftover % columns.len() as u16;
+        preferred
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| p + per_col + if (i as u16) < remainder { 1 } else { 0 })
+            .collect()
+    } else {
+        let base = total_width / columns.len() as u16;
+        let remainder = total_width % columns.len() as u16;
+        (0..columns.len())
+            .map(|i| base + if (i as u16) < remainder { 1 } else { 0 })
+            .collect()
+    }
 }
 
-fn layout_rows(area: Rect, row_heights: &[u16], available: u16) -> Vec<Rect> {
-    if row_heights.is_empty() || available == 0 {
-        return Vec::new();
+fn adjust_table_scroll(state: &mut InputTableState, row_heights: &[u16], available: u16) {
+    if available == 0 || row_heights.is_empty() || state.rows.is_empty() {
+        return;
     }
-    let constraints: Vec<Constraint> = row_heights.iter().map(|h| Constraint::Length(*h)).collect();
-    let row_area = Rect::new(area.x, area.y, area.width, available);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(row_area)
-        .to_vec()
+    if state.row_scroll_offset >= row_heights.len() {
+        state.row_scroll_offset = row_heights.len().saturating_sub(1);
+    }
+
+    let mut tops: Vec<u32> = Vec::with_capacity(row_heights.len());
+    let mut acc: u32 = 0;
+    for &h in row_heights {
+        tops.push(acc);
+        acc += h as u32;
+    }
+
+    let focus_top = tops.get(state.focus_row).copied().unwrap_or(0);
+    let focus_bottom = focus_top + row_heights.get(state.focus_row).copied().unwrap_or(1) as u32;
+
+    let viewport_top = tops.get(state.row_scroll_offset).copied().unwrap_or(0);
+    let viewport_bottom = viewport_top + available as u32;
+
+    if focus_top < viewport_top {
+        state.row_scroll_offset = state.focus_row;
+    } else if focus_bottom > viewport_bottom {
+        for i in state.row_scroll_offset..=state.focus_row {
+            let top = tops.get(i).copied().unwrap_or(0);
+            if top + available as u32 >= focus_bottom {
+                state.row_scroll_offset = i;
+                break;
+            }
+        }
+    }
 }
 
 fn layout_columns(row_rect: Rect, column_widths: &[u16]) -> Vec<Rect> {
@@ -844,6 +953,38 @@ mod tests {
         assert_eq!(state.focus(), (1, 1));
         InputTable.handle_event(&mut state, press(KeyCode::Up));
         assert_eq!(state.focus(), (0, 1));
+    }
+
+    #[test]
+    fn up_down_inside_choice_cell_falls_through_to_cell() {
+        let input = ChoiceInput::new("c", "p").with_options(vec![
+            ChoiceOption::new("a", "A", "alpha"),
+            ChoiceOption::new("b", "B", "beta"),
+            ChoiceOption::new("c", "C", "gamma"),
+        ]);
+        let columns = vec![InputTableColumn::ChooseOne(input)];
+        let mut state = InputTableState::with_blank_rows(columns, 2);
+        assert_eq!(state.focus(), (0, 0));
+        let outcome = InputTable.handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.focus(), (0, 0));
+    }
+
+    #[test]
+    fn alt_up_down_navigates_rows_from_choice_cell() {
+        let input = ChoiceInput::new("c", "p").with_options(vec![
+            ChoiceOption::new("a", "A", "alpha"),
+            ChoiceOption::new("b", "B", "beta"),
+        ]);
+        let columns = vec![InputTableColumn::ChooseOne(input)];
+        let mut state = InputTableState::with_blank_rows(columns, 3);
+        assert_eq!(state.focus(), (0, 0));
+        let alt_down = KeyEvent::new(KeyCode::Down, KeyModifiers::ALT);
+        InputTable.handle_event(&mut state, alt_down);
+        assert_eq!(state.focus(), (1, 0));
+        let alt_up = KeyEvent::new(KeyCode::Up, KeyModifiers::ALT);
+        InputTable.handle_event(&mut state, alt_up);
+        assert_eq!(state.focus(), (0, 0));
     }
 
     #[test]
@@ -1106,5 +1247,70 @@ mod tests {
             rows[0].cells[0].value,
             CellValue::ChosenMany(vec!["alpha".into(), "beta".into()])
         );
+    }
+
+    #[test]
+    fn scroll_offset_adjusts_when_focus_moves_past_viewport() {
+        let columns = vec![InputTableColumn::TextInput {
+            id: "name".into(),
+            config: TextInputConfig::default(),
+        }];
+        let mut state = InputTableState::with_blank_rows(columns, 10);
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        InputTable.render(area, &mut buf, &mut state);
+        assert_eq!(state.row_scroll_offset, 0);
+        for _ in 0..4 {
+            InputTable.handle_event(&mut state, press(KeyCode::Down));
+        }
+        InputTable.render(area, &mut buf, &mut state);
+        assert!(
+            state.row_scroll_offset > 0,
+            "expected scroll offset to advance past 0"
+        );
+    }
+
+    #[test]
+    fn scroll_offset_adjusts_when_focus_returns_above_viewport() {
+        let columns = vec![InputTableColumn::TextInput {
+            id: "name".into(),
+            config: TextInputConfig::default(),
+        }];
+        let mut state = InputTableState::with_blank_rows(columns, 10);
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        for _ in 0..9 {
+            InputTable.handle_event(&mut state, press(KeyCode::Down));
+        }
+        InputTable.render(area, &mut buf, &mut state);
+        let offset_after_down = state.row_scroll_offset;
+        assert!(offset_after_down > 0);
+        for _ in 0..9 {
+            InputTable.handle_event(&mut state, press(KeyCode::Up));
+        }
+        InputTable.render(area, &mut buf, &mut state);
+        assert_eq!(
+            state.row_scroll_offset, 0,
+            "expected scroll offset to return to 0"
+        );
+    }
+
+    #[test]
+    fn render_paints_overflow_indicators_when_rows_exceed_viewport() {
+        let columns = vec![InputTableColumn::TextInput {
+            id: "name".into(),
+            config: TextInputConfig::default(),
+        }];
+        let mut state = InputTableState::with_blank_rows(columns, 10);
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        for _ in 0..5 {
+            InputTable.handle_event(&mut state, press(KeyCode::Down));
+        }
+        InputTable.render(area, &mut buf, &mut state);
+        let top_right = buf[(area.x + area.width - 1, area.y)].symbol();
+        assert_eq!(top_right, "▲");
+        let bottom_right = buf[(area.x + area.width - 1, area.y + 2)].symbol();
+        assert_eq!(bottom_right, "▼");
     }
 }

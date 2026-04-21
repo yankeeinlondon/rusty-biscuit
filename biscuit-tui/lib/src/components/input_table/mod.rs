@@ -15,8 +15,11 @@
 //!
 //! ## Focus & Submit
 //!
-//! - Left/Right and Up/Down arrows move focus within the grid,
-//!   skipping [`CellState::StaticText`] cells.
+//! - Left/Right arrows move focus across columns (except inside
+//!   editable text cells where they control the cursor).
+//! - Up/Down arrows move focus across rows (except inside choice cells
+//!   where they navigate the option list; use Tab/BackTab or Alt+Up/
+//!   Alt+Down to move between rows from choice cells).
 //! - Tab and Shift-Tab wrap across rows.
 //! - Ctrl-S validates all cells and either submits (returning
 //!   [`EventOutcome::Submitted`]) or routes focus to the first cell
@@ -27,15 +30,12 @@
 //!
 //! ## Value Shape
 //!
-//! `state.value()` returns `Vec<Vec<String>>` — one inner vector per
-//! row, and one string per column. The string encoding is:
+//! [`InputTableState::rows_typed`] returns `Vec<Row>` — each [`Row`]
+//! contains a vector of [`RowCell`]s pairing column ids with typed
+//! [`CellValue`]s. This preserves semantic types (booleans, multi-line
+//! text, multi-select arrays) rather than flattening to strings.
 //!
-//! - `StaticText`: the column's text.
-//! - `BooleanSwitch`: `"true"` / `"false"`.
-//! - `TextInput`: the edit buffer contents.
-//! - `TextAreaInput`: the edit buffer, lines joined with `\n`.
-//! - `ChooseOne`: the selected option value (empty string when none).
-//! - `ChooseMany`: comma-separated selected values.
+//! [`InputTableState::rows_typed`]: table::InputTableState::rows_typed
 
 pub mod cell;
 pub mod column;
