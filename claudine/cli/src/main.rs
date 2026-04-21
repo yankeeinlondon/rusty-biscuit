@@ -10,6 +10,7 @@ mod commands;
 mod completion;
 mod log;
 mod output;
+mod perf;
 mod provider_values;
 mod table_utils;
 mod telemetry;
@@ -114,7 +115,10 @@ fn main() -> Result<()> {
     // never has to absorb a completion subprocess on the happy path.
     completion::maybe_complete();
 
-    let argv: Vec<OsString> = argv::normalize(std::env::args_os().collect());
+    let raw_argv: Vec<OsString> = std::env::args_os().collect();
+    let perf_bootstrap = perf::scan_perf_bootstrap(&raw_argv);
+
+    let argv: Vec<OsString> = argv::normalize(raw_argv);
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
     // disabled before parsing. Uses the same token stream the parse will see.
@@ -133,25 +137,53 @@ fn main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(argv))
+    runtime.block_on(async_main(argv, perf_bootstrap))
 }
 
-async fn async_main(argv: Vec<OsString>) -> Result<()> {
+async fn async_main(argv: Vec<OsString>, perf_bootstrap: perf::PerfBootstrap) -> Result<()> {
+    let perf_arg_parsing = perf_bootstrap
+        .started_at
+        .map(|started| started.elapsed())
+        .unwrap_or_default();
+
     let cli = parse_cli_from(&argv);
     log::set_plain(cli.plain);
+
+    let tracing_start = std::time::Instant::now();
     telemetry::init_tracing(cli.debug);
     let root_span = telemetry::root_span(&cli);
     let _root_guard = root_span.enter();
+    let perf_tracing_init = tracing_start.elapsed();
 
     if cli.help || cli.command.is_none() {
         return commands::help::run();
     }
 
+    let perf_enabled = perf_bootstrap.enabled;
+
     let command = match wrapper_command(cli.command.unwrap()) {
         Ok((provider, args)) => {
             // Wrapper commands also need config — check before launching
+            let config_start = std::time::Instant::now();
             ensure_config_exists().await?;
-            return commands::wrap::run_provider_wrapper(provider, args, cli.verbose);
+            let perf_config_loading = config_start.elapsed();
+
+            let startup_timings = if perf_enabled {
+                Some(perf::StartupTimings {
+                    arg_parsing: perf_arg_parsing,
+                    tracing_init: perf_tracing_init,
+                    config_loading: perf_config_loading,
+                })
+            } else {
+                None
+            };
+
+            return commands::wrap::run_provider_wrapper(
+                provider,
+                args,
+                cli.verbose,
+                startup_timings,
+            );
         }
         Err(command) => *command,
     };
@@ -163,9 +195,24 @@ async fn async_main(argv: Vec<OsString>) -> Result<()> {
         command,
         Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_)
     );
-    if needs_config {
+
+    let perf_config_loading = if needs_config {
+        let config_start = std::time::Instant::now();
         ensure_config_exists().await?;
-    }
+        config_start.elapsed()
+    } else {
+        std::time::Duration::ZERO
+    };
+
+    let startup_timings = if perf_enabled {
+        Some(perf::StartupTimings {
+            arg_parsing: perf_arg_parsing,
+            tracing_init: perf_tracing_init,
+            config_loading: perf_config_loading,
+        })
+    } else {
+        None
+    };
 
     match command {
         Commands::Handle(args) => commands::handle::run(args).await,
@@ -189,8 +236,14 @@ async fn async_main(argv: Vec<OsString>) -> Result<()> {
         | Commands::Qwen(_)
         | Commands::Opencode(_)
         | Commands::Goose(_) => unreachable!("wrapper commands are handled before this match"),
-        Commands::Compose(args) => commands::compose::run_compose(args, cli.verbose),
-        Commands::InlineCompose(args) => commands::compose::run_inline_compose(args, cli.verbose),
-        Commands::Sequence(args) => commands::sequence::run_sequence(args, cli.verbose),
+        Commands::Compose(args) => {
+            commands::compose::run_compose(args, cli.verbose, startup_timings)
+        }
+        Commands::InlineCompose(args) => {
+            commands::compose::run_inline_compose(args, cli.verbose, startup_timings)
+        }
+        Commands::Sequence(args) => {
+            commands::sequence::run_sequence(args, cli.verbose, startup_timings)
+        }
     }
 }

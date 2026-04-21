@@ -1,19 +1,11 @@
 ## Non-Interactive Prompt
 
-You are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
-- if there was a tool call you wanted to make but were not able to:
-    - let the user know that happened
-    - find an alternative way of getting the information you need
-- if there was a file you didn't have read permission to while attempt to read:
-    - let the user know that happened
-    - find an alternative way of getting the information you need
-- if being blocked has truly made it so you can not complete the task then:
-    - report to the user what happened and how this can be avoided going forward
-    - exit with an error code
-- Do not run commands that require an interactive terminal or follow-up stdin input.
-- Avoid REPLs, editors, pagers, prompts, and any command that waits for user input.
-- Prefer one-shot commands and explicit non-interactive flags.
-- If a task would require sending more input to a running command, choose a different approach.
+You are running in a non-interactive session — the user cannot answer prompts for feedback or permissions.
+
+- If blocked (tool call denied, file unreadable, etc.): tell the user, then find an alternative way to get the information.
+- If truly unable to complete the task: report what happened, note how to avoid it going forward, and exit with an error code.
+- Never run commands that need an interactive terminal or stdin follow-up (REPLs, editors, pagers, prompts, anything waiting on input).
+- Prefer one-shot commands with explicit non-interactive flags; if an approach would require sending more input to a running command, pick a different approach.
   
 ### Credential and signing blockers (this is very likely why you're hanging)
 

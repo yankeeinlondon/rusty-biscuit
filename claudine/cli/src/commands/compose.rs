@@ -164,6 +164,10 @@ pub struct SharedComposeArgs {
     /// Treat unresolved or ambiguous MCP tags as hard errors.
     #[arg(long)]
     pub strict: bool,
+
+    /// Emit a performance report to stderr after command completion.
+    #[arg(long)]
+    pub perf: bool,
 }
 
 impl SharedComposeArgs {
@@ -235,8 +239,12 @@ pub struct InlineComposeArgs {
 }
 
 /// Entry point for `claudine compose`.
-pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
-    let code = match run_compose_inner(args, verbose) {
+pub fn run_compose(
+    args: ComposeArgs,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<()> {
+    let code = match run_compose_inner(args, verbose, startup_timings) {
         Ok(code) => code,
         Err(error) => {
             if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
@@ -249,8 +257,12 @@ pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
 }
 
 /// Entry point for `claudine inline-compose`.
-pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
-    let code = match run_inline_compose_inner(args, verbose) {
+pub fn run_inline_compose(
+    args: InlineComposeArgs,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<()> {
+    let code = match run_inline_compose_inner(args, verbose, startup_timings) {
         Ok(code) => code,
         Err(error) => {
             if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
@@ -262,7 +274,11 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
     std::process::exit(code);
 }
 
-fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
+fn run_compose_inner(
+    args: ComposeArgs,
+    verbose: u8,
+    _startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<i32> {
     let ComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
@@ -355,7 +371,11 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     execute_composition_request(request, verbose)
 }
 
-fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
+fn run_inline_compose_inner(
+    args: InlineComposeArgs,
+    verbose: u8,
+    _startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<i32> {
     let InlineComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
