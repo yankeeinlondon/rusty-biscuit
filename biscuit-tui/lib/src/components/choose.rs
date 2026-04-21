@@ -120,8 +120,6 @@ pub struct ChoiceInput<V = String> {
     pub min_selections: Option<usize>,
     /// Maximum selections (only honoured by `ChooseMany`).
     pub max_selections: Option<usize>,
-    /// When `true`, option order is shuffled on construction.
-    pub shuffle_options: bool,
 }
 
 impl<V> ChoiceInput<V> {
@@ -136,7 +134,6 @@ impl<V> ChoiceInput<V> {
             required: false,
             min_selections: None,
             max_selections: None,
-            shuffle_options: false,
         }
     }
 

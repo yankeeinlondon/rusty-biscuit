@@ -240,6 +240,10 @@ impl<V: Clone + PartialEq> StandaloneState for ChooseManyState<V> {
     fn validation_error(&self) -> Option<&str> {
         self.validation_error.as_deref()
     }
+
+    fn help_hint(&self) -> &str {
+        &self.theme.help_hint
+    }
 }
 
 /// Multi-selection list widget.
@@ -472,6 +476,8 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
             disabled_style
         } else if idx == state.hover {
             hover_style
+        } else if state.selected[idx] {
+            state.theme.selected_label_style
         } else {
             Style::default()
         };

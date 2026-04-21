@@ -298,6 +298,17 @@ mod tests {
     }
 
     #[test]
+    fn dictionary_accepts_strict_json_object() {
+        let json = "{\"red\": \"R\", \"green\": \"G\"}";
+        let input = choose_one_from_dictionary("c", "P", json).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].id, "red");
+        assert_eq!(input.options[0].value, "R");
+        assert_eq!(input.options[1].id, "green");
+        assert_eq!(input.options[1].value, "G");
+    }
+
+    #[test]
     fn dictionary_surfaces_parse_errors() {
         let garbage = "{unterminated: mapping";
         let err = choose_one_from_dictionary("c", "P", garbage).unwrap_err();
