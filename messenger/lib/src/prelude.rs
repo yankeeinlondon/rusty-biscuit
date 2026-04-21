@@ -55,6 +55,11 @@ pub use crate::validate::{
     CompatibilityWarning, normalize_dispatch, validate_dispatch, validate_message,
 };
 
+#[cfg(feature = "desktop")]
+pub use crate::provider::desktop::{
+    DesktopConfig, DesktopNotificationProvider, LinuxDesktopConfig, MacOsDesktopConfig,
+    MacOsNotificationStrategy, WindowsDesktopConfig,
+};
 #[cfg(feature = "discord")]
 pub use crate::provider::discord::{DiscordConfig, DiscordProvider};
 #[cfg(feature = "signal")]

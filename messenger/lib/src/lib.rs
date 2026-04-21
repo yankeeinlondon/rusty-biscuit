@@ -21,12 +21,21 @@ pub use error::MessengerError;
 pub use message::{Location, Message, MessageBody};
 #[doc(hidden)]
 pub use prepared::PreparedMessage;
+#[cfg(feature = "desktop")]
+pub use provider::desktop::{
+    DesktopConfig, DesktopNotificationProvider, DesktopNotificationReceipt,
+    DesktopNotificationRequest, LinuxDesktopConfig, MacOsDesktopConfig, MacOsNotificationStrategy,
+    WindowsDesktopConfig,
+};
 pub use provider::{Messenger, Provider, SendPlan};
 pub use receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
 #[cfg(feature = "desktop")]
 pub use target::DesktopTarget;
 pub use target::Target;
-pub use validate::{CompatibilityWarning, normalize_dispatch, validate_dispatch, validate_message};
+pub use validate::{
+    CompatibilityWarning, normalize_dispatch, validate_dispatch, validate_message,
+    validate_message_for_provider,
+};
 
 #[cfg(test)]
 mod tests;
