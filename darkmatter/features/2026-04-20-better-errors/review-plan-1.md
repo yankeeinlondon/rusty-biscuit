@@ -1,7 +1,7 @@
 ---
 phases: 7
-starting_phase: 2
-start_phase: 2
+starting_phase: 5
+start_phase: 5
 source_files_during_phase_2:
   - darkmatter/lib/src/markdown/compose/mod.rs
   - darkmatter/lib/src/markdown/compose/page_blocks/parser.rs
@@ -55,6 +55,16 @@ docs_updated_during_phase_4:
   - darkmatter/features/2026-04-20-better-errors/review-plan-1.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/errors/mod.rs
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/tests/as_block_error_registry.rs
+  - darkmatter/cli/src/main.rs
+  - biscuit-terminal/lib/src/errors/block_error.rs
+docs_updated_during_phase_5:
+  - darkmatter/features/2026-04-20-better-errors/review-plan-1.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - darkmatter
 ---
