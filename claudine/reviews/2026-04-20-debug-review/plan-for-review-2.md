@@ -13,6 +13,17 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_4:
+  - claudine/lib/src/stream/logs/codex.rs
+  - claudine/lib/src/stream/claude_semantic.rs
+  - claudine/lib/src/stream/codex_semantic.rs
+  - claudine/lib/src/stream/gemini_semantic.rs
+  - claudine/lib/src/stream/kimi_semantic.rs
+  - claudine/lib/src/stream/opencode_semantic.rs
+  - claudine/lib/src/stream/qwen_semantic.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - claudine
   - claudine-cli
