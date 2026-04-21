@@ -852,8 +852,7 @@ mod tests {
                 "https://hooks.slack.com/services/T000/B000/DEFAULT-ENV",
             );
         }
-        let parsed: RouteConfig =
-            serde_json::from_str(r#"{"provider":"slack-webhook"}"#).unwrap();
+        let parsed: RouteConfig = serde_json::from_str(r#"{"provider":"slack-webhook"}"#).unwrap();
         let env_name = match parsed {
             RouteConfig::SlackWebhook {
                 webhook_url,
