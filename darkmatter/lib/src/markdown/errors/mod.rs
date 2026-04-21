@@ -88,6 +88,11 @@ pub fn as_block_error<'a>(
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<DeferredSetError>() {
+        // Kept for library consumers that call the parser directly. The CLI path
+        // cannot reach this arm because `TransclusionError::InvalidFrontmatterAssignment`
+        // (promoted from `DeferredSetError` at `compose/transclusion/types.rs:324-336`)
+        // is what gets returned from the compose pipeline — `DeferredSetError` itself is
+        // never exposed at the top level.
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<NormalizationError>() {

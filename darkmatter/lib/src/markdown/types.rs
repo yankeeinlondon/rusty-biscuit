@@ -2,7 +2,7 @@
 
 use biscuit_file::YamlParseError;
 use biscuit_terminal::components::status_block::StatusBlock;
-use biscuit_terminal::errors::{BlockError, render_with_causes};
+use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use indexmap::IndexMap;
 use thiserror::Error;
@@ -104,10 +104,6 @@ impl BlockError for MarkdownError {
             MarkdownError::Serialization(source) => blocks::serialization_block(source),
             MarkdownError::Transform(message) => blocks::transform_block(message),
         }
-    }
-
-    fn report_block_error(&self, term: &Terminal) -> String {
-        render_with_causes(self, term)
     }
 
     fn block_source(&self) -> Option<&(dyn BlockError + 'static)> {
