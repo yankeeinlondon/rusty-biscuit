@@ -1,12 +1,18 @@
 ---
 phase: 1
+total_phases: ""
 plan: ""
 success: 
     say: "Phase {{phase}} of the plan was implemented"
 failure: 
     say: "Ran into problems implementing phase {{phase}} of the plan!"
 ---
+::block when="total_phases"
+# Implement Phase {{phase}} of {{total_phases}}
+::end-block
+::block when="!total_phases"
 # Implement Phase {{phase}}
+::end-block
 
 Your task is to implement phase {{phase}} of the plan found in {{plan}}.
 
