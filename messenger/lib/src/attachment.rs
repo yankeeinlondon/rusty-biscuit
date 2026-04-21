@@ -12,7 +12,7 @@ pub struct Attachment {
 }
 
 /// The type of attachment content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AttachmentKind {
     Image,
     Audio,
