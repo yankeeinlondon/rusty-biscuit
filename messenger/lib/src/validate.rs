@@ -10,6 +10,11 @@ use crate::receipt::ProviderKind;
 use crate::target::Target;
 
 /// Validate that a message has content.
+///
+/// Uses the conservative rule: body, attachments, or location must be
+/// present. The `title` field alone is **not** enough for non-desktop
+/// providers. Use [`validate_message_for_provider`] in provider-aware
+/// flows that allow title-only messages for the desktop provider.
 pub fn validate_message(message: &Message) -> Result<(), MessengerError> {
     if message.is_empty() {
         return Err(MessengerError::InvalidMessage(
@@ -17,6 +22,30 @@ pub fn validate_message(message: &Message) -> Result<(), MessengerError> {
         ));
     }
     Ok(())
+}
+
+/// Provider-aware message validity check.
+///
+/// Matches [`validate_message`] for every provider except
+/// [`ProviderKind::Desktop`], where a title-only message is permitted.
+/// Desktop notifications treat `title` as first-class content: a "Deploy
+/// finished" toast with no body is valid and should not error out before
+/// a backend ever sees it.
+pub fn validate_message_for_provider(
+    message: &Message,
+    provider: ProviderKind,
+) -> Result<(), MessengerError> {
+    #[cfg(feature = "desktop")]
+    if provider == ProviderKind::Desktop {
+        if message.is_empty() && message.title.is_none() {
+            return Err(MessengerError::InvalidMessage(
+                "message has no title, body, attachments, or location".into(),
+            ));
+        }
+        return Ok(());
+    }
+    let _ = provider;
+    validate_message(message)
 }
 
 /// A best-effort compatibility warning emitted when a feature is dropped.
@@ -239,7 +268,7 @@ pub fn normalize_dispatch(
         validate_attachment_source(attachment, provider)?;
     }
 
-    if normalized_message.is_empty() {
+    if is_undeliverable_after_normalization(&normalized_message, provider) {
         tracing::warn!("normalization dropped all deliverable content");
         return Err(MessengerError::InvalidMessage(format!(
             "{provider} cannot deliver this message after dropping unsupported features"
@@ -251,6 +280,15 @@ pub fn normalize_dispatch(
         message: normalized_message,
         warnings,
     })
+}
+
+fn is_undeliverable_after_normalization(message: &Message, provider: ProviderKind) -> bool {
+    #[cfg(feature = "desktop")]
+    if provider == ProviderKind::Desktop {
+        return message.is_empty() && message.title.is_none();
+    }
+    let _ = provider;
+    message.is_empty()
 }
 
 fn validate_attachment_source(
