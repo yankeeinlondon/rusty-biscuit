@@ -7,6 +7,8 @@ pub enum Target {
     DiscordWebhook(DiscordWebhookTarget),
     #[cfg(feature = "slack")]
     Slack(SlackTarget),
+    #[cfg(feature = "slack")]
+    SlackWebhook(SlackWebhookTarget),
     #[cfg(feature = "signal")]
     Signal(SignalTarget),
     #[cfg(feature = "whatsapp")]
@@ -39,6 +41,14 @@ pub struct DiscordWebhookTarget {
 pub struct SlackTarget {
     pub channel_id: String,
 }
+
+/// Slack webhook target.
+///
+/// The webhook URL (configured on the provider) binds the channel.
+/// Reply threading comes from `dispatch.reply_to`.
+#[cfg(feature = "slack")]
+#[derive(Debug, Clone, Default)]
+pub struct SlackWebhookTarget {}
 
 /// Signal destination.
 #[cfg(feature = "signal")]
@@ -108,6 +118,11 @@ impl Target {
         Self::Slack(SlackTarget {
             channel_id: channel_id.into(),
         })
+    }
+
+    #[cfg(feature = "slack")]
+    pub fn slack_webhook() -> Self {
+        Self::SlackWebhook(SlackWebhookTarget {})
     }
 
     #[cfg(feature = "signal")]

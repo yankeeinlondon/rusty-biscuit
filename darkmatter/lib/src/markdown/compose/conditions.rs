@@ -28,6 +28,35 @@ pub enum ConditionError {
     },
 }
 
+impl biscuit_terminal::errors::BlockError for ConditionError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round</cyan>";
+
+        match self {
+            ConditionError::Parse { expr, line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ConditionError", "parse failed"))
+                .body(format!(
+                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint(operator_hint),
+
+            ConditionError::Eval { expr, line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ConditionError", "evaluation failed"))
+                .body(format!(
+                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("Confirm every variable referenced is present in the effective state."),
+        }
+    }
+}
+
 /// Evaluates a `when` condition expression.
 pub fn evaluate_condition(
     expr: &str,

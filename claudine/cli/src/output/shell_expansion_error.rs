@@ -1,15 +1,15 @@
 //! Rich rendering for [`ShellExpansionError`] surfaced during composition.
 //!
-//! Produces a `Status`-headed, `BlockQuote`-wrapped, darkmatter-highlighted
+//! Produces a `StatusBlock`-wrapped, darkmatter-highlighted
 //! report that points the user directly at the offending directive in the
 //! source file (body) or at the offending key in YAML frontmatter.
 
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::block_quote::BlockQuote;
-use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-use biscuit_terminal::components::status::{Status, StatusState};
+use biscuit_terminal::components::status::StatusState;
+use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
@@ -34,7 +34,7 @@ const LEFT_MARGIN: u32 = 2;
 const RIGHT_MARGIN: u32 = 2;
 
 /// Border string used by the BlockQuote.
-const BORDER: &str = "▌ ";
+const BORDER: &str = "┃ ";
 
 /// Pretty-print a composition-time shell expansion error.
 ///
@@ -88,42 +88,37 @@ pub(crate) fn pretty_markdown_report(
 }
 
 fn render_with_terminal(source_path: &Path, error: &ShellExpansionError, term: &Terminal) {
-    let report = ShellExpansionReport::build(source_path, error);
-
+    let report = build_error_block(source_path, error);
     log::message("");
-    log::message(&report.header.render(term));
+    log::message(&report.render(term));
     log::message("");
-
-    if let Some(ref quote) = report.body {
-        log::message(&quote.render(term));
-        log::message("");
-    }
-
-    if let Some(ref hint) = report.hint {
-        log::message(&Prose::new(hint.clone()).render(term));
-        log::message("");
-    }
 }
 
-struct ShellExpansionReport {
-    header: Status,
-    body: Option<BlockQuote>,
-    hint: Option<String>,
-}
+fn build_error_block(source_path: &Path, error: &ShellExpansionError) -> StatusBlock {
+    let origin_kind = origin_kind(error);
+    let reason = describe_error(error);
+    let absolute = canonicalize_or_self(source_path);
+    let relative = relative_to_cwd(&absolute);
 
-impl ShellExpansionReport {
-    fn build(source_path: &Path, error: &ShellExpansionError) -> Self {
-        let origin_kind = origin_kind(error);
-        let reason = describe_error(error);
-        let absolute = canonicalize_or_self(source_path);
-        let relative = relative_to_cwd(&absolute);
+    let mut block = StatusBlock::new(StatusState::Error)
+        .header(build_header_markup(
+            &absolute,
+            &relative,
+            origin_kind,
+            &reason,
+        ))
+        .left_margin(Margin::Chars(LEFT_MARGIN))
+        .right_margin(Margin::Chars(RIGHT_MARGIN));
 
-        let header = build_header(&absolute, &relative, origin_kind, &reason);
-        let body = build_body(source_path, error, origin_kind);
-        let hint = build_hint(error);
-
-        Self { header, body, hint }
+    if let Some(body) = build_body(source_path, error, origin_kind) {
+        block = block.body(body);
     }
+
+    if let Some(hint) = build_hint(error) {
+        block = block.hint(hint);
+    }
+
+    block
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,10 +271,9 @@ fn trim_trailing_blank_lines(rendered: &str) -> String {
     lines.join("\n")
 }
 
-/// Build the Status header with the "prompt referenced {file} provided an
+/// Build the prose header with the "prompt referenced {file} provided an
 /// invalid shell expansion command in the {body|frontmatter}" text.
-#[allow(deprecated)]
-fn build_header(absolute: &Path, relative: &Path, kind: OriginKind, reason: &str) -> Status {
+fn build_header_markup(absolute: &Path, relative: &Path, kind: OriginKind, reason: &str) -> String {
     let rel_display = prose_escape(&relative.display().to_string());
     let abs_display = absolute.display().to_string();
     let kind_label = match kind {
@@ -298,7 +292,7 @@ fn build_header(absolute: &Path, relative: &Path, kind: OriginKind, reason: &str
         reason = reason_escaped,
     );
 
-    Status::from_prose(markup).state(StatusState::Failure)
+    markup
 }
 
 /// Build a single hint line tailored to the error kind, when useful.

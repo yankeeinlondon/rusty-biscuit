@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::sync::LazyLock;
+use tracing::{debug, trace};
 
 use super::StderrIngestOutcome;
 use crate::stream::semantic::{SemanticEvent, SemanticEventSink, SharedSemanticSink};
@@ -115,6 +116,8 @@ pub fn parse_line(line: &str) -> Option<CodexLogRecord> {
 pub struct CodexLogBridge<S: SemanticEventSink> {
     sink: SharedSemanticSink<S>,
     observed: Arc<Mutex<Vec<CodexLogRecord>>>,
+    lines_consumed: u32,
+    lines_skipped: u32,
 }
 
 impl<S: SemanticEventSink> CodexLogBridge<S> {
@@ -122,6 +125,8 @@ impl<S: SemanticEventSink> CodexLogBridge<S> {
         Self {
             sink,
             observed: Arc::new(Mutex::new(Vec::new())),
+            lines_consumed: 0,
+            lines_skipped: 0,
         }
     }
 
@@ -135,8 +140,23 @@ impl<S: SemanticEventSink> CodexLogBridge<S> {
     /// the line (so the caller suppresses raw echo).
     pub fn ingest(&mut self, line: &str) -> StderrIngestOutcome {
         let Some(record) = parse_line(line) else {
+            self.lines_skipped += 1;
+            debug!(
+                provider = "codex",
+                raw = %line,
+                "codex log bridge unrecognized line, skipping passthrough"
+            );
             return StderrIngestOutcome::NotConsumed;
         };
+
+        self.lines_consumed += 1;
+        trace!(
+            provider = "codex",
+            level = %record.level.as_str(),
+            target = %record.target,
+            body = %record.body,
+            "codex log bridge parsed structured tracing event"
+        );
 
         // Capture the record first so even a failing sink lock still leaves
         // diagnostic breadcrumbs for tests and the summary finalizer.
@@ -159,6 +179,11 @@ impl<S: SemanticEventSink> CodexLogBridge<S> {
             extra: Value::Object(extra),
         });
         StderrIngestOutcome::Consumed
+    }
+
+    /// Returns a tuple of (lines_consumed, lines_skipped) for the bridge.
+    pub fn ingest_stats(&self) -> (u32, u32) {
+        (self.lines_consumed, self.lines_skipped)
     }
 }
 

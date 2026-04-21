@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
+use tracing::debug;
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::codex::{
@@ -97,6 +98,11 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
+        debug!(
+            provider = "codex",
+            event_type = %kind,
+            "codex parser falling back to provider extension for unknown event type"
+        );
         self.sink
             .on_semantic_event(SemanticEvent::ProviderExtension {
                 provider: Provider::Codex,

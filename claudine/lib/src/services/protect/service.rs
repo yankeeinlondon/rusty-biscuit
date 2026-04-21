@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use tracing::{debug, info_span};
+
 use crate::error::Result;
 
 use super::catalog::{ProtectPlatform, RuleGroup, ScanSurface};
@@ -43,29 +45,61 @@ impl ProtectService {
 
     /// Evaluate a request against the deny catalog.
     pub fn evaluate(&self, request: &ProtectRequest) -> ProtectDecision {
+        let surface = match request {
+            ProtectRequest::BashCommand { .. } => "bash_command",
+            ProtectRequest::WritePath { .. } => "write_path",
+            ProtectRequest::McpResponse { .. } => "mcp_response",
+        };
+        let _span = info_span!(
+            "protect_evaluate",
+            surface,
+            enabled = self.config.enabled,
+        )
+        .entered();
+
         if !self.config.enabled {
+            debug!(surface, "protect disabled, allowing");
             return ProtectDecision::allow();
         }
 
-        match request {
+        let decision = match request {
             ProtectRequest::BashCommand { command } => self.evaluate_bash_command(command),
             ProtectRequest::WritePath { path, cwd } => self.evaluate_write_path(path, *cwd),
             ProtectRequest::McpResponse { payloads } => self.evaluate_mcp_response(payloads),
-        }
+        };
+
+        debug!(
+            outcome = ?decision.outcome,
+            finding_count = if decision.is_blocked() { 1 } else { 0 },
+            "protect evaluation complete",
+        );
+
+        decision
     }
 
     fn evaluate_bash_command(&self, command: &str) -> ProtectDecision {
+        let _span = info_span!("protect_bash", command_truncated = &command[..command.len().min(80)]).entered();
         for group in &self.catalog.command_groups {
             if let Some((m, rule_supports_allow_paths)) = group.find_match(command) {
-                // Check allow_paths suppression (per-rule, not per-group)
                 if rule_supports_allow_paths
                     && let Some(allow_paths) = self.config.get_allow_paths(group.group)
                 {
                     let targets = extract_target_paths(command);
                     if all_targets_allowed(&targets, allow_paths) {
+                        debug!(
+                            group = %group.group,
+                            rule_id = %m.rule_id,
+                            "match suppressed by allow_paths",
+                        );
                         continue;
                     }
                 }
+                debug!(
+                    group = %group.group,
+                    rule_id = %m.rule_id,
+                    matched_text = %m.matched_text,
+                    "command blocked",
+                );
                 return ProtectDecision::blocked(m);
             }
         }
@@ -73,6 +107,12 @@ impl ProtectService {
         if let Some(custom) = &self.catalog.custom_group
             && let Some((m, _)) = custom.find_match(command)
         {
+            debug!(
+                group = "custom",
+                rule_id = %m.rule_id,
+                matched_text = %m.matched_text,
+                "custom rule blocked command",
+            );
             return ProtectDecision::blocked(m);
         }
 
@@ -80,6 +120,7 @@ impl ProtectService {
     }
 
     fn evaluate_write_path(&self, path: &str, cwd: Option<&str>) -> ProtectDecision {
+        let _span = info_span!("protect_write", path).entered();
         if !self.config.is_group_enabled(RuleGroup::SensitivePaths) {
             return ProtectDecision::allow();
         }
@@ -101,7 +142,6 @@ impl ProtectService {
             if let Some(allow_paths) = self.config.get_allow_paths(RuleGroup::SensitivePaths)
                 && allow_paths.iter().any(|allowed| {
                     if allowed.starts_with('/') {
-                        // Normalize and canonicalize the allowed path for comparison
                         let allowed_normalized = normalize_path(allowed);
                         let allowed_canonical =
                             super::path::canonicalize_existing_ancestor(&allowed_normalized);
@@ -113,8 +153,10 @@ impl ProtectService {
                     }
                 })
             {
+                debug!(path = %resolved_str, "sensitive path suppressed by allow_paths");
                 return ProtectDecision::allow();
             }
+            debug!(path = %resolved_str, "sensitive path blocked");
             return ProtectDecision::blocked(ProtectMatch {
                 group: RuleGroup::SensitivePaths,
                 rule_id: "sensitive_prefix".to_string(),
@@ -130,8 +172,15 @@ impl ProtectService {
     }
 
     fn evaluate_mcp_response(&self, payloads: &[Cow<str>]) -> ProtectDecision {
+        let _span = info_span!("protect_mcp", payload_count = payloads.len()).entered();
         for payload in payloads {
             if let Some(m) = self.catalog.evaluate_mcp(payload) {
+                debug!(
+                    group = %m.group,
+                    rule_id = %m.rule_id,
+                    matched_text = %m.matched_text,
+                    "MCP payload blocked",
+                );
                 return ProtectDecision::blocked(m);
             }
         }

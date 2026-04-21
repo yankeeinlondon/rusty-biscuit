@@ -58,6 +58,11 @@ pub enum ProviderOverrides {
 pub struct DiscordOverrides {}
 
 #[cfg(feature = "discord")]
+/// Placeholder for future Discord webhook-specific options.
+///
+/// This remains exhaustively constructible for now because adding
+/// `#[non_exhaustive]` would be a breaking change for downstream callers that
+/// currently instantiate it as `DiscordWebhookOverrides {}`.
 #[derive(Debug, Clone, Default)]
 pub struct DiscordWebhookOverrides {}
 

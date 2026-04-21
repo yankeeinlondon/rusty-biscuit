@@ -1,4 +1,6 @@
 #[cfg(feature = "discord")]
+pub(crate) mod attachment_helpers;
+#[cfg(feature = "discord")]
 pub mod discord;
 #[cfg(feature = "discord")]
 pub mod discord_webhook;
@@ -6,6 +8,8 @@ pub mod discord_webhook;
 pub mod signal;
 #[cfg(feature = "slack")]
 pub mod slack;
+#[cfg(feature = "slack")]
+pub mod slack_webhook;
 #[cfg(feature = "telegram")]
 pub mod telegram;
 #[cfg(feature = "whatsapp")]

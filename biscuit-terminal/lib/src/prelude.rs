@@ -17,6 +17,7 @@ pub use crate::components::prose::Prose;
 pub use crate::components::renderable::{Renderable, RenderableContent};
 pub use crate::components::section::{HeadingLevel, Section};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
+pub use crate::components::status_block::StatusBlock;
 pub use crate::components::table::table::{
     MeasuredColumn, Table, TableCellContent, TableColumn, TableWidthError, TableWidthMeasurements,
     TableWidthPlan,

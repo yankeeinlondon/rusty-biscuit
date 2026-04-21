@@ -26,6 +26,7 @@
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
+use tracing::debug;
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::opencode::{
@@ -389,6 +390,11 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
+        debug!(
+            provider = "opencode",
+            event_type = %kind,
+            "opencode parser falling back to provider extension for unknown event type"
+        );
         self.sink
             .on_semantic_event(SemanticEvent::ProviderExtension {
                 provider: Provider::OpenCode,

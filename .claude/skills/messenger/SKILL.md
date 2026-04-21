@@ -44,6 +44,7 @@ let receipt = messenger.send(dispatch, &message).await?;
 | Telegram | `telegram` | HTML | Yes | No | Native | Yes | Yes |
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
+Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.
 
 ## Key Types
 

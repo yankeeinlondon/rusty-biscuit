@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use tracing::{debug, info_span};
+
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     ApprovedRuntimeCommand, AttemptOutcome, FailureCheck, FailureEvent, FailurePhase,
@@ -49,6 +51,13 @@ pub fn resolve_handler(
     table: &HandlerTable,
     programmatic: Option<&ApprovedRuntimeCommand>,
 ) -> Result<Option<HandlerAction>, HarnessError> {
+    let _span = info_span!(
+        "harness_resolve_handler",
+        event = %failure.event,
+        phase = %failure.failure_phase,
+        attempt = failure.attempt,
+    )
+    .entered();
     // 1. Subject-specific handler: match by event + subject_key
     if let Some(ref subject_key) = failure.subject_key {
         for rule in &table.exact {
@@ -77,11 +86,19 @@ pub fn resolve_handler(
     }
 
     // 4. Unhandled
+    debug!("no handler matched, failure unhandled");
     Ok(None)
 }
 
 /// Map `ProcessTermination` and `AttemptOutcome` to a `FailureEvent`.
 pub fn classify_failure(outcome: &AttemptOutcome) -> Option<FailureEvent> {
+    let _span = info_span!(
+        "harness_classify_failure",
+        termination = %outcome.termination,
+        exit_code = outcome.exit_code,
+        attempt = outcome.attempt,
+    )
+    .entered();
     match outcome.termination {
         ProcessTermination::TimedOut => Some(FailureEvent::Timeout),
         ProcessTermination::Interrupted => None, // User canceled, no handler

@@ -2,7 +2,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
-use inquire::{Confirm, InquireError, Select, Text};
+use inquire::{Confirm, InquireError, Password, PasswordDisplayMode, Select, Text};
 
 use crate::config::{Config, RouteConfig, RouteProvider};
 
@@ -165,6 +165,7 @@ fn configure_provider(provider: &RouteProvider, route_name: Option<&str>) -> Res
         RouteProvider::Discord => configure_discord(),
         RouteProvider::DiscordWebhook => configure_discord_webhook(),
         RouteProvider::Slack => configure_slack(),
+        RouteProvider::SlackWebhook => configure_slack_webhook(),
         RouteProvider::Signal => configure_signal(),
         RouteProvider::WhatsApp => configure_whatsapp(),
         RouteProvider::Telegram => configure_telegram(),
@@ -306,6 +307,69 @@ fn configure_slack() -> Result<RouteConfig> {
         channel_id,
         bot_token,
         bot_token_env,
+    })
+}
+
+fn configure_slack_webhook() -> Result<RouteConfig> {
+    println!(
+        "\n{}",
+        styled(
+            "<dim>Slack Incoming Webhooks require the full webhook URL (https://hooks.slack.com/services/T.../B.../token).</dim>"
+        )
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>Create one under Slack app settings → Incoming Webhooks and pick a target channel.</dim>"
+        )
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>The URL binds both the channel and authentication — treat it as a secret.</dim>"
+        )
+    );
+
+    let use_env_var = Confirm::new("Load the webhook URL from an environment variable?")
+        .with_default(false)
+        .with_help_message(
+            "Select Yes to store only an env-var name in config; select No to enter the URL now (masked input).",
+        )
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    if use_env_var {
+        let webhook_url_env = Text::new("Environment variable for webhook URL:")
+            .with_default("SLACK_WEBHOOK_URL")
+            .with_help_message("The env var that holds your Slack webhook URL")
+            .prompt()
+            .map_err(handle_cancel)?;
+
+        return Ok(RouteConfig::SlackWebhook {
+            webhook_url: None,
+            webhook_url_env,
+        });
+    }
+
+    let webhook_url = Password::new("Webhook URL:")
+        .with_display_mode(PasswordDisplayMode::Masked)
+        .with_help_message("Full Slack webhook URL — treated as a secret and will not be echoed")
+        .without_confirmation()
+        .with_validator(|input: &str| {
+            if input.trim().is_empty() {
+                Ok(inquire::validator::Validation::Invalid(
+                    "Webhook URL cannot be empty.".into(),
+                ))
+            } else {
+                Ok(inquire::validator::Validation::Valid)
+            }
+        })
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    Ok(RouteConfig::SlackWebhook {
+        webhook_url: Some(webhook_url),
+        webhook_url_env: "SLACK_WEBHOOK_URL".into(),
     })
 }
 
