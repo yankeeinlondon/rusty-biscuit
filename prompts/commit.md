@@ -72,8 +72,6 @@ Your task is to:
    - provide the subagent the grouped files and the delta's in these files
    - provide the subagent the "operation" and "scope" (including no scope if that's the determination)
       - tell the subagent to run `sniff git commits` for examples of real commits in this repo
-      - **CRITICAL - File Limiting:** Git does NOT limit a commit to specific files when you use `git commit -- path`. If other files are staged, git will commit ALL staged files! To commit only specific files:
-          - use `git commit -m "message" -- path1 path2` ONLY when you are certain only those files are staged
       - **Commit Message Format:** Messages must follow this structure:
           - First line: Brief summary (under 72 chars)
           - Blank line
