@@ -4,6 +4,25 @@ created: 2026-04-19
 start_phase: 1
 packages:
   - messenger
+source_files_during_phase_1:
+  - messenger/lib/src/attachment.rs
+  - messenger/lib/src/capabilities.rs
+  - messenger/lib/src/message.rs
+  - messenger/lib/src/prepared.rs
+  - messenger/lib/src/provider/discord.rs
+  - messenger/lib/src/provider/discord_webhook.rs
+  - messenger/lib/src/provider/signal.rs
+  - messenger/lib/src/provider/slack.rs
+  - messenger/lib/src/provider/slack_webhook.rs
+  - messenger/lib/src/provider/telegram.rs
+  - messenger/lib/src/provider/whatsapp.rs
+  - messenger/lib/src/tests/builders.rs
+  - messenger/lib/src/tests/discord_webhook_integration.rs
+  - messenger/lib/src/tests/validation.rs
+  - messenger/lib/src/validate.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Desktop Notifications Execution Plan
