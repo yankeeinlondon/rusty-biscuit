@@ -72,6 +72,15 @@ docs_updated_during_phase_6:
   - darkmatter/features/2026-04-20-better-errors/review-plan-1.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase6: []
+source_files_during_phase_7:
+  - darkmatter/cli/src/commands.rs
+  - darkmatter/cli/tests/cli.rs
+docs_updated_during_phase_7:
+  - darkmatter/docs/error-rendering.md
+  - biscuit-terminal/README.md
+  - darkmatter/features/2026-04-20-better-errors/review-plan-1.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase7: []
 packages:
   - darkmatter
 ---
