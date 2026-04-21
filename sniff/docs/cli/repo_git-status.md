@@ -76,6 +76,8 @@ Status lines are listed in this order: conflicted files, recent commits, staged 
 - **Unstaged** — rendered in yellow: `unstaged(<action>): [dir/]<filename>` with diff stats
 - **Untracked** — rendered in dim grey: `untracked: [dir/]<filename>`
 
+Each displayed file path is rendered as an OSC8 hyperlink targeting the file's absolute path. In `--plain` mode, the hyperlink markup is stripped and the same visible text remains.
+
 Diff stats appear as `<N added, M removed>` and are omitted for created or deleted files.
 
 When there are no changes at all, the section shows `No changes` in dim text.

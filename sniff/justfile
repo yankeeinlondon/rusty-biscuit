@@ -8,6 +8,7 @@ import "../just/plan.just"
 import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
+import "../just/spec.just"
 import "../just/devops.just"
 
 BOLD := '\033[1m'

@@ -44,7 +44,7 @@ These flags apply to all `sniff repo` subcommands:
 
 | Subcommand | Description |
 |------------|-------------|
-| [`packages`](./repo_packages.md) | All package names as a comma-separated list |
+| [`packages`](./repo_packages.md) | All package names (CSV, `--md`, or `--list`); `--package-area` scopes by area |
 | [`package`](./repo_package.md) | Package name of the current directory |
 | [`package-area`](./repo_package-area.md) | Package area (top-level directory) of the current directory |
 | [`dirty-packages`](./repo_dirty-packages.md) | Packages with uncommitted changes |

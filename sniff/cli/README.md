@@ -133,7 +133,11 @@ sniff repo hash HEAD                 # Show latest commit details
 sniff repo remote origin             # Inspect remote repository
 sniff repo deps                      # Text dependency list
 sniff repo deps --ui                 # Mermaid dependency diagram
-sniff repo packages                  # List all package names
+sniff repo packages                  # List all package names (CSV)
+sniff repo packages --md             # Markdown unordered list
+sniff repo packages --list           # Raw list (one per line)
+sniff repo packages --package-area A # Restrict to a single area
+sniff repo packages --verbose        # Annotate each entry with its root dir
 sniff repo package                   # Package name for current directory
 sniff repo package-area              # Package area for current directory
 sniff repo dirty-packages            # Packages with uncommitted changes
