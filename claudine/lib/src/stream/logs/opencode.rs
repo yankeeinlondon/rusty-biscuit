@@ -339,6 +339,102 @@ fn detect_asset_suffix(value: &str) -> Option<AssetType> {
     }
 }
 
+fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
+    let error_tag = match record.tags.get("error") {
+        Some(tag) => tag,
+        None => return String::new(),
+    };
+
+    let root: serde_json::Value = match serde_json::from_str(error_tag) {
+        Ok(v) => v,
+        Err(_) => return String::new(),
+    };
+
+    let envelope = root.get("error").unwrap_or(&root);
+
+    let error_name = envelope
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let status_code = envelope
+        .get("statusCode")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            envelope
+                .get("errors")
+                .and_then(|errors| errors.get(0))
+                .and_then(|e| e.get("statusCode"))
+                .and_then(|v| v.as_u64())
+        })
+        .or_else(|| {
+            envelope
+                .get("lastError")
+                .and_then(|e| e.get("statusCode"))
+                .and_then(|v| v.as_u64())
+        });
+
+    let provider_message = extract_provider_message(envelope);
+
+    let mut parts = Vec::new();
+
+    if let Some(code) = status_code {
+        parts.push(format!("{error_name} ({code})"));
+    } else {
+        parts.push(error_name.to_string());
+    }
+
+    if let Some(msg) = &provider_message {
+        parts.push(msg.clone());
+    }
+
+    parts.join(": ")
+}
+
+fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
+    if let Some(msg) = envelope.get("message").and_then(|v| v.as_str())
+        && !msg.is_empty()
+    {
+        return Some(msg.to_string());
+    }
+
+    for source in ["errors", "lastError"] {
+        let owned;
+        let entries: Option<&Vec<serde_json::Value>> = match source {
+            "errors" => envelope.get("errors").and_then(|v| v.as_array()),
+            _ => {
+                owned = envelope.get(source).map(|v| vec![v.clone()]).unwrap_or_default();
+                Some(&owned)
+            }
+        };
+        if let Some(arr) = entries {
+            for entry in arr {
+                if let Some(body_str) = entry.get("responseBody").and_then(|v| v.as_str()) {
+                    if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str)
+                        && let Some(msg) = body
+                            .get("error")
+                            .and_then(|e| e.get("message"))
+                            .and_then(|v| v.as_str())
+                        && !msg.is_empty()
+                    {
+                        return Some(msg.to_string());
+                    }
+                    if !body_str.is_empty() {
+                        return Some(body_str.to_string());
+                    }
+                }
+                if let Some(msg) = entry.get("message").and_then(|v| v.as_str())
+                    && !msg.is_empty()
+                {
+                    return Some(msg.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<LogClassification> {
     let haystack = record.raw.as_str();
 
@@ -348,7 +444,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
     ) || (service == "llm" && haystack.contains("fetch failed"))
     {
         return Some(LogClassification::AuthFailure {
-            message: haystack.to_string(),
+            message: summarize_error_json(record),
         });
     }
 
@@ -378,7 +474,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         return Some(LogClassification::ApiFailure {
             status_code: extract_status_code(haystack),
             error_name: "AI_APICallError".to_string(),
-            message: haystack.to_string(),
+            message: summarize_error_json(record),
         });
     }
 
@@ -754,6 +850,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         extra_map.insert("error_name".into(), Value::String(error_name.clone()));
         if let Some(code) = status_code {
             extra_map.insert("status_code".into(), json!(code));
+        }
+        if let Some(raw_error) = record.tags.get("error") {
+            extra_map.insert("raw_error".into(), Value::String(raw_error.clone()));
         }
 
         let rendered = if !message.is_empty() {
