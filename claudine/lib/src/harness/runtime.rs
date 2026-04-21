@@ -2,13 +2,21 @@
 
 use crate::harness::model::{AttemptOutcome, ProcessTermination};
 use crate::stream::summary::StreamExecutionSummary;
+use tracing::info_span;
 
-/// Build an [`AttemptOutcome`] from a stream execution summary and termination info.
 pub fn build_attempt_outcome(
     attempt: u32,
     summary: &StreamExecutionSummary,
     termination: ProcessTermination,
 ) -> AttemptOutcome {
+    let _span = info_span!(
+        "harness_attempt_outcome",
+        attempt,
+        termination = %termination,
+        exit_code = summary.exit_code,
+        has_session_id = summary.session_id.is_some(),
+    )
+    .entered();
     AttemptOutcome {
         attempt,
         session_id: summary.session_id.clone(),

@@ -8,6 +8,7 @@ use std::path::Path;
 
 use indexmap::IndexMap;
 use serde_json::Value;
+use tracing::debug;
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
@@ -202,7 +203,7 @@ pub fn parse_harness_plan(
     // Parse handlers
     let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx)?;
 
-    Ok(HarnessPlan {
+    let plan = HarnessPlan {
         source_path: source_path.to_path_buf(),
         timeout,
         step_timeout,
@@ -212,7 +213,15 @@ pub fn parse_harness_plan(
         post_checks,
         handlers,
         programmatic_handler,
-    })
+    };
+    debug!(
+        source = %source_path.display(),
+        pre_checks = plan.pre_checks.len(),
+        post_checks = plan.post_checks.len(),
+        timeout_secs = plan.timeout.map(|d| d.as_secs()),
+        "parsed harness plan",
+    );
+    Ok(plan)
 }
 
 /// Create a system-owned `has_write_permission` pre-check rule for the

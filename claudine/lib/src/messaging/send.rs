@@ -406,6 +406,7 @@ fn provider_kind_label(kind: &ProviderKind) -> &'static str {
         ProviderKind::Signal => "signal",
         ProviderKind::WhatsApp => "whatsapp",
         ProviderKind::Telegram => "telegram",
+        ProviderKind::SlackWebhook => "slack_webhook",
     }
 }
 

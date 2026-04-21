@@ -32,7 +32,7 @@ sequence:
 ::end-block
 
 ::block when="state=='suggestions_windows'"
-::file @prompts/implement-review-suggestions.md dir="{{dir}}" design="window-design.md" review="windows-review" iteration=1
+::file @prompts/implement-feature-review-suggestions.md dir="{{dir}}" design="window-design.md" review="windows-review" iteration=1
 ::end-block
 
 ::block when="state=='review_2_windows'"
@@ -40,7 +40,7 @@ sequence:
 ::end-block
 
 ::block when="state=='suggestions_2_windows'"
-::file @prompts/implement-review-suggestions.md dir="{{dir}}" design="window-design.md" review="windows-review" iteration=2
+::file @prompts/implement-feature-review-suggestions.md dir="{{dir}}" design="window-design.md" review="windows-review" iteration=2
 ::end-block
 
 ::block when="state=='implement_linux'"
@@ -54,7 +54,7 @@ sequence:
 ::end-block
 
 ::block when="state=='suggestions_linux'"
-::file @prompts/implement-review-suggestions.md dir="{{dir}}" design="linux-design.md" review="linux-review" iteration=1
+::file @prompts/implement-feature-review-suggestions.md dir="{{dir}}" design="linux-design.md" review="linux-review" iteration=1
 ::end-block
 
 ::block when="state=='review_2_linux'"
@@ -62,7 +62,7 @@ sequence:
 ::end-block
 
 ::block when="state=='suggestions_2_linux'"
-::file @prompts/implement-review-suggestions.md dir="{{dir}}" design="linux-design.md" review="linux-review" iteration=2
+::file @prompts/implement-feature-review-suggestions.md dir="{{dir}}" design="linux-design.md" review="linux-review" iteration=2
 ::end-block
 
 ::block when="state=='commit'"

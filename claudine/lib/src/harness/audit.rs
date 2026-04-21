@@ -3,6 +3,8 @@
 //! Collects all auditable commands from a `HarnessPlan` and optional source
 //! page text, then runs each through shell policy without executing it.
 
+use tracing::{debug, info_span};
+
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     AuditedCommand, AuditedCommandSource, HandlerAction, HarnessPlan, ShellAuditOutcome,
@@ -101,7 +103,10 @@ pub fn audit_shell_commands(
     commands: &[AuditedCommand],
     options: &ShellApprovalOptions,
 ) -> ShellAuditReport {
-    let outcomes = commands
+    let command_count = commands.len();
+    let _span = info_span!("harness_audit", command_count).entered();
+
+    let outcomes: Vec<_> = commands
         .iter()
         .map(|cmd| {
             let parts: Vec<String> = std::iter::once(cmd.executable.clone())
@@ -113,40 +118,61 @@ pub fn audit_shell_commands(
             );
 
             match result {
-                Ok(_) => ShellAuditOutcome {
-                    command: cmd.clone(),
-                    passed: true,
-                    message: format!("<green-500>{}</green-500> approved", prose_escape(&cmd.raw)),
-                },
-                Err(HarnessError::ShellCommandDenied { .. }) => ShellAuditOutcome {
-                    command: cmd.clone(),
-                    passed: false,
-                    message: format!(
-                        "<red-500>{}</red-500> denied by policy",
-                        prose_escape(&cmd.raw)
-                    ),
-                },
-                Err(HarnessError::ShellCommandBlacklisted { reason, .. }) => ShellAuditOutcome {
-                    command: cmd.clone(),
-                    passed: false,
-                    message: format!(
-                        "<red-500>{}</red-500> blacklisted: {}",
-                        prose_escape(&cmd.raw),
-                        prose_escape(&reason),
-                    ),
-                },
-                Err(e) => ShellAuditOutcome {
-                    command: cmd.clone(),
-                    passed: false,
-                    message: format!(
-                        "<red-500>{}</red-500> audit error: {}",
-                        prose_escape(&cmd.raw),
-                        prose_escape(&e.to_string()),
-                    ),
-                },
+                Ok(_) => {
+                    debug!(command = %cmd.raw, "audit approved");
+                    ShellAuditOutcome {
+                        command: cmd.clone(),
+                        passed: true,
+                        message: format!("<green-500>{}</green-500> approved", prose_escape(&cmd.raw)),
+                    }
+                }
+                Err(HarnessError::ShellCommandDenied { .. }) => {
+                    debug!(command = %cmd.raw, "audit denied by policy");
+                    ShellAuditOutcome {
+                        command: cmd.clone(),
+                        passed: false,
+                        message: format!(
+                            "<red-500>{}</red-500> denied by policy",
+                            prose_escape(&cmd.raw)
+                        ),
+                    }
+                }
+                Err(HarnessError::ShellCommandBlacklisted { reason, .. }) => {
+                    debug!(command = %cmd.raw, reason = %reason, "audit blacklisted");
+                    ShellAuditOutcome {
+                        command: cmd.clone(),
+                        passed: false,
+                        message: format!(
+                            "<red-500>{}</red-500> blacklisted: {}",
+                            prose_escape(&cmd.raw),
+                            prose_escape(&reason),
+                        ),
+                    }
+                }
+                Err(e) => {
+                    debug!(command = %cmd.raw, error = %e, "audit error");
+                    ShellAuditOutcome {
+                        command: cmd.clone(),
+                        passed: false,
+                        message: format!(
+                            "<red-500>{}</red-500> audit error: {}",
+                            prose_escape(&cmd.raw),
+                            prose_escape(&e.to_string()),
+                        ),
+                    }
+                }
             }
         })
         .collect();
+
+    let passed_count = outcomes.iter().filter(|o| o.passed).count();
+    let failed_count = outcomes.len() - passed_count;
+    debug!(
+        total = outcomes.len(),
+        passed = passed_count,
+        failed = failed_count,
+        "audit complete"
+    );
 
     ShellAuditReport { outcomes }
 }

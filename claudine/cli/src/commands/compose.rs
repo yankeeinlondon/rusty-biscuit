@@ -15,6 +15,7 @@ use claudine::composition::{
 use claudine::events::Provider;
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
+use tracing::info_span;
 
 use super::wrap::composition::execute_composition_request;
 use crate::log;
@@ -278,6 +279,14 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 
     let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
 
+    let _compose_span = info_span!(
+        "compose",
+        file = %source.resolved_path.display(),
+        provider = ?shared.explicit_provider(),
+        interactive = shared.interactive,
+    )
+    .entered();
+
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
@@ -367,13 +376,18 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         None
     };
 
-    // -- Pre-validation: file resolution ------------------------------------
-
     let source = match composition::resolve_composition_source(&file) {
         Ok(source) => {
             if let Some(ref t) = term {
                 claudine::harness::report::report_source_file(&file, &source.resolved_path, t);
             }
+            let _inline_span = info_span!(
+                "inline_compose",
+                file = %source.resolved_path.display(),
+                provider = ?shared.explicit_provider(),
+                interactive = shared.interactive,
+            )
+            .entered();
             source
         }
         Err(e) => {
