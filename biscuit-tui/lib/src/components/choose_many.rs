@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent};
+use rand::seq::SliceRandom;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -72,6 +73,9 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     /// The selection mode is forced to [`SelectionMode::Multiple`].
     pub fn new(mut input: ChoiceInput<V>) -> Self {
         input.selection_mode = SelectionMode::Multiple;
+        if input.shuffle_options {
+            input.options.shuffle(&mut rand::rng());
+        }
         let selected = vec![false; input.options.len()];
         let hotkeys = build_hotkeys(&input.options);
         let hover = first_enabled_index(&input.options).unwrap_or(0);
@@ -948,5 +952,42 @@ mod tests {
             found_disabled,
             "Did not find disabled label 'Disabled' in buffer"
         );
+    }
+
+    #[test]
+    fn shuffle_randomises_order_choose_many() {
+        let options: Vec<ChoiceOption<String>> = (0..20)
+            .map(|i| ChoiceOption::new(format!("id{i}"), format!("Option {i}"), format!("value{i}")))
+            .collect();
+        let original_labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
+        let input = ChoiceInput::new("x", "P")
+            .with_shuffle_options(true)
+            .with_options(options);
+        let state = ChooseManyState::new(input);
+        let shuffled_labels: Vec<&str> = state.options().iter().map(|o| o.label.as_str()).collect();
+        let same_set: std::collections::HashSet<&str> = shuffled_labels.iter().copied().collect();
+        let original_set: std::collections::HashSet<&str> =
+            original_labels.iter().map(|s| s.as_str()).collect();
+        assert_eq!(same_set, original_set);
+        assert_ne!(
+            shuffled_labels,
+            original_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            "With 20 options it is astronomically unlikely the order is unchanged"
+        );
+    }
+
+    #[test]
+    fn shuffle_then_select_choose_many() {
+        let options: Vec<ChoiceOption<String>> = (0..10)
+            .map(|i| ChoiceOption::new(format!("id{i}"), format!("Opt{i}"), format!("val{i}")))
+            .collect();
+        let input = ChoiceInput::new("x", "P")
+            .with_shuffle_options(true)
+            .with_options(options);
+        let mut state = ChooseManyState::new(input);
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert!(state.is_selected(0));
+        let values = state.selected_values();
+        assert_eq!(values.len(), 1);
     }
 }

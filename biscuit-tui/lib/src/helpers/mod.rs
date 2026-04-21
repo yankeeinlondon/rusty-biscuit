@@ -7,6 +7,7 @@
 pub mod choice_builders;
 
 pub use choice_builders::{
-    ChoiceBuilderError, choose_many_from_csv, choose_many_from_markdown_list, choose_one_from_csv,
-    choose_one_from_dictionary, choose_one_from_markdown_list,
+    ChoiceBuilderError, choose_many_from_csv, choose_many_from_dictionary,
+    choose_many_from_markdown_list, choose_one_from_csv, choose_one_from_dictionary,
+    choose_one_from_markdown_list,
 };

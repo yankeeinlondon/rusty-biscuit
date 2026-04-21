@@ -120,6 +120,9 @@ pub struct ChoiceInput<V = String> {
     pub min_selections: Option<usize>,
     /// Maximum selections (only honoured by `ChooseMany`).
     pub max_selections: Option<usize>,
+    /// When `true`, the option order is randomised when the state is
+    /// built.
+    pub shuffle_options: bool,
 }
 
 impl<V> ChoiceInput<V> {
@@ -134,6 +137,7 @@ impl<V> ChoiceInput<V> {
             required: false,
             min_selections: None,
             max_selections: None,
+            shuffle_options: false,
         }
     }
 
@@ -170,6 +174,12 @@ impl<V> ChoiceInput<V> {
     /// Sets `max_selections` (only meaningful for `Multiple` mode).
     pub fn with_max_selections(mut self, max: usize) -> Self {
         self.max_selections = Some(max);
+        self
+    }
+
+    /// Sets `shuffle_options`.
+    pub fn with_shuffle_options(mut self, shuffle: bool) -> Self {
+        self.shuffle_options = shuffle;
         self
     }
 }
@@ -219,6 +229,7 @@ mod tests {
         assert!(!input.required);
         assert!(input.min_selections.is_none());
         assert!(input.max_selections.is_none());
+        assert!(!input.shuffle_options);
     }
 
     #[test]
@@ -229,6 +240,7 @@ mod tests {
             .with_min_selections(1)
             .with_max_selections(3)
             .with_help_text("Choose wisely")
+            .with_shuffle_options(true)
             .with_options(vec![ChoiceOption::new("r", "Red", "red")]);
         assert_eq!(input.selection_mode, SelectionMode::Multiple);
         assert!(input.required);
@@ -236,5 +248,6 @@ mod tests {
         assert_eq!(input.max_selections, Some(3));
         assert_eq!(input.help_text.as_deref(), Some("Choose wisely"));
         assert_eq!(input.options.len(), 1);
+        assert!(input.shuffle_options);
     }
 }
