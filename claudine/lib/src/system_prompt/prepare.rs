@@ -1,5 +1,6 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
+use tracing::info_span;
 
 use crate::system_prompt::types::*;
 
@@ -113,6 +114,12 @@ pub fn resolve_and_prepare_for_session(
     context: &crate::system_prompt::context::LaunchContext,
     non_interactive: bool,
 ) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
+    let _span = info_span!(
+        "system_prompt_prepare",
+        non_interactive,
+        repo = %context.repo_root.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+    )
+    .entered();
     let effective =
         match crate::system_prompt::resolve::resolve_system_prompt_source(args, context)? {
             Some((source, raw_text)) => prepare_system_prompt(source, &raw_text)?,

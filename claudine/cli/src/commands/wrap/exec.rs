@@ -651,7 +651,7 @@ fn wait_with_signal_handling(
 /// stderr-bridge channel. When a signal arrives, the child's process group
 /// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
 /// period. User Ctrl-C still reports `Interrupted`; wrapper-driven early
-/// termination (rate-limit recovery, silent-stall recovery) preserves a
+/// termination (rate-limit recovery) preserves a
 /// normal `Completed` termination so downstream failure handling can inspect
 /// synthesized summary fields instead of treating the run like a user cancel.
 ///
@@ -665,7 +665,6 @@ fn wait_with_signal_and_early_termination(
     early_rx: Receiver<EarlyTermination>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
-    silent_stall_threshold: Duration,
     wall_clock_timeout: Option<Duration>,
     step_timeout: Option<Duration>,
 ) -> Result<(
@@ -789,14 +788,8 @@ fn wait_with_signal_and_early_termination(
                 metrics,
                 Instant::now(),
                 stop_threshold,
-                silent_stall_threshold,
             )
         {
-            tracing::warn!(
-                child_pid,
-                early_termination = ?signal,
-                "OpenCode silent-stall recovery triggered; sending SIGTERM to child process group",
-            );
             let kill_pid = if child_in_own_pgroup {
                 -(child_pid as i32)
             } else {
@@ -866,7 +859,6 @@ fn wait_with_signal_and_early_termination(
     early_rx: Receiver<EarlyTermination>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
-    silent_stall_threshold: Duration,
     wall_clock_timeout: Option<Duration>,
     step_timeout: Option<Duration>,
 ) -> Result<(
@@ -923,7 +915,6 @@ fn wait_with_signal_and_early_termination(
                 metrics,
                 Instant::now(),
                 stop_threshold,
-                silent_stall_threshold,
             )
         {
             let _ = child.kill();
@@ -987,12 +978,6 @@ fn apply_early_termination_to_summary(
             summary.is_error = false;
             summary.error_kind = None;
             summary.error_message = None;
-        }
-        EarlyTermination::SilentStall { message } => {
-            summary.exit_code = 1;
-            summary.is_error = true;
-            summary.error_kind = Some("provider_stalled".into());
-            summary.error_message = Some(message.clone());
         }
         EarlyTermination::StepTimeout { message } => {
             summary.exit_code = 1;
@@ -1534,17 +1519,6 @@ fn instant_to_local(
 /// first, then OpenCode gets additional time to recover before Claudine
 /// kills the hung process group. Invalid or non-positive values fall back to
 /// 5 minutes.
-fn opencode_hang_threshold_from_env() -> Duration {
-    match std::env::var("CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|secs| *secs > 0)
-    {
-        Some(secs) => Duration::from_secs(secs),
-        None => Duration::from_secs(300),
-    }
-}
-
 /// Format a duration in seconds for internal early-termination messages.
 ///
 /// Used by the step-silence and OpenCode-hang detectors to compose their
@@ -1595,7 +1569,6 @@ fn detect_opencode_hang_termination(
     metrics: &LiveMetrics,
     now: Instant,
     stop_threshold: Duration,
-    silent_stall_threshold: Duration,
 ) -> Option<EarlyTermination> {
     let state = metrics.lock().ok()?;
     let last_event_at = state.last_event_at?;
@@ -1614,14 +1587,6 @@ fn detect_opencode_hang_termination(
         });
     }
 
-    if silence >= silent_stall_threshold {
-        return Some(EarlyTermination::SilentStall {
-            message: format!(
-                "OpenCode produced no activity for {silence_text}; terminating hung process"
-            ),
-        });
-    }
-
     None
 }
 
@@ -1635,7 +1600,7 @@ fn early_termination_process_outcome(
         Some(EarlyTermination::CompletedButHung { .. }) => {
             claudine::harness::ProcessTermination::Completed
         }
-        Some(EarlyTermination::RateLimit { .. } | EarlyTermination::SilentStall { .. }) => {
+        Some(EarlyTermination::RateLimit { .. }) => {
             claudine::harness::ProcessTermination::Completed
         }
         None => claudine::harness::ProcessTermination::Completed,
@@ -1939,15 +1904,9 @@ pub(crate) fn run_child_stream_semantic(
         stdin_pipe.write_all(seed.as_bytes())?;
     }
 
-    // OpenCode silent-stall recovery has two thresholds:
-    // `opencode_stop_threshold` is the post-"stop" grace window, kept at
-    // the previous 120s default so provider kill behavior does not shift
-    // with this feature; `opencode_silent_stall_threshold` is the hard
-    // "any silence" budget (defaults to five minutes, overridable via
-    // `CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS`). Neither drives a
-    // user-visible timing line.
+    // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"
+    // grace window (120s). It does not drive a user-visible timing line.
     let opencode_stop_threshold = Duration::from_secs(120);
-    let opencode_silent_stall_threshold = opencode_hang_threshold_from_env();
     let wall_clock_timeout = timeout.map(Duration::from_secs);
     let step_timeout_duration = step_timeout.map(Duration::from_secs);
     let needs_advanced_wait = wall_clock_timeout.is_some()
@@ -1967,7 +1926,6 @@ pub(crate) fn run_child_stream_semantic(
             rx,
             Some(wait_loop_metrics),
             opencode_stop_threshold,
-            opencode_silent_stall_threshold,
             wall_clock_timeout,
             step_timeout_duration,
         )?
@@ -1978,7 +1936,6 @@ pub(crate) fn run_child_stream_semantic(
 
     if let Some(
         EarlyTermination::CompletedButHung { message }
-        | EarlyTermination::SilentStall { message }
         | EarlyTermination::StepTimeout { message },
     ) = early_termination.as_ref()
     {
@@ -2482,29 +2439,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_early_termination_silent_stall_sets_provider_stalled_error() {
-        let mut summary = StreamExecutionSummary::default();
-
-        apply_early_termination_to_summary(
-            &mut summary,
-            &EarlyTermination::SilentStall {
-                message: "OpenCode produced no activity for 5m".into(),
-            },
-        );
-
-        assert_eq!(summary.exit_code, 1);
-        assert!(summary.is_error);
-        assert_eq!(summary.error_kind.as_deref(), Some("provider_stalled"));
-        assert!(
-            summary
-                .error_message
-                .as_deref()
-                .unwrap_or("")
-                .contains("no activity"),
-        );
-    }
-
-    #[test]
     fn detect_opencode_hang_termination_recovers_after_stop_reason() {
         let metrics = claudine::stream::progress::new_live_metrics();
         let now = Instant::now();
@@ -2518,34 +2452,11 @@ mod tests {
             &metrics,
             now,
             Duration::from_secs(120),
-            Duration::from_secs(300),
         );
 
         assert!(matches!(
             detected,
             Some(EarlyTermination::CompletedButHung { .. })
-        ));
-    }
-
-    #[test]
-    fn detect_opencode_hang_termination_reports_generic_silent_stall() {
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let now = Instant::now();
-        {
-            let mut state = metrics.lock().unwrap();
-            state.last_event_at = Some(now - Duration::from_secs(360));
-        }
-
-        let detected = detect_opencode_hang_termination(
-            &metrics,
-            now,
-            Duration::from_secs(120),
-            Duration::from_secs(300),
-        );
-
-        assert!(matches!(
-            detected,
-            Some(EarlyTermination::SilentStall { .. })
         ));
     }
 

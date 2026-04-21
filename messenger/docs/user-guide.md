@@ -10,12 +10,13 @@ The outbound send model in `messenger` is provider API credentials plus an expli
 
 - Discord (bot): bot token + channel ID
 - Discord (webhook): full webhook URL (binds channel + authentication)
-- Slack: bot token + channel ID
+- Slack (bot): bot token + channel ID
+- Slack (webhook): full webhook URL (binds channel + authentication)
 - Signal: JSON-RPC URL + account + recipient/group ID
 - WhatsApp: Cloud API credentials + recipient phone number
 - Telegram: bot token + chat ID
 
-Discord ships with two distinct adapters: a bot-token adapter (full capability, replies supported) and a webhook adapter (notification-only, no replies). Slack is modeled only as a bot-token adapter; `messenger` does not currently send via Slack incoming webhooks.
+Discord and Slack each ship with two distinct adapters: a bot-token adapter (full capability, replies supported) and a webhook adapter (notification-only, no attachments, receipts are not addressable).
 
 ### Discord (Bot)
 
@@ -70,7 +71,7 @@ Prefer a Discord **webhook** over a bot when you only need one-way notifications
 
 ---
 
-### Slack
+### Slack (Bot)
 
 **What you need:**
 
@@ -91,6 +92,36 @@ Prefer a Discord **webhook** over a bot when you only need one-way notifications
 - [chat.postMessage Reference](https://api.slack.com/methods/chat.postMessage)
 
 **Environment variable:** `SLACK_BOT_TOKEN`
+
+---
+
+### Slack (Webhook)
+
+Prefer a Slack **incoming webhook** over a bot when you only need one-way notifications into a specific channel: no Slack app token management is required, and the permission model is simpler (just "Incoming Webhooks"). The tradeoff is capability — webhooks cannot upload files, and the Slack response does not include a message ID, so webhook receipts cannot be used for richer downstream follow-up.
+
+**What you need:**
+
+- A **Webhook URL** of the form `https://hooks.slack.com/services/T.../B.../<token>`. This single URL binds both the target channel and the authentication token — there is no separate channel ID field.
+
+**Account setup:**
+
+1. Go to [Slack API: Your Apps](https://api.slack.com/apps), open your app (or create one), and enable **Incoming Webhooks**.
+2. Click **Add New Webhook to Workspace**, pick the target channel, and copy the webhook URL.
+3. Treat the URL as a secret: anyone with it can post to the channel.
+
+**Helpful resources:**
+
+- [Slack Incoming Webhooks Guide](https://api.slack.com/messaging/webhooks)
+
+**Capability notes:**
+
+- Markdown rendering: supported (uses the same Slack mrkdwn renderer as the bot adapter).
+- Attachments: **not supported** — file uploads require the Web API.
+- Replies: supported. The reply thread is driven by `MessageRef::SlackWebhook { thread_ts: Some(...) }` on the dispatch's `reply_to`. Webhook responses do not return a `thread_ts`, so a webhook send cannot be replied to using only its own receipt — the thread timestamp has to come from a Slack bot receipt or be supplied externally.
+- Link preview suppression: supported via `dispatch.options.disable_link_preview`.
+- Receipts: `raw_id` is always empty and `message_ref.thread_ts` is `None`. Successful sends are recorded with `metadata["delivery_confirmed"] = "true"`, but there is no message ID to address later.
+
+**Environment variable:** `SLACK_WEBHOOK_URL`
 
 ---
 
@@ -192,7 +223,7 @@ Prefer a Discord **webhook** over a bot when you only need one-way notifications
 
 The CLI stores its configuration at `~/.messenger.json`. The `messenger setup` command creates and updates this file interactively.
 
-The config examples below intentionally follow the implemented transport models: bot-token-plus-channel for Discord (bot) and Slack, webhook-URL-only for Discord (webhook), recipient-based API sends for Signal and WhatsApp, and bot-token-plus-chat for Telegram.
+The config examples below intentionally follow the implemented transport models: bot-token-plus-channel for Discord (bot) and Slack (bot), webhook-URL-only for Discord (webhook) and Slack (webhook), recipient-based API sends for Signal and WhatsApp, and bot-token-plus-chat for Telegram.
 
 ### Config Schema
 
@@ -204,6 +235,10 @@ The config examples below intentionally follow the implemented transport models:
       "provider": "slack",
       "channel_id": "C012345ABC",
       "bot_token_env": "SLACK_BOT_TOKEN"
+    },
+    "slack.deploys": {
+      "provider": "slack-webhook",
+      "webhook_url_env": "SLACK_WEBHOOK_URL"
     },
     "discord.alerts": {
       "provider": "discord",
@@ -249,11 +284,14 @@ The config examples below intentionally follow the implemented transport models:
 | Discord | `provider`, `channel_id` | `bot_token`, `bot_token_env` |
 | Discord (webhook) | `provider` (`"discord-webhook"`) | `webhook_url`, `webhook_url_env` |
 | Slack | `provider`, `channel_id` | `bot_token`, `bot_token_env` |
+| Slack (webhook) | `provider` (`"slack-webhook"`) | `webhook_url`, `webhook_url_env` |
 | Signal | `provider`, `recipient` | `rpc_url`, `rpc_url_env`, `account`, `account_env` |
 | WhatsApp | `provider`, `recipient` | `access_token`, `access_token_env`, `phone_number_id`, `phone_number_id_env` |
 | Telegram | `provider`, `chat_id` | `bot_token`, `bot_token_env` |
 
 For `discord-webhook` routes, at least one of `webhook_url` or a resolvable `webhook_url_env` must be present at send time. The webhook URL is the single credential; there is no `channel_id` field because the URL already binds the channel.
+
+For `slack-webhook` routes, the same rule applies: at least one of `webhook_url` or a resolvable `webhook_url_env` must be present at send time. An empty or whitespace-only `webhook_url` is treated as absent and the CLI falls back to `webhook_url_env` (defaults to `SLACK_WEBHOOK_URL` when omitted).
 
 ### Secret Resolution
 
@@ -263,6 +301,31 @@ Each secret can be provided in two ways:
 2. **Environment variable** — referenced by name (e.g., `"bot_token_env": "SLACK_BOT_TOKEN"`)
 
 When both are present, the inline value takes priority. If neither is set, the CLI falls back to a default environment variable name per provider (see the table in [Platform Setup](#platform-setup)).
+
+### Discord Webhook Route Setup
+
+`messenger setup discord-webhook` follows the same secret-resolution model as the bot-token routes:
+
+1. Choose whether to store the webhook URL directly in `~/.messenger.json` or reference it via an environment variable.
+2. If you choose the env-var path, the default suggested variable is `DISCORD_WEBHOOK_URL`.
+3. The saved route contains only `webhook_url` or `webhook_url_env`; it never stores a `channel_id` because the webhook URL already selects the channel.
+
+Discord webhook thread routing is a dispatch-time concern, not a route field. CLI route config does not persist `thread_id`; library callers provide it with `Target::discord_webhook_thread(...)` when needed.
+
+### Slack Webhook Route Setup
+
+`messenger setup slack-webhook` follows the same secret-resolution model as the bot-token routes:
+
+1. Choose whether to store the webhook URL directly in `~/.messenger.json` or reference it via an environment variable.
+2. If you choose the direct-value path, the prompt uses masked input so the URL is not echoed and an empty value is rejected before the route is written.
+3. If you choose the env-var path, the default suggested variable is `SLACK_WEBHOOK_URL`.
+4. The saved route contains only `webhook_url` or `webhook_url_env`; it never stores a `channel_id` because the webhook URL already selects the channel.
+
+Key behavioral differences from the Slack bot route:
+
+- No file uploads: attachments are rejected or dropped per the usual compatibility rules.
+- Receipts have no message ID: `raw_id` is always empty and `message_ref.thread_ts` is `None` on success. A webhook receipt cannot be used on its own as the reply target of a later send.
+- Replies are still possible by supplying `--reply-to` from a Slack bot receipt or any other source that carries a Slack `thread_ts`.
 
 ### Receipt Storage
 
@@ -378,9 +441,9 @@ use secrecy::SecretString;
 async fn main() -> Result<(), messenger::MessengerError> {
     let mut messenger = Messenger::new();
 
-    messenger.register(Box::new(DiscordWebhookProvider::new(DiscordWebhookConfig {
+    messenger.register(Box::new(DiscordWebhookProvider::try_new(DiscordWebhookConfig {
         webhook_url: SecretString::from(std::env::var("DISCORD_WEBHOOK_URL").unwrap()),
-    })));
+    })?));
 
     let message = Message::markdown("**Deploy succeeded**");
 
@@ -397,6 +460,7 @@ async fn main() -> Result<(), messenger::MessengerError> {
 ```
 
 The webhook adapter does not support replies. Attempting `Dispatch::reply_to(...)` against a `Target::DiscordWebhook` causes `plan_send()`/`send()` to return `MessengerError::UnsupportedFeature` before any network call.
+The webhook adapter uses the same Discord markdown renderer as the bot adapter, so Markdown formatting is identical between the two Discord transports.
 
 ### Ad-hoc CLI Usage
 
@@ -414,8 +478,37 @@ messenger send --provider discord-webhook \
 | Discord | `DiscordConfig` | `bot_token: SecretString` |
 | Discord (webhook) | `DiscordWebhookConfig` | `webhook_url: SecretString` |
 | Slack | `SlackConfig` | `bot_token: SecretString` |
+| Slack (webhook) | `SlackWebhookConfig` | `webhook_url: SecretString` |
 | Signal | `SignalConfig` | `rpc_url: String`, `account: String` |
 | WhatsApp | `WhatsAppConfig` | `access_token: SecretString`, `phone_number_id: String` |
 | Telegram | `TelegramConfig` | `bot_token: SecretString` |
 
-All config structs except `DiscordConfig`, `DiscordWebhookConfig`, and `SignalConfig` have an optional `api_base_url: Option<String>` field for testing or proxy use. `WhatsAppConfig` also has an optional `api_version: Option<String>` (defaults to `v23.0`). `DiscordWebhookConfig` binds its endpoint through the `webhook_url` itself — tests point the provider at a mock server by crafting a URL against the mock's `uri()`.
+All config structs except `DiscordConfig`, `DiscordWebhookConfig`, `SlackWebhookConfig`, and `SignalConfig` have an optional `api_base_url: Option<String>` field for testing or proxy use. `WhatsAppConfig` also has an optional `api_version: Option<String>` (defaults to `v23.0`). `DiscordWebhookConfig` and `SlackWebhookConfig` bind their endpoints through the `webhook_url` itself; integration tests construct them through provider-specific test-only helpers that relax the runtime host validation so a wiremock server can stand in for the production host.
+
+### Slack Webhook Library Example
+
+```rust
+use messenger::prelude::*;
+use messenger::provider::slack_webhook::{SlackWebhookConfig, SlackWebhookProvider};
+use secrecy::SecretString;
+
+#[tokio::main]
+async fn main() -> Result<(), messenger::MessengerError> {
+    let mut messenger = Messenger::new();
+
+    messenger.register(Box::new(SlackWebhookProvider::try_new(SlackWebhookConfig {
+        webhook_url: SecretString::from(std::env::var("SLACK_WEBHOOK_URL").unwrap()),
+    })?));
+
+    let message = Message::markdown("**Deploy succeeded**");
+    let dispatch = Dispatch::to(Target::slack_webhook());
+
+    let receipt = messenger.send(dispatch, &message).await?;
+    // raw_id is "" and message_ref.thread_ts is None for webhook sends;
+    // successful delivery is confirmed via metadata["delivery_confirmed"] = "true".
+    println!("Delivered: {}", receipt.metadata.get("delivery_confirmed").cloned().unwrap_or_default());
+    Ok(())
+}
+```
+
+`SlackWebhookProvider::try_new` enforces production URL rules (https scheme, `hooks.slack.com` host, `/services/{T}/{B}/{token}` path). Malformed URLs return `MessengerError::InvalidMessage`; missing configuration is surfaced by the CLI resolution layer as `MessengerError::MissingConfiguration`.

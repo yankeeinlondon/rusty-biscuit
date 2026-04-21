@@ -46,7 +46,15 @@ implement-plan filter="":
     echo -e "- we will start with phase ${current}"
 
     agent="$(just _choose_agent)"
-    echo -e "Will call the {{bold}}${agent}{{reset}} agent to implement each phase"
+
+    model=""
+    if [[ "${agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
+        echo -e "Will call the {{bold}}${agent}{{reset}}({{dim}}${model}{{reset}}) agent to implement each phase"
+    else
+        echo -e "Will call the {{bold}}${agent}{{reset}} agent to implement each phase"
+    fi
+
     echo
     while true; do
         claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y

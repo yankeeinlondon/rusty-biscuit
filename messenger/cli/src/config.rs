@@ -26,6 +26,9 @@ pub enum RouteProvider {
     DiscordWebhook,
     #[value(name = "slack")]
     Slack,
+    #[serde(rename = "slack-webhook")]
+    #[value(name = "slack-webhook")]
+    SlackWebhook,
     #[value(name = "signal")]
     Signal,
     #[value(name = "whatsapp")]
@@ -35,10 +38,11 @@ pub enum RouteProvider {
 }
 
 impl RouteProvider {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Discord,
         Self::DiscordWebhook,
         Self::Slack,
+        Self::SlackWebhook,
         Self::Signal,
         Self::WhatsApp,
         Self::Telegram,
@@ -49,6 +53,7 @@ impl RouteProvider {
             Self::Discord => "discord",
             Self::DiscordWebhook => "discord-webhook",
             Self::Slack => "slack",
+            Self::SlackWebhook => "slack-webhook",
             Self::Signal => "signal",
             Self::WhatsApp => "whatsapp",
             Self::Telegram => "telegram",
@@ -82,6 +87,10 @@ pub enum RouteConfig {
         channel_id: String,
         bot_token: Option<String>,
         bot_token_env: String,
+    },
+    SlackWebhook {
+        webhook_url: Option<String>,
+        webhook_url_env: String,
     },
     Signal {
         recipient: String,
@@ -127,6 +136,13 @@ enum RouteConfigRepr {
         bot_token: Option<String>,
         #[serde(default = "default_slack_token_env")]
         bot_token_env: String,
+    },
+    #[serde(rename = "slack-webhook")]
+    SlackWebhook {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_url: Option<String>,
+        #[serde(default = "default_slack_webhook_url_env")]
+        webhook_url_env: String,
     },
     Signal {
         recipient: String,
@@ -180,6 +196,7 @@ impl RouteConfig {
             Self::Discord { .. } => RouteProvider::Discord,
             Self::DiscordWebhook { .. } => RouteProvider::DiscordWebhook,
             Self::Slack { .. } => RouteProvider::Slack,
+            Self::SlackWebhook { .. } => RouteProvider::SlackWebhook,
             Self::Signal { .. } => RouteProvider::Signal,
             Self::WhatsApp { .. } => RouteProvider::WhatsApp,
             Self::Telegram { .. } => RouteProvider::Telegram,
@@ -202,6 +219,10 @@ impl RouteConfig {
                 channel_id: target_id,
                 bot_token: None,
                 bot_token_env: default_slack_token_env(),
+            },
+            RouteProvider::SlackWebhook => Self::SlackWebhook {
+                webhook_url: Some(target_id),
+                webhook_url_env: default_slack_webhook_url_env(),
             },
             RouteProvider::Signal => Self::Signal {
                 recipient: target_id,
@@ -276,6 +297,13 @@ impl From<RouteConfigRepr> for RouteConfig {
                 bot_token,
                 bot_token_env,
             },
+            RouteConfigRepr::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => Self::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            },
             RouteConfigRepr::Signal {
                 recipient,
                 rpc_url,
@@ -343,6 +371,13 @@ impl From<RouteConfig> for RouteConfigRepr {
                 bot_token,
                 bot_token_env,
             },
+            RouteConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => Self::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            },
             RouteConfig::Signal {
                 recipient,
                 rpc_url,
@@ -405,6 +440,10 @@ impl From<LegacyRouteConfig> for RouteConfig {
                 bot_token: None,
                 bot_token_env: token_env.unwrap_or_else(default_slack_token_env),
             },
+            RouteProvider::SlackWebhook => Self::SlackWebhook {
+                webhook_url: None,
+                webhook_url_env: token_env.unwrap_or_else(default_slack_webhook_url_env),
+            },
             RouteProvider::Signal => Self::Signal {
                 recipient: value.channel_id,
                 rpc_url: None,
@@ -438,6 +477,10 @@ fn default_discord_webhook_url_env() -> String {
 
 fn default_slack_token_env() -> String {
     "SLACK_BOT_TOKEN".into()
+}
+
+fn default_slack_webhook_url_env() -> String {
+    "SLACK_WEBHOOK_URL".into()
 }
 
 fn default_signal_rpc_url_env() -> String {
@@ -601,6 +644,78 @@ mod tests {
             RouteConfig::DiscordWebhook {
                 webhook_url: None,
                 webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn slack_webhook_route_round_trips_with_both_fields() {
+        let cfg = RouteConfig::SlackWebhook {
+            webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: RouteConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn slack_webhook_route_round_trips_with_env_only() {
+        let cfg = RouteConfig::SlackWebhook {
+            webhook_url: None,
+            webhook_url_env: "CUSTOM_SLACK_WEBHOOK_URL".into(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: RouteConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, cfg);
+    }
+
+    #[test]
+    fn slack_webhook_route_applies_default_env_when_absent() {
+        let raw = r#"{"provider":"slack-webhook","webhook_url":"https://hooks.slack.com/services/T000/B000/XXXXX"}"#;
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            parsed,
+            RouteConfig::SlackWebhook {
+                webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn slack_webhook_route_applies_default_when_both_fields_absent() {
+        let raw = r#"{"provider":"slack-webhook"}"#;
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            parsed,
+            RouteConfig::SlackWebhook {
+                webhook_url: None,
+                webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn slack_webhook_route_reports_provider_kind() {
+        let route = RouteConfig::SlackWebhook {
+            webhook_url: None,
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        };
+        assert_eq!(route.provider(), RouteProvider::SlackWebhook);
+    }
+
+    #[test]
+    fn slack_webhook_route_builds_from_provider_and_target() {
+        let route = RouteConfig::from_provider_and_target(
+            RouteProvider::SlackWebhook,
+            "https://hooks.slack.com/services/T000/B000/XXXXX",
+        );
+        assert_eq!(
+            route,
+            RouteConfig::SlackWebhook {
+                webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".into(),
             }
         );
     }

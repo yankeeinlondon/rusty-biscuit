@@ -79,6 +79,175 @@ pub enum ImageRefError {
     },
 }
 
+impl biscuit_terminal::errors::BlockError for ImageRefError {
+    fn status_block(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::EmptySource => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "empty source"))
+                .body("Image source URL cannot be empty or whitespace-only.")
+                .hint("Pass a non-empty URL or path to <cyan>ImageRef::new</cyan>."),
+
+            Self::MissingSource => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "missing source"))
+                .body("Image reference must define either `src` or `srcset`.")
+                .hint("Set <cyan>src=\"...\"</cyan> or <cyan>srcset=\"...\"</cyan> on the image."),
+
+            Self::UnrecognizedFormat => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ImageRefError",
+                    "unrecognized image format",
+                ))
+                .body(
+                    "Input did not look like an HTML `<img ... />` tag or a Markdown `![alt](src)` reference.",
+                )
+                .hint(
+                    "Use <cyan>![alt](src \"title\")</cyan> for Markdown or <cyan>&lt;img src=\"...\" alt=\"...\" /&gt;</cyan> for HTML.",
+                ),
+
+            Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "malformed HTML image"))
+                .body(format!("<dim>Message:</dim> {message}"))
+                .hint(
+                    "Ensure the tag starts with <cyan>&lt;img</cyan> and ends with <cyan>&gt;</cyan> (self-closing is allowed).",
+                ),
+
+            Self::MalformedMarkdown(message) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ImageRefError",
+                    "malformed markdown image",
+                ))
+                .body(format!("<dim>Message:</dim> {message}"))
+                .hint(
+                    "Use the pattern <cyan>![alt](src \"optional title\")</cyan> with balanced brackets and parentheses.",
+                ),
+
+            Self::InvalidStyle(source) => {
+                biscuit_terminal::errors::BlockError::status_block(source, term)
+            }
+
+            Self::InvalidDecoding { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "invalid decoding"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Accepted values: <cyan>sync</cyan>, <cyan>async</cyan>, <cyan>auto</cyan>.",
+                ),
+
+            Self::InvalidFetchPriority { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ImageRefError",
+                    "invalid fetch priority",
+                ))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Accepted values: <cyan>high</cyan>, <cyan>low</cyan>, <cyan>auto</cyan>.",
+                ),
+
+            Self::InvalidLoading { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "invalid loading"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint("Accepted values: <cyan>eager</cyan>, <cyan>lazy</cyan>."),
+
+            Self::InvalidReferrerPolicy { value } => {
+                let mut body = format!("<dim>Value:</dim> <cyan>{value}</cyan>");
+                if let Some(suggestion) = suggest_referrer_policy(value) {
+                    body.push_str(&format!(
+                        "\n<dim>Did you mean:</dim> <cyan>{suggestion}</cyan>?"
+                    ));
+                }
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "ImageRefError",
+                        "invalid referrer policy",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Accepted values: <cyan>no-referrer</cyan>, <cyan>no-referrer-when-downgrade</cyan>, <cyan>origin</cyan>, <cyan>origin-when-cross-origin</cyan>, <cyan>same-origin</cyan>, <cyan>strict-origin</cyan>, <cyan>strict-origin-when-cross-origin</cyan>, <cyan>unsafe-url</cyan>.",
+                    )
+            }
+        }
+    }
+
+    fn block_source(&self) -> Option<&(dyn biscuit_terminal::errors::BlockError + 'static)> {
+        match self {
+            Self::InvalidStyle(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
+fn suggest_referrer_policy(value: &str) -> Option<&'static str> {
+    const CANDIDATES: &[&str] = &[
+        "no-referrer",
+        "no-referrer-when-downgrade",
+        "origin",
+        "origin-when-cross-origin",
+        "same-origin",
+        "strict-origin",
+        "strict-origin-when-cross-origin",
+        "unsafe-url",
+    ];
+
+    let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(&'static str, usize)> = None;
+    for candidate in CANDIDATES {
+        let distance = levenshtein_distance(&normalized, candidate);
+        match best {
+            Some((_, best_distance)) if distance >= best_distance => {}
+            _ => best = Some((candidate, distance)),
+        }
+    }
+
+    let (candidate, distance) = best?;
+    let threshold = candidate.len().max(3) / 2;
+    if distance <= threshold {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    if a == b {
+        return 0;
+    }
+    if a.is_empty() {
+        return b.chars().count();
+    }
+    if b.is_empty() {
+        return a.chars().count();
+    }
+
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b_chars.len()).collect();
+    let mut curr = vec![0usize; b_chars.len() + 1];
+
+    for (i, ac) in a_chars.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, bc) in b_chars.iter().enumerate() {
+            let cost = if ac == bc { 0 } else { 1 };
+            let deletion = prev[j + 1] + 1;
+            let insertion = curr[j] + 1;
+            let substitution = prev[j] + cost;
+            curr[j + 1] = deletion.min(insertion).min(substitution);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_chars.len()]
+}
+
 /// Browser image decoding hint values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]

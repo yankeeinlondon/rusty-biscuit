@@ -316,6 +316,8 @@ pub fn target_provider_kind(target: &Target) -> ProviderKind {
         Target::DiscordWebhook(_) => ProviderKind::DiscordWebhook,
         #[cfg(feature = "slack")]
         Target::Slack(_) => ProviderKind::Slack,
+        #[cfg(feature = "slack")]
+        Target::SlackWebhook(_) => ProviderKind::SlackWebhook,
         #[cfg(feature = "signal")]
         Target::Signal(_) => ProviderKind::Signal,
         #[cfg(feature = "whatsapp")]

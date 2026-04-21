@@ -30,6 +30,8 @@ messenger completions                # Print shell completion instructions
 2. `--route` (named route from config)
 3. `default_route` from `~/.messenger.json`
 
+The CLI does not currently expose a Discord webhook thread-routing flag. If you need `thread_id`, build the dispatch in library code with `Target::discord_webhook_thread(...)`.
+
 ## Configuration
 
 **File**: `~/.messenger.json`
@@ -55,7 +57,7 @@ messenger completions                # Print shell completion instructions
 **WhatsApp**: `recipient`, optional `access_token` / `access_token_env`, optional `phone_number_id` / `phone_number_id_env`
 **Telegram**: `chat_id`, optional `bot_token` / `bot_token_env`
 
-When both an inline secret and env var name are present, the inline value wins.
+When both an inline secret and env var name are present, the inline value wins. For Discord webhooks there is intentionally no `channel_id`: the webhook URL already binds the destination channel.
 
 ### Default Environment Variables
 
@@ -89,6 +91,7 @@ Every send writes a JSON receipt to `~/.messenger/receipts/<unix_ms>-<provider>.
 - Offers `Exit`, `Add another`, or `Modify "<route>"` when routes exist
 - Route names: `provider`, `provider.2`, `provider.3`, ...
 - First route becomes `default_route`; replacing existing default is opt-in
+- `discord-webhook` setup prompts for either a literal webhook URL or an environment variable name, defaulting to `DISCORD_WEBHOOK_URL`
 
 ## Key CLI Crates
 

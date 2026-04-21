@@ -31,6 +31,7 @@ pub mod cleanup;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
+pub mod errors;
 mod frontmatter;
 pub mod fs;
 pub mod hash;

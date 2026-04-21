@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use tracing::info_span;
+
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 
@@ -102,6 +104,7 @@ impl PolicyEngine {
         provider: Provider,
         ctx: &PolicyContext,
     ) -> Result<ConfiguredPolicySnapshot> {
+        let _span = info_span!("permissions_configured", %provider).entered();
         let backend = self.backend(provider)?;
 
         let sources = backend.discover_sources(ctx)?;
@@ -130,6 +133,7 @@ impl PolicyEngine {
         ctx: &PolicyContext,
         cli: CliPolicyInput<'_>,
     ) -> Result<EffectivePolicySnapshot> {
+        let _span = info_span!("permissions_effective", %provider).entered();
         let backend = self.backend(provider)?;
 
         let sources = backend.discover_sources(ctx)?;
