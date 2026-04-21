@@ -50,12 +50,8 @@ impl ProtectService {
             ProtectRequest::WritePath { .. } => "write_path",
             ProtectRequest::McpResponse { .. } => "mcp_response",
         };
-        let _span = info_span!(
-            "protect_evaluate",
-            surface,
-            enabled = self.config.enabled,
-        )
-        .entered();
+        let _span =
+            info_span!("protect_evaluate", surface, enabled = self.config.enabled,).entered();
 
         if !self.config.enabled {
             debug!(surface, "protect disabled, allowing");
@@ -78,7 +74,11 @@ impl ProtectService {
     }
 
     fn evaluate_bash_command(&self, command: &str) -> ProtectDecision {
-        let _span = info_span!("protect_bash", command_truncated = &command[..command.len().min(80)]).entered();
+        let _span = info_span!(
+            "protect_bash",
+            command_truncated = &command[..command.len().min(80)]
+        )
+        .entered();
         for group in &self.catalog.command_groups {
             if let Some((m, rule_supports_allow_paths)) = group.find_match(command) {
                 if rule_supports_allow_paths

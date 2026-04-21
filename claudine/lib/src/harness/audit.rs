@@ -123,7 +123,10 @@ pub fn audit_shell_commands(
                     ShellAuditOutcome {
                         command: cmd.clone(),
                         passed: true,
-                        message: format!("<green-500>{}</green-500> approved", prose_escape(&cmd.raw)),
+                        message: format!(
+                            "<green-500>{}</green-500> approved",
+                            prose_escape(&cmd.raw)
+                        ),
                     }
                 }
                 Err(HarnessError::ShellCommandDenied { .. }) => {

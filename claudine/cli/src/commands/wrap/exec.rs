@@ -784,11 +784,8 @@ fn wait_with_signal_and_early_termination(
         if early_termination.is_none()
             && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = detect_opencode_hang_termination(
-                metrics,
-                Instant::now(),
-                stop_threshold,
-            )
+            && let Some(signal) =
+                detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
         {
             let kill_pid = if child_in_own_pgroup {
                 -(child_pid as i32)
@@ -911,11 +908,8 @@ fn wait_with_signal_and_early_termination(
         if early_termination.is_none()
             && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = detect_opencode_hang_termination(
-                metrics,
-                Instant::now(),
-                stop_threshold,
-            )
+            && let Some(signal) =
+                detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
         {
             let _ = child.kill();
             early_termination = Some(signal);
@@ -1935,8 +1929,7 @@ pub(crate) fn run_child_stream_semantic(
     };
 
     if let Some(
-        EarlyTermination::CompletedButHung { message }
-        | EarlyTermination::StepTimeout { message },
+        EarlyTermination::CompletedButHung { message } | EarlyTermination::StepTimeout { message },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)
@@ -2448,11 +2441,7 @@ mod tests {
             state.provider_status = Some("stop".into());
         }
 
-        let detected = detect_opencode_hang_termination(
-            &metrics,
-            now,
-            Duration::from_secs(120),
-        );
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
 
         assert!(matches!(
             detected,

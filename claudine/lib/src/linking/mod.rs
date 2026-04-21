@@ -57,7 +57,13 @@ pub fn link_skills(
     filter: Option<&str>,
     dry_run: bool,
 ) -> Result<LinkReport> {
-    let _span = info_span!("link_skills", ?scope, dry_run, filter = filter.unwrap_or("")).entered();
+    let _span = info_span!(
+        "link_skills",
+        ?scope,
+        dry_run,
+        filter = filter.unwrap_or("")
+    )
+    .entered();
     link_skills_inner(&ProviderSkillPaths::new(), scope, filter, dry_run)
 }
 
