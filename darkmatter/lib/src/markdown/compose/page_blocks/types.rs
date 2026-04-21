@@ -14,8 +14,12 @@ pub enum PageBlockError {
     UnmatchedEnd { line: usize },
 
     /// Reached end of file with an unclosed `::block`.
-    #[error("Unterminated ::block starting at line {line}")]
-    UnterminatedBlock { line: usize },
+    #[error("Unterminated ::block starting at line {line} (file ends at line {file_ends_at_line})")]
+    UnterminatedBlock {
+        line: usize,
+        opening_text: String,
+        file_ends_at_line: usize,
+    },
 
     /// Condition parsing or evaluation failed.
     #[error("{0}")]
@@ -44,9 +48,11 @@ impl biscuit_terminal::errors::BlockError for PageBlockError {
                 .body(format!("<dim>Line:</dim> {line}"))
                 .hint("Add a matching <cyan>::block</cyan> directive above this closing line."),
 
-            PageBlockError::UnterminatedBlock { line } => StatusBlock::new(StatusState::Error)
+            PageBlockError::UnterminatedBlock { line, opening_text, file_ends_at_line } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("PageBlockError", "unterminated ::block"))
-                .body(format!("<dim>Opened at line:</dim> {line}"))
+                .body(format!(
+                    "<dim>Opened at line:</dim> {line}\n<dim>Opening directive:</dim> {opening_text}\n<dim>File ends at line:</dim> {file_ends_at_line}"
+                ))
                 .hint("Add a matching <cyan>::end-block</cyan> directive to close the region."),
 
             PageBlockError::Condition(inner) => {

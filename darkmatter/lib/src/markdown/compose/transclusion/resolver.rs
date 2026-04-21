@@ -19,7 +19,7 @@ pub(crate) fn resolve_target(
     match kind {
         DirectiveKind::Url => resolve_url_target(raw_target, options),
         DirectiveKind::File | DirectiveKind::Code => {
-            let path = resolve_path(raw_target, options, source, line)?;
+            let path = resolve_path(raw_target, kind, options, source, line)?;
             validate_local_target(kind, &path, options)?;
             Ok(ResolvedTarget::File {
                 id: path.to_string_lossy().to_string(),
@@ -55,6 +55,7 @@ fn resolve_url_target(
 /// since transclusion context is file-relative.
 pub(crate) fn resolve_path(
     raw_target: &str,
+    kind: DirectiveKind,
     options: &TransclusionOptions,
     source: &ComposeSource,
     line: usize,
@@ -93,9 +94,16 @@ pub(crate) fn resolve_path(
     // Use FileReference for @, !, vault:, %, {{ENV}}, and absolute paths.
     if is_file_reference_target(raw_target) {
         if raw_target.starts_with('@') && !options.resolve_repo_root {
+            let source_file = match source {
+                ComposeSource::File(p) => p.clone(),
+                ComposeSource::Url(u) => PathBuf::from(u.to_string()),
+                ComposeSource::Unknown => PathBuf::from("<unknown>"),
+            };
             return Err(TransclusionError::InvalidReference {
                 reference: raw_target.to_string(),
                 line,
+                source_file,
+                directive_kind: kind,
             });
         }
 
@@ -304,6 +312,7 @@ mod tests {
 
         let resolved = resolve_path(
             "./child.md",
+            DirectiveKind::File,
             &default_options(),
             &ComposeSource::File(source_path),
             1,
@@ -316,7 +325,7 @@ mod tests {
     #[test]
     fn relative_requires_source_context() {
         let err =
-            resolve_path("./child.md", &default_options(), &ComposeSource::Unknown, 2).unwrap_err();
+            resolve_path("./child.md", DirectiveKind::File, &default_options(), &ComposeSource::Unknown, 2).unwrap_err();
         assert!(matches!(
             err,
             TransclusionError::MissingSourceContext { .. }
@@ -347,6 +356,7 @@ mod tests {
 
         let resolved = resolve_path(
             "@/shared.md",
+            DirectiveKind::File,
             &default_options(),
             &ComposeSource::File(source_path),
             1,
@@ -363,7 +373,7 @@ mod tests {
         let mut opts = default_options();
         opts.resolve_repo_root = false;
 
-        let err = resolve_path("@/shared.md", &opts, &ComposeSource::Unknown, 1).unwrap_err();
+        let err = resolve_path("@/shared.md", DirectiveKind::File, &opts, &ComposeSource::Unknown, 1).unwrap_err();
 
         assert!(matches!(err, TransclusionError::InvalidReference { .. }));
     }
@@ -420,7 +430,7 @@ mod tests {
         opts.magic_paths
             .push((magic_dir.clone(), biscuit_file::PathPosition::Start));
 
-        let resolved = resolve_path("@/special.md", &opts, &ComposeSource::File(source_path), 1);
+        let resolved = resolve_path("@/special.md", DirectiveKind::File, &opts, &ComposeSource::File(source_path), 1);
 
         std::env::set_current_dir(&original_dir).unwrap();
 

@@ -159,8 +159,8 @@ mod tests {
 
     #[test]
     fn display_number_literal_float() {
-        let expr = Expr::NumberLiteral(3.14);
-        assert_eq!(expr.to_string(), "3.14");
+        let expr = Expr::NumberLiteral(3.15);
+        assert_eq!(expr.to_string(), "3.15");
     }
 
     #[test]

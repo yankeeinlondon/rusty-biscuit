@@ -362,11 +362,11 @@ mod tests {
 
     #[test]
     fn test_float_value_coerced() {
-        let state = make_state_with_replace(json!({"pi": 3.14159}));
+        let state = make_state_with_replace(json!({"pi": 3.15159}));
 
         let (result, count) = apply_replacements("pi", &state);
 
-        assert_eq!(result, "3.14159");
+        assert_eq!(result, "3.15159");
         assert_eq!(count, 1);
     }
 

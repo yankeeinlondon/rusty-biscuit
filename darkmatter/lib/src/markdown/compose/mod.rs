@@ -339,7 +339,12 @@ impl Markdown {
         };
 
         if let Some(id) = source_id.clone() {
-            runtime.transclusion.enter(id)?;
+            let path = match &options.source {
+                ComposeSource::File(p) => p.clone(),
+                ComposeSource::Url(u) => std::path::PathBuf::from(u.to_string()),
+                ComposeSource::Unknown => std::path::PathBuf::from("<unknown>"),
+            };
+            runtime.transclusion.enter(id, path, 1)?;
         }
 
         let result = (|| {
