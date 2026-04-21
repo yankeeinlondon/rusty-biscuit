@@ -33,9 +33,9 @@
 
 pub use crate::attachment::{Attachment, AttachmentKind, AttachmentSource};
 pub use crate::capabilities::CapabilitySet;
+pub use crate::dispatch::{CompatibilityMode, DeliveryOptions, Dispatch, ProviderOverrides};
 #[cfg(feature = "desktop")]
 pub use crate::dispatch::{DesktopOverrides, NotificationIcon, NotificationUrgency};
-pub use crate::dispatch::{CompatibilityMode, DeliveryOptions, Dispatch, ProviderOverrides};
 pub use crate::error::MessengerError;
 pub use crate::message::{Location, Message, MessageBody};
 pub use crate::provider::{Messenger, Provider, SendPlan};

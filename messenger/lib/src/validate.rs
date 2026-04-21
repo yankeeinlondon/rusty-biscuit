@@ -151,10 +151,11 @@ pub fn normalize_dispatch(
     }
 
     if !normalized_message.attachments.is_empty() {
-        let has_unsupported_attachment = normalized_message
-            .attachments
-            .iter()
-            .any(|attachment| !capabilities.supported_attachment_kinds.contains(&attachment.kind));
+        let has_unsupported_attachment = normalized_message.attachments.iter().any(|attachment| {
+            !capabilities
+                .supported_attachment_kinds
+                .contains(&attachment.kind)
+        });
 
         if has_unsupported_attachment {
             if dispatch.options.compatibility == CompatibilityMode::Strict {
@@ -167,10 +168,15 @@ pub fn normalize_dispatch(
                     feature: "attachments",
                 });
             }
-            tracing::debug!(feature = "attachments", "dropping unsupported attachment kinds");
-            normalized_message
-                .attachments
-                .retain(|attachment| capabilities.supported_attachment_kinds.contains(&attachment.kind));
+            tracing::debug!(
+                feature = "attachments",
+                "dropping unsupported attachment kinds"
+            );
+            normalized_message.attachments.retain(|attachment| {
+                capabilities
+                    .supported_attachment_kinds
+                    .contains(&attachment.kind)
+            });
             warnings.push(CompatibilityWarning {
                 provider,
                 feature: "attachments",
