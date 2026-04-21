@@ -69,6 +69,9 @@ fn main() {
         // mask an inner BlockError implementation. Darkmatter's downcast registry
         // takes precedence; the terminal-local stub is checked only as a fallback
         // for non-darkmatter error types.
+        // NOTE: biscuit_terminal::errors::as_block_error returns None unconditionally
+        // (it is a documented stub); the call here is intentional to leave room for
+        // future extension without adding a hard dependency.
         let block = e.chain().find_map(|cause| {
             as_darkmatter_block_error(cause).or_else(|| as_terminal_block_error(cause))
         });
