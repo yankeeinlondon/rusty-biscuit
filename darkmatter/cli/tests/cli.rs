@@ -855,7 +855,7 @@ fn test_set_overlay_strict_rejects_invalid() {
         .arg(dir.path().join("parent.md"))
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Invalid frontmatter assignment"));
+        .stderr(predicate::str::contains("invalid frontmatter assignment"));
 }
 
 #[test]
@@ -897,9 +897,7 @@ fn test_set_overlay_strict_rejects_reassigned() {
         .arg(dir.path().join("parent.md"))
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "Invalid reassigned frontmatter property",
-        ));
+        .stderr(predicate::str::contains("reassigned frontmatter property"));
 }
 
 #[test]
@@ -1086,13 +1084,13 @@ fn test_compose_state_variables_available_during_validation() {
 
 #[test]
 fn test_compose_scalar_ctx_without_allow_override_fails() {
-    // A document with scalar ctx should fail by default
     md_cmd()
         .args(["compose", "-"])
         .write_stdin("---\nctx: hello\n---\n# Test {{ ctx.today }}")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("must be a JSON object"));
+        .stderr(predicate::str::contains("CtxMergeError"))
+        .stderr(predicate::str::contains("JSON object"));
 }
 
 #[test]
@@ -2487,4 +2485,60 @@ fn test_graph_json_output() {
         .stdout(predicate::str::contains("{"))
         .stdout(predicate::str::contains("\"references\""))
         .stdout(predicate::str::contains("example.com"));
+}
+
+// =============================================================================
+//                  BLOCK RENDERING END-TO-END TESTS
+// =============================================================================
+
+/// End-to-end test for the CLI block rendering path.
+///
+/// Creates a transclusion cycle (A includes B, B includes A), runs
+/// `md compose`, and asserts that the CLI:
+/// - exits with a non-zero code,
+/// - emits the error type name (`TransclusionError`) on stderr,
+/// - emits a human-readable summary (`cycle detected`),
+/// - emits a hint-tagged token from the rendered block.
+#[test]
+fn test_block_rendering_transclusion_cycle_tty() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let a = dir.path().join("a.md");
+    let b = dir.path().join("b.md");
+    std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
+    std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&a)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("TransclusionError"))
+        .stderr(predicate::str::contains("cycle detected"))
+        .stderr(predicate::str::contains("Break the cycle"));
+}
+
+/// Non-TTY block rendering: the same cycle error must still produce
+/// readable plain text (optimistic 80-column render) when stderr is
+/// piped. `assert_cmd` runs commands with piped stdio by default, so
+/// this test naturally exercises the non-TTY branch in `main.rs`.
+#[test]
+fn test_block_rendering_transclusion_cycle_non_tty() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let a = dir.path().join("a.md");
+    let b = dir.path().join("b.md");
+    std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
+    std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
+
+    let output = md_cmd().arg("compose").arg(&a).output().unwrap();
+
+    assert!(!output.status.success(), "expected non-zero exit code");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cycle detected"),
+        "stderr should contain human-readable summary in non-TTY mode\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Break the cycle"),
+        "stderr should contain hint from rendered block in non-TTY mode\nstderr:\n{stderr}"
+    );
 }
