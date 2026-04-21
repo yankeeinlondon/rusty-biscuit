@@ -115,6 +115,69 @@ severity without duplicating the mapping yourself.
 `StatusState::Failure` is deprecated in favor of `StatusState::Error`. Persisted JSON using
 `"Failure"` remains compatible because it deserializes through the alias on `Error`.
 
+## BlockError
+
+`BlockError` is the terminal-rendering contract for errors. Any
+`std::error::Error` can implement `BlockError` to produce a consistent
+**Block Style Error** — a `Status` title line over a red-bordered
+`StatusBlock` body with an optional hint — using a single trait method.
+
+```rust
+use std::error::Error;
+use std::fmt;
+use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
+use biscuit_terminal::prelude::*;
+
+#[derive(Debug)]
+struct CycleDetected { chain: Vec<String> }
+
+impl fmt::Display for CycleDetected {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "cycle detected: {}", self.chain.join(" -> "))
+    }
+}
+
+impl Error for CycleDetected {}
+
+impl BlockError for CycleDetected {
+    fn status_block(&self, _term: &Terminal) -> StatusBlock {
+        StatusBlock::new(self.severity())
+            .error_header(ErrorHeader::new("CycleDetected", "transclusion cycle"))
+            .body(format!("chain: {}", self.chain.join(" -> ")))
+            .hint("Break the cycle by removing one of the edges.")
+    }
+}
+
+let err = CycleDetected { chain: vec!["a.md".into(), "b.md".into(), "a.md".into()] };
+let term = Terminal::new();
+eprintln!("{}", err.report_block_error(&term));
+```
+
+Key methods:
+
+- `status_block(&Terminal) -> StatusBlock` — the single required method. Build
+  a configured (but unrendered) block; the default `report_block_error`
+  renders it for you.
+- `severity() -> StatusState` — defaults to `Error`. Override for warnings.
+- `report_block_error(&Terminal) -> String` — default composes
+  `status_block(term).render(term)`. Override to add a cause chain.
+- `report_block_error_optimistic(Option<u32>) -> String` — non-TTY fallback
+  using an 80-column optimistic terminal. Great for logs, pipelines, and
+  tests.
+- `block_source() -> Option<&dyn BlockError>` — wrapper errors return their
+  inner `BlockError` here; see `render_with_causes`.
+
+Supporting helpers live alongside the trait:
+
+- `ErrorHeader::new("ErrorName", "summary")` — canonical title line shape.
+- `StatusBlockExt::error_header(ErrorHeader)` — sets the header in one call.
+- `render_with_causes(&err, &term)` — stacks wrapper + nested-cause blocks
+  under a dim `Caused by:` caption.
+
+See
+[`darkmatter/docs/error-rendering.md`](../darkmatter/docs/error-rendering.md)
+for an end-to-end rendering contract and adoption guide.
+
 ## More Information
 
 For more information on either the library or CLI refer to more detailed documents on each:

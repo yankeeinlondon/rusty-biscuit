@@ -18,6 +18,7 @@ pub use crate::components::renderable::{Renderable, RenderableContent};
 pub use crate::components::section::{HeadingLevel, Section};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::status_block::StatusBlock;
+pub use crate::errors::{BlockError, ErrorHeader, StatusBlockExt, as_block_error, render_with_causes};
 pub use crate::components::table::table::{
     MeasuredColumn, Table, TableCellContent, TableColumn, TableWidthError, TableWidthMeasurements,
     TableWidthPlan,
