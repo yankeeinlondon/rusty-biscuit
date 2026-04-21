@@ -34,6 +34,36 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/normalize/types.rs
+  - darkmatter/lib/src/render/stylesheet.rs
+  - darkmatter/lib/src/render/link.rs
+  - darkmatter/lib/src/render/image_ref.rs
+  - darkmatter/lib/src/markdown/errors/mod.rs
+  - darkmatter/lib/tests/error_snapshots/main.rs
+  - darkmatter/lib/tests/error_snapshots/helpers.rs
+  - darkmatter/lib/tests/error_snapshots/ctx_merge.rs
+  - darkmatter/lib/tests/error_snapshots/deferred_set.rs
+  - darkmatter/lib/tests/error_snapshots/editor.rs
+  - darkmatter/lib/tests/error_snapshots/file_tree.rs
+  - darkmatter/lib/tests/error_snapshots/image_ref.rs
+  - darkmatter/lib/tests/error_snapshots/link.rs
+  - darkmatter/lib/tests/error_snapshots/markdown_error.rs
+  - darkmatter/lib/tests/error_snapshots/mermaid_theme.rs
+  - darkmatter/lib/tests/error_snapshots/normalization.rs
+  - darkmatter/lib/tests/error_snapshots/page_block.rs
+  - darkmatter/lib/tests/error_snapshots/reference.rs
+  - darkmatter/lib/tests/error_snapshots/shell_expansion.rs
+  - darkmatter/lib/tests/error_snapshots/stylesheet.rs
+  - darkmatter/lib/tests/error_snapshots/toc_linking.rs
+  - darkmatter/lib/tests/error_snapshots/transclusion.rs
+  - darkmatter/lib/tests/error_snapshots/condition.rs
+docs_updated_during_phase_4:
+  - biscuit-terminal/README.md
+docs_created_during_phase_4:
+  - darkmatter/docs/error-rendering.md
+skills_files_updated_during_phase4: []
 packages:
   - biscuit-terminal
   - darkmatter
@@ -110,12 +140,12 @@ This plan outlines the steps to implement the `BlockError` trait and adopt it ac
 1.  **Step 1: Remaining Enums Coverage**
     - Implement `BlockError` for `DeferredSetError`, `NormalizationError`, `StylesheetError`, `LinkError`, and `ImageRefError`.
     - Add remaining enrichments as defined in the Technical Design (§2.3).
-    - [ ] *Parallelizable:* Yes.
+    - [x] *Parallelizable:* Yes.
 2.  **Step 2: Snapshot Testing Suite**
     - Create `darkmatter/lib/tests/error_snapshots/`.
     - Implement a test harness to generate and verify snapshots for all 100+ error variants.
-    - [ ] *Validation Checkpoint:* `cargo test -p darkmatter-lib` includes snapshot coverage.
+    - [x] *Validation Checkpoint:* `cargo test -p darkmatter-lib` includes snapshot coverage.
 3.  **Step 3: Documentation & Skills Update**
     - Update `biscuit-terminal/README.md` and `darkmatter/docs/error-rendering.md`.
     - Update `biscuit-terminal` and `darkmatter` skill definitions.
-    - [ ] *Parallelizable:* Yes.
+    - [x] *Parallelizable:* Yes.
