@@ -18,10 +18,11 @@ pub enum ProviderKind {
     Signal,
     WhatsApp,
     Telegram,
+    Desktop,
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Discord,
         Self::DiscordWebhook,
         Self::Slack,
@@ -29,6 +30,7 @@ impl ProviderKind {
         Self::Signal,
         Self::WhatsApp,
         Self::Telegram,
+        Self::Desktop,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -40,6 +42,7 @@ impl ProviderKind {
             Self::Signal => "signal",
             Self::WhatsApp => "whatsapp",
             Self::Telegram => "telegram",
+            Self::Desktop => "desktop",
         }
     }
 
@@ -62,6 +65,27 @@ impl fmt::Display for ProviderKind {
             Self::Signal => write!(f, "Signal"),
             Self::WhatsApp => write!(f, "WhatsApp"),
             Self::Telegram => write!(f, "Telegram"),
+            Self::Desktop => write!(f, "Desktop"),
+        }
+    }
+}
+
+/// Host OS targeted by a desktop notification delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DesktopPlatform {
+    #[serde(rename = "macos")]
+    MacOS,
+    Linux,
+    Windows,
+}
+
+impl fmt::Display for DesktopPlatform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MacOS => write!(f, "macOS"),
+            Self::Linux => write!(f, "Linux"),
+            Self::Windows => write!(f, "Windows"),
         }
     }
 }
@@ -102,6 +126,10 @@ pub enum MessageRef {
         message_id: i64,
         thread_id: Option<i64>,
     },
+    Desktop {
+        platform: DesktopPlatform,
+        notification_id: String,
+    },
 }
 
 impl MessageRef {
@@ -115,6 +143,7 @@ impl MessageRef {
             Self::Signal { .. } => ProviderKind::Signal,
             Self::WhatsApp { .. } => ProviderKind::WhatsApp,
             Self::Telegram { .. } => ProviderKind::Telegram,
+            Self::Desktop { .. } => ProviderKind::Desktop,
         }
     }
 

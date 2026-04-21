@@ -33,15 +33,19 @@
 
 pub use crate::attachment::{Attachment, AttachmentKind, AttachmentSource};
 pub use crate::capabilities::CapabilitySet;
+#[cfg(feature = "desktop")]
+pub use crate::dispatch::{DesktopOverrides, NotificationIcon, NotificationUrgency};
 pub use crate::dispatch::{CompatibilityMode, DeliveryOptions, Dispatch, ProviderOverrides};
 pub use crate::error::MessengerError;
 pub use crate::message::{Location, Message, MessageBody};
 pub use crate::provider::{Messenger, Provider, SendPlan};
 #[cfg(feature = "telegram")]
 pub use crate::receipt::TelegramChatRef;
-pub use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
+pub use crate::receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
 #[cfg(feature = "signal")]
 pub use crate::receipt::{SignalAuthor, SignalThreadKey};
+#[cfg(feature = "desktop")]
+pub use crate::target::DesktopTarget;
 pub use crate::target::Target;
 #[cfg(feature = "signal")]
 pub use crate::target::{SignalAddress, SignalTarget};

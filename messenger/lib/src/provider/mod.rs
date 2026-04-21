@@ -1,5 +1,7 @@
 #[cfg(feature = "discord")]
 pub(crate) mod attachment_helpers;
+#[cfg(feature = "desktop")]
+pub mod desktop;
 #[cfg(feature = "discord")]
 pub mod discord;
 #[cfg(feature = "discord")]

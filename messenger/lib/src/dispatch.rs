@@ -1,3 +1,6 @@
+#[cfg(feature = "desktop")]
+use std::path::PathBuf;
+
 use crate::receipt::MessageRef;
 use crate::target::Target;
 
@@ -51,6 +54,8 @@ pub enum ProviderOverrides {
     WhatsApp(WhatsAppOverrides),
     #[cfg(feature = "telegram")]
     Telegram(TelegramOverrides),
+    #[cfg(feature = "desktop")]
+    Desktop(DesktopOverrides),
 }
 
 #[cfg(feature = "discord")]
@@ -81,6 +86,49 @@ pub struct WhatsAppOverrides {}
 #[cfg(feature = "telegram")]
 #[derive(Debug, Clone, Default)]
 pub struct TelegramOverrides {}
+
+/// Desktop-notification-specific overrides.
+///
+/// All fields are optional; callers supply only the values they want to
+/// override from the route's [`DesktopConfig`](crate::provider::desktop::DesktopConfig)
+/// defaults.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Default)]
+pub struct DesktopOverrides {
+    pub subtitle: Option<String>,
+    pub app_name: Option<String>,
+    pub category: Option<String>,
+    pub urgency: Option<NotificationUrgency>,
+    pub timeout_ms: Option<u32>,
+    pub icon: Option<NotificationIcon>,
+    pub replace_id: Option<String>,
+}
+
+/// Portable urgency level for desktop notifications.
+///
+/// Backends map this onto their native notion of urgency, scenario, or
+/// interruption level. Mapping is best-effort and may be dropped by
+/// backends that do not expose a comparable concept.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NotificationUrgency {
+    Low,
+    #[default]
+    Normal,
+    Critical,
+}
+
+/// Portable icon reference for desktop notifications.
+///
+/// `Named` matches a freedesktop.org-style icon name (e.g. `dialog-information`);
+/// `Path` points to an absolute filesystem path that the backend should read
+/// at send time.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationIcon {
+    Named(String),
+    Path(PathBuf),
+}
 
 impl Dispatch {
     /// Create a dispatch targeting the given destination.

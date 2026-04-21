@@ -15,6 +15,8 @@ pub enum Target {
     WhatsApp(WhatsAppTarget),
     #[cfg(feature = "telegram")]
     Telegram(TelegramTarget),
+    #[cfg(feature = "desktop")]
+    Desktop(DesktopTarget),
 }
 
 /// Discord channel target.
@@ -90,6 +92,17 @@ pub enum TelegramChatId {
     Username(String),
 }
 
+/// Desktop notification destination.
+///
+/// Carries no channel or recipient — desktop sends always deliver to the
+/// current host OS notification center. The empty struct preserves the
+/// enum-variant-plus-typed-struct pattern used by the other targets so
+/// future fields (e.g. transient routing hints) can land without breaking
+/// pattern matches.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Default)]
+pub struct DesktopTarget {}
+
 // Convenience constructors on Target
 impl Target {
     #[cfg(feature = "discord")]
@@ -150,5 +163,11 @@ impl Target {
             chat_id,
             thread_id: None,
         })
+    }
+
+    /// Build a desktop notification target for the current host OS.
+    #[cfg(feature = "desktop")]
+    pub fn desktop() -> Self {
+        Self::Desktop(DesktopTarget::default())
     }
 }

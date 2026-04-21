@@ -333,6 +333,8 @@ pub fn target_provider_kind(target: &Target) -> ProviderKind {
         Target::WhatsApp(_) => ProviderKind::WhatsApp,
         #[cfg(feature = "telegram")]
         Target::Telegram(_) => ProviderKind::Telegram,
+        #[cfg(feature = "desktop")]
+        Target::Desktop(_) => ProviderKind::Desktop,
         _ => unreachable!("no provider features enabled"),
     }
 }
