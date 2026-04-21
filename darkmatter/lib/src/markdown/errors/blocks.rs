@@ -117,3 +117,112 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .body(message.to_string())
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
+
+#[cfg(test)]
+mod tests {
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    use super::*;
+
+    fn render_block(block: &StatusBlock) -> String {
+        strip_escape_codes(block.render_optimistic(Some(80)))
+    }
+
+    #[test]
+    fn file_load_block_renders_io_kind_and_message() {
+        let err = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        let out = render_block(&file_load_block(&err));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("file load failed"), "missing summary: {out}");
+        assert!(out.contains("NotFound"), "missing I/O kind: {out}");
+        assert!(out.contains("no such file"), "missing error message: {out}");
+    }
+
+    #[test]
+    fn frontmatter_parse_block_renders_yaml_error() {
+        let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(": [broken")
+            .unwrap_err();
+        let out = render_block(&frontmatter_parse_block(&err));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("frontmatter parse failed"), "missing summary: {out}");
+        assert!(
+            out.contains("error") || out.contains("Error"),
+            "missing YAML error detail: {out}",
+        );
+    }
+
+    #[test]
+    fn frontmatter_merge_block_renders_message() {
+        let out = render_block(&frontmatter_merge_block("conflict in 'title'"));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("frontmatter merge failed"), "missing summary: {out}");
+        assert!(out.contains("conflict in 'title'"), "missing message: {out}");
+    }
+
+    #[test]
+    fn theme_load_block_renders_message() {
+        let out = render_block(&theme_load_block("unknown theme `neon`"));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("theme load failed"), "missing summary: {out}");
+        assert!(out.contains("unknown theme `neon`"), "missing message: {out}");
+    }
+
+    #[test]
+    fn ast_parse_block_renders_message() {
+        let out = render_block(&ast_parse_block("line 3: unexpected token"));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("AST parse failed"), "missing summary: {out}");
+        assert!(out.contains("line 3: unexpected token"), "missing message: {out}");
+    }
+
+    #[test]
+    fn invalid_line_range_block_renders_message() {
+        let out = render_block(&invalid_line_range_block("start > end"));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("invalid line range"), "missing summary: {out}");
+        assert!(out.contains("start > end"), "missing message: {out}");
+    }
+
+    #[test]
+    fn serialization_block_renders_position() {
+        let err = serde_json::from_str::<serde_json::Value>("{ bogus }").unwrap_err();
+        let out = render_block(&serialization_block(&err));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("serialization failed"), "missing summary: {out}");
+        assert!(out.contains("line"), "missing line position: {out}");
+        assert!(out.contains("column"), "missing column position: {out}");
+    }
+
+    #[test]
+    fn transform_block_renders_message() {
+        let out = render_block(&transform_block("pipeline stalled"));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("transform failed"), "missing summary: {out}");
+        assert!(out.contains("pipeline stalled"), "missing message: {out}");
+    }
+
+    /// `reqwest::Error` cannot be constructed without firing a real HTTP
+    /// request. This smoke test exercises the helper by sending a request to
+    /// an address that is guaranteed to refuse connections, producing a real
+    /// `reqwest::Error` cheaply.
+    ///
+    /// ## Notes
+    ///
+    /// The request targets `http://0.0.0.0:1` which has no listener and fails
+    /// instantly. If this proves flaky in CI, the test can be replaced with a
+    /// compile-time assertion that `url_fetch_block` accepts `&reqwest::Error`.
+    #[tokio::test]
+    async fn url_fetch_block_renders_with_reqwest_error() {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(100))
+            .build()
+            .expect("client builder should not fail");
+        let result = client.get("http://0.0.0.0:1").send().await;
+        let err = result.expect_err("request to 0.0.0.0:1 should fail");
+        let out = render_block(&url_fetch_block(&err));
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(out.contains("URL fetch failed"), "missing summary: {out}");
+        assert!(out.contains("http://0.0.0.0:1"), "missing URL: {out}");
+    }
+}

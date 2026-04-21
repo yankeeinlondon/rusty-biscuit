@@ -62,7 +62,7 @@ implement-plan filter="":
         claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y ${model} || (
             echo
             echo -e "{{red}}{{bold}}ERROR:{{reset}} the implementation of the plan {{blue}}$(just _link "${plan}") was unable to complete phase {{yellow}}${current}{{reset}}" || echo "failed at phase ${current}"
-
+            md set "${plan}" "start_phase" ${current} || true
             echo
             exit 5
         )

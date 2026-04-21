@@ -97,6 +97,15 @@ without depending on live capability detection.
 
 ## Adding a new error enum
 
+> **Required:** After adding a new `BlockError` implementation, you **must**
+> add a corresponding downcast arm to
+> [`as_block_error`](../lib/src/markdown/errors/mod.rs) in
+> `darkmatter/lib/src/markdown/errors/mod.rs`. Without it the CLI silently
+> falls back to the generic `Display` chain and the new enum's rich block
+> rendering is never shown. The drift-guard test in
+> `darkmatter/lib/tests/as_block_error_registry.rs` will fail CI if you
+> forget.
+
 1. Implement `BlockError` in the file that owns the enum (or in a sibling
    `errors/blocks.rs` helper module if the impl would be large).
 2. Add the concrete type to `as_block_error` in

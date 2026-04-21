@@ -1,6 +1,6 @@
 set dotenv-load := true
 set positional-arguments := true
-set allow-duplicate-recipes := true
+# set allow-duplicate-recipes := true
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"

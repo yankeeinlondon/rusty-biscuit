@@ -622,7 +622,7 @@ pub fn run_compose(
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
 
-        match &e {
+        match e {
             ShellExpansion(ShellExpansionError::ExecutionFailed {
                 command,
                 code,
@@ -668,13 +668,13 @@ pub fn run_compose(
                 origin: _,
                 ..
             }) => {
-                let executable = command.split_whitespace().next().unwrap_or(command);
+                let executable = command.split_whitespace().next().unwrap_or(&command);
                 eyre!(
                     "Approval required for '{command}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {command}\n  prefix {executable}",
                     whitelist_path.display(),
                 )
             }
-            _ => eyre!("{e}"),
+            other => other.into(),
         }
     })?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
