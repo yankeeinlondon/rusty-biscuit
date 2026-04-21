@@ -108,8 +108,8 @@ pub fn as_block_error<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+    use std::path::PathBuf;
 
     use crate::markdown::compose::ShellCommandOrigin;
 
@@ -214,11 +214,13 @@ mod tests {
             expr: "a &&& b".into(),
             line: 7,
             message: "unexpected token".into(),
+            span: 3..4,
         };
         let out = render(&err);
         assert!(out.contains("ConditionError"));
         assert!(out.contains("parse failed"));
         assert!(out.contains("a &&& b"));
+        assert!(out.contains("^"));
         assert!(out.contains("&&"));
         assert!(out.contains("HasKey"));
     }
@@ -245,6 +247,7 @@ mod tests {
                 "expected valid-values list to include {name}; output was:\n{out}"
             );
         }
+        assert!(out.contains("Strip leading emoji"));
     }
 
     #[test]

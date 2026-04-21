@@ -487,7 +487,9 @@ mod tests {
         env_guard.remove("VISUAL");
 
         let err = edit_text("seed", ".md").unwrap_err();
-        assert!(matches!(err, EditorError::Missing { ref path } if path.extension().and_then(|ext| ext.to_str()) == Some("md")));
+        assert!(
+            matches!(err, EditorError::Missing { ref path } if path.extension().and_then(|ext| ext.to_str()) == Some("md"))
+        );
     }
 
     #[cfg(unix)]
@@ -495,8 +497,7 @@ mod tests {
     #[serial]
     fn launch_editor_on_path_surfaces_non_zero_exit() {
         let dir = tempdir().unwrap();
-        let editor_script =
-            write_editor_script(dir.path(), "editor-fail", "#!/bin/sh\nexit 23\n");
+        let editor_script = write_editor_script(dir.path(), "editor-fail", "#!/bin/sh\nexit 23\n");
         let file_path = dir.path().join("note.md");
         std::fs::write(&file_path, "seed").unwrap();
 

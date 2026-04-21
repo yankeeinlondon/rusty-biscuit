@@ -54,7 +54,10 @@ pub(crate) fn url_fetch_block(source: &reqwest::Error) -> StatusBlock {
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterParse`].
 pub(crate) fn frontmatter_parse_block(source: &YamlParseError) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
-        .error_header(ErrorHeader::new("MarkdownError", "frontmatter parse failed"))
+        .error_header(ErrorHeader::new(
+            "MarkdownError",
+            "frontmatter parse failed",
+        ))
         .body(format!("{source}"))
         .hint("Check the YAML between the leading `---` markers for syntax errors.")
 }
@@ -62,7 +65,10 @@ pub(crate) fn frontmatter_parse_block(source: &YamlParseError) -> StatusBlock {
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterMerge`].
 pub(crate) fn frontmatter_merge_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
-        .error_header(ErrorHeader::new("MarkdownError", "frontmatter merge failed"))
+        .error_header(ErrorHeader::new(
+            "MarkdownError",
+            "frontmatter merge failed",
+        ))
         .body(message.to_string())
         .hint("Review the frontmatter merge strategy for conflicting keys.")
 }

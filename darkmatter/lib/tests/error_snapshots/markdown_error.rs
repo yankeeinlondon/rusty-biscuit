@@ -21,7 +21,11 @@ fn frontmatter_merge_renders_leaf_block() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["MarkdownError", "frontmatter merge failed", "conflict in 'title'"],
+        &[
+            "MarkdownError",
+            "frontmatter merge failed",
+            "conflict in 'title'",
+        ],
     );
 }
 
@@ -48,7 +52,11 @@ fn ast_parse_renders_leaf_block() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["MarkdownError", "AST parse failed", "line 3: unexpected token"],
+        &[
+            "MarkdownError",
+            "AST parse failed",
+            "line 3: unexpected token",
+        ],
     );
 }
 
@@ -79,12 +87,7 @@ fn serialization_renders_leaf_block_with_position() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &[
-            "MarkdownError",
-            "serialization failed",
-            "line",
-            "column",
-        ],
+        &["MarkdownError", "serialization failed", "line", "column"],
     );
 }
 
@@ -105,7 +108,14 @@ fn transclusion_delegation_surfaces_inner_block_only() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "cycle detected", "a.md", "b.md", ":line 3", ":line 7"],
+        &[
+            "TransclusionError",
+            "cycle detected",
+            "a.md",
+            "b.md",
+            ":line 3",
+            ":line 7",
+        ],
     );
     assert!(
         !out.contains("Caused by:"),

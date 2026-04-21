@@ -490,7 +490,10 @@ fn truncate_output(text: &str) -> String {
     let lines: Vec<&str> = truncated_bytes.lines().collect();
     if lines.len() > MAX_LINES {
         let head = lines[..MAX_LINES].join("\n");
-        format!("{head}\n<dim>… {} more lines</dim>", lines.len() - MAX_LINES)
+        format!(
+            "{head}\n<dim>… {} more lines</dim>",
+            lines.len() - MAX_LINES
+        )
     } else {
         truncated_bytes
     }

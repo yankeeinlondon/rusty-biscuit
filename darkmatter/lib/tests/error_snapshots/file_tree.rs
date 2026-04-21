@@ -30,14 +30,20 @@ fn markdown_delegates_inner_block() {
     ));
     let out = render(&err);
     // Delegating variant shows the inner MarkdownError block, not a FileTreeError wrapper.
-    assert_contains_all(&out, &["MarkdownError", "transform failed", "pipeline stalled"]);
+    assert_contains_all(
+        &out,
+        &["MarkdownError", "transform failed", "pipeline stalled"],
+    );
 }
 
 #[test]
 fn reference_delegates_inner_block() {
-    let err = FileTreeError::Reference(darkmatter::markdown::reference::ReferenceError::Validation(
-        "orphan node".into(),
-    ));
+    let err = FileTreeError::Reference(
+        darkmatter::markdown::reference::ReferenceError::Validation("orphan node".into()),
+    );
     let out = render(&err);
-    assert_contains_all(&out, &["ReferenceError", "validation failed", "orphan node"]);
+    assert_contains_all(
+        &out,
+        &["ReferenceError", "validation failed", "orphan node"],
+    );
 }

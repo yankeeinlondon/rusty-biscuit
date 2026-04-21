@@ -719,14 +719,8 @@ This is content."#;
         let plan: Option<String> = fm.get("plan").unwrap();
 
         assert_eq!(dir, Some("$(dirname \"{{review}}\")".to_string()));
-        assert_eq!(
-            basename,
-            Some("$(basename \"{{review}}\" .md)".to_string())
-        );
-        assert_eq!(
-            plan,
-            Some("{{dir}}/plan-for-{{basename}}.md".to_string())
-        );
+        assert_eq!(basename, Some("$(basename \"{{review}}\" .md)".to_string()));
+        assert_eq!(plan, Some("{{dir}}/plan-for-{{basename}}.md".to_string()));
     }
 
     #[test]

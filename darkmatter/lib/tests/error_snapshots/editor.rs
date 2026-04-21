@@ -46,7 +46,11 @@ fn missing_file_hints_at_restore() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["EditorError", "edited file missing", "/tmp/deleted-buffer.md"],
+        &[
+            "EditorError",
+            "edited file missing",
+            "/tmp/deleted-buffer.md",
+        ],
     );
 }
 

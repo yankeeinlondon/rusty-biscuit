@@ -17,6 +17,7 @@
 
 mod helpers;
 
+mod condition;
 mod ctx_merge;
 mod deferred_set;
 mod editor;
@@ -32,4 +33,3 @@ mod shell_expansion;
 mod stylesheet;
 mod toc_linking;
 mod transclusion;
-mod condition;
