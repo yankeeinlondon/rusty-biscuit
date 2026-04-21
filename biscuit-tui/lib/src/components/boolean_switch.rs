@@ -485,4 +485,28 @@ mod tests {
         assert_eq!(outcome, EventOutcome::Ignored);
         assert!(!state.checked());
     }
+
+    #[test]
+    fn custom_left_right_bindings_work() {
+        let bindings = KeyBindings {
+            left: vec![press(KeyCode::Char('a'))],
+            right: vec![press(KeyCode::Char('d'))],
+            ..KeyBindings::default()
+        };
+        let mut state = BooleanSwitchState::new()
+            .with_value(true)
+            .with_key_bindings(bindings);
+
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Char('a')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(!state.checked());
+
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Char('d')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.checked());
+
+        let outcome = BooleanSwitch.handle_event(&mut state, press(KeyCode::Left));
+        assert_eq!(outcome, EventOutcome::Ignored);
+        assert!(state.checked());
+    }
 }

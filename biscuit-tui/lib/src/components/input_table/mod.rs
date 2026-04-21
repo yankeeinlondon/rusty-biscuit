@@ -30,12 +30,12 @@
 //!
 //! ## Value Shape
 //!
-//! [`InputTableState::rows_typed`] returns `Vec<Row>` — each [`Row`]
-//! contains a vector of [`RowCell`]s pairing column ids with typed
-//! [`CellValue`]s. This preserves semantic types (booleans, multi-line
-//! text, multi-select arrays) rather than flattening to strings.
+//! [`InputTableState::value`] returns `&[Row]` — each [`Row`] contains
+//! a vector of [`RowCell`]s pairing column ids with typed [`CellValue`]s.
+//! This preserves semantic types (booleans, multi-line text,
+//! multi-select arrays) rather than flattening to strings.
 //!
-//! [`InputTableState::rows_typed`]: table::InputTableState::rows_typed
+//! [`InputTableState::value`]: table::InputTableState::value
 
 pub mod cell;
 pub mod column;

@@ -431,6 +431,25 @@ mod tests {
     }
 
     #[test]
+    fn custom_key_bindings_override_submit_and_cancel() {
+        let bindings = KeyBindings {
+            submit: vec![ctrl(KeyCode::Char('d'))],
+            cancel: vec![press(KeyCode::F(4))],
+            ..KeyBindings::default()
+        };
+        let mut state = TextAreaInputState::new(40, 5).with_key_bindings(bindings);
+
+        let outcome = TextAreaInput.handle_event(&mut state, ctrl(KeyCode::Char('d')));
+        assert_eq!(outcome, EventOutcome::Submitted);
+
+        let outcome = TextAreaInput.handle_event(&mut state, ctrl(KeyCode::Char('s')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+
+        let outcome = TextAreaInput.handle_event(&mut state, press(KeyCode::F(4)));
+        assert_eq!(outcome, EventOutcome::Cancelled);
+    }
+
+    #[test]
     fn typing_clears_active_validation_error() {
         let mut state = TextAreaInputState::new(40, 5);
         state.set_validation_error("required");

@@ -628,6 +628,21 @@ mod tests {
     }
 
     #[test]
+    fn toggling_selection_clears_validation_error() {
+        let input = fixture_input().required();
+        let mut state = ChooseManyState::new(input);
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_some());
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_none());
+        assert!(state.is_selected(0));
+    }
+
+    #[test]
     fn esc_cancels() {
         let mut state = ChooseManyState::new(fixture_input());
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Esc));
@@ -773,6 +788,26 @@ mod tests {
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
         assert_eq!(outcome, EventOutcome::Ignored);
         assert!(state.is_selected(0));
+    }
+
+    #[test]
+    fn custom_up_down_bindings_work() {
+        let bindings = KeyBindings {
+            up: vec![press(KeyCode::Char('w'))],
+            down: vec![press(KeyCode::Char('s'))],
+            ..KeyBindings::default()
+        };
+        let mut state = ChooseManyState::new(fixture_input()).with_key_bindings(bindings);
+        assert_eq!(state.hover, 0);
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('s')));
+        assert_eq!(state.hover, 1);
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('w')));
+        assert_eq!(state.hover, 0);
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover, 0);
     }
 
     #[test]
