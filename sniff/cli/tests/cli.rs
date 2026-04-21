@@ -2619,7 +2619,13 @@ fn test_repo_recent_commits_plain_output_exact_structure() {
 fn test_repo_packages_csv_default() {
     let (_dir, path) = create_cli_monorepo();
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "packages", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--plain",
+        ])
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
