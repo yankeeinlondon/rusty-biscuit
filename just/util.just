@@ -126,9 +126,9 @@ _choose_plan filter="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{filter}}" ]]; then
-        file="$(fd -g '*plan*\.md'  |  fzf --height=15 --border --border-label 'Choose a plan file' )"
+        file="$(fd -g '*plan*\.md' --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a plan file' )"
     else
-        file="$(fd -g '*plan*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the plan file' )"
+        file="$(fd -g '*plan*\.md' --exclude '_completed' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the plan file' )"
     fi
     echo "${file}"
 
@@ -159,11 +159,31 @@ _get_design_doc dir:
     fi
     echo "${design}"
 
+
+_choose_model:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    model="$(printf '%s\n' 'zai-coding-plan/glm-5.1' 'minimax/MiniMax-M2.7-highspeed' | fzf --border --border-label 'Choose a Model')"
+    echo "${model}"
+
 # return a list of all `*review*.md` files found features, fixes, and reviews
 _choose_review filter="":
     #!/usr/bin/env bash
     set -euo pipefail
-    mapfile -t files < <(for d in fixes/ features/ reviews/; do [[ -d "${d}" ]] && fd -g '*review*.md' "${d}"; done {{ if filter == "" { "" } else { "| rg \"" + filter + "\"" } }})
+    mapfile -t files < <(for d in reviews/; do [[ -d "${d}" ]] && fd -g '*review*.md' "${d}"; done {{ if filter == "" { "" } else { "| rg \"" + filter + "\"" } }})
+    if [[ ${#files[@]} -eq 1 ]]; then
+        echo "${files[0]}"
+    elif [[ ${#files[@]} -gt 1 ]]; then
+        printf '%s\n' "${files[@]}" | fzf --height=15 --border --border-label 'Choose a review file'
+    else
+        echo -e "{{red}}no reviews found!{{reset}}" >&2
+        exit 1
+    fi
+
+_choose_spec_review filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mapfile -t files < <(for d in fixes/ features/; do [[ -d "${d}" ]] && fd -g '*review*.md' "${d}"; done {{ if filter == "" { "" } else { "| rg \"" + filter + "\"" } }})
     if [[ ${#files[@]} -eq 1 ]]; then
         echo "${files[0]}"
     elif [[ ${#files[@]} -gt 1 ]]; then

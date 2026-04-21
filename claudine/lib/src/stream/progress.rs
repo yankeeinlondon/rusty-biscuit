@@ -269,7 +269,6 @@ pub fn should_warn_stall(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

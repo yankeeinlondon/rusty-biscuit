@@ -361,6 +361,144 @@ pub enum ShellExpansionError {
     },
 }
 
+impl biscuit_terminal::errors::BlockError for ShellExpansionError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            ShellExpansionError::ParseDirective { origin, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "directive parse failed",
+                ))
+                .body(format!(
+                    "<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("Body syntax: <cyan>::shell \"command\"</cyan>. Frontmatter syntax: <cyan>key: $(command)</cyan>."),
+
+            ShellExpansionError::CommandNotFound { command, origin } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command not found"))
+                .body(format!(
+                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
+                ))
+                .hint("Install the binary or update <cyan>$PATH</cyan> so it is discoverable."),
+
+            ShellExpansionError::Blacklisted { command, reason, origin } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command blacklisted"))
+                .body(format!(
+                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Reason:</dim> {reason}"
+                ))
+                .hint("Remove the entry from your blacklist file if you trust this command."),
+
+            ShellExpansionError::ApprovalRequired {
+                command,
+                whitelist_path,
+                blacklist_path,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "approval required"))
+                .body(format!(
+                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Whitelist:</dim> {}\n<dim>Blacklist:</dim> {}",
+                    whitelist_path.display(),
+                    blacklist_path.display()
+                ))
+                .hint("Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."),
+
+            ShellExpansionError::Denied { command, origin } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command denied"))
+                .body(format!(
+                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
+                ))
+                .hint("The user declined to approve this shell expansion."),
+
+            ShellExpansionError::NotPreApproved { command, origin, source_desc } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "command not pre-approved",
+                ))
+                .body(format!(
+                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Source:</dim> {source_desc}"
+                ))
+                .hint("This is a bug in the pre-flight scanner — please report it."),
+
+            ShellExpansionError::Timeout { command, timeout, origin } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command timed out"))
+                .body(format!(
+                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Timeout:</dim> {timeout:?}"
+                ))
+                .hint("Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."),
+
+            ShellExpansionError::ExecutionFailed {
+                command,
+                code,
+                stdout,
+                stderr,
+                origin,
+            } => {
+                let stdout_section = if stdout.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("\n<dim>stdout:</dim>\n{}", truncate_output(stdout))
+                };
+                let stderr_section = if stderr.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("\n<dim>stderr:</dim>\n{}", truncate_output(stderr))
+                };
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("ShellExpansionError", "execution failed"))
+                    .body(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stdout_section}{stderr_section}"
+                    ))
+                    .hint("Run the command directly to reproduce the failure.")
+            }
+
+            ShellExpansionError::PolicyIo { path, source } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "policy I/O error"))
+                .body(format!(
+                    "<dim>Path:</dim> {}\n<dim>Kind:</dim> {:?}\n{source}",
+                    path.display(),
+                    source.kind()
+                ))
+                .hint("Verify the policy file exists and the process can read it."),
+        }
+    }
+}
+
+/// Truncate output to a maximum number of lines/bytes for block rendering.
+fn truncate_output(text: &str) -> String {
+    const MAX_LINES: usize = 20;
+    const MAX_BYTES: usize = 2048;
+
+    let truncated_bytes = if text.len() > MAX_BYTES {
+        let cut = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= MAX_BYTES)
+            .last()
+            .unwrap_or(0);
+        format!("{}\n<dim>… output truncated</dim>", &text[..cut])
+    } else {
+        text.to_string()
+    };
+
+    let lines: Vec<&str> = truncated_bytes.lines().collect();
+    if lines.len() > MAX_LINES {
+        let head = lines[..MAX_LINES].join("\n");
+        format!(
+            "{head}\n<dim>… {} more lines</dim>",
+            lines.len() - MAX_LINES
+        )
+    } else {
+        truncated_bytes
+    }
+}
+
 /// Paths to whitelist and blacklist policy files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellPolicyPaths {

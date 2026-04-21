@@ -14,12 +14,56 @@ pub enum PageBlockError {
     UnmatchedEnd { line: usize },
 
     /// Reached end of file with an unclosed `::block`.
-    #[error("Unterminated ::block starting at line {line}")]
-    UnterminatedBlock { line: usize },
+    #[error("Unterminated ::block starting at line {line} (file ends at line {file_ends_at_line})")]
+    UnterminatedBlock {
+        line: usize,
+        opening_text: String,
+        file_ends_at_line: usize,
+    },
 
     /// Condition parsing or evaluation failed.
     #[error("{0}")]
     Condition(#[from] super::super::conditions::ConditionError),
+}
+
+impl biscuit_terminal::errors::BlockError for PageBlockError {
+    fn status_block(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            PageBlockError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("PageBlockError", "directive parse failed"))
+                .body(format!(
+                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("Opening syntax: <cyan>::block when=\"expr\"</cyan> — close with <cyan>::end-block</cyan>."),
+
+            PageBlockError::UnmatchedEnd { line } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("PageBlockError", "unmatched ::end-block"))
+                .body(format!("<dim>Line:</dim> {line}"))
+                .hint("Add a matching <cyan>::block</cyan> directive above this closing line."),
+
+            PageBlockError::UnterminatedBlock { line, opening_text, file_ends_at_line } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("PageBlockError", "unterminated ::block"))
+                .body(format!(
+                    "<dim>Opened at line:</dim> {line}\n<dim>Opening directive:</dim> {opening_text}\n<dim>File ends at line:</dim> {file_ends_at_line}"
+                ))
+                .hint("Add a matching <cyan>::end-block</cyan> directive to close the region."),
+
+            PageBlockError::Condition(inner) => {
+                biscuit_terminal::errors::BlockError::status_block(inner, term)
+            }
+        }
+    }
+
+    fn block_source(&self) -> Option<&(dyn biscuit_terminal::errors::BlockError + 'static)> {
+        None
+    }
 }
 
 /// Parsed options from a `::block` directive line.

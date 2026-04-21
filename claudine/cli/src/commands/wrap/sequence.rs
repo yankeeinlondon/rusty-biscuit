@@ -14,6 +14,7 @@ use claudine::composition::{
 };
 use claudine::harness::{HarnessResolutionContext, has_harness_properties, parse_harness_plan};
 use color_eyre::eyre::{Result, eyre};
+use tracing::{debug, info_span};
 
 use crate::commands::compose::SharedComposeArgs;
 use crate::log;
@@ -125,6 +126,8 @@ pub(crate) fn execute_sequence(
     // pass up-front means any required approval prompts fire BEFORE
     // the first agent launches — the operator reviews all shell commands
     // (both template and harness) once and then walks away.
+    let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
+
     let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
         if interrupted.load(Ordering::SeqCst) {
@@ -216,6 +219,8 @@ pub(crate) fn execute_sequence(
     }
 
     // ── Phase 2: execute each step ─────────────────────────────────────
+    drop(_preflight_span);
+
     let mut interrupt_observed = false;
     for (step_index, step_ctx) in step_contexts.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
@@ -223,6 +228,13 @@ pub(crate) fn execute_sequence(
             break;
         }
         let step = &plan.steps[step_index];
+
+        let _step_span = info_span!(
+            "sequence_step",
+            step_index = step_index + 1,
+            step_name = %step.name
+        )
+        .entered();
 
         if !silent {
             let status = Status::from_prose(format!(
@@ -287,6 +299,7 @@ pub(crate) fn execute_sequence(
                     error: None,
                     duration,
                 });
+                debug!(step_index = step_index + 1, step_name = %step.name, provider = %outcome.provider, exit_code = 0, "sequence step succeeded");
                 if !silent {
                     let status = Status::from_prose(format!(
                         "step <b><yellow>{}/{}</yellow></b> succeeded (<dim><i>via {}</i></dim>)",
@@ -315,6 +328,7 @@ pub(crate) fn execute_sequence(
                     error: Some("interrupted by SIGINT".into()),
                     duration,
                 });
+                debug!(step_index = step_index + 1, step_name = %step.name, "sequence step interrupted");
                 if !silent {
                     let status = Status::from_prose(format!(
                         "step <b><yellow>{}/{}</yellow></b> interrupted by Ctrl+C",
@@ -340,6 +354,7 @@ pub(crate) fn execute_sequence(
                     error: Some(error_msg.clone()),
                     duration,
                 });
+                debug!(step_index = step_index + 1, step_name = %step.name, provider = %outcome.provider, exit_code = outcome.exit_code, error = %error_msg, "sequence step failed");
                 if !silent {
                     let status = Status::from_prose(format!(
                         "step <b><yellow>{}/{}</yellow></b> failed: {}",
@@ -351,6 +366,7 @@ pub(crate) fn execute_sequence(
                     log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
+                    debug!(step_index = step_index + 1, step_name = %step.name, fail_fast = %effective_fail_fast, "sequence fail-fast triggered");
                     break;
                 }
             }
@@ -364,6 +380,7 @@ pub(crate) fn execute_sequence(
                     error: Some(error_msg.clone()),
                     duration,
                 });
+                debug!(step_index = step_index + 1, step_name = %step.name, error = %error_msg, "sequence step error");
                 if !silent {
                     let status = Status::from_prose(format!(
                         "step <b><yellow>{}/{}</yellow></b> failed: {}",
@@ -375,6 +392,7 @@ pub(crate) fn execute_sequence(
                     log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
+                    debug!(step_index = step_index + 1, step_name = %step.name, fail_fast = %effective_fail_fast, "sequence fail-fast triggered");
                     break;
                 }
             }

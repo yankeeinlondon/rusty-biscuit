@@ -176,6 +176,8 @@ pub(crate) fn execute_composition_request_inner(
     request: CompositionExecutionRequest,
     verbose: u8,
 ) -> Result<SingleCompositionOutcome> {
+    let _span = tracing::info_span!("composition_prepare").entered();
+
     let term = wrap_terminal();
     let launch_cwd = std::env::current_dir()?;
     let detail_requested = verbose > 0;
@@ -671,6 +673,10 @@ pub(crate) fn execute_composition_request_inner(
 
     switch_process_cwd(child_cwd)?;
 
+    drop(_span);
+
+    let _span = tracing::info_span!("composition_preflight").entered();
+
     if !silent && !quiet {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
         use biscuit_terminal::prelude::Renderable as _;
@@ -841,6 +847,10 @@ pub(crate) fn execute_composition_request_inner(
             crate::log::message("");
         }
     }
+
+    drop(_span);
+
+    let _span = tracing::info_span!("composition_execute").entered();
 
     // -- Execution --------------------------------------------------------
 
@@ -1157,6 +1167,8 @@ fn execute_without_harness(
             }
         }
     };
+
+    let _span = tracing::info_span!("composition_postprocess").entered();
 
     // -- Direct mode: emit summary immediately and return -------------------
     let (closure_plan, resolved_path, show_checks) = match mode {

@@ -17,7 +17,7 @@ use sniff::filesystem::{
 };
 
 use super::{TextOutput, format_number, relative_path};
-use crate::args::FilesFilter;
+use crate::args::{FilesFilter, PackagesFormat};
 
 /// Parsed repo filter with support for negation (`!`) and area matching (`@`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -532,12 +532,9 @@ fn build_git_status_items(
         .collect();
     for file in &conflicted {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
-        let line = if dir.is_empty() {
-            format!("<red>conflicted: <b>{}</b></red>", name)
-        } else {
-            format!("<red>conflicted: {}<b>{}</b></red>", dir, name)
-        };
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<red>conflicted: {linked_path}</red>");
         status_items.push(line);
     }
 
@@ -576,7 +573,8 @@ fn build_git_status_items(
     // Add staged files
     for file in &staged {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         // Only show diff stats for modified files (not created/deleted)
         let diff_stats = if file.action == FileAction::Modified {
@@ -584,48 +582,29 @@ fn build_git_status_items(
         } else {
             String::new()
         };
-        let line = if dir.is_empty() {
-            format!(
-                "<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>{diff_stats}",
-                name
-            )
-        } else {
-            format!(
-                "<lime>staged(<dim><i>{action}</i></dim>): {}<b>{}</b></lime>{diff_stats}",
-                dir, name
-            )
-        };
+        let line =
+            format!("<lime>staged(<dim><i>{action}</i></dim>): {linked_path}</lime>{diff_stats}");
         status_items.push(line);
     }
 
     // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
-        let line = if dir.is_empty() {
-            format!(
-                "<yellow>unstaged(<dim><i>{action}</i></dim>): <b>{}</b></yellow>{diff_stats}",
-                name
-            )
-        } else {
-            format!(
-                "<yellow>unstaged(<dim><i>{action}</i></dim>): {}<b>{}</b></yellow>{diff_stats}",
-                dir, name
-            )
-        };
+        let line = format!(
+            "<yellow>unstaged(<dim><i>{action}</i></dim>): {linked_path}</yellow>{diff_stats}"
+        );
         status_items.push(line);
     }
 
     for file in &untracked {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
-        let line = if dir.is_empty() {
-            format!("<dim>untracked: <b>{}</b></dim>", name)
-        } else {
-            format!("<dim>untracked: {}<b>{}</b></dim>", dir, name)
-        };
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<dim>untracked: {linked_path}</dim>");
         status_items.push(line);
     }
 
@@ -1326,20 +1305,98 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
 /// Render package names as a comma-separated plain text list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_repo_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
-    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+/// Filter a package list by name/area filters and an optional package-area scope.
+fn select_repo_packages<'a>(
+    packages: &'a [Package],
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a Package> {
+    let mut filtered = filter_packages(packages, repo_filter);
+    if let Some(area) = package_area {
+        let needle = area.to_lowercase();
+        filtered.retain(|p| p.package_area.to_lowercase() == needle);
+    }
+    filtered
+}
 
-    match repo {
-        Some(repo) if repo.is_monorepo => {
-            if let Some(ref packages) = repo.packages {
-                let filtered = filter_packages(packages, repo_filter);
-                let names: Vec<&str> = filtered.iter().map(|p| p.name.as_str()).collect();
-                names.join(", ")
-            } else {
-                String::new()
-            }
-        }
-        _ => String::from("- the \"--packages\" switch is only intended to be used in a monorepo"),
+/// Collect package names matching the given filters and area scope.
+///
+/// Returns an empty vec when the repo is not a monorepo.
+pub fn collect_repo_package_names<'a>(
+    repo: &'a RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a str> {
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    select_repo_packages(packages, repo_filter, package_area)
+        .into_iter()
+        .map(|p| p.name.as_str())
+        .collect()
+}
+
+/// Render a styled package entry; with `verbose > 0` appends the dimmed/italic
+/// repo-relative root directory (e.g. `name(<dim><i>./relative</i></dim>)`).
+fn package_entry_markup(pkg: &Package, verbose: u8) -> String {
+    if verbose > 0 {
+        format!(
+            "{}(<dim><i>./{}</i></dim>)",
+            pkg.name,
+            pkg.relative.trim_start_matches("./")
+        )
+    } else {
+        pkg.name.clone()
+    }
+}
+
+/// Render the package list for `sniff repo packages` in the requested format.
+///
+/// Honors `--md` (Markdown unordered list), `--list` (one entry per line), and
+/// the default csv form. With `verbose > 0`, each entry is annotated with the
+/// dimmed package root directory.
+pub fn render_repo_packages_formatted(
+    repo: &RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+    format: PackagesFormat,
+    verbose: u8,
+) -> String {
+    if !repo.is_monorepo {
+        return String::from(
+            "- the \"packages\" subcommand is only intended to be used in a monorepo",
+        );
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return String::new();
+    };
+
+    let filtered = select_repo_packages(packages, repo_filter, package_area);
+    if filtered.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let entries: Vec<String> = filtered
+        .iter()
+        .map(|pkg| {
+            let markup = package_entry_markup(pkg, verbose);
+            Prose::new(markup).render(&term)
+        })
+        .collect();
+
+    match format {
+        PackagesFormat::Csv => entries.join(", "),
+        PackagesFormat::Markdown => entries
+            .iter()
+            .map(|e| format!("- {e}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        PackagesFormat::List => entries.join("\n"),
     }
 }
 
@@ -2976,6 +3033,15 @@ fn format_basename_filepath(relative: &str, absolute: &str) -> String {
     format!("<a href=\"{absolute}\"><blue>{basename}</blue></a>")
 }
 
+/// Format a git-status filepath preserving the existing visible text while
+/// making the path clickable through Prose OSC8 support.
+fn format_git_status_filepath(relative: &str, absolute: &str) -> String {
+    match relative.rsplit_once('/') {
+        Some((dir, file)) => format!("<a href=\"{absolute}\">{dir}/<b>{file}</b></a>"),
+        None => format!("<a href=\"{absolute}\"><b>{relative}</b></a>"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared path-list renderer
 // ---------------------------------------------------------------------------
@@ -3352,8 +3418,16 @@ mod tests {
 
             let items = build_git_status_items(&git, 10, 0);
 
-            assert!(items[0].starts_with("<red>conflicted:"));
-            assert!(items.iter().any(|item| item.starts_with("<dim>untracked:")));
+            assert!(items[0].starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
+            assert!(items[0].contains("<b>conflict.txt</b></a>"));
+            assert!(items.iter().any(|item| {
+                item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
+                    && item.contains("<b>notes.md</b></a>")
+            }));
+            assert!(items.iter().any(|item| {
+                item.starts_with("<lime>staged(")
+                    && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
+            }));
         }
 
         #[test]

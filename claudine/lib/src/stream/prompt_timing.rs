@@ -121,9 +121,9 @@ pub fn render_header_prose(
     let local_time = format_local_time_now();
     let link = prompt_link(ctx);
     match kind {
-        HeaderKind::Zero => format!(
-            "\u{23f1}\u{fe0f} {local_time} <i><dim>running the {link} prompt</dim></i>"
-        ),
+        HeaderKind::Zero => {
+            format!("\u{23f1}\u{fe0f} {local_time} <i><dim>running the {link} prompt</dim></i>")
+        }
         HeaderKind::Tick => {
             let duration = format_timing_duration(elapsed);
             format!(
@@ -300,8 +300,7 @@ mod tests {
         let elapsed = Duration::from_secs(45 * 60);
         let remaining = Duration::from_secs(15 * 60);
         let deadline = Local::now();
-        let rendered =
-            render_timeout_warn_prose(elapsed, Some((remaining, deadline)), &ctx());
+        let rendered = render_timeout_warn_prose(elapsed, Some((remaining, deadline)), &ctx());
         assert!(
             rendered.contains("running for 45m"),
             "elapsed duration must be rendered: {rendered}"
@@ -331,8 +330,7 @@ mod tests {
         let silence = Duration::from_secs(90);
         let remaining = Duration::from_secs(30);
         let deadline = Local::now();
-        let rendered =
-            render_step_timeout_warn_prose(silence, Some((remaining, deadline)), &ctx());
+        let rendered = render_step_timeout_warn_prose(silence, Some((remaining, deadline)), &ctx());
         assert!(
             rendered.contains("not produced output for 1m"),
             "silence duration must render in minutes: {rendered}"

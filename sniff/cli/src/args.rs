@@ -40,6 +40,8 @@ pub enum RepoAction {
     },
     Packages {
         filter: Vec<String>,
+        package_area: Option<String>,
+        format: PackagesFormat,
     },
     Package {
         no_error: bool,
@@ -188,6 +190,18 @@ pub enum BlastRadiusScopeArg {
     LastCommit,
 }
 
+/// Output shape for the `repo packages` subcommand.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PackagesFormat {
+    /// Comma-separated values on a single line (default).
+    #[default]
+    Csv,
+    /// Markdown unordered list (`- name` per line).
+    Markdown,
+    /// Plain list (one entry per line, no bullet).
+    List,
+}
+
 /// Detect system and repository information
 #[derive(Parser)]
 #[command(
@@ -211,9 +225,13 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub perf: bool,
 
-    /// Increase output verbosity
+    /// Increase output verbosity (styled user output only; never raw tracing)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
+
+    /// Emit raw developer tracing to stderr; repeat for higher verbosity
+    #[arg(long, action = clap::ArgAction::Count, global = true)]
+    pub debug: u8,
 
     /// Strip terminal escape codes from text output
     #[arg(long, global = true)]
@@ -648,6 +666,15 @@ pub enum RepoSubcommand {
     Packages {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Restrict output to packages in the specified package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Render as a Markdown unordered list (one `- name` per line)
+        #[arg(long, conflicts_with = "list")]
+        md: bool,
+        /// Render as a raw list (one name per line, no bullet)
+        #[arg(long, conflicts_with = "md")]
+        list: bool,
     },
     /// Output the package name for the current directory
     Package {
@@ -1051,11 +1078,24 @@ impl Commands {
                     },
                     ui: *ui,
                 },
-                Some(RepoSubcommand::Packages { filter: sub_filter }) => RepoAction::Packages {
+                Some(RepoSubcommand::Packages {
+                    filter: sub_filter,
+                    package_area,
+                    md,
+                    list,
+                }) => RepoAction::Packages {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
                     } else {
                         sub_filter.clone()
+                    },
+                    package_area: package_area.clone(),
+                    format: if *md {
+                        PackagesFormat::Markdown
+                    } else if *list {
+                        PackagesFormat::List
+                    } else {
+                        PackagesFormat::Csv
                     },
                 },
                 Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {

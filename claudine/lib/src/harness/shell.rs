@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::ShellCommandOrigin;
@@ -14,6 +15,8 @@ use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
     check_whitelist, normalize_command, resolve_policy_paths,
 };
+
+use tracing::{debug, info_span};
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::ApprovedRuntimeCommand;
@@ -54,6 +57,8 @@ pub fn validate_and_approve_command(
     raw: &str,
     options: &ShellApprovalOptions,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    let _span = info_span!("harness_shell_validate", command = %raw).entered();
+
     // Tokenize
     let tokens = tokenize(raw).map_err(|_| HarnessError::ShellCommandDenied {
         command: raw.to_string(),
@@ -78,19 +83,28 @@ pub fn validate_and_approve_command_parts(
     source_file: Option<&Path>,
     source_line: Option<usize>,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    let raw = parts.join(" ");
+    let _span = info_span!(
+        "harness_shell_validate",
+        command = %raw,
+        ?source_file,
+        source_line
+    )
+    .entered();
+
     if parts.is_empty() {
         return Err(HarnessError::ShellCommandDenied {
             command: String::new(),
         });
     }
 
-    let raw = parts.join(" ");
     let executable = &parts[0];
     let args: Vec<String> = parts[1..].to_vec();
     let normalized = normalize_command(executable, &args);
 
     // Check built-in blacklist
     if let Some(reason) = check_builtin_blacklist(executable, &args) {
+        debug!(reason = %reason, "shell command blocked by builtin blacklist");
         return Err(HarnessError::ShellCommandBlacklisted {
             command: raw.clone(),
             reason,
@@ -132,6 +146,7 @@ pub fn validate_and_approve_command_parts(
     )
     .unwrap_or_default();
     if check_user_blacklist(&blacklist, executable, &args, &normalized) {
+        debug!("shell command blocked by user blacklist");
         return Err(HarnessError::ShellCommandBlacklisted {
             command: raw.clone(),
             reason: "command matches user blacklist".to_string(),
@@ -144,6 +159,7 @@ pub fn validate_and_approve_command_parts(
     )
     .unwrap_or_default();
     if check_whitelist(&whitelist, executable, &normalized) {
+        debug!("shell command approved via whitelist");
         return Ok(ApprovedRuntimeCommand {
             raw,
             executable: executable.to_string(),
@@ -160,6 +176,7 @@ pub fn validate_and_approve_command_parts(
     {
         match decision {
             CachedApprovalDecision::Allowed => {
+                debug!("shell command approved via cache");
                 return Ok(ApprovedRuntimeCommand {
                     raw,
                     executable: executable.to_string(),
@@ -167,11 +184,13 @@ pub fn validate_and_approve_command_parts(
                 });
             }
             CachedApprovalDecision::Denied => {
+                debug!("shell command denied via cache");
                 return Err(HarnessError::ShellCommandDenied {
                     command: raw.clone(),
                 });
             }
             CachedApprovalDecision::Blacklisted => {
+                debug!("shell command blacklisted via cache");
                 return Err(HarnessError::ShellCommandBlacklisted {
                     command: raw.clone(),
                     reason: "command was previously blacklisted during this session".to_string(),
@@ -199,6 +218,7 @@ pub fn validate_and_approve_command_parts(
                 use darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision;
                 match decision {
                     ShellApprovalDecision::AllowExactPersist => {
+                        debug!("handler approved (AllowExactPersist), persisting to whitelist");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_exact(
                             &policy_paths,
                             &normalized,
@@ -210,6 +230,7 @@ pub fn validate_and_approve_command_parts(
                         );
                     }
                     ShellApprovalDecision::AllowCommandPersist => {
+                        debug!("handler approved (AllowCommandPersist), persisting to whitelist");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_prefix(
                             &policy_paths,
                             executable,
@@ -220,12 +241,16 @@ pub fn validate_and_approve_command_parts(
                             CachedApprovalDecision::Allowed,
                         );
                     }
-                    ShellApprovalDecision::AllowOnce => cache_approval_decision(
-                        &options.approval_cache,
-                        &normalized,
-                        CachedApprovalDecision::Allowed,
-                    ),
+                    ShellApprovalDecision::AllowOnce => {
+                        debug!("handler approved (AllowOnce)");
+                        cache_approval_decision(
+                            &options.approval_cache,
+                            &normalized,
+                            CachedApprovalDecision::Allowed,
+                        );
+                    }
                     ShellApprovalDecision::Deny => {
+                        debug!("handler denied command");
                         cache_approval_decision(
                             &options.approval_cache,
                             &normalized,
@@ -236,6 +261,7 @@ pub fn validate_and_approve_command_parts(
                         });
                     }
                     ShellApprovalDecision::BlacklistPersist => {
+                        debug!("handler blacklisted command");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_blacklist_exact(
                             &policy_paths,
                             &normalized,
@@ -253,16 +279,18 @@ pub fn validate_and_approve_command_parts(
                 }
             }
             Err(_) => {
+                debug!("handler returned error, denying command");
                 return Err(HarnessError::ShellCommandDenied {
                     command: raw.clone(),
                 });
             }
         }
     } else {
-        // No approval handler and not whitelisted: deny
+        debug!("no approval handler and not whitelisted, denying command");
         return Err(HarnessError::ShellCommandDenied { command: raw });
     }
 
+    debug!("shell command approved");
     Ok(ApprovedRuntimeCommand {
         raw,
         executable: executable.to_string(),
@@ -293,6 +321,14 @@ pub async fn execute_approved_command(
     working_dir: Option<&std::path::Path>,
     timeout: std::time::Duration,
 ) -> Result<(i32, String, String), HarnessError> {
+    let _span = info_span!(
+        "harness_shell_execute",
+        command = %command.raw,
+        timeout_secs = timeout.as_secs()
+    )
+    .entered();
+
+    let start = Instant::now();
     let exe = which::which(&command.executable).map_err(|_| HarnessError::HandlerFailed {
         action: "shell_command".to_string(),
         detail: format!("executable '{}' not found in PATH", command.executable),
@@ -319,6 +355,7 @@ pub async fn execute_approved_command(
     match result {
         Ok(Ok(status)) => {
             let exit_code = status.code().unwrap_or(-1);
+            let duration_ms = start.elapsed().as_millis() as u64;
 
             let stdout = match stdout_pipe {
                 Some(mut pipe) => {
@@ -340,15 +377,26 @@ pub async fn execute_approved_command(
                 None => String::new(),
             };
 
+            debug!(
+                exit_code,
+                duration_ms,
+                stdout_len = stdout.len(),
+                stderr_len = stderr.len(),
+                "shell command completed"
+            );
             Ok((exit_code, stdout, stderr))
         }
-        Ok(Err(e)) => Err(HarnessError::HandlerFailed {
-            action: "shell_command".to_string(),
-            detail: format!("failed to wait for '{}': {e}", command.executable),
-        }),
+        Ok(Err(e)) => {
+            debug!(error = %e, "shell command wait failed");
+            Err(HarnessError::HandlerFailed {
+                action: "shell_command".to_string(),
+                detail: format!("failed to wait for '{}': {e}", command.executable),
+            })
+        }
         Err(_) => {
             let _ = child.kill().await;
             let _ = child.wait().await;
+            debug!(timeout_secs = timeout.as_secs(), "shell command timed out");
             Err(HarnessError::HandlerFailed {
                 action: "shell_command".to_string(),
                 detail: format!(

@@ -92,21 +92,60 @@ pub struct BlockOptions {
 /// a JSON5 object or when the same `set.NAME=` appears twice on one
 /// directive line. Resolution into a hard error or a warning happens
 /// during transclusion when the governing `ComposeOptions` are in scope.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DeferredSetError {
     /// Object-form RHS did not parse as a JSON5 object.
+    #[error("invalid set assignment at line {line}: {reason} (value: {raw})")]
     InvalidAssignment {
         /// Raw RHS as seen on the directive line (with any stripped quotes re-wrapped).
         raw: String,
         /// Human-readable reason (e.g., "expected JSON5 object").
         reason: String,
+        /// 1-based directive line number.
+        line: usize,
     },
 
     /// A property-form name (or `"<object>"`) was assigned more than once.
+    #[error("reassigned set property '{name}'")]
     ReassignedProperty {
         /// The conflicting property name, or `"<object>"` for object-form.
         name: String,
     },
+}
+
+impl biscuit_terminal::errors::BlockError for DeferredSetError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::InvalidAssignment { raw, reason, line } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "DeferredSetError",
+                    "invalid set assignment",
+                ))
+                .body(format!(
+                    "<dim>Line:</dim> {line}\n<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
+                ))
+                .hint(
+                    "Use a JSON5 object like <cyan>set={ key: \"value\" }</cyan> or a property form like <cyan>set.key=\"value\"</cyan>.",
+                ),
+
+            Self::ReassignedProperty { name } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "DeferredSetError",
+                    "reassigned set property",
+                ))
+                .body(format!("<dim>Property:</dim> <cyan>{name}</cyan>"))
+                .hint(
+                    "Each <cyan>set.NAME=</cyan> clause must appear only once per directive line.",
+                ),
+        }
+    }
 }
 
 /// Parsed directive from markdown body.
@@ -133,6 +172,10 @@ pub struct BlockDirective {
 pub struct DependencyNode {
     /// Canonical identifier (path or URL).
     pub id: String,
+    /// Resolved file path (or empty for URLs/synthetic sources).
+    pub path: PathBuf,
+    /// 1-based line number where the transclusion directive appeared.
+    pub line: usize,
 }
 
 /// Runtime state for recursive transclusion.
@@ -163,15 +206,23 @@ impl TransclusionRuntime {
     }
 
     /// Enters a dependency node and validates cycle/depth constraints.
-    pub fn enter(&mut self, id: String) -> Result<(), TransclusionError> {
+    pub fn enter(
+        &mut self,
+        id: String,
+        path: PathBuf,
+        line: usize,
+    ) -> Result<(), TransclusionError> {
         // Check local stack for cycle (provides chain for error message)
         if let Some(idx) = self.stack.iter().position(|n| n.id == id) {
-            let mut chain: Vec<String> = self.stack[idx..].iter().map(|n| n.id.clone()).collect();
-            chain.push(id);
+            let mut chain: Vec<(PathBuf, usize)> = self.stack[idx..]
+                .iter()
+                .map(|n| (n.path.clone(), n.line))
+                .collect();
+            chain.push((path.clone(), line));
             return Err(TransclusionError::CycleDetected { chain });
         }
 
-        self.stack.push(DependencyNode { id });
+        self.stack.push(DependencyNode { id, path, line });
         self.deepest_seen = self.deepest_seen.max(self.stack.len());
 
         if self.stack.len() > self.max_depth {
@@ -240,10 +291,23 @@ pub struct FrontmatterRefs {
 #[derive(Debug, Error)]
 pub enum TransclusionError {
     #[error("Failed to parse directive at line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    ParseDirective {
+        line: usize,
+        message: String,
+        caret_col: Option<usize>,
+    },
 
-    #[error("Invalid reference '{reference}' at line {line}")]
-    InvalidReference { reference: String, line: usize },
+    #[error(
+        "Invalid {} reference '{reference}' in {} at line {line}",
+        .directive_kind.as_str(),
+        .source_file.display()
+    )]
+    InvalidReference {
+        reference: String,
+        line: usize,
+        source_file: PathBuf,
+        directive_kind: DirectiveKind,
+    },
 
     #[error("Missing source context to resolve '{reference}' at line {line}")]
     MissingSourceContext { reference: String, line: usize },
@@ -257,8 +321,8 @@ pub enum TransclusionError {
     #[error("Code transclusion source is not UTF-8 text: {path}")]
     NonTextCodeSource { path: PathBuf },
 
-    #[error("Transclusion cycle detected: {chain:?}")]
-    CycleDetected { chain: Vec<String> },
+    #[error("Transclusion cycle detected: {}", .chain.iter().map(|(p, l)| format!("{}:{}", p.display(), l)).collect::<Vec<_>>().join(" -> "))]
+    CycleDetected { chain: Vec<(PathBuf, usize)> },
 
     #[error("Maximum transclusion depth exceeded (max: {max_depth})")]
     MaxDepthExceeded { max_depth: usize },
@@ -308,6 +372,185 @@ pub enum TransclusionError {
 
     #[error("JSON parse error in transclusion option: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl biscuit_terminal::errors::BlockError for TransclusionError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            TransclusionError::ParseDirective { line, message, .. } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "directive parse failed"))
+                .body(format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"))
+                .hint("Expected syntax: <cyan>::file ./path.md</cyan> | <cyan>::code ./file.rs</cyan>."),
+
+            TransclusionError::InvalidReference { reference, line, source_file, directive_kind } => {
+                let kind_str = match directive_kind {
+                    DirectiveKind::File => "::file",
+                    DirectiveKind::Code => "::code",
+                    DirectiveKind::Url => "::url",
+                };
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("TransclusionError", "invalid reference"))
+                    .body(format!(
+                        "<dim>Source file:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Directive:</dim> {kind_str}\n<dim>Reference:</dim> <cyan>{reference}</cyan>",
+                        source_file.display()
+                    ))
+                    .hint("Use a relative path, absolute path, or <cyan>https://</cyan> URL.")
+            }
+
+            TransclusionError::MissingSourceContext { reference, line } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "TransclusionError",
+                        "missing source context",
+                    ))
+                    .body(format!(
+                        "<dim>Reference:</dim> <cyan>{reference}</cyan>\n<dim>Line:</dim> {line}"
+                    ))
+                    .hint("Load the document from a file or URL so relative refs can resolve.")
+            }
+
+            TransclusionError::UnsupportedReferenceType { reference } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "TransclusionError",
+                        "unsupported reference type",
+                    ))
+                    .body(format!("<dim>Reference:</dim> <cyan>{reference}</cyan>"))
+                    .hint("Supported types: local file paths, HTTP(S) URLs.")
+            }
+
+            TransclusionError::UnsupportedFileType { path } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "unsupported file type",
+                ))
+                .body(format!("<dim>Path:</dim> <cyan>{}</cyan>", path.display()))
+                .hint("Use <cyan>::file</cyan> for markdown or <cyan>::code</cyan> for text/source."),
+
+            TransclusionError::NonTextCodeSource { path } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "non-text code source"))
+                .body(format!("<dim>Path:</dim> <cyan>{}</cyan>", path.display()))
+                .hint("Only UTF-8 text files can be transcluded with <cyan>::code</cyan>."),
+
+            TransclusionError::CycleDetected { chain } => {
+                let chain_display = chain
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (path, line))| {
+                        format!(
+                            "  {}. <cyan>{}</cyan> <dim>:line {}</dim>",
+                            i + 1,
+                            path.display(),
+                            line
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("TransclusionError", "cycle detected"))
+                    .body(format!("<dim>Chain:</dim>\n{chain_display}"))
+                    .hint("Break the cycle by removing one transclusion edge.")
+            }
+
+            TransclusionError::MaxDepthExceeded { max_depth } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "max recursion depth exceeded",
+                ))
+                .body(format!("<dim>Max depth:</dim> {max_depth}"))
+                .hint("Flatten the transclusion tree or raise the configured max depth."),
+
+            TransclusionError::ConditionEval { expr, line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "condition evaluation failed",
+                ))
+                .body(format!(
+                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("Check that every variable referenced is present in the effective state."),
+
+            TransclusionError::ConditionParse { expr, line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "condition parse failed",
+                ))
+                .body(format!(
+                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("Operators: <cyan>&&  ||  !  ==  !=  >  >=  <</cyan> plus helpers like <cyan>HasKey</cyan>, <cyan>Contains</cyan>, <cyan>Length</cyan>."),
+
+            TransclusionError::Relevel(message) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "re-leveling failed"))
+                .body(message.clone())
+                .hint("Pick a target heading level that fits within H1–H6."),
+
+            TransclusionError::UrlExecutionDisabled { url } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "remote transclusion disabled",
+                ))
+                .body(format!("<dim>URL:</dim> <cyan>{url}</cyan>"))
+                .hint("Enable URL transclusion in the compose options to allow this request."),
+
+            TransclusionError::InvalidFrontmatterAssignment { line, raw, reason } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "invalid frontmatter assignment",
+                ))
+                .body(format!(
+                    "<dim>Line:</dim> {line}\n<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
+                ))
+                .hint("Run with <cyan>--allow-invalid-frontmatter-assignment</cyan> to downgrade to a warning."),
+
+            TransclusionError::InvalidReassignedFrontmatterProperty { line, name } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "reassigned frontmatter property",
+                ))
+                .body(format!(
+                    "<dim>Line:</dim> {line}\n<dim>Property:</dim> <cyan>{name}</cyan>"
+                ))
+                .hint("Run with <cyan>--allow-reassigned-frontmatter-property</cyan> to downgrade to a warning."),
+
+            TransclusionError::Io(source) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "I/O error"))
+                .body(format!("<dim>Kind:</dim> {:?}\n{source}", source.kind()))
+                .hint("Confirm the referenced file exists and is readable."),
+
+            TransclusionError::UrlParse(source) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TransclusionError", "URL parse error"))
+                .body(format!("{source}"))
+                .hint("Use a fully qualified URL including the <cyan>https://</cyan> scheme."),
+
+            TransclusionError::FileReference(source) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "file reference error",
+                ))
+                .body(format!("{source}"))
+                .hint("Verify the reference string and surrounding compose source."),
+
+            TransclusionError::Json(source) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TransclusionError",
+                    "directive option parse error",
+                ))
+                .body(format!(
+                    "{source}\n<dim>Position:</dim> line {}, column {}",
+                    source.line(),
+                    source.column()
+                ))
+                .hint("Directive options use JSON5; check braces, quoting, and commas."),
+        }
+    }
 }
 
 /// Source info derived from a compose source.

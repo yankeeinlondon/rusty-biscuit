@@ -15,6 +15,7 @@ pub(crate) struct Cursor<'a> {
 #[derive(Debug)]
 pub(crate) struct CursorError {
     pub line: usize,
+    pub column: usize,
     pub message: String,
 }
 
@@ -29,6 +30,10 @@ impl<'a> Cursor<'a> {
 
     pub fn current(&self) -> Option<char> {
         self.input[self.pos..].chars().next()
+    }
+
+    fn current_column(&self) -> usize {
+        self.input[..self.pos].chars().count() + 1
     }
 
     pub fn advance(&mut self) {
@@ -60,6 +65,7 @@ impl<'a> Cursor<'a> {
         } else {
             Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected '{}'", literal),
             })
         }
@@ -73,10 +79,12 @@ impl<'a> Cursor<'a> {
             }
             Some(ch) => Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected '{}', found '{}'", expected, ch),
             }),
             None => Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected '{}' at end of directive", expected),
             }),
         }
@@ -118,6 +126,7 @@ impl<'a> Cursor<'a> {
         if self.current() == Some('.') {
             return Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: "nested dotted keys are not supported in v1".to_string(),
             });
         }
@@ -130,6 +139,7 @@ impl<'a> Cursor<'a> {
         let Some(ch) = self.current() else {
             return Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: "Unexpected end of directive".to_string(),
             });
         };
@@ -137,6 +147,7 @@ impl<'a> Cursor<'a> {
         if !is_identifier_start(ch) {
             return Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected identifier, found '{}'", ch),
             });
         }
@@ -157,6 +168,7 @@ impl<'a> Cursor<'a> {
         let Some(ch) = self.current() else {
             return Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: "Expected value, found end of directive".to_string(),
             });
         };
@@ -171,6 +183,7 @@ impl<'a> Cursor<'a> {
     fn read_quoted_value(&mut self, line: usize) -> Result<String, CursorError> {
         let quote = self.current().ok_or_else(|| CursorError {
             line,
+            column: self.current_column(),
             message: "Expected quote".to_string(),
         })?;
         self.advance();
@@ -181,6 +194,7 @@ impl<'a> Cursor<'a> {
                 None => {
                     return Err(CursorError {
                         line,
+                        column: self.current_column(),
                         message: "Unterminated quoted value".to_string(),
                     });
                 }
@@ -229,6 +243,7 @@ impl<'a> Cursor<'a> {
                         None => {
                             return Err(CursorError {
                                 line,
+                                column: self.current_column(),
                                 message: "Unterminated escape sequence".to_string(),
                             });
                         }
@@ -282,6 +297,7 @@ impl<'a> Cursor<'a> {
 
         Err(CursorError {
             line,
+            column: self.current_column(),
             message: "Unterminated JSON option value".to_string(),
         })
     }

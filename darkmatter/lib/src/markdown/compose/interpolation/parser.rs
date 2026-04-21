@@ -469,9 +469,9 @@ mod tests {
 
         #[test]
         fn parses_float() {
-            let expr = parse("3.14").unwrap();
+            let expr = parse("3.15").unwrap();
             match expr {
-                Expr::NumberLiteral(n) => assert!((n - 3.14).abs() < f64::EPSILON),
+                Expr::NumberLiteral(n) => assert!((n - 3.15).abs() < f64::EPSILON),
                 _ => panic!("Expected NumberLiteral"),
             }
         }

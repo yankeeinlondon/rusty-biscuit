@@ -96,12 +96,14 @@ pub async fn dispatch(
     provider: Provider,
     env: &EnvironmentContext,
 ) -> Result<DispatchOutcome> {
+    let _span = info_span!("dispatch_event", %provider).entered();
+
     let adapter = adapters::adapter_for(provider);
 
     let (event, mut meta) = match adapter.parse_event(raw) {
         Ok(parsed) => parsed,
-        Err(AdapterError::UnknownEvent(_)) => {
-            debug!(%provider, "Adapter returned unknown event, skipping dispatch");
+        Err(AdapterError::UnknownEvent(reason)) => {
+            debug!(%provider, %reason, "adapter returned unknown event, skipping dispatch");
             return Ok(DispatchOutcome::default());
         }
         Err(error) => return Err(error.into()),
@@ -177,7 +179,15 @@ pub async fn dispatch_canonical(
                 debug!(%provider, "Adapter returned unknown event, skipping canonical dispatch");
                 return Ok(DispatchOutcome::default());
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                let _fail_span = info_span!(
+                    "dispatch_adapter_parse_failed",
+                    %provider,
+                    error = %error,
+                )
+                .entered();
+                return Err(error.into());
+            }
         }
     };
 

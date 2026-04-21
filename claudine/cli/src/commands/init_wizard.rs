@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use clap::Args;
 use color_eyre::eyre::Result;
+use tracing::info_span;
 
 use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
 use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
@@ -23,6 +24,7 @@ pub struct InitArgs {
 }
 
 pub async fn run_initialization() -> Result<()> {
+    let _span = info_span!("init_wizard").entered();
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         return run_headless_initialization().await;
     }

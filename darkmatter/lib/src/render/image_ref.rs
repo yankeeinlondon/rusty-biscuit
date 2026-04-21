@@ -43,8 +43,12 @@ pub enum ImageRefError {
     MalformedHtml(String),
 
     /// Markdown input failed to parse.
-    #[error("malformed markdown image reference: {0}")]
-    MalformedMarkdown(String),
+    #[error("malformed markdown image reference: {message}")]
+    MalformedMarkdown {
+        message: String,
+        input: Option<String>,
+        caret: Option<usize>,
+    },
 
     /// A CSS style declaration failed to parse.
     #[error("invalid CSS style: {0}")]
@@ -77,6 +81,208 @@ pub enum ImageRefError {
         /// Received value.
         value: String,
     },
+}
+
+impl biscuit_terminal::errors::BlockError for ImageRefError {
+    fn status_block(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::EmptySource => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "empty source"))
+                .body("Image source URL cannot be empty or whitespace-only.")
+                .hint("Pass a non-empty URL or path to <cyan>ImageRef::new</cyan>."),
+
+            Self::MissingSource => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "missing source"))
+                .body("Image reference must define either `src` or `srcset`.")
+                .hint("Set <cyan>src=\"...\"</cyan> or <cyan>srcset=\"...\"</cyan> on the image."),
+
+            Self::UnrecognizedFormat => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ImageRefError",
+                    "unrecognized image format",
+                ))
+                .body(
+                    "Input did not look like an HTML `<img ... />` tag or a Markdown `![alt](src)` reference.",
+                )
+                .hint(
+                    "Use <cyan>![alt](src \"title\")</cyan> for Markdown or <cyan>&lt;img src=\"...\" alt=\"...\" /&gt;</cyan> for HTML.",
+                ),
+
+            Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "malformed HTML image"))
+                .body(format!("<dim>Message:</dim> {message}"))
+                .hint(
+                    "Ensure the tag starts with <cyan>&lt;img</cyan> and ends with <cyan>&gt;</cyan> (self-closing is allowed).",
+                ),
+
+            Self::MalformedMarkdown {
+                message,
+                input,
+                caret,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ImageRefError",
+                    "malformed markdown image",
+                ))
+                .body(render_markdown_parse_body(message, input.as_deref(), *caret))
+                .hint(
+                    "Use the pattern <cyan>![alt](src \"optional title\")</cyan> with balanced brackets and parentheses.",
+                ),
+
+            Self::InvalidStyle(source) => {
+                biscuit_terminal::errors::BlockError::status_block(source, term)
+            }
+
+            Self::InvalidDecoding { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "invalid decoding"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Accepted values: <cyan>sync</cyan>, <cyan>async</cyan>, <cyan>auto</cyan>.",
+                ),
+
+            Self::InvalidFetchPriority { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ImageRefError",
+                    "invalid fetch priority",
+                ))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Accepted values: <cyan>high</cyan>, <cyan>low</cyan>, <cyan>auto</cyan>.",
+                ),
+
+            Self::InvalidLoading { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ImageRefError", "invalid loading"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint("Accepted values: <cyan>eager</cyan>, <cyan>lazy</cyan>."),
+
+            Self::InvalidReferrerPolicy { value } => {
+                let mut body = format!("<dim>Value:</dim> <cyan>{value}</cyan>");
+                if let Some(suggestion) = suggest_referrer_policy(value) {
+                    body.push_str(&format!(
+                        "\n<dim>Did you mean:</dim> <cyan>{suggestion}</cyan>?"
+                    ));
+                }
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "ImageRefError",
+                        "invalid referrer policy",
+                    ))
+                    .body(body)
+                    .hint(
+                        "Accepted values: <cyan>no-referrer</cyan>, <cyan>no-referrer-when-downgrade</cyan>, <cyan>origin</cyan>, <cyan>origin-when-cross-origin</cyan>, <cyan>same-origin</cyan>, <cyan>strict-origin</cyan>, <cyan>strict-origin-when-cross-origin</cyan>, <cyan>unsafe-url</cyan>.",
+                    )
+            }
+        }
+    }
+
+    fn block_source(&self) -> Option<&(dyn biscuit_terminal::errors::BlockError + 'static)> {
+        match self {
+            Self::InvalidStyle(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
+impl ImageRefError {
+    /// Creates a markdown-parse error without source-context details.
+    pub fn malformed_markdown(message: impl Into<String>) -> Self {
+        Self::MalformedMarkdown {
+            message: message.into(),
+            input: None,
+            caret: None,
+        }
+    }
+
+    fn malformed_markdown_with_context(
+        message: impl Into<String>,
+        input: impl Into<String>,
+        caret: usize,
+    ) -> Self {
+        Self::MalformedMarkdown {
+            message: message.into(),
+            input: Some(input.into()),
+            caret: Some(caret),
+        }
+    }
+}
+
+impl From<&str> for ImageRefError {
+    fn from(value: &str) -> Self {
+        Self::malformed_markdown(value)
+    }
+}
+
+fn suggest_referrer_policy(value: &str) -> Option<&'static str> {
+    const CANDIDATES: &[&str] = &[
+        "no-referrer",
+        "no-referrer-when-downgrade",
+        "origin",
+        "origin-when-cross-origin",
+        "same-origin",
+        "strict-origin",
+        "strict-origin-when-cross-origin",
+        "unsafe-url",
+    ];
+
+    let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(&'static str, usize)> = None;
+    for candidate in CANDIDATES {
+        let distance = levenshtein_distance(&normalized, candidate);
+        match best {
+            Some((_, best_distance)) if distance >= best_distance => {}
+            _ => best = Some((candidate, distance)),
+        }
+    }
+
+    let (candidate, distance) = best?;
+    let threshold = candidate.len().max(3) / 2;
+    if distance <= threshold {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    if a == b {
+        return 0;
+    }
+    if a.is_empty() {
+        return b.chars().count();
+    }
+    if b.is_empty() {
+        return a.chars().count();
+    }
+
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b_chars.len()).collect();
+    let mut curr = vec![0usize; b_chars.len() + 1];
+
+    for (i, ac) in a_chars.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, bc) in b_chars.iter().enumerate() {
+            let cost = if ac == bc { 0 } else { 1 };
+            let deletion = prev[j + 1] + 1;
+            let insertion = curr[j] + 1;
+            let substitution = prev[j] + cost;
+            curr[j + 1] = deletion.min(insertion).min(substitution);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[b_chars.len()]
 }
 
 /// Browser image decoding hint values.
@@ -1120,8 +1326,10 @@ fn parse_html_image(input: &str) -> Result<ImageRef, ImageRefError> {
 fn parse_markdown_image(input: &str) -> Result<ImageRef, ImageRefError> {
     let input = input.trim();
     if !input.starts_with("![") {
-        return Err(ImageRefError::MalformedMarkdown(
-            "markdown image must start with `![`".to_string(),
+        return Err(ImageRefError::malformed_markdown_with_context(
+            "markdown image must start with `![`",
+            input,
+            0,
         ));
     }
 
@@ -1130,16 +1338,20 @@ fn parse_markdown_image(input: &str) -> Result<ImageRef, ImageRefError> {
 
     let rest = &input[alt_end + 1..];
     if !rest.starts_with('(') {
-        return Err(ImageRefError::MalformedMarkdown(
-            "expected `(` after alt text".to_string(),
+        return Err(ImageRefError::malformed_markdown_with_context(
+            "expected `(` after alt text",
+            input,
+            alt_end + 1,
         ));
     }
 
     let paren_end = find_closing_paren(rest, 0)?;
     let paren_content = &rest[1..paren_end];
     if !rest[paren_end + 1..].trim().is_empty() {
-        return Err(ImageRefError::MalformedMarkdown(
-            "unexpected trailing content after markdown image".to_string(),
+        return Err(ImageRefError::malformed_markdown_with_context(
+            "unexpected trailing content after markdown image",
+            input,
+            alt_end + 1 + paren_end + 1,
         ));
     }
 
@@ -1262,8 +1474,10 @@ fn find_closing_bracket(input: &str, start: usize) -> Result<usize, ImageRefErro
         }
     }
 
-    Err(ImageRefError::MalformedMarkdown(
-        "unmatched `[` in markdown image".to_string(),
+    Err(ImageRefError::malformed_markdown_with_context(
+        "unmatched `[` in markdown image",
+        input,
+        start,
     ))
 }
 
@@ -1310,9 +1524,34 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, ImageRefError>
         }
     }
 
-    Err(ImageRefError::MalformedMarkdown(
-        "unmatched `(` in markdown image".to_string(),
+    Err(ImageRefError::malformed_markdown_with_context(
+        "unmatched `(` in markdown image",
+        input,
+        start,
     ))
+}
+
+fn render_markdown_parse_body(message: &str, input: Option<&str>, caret: Option<usize>) -> String {
+    let mut body = format!("<dim>Message:</dim> {message}");
+
+    if let Some(input) = input {
+        body.push_str(&format!("\n<dim>Input:</dim>\n  <cyan>{input}</cyan>"));
+        if let Some(caret) = caret {
+            body.push('\n');
+            body.push_str(&caret_marker(input, caret));
+        }
+    }
+
+    body
+}
+
+fn caret_marker(input: &str, byte_offset: usize) -> String {
+    let clamped = byte_offset.min(input.len());
+    let column = input
+        .char_indices()
+        .take_while(|(idx, _)| *idx < clamped)
+        .count();
+    format!("  {}^", " ".repeat(column))
 }
 
 fn extract_markdown_url(content: &str) -> (String, &str) {

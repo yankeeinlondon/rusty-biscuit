@@ -90,8 +90,18 @@ pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBloc
     }
 
     // Check for unterminated blocks (report the deepest open one)
-    if let Some(entry) = stack.last() {
-        return Err(PageBlockError::UnterminatedBlock { line: entry.2 });
+    if let Some((block_start, _, start_line, _, _)) = stack.last() {
+        // Extract the opening directive line
+        let opening_end = content[*block_start..]
+            .find('\n')
+            .map(|pos| block_start + pos)
+            .unwrap_or(content.len());
+        let opening_text = content[*block_start..opening_end].to_string();
+        return Err(PageBlockError::UnterminatedBlock {
+            line: *start_line,
+            opening_text,
+            file_ends_at_line: line_number.saturating_sub(1),
+        });
     }
 
     Ok(top_level)
@@ -207,7 +217,10 @@ mod tests {
         let result = parse_page_blocks(content);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, PageBlockError::UnterminatedBlock { line: 1 }));
+        assert!(matches!(
+            err,
+            PageBlockError::UnterminatedBlock { line: 1, .. }
+        ));
     }
 
     #[test]

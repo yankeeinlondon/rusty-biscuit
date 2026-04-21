@@ -32,7 +32,7 @@ schedule name="":
     if [[ -n "${name}" ]]; then
         mapfile -t matches < <(for dir in features/_unscheduled fixes/_unscheduled; do
             [[ -d "${dir}" ]] || continue
-            fd --type d --max-depth 1 --exact . "${dir}" | while read -r d; do
+            fd --type d --max-depth 1 . "${dir}" | while read -r d; do
                 base="$(basename "${d}")"
                 if [[ "${base}" == *"${name}"* ]]; then
                     echo "${d}"

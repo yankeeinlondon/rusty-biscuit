@@ -30,7 +30,7 @@ pub(crate) use types::{TocLinkingDirective, TocLinkingOptions};
 
 #[cfg(test)]
 use crate::markdown::Markdown;
-use crate::markdown::compose::transclusion::resolve_path;
+use crate::markdown::compose::transclusion::{DirectiveKind, resolve_path};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::toc::MarkdownTocNode;
 use filter::HeadingFilter;
@@ -147,11 +147,12 @@ fn resolve_file(
     source: &ComposeSource,
     line: usize,
 ) -> Result<std::path::PathBuf, TocLinkingError> {
-    let path =
-        resolve_path(target, options, source, line).map_err(|_| TocLinkingError::FileNotFound {
+    let path = resolve_path(target, DirectiveKind::File, options, source, line).map_err(|_| {
+        TocLinkingError::FileNotFound {
             path: target.to_string(),
             line,
-        })?;
+        }
+    })?;
 
     if !path.exists() {
         return Err(TocLinkingError::FileNotFound {
@@ -190,7 +191,7 @@ mod tests {
         let source_path = dir.path().join("source.md");
         write_file(dir.path(), "source.md", "");
 
-        let content = format!("Before\n\n::toc-linking ./api.md\n\nAfter\n");
+        let content = "Before\n\n::toc-linking ./api.md\n\nAfter\n".to_string();
         let source = ComposeSource::File(source_path);
         let options = TransclusionOptions {
             source: source.clone(),

@@ -714,7 +714,7 @@ mod tests {
 
         #[test]
         fn as_string_number_float() {
-            assert_eq!(EvalValue::Number(3.14).as_string(), "3.14");
+            assert_eq!(EvalValue::Number(3.15).as_string(), "3.15");
         }
 
         #[test]
@@ -742,7 +742,7 @@ mod tests {
         #[test]
         fn from_json_number() {
             assert_eq!(EvalValue::from_json(&json!(42)), EvalValue::Number(42.0));
-            assert_eq!(EvalValue::from_json(&json!(3.14)), EvalValue::Number(3.14));
+            assert_eq!(EvalValue::from_json(&json!(3.15)), EvalValue::Number(3.15));
         }
 
         #[test]
@@ -1536,8 +1536,8 @@ mod tests {
         fn string_number_to_number() {
             assert_eq!(EvalValue::String("42".to_string()).as_number(), Some(42.0));
             assert_eq!(
-                EvalValue::String("3.14".to_string()).as_number(),
-                Some(3.14)
+                EvalValue::String("3.15".to_string()).as_number(),
+                Some(3.15)
             );
             assert_eq!(EvalValue::String("-5".to_string()).as_number(), Some(-5.0));
         }

@@ -2706,7 +2706,7 @@ mod tests {
     #[test]
     fn test_format_float_normal() {
         assert_eq!(format_float(1234.5), "1,234.50");
-        assert_eq!(format_float(3.14), "3.14");
+        assert_eq!(format_float(3.15), "3.15");
         assert_eq!(format_float(0.5), "0.50");
     }
 
@@ -2754,7 +2754,7 @@ mod tests {
     #[test]
     fn test_display_impl() {
         assert_eq!(TableCellContent::Integer(42).to_string(), "42");
-        assert_eq!(TableCellContent::Float(3.14).to_string(), "3.14");
+        assert_eq!(TableCellContent::Float(3.15).to_string(), "3.15");
         assert_eq!(
             TableCellContent::Currency(Currency::USD, 9.99).to_string(),
             "$9.99"
@@ -2773,8 +2773,8 @@ mod tests {
 
     #[test]
     fn test_from_f64() {
-        let cell = TableCellContent::from(3.14f64);
-        assert!(matches!(cell, TableCellContent::Float(v) if (v - 3.14).abs() < f64::EPSILON));
+        let cell = TableCellContent::from(3.15f64);
+        assert!(matches!(cell, TableCellContent::Float(v) if (v - 3.15).abs() < f64::EPSILON));
     }
 
     // ── pad_cell tests ────────────────────────────────────────────
@@ -3100,10 +3100,10 @@ mod tests {
                 // Extract the column number from \x1b[NNG pattern
                 if let Some(start) = line.find("\x1b[") {
                     let rest = &line[start + 2..];
-                    if let Some(end) = rest.find('G') {
-                        if let Ok(col) = rest[..end].parse::<u32>() {
-                            return col > 30;
-                        }
+                    if let Some(end) = rest.find('G')
+                        && let Ok(col) = rest[..end].parse::<u32>()
+                    {
+                        return col > 30;
                     }
                 }
                 false
@@ -3132,10 +3132,10 @@ mod tests {
             .map(|line| {
                 if let Some(start) = line.find("\x1b[") {
                     let rest = &line[start + 2..];
-                    if let Some(end) = rest.find('G') {
-                        if let Ok(col) = rest[..end].parse::<u32>() {
-                            return col > 70;
-                        }
+                    if let Some(end) = rest.find('G')
+                        && let Ok(col) = rest[..end].parse::<u32>()
+                    {
+                        return col > 70;
                     }
                 }
                 false
