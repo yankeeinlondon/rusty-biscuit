@@ -121,23 +121,32 @@ pub fn normalize_dispatch(
         });
     }
 
-    if !normalized_message.attachments.is_empty() && !capabilities.supports_attachments {
-        if dispatch.options.compatibility == CompatibilityMode::Strict {
-            tracing::warn!(
-                feature = "attachments",
-                "strict mode rejected unsupported feature"
-            );
-            return Err(MessengerError::UnsupportedFeature {
+    if !normalized_message.attachments.is_empty() {
+        let has_unsupported_attachment = normalized_message
+            .attachments
+            .iter()
+            .any(|attachment| !capabilities.supported_attachment_kinds.contains(&attachment.kind));
+
+        if has_unsupported_attachment {
+            if dispatch.options.compatibility == CompatibilityMode::Strict {
+                tracing::warn!(
+                    feature = "attachments",
+                    "strict mode rejected unsupported feature"
+                );
+                return Err(MessengerError::UnsupportedFeature {
+                    provider,
+                    feature: "attachments",
+                });
+            }
+            tracing::debug!(feature = "attachments", "dropping unsupported attachment kinds");
+            normalized_message
+                .attachments
+                .retain(|attachment| capabilities.supported_attachment_kinds.contains(&attachment.kind));
+            warnings.push(CompatibilityWarning {
                 provider,
                 feature: "attachments",
             });
         }
-        tracing::debug!(feature = "attachments", "dropping unsupported feature");
-        normalized_message.attachments.clear();
-        warnings.push(CompatibilityWarning {
-            provider,
-            feature: "attachments",
-        });
     }
 
     if normalized_message.location.is_some() && !capabilities.supports_location {
