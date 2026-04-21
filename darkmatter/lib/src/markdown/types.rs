@@ -1,8 +1,13 @@
 //! Type definitions for the markdown module.
 
 use biscuit_file::YamlParseError;
+use biscuit_terminal::components::status_block::StatusBlock;
+use biscuit_terminal::errors::{BlockError, render_with_causes};
+use biscuit_terminal::terminal::Terminal;
 use indexmap::IndexMap;
 use thiserror::Error;
+
+use crate::markdown::errors::blocks;
 
 /// Type alias for frontmatter data.
 ///
@@ -76,3 +81,41 @@ pub enum MarkdownError {
 
 /// Result type for markdown operations.
 pub type MarkdownResult<T> = Result<T, MarkdownError>;
+
+impl BlockError for MarkdownError {
+    fn status_block(&self, term: &Terminal) -> StatusBlock {
+        match self {
+            // Delegating variants: surface the sub-error's block directly.
+            MarkdownError::Transclusion(inner) => inner.status_block(term),
+            MarkdownError::ShellExpansion(inner) => inner.status_block(term),
+            MarkdownError::PageBlock(inner) => inner.status_block(term),
+            MarkdownError::TocLinking(inner) => inner.status_block(term),
+            MarkdownError::Reference(inner) => inner.status_block(term),
+            MarkdownError::CtxMerge(inner) => inner.status_block(term),
+
+            // Leaf variants own their block shape.
+            MarkdownError::FrontmatterParse(source) => blocks::frontmatter_parse_block(source),
+            MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
+            MarkdownError::FileLoad(source) => blocks::file_load_block(source),
+            MarkdownError::UrlFetch(source) => blocks::url_fetch_block(source),
+            MarkdownError::ThemeLoad(message) => blocks::theme_load_block(message),
+            MarkdownError::AstParse(message) => blocks::ast_parse_block(message),
+            MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
+            MarkdownError::Serialization(source) => blocks::serialization_block(source),
+            MarkdownError::Transform(message) => blocks::transform_block(message),
+        }
+    }
+
+    fn report_block_error(&self, term: &Terminal) -> String {
+        render_with_causes(self, term)
+    }
+
+    fn block_source(&self) -> Option<&(dyn BlockError + 'static)> {
+        // Delegating variants already return the inner block from
+        // `status_block`, so returning `Some(inner)` here would double-render
+        // the same block under a "Caused by:" caption. Only leaf variants
+        // that wrap a foreign error type and have no sub-block would surface
+        // a cause — none of today's leaf variants do.
+        None
+    }
+}

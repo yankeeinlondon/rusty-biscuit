@@ -1,9 +1,11 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::errors::as_block_error as as_terminal_block_error;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::Result;
+use darkmatter::markdown::errors::as_block_error as as_darkmatter_block_error;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
 use darkmatter_cli::commands::{run_clean, run_render, run_subcommand, validate_subcommand_usage};
@@ -62,6 +64,29 @@ fn main() {
     CompleteEnv::with_factory(Cli::command).complete();
 
     if let Err(e) = run() {
+        // Prefer `BlockError` rendering when any error in the chain implements it.
+        // Walk the cause chain so wrapper errors (eyre Report, Box<dyn Error>) don't
+        // mask an inner BlockError implementation. Darkmatter's downcast registry
+        // takes precedence; the terminal-local stub is checked only as a fallback
+        // for non-darkmatter error types.
+        let block = e
+            .chain()
+            .find_map(|cause| {
+                as_darkmatter_block_error(cause).or_else(|| as_terminal_block_error(cause))
+            });
+
+        if let Some(block) = block {
+            // TTY => full terminal detection; non-TTY => optimistic 80-column render.
+            let rendered = if io::stderr().is_terminal() {
+                block.report_block_error(&Terminal::new())
+            } else {
+                block.report_block_error_optimistic(None)
+            };
+            eprintln!("{rendered}");
+            std::process::exit(1);
+        }
+
+        // Fallback: legacy Display-chain renderer.
         // Deduplicate chain: skip causes whose message is already contained in a prior message.
         let top = e.to_string();
         let mut seen = top.clone();
