@@ -21,9 +21,7 @@ use std::sync::Arc;
 
 use crate::attachment::{AttachmentKind, AttachmentSource};
 use crate::capabilities::CapabilitySet;
-use crate::dispatch::{
-    Dispatch, NotificationIcon, NotificationUrgency, ProviderOverrides,
-};
+use crate::dispatch::{Dispatch, NotificationIcon, NotificationUrgency, ProviderOverrides};
 use crate::error::MessengerError;
 use crate::prepared::PreparedMessage;
 use crate::receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
@@ -276,9 +274,7 @@ pub(crate) fn build_request(
         .and_then(|o| o.category.clone())
         .or_else(|| config.category.clone());
 
-    let urgency = overrides
-        .and_then(|o| o.urgency)
-        .unwrap_or(config.urgency);
+    let urgency = overrides.and_then(|o| o.urgency).unwrap_or(config.urgency);
 
     let timeout_ms = overrides.and_then(|o| o.timeout_ms).or(config.timeout_ms);
 
@@ -344,11 +340,7 @@ fn select_backend(config: &DesktopConfig) -> Arc<dyn DesktopBackend> {
     {
         Arc::new(windows::WindowsBackend::new(config.windows.clone()))
     }
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    )))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         let _ = config;
         Arc::new(UnimplementedBackend)
@@ -383,11 +375,7 @@ impl DesktopBackend for UnimplementedBackend {
         {
             DesktopPlatform::Windows
         }
-        #[cfg(not(any(
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "windows"
-        )))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         {
             DesktopPlatform::Linux
         }
@@ -574,7 +562,10 @@ mod tests {
         let dispatch = Dispatch::to(Target::desktop());
 
         let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
-        assert_eq!(request.image.as_deref(), Some(std::path::Path::new("/tmp/first.png")));
+        assert_eq!(
+            request.image.as_deref(),
+            Some(std::path::Path::new("/tmp/first.png"))
+        );
     }
 
     #[test]
@@ -597,8 +588,7 @@ mod tests {
     #[tokio::test]
     async fn send_prepared_produces_typed_receipt() {
         let backend = Arc::new(CapturingBackend::with_platform(DesktopPlatform::Linux));
-        let provider =
-            DesktopNotificationProvider::with_backend(default_config(), backend.clone());
+        let provider = DesktopNotificationProvider::with_backend(default_config(), backend.clone());
 
         let message = Message::text("body").title("hi");
         let prepared = PreparedMessage::new(&message);
@@ -620,7 +610,10 @@ mod tests {
             _ => panic!("expected MessageRef::Desktop"),
         }
         assert_eq!(receipt.raw_id, "fake-id-1");
-        assert_eq!(receipt.metadata.get("platform").map(String::as_str), Some("Linux"));
+        assert_eq!(
+            receipt.metadata.get("platform").map(String::as_str),
+            Some("Linux")
+        );
 
         let captured = backend.last_request();
         assert_eq!(captured.title, "hi");
@@ -630,11 +623,9 @@ mod tests {
     async fn send_prepared_propagates_backend_metadata() {
         let backend = Arc::new(CapturingBackend::with_platform(DesktopPlatform::MacOS));
         *backend.response.lock().unwrap() = Some(
-            DesktopNotificationReceipt::new("uuid-42")
-                .with_metadata("delivery", "applescript"),
+            DesktopNotificationReceipt::new("uuid-42").with_metadata("delivery", "applescript"),
         );
-        let provider =
-            DesktopNotificationProvider::with_backend(default_config(), backend.clone());
+        let provider = DesktopNotificationProvider::with_backend(default_config(), backend.clone());
 
         let message = Message::text("body").title("mac-test");
         let prepared = PreparedMessage::new(&message);

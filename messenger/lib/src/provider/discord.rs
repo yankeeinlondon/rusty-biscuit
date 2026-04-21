@@ -208,8 +208,14 @@ mod tests {
         });
 
         let caps = provider.capabilities();
-        assert!(caps.supported_attachment_kinds.contains(&crate::AttachmentKind::Image));
-        assert!(caps.supported_attachment_kinds.contains(&crate::AttachmentKind::Document));
+        assert!(
+            caps.supported_attachment_kinds
+                .contains(&crate::AttachmentKind::Image)
+        );
+        assert!(
+            caps.supported_attachment_kinds
+                .contains(&crate::AttachmentKind::Document)
+        );
     }
 
     #[test]

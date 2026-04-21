@@ -573,9 +573,7 @@ fn configure_telegram() -> Result<RouteConfig> {
 fn configure_desktop() -> Result<RouteConfig> {
     println!(
         "\n{}",
-        styled(
-            "<dim>Desktop notifications deliver to the host OS notification center.</dim>"
-        )
+        styled("<dim>Desktop notifications deliver to the host OS notification center.</dim>")
     );
     println!(
         "{}",
@@ -596,9 +594,7 @@ fn configure_desktop() -> Result<RouteConfig> {
         .map_err(handle_cancel)?;
 
     let icon = Text::new("Icon name or path (optional):")
-        .with_help_message(
-            "Freedesktop icon name (Linux/macOS) or absolute path to an image file",
-        )
+        .with_help_message("Freedesktop icon name (Linux/macOS) or absolute path to an image file")
         .prompt()
         .map_err(handle_cancel)?;
 
@@ -902,7 +898,10 @@ mod tests {
                 ..
             } => {
                 assert_eq!(windows.app_id.as_deref(), Some("RustyBiscuit.Messenger"));
-                assert_eq!(macos.bundle_id.as_deref(), Some("com.rustybiscuit.messenger"));
+                assert_eq!(
+                    macos.bundle_id.as_deref(),
+                    Some("com.rustybiscuit.messenger")
+                );
                 assert_eq!(macos.strategy, RouteMacOsStrategy::Auto);
                 assert_eq!(linux.desktop_entry.as_deref(), Some("messenger"));
                 assert_eq!(*urgency, RouteUrgency::Normal);

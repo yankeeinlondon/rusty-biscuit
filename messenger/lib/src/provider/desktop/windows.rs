@@ -34,8 +34,7 @@ use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 ///
 /// Kept as a module constant so tests and CLI help text can reference the
 /// exact string without drifting.
-pub(crate) const WINDOWS_SETUP_REQUIRED: &str =
-    "Windows desktop notifications require `messenger setup desktop` to register the Start Menu shortcut and App User Model ID";
+pub(crate) const WINDOWS_SETUP_REQUIRED: &str = "Windows desktop notifications require `messenger setup desktop` to register the Start Menu shortcut and App User Model ID";
 
 /// Windows WinRT toast backend.
 pub(crate) struct WindowsBackend {
@@ -161,9 +160,9 @@ fn send_toast(
         toast = toast.sound(Some(Sound::Default));
     }
 
-    toast
-        .show()
-        .map_err(|error| ProviderKind::Desktop.transport_error(format!("WinRT toast failed: {error}")))?;
+    toast.show().map_err(|error| {
+        ProviderKind::Desktop.transport_error(format!("WinRT toast failed: {error}"))
+    })?;
 
     let notification_id = uuid::Uuid::new_v4().to_string();
     Ok(DesktopNotificationReceipt::new(notification_id).with_metadata("delivery", "winrt"))

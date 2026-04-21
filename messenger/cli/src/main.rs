@@ -360,8 +360,7 @@ async fn send_message(args: SendArgs) -> Result<()> {
             timeout_ms,
         });
         if !overrides_is_empty(&overrides) {
-            dispatch = dispatch
-                .with_overrides(messenger::ProviderOverrides::Desktop(overrides));
+            dispatch = dispatch.with_overrides(messenger::ProviderOverrides::Desktop(overrides));
         }
     }
 
@@ -1059,8 +1058,7 @@ mod tests {
                 "https://hooks.slack.com/services/T000/B000/DEFAULT-ENV",
             );
         }
-        let parsed: RouteConfig =
-            serde_json::from_str(r#"{"provider":"slack-webhook"}"#).unwrap();
+        let parsed: RouteConfig = serde_json::from_str(r#"{"provider":"slack-webhook"}"#).unwrap();
         let env_name = match parsed {
             RouteConfig::SlackWebhook {
                 webhook_url,
@@ -1111,13 +1109,8 @@ mod tests {
 
     #[test]
     fn resolve_route_builds_desktop_ad_hoc_route_without_channel() {
-        let resolved = resolve_route(
-            Some(RouteProvider::Desktop),
-            None,
-            None,
-            &Config::default(),
-        )
-        .unwrap();
+        let resolved =
+            resolve_route(Some(RouteProvider::Desktop), None, None, &Config::default()).unwrap();
 
         assert_eq!(resolved.name, None);
         assert_eq!(resolved.route.provider(), RouteProvider::Desktop);
@@ -1143,13 +1136,8 @@ mod tests {
 
     #[test]
     fn resolve_route_still_requires_channel_for_chat_provider() {
-        let err = resolve_route(
-            Some(RouteProvider::Slack),
-            None,
-            None,
-            &Config::default(),
-        )
-        .unwrap_err();
+        let err =
+            resolve_route(Some(RouteProvider::Slack), None, None, &Config::default()).unwrap_err();
 
         let msg = format!("{err}");
         assert!(
@@ -1239,7 +1227,10 @@ mod tests {
                 assert_eq!(urgency, config::RouteUrgency::Normal);
                 assert_eq!(timeout_ms, Some(5000));
                 assert_eq!(windows.app_id.as_deref(), Some("RustyBiscuit.Messenger"));
-                assert_eq!(macos.bundle_id.as_deref(), Some("com.rustybiscuit.messenger"));
+                assert_eq!(
+                    macos.bundle_id.as_deref(),
+                    Some("com.rustybiscuit.messenger")
+                );
                 assert_eq!(macos.strategy, config::RouteMacOsStrategy::Auto);
                 assert_eq!(linux.desktop_entry.as_deref(), Some("messenger"));
             }

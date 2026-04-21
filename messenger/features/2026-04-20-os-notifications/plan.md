@@ -1,7 +1,7 @@
 ---
 phases: 7
 created: 2026-04-19
-start_phase: 1
+start_phase: 7
 packages:
   - messenger
 source_files_during_phase_1:
@@ -82,7 +82,9 @@ docs_updated_during_phase_7:
   - docs/dependencies.md
 docs_created_during_phase_7:
   - messenger/docs/platforms/desktop.md
-skills_files_updated_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/messenger/SKILL.md
+  - .claude/skills/messenger/providers.md
 packages:
   - messenger
 ---

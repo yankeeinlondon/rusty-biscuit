@@ -95,8 +95,7 @@ fn send_applescript(
         .arg(&script)
         .status()
         .map_err(|error| {
-            ProviderKind::Desktop
-                .transport_error(format!("failed to invoke osascript: {error}"))
+            ProviderKind::Desktop.transport_error(format!("failed to invoke osascript: {error}"))
         })?;
 
     if !status.success() {
@@ -179,11 +178,8 @@ fn send_native(
     }
 
     let identifier = NSString::from_str(&notification_id);
-    let notification_request = UNNotificationRequest::requestWithIdentifier_content_trigger(
-        &identifier,
-        &content,
-        None,
-    );
+    let notification_request =
+        UNNotificationRequest::requestWithIdentifier_content_trigger(&identifier, &content, None);
 
     center.addNotificationRequest_withCompletionHandler(&notification_request, None);
 
@@ -264,8 +260,7 @@ mod tests {
             backend.resolved_strategy(),
             MacOsNotificationStrategy::AppleScript
         );
-        let backend =
-            MacOsBackend::new(MacOsNotificationStrategy::NativeUserNotifications, None);
+        let backend = MacOsBackend::new(MacOsNotificationStrategy::NativeUserNotifications, None);
         assert_eq!(
             backend.resolved_strategy(),
             MacOsNotificationStrategy::NativeUserNotifications
