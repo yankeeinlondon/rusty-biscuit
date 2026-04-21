@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
+use tracing::debug;
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::kimi::{
@@ -235,6 +236,11 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
+        debug!(
+            provider = "kimi",
+            event_type = %kind,
+            "kimi parser falling back to provider extension for unknown event type"
+        );
         self.sink
             .on_semantic_event(SemanticEvent::ProviderExtension {
                 provider: Provider::KimiCode,
