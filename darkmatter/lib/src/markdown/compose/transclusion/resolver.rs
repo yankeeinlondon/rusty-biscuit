@@ -324,8 +324,14 @@ mod tests {
 
     #[test]
     fn relative_requires_source_context() {
-        let err =
-            resolve_path("./child.md", DirectiveKind::File, &default_options(), &ComposeSource::Unknown, 2).unwrap_err();
+        let err = resolve_path(
+            "./child.md",
+            DirectiveKind::File,
+            &default_options(),
+            &ComposeSource::Unknown,
+            2,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             TransclusionError::MissingSourceContext { .. }
@@ -373,7 +379,14 @@ mod tests {
         let mut opts = default_options();
         opts.resolve_repo_root = false;
 
-        let err = resolve_path("@/shared.md", DirectiveKind::File, &opts, &ComposeSource::Unknown, 1).unwrap_err();
+        let err = resolve_path(
+            "@/shared.md",
+            DirectiveKind::File,
+            &opts,
+            &ComposeSource::Unknown,
+            1,
+        )
+        .unwrap_err();
 
         assert!(matches!(err, TransclusionError::InvalidReference { .. }));
     }
@@ -430,7 +443,13 @@ mod tests {
         opts.magic_paths
             .push((magic_dir.clone(), biscuit_file::PathPosition::Start));
 
-        let resolved = resolve_path("@/special.md", DirectiveKind::File, &opts, &ComposeSource::File(source_path), 1);
+        let resolved = resolve_path(
+            "@/special.md",
+            DirectiveKind::File,
+            &opts,
+            &ComposeSource::File(source_path),
+            1,
+        );
 
         std::env::set_current_dir(&original_dir).unwrap();
 

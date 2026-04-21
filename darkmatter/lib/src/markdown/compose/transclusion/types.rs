@@ -95,12 +95,14 @@ pub struct BlockOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DeferredSetError {
     /// Object-form RHS did not parse as a JSON5 object.
-    #[error("invalid set assignment: {reason} (value: {raw})")]
+    #[error("invalid set assignment at line {line}: {reason} (value: {raw})")]
     InvalidAssignment {
         /// Raw RHS as seen on the directive line (with any stripped quotes re-wrapped).
         raw: String,
         /// Human-readable reason (e.g., "expected JSON5 object").
         reason: String,
+        /// 1-based directive line number.
+        line: usize,
     },
 
     /// A property-form name (or `"<object>"`) was assigned more than once.
@@ -121,13 +123,13 @@ impl biscuit_terminal::errors::BlockError for DeferredSetError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            Self::InvalidAssignment { raw, reason } => StatusBlock::new(StatusState::Error)
+            Self::InvalidAssignment { raw, reason, line } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "DeferredSetError",
                     "invalid set assignment",
                 ))
                 .body(format!(
-                    "<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
+                    "<dim>Line:</dim> {line}\n<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
                 ))
                 .hint(
                     "Use a JSON5 object like <cyan>set={ key: \"value\" }</cyan> or a property form like <cyan>set.key=\"value\"</cyan>.",
@@ -204,10 +206,18 @@ impl TransclusionRuntime {
     }
 
     /// Enters a dependency node and validates cycle/depth constraints.
-    pub fn enter(&mut self, id: String, path: PathBuf, line: usize) -> Result<(), TransclusionError> {
+    pub fn enter(
+        &mut self,
+        id: String,
+        path: PathBuf,
+        line: usize,
+    ) -> Result<(), TransclusionError> {
         // Check local stack for cycle (provides chain for error message)
         if let Some(idx) = self.stack.iter().position(|n| n.id == id) {
-            let mut chain: Vec<(PathBuf, usize)> = self.stack[idx..].iter().map(|n| (n.path.clone(), n.line)).collect();
+            let mut chain: Vec<(PathBuf, usize)> = self.stack[idx..]
+                .iter()
+                .map(|n| (n.path.clone(), n.line))
+                .collect();
             chain.push((path.clone(), line));
             return Err(TransclusionError::CycleDetected { chain });
         }

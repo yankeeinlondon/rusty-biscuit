@@ -217,7 +217,10 @@ mod tests {
         let result = parse_page_blocks(content);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, PageBlockError::UnterminatedBlock { line: 1, .. }));
+        assert!(matches!(
+            err,
+            PageBlockError::UnterminatedBlock { line: 1, .. }
+        ));
     }
 
     #[test]

@@ -237,7 +237,7 @@ fn apply_set_object(
     options: &mut BlockOptions,
     raw: &str,
     was_quoted: bool,
-    _line: usize,
+    line: usize,
 ) -> Result<(), TransclusionError> {
     let parsed = match parse_json5_value(raw) {
         Ok(v) => v,
@@ -247,6 +247,7 @@ fn apply_set_object(
                 .push(DeferredSetError::InvalidAssignment {
                     raw: format_raw_for_error(raw, was_quoted),
                     reason: format!("failed to parse as JSON5: {}", e),
+                    line,
                 });
             return Ok(());
         }
@@ -258,6 +259,7 @@ fn apply_set_object(
             .push(DeferredSetError::InvalidAssignment {
                 raw: format_raw_for_error(raw, was_quoted),
                 reason: "expected JSON5 object".to_string(),
+                line,
             });
         return Ok(());
     };

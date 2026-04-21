@@ -39,7 +39,14 @@ fn invalid_reference_shows_reference() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "invalid reference", "//weird", "2", "doc.md", "::file"],
+        &[
+            "TransclusionError",
+            "invalid reference",
+            "//weird",
+            "2",
+            "doc.md",
+            "::file",
+        ],
     );
 }
 
@@ -113,7 +120,14 @@ fn cycle_detected_lists_chain() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "cycle detected", "a.md", "b.md", ":line 3", ":line 7"],
+        &[
+            "TransclusionError",
+            "cycle detected",
+            "a.md",
+            "b.md",
+            ":line 3",
+            ":line 7",
+        ],
     );
 }
 
@@ -174,7 +188,11 @@ fn relevel_shows_message() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "re-leveling failed", "would push past H6"],
+        &[
+            "TransclusionError",
+            "re-leveling failed",
+            "would push past H6",
+        ],
     );
 }
 

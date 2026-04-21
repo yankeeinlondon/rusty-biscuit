@@ -1067,7 +1067,7 @@ impl Markdown {
 
             for error in &directive.options.deferred_set_errors {
                 match error {
-                    transclusion::DeferredSetError::InvalidAssignment { raw, reason } => {
+                    transclusion::DeferredSetError::InvalidAssignment { raw, reason, line } => {
                         if options.allow_invalid_frontmatter_assignment {
                             report.add_warning(
                                 ComposeWarning::new(
@@ -1075,17 +1075,17 @@ impl Markdown {
                                     format!(
                                         "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
                                         directive.kind.as_str(),
-                                        directive.line,
+                                        line,
                                         reason,
                                         raw
                                     ),
                                 )
-                                .at_line(directive.line),
+                                .at_line(*line),
                             );
                         } else {
                             return Err(
                                 transclusion::TransclusionError::InvalidFrontmatterAssignment {
-                                    line: directive.line,
+                                    line: *line,
                                     raw: raw.clone(),
                                     reason: reason.clone(),
                                 }

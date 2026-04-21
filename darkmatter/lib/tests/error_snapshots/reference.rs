@@ -55,7 +55,10 @@ fn missing_source_context_shows_reference_and_line() {
 fn validation_shows_message() {
     let err = ReferenceError::Validation("orphan node".into());
     let out = render(&err);
-    assert_contains_all(&out, &["ReferenceError", "validation failed", "orphan node"]);
+    assert_contains_all(
+        &out,
+        &["ReferenceError", "validation failed", "orphan node"],
+    );
 }
 
 #[test]
