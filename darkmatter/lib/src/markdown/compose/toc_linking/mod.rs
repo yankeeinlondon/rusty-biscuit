@@ -147,17 +147,12 @@ fn resolve_file(
     source: &ComposeSource,
     line: usize,
 ) -> Result<std::path::PathBuf, TocLinkingError> {
-    let path = resolve_path(
-        target,
-        DirectiveKind::File,
-        options,
-        source,
-        line,
-    )
-    .map_err(|_| TocLinkingError::FileNotFound {
+    let path = resolve_path(target, DirectiveKind::File, options, source, line).map_err(|_| {
+        TocLinkingError::FileNotFound {
             path: target.to_string(),
             line,
-        })?;
+        }
+    })?;
 
     if !path.exists() {
         return Err(TocLinkingError::FileNotFound {

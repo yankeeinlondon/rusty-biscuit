@@ -13,8 +13,14 @@ use crate::markdown::highlighting::{ColorMode, ThemePair};
 #[derive(Error, Debug)]
 pub enum MermaidThemeError {
     /// Invalid JSON syntax.
-    #[error("Invalid JSON: {0}")]
-    InvalidJson(#[from] serde_json::Error),
+    #[error("Invalid JSON at line {line}, column {column}: {source}")]
+    InvalidJson {
+        snippet: String,
+        line: usize,
+        column: usize,
+        #[source]
+        source: serde_json::Error,
+    },
     /// Invalid color value for a field.
     #[error("Invalid color value for '{field}': {value}")]
     InvalidColor {
@@ -35,12 +41,15 @@ impl biscuit_terminal::errors::BlockError for MermaidThemeError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            MermaidThemeError::InvalidJson(source) => StatusBlock::new(StatusState::Error)
+            MermaidThemeError::InvalidJson {
+                snippet,
+                line,
+                column,
+                source,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("MermaidThemeError", "invalid JSON"))
                 .body(format!(
-                    "{source}\n<dim>Position:</dim> line {}, column {}",
-                    source.line(),
-                    source.column()
+                    "<dim>Message:</dim> {source}\n<dim>Position:</dim> line {line}, column {column}\n<dim>Snippet:</dim>\n  <cyan>{snippet}</cyan>"
                 ))
                 .hint("Validate the JSON with a linter, or check for missing commas/quotes."),
 
@@ -52,6 +61,36 @@ impl biscuit_terminal::errors::BlockError for MermaidThemeError {
                 .hint("Accepted formats: <cyan>#rgb</cyan>, <cyan>#rrggbb</cyan>, or a CSS named color."),
         }
     }
+}
+
+impl MermaidThemeError {
+    pub fn invalid_json(input: &str, source: serde_json::Error) -> Self {
+        let line = source.line();
+        let column = source.column();
+        Self::InvalidJson {
+            snippet: json_error_snippet(input, line, column),
+            line,
+            column,
+            source,
+        }
+    }
+}
+
+fn json_error_snippet(input: &str, line: usize, column: usize) -> String {
+    let fallback = input.trim().chars().take(200).collect::<String>();
+    let Some(line_text) = input.lines().nth(line.saturating_sub(1)) else {
+        return fallback;
+    };
+
+    let chars: Vec<char> = line_text.chars().collect();
+    if chars.len() <= 200 {
+        return line_text.trim_end().to_string();
+    }
+
+    let focus = column.saturating_sub(1).min(chars.len());
+    let start = focus.saturating_sub(100);
+    let end = (start + 200).min(chars.len());
+    chars[start..end].iter().collect()
 }
 
 /// Mermaid theme color scheme.
@@ -247,7 +286,7 @@ impl TryFrom<String> for MermaidTheme {
     type Error = MermaidThemeError;
 
     fn try_from(json: String) -> Result<Self, Self::Error> {
-        serde_json::from_str(&json).map_err(MermaidThemeError::from)
+        serde_json::from_str(&json).map_err(|source| MermaidThemeError::invalid_json(&json, source))
     }
 }
 
@@ -255,7 +294,7 @@ impl TryFrom<&str> for MermaidTheme {
     type Error = MermaidThemeError;
 
     fn try_from(json: &str) -> Result<Self, Self::Error> {
-        serde_json::from_str(json).map_err(MermaidThemeError::from)
+        serde_json::from_str(json).map_err(|source| MermaidThemeError::invalid_json(json, source))
     }
 }
 
@@ -263,7 +302,9 @@ impl TryFrom<serde_json::Value> for MermaidTheme {
     type Error = MermaidThemeError;
 
     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
-        serde_json::from_value(value).map_err(MermaidThemeError::from)
+        let input = value.to_string();
+        serde_json::from_value(value)
+            .map_err(|source| MermaidThemeError::invalid_json(&input, source))
     }
 }
 
@@ -532,7 +573,7 @@ mod tests {
         let result = MermaidTheme::try_from(json);
         assert!(result.is_err());
         match result {
-            Err(MermaidThemeError::InvalidJson(_)) => {
+            Err(MermaidThemeError::InvalidJson { .. }) => {
                 // Expected error type
             }
             _ => panic!("Expected InvalidJson error"),

@@ -9,6 +9,7 @@ fn invalid_assignment_shows_raw_and_reason() {
     let err = DeferredSetError::InvalidAssignment {
         raw: "\"not json\"".into(),
         reason: "expected JSON5 object".into(),
+        line: 8,
     };
     let out = render(&err);
     assert_contains_all(
@@ -16,6 +17,7 @@ fn invalid_assignment_shows_raw_and_reason() {
         &[
             "DeferredSetError",
             "invalid set assignment",
+            "8",
             "\"not json\"",
             "expected JSON5 object",
             "set=",

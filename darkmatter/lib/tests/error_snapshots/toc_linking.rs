@@ -46,7 +46,12 @@ fn invalid_cleanup_service_enumerates_valid_values() {
     }
     assert_contains_all(
         &out,
-        &["TocLinkingError", "invalid cleanup service", "bogus"],
+        &[
+            "TocLinkingError",
+            "invalid cleanup service",
+            "bogus",
+            "Strip leading emoji",
+        ],
     );
 }
 

@@ -30,16 +30,46 @@ fn unrecognized_format_hints_at_markdown_and_html() {
 fn malformed_html_includes_message() {
     let err = ImageRefError::MalformedHtml("missing end of tag".into());
     let out = render(&err);
-    assert_contains_all(&out, &["ImageRefError", "malformed HTML image", "missing end of tag"]);
+    assert_contains_all(
+        &out,
+        &[
+            "ImageRefError",
+            "malformed HTML image",
+            "missing end of tag",
+        ],
+    );
 }
 
 #[test]
-fn malformed_markdown_includes_message() {
-    let err = ImageRefError::MalformedMarkdown("expected ( after alt".into());
+fn malformed_markdown_includes_message_input_and_caret() {
+    let err = ImageRefError::MalformedMarkdown {
+        message: "expected ( after alt".into(),
+        input: Some("![alt] image.png".into()),
+        caret: Some(7),
+    };
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["ImageRefError", "malformed markdown image", "expected ( after alt"],
+        &[
+            "ImageRefError",
+            "malformed markdown image",
+            "expected ( after alt",
+        ],
+    );
+    assert_contains_all(&out, &["![alt] image.png", "^"]);
+}
+
+#[test]
+fn malformed_markdown_without_context_still_renders_message() {
+    let err = ImageRefError::from("missing closing bracket");
+    let out = render(&err);
+    assert_contains_all(
+        &out,
+        &[
+            "ImageRefError",
+            "malformed markdown image",
+            "missing closing bracket",
+        ],
     );
 }
 
@@ -51,7 +81,10 @@ fn invalid_style_delegates_stylesheet_block() {
     let err = ImageRefError::InvalidStyle(inner);
     let out = render(&err);
     // InvalidStyle delegates through to StylesheetError.
-    assert_contains_all(&out, &["StylesheetError", "invalid color value", "notacolor"]);
+    assert_contains_all(
+        &out,
+        &["StylesheetError", "invalid color value", "notacolor"],
+    );
 }
 
 #[test]
@@ -100,13 +133,7 @@ fn invalid_loading_lists_accepted_values() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &[
-            "ImageRefError",
-            "invalid loading",
-            "never",
-            "eager",
-            "lazy",
-        ],
+        &["ImageRefError", "invalid loading", "never", "eager", "lazy"],
     );
 }
 

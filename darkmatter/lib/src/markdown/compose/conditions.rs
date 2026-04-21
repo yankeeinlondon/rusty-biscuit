@@ -7,6 +7,7 @@
 use super::EffectiveState;
 use super::interpolation::{ComparisonOp, Expr, parse_condition};
 use serde_json::Value;
+use std::ops::Range;
 use tracing::{debug, trace};
 
 /// Errors from condition parsing or evaluation.
@@ -18,6 +19,12 @@ pub enum ConditionError {
         expr: String,
         line: usize,
         message: String,
+        /// Byte range in `expr` that the parser identified as problematic.
+        ///
+        /// When the parser reports only a single byte position, darkmatter
+        /// records a single-point span at that offset. If no position can be
+        /// recovered, the span falls back to the full expression.
+        span: Range<usize>,
     },
     /// Failed to evaluate a condition expression.
     #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
@@ -40,10 +47,16 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
         let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round</cyan>";
 
         match self {
-            ConditionError::Parse { expr, line, message } => StatusBlock::new(StatusState::Error)
+            ConditionError::Parse {
+                expr,
+                line,
+                message,
+                span,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ConditionError", "parse failed"))
                 .body(format!(
-                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                    "<dim>Expression:</dim>\n  <cyan>{expr}</cyan>\n{}\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}",
+                    caret_marker(expr, span.start)
                 ))
                 .hint(operator_hint),
 
@@ -68,7 +81,8 @@ pub fn evaluate_condition(
     let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
         expr: expr.to_string(),
         line,
-        message: e.to_string(),
+        message: e.message.clone(),
+        span: parse_error_span(expr, e.position),
     })?;
 
     let value = eval_expr(&parsed, state).map_err(|message| ConditionError::Eval {
@@ -81,6 +95,29 @@ pub fn evaluate_condition(
     debug!(expr = %expr, result, "conditions: evaluated");
 
     Ok(result)
+}
+
+fn parse_error_span(expr: &str, position: usize) -> Range<usize> {
+    if expr.is_empty() {
+        return 0..0;
+    }
+
+    let start = position.min(expr.len());
+    let end = (start.saturating_add(1)).min(expr.len());
+    if start == end {
+        0..expr.len()
+    } else {
+        start..end
+    }
+}
+
+fn caret_marker(input: &str, byte_offset: usize) -> String {
+    let clamped = byte_offset.min(input.len());
+    let column = input
+        .char_indices()
+        .take_while(|(idx, _)| *idx < clamped)
+        .count();
+    format!("  {}^", " ".repeat(column))
 }
 
 fn eval_expr(expr: &Expr, state: &EffectiveState) -> Result<Value, String> {
