@@ -9795,10 +9795,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tui"
-version = "0.1.0"
-
-[[package]]
 name = "tungstenite"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

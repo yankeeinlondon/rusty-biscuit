@@ -32,7 +32,7 @@ members = [
     "tabby/ui",
     "tree-hugger/cli",
     "tree-hugger/lib",
-    "tui",
+    # "tui",  # TEMPORARILY COMMENTED: package does not exist
     "unchained-ai/cli",
     "unchained-ai/gen",
     "unchained-ai/lib", "agent-sandbox/cli", "messenger/cli", "messenger/lib", "biscuit-visualized/src", "worktree/lib", "worktree/cli",
