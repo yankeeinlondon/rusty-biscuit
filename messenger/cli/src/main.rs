@@ -29,7 +29,7 @@ mod config;
 mod receipt_store;
 mod setup;
 
-use config::{Config, RouteConfig, RouteProvider};
+use config::{Config, RouteConfig, RouteProvider, RouteUrgency};
 
 #[derive(Parser)]
 #[command(name = "messenger", about = "Send messages to any platform")]
@@ -45,11 +45,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 #[command(disable_help_subcommand = true)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Send a message.
     Send {
         /// The message text to send (Markdown supported unless --plain is used).
-        message: String,
+        ///
+        /// Optional: desktop notifications accept a title-only send via `--title`.
+        message: Option<String>,
 
         /// Provider to use for an ad-hoc route.
         #[arg(long)]
@@ -90,6 +93,30 @@ enum Commands {
         /// Attach a geographic location (format: "LAT,LON").
         #[arg(long, value_name = "LAT,LON")]
         location: Option<String>,
+
+        /// Title for providers that distinguish a summary line (desktop notifications).
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Subtitle (desktop notifications only).
+        #[arg(long)]
+        subtitle: Option<String>,
+
+        /// Icon name or path (desktop notifications).
+        #[arg(long)]
+        icon: Option<String>,
+
+        /// Category / thread identifier (desktop notifications).
+        #[arg(long)]
+        category: Option<String>,
+
+        /// Urgency level (desktop notifications).
+        #[arg(long, value_enum)]
+        urgency: Option<RouteUrgency>,
+
+        /// Expiry timeout in milliseconds (desktop notifications).
+        #[arg(long, value_name = "MS")]
+        timeout_ms: Option<u32>,
     },
     /// Interactive provider configuration.
     Setup {
@@ -133,11 +160,32 @@ async fn main() -> Result<()> {
             strict,
             plain,
             location,
+            title,
+            subtitle,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
         } => {
-            send_message(
-                &message, provider, channel, route, reply_to, image, file, silent, strict, plain,
+            send_message(SendArgs {
+                message,
+                provider,
+                channel,
+                route,
+                reply_to,
+                image,
+                file,
+                silent,
+                strict,
+                plain,
                 location,
-            )
+                title,
+                subtitle,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+            })
             .await?;
         }
         Commands::Setup { provider } | Commands::Init { provider } => {
@@ -194,13 +242,11 @@ fn init_tracing(debug_level: u8) -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
-async fn send_message(
-    message_text: &str,
-    provider_opt: Option<RouteProvider>,
-    channel_opt: Option<String>,
-    route_opt: Option<String>,
+struct SendArgs {
+    message: Option<String>,
+    provider: Option<RouteProvider>,
+    channel: Option<String>,
+    route: Option<String>,
     reply_to: Option<String>,
     image: Option<PathBuf>,
     file: Option<PathBuf>,
@@ -208,7 +254,36 @@ async fn send_message(
     strict: bool,
     plain: bool,
     location: Option<String>,
-) -> Result<()> {
+    title: Option<String>,
+    subtitle: Option<String>,
+    icon: Option<String>,
+    category: Option<String>,
+    urgency: Option<RouteUrgency>,
+    timeout_ms: Option<u32>,
+}
+
+#[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
+async fn send_message(args: SendArgs) -> Result<()> {
+    let SendArgs {
+        message: message_text,
+        provider: provider_opt,
+        channel: channel_opt,
+        route: route_opt,
+        reply_to,
+        image,
+        file,
+        silent,
+        strict,
+        plain,
+        location,
+        title,
+        subtitle,
+        icon,
+        category,
+        urgency,
+        timeout_ms,
+    } = args;
+
     let config = Config::load()?;
     let resolved_route = resolve_route(provider_opt, channel_opt, route_opt, &config)?;
     let route_label = resolved_route.name.as_deref().unwrap_or("<ad-hoc>");
@@ -224,18 +299,33 @@ async fn send_message(
         strict,
         plain,
         has_location = location.is_some(),
+        has_title = title.is_some(),
         "building message from CLI arguments"
     );
 
     let mut messenger = messenger::Messenger::new();
     register_provider(&mut messenger, &resolved_route.route)?;
 
-    let mut message = if plain {
-        messenger::Message::text(message_text)
-    } else {
-        messenger::Message::markdown(message_text)
+    let mut message = match message_text.as_deref() {
+        Some(text) if !text.is_empty() => {
+            if plain {
+                messenger::Message::text(text)
+            } else {
+                messenger::Message::markdown(text)
+            }
+        }
+        _ => messenger::Message {
+            title: None,
+            body: None,
+            attachments: Vec::new(),
+            location: None,
+            metadata: std::collections::BTreeMap::new(),
+        },
     };
 
+    if let Some(t) = title {
+        message = message.title(t);
+    }
     if let Some(ref loc) = location {
         let (lat, lon) = parse_location(loc)?;
         message = message.with_location(lat, lon);
@@ -260,6 +350,20 @@ async fn send_message(
         dispatch = dispatch.strict();
     }
 
+    if provider_kind == RouteProvider::Desktop {
+        let overrides = build_desktop_overrides(DesktopOverrideInputs {
+            subtitle,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+        });
+        if !overrides_is_empty(&overrides) {
+            dispatch = dispatch
+                .with_overrides(messenger::ProviderOverrides::Desktop(overrides));
+        }
+    }
+
     let plan = messenger.plan_send(dispatch, &message)?;
     emit_compatibility_warnings(&plan.warnings);
 
@@ -281,6 +385,52 @@ async fn send_message(
     Ok(())
 }
 
+struct DesktopOverrideInputs {
+    subtitle: Option<String>,
+    icon: Option<String>,
+    category: Option<String>,
+    urgency: Option<RouteUrgency>,
+    timeout_ms: Option<u32>,
+}
+
+fn build_desktop_overrides(inputs: DesktopOverrideInputs) -> messenger::DesktopOverrides {
+    messenger::DesktopOverrides {
+        subtitle: inputs.subtitle,
+        app_name: None,
+        category: inputs.category,
+        urgency: inputs.urgency.map(route_urgency_to_messenger),
+        timeout_ms: inputs.timeout_ms,
+        icon: inputs.icon.map(icon_string_to_messenger),
+        replace_id: None,
+    }
+}
+
+fn overrides_is_empty(o: &messenger::DesktopOverrides) -> bool {
+    o.subtitle.is_none()
+        && o.app_name.is_none()
+        && o.category.is_none()
+        && o.urgency.is_none()
+        && o.timeout_ms.is_none()
+        && o.icon.is_none()
+        && o.replace_id.is_none()
+}
+
+fn route_urgency_to_messenger(urgency: RouteUrgency) -> messenger::NotificationUrgency {
+    match urgency {
+        RouteUrgency::Low => messenger::NotificationUrgency::Low,
+        RouteUrgency::Normal => messenger::NotificationUrgency::Normal,
+        RouteUrgency::Critical => messenger::NotificationUrgency::Critical,
+    }
+}
+
+fn icon_string_to_messenger(value: String) -> messenger::NotificationIcon {
+    if value.contains(std::path::MAIN_SEPARATOR) || value.starts_with('.') {
+        messenger::NotificationIcon::Path(PathBuf::from(value))
+    } else {
+        messenger::NotificationIcon::Named(value)
+    }
+}
+
 fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning]) {
     for warning in warnings {
         eprintln!("{warning}");
@@ -294,13 +444,25 @@ fn resolve_route(
     config: &Config,
 ) -> Result<ResolvedRoute> {
     if let Some(provider) = provider_opt {
-        let channel = channel_opt
-            .as_deref()
-            .ok_or_else(|| eyre!("--channel is required when using --provider"))?;
-        tracing::debug!(provider = %provider, channel = %channel, "using ad-hoc route");
+        if provider.requires_target() {
+            let channel = channel_opt
+                .as_deref()
+                .ok_or_else(|| eyre!("--channel is required when using --provider {provider}"))?;
+            tracing::debug!(provider = %provider, channel = %channel, "using ad-hoc route");
+            return Ok(ResolvedRoute {
+                name: None,
+                route: RouteConfig::from_provider_and_target(provider, channel),
+            });
+        }
+        if channel_opt.is_some() {
+            return Err(eyre!(
+                "--channel is not supported for provider {provider}; desktop notifications target the local host"
+            ));
+        }
+        tracing::debug!(provider = %provider, "using ad-hoc targetless route");
         return Ok(ResolvedRoute {
             name: None,
-            route: RouteConfig::from_provider_and_target(provider, channel),
+            route: RouteConfig::from_provider_and_target(provider, String::new()),
         });
     }
 
@@ -437,6 +599,49 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 ),
             ));
         }
+        RouteConfig::Desktop {
+            app_name,
+            default_title,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+            windows,
+            macos,
+            linux,
+        } => {
+            let config = messenger::DesktopConfig {
+                app_name: app_name.clone(),
+                default_title: default_title.clone(),
+                category: category.clone(),
+                urgency: route_urgency_to_messenger(*urgency),
+                timeout_ms: *timeout_ms,
+                icon: icon.clone().map(icon_string_to_messenger),
+                windows: messenger::WindowsDesktopConfig {
+                    app_id: windows.app_id.clone(),
+                },
+                macos: messenger::MacOsDesktopConfig {
+                    bundle_id: macos.bundle_id.clone(),
+                    strategy: match macos.strategy {
+                        config::RouteMacOsStrategy::Auto => {
+                            messenger::MacOsNotificationStrategy::Auto
+                        }
+                        config::RouteMacOsStrategy::NativeUserNotifications => {
+                            messenger::MacOsNotificationStrategy::NativeUserNotifications
+                        }
+                        config::RouteMacOsStrategy::AppleScript => {
+                            messenger::MacOsNotificationStrategy::AppleScript
+                        }
+                    },
+                },
+                linux: messenger::LinuxDesktopConfig {
+                    desktop_entry: linux.desktop_entry.clone(),
+                },
+            };
+            messenger.register(Box::new(messenger::DesktopNotificationProvider::new(
+                config,
+            )));
+        }
     }
     Ok(())
 }
@@ -472,6 +677,7 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
             };
             Ok(messenger::Target::telegram_chat(chat_id))
         }
+        RouteConfig::Desktop { .. } => Ok(messenger::Target::desktop()),
     }
 }
 
@@ -900,5 +1106,275 @@ mod tests {
             warning.to_string(),
             "⚠️ the attachments feature is not supported on Slack and will be dropped"
         );
+    }
+
+    #[test]
+    fn resolve_route_builds_desktop_ad_hoc_route_without_channel() {
+        let resolved = resolve_route(
+            Some(RouteProvider::Desktop),
+            None,
+            None,
+            &Config::default(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.name, None);
+        assert_eq!(resolved.route.provider(), RouteProvider::Desktop);
+        assert!(matches!(resolved.route, RouteConfig::Desktop { .. }));
+    }
+
+    #[test]
+    fn resolve_route_rejects_channel_for_desktop_provider() {
+        let err = resolve_route(
+            Some(RouteProvider::Desktop),
+            Some("ignored".into()),
+            None,
+            &Config::default(),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("--channel is not supported"),
+            "expected --channel rejection for desktop, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_route_still_requires_channel_for_chat_provider() {
+        let err = resolve_route(
+            Some(RouteProvider::Slack),
+            None,
+            None,
+            &Config::default(),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("--channel is required"),
+            "expected --channel required for Slack, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn build_target_maps_desktop_route_to_desktop_target() {
+        let target = build_target(&RouteConfig::desktop_default()).unwrap();
+        assert!(matches!(target, messenger::Target::Desktop(_)));
+    }
+
+    #[test]
+    fn desktop_route_survives_config_save_load_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let route = RouteConfig::Desktop {
+            app_name: "Messenger".into(),
+            default_title: Some("Build Status".into()),
+            icon: Some("dialog-information".into()),
+            category: Some("im.received".into()),
+            urgency: config::RouteUrgency::Critical,
+            timeout_ms: Some(5000),
+            windows: config::DesktopWindowsConfig {
+                app_id: Some("RustyBiscuit.Messenger".into()),
+            },
+            macos: config::DesktopMacOsConfig {
+                bundle_id: Some("com.rustybiscuit.messenger".into()),
+                strategy: config::RouteMacOsStrategy::NativeUserNotifications,
+            },
+            linux: config::DesktopLinuxConfig {
+                desktop_entry: Some("messenger".into()),
+            },
+        };
+
+        let mut config = Config {
+            default_route: Some("desktop.local".into()),
+            routes: HashMap::new(),
+        };
+        config.routes.insert("desktop.local".into(), route.clone());
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
+        let stored = loaded.routes.get("desktop.local").unwrap();
+        assert_eq!(stored, &route);
+        assert_eq!(stored.provider(), RouteProvider::Desktop);
+    }
+
+    #[test]
+    fn desktop_route_parses_spec_example_config() {
+        let raw = r#"{
+            "provider": "desktop",
+            "app_name": "Messenger",
+            "default_title": "Messenger",
+            "icon": "dialog-information",
+            "category": "im.received",
+            "urgency": "normal",
+            "timeout_ms": 5000,
+            "windows": { "app_id": "RustyBiscuit.Messenger" },
+            "macos": { "bundle_id": "com.rustybiscuit.messenger", "strategy": "auto" },
+            "linux": { "desktop_entry": "messenger" }
+        }"#;
+
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed.provider(), RouteProvider::Desktop);
+        match parsed {
+            RouteConfig::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                windows,
+                macos,
+                linux,
+            } => {
+                assert_eq!(app_name, "Messenger");
+                assert_eq!(default_title.as_deref(), Some("Messenger"));
+                assert_eq!(icon.as_deref(), Some("dialog-information"));
+                assert_eq!(category.as_deref(), Some("im.received"));
+                assert_eq!(urgency, config::RouteUrgency::Normal);
+                assert_eq!(timeout_ms, Some(5000));
+                assert_eq!(windows.app_id.as_deref(), Some("RustyBiscuit.Messenger"));
+                assert_eq!(macos.bundle_id.as_deref(), Some("com.rustybiscuit.messenger"));
+                assert_eq!(macos.strategy, config::RouteMacOsStrategy::Auto);
+                assert_eq!(linux.desktop_entry.as_deref(), Some("messenger"));
+            }
+            other => panic!("expected RouteConfig::Desktop, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_route_applies_defaults_when_minimal() {
+        let raw = r#"{ "provider": "desktop" }"#;
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        match parsed {
+            RouteConfig::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                windows,
+                macos,
+                linux,
+            } => {
+                assert_eq!(app_name, "Messenger");
+                assert!(default_title.is_none());
+                assert!(icon.is_none());
+                assert!(category.is_none());
+                assert_eq!(urgency, config::RouteUrgency::Normal);
+                assert!(timeout_ms.is_none());
+                assert!(windows.app_id.is_none());
+                assert!(macos.bundle_id.is_none());
+                assert_eq!(macos.strategy, config::RouteMacOsStrategy::Auto);
+                assert!(linux.desktop_entry.is_none());
+            }
+            other => panic!("expected RouteConfig::Desktop, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn requires_target_reports_desktop_as_targetless() {
+        assert!(!RouteProvider::Desktop.requires_target());
+        for other in RouteProvider::ALL
+            .iter()
+            .filter(|p| **p != RouteProvider::Desktop)
+        {
+            assert!(
+                other.requires_target(),
+                "chat provider {other} must still require a target"
+            );
+        }
+    }
+
+    #[test]
+    fn icon_string_routes_absolute_path_to_path_variant() {
+        let icon = icon_string_to_messenger(format!(
+            "{}tmp{}icon.png",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        ));
+        assert!(matches!(icon, messenger::NotificationIcon::Path(_)));
+    }
+
+    #[test]
+    fn icon_string_routes_name_to_named_variant() {
+        let icon = icon_string_to_messenger("dialog-information".into());
+        assert_eq!(
+            icon,
+            messenger::NotificationIcon::Named("dialog-information".into())
+        );
+    }
+
+    #[test]
+    fn send_cli_parses_desktop_flags() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--title",
+            "Build",
+            "--urgency",
+            "critical",
+            "--timeout-ms",
+            "3500",
+            "Green across the board",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                provider,
+                channel,
+                title,
+                urgency,
+                timeout_ms,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Green across the board"));
+                assert_eq!(provider, Some(RouteProvider::Desktop));
+                assert_eq!(channel, None);
+                assert_eq!(title.as_deref(), Some("Build"));
+                assert_eq!(urgency, Some(config::RouteUrgency::Critical));
+                assert_eq!(timeout_ms, Some(3500));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_allows_desktop_send_without_body() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--title",
+            "Alert",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send { message, title, .. } => {
+                assert!(message.is_none());
+                assert_eq!(title.as_deref(), Some("Alert"));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn desktop_listed_in_provider_value_enum() {
+        use clap::ValueEnum;
+        let parsed = RouteProvider::from_str("desktop", true).unwrap();
+        assert_eq!(parsed, RouteProvider::Desktop);
     }
 }

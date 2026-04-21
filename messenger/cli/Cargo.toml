@@ -14,7 +14,7 @@ sfx-native-windows = []
 sfx-native-linux = []
 
 [dependencies]
-messenger = { path = "../lib", features = ["discord", "slack", "signal", "whatsapp", "telegram"] }
+messenger = { path = "../lib", features = ["discord", "slack", "signal", "whatsapp", "telegram", "desktop"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }

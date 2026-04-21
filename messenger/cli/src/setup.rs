@@ -169,6 +169,7 @@ fn configure_provider(provider: &RouteProvider, route_name: Option<&str>) -> Res
         RouteProvider::Signal => configure_signal(),
         RouteProvider::WhatsApp => configure_whatsapp(),
         RouteProvider::Telegram => configure_telegram(),
+        RouteProvider::Desktop => configure_desktop(),
     }
 }
 
@@ -560,6 +561,44 @@ fn configure_telegram() -> Result<RouteConfig> {
         bot_token,
         bot_token_env,
     })
+}
+
+fn configure_desktop() -> Result<RouteConfig> {
+    println!(
+        "\n{}",
+        styled(
+            "<dim>Desktop notifications deliver to the host OS notification center.</dim>"
+        )
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>No channel or token is needed; platform-specific bootstrap (Windows shortcut, macOS strategy) is covered by the full setup flow.</dim>"
+        )
+    );
+
+    let app_name = Text::new("App name:")
+        .with_default("Messenger")
+        .with_help_message("Name shown by the notification center")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    let default_title = Text::new("Default title (optional):")
+        .with_help_message("Used when a message does not supply its own title")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    let mut route = RouteConfig::desktop_default();
+    if let RouteConfig::Desktop {
+        app_name: ref mut cfg_app_name,
+        default_title: ref mut cfg_default_title,
+        ..
+    } = route
+    {
+        *cfg_app_name = app_name;
+        *cfg_default_title = non_empty(default_title);
+    }
+    Ok(route)
 }
 
 fn suggest_route_name(provider: &RouteProvider, config: &Config) -> String {
