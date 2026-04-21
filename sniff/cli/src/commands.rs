@@ -14,7 +14,7 @@ use tracing::info_span;
 
 use crate::args::{
     BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
-    FileListArgs, FilesFilter, ServiceStateArg,
+    FileListArgs, FilesFilter, PackagesFormat, ServiceStateArg,
 };
 use crate::output::{self, OutputFilter, PathListFormat};
 
@@ -36,7 +36,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    crate::init_tracing(cli.verbose);
+    crate::init_tracing(cli.debug);
 
     let _root = info_span!("sniff",
         command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
@@ -407,6 +407,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return crate::output::recent_commits::handle_recent_commits_command(
                     action,
                     base_dir.as_deref(),
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                );
+            }
+            crate::args::RepoAction::Packages {
+                filter,
+                package_area,
+                format,
+            } => {
+                return handle_repo_packages(
+                    base_dir.as_deref(),
+                    filter,
+                    package_area.as_deref(),
+                    *format,
                     cli.json,
                     cli.plain,
                     cli.verbose,
@@ -1000,6 +1015,47 @@ fn resolve_package_path(
         areas.join(", ")
     )
     .into())
+}
+
+/// Fast-path handler for `sniff repo packages`.
+///
+/// Skips the full detection pipeline and calls `detect_repo_structure` directly,
+/// which avoids git scanning, file inventory, language detection, docs, and
+/// formatting work. Typical wall time on a large monorepo: well under 50ms.
+fn handle_repo_packages(
+    base_dir: Option<&std::path::Path>,
+    filter: &[String],
+    package_area: Option<&str>,
+    format: PackagesFormat,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let root = base_dir.unwrap_or(&cwd);
+
+    let info = match sniff::filesystem::repo::detect_repo_structure(root)? {
+        Some(info) => info,
+        None => {
+            return Err("Not inside a recognized repository".into());
+        }
+    };
+
+    if json {
+        let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
+        println!("{}", serde_json::to_string(&names)?);
+        return Ok(());
+    }
+
+    let rendered =
+        output::render_repo_packages_formatted(&info, filter, package_area, format, verbose);
+    let with_newline = if rendered.ends_with('\n') {
+        rendered
+    } else {
+        format!("{rendered}\n")
+    };
+    output::emit_text(&with_newline, plain);
+    Ok(())
 }
 
 /// Resolve `FileListArgs` flags into a `PathListFormat`.

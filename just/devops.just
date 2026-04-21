@@ -7,6 +7,7 @@ red := '\033[31m'
 green := '\033[32m'
 yellow := '\033[33m'
 blue := '\033[34m'
+underline := '\033[4m'
 
 # dim := '\033[2m'
 
@@ -111,4 +112,18 @@ _test pkg *args="":
 # Show all README.md files in the package
 _readme_files:
     @sniff docs --readme --json "$(sniff repo package-area)"
+
+status:
+    @echo
+    @echo -e "{{bold}}{{blue}}{{underline}}Features{{reset}}"
+    @echo
+    @eza features -lDga -I '_*'
+    @echo
+    @echo -e "{{bold}}Unscheduled{{reset}}"
+    @echo
+    @eza features/_unscheduled -lDga -s modified
+    @echo
+    @echo -e "{{bold}}{{blue}}{{underline}}Fixes{{reset}}"
+    @echo
+    @eza fixes -lDga -I '_*'
 

@@ -43,8 +43,12 @@ pub enum ImageRefError {
     MalformedHtml(String),
 
     /// Markdown input failed to parse.
-    #[error("malformed markdown image reference: {0}")]
-    MalformedMarkdown(String),
+    #[error("malformed markdown image reference: {message}")]
+    MalformedMarkdown {
+        message: String,
+        input: Option<String>,
+        caret: Option<usize>,
+    },
 
     /// A CSS style declaration failed to parse.
     #[error("invalid CSS style: {0}")]
@@ -118,12 +122,16 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
                     "Ensure the tag starts with <cyan>&lt;img</cyan> and ends with <cyan>&gt;</cyan> (self-closing is allowed).",
                 ),
 
-            Self::MalformedMarkdown(message) => StatusBlock::new(StatusState::Error)
+            Self::MalformedMarkdown {
+                message,
+                input,
+                caret,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "ImageRefError",
                     "malformed markdown image",
                 ))
-                .body(format!("<dim>Message:</dim> {message}"))
+                .body(render_markdown_parse_body(message, input.as_deref(), *caret))
                 .hint(
                     "Use the pattern <cyan>![alt](src \"optional title\")</cyan> with balanced brackets and parentheses.",
                 ),
@@ -179,6 +187,35 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
             Self::InvalidStyle(inner) => Some(inner),
             _ => None,
         }
+    }
+}
+
+impl ImageRefError {
+    /// Creates a markdown-parse error without source-context details.
+    pub fn malformed_markdown(message: impl Into<String>) -> Self {
+        Self::MalformedMarkdown {
+            message: message.into(),
+            input: None,
+            caret: None,
+        }
+    }
+
+    fn malformed_markdown_with_context(
+        message: impl Into<String>,
+        input: impl Into<String>,
+        caret: usize,
+    ) -> Self {
+        Self::MalformedMarkdown {
+            message: message.into(),
+            input: Some(input.into()),
+            caret: Some(caret),
+        }
+    }
+}
+
+impl From<&str> for ImageRefError {
+    fn from(value: &str) -> Self {
+        Self::malformed_markdown(value)
     }
 }
 
@@ -1289,8 +1326,10 @@ fn parse_html_image(input: &str) -> Result<ImageRef, ImageRefError> {
 fn parse_markdown_image(input: &str) -> Result<ImageRef, ImageRefError> {
     let input = input.trim();
     if !input.starts_with("![") {
-        return Err(ImageRefError::MalformedMarkdown(
-            "markdown image must start with `![`".to_string(),
+        return Err(ImageRefError::malformed_markdown_with_context(
+            "markdown image must start with `![`",
+            input,
+            0,
         ));
     }
 
@@ -1299,16 +1338,20 @@ fn parse_markdown_image(input: &str) -> Result<ImageRef, ImageRefError> {
 
     let rest = &input[alt_end + 1..];
     if !rest.starts_with('(') {
-        return Err(ImageRefError::MalformedMarkdown(
-            "expected `(` after alt text".to_string(),
+        return Err(ImageRefError::malformed_markdown_with_context(
+            "expected `(` after alt text",
+            input,
+            alt_end + 1,
         ));
     }
 
     let paren_end = find_closing_paren(rest, 0)?;
     let paren_content = &rest[1..paren_end];
     if !rest[paren_end + 1..].trim().is_empty() {
-        return Err(ImageRefError::MalformedMarkdown(
-            "unexpected trailing content after markdown image".to_string(),
+        return Err(ImageRefError::malformed_markdown_with_context(
+            "unexpected trailing content after markdown image",
+            input,
+            alt_end + 1 + paren_end + 1,
         ));
     }
 
@@ -1431,8 +1474,10 @@ fn find_closing_bracket(input: &str, start: usize) -> Result<usize, ImageRefErro
         }
     }
 
-    Err(ImageRefError::MalformedMarkdown(
-        "unmatched `[` in markdown image".to_string(),
+    Err(ImageRefError::malformed_markdown_with_context(
+        "unmatched `[` in markdown image",
+        input,
+        start,
     ))
 }
 
@@ -1479,9 +1524,34 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, ImageRefError>
         }
     }
 
-    Err(ImageRefError::MalformedMarkdown(
-        "unmatched `(` in markdown image".to_string(),
+    Err(ImageRefError::malformed_markdown_with_context(
+        "unmatched `(` in markdown image",
+        input,
+        start,
     ))
+}
+
+fn render_markdown_parse_body(message: &str, input: Option<&str>, caret: Option<usize>) -> String {
+    let mut body = format!("<dim>Message:</dim> {message}");
+
+    if let Some(input) = input {
+        body.push_str(&format!("\n<dim>Input:</dim>\n  <cyan>{input}</cyan>"));
+        if let Some(caret) = caret {
+            body.push('\n');
+            body.push_str(&caret_marker(input, caret));
+        }
+    }
+
+    body
+}
+
+fn caret_marker(input: &str, byte_offset: usize) -> String {
+    let clamped = byte_offset.min(input.len());
+    let column = input
+        .char_indices()
+        .take_while(|(idx, _)| *idx < clamped)
+        .count();
+    format!("  {}^", " ".repeat(column))
 }
 
 fn extract_markdown_url(content: &str) -> (String, &str) {

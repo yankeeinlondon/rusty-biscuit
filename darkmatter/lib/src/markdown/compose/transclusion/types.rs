@@ -95,12 +95,14 @@ pub struct BlockOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DeferredSetError {
     /// Object-form RHS did not parse as a JSON5 object.
-    #[error("invalid set assignment: {reason} (value: {raw})")]
+    #[error("invalid set assignment at line {line}: {reason} (value: {raw})")]
     InvalidAssignment {
         /// Raw RHS as seen on the directive line (with any stripped quotes re-wrapped).
         raw: String,
         /// Human-readable reason (e.g., "expected JSON5 object").
         reason: String,
+        /// 1-based directive line number.
+        line: usize,
     },
 
     /// A property-form name (or `"<object>"`) was assigned more than once.
@@ -121,13 +123,13 @@ impl biscuit_terminal::errors::BlockError for DeferredSetError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            Self::InvalidAssignment { raw, reason } => StatusBlock::new(StatusState::Error)
+            Self::InvalidAssignment { raw, reason, line } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "DeferredSetError",
                     "invalid set assignment",
                 ))
                 .body(format!(
-                    "<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
+                    "<dim>Line:</dim> {line}\n<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
                 ))
                 .hint(
                     "Use a JSON5 object like <cyan>set={ key: \"value\" }</cyan> or a property form like <cyan>set.key=\"value\"</cyan>.",
@@ -170,6 +172,10 @@ pub struct BlockDirective {
 pub struct DependencyNode {
     /// Canonical identifier (path or URL).
     pub id: String,
+    /// Resolved file path (or empty for URLs/synthetic sources).
+    pub path: PathBuf,
+    /// 1-based line number where the transclusion directive appeared.
+    pub line: usize,
 }
 
 /// Runtime state for recursive transclusion.
@@ -200,15 +206,23 @@ impl TransclusionRuntime {
     }
 
     /// Enters a dependency node and validates cycle/depth constraints.
-    pub fn enter(&mut self, id: String) -> Result<(), TransclusionError> {
+    pub fn enter(
+        &mut self,
+        id: String,
+        path: PathBuf,
+        line: usize,
+    ) -> Result<(), TransclusionError> {
         // Check local stack for cycle (provides chain for error message)
         if let Some(idx) = self.stack.iter().position(|n| n.id == id) {
-            let mut chain: Vec<String> = self.stack[idx..].iter().map(|n| n.id.clone()).collect();
-            chain.push(id);
+            let mut chain: Vec<(PathBuf, usize)> = self.stack[idx..]
+                .iter()
+                .map(|n| (n.path.clone(), n.line))
+                .collect();
+            chain.push((path.clone(), line));
             return Err(TransclusionError::CycleDetected { chain });
         }
 
-        self.stack.push(DependencyNode { id });
+        self.stack.push(DependencyNode { id, path, line });
         self.deepest_seen = self.deepest_seen.max(self.stack.len());
 
         if self.stack.len() > self.max_depth {
@@ -277,10 +291,23 @@ pub struct FrontmatterRefs {
 #[derive(Debug, Error)]
 pub enum TransclusionError {
     #[error("Failed to parse directive at line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    ParseDirective {
+        line: usize,
+        message: String,
+        caret_col: Option<usize>,
+    },
 
-    #[error("Invalid reference '{reference}' at line {line}")]
-    InvalidReference { reference: String, line: usize },
+    #[error(
+        "Invalid {} reference '{reference}' in {} at line {line}",
+        .directive_kind.as_str(),
+        .source_file.display()
+    )]
+    InvalidReference {
+        reference: String,
+        line: usize,
+        source_file: PathBuf,
+        directive_kind: DirectiveKind,
+    },
 
     #[error("Missing source context to resolve '{reference}' at line {line}")]
     MissingSourceContext { reference: String, line: usize },
@@ -294,8 +321,8 @@ pub enum TransclusionError {
     #[error("Code transclusion source is not UTF-8 text: {path}")]
     NonTextCodeSource { path: PathBuf },
 
-    #[error("Transclusion cycle detected: {chain:?}")]
-    CycleDetected { chain: Vec<String> },
+    #[error("Transclusion cycle detected: {}", .chain.iter().map(|(p, l)| format!("{}:{}", p.display(), l)).collect::<Vec<_>>().join(" -> "))]
+    CycleDetected { chain: Vec<(PathBuf, usize)> },
 
     #[error("Maximum transclusion depth exceeded (max: {max_depth})")]
     MaxDepthExceeded { max_depth: usize },
@@ -357,17 +384,25 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            TransclusionError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
+            TransclusionError::ParseDirective { line, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "directive parse failed"))
                 .body(format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"))
                 .hint("Expected syntax: <cyan>::file ./path.md</cyan> | <cyan>::code ./file.rs</cyan>."),
 
-            TransclusionError::InvalidReference { reference, line } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("TransclusionError", "invalid reference"))
-                .body(format!(
-                    "<dim>Reference:</dim> <cyan>{reference}</cyan>\n<dim>Line:</dim> {line}"
-                ))
-                .hint("Use a relative path, absolute path, or <cyan>https://</cyan> URL."),
+            TransclusionError::InvalidReference { reference, line, source_file, directive_kind } => {
+                let kind_str = match directive_kind {
+                    DirectiveKind::File => "::file",
+                    DirectiveKind::Code => "::code",
+                    DirectiveKind::Url => "::url",
+                };
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("TransclusionError", "invalid reference"))
+                    .body(format!(
+                        "<dim>Source file:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Directive:</dim> {kind_str}\n<dim>Reference:</dim> <cyan>{reference}</cyan>",
+                        source_file.display()
+                    ))
+                    .hint("Use a relative path, absolute path, or <cyan>https://</cyan> URL.")
+            }
 
             TransclusionError::MissingSourceContext { reference, line } => {
                 StatusBlock::new(StatusState::Error)
@@ -408,7 +443,14 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 let chain_display = chain
                     .iter()
                     .enumerate()
-                    .map(|(i, id)| format!("  {i}. <cyan>{id}</cyan>"))
+                    .map(|(i, (path, line))| {
+                        format!(
+                            "  {}. <cyan>{}</cyan> <dim>:line {}</dim>",
+                            i + 1,
+                            path.display(),
+                            line
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
                 StatusBlock::new(StatusState::Error)

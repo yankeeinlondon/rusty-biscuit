@@ -126,9 +126,9 @@ _choose_plan filter="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{filter}}" ]]; then
-        file="$(fd -g '*plan*\.md'  |  fzf --height=15 --border --border-label 'Choose a plan file' )"
+        file="$(fd -g '*plan*\.md' --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a plan file' )"
     else
-        file="$(fd -g '*plan*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the plan file' )"
+        file="$(fd -g '*plan*\.md' --exclude '_completed' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the plan file' )"
     fi
     echo "${file}"
 

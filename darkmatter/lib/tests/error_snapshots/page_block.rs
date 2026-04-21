@@ -31,18 +31,17 @@ fn unmatched_end_hints_at_block() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &[
-            "PageBlockError",
-            "unmatched ::end-block",
-            "20",
-            "::block",
-        ],
+        &["PageBlockError", "unmatched ::end-block", "20", "::block"],
     );
 }
 
 #[test]
 fn unterminated_block_shows_opening_line() {
-    let err = PageBlockError::UnterminatedBlock { line: 7 };
+    let err = PageBlockError::UnterminatedBlock {
+        line: 7,
+        opening_text: "::block when=\"condition\"".to_string(),
+        file_ends_at_line: 42,
+    };
     let out = render(&err);
     assert_contains_all(
         &out,
@@ -50,6 +49,8 @@ fn unterminated_block_shows_opening_line() {
             "PageBlockError",
             "unterminated ::block",
             "7",
+            "::block when=\"condition\"",
+            "42",
             "::end-block",
         ],
     );
@@ -61,10 +62,11 @@ fn condition_delegates_inner_block() {
         expr: "a &&& b".into(),
         line: 4,
         message: "unexpected token".into(),
+        span: 3..4,
     });
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["ConditionError", "parse failed", "a &&& b", "4"],
+        &["ConditionError", "parse failed", "a &&& b", "4", "^"],
     );
 }

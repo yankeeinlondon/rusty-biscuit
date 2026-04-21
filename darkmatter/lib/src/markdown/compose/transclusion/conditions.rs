@@ -23,6 +23,7 @@ impl From<ConditionError> for TransclusionError {
                 expr,
                 line,
                 message,
+                span: _,
             } => TransclusionError::ConditionParse {
                 expr,
                 line,

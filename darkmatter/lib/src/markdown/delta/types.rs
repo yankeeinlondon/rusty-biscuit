@@ -830,9 +830,11 @@ mod tests {
 
     #[test]
     fn test_document_change_content_minor() {
-        let mut stats = DeltaStatistics::default();
-        stats.content_change_ratio = 0.05;
-        stats.content_only_changes = 1;
+        let stats = DeltaStatistics {
+            content_change_ratio: 0.05,
+            content_only_changes: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             DocumentChange::from_statistics(&stats),
             DocumentChange::ContentMinor
@@ -841,9 +843,11 @@ mod tests {
 
     #[test]
     fn test_document_change_content_moderate() {
-        let mut stats = DeltaStatistics::default();
-        stats.content_change_ratio = 0.25;
-        stats.content_only_changes = 1;
+        let stats = DeltaStatistics {
+            content_change_ratio: 0.25,
+            content_only_changes: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             DocumentChange::from_statistics(&stats),
             DocumentChange::ContentModerate
@@ -852,9 +856,11 @@ mod tests {
 
     #[test]
     fn test_document_change_rewritten() {
-        let mut stats = DeltaStatistics::default();
-        stats.content_change_ratio = 0.85;
-        stats.content_only_changes = 1;
+        let stats = DeltaStatistics {
+            content_change_ratio: 0.85,
+            content_only_changes: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             DocumentChange::from_statistics(&stats),
             DocumentChange::Rewritten

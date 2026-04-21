@@ -708,9 +708,7 @@ mod tests {
 
     #[test]
     fn inline_html_links_normalize_nested_markup() {
-        let md: Markdown = concat!(
-            r#"<a href="https://x.com"><strong>Bold</strong> <em>text</em> <code>let x = 1;</code><br />line 2</a>"#
-        )
+        let md: Markdown = r#"<a href="https://x.com"><strong>Bold</strong> <em>text</em> <code>let x = 1;</code><br />line 2</a>"#
         .into();
         let links = md.inline_html_links();
 

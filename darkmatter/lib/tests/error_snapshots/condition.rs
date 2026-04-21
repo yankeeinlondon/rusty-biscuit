@@ -10,6 +10,7 @@ fn parse_lists_operators_and_helpers() {
         expr: "a &&& b".into(),
         line: 4,
         message: "unexpected token".into(),
+        span: 3..4,
     };
     let out = render(&err);
     assert_contains_all(
@@ -20,6 +21,7 @@ fn parse_lists_operators_and_helpers() {
             "a &&& b",
             "4",
             "unexpected token",
+            "^",
             "&&",
             "HasKey",
         ],

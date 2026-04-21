@@ -985,23 +985,23 @@ After code {{ end }}."#;
 
         #[test]
         fn tokenizes_float() {
-            let mut lexer = Lexer::new("3.14");
+            let mut lexer = Lexer::new("3.15");
             let tokens = lexer.tokenize_all().unwrap();
 
             assert_eq!(tokens.len(), 2);
             assert!(
-                matches!(&tokens[0], Token::NumberLiteral(n) if (*n - 3.14).abs() < f64::EPSILON)
+                matches!(&tokens[0], Token::NumberLiteral(n) if (*n - 3.15).abs() < f64::EPSILON)
             );
         }
 
         #[test]
         fn tokenizes_negative_float() {
-            let mut lexer = Lexer::new("-3.14");
+            let mut lexer = Lexer::new("-3.15");
             let tokens = lexer.tokenize_all().unwrap();
 
             assert_eq!(tokens.len(), 2);
             assert!(
-                matches!(&tokens[0], Token::NumberLiteral(n) if (*n - -3.14).abs() < f64::EPSILON)
+                matches!(&tokens[0], Token::NumberLiteral(n) if (*n - -3.15).abs() < f64::EPSILON)
             );
         }
 

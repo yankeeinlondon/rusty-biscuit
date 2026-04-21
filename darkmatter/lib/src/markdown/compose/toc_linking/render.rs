@@ -96,8 +96,10 @@ mod tests {
     #[test]
     fn empty_result_with_text() {
         let headings: Vec<&MarkdownTocNode> = vec![];
-        let mut options = TocLinkingOptions::default();
-        options.empty_text = Some("no results".to_string());
+        let options = TocLinkingOptions {
+            empty_text: Some("no results".to_string()),
+            ..Default::default()
+        };
 
         let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
         assert_eq!(result, "no results");
@@ -108,8 +110,10 @@ mod tests {
         let h = make_heading(2, "🚀 Getting Started", "getting-started");
         let headings: Vec<&MarkdownTocNode> = vec![&h];
 
-        let mut options = TocLinkingOptions::default();
-        options.cleanup_services = vec![CleanupService::EmojiLeader];
+        let options = TocLinkingOptions {
+            cleanup_services: vec![CleanupService::EmojiLeader],
+            ..Default::default()
+        };
 
         let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
         // Display text has emoji stripped, but slug is unchanged

@@ -84,6 +84,7 @@ fn parse_reference_field(
                             "Frontmatter '{}' must be a string or array of strings",
                             field_name
                         ),
+                        caret_col: None,
                     });
                 };
                 refs.push(s.to_string());
@@ -96,6 +97,7 @@ fn parse_reference_field(
                 "Frontmatter '{}' must be a string or array of strings",
                 field_name
             ),
+            caret_col: None,
         }),
     }
 }
@@ -119,6 +121,7 @@ fn parse_directive_line(
                     "Unknown directive kind '{}': expected file/code/url",
                     kind_str
                 ),
+                caret_col: None,
             });
         }
     };
@@ -129,6 +132,7 @@ fn parse_directive_line(
         return Err(TransclusionError::ParseDirective {
             line,
             message: "Directive target cannot be empty".to_string(),
+            caret_col: None,
         });
     }
 
@@ -183,6 +187,7 @@ fn parse_set_option(
                 Some(name) => format!("'set.{}=' requires a JSON5 value", name),
                 None => "'set=' requires a JSON5 value".to_string(),
             },
+            caret_col: None,
         });
     }
 
@@ -210,6 +215,7 @@ fn apply_set_property(
         parse_json5_value(raw).map_err(|e| TransclusionError::ParseDirective {
             line,
             message: format!("'set.{}=' requires a JSON5 value: {}", name, e),
+            caret_col: None,
         })?
     };
 
@@ -231,7 +237,7 @@ fn apply_set_object(
     options: &mut BlockOptions,
     raw: &str,
     was_quoted: bool,
-    _line: usize,
+    line: usize,
 ) -> Result<(), TransclusionError> {
     let parsed = match parse_json5_value(raw) {
         Ok(v) => v,
@@ -241,6 +247,7 @@ fn apply_set_object(
                 .push(DeferredSetError::InvalidAssignment {
                     raw: format_raw_for_error(raw, was_quoted),
                     reason: format!("failed to parse as JSON5: {}", e),
+                    line,
                 });
             return Ok(());
         }
@@ -252,6 +259,7 @@ fn apply_set_object(
             .push(DeferredSetError::InvalidAssignment {
                 raw: format_raw_for_error(raw, was_quoted),
                 reason: "expected JSON5 object".to_string(),
+                line,
             });
         return Ok(());
     };
@@ -303,6 +311,7 @@ fn apply_option(
                     return Err(TransclusionError::ParseDirective {
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
+                        caret_col: None,
                     });
                 };
                 options.replace = ReplaceOption::OneOff(obj.clone());
@@ -343,6 +352,7 @@ impl From<CursorError> for TransclusionError {
         TransclusionError::ParseDirective {
             line: e.line,
             message: e.message,
+            caret_col: Some(e.column),
         }
     }
 }

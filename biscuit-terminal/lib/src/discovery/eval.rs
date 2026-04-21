@@ -420,8 +420,7 @@ mod proptests {
         /// Property: newlines increase line count in output
         #[test]
         fn newlines_increase_line_count(lines in 1usize..20, content in "[a-z]{1,5}") {
-            let s = std::iter::repeat(content.as_str())
-                .take(lines)
+            let s = std::iter::repeat_n(content.as_str(), lines)
                 .collect::<Vec<_>>()
                 .join("\n");
             let widths = line_widths(&s);

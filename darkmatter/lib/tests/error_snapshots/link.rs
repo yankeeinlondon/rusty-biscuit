@@ -27,8 +27,12 @@ fn malformed_html_includes_message() {
 }
 
 #[test]
-fn malformed_markdown_includes_message() {
-    let err = LinkError::MalformedMarkdown("expected ( after display text".into());
+fn malformed_markdown_includes_message_input_and_caret() {
+    let err = LinkError::MalformedMarkdown {
+        message: "expected ( after display text".into(),
+        input: Some("[label] target".into()),
+        caret: Some(8),
+    };
     let out = render(&err);
     assert_contains_all(
         &out,
@@ -36,6 +40,22 @@ fn malformed_markdown_includes_message() {
             "LinkError",
             "malformed markdown link",
             "expected ( after display text",
+            "[label] target",
+            "^",
+        ],
+    );
+}
+
+#[test]
+fn malformed_markdown_without_context_still_renders_message() {
+    let err = LinkError::from("missing closing bracket");
+    let out = render(&err);
+    assert_contains_all(
+        &out,
+        &[
+            "LinkError",
+            "malformed markdown link",
+            "missing closing bracket",
         ],
     );
 }

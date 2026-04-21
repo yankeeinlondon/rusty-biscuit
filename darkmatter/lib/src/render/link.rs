@@ -43,8 +43,12 @@ pub enum LinkError {
     MalformedHtml(String),
 
     /// Markdown input failed to parse.
-    #[error("malformed markdown link: {0}")]
-    MalformedMarkdown(String),
+    #[error("malformed markdown link: {message}")]
+    MalformedMarkdown {
+        message: String,
+        input: Option<String>,
+        caret: Option<usize>,
+    },
 
     /// Missing required href/url field.
     #[error("link is missing href/url")]
@@ -91,9 +95,13 @@ impl biscuit_terminal::errors::BlockError for LinkError {
                     "Ensure the link opens with <cyan>&lt;a ...&gt;</cyan> and closes with <cyan>&lt;/a&gt;</cyan> and has an <cyan>href</cyan> attribute.",
                 ),
 
-            Self::MalformedMarkdown(message) => StatusBlock::new(StatusState::Error)
+            Self::MalformedMarkdown {
+                message,
+                input,
+                caret,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "malformed markdown link"))
-                .body(format!("<dim>Message:</dim> {message}"))
+                .body(render_markdown_parse_body(message, input.as_deref(), *caret))
                 .hint(
                     "Use the pattern <cyan>[display](url \"optional title\")</cyan> with balanced brackets and parentheses.",
                 ),
@@ -121,6 +129,35 @@ impl biscuit_terminal::errors::BlockError for LinkError {
             Self::InvalidStyle(inner) => Some(inner),
             _ => None,
         }
+    }
+}
+
+impl LinkError {
+    /// Creates a markdown-parse error without source-context details.
+    pub fn malformed_markdown(message: impl Into<String>) -> Self {
+        Self::MalformedMarkdown {
+            message: message.into(),
+            input: None,
+            caret: None,
+        }
+    }
+
+    fn malformed_markdown_with_context(
+        message: impl Into<String>,
+        input: impl Into<String>,
+        caret: usize,
+    ) -> Self {
+        Self::MalformedMarkdown {
+            message: message.into(),
+            input: Some(input.into()),
+            caret: Some(caret),
+        }
+    }
+}
+
+impl From<&str> for LinkError {
+    fn from(value: &str) -> Self {
+        Self::malformed_markdown(value)
     }
 }
 
@@ -928,8 +965,10 @@ fn is_anchor_closing_tag(input: &str) -> bool {
 fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
     let input = input.trim();
     if !input.starts_with('[') {
-        return Err(LinkError::MalformedMarkdown(
-            "link must start with '['".to_string(),
+        return Err(LinkError::malformed_markdown_with_context(
+            "link must start with '['",
+            input,
+            0,
         ));
     }
 
@@ -938,8 +977,10 @@ fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
 
     let rest = &input[display_end + 1..];
     if !rest.starts_with('(') {
-        return Err(LinkError::MalformedMarkdown(
-            "expected '(' after display text".to_string(),
+        return Err(LinkError::malformed_markdown_with_context(
+            "expected '(' after display text",
+            input,
+            display_end + 1,
         ));
     }
 
@@ -1058,8 +1099,10 @@ fn find_closing_bracket(input: &str, start: usize) -> Result<usize, LinkError> {
         }
     }
 
-    Err(LinkError::MalformedMarkdown(
-        "unmatched '[' in link".to_string(),
+    Err(LinkError::malformed_markdown_with_context(
+        "unmatched '[' in link",
+        input,
+        start,
     ))
 }
 
@@ -1106,9 +1149,34 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkError> {
         }
     }
 
-    Err(LinkError::MalformedMarkdown(
-        "unmatched '(' in link".to_string(),
+    Err(LinkError::malformed_markdown_with_context(
+        "unmatched '(' in link",
+        input,
+        start,
     ))
+}
+
+fn render_markdown_parse_body(message: &str, input: Option<&str>, caret: Option<usize>) -> String {
+    let mut body = format!("<dim>Message:</dim> {message}");
+
+    if let Some(input) = input {
+        body.push_str(&format!("\n<dim>Input:</dim>\n  <cyan>{input}</cyan>"));
+        if let Some(caret) = caret {
+            body.push('\n');
+            body.push_str(&caret_marker(input, caret));
+        }
+    }
+
+    body
+}
+
+fn caret_marker(input: &str, byte_offset: usize) -> String {
+    let clamped = byte_offset.min(input.len());
+    let column = input
+        .char_indices()
+        .take_while(|(idx, _)| *idx < clamped)
+        .count();
+    format!("  {}^", " ".repeat(column))
 }
 
 fn extract_url(content: &str) -> (String, &str) {

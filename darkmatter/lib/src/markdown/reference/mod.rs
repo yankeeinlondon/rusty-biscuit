@@ -22,6 +22,7 @@ use crate::markdown::compose::transclusion::{
     BlockOptions, DirectiveKind, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::types::MarkdownResult;
+use std::path::PathBuf;
 
 /// Resolve a raw transclusion target to a string path using `FileReference`
 /// semantics, with fallback to simple path join.
@@ -51,6 +52,50 @@ fn resolve_transclusion_target(
             base_dir.map(|dir| dir.join(raw_target).to_string_lossy().to_string())
         }
         _ => None,
+    }
+}
+
+fn source_file_for_error(source: &ComposeSource) -> PathBuf {
+    match source {
+        ComposeSource::File(path) => path.clone(),
+        ComposeSource::Url(url) => PathBuf::from(url.to_string()),
+        ComposeSource::Unknown => PathBuf::from("<unknown>"),
+    }
+}
+
+fn directive_text_at_line(content: &str, line: usize) -> String {
+    content
+        .lines()
+        .nth(line.saturating_sub(1))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn map_reference_parse_error(
+    source: &ComposeSource,
+    content: &str,
+    err: crate::markdown::compose::TransclusionError,
+) -> ReferenceError {
+    match err {
+        crate::markdown::compose::TransclusionError::ParseDirective {
+            line,
+            message,
+            caret_col,
+        } => ReferenceError::ParseDirective {
+            line,
+            message,
+            source_file: source_file_for_error(source),
+            directive_text: directive_text_at_line(content, line),
+            caret_col,
+        },
+        other => ReferenceError::ParseDirective {
+            line: 0,
+            message: other.to_string(),
+            source_file: source_file_for_error(source),
+            directive_text: String::new(),
+            caret_col: None,
+        },
     }
 }
 
@@ -92,11 +137,8 @@ impl Markdown {
         let mut refs = Vec::new();
 
         // Block directives (::file, ::code, ::url)
-        let directives =
-            parse_directives(self.content()).map_err(|e| ReferenceError::ParseDirective {
-                line: 0,
-                message: e.to_string(),
-            })?;
+        let directives = parse_directives(self.content())
+            .map_err(|e| map_reference_parse_error(&source, self.content(), e))?;
 
         for directive in &directives {
             let kind = match directive.kind {

@@ -148,7 +148,7 @@ fn bench_component_render(c: &mut Criterion) {
         b.iter(|| {
             let items: Vec<RenderableContent> = (1..=5)
                 .map(|i| {
-                    RenderableContent::Component(Rc::new(Prose::new(&format!(
+                    RenderableContent::Component(Rc::new(Prose::new(format!(
                         "Item number {i} with some descriptive text"
                     ))))
                 })

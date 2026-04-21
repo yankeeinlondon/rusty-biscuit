@@ -7,22 +7,25 @@ mod output;
 
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Initialize tracing subscriber based on verbosity level.
+/// Initialize tracing subscriber for raw developer-facing diagnostics.
 ///
-/// Verbosity levels:
+/// `--verbose` is reserved for styled user-facing output and never drives
+/// tracing. Raw tracing output is opt-in via `--debug` or `RUST_LOG`.
+///
+/// Debug levels:
 /// - 0 (default): No subscriber (zero overhead)
-/// - 1 (-v): INFO for sniff crates
-/// - 2 (-vv): DEBUG for sniff crates
-/// - 3+ (-vvv): TRACE for sniff crates with file/line numbers
+/// - 1 (--debug): INFO for sniff crates
+/// - 2 (--debug --debug): DEBUG for sniff crates
+/// - 3+ (--debug x3): TRACE for sniff crates with file/line numbers
 ///
-/// Setting `RUST_LOG` overrides all verbosity levels.
-pub(crate) fn init_tracing(verbose: u8) {
+/// Setting `RUST_LOG` overrides all debug levels.
+pub(crate) fn init_tracing(debug: u8) {
     let explicit_rust_log = std::env::var("RUST_LOG").ok();
-    if verbose == 0 && explicit_rust_log.is_none() {
+    if debug == 0 && explicit_rust_log.is_none() {
         return;
     }
 
-    let base_filter = explicit_rust_log.unwrap_or_else(|| match verbose {
+    let base_filter = explicit_rust_log.unwrap_or_else(|| match debug {
         1 => "warn,sniff=info,sniff_cli=info".into(),
         2 => "info,sniff=debug,sniff_cli=debug".into(),
         _ => "debug,sniff=trace,sniff_cli=trace".into(),
@@ -37,8 +40,8 @@ pub(crate) fn init_tracing(verbose: u8) {
                 .with_target(true)
                 .with_level(true)
                 .with_thread_ids(false)
-                .with_file(verbose >= 3)
-                .with_line_number(verbose >= 3)
+                .with_file(debug >= 3)
+                .with_line_number(debug >= 3)
                 .with_writer(std::io::stderr)
                 .compact(),
         )

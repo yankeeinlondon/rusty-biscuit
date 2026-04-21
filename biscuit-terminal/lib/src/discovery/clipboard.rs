@@ -266,8 +266,8 @@ mod tests {
         // - Non-TTY/CI: Should fail with Unsupported
         // - Real terminal with OSC52 support: May succeed
         let result = set_clipboard("test");
-        if result.is_err() {
-            assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::Unsupported);
+        if let Err(err) = result {
+            assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
         }
         // If it succeeds, that's also valid (running in a real terminal)
     }

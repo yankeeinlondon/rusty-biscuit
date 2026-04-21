@@ -6447,7 +6447,7 @@ fn line6() {}
 
         // Check for duplicate background codes
         let bg_code = "\x1b[48;2;255;243;184m";
-        let bg_count = output.matches(bg_code).count();
+        let _bg_count = output.matches(bg_code).count();
 
         // For "separate it from" (3 words + 2 spaces when styled), we expect up to 5 bg codes
         // But we should NOT have consecutive duplicate codes

@@ -70,16 +70,22 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
             TocLinkingError::InvalidCleanupService { service, line } => {
                 let valid = CleanupService::all()
                     .iter()
-                    .map(|s| format!("<cyan>{}</cyan>", cleanup_service_name(s)))
+                    .map(|service| {
+                        let descriptor = cleanup_service_descriptor(service);
+                        format!(
+                            "  <cyan>{}</cyan> - {}",
+                            descriptor.name, descriptor.description
+                        )
+                    })
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join("\n");
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "TocLinkingError",
                         "invalid cleanup service",
                     ))
                     .body(format!(
-                        "<dim>Service:</dim> <cyan>{service}</cyan>\n<dim>Line:</dim> {line}\n<dim>Valid:</dim> {valid}"
+                        "<dim>Service:</dim> <cyan>{service}</cyan>\n<dim>Line:</dim> {line}\n<dim>Valid services:</dim>\n{valid}"
                     ))
                     .hint("Pass a comma-separated list of valid service names to <cyan>cleanup=</cyan>.")
             }
@@ -116,14 +122,35 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
     }
 }
 
-/// Canonical CLI token for a cleanup service.
-fn cleanup_service_name(service: &CleanupService) -> &'static str {
+/// Name/description pair for a cleanup service.
+struct CleanupServiceDescriptor {
+    name: &'static str,
+    description: &'static str,
+}
+
+/// Canonical CLI token and user-facing description for a cleanup service.
+fn cleanup_service_descriptor(service: &CleanupService) -> CleanupServiceDescriptor {
     match service {
-        CleanupService::EmojiLeader => "emoji_leader",
-        CleanupService::EmojiTrailing => "emoji_trailing",
-        CleanupService::Emoji => "emoji",
-        CleanupService::Number => "number",
-        CleanupService::Capitalize => "capitalize",
+        CleanupService::EmojiLeader => CleanupServiceDescriptor {
+            name: "emoji_leader",
+            description: "Strip leading emoji and any following space.",
+        },
+        CleanupService::EmojiTrailing => CleanupServiceDescriptor {
+            name: "emoji_trailing",
+            description: "Strip trailing emoji and any preceding space.",
+        },
+        CleanupService::Emoji => CleanupServiceDescriptor {
+            name: "emoji",
+            description: "Remove emoji sequences anywhere in the heading.",
+        },
+        CleanupService::Number => CleanupServiceDescriptor {
+            name: "number",
+            description: "Remove a leading numeric outline like `1.2.3`.",
+        },
+        CleanupService::Capitalize => CleanupServiceDescriptor {
+            name: "capitalize",
+            description: "Uppercase the first alphanumeric character.",
+        },
     }
 }
 

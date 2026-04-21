@@ -410,8 +410,8 @@ pub enum NormalizationError {
     },
 
     /// A custom validation rule was violated.
-    #[error("Validation failed: {0}")]
-    ValidationFailed(String),
+    #[error("Validation failed: {} issue(s)", .0.len())]
+    ValidationFailed(Vec<StructureIssue>),
 }
 
 impl biscuit_terminal::errors::BlockError for NormalizationError {
@@ -447,17 +447,45 @@ impl biscuit_terminal::errors::BlockError for NormalizationError {
                     ))
             }
 
-            Self::ValidationFailed(message) => StatusBlock::new(StatusState::Error)
+            Self::ValidationFailed(issues) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "NormalizationError",
                     "validation failed",
                 ))
-                .body(message.clone())
+                .body(render_validation_issues(issues))
                 .hint(
                     "Fix the highlighted structural issues (multiple H1, skipped levels, hierarchy violations) before re-leveling.",
                 ),
         }
     }
+}
+
+fn render_validation_issues(issues: &[StructureIssue]) -> String {
+    let details = issues
+        .iter()
+        .map(|issue| {
+            let mut line = if issue.line_number > 0 {
+                format!(
+                    "- <b>{}</b> at line {}: {}",
+                    issue.kind, issue.line_number, issue.description
+                )
+            } else {
+                format!("- <b>{}</b>: {}", issue.kind, issue.description)
+            };
+
+            if let Some(suggestion) = &issue.suggestion {
+                line.push_str(&format!("\n  <dim>Suggestion:</dim> {suggestion}"));
+            }
+
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "<dim>Issue count:</dim> {} issue(s)\n{details}",
+        issues.len()
+    )
 }
 
 #[cfg(test)]

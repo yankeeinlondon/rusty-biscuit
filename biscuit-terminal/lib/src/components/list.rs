@@ -685,7 +685,7 @@ mod tests {
         let width = 40u32;
         let result = list.render_optimistic(Some(width));
         for line in result.lines() {
-            let vis = visible_width(line) as u32;
+            let vis = visible_width(line);
             assert!(
                 vis <= width,
                 "Line exceeds width {}: {:?} ({})",

@@ -124,11 +124,7 @@ fn not_pre_approved_surfaces_command() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &[
-            "ShellExpansionError",
-            "not pre-approved",
-            "pnpm run build",
-        ],
+        &["ShellExpansionError", "not pre-approved", "pnpm run build"],
     );
 }
 
@@ -140,14 +136,7 @@ fn timeout_includes_duration() {
         origin: body_origin(),
     };
     let out = render(&err);
-    assert_contains_all(
-        &out,
-        &[
-            "ShellExpansionError",
-            "timed out",
-            "sleep 30",
-        ],
-    );
+    assert_contains_all(&out, &["ShellExpansionError", "timed out", "sleep 30"]);
 }
 
 #[test]

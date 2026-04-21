@@ -12,7 +12,12 @@ fn invalid_declaration_shows_input() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["StylesheetError", "invalid declaration", "color", "property: value"],
+        &[
+            "StylesheetError",
+            "invalid declaration",
+            "color",
+            "property: value",
+        ],
     );
 }
 
@@ -31,10 +36,10 @@ fn invalid_property_name_shows_name() {
 #[test]
 fn property_value_type_mismatch_shows_expected_actual_and_example() {
     let err = StylesheetError::PropertyValueTypeMismatch {
-        property: "z-index".into(),
-        expected: CssValueKind::Integer,
-        actual: CssValueKind::Sizing,
-        value: "1px".into(),
+        property: "font-size".into(),
+        expected: CssValueKind::Sizing,
+        actual: CssValueKind::Integer,
+        value: "40".into(),
     };
     let out = render(&err);
     assert_contains_all(
@@ -42,11 +47,11 @@ fn property_value_type_mismatch_shows_expected_actual_and_example() {
         &[
             "StylesheetError",
             "property/value type mismatch",
-            "z-index",
-            "integer",
+            "font-size",
             "sizing",
-            "1px",
+            "integer",
             "40",
+            "16px",
         ],
     );
 }
@@ -116,17 +121,12 @@ fn invalid_raw_value_hints_at_semicolons() {
         value: "1px;".into(),
     };
     let out = render(&err);
-    assert_contains_all(
-        &out,
-        &["StylesheetError", "invalid raw value", "1px;"],
-    );
+    assert_contains_all(&out, &["StylesheetError", "invalid raw value", "1px;"]);
 }
 
 #[test]
 fn invalid_custom_property_hints_at_dashes() {
-    let err = StylesheetError::InvalidCustomProperty {
-        name: "foo".into(),
-    };
+    let err = StylesheetError::InvalidCustomProperty { name: "foo".into() };
     let out = render(&err);
     assert_contains_all(
         &out,

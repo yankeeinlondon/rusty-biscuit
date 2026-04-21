@@ -95,7 +95,10 @@ impl biscuit_terminal::errors::BlockError for StylesheetError {
                 actual,
                 value,
             } => {
-                let example = example_for_kind(*expected);
+                let example = CssProp::from_css_name(property)
+                    .ok()
+                    .map(|prop| examples_for_property(&prop))
+                    .unwrap_or(example_for_kind(*expected));
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "StylesheetError",
@@ -165,6 +168,31 @@ fn example_for_kind(kind: CssValueKind) -> &'static str {
         CssValueKind::Color => "#336699",
         CssValueKind::Integer => "40",
         CssValueKind::Raw => "var(--token)",
+    }
+}
+
+fn examples_for_property(prop: &CssProp) -> &'static str {
+    match prop {
+        CssProp::FontSize => "16px",
+        CssProp::Width | CssProp::MinWidth | CssProp::MaxWidth => "320px",
+        CssProp::Height | CssProp::MinHeight | CssProp::MaxHeight => "240px",
+        CssProp::Margin | CssProp::Padding => "8px 16px",
+        CssProp::BorderRadius => "12px 12px 0 0",
+        CssProp::Color
+        | CssProp::BackgroundColor
+        | CssProp::BorderColor
+        | CssProp::OutlineColor
+        | CssProp::TextDecorationColor => "#336699",
+        CssProp::ZIndex => "10",
+        CssProp::Order | CssProp::FlexGrow | CssProp::FlexShrink => "1",
+        CssProp::Other(_) => prop
+            .expected_kind()
+            .map(example_for_kind)
+            .unwrap_or("var(--token)"),
+        _ => prop
+            .expected_kind()
+            .map(example_for_kind)
+            .unwrap_or("var(--token)"),
     }
 }
 

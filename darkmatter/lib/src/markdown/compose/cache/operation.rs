@@ -340,8 +340,10 @@ mod tests {
         let opts1 = TocLinkingOptions::default();
 
         // Modified empty_text (accessible without private types)
-        let mut opts2 = TocLinkingOptions::default();
-        opts2.empty_text = Some("nothing here".to_string());
+        let opts2 = TocLinkingOptions {
+            empty_text: Some("nothing here".to_string()),
+            ..Default::default()
+        };
 
         assert_ne!(
             TocLinkingOperation::cache_key_string(path, &opts1),

@@ -109,8 +109,8 @@ fix name:
         choices=()
         has_today=false
         for m in "${matches[@]}"; do
-            bname="${m##*/}"
-            [[ "${bname}" == "{{Today}}-"* ]] && has_today=true
+            match="${m##*/}"
+            [[ "${match}" == "{{Today}}-"* ]] && has_today=true
             choices+=("${m}")
         done
         if [[ "${has_today}" == false ]]; then
@@ -126,8 +126,8 @@ fix name:
             choices=()
             has_today=false
             for m in "${matches[@]}"; do
-                bname="${m##*/}"
-                [[ "${bname}" == "{{Today}}-"* ]] && has_today=true
+                match="${m##*/}"
+                [[ "${match}" == "{{Today}}-"* ]] && has_today=true
                 choices+=("${m}")
             done
             if [[ "${has_today}" == false ]]; then
@@ -212,16 +212,26 @@ design filter="":
     fi
 
     use_agent="$(just _choose_agent)"
+    model=""
+    if [[ "${use_agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
+    fi
 
     dir="$(dirname ${file})"
     echo
     echo -e "Creating a technical design from the spec file: {{blue}}${file}{{reset}}. Using {{bold}}${use_agent}{{reset}} agent."
-    claudine compose @prompts/design.md --${use_agent} -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
+    claudine compose @prompts/design.md --${use_agent} -y --set spec="$(basename "${file}")" dir="${dir}" ${model} || (
+        echo
+        echo -e "Failed to complete the design for {{blue}}$(just _link "${file}"){{reset}} using the {{yellow}}${use_agent}{{reset}} agent"
+        echo
+        just _speak "Attempt to create a technical design in the $(sniff repo package-area) package area has failed!"
+        exit 1
+    )
     echo
-    link="$()"
-    echo -e "We now have a {{bold}}technical design{{reset}} document for this specification"
+    link="$(just _link "${dir}/tech-design.md")"
+    echo -e "We now have a {{bold}}technical design{{reset}} document for {{blue}}${link}{{reset}}"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
-        just plan-feature "${file}" "${dir}/tech-design.md"
+        just plan-feature spec:="${file}" design:="${dir}/tech-design.md"
     fi
 
 clarify filter="":
@@ -235,9 +245,19 @@ clarify filter="":
     fi
 
     agent="$(just _choose_agent)"
+    model=""
+    if [[ "${use_agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
+    fi
     doc_path="$(sniff repo package-area)/${file}"
-    claudine compose "@prompts/clarify.md" --${agent} -y -i --set "{ doc: \"@${doc_path}\" }"
-    link="$(just _link $(basename "${file}") "${file}")"
+    link="$(just _link "${file}")"
+    claudine compose "@prompts/clarify.md" --${agent} -y -i doc="${doc_path}" ${model} || (
+        echo
+        echo -e "Failed to complete the {{yellow}}Clarify{{reset}} prompt for ${link}"
+        echo
+        just _speak "While trying to clarify requirements in $(sniff repo package-area), a problem was encountered and the clarify prompt has failed"
+        exit 1
+    )
     echo -e "The {{blue}}${link}{{reset}} file has been {{italic}}clarified{{reset}}"
 
 

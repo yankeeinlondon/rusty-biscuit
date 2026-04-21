@@ -541,7 +541,7 @@ mod tests {
         let mut fm = HashMap::new();
         fm.insert("string".to_string(), json!("hello"));
         fm.insert("number".to_string(), json!(42));
-        fm.insert("float".to_string(), json!(3.14));
+        fm.insert("float".to_string(), json!(3.15));
         fm.insert("bool_true".to_string(), json!(true));
         fm.insert("bool_false".to_string(), json!(false));
         fm.insert("null".to_string(), json!(null));
@@ -551,7 +551,7 @@ mod tests {
 
         assert_eq!(state.get_string("string"), "hello");
         assert_eq!(state.get_string("number"), "42");
-        assert_eq!(state.get_string("float"), "3.14");
+        assert_eq!(state.get_string("float"), "3.15");
         assert_eq!(state.get_string("bool_true"), "true");
         assert_eq!(state.get_string("bool_false"), "false");
         assert_eq!(state.get_string("null"), "");

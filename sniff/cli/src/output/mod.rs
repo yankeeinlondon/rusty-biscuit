@@ -40,11 +40,11 @@ pub use topics::render_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_current_package_area_dirty, print_package_area_has_source_code_changes,
-    render_dirty_package_areas, render_dirty_packages, render_files_section,
-    render_filesystem_section, render_language_section, render_repo_deps_text,
-    render_repo_deps_visual, render_repo_package, render_repo_package_area,
-    render_repo_package_area_root, render_repo_package_root, render_repo_packages,
+    collect_repo_package_names, print_current_package_area_dirty,
+    print_package_area_has_source_code_changes, render_dirty_package_areas, render_dirty_packages,
+    render_files_section, render_filesystem_section, render_language_section,
+    render_repo_deps_text, render_repo_deps_visual, render_repo_package, render_repo_package_area,
+    render_repo_package_area_root, render_repo_package_root, render_repo_packages_formatted,
     render_repo_root, render_repo_section, render_staged_package_areas, render_staged_packages,
     render_unstaged_package_areas, render_unstaged_packages,
 };
@@ -434,10 +434,8 @@ pub fn render_text(
                 Some(RepoAction::PackageArea { .. }) => {
                     unreachable!("PackageArea is handled as an early return in commands.rs")
                 }
-                Some(RepoAction::Packages { filter }) => {
-                    let rendered = render_repo_packages(result, filter);
-                    out.push_str(&rendered);
-                    out.push('\n');
+                Some(RepoAction::Packages { .. }) => {
+                    unreachable!("Packages is handled as an early return in commands.rs")
                 }
                 Some(RepoAction::DirtyPackages { filter }) => {
                     let rendered = render_dirty_packages(result, filter);

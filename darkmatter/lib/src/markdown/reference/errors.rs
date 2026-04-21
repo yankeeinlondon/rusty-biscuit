@@ -1,13 +1,21 @@
 //! Error types for the reference analysis subsystem.
 
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 /// Errors produced by reference analysis.
 #[derive(Debug, Error)]
 pub enum ReferenceError {
     /// Failed to parse a directive.
-    #[error("Failed to parse directive at line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    #[error("Failed to parse directive in {} at line {line}: {message}", .source_file.display())]
+    ParseDirective {
+        line: usize,
+        message: String,
+        source_file: PathBuf,
+        directive_text: String,
+        caret_col: Option<usize>,
+    },
 
     /// Reference requires source context that is not available.
     #[error("Missing source context for reference '{reference}' at line {line}")]
@@ -50,25 +58,39 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            ReferenceError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "ReferenceError",
-                    "directive parse failed",
-                ))
-                .body(format!(
-                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
-                .hint("Expected: <cyan>::file ./doc.md</cyan>, <cyan>::code ./file.rs</cyan>, or <cyan>::url https://…</cyan>."),
+            ReferenceError::ParseDirective {
+                line,
+                message,
+                source_file,
+                directive_text,
+                caret_col,
+            } => {
+                let caret_line =
+                    caret_col.map(|col| format!("\n  {}^", " ".repeat(col.saturating_sub(1))));
 
-            ReferenceError::MissingSourceContext { reference, line } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "ReferenceError",
-                    "missing source context",
-                ))
-                .body(format!(
-                    "<dim>Reference:</dim> <cyan>{reference}</cyan>\n<dim>Line:</dim> {line}"
-                ))
-                .hint("Load the document from a path or URL so relative references can resolve."),
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "ReferenceError",
+                        "directive parse failed",
+                    ))
+                    .body(format!(
+                        "<dim>Source:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}\n<dim>Directive:</dim>\n  {directive_text}{}",
+                        source_file.display(),
+                        caret_line.unwrap_or_default()
+                    ))
+                    .hint("Expected: <cyan>::file ./doc.md</cyan>, <cyan>::code ./file.rs</cyan>, or <cyan>::url https://…</cyan>.")
+            }
+
+            ReferenceError::MissingSourceContext { reference, line } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("ReferenceError", "missing source context"))
+                    .body(format!(
+                        "<dim>Reference:</dim> <cyan>{reference}</cyan>\n<dim>Line:</dim> {line}"
+                    ))
+                    .hint(
+                        "Load the document from a path or URL so relative references can resolve.",
+                    )
+            }
 
             ReferenceError::Validation(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "validation failed"))
@@ -80,19 +102,13 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
             }
 
             ReferenceError::FileReference(source) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "ReferenceError",
-                    "file reference error",
-                ))
+                .error_header(ErrorHeader::new("ReferenceError", "file reference error"))
                 .body(format!("{source}"))
                 .hint("Verify the reference string and surrounding compose source."),
 
             ReferenceError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "I/O error"))
-                .body(format!(
-                    "<dim>Kind:</dim> {:?}\n{source}",
-                    source.kind()
-                ))
+                .body(format!("<dim>Kind:</dim> {:?}\n{source}", source.kind()))
                 .hint("Confirm the referenced file exists and is readable."),
 
             ReferenceError::Url(source) => StatusBlock::new(StatusState::Error)

@@ -41,7 +41,7 @@ mod tests {
     #[test]
     fn test_load_syntax_set() {
         let syntax_set = load_syntax_set();
-        assert!(syntax_set.syntaxes().len() > 0);
+        assert!(!syntax_set.syntaxes().is_empty());
     }
 
     #[test]
