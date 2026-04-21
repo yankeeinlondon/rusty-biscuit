@@ -392,41 +392,40 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
 }
 
 fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
-    if let Some(msg) = envelope.get("message").and_then(|v| v.as_str())
-        && !msg.is_empty()
-    {
-        return Some(msg.to_string());
+    if let Some(msg) = envelope.get("message").and_then(|v| v.as_str()) {
+        if !msg.is_empty() {
+            return Some(msg.to_string());
+        }
+    }
+
+    if let Some(body_str) = envelope.get("responseBody").and_then(|v| v.as_str()) {
+        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str) {
+            if let Some(msg) = body
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|v| v.as_str())
+            {
+                if !msg.is_empty() {
+                    return Some(msg.to_string());
+                }
+            }
+        }
+        if !body_str.is_empty() {
+            return Some(body_str.to_string());
+        }
     }
 
     for source in ["errors", "lastError"] {
-        let owned;
-        let entries: Option<&Vec<serde_json::Value>> = match source {
-            "errors" => envelope.get("errors").and_then(|v| v.as_array()),
-            _ => {
-                owned = envelope.get(source).map(|v| vec![v.clone()]).unwrap_or_default();
-                Some(&owned)
-            }
+        let entries = match source {
+            "errors" => envelope.get("errors").and_then(|v| v.as_array()).cloned(),
+            _ => envelope
+                .get(source)
+                .map(|v| vec![v.clone()]),
         };
         if let Some(arr) = entries {
-            for entry in arr {
-                if let Some(body_str) = entry.get("responseBody").and_then(|v| v.as_str()) {
-                    if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str)
-                        && let Some(msg) = body
-                            .get("error")
-                            .and_then(|e| e.get("message"))
-                            .and_then(|v| v.as_str())
-                        && !msg.is_empty()
-                    {
-                        return Some(msg.to_string());
-                    }
-                    if !body_str.is_empty() {
-                        return Some(body_str.to_string());
-                    }
-                }
-                if let Some(msg) = entry.get("message").and_then(|v| v.as_str())
-                    && !msg.is_empty()
-                {
-                    return Some(msg.to_string());
+            for entry in &arr {
+                if let Some(msg) = extract_provider_message(entry) {
+                    return Some(msg);
                 }
             }
         }
@@ -1261,23 +1260,58 @@ mod tests {
             LogClassification::ApiFailure {
                 status_code,
                 error_name,
-                ..
+                message,
             } => {
                 assert_eq!(status_code, Some(500));
                 assert_eq!(error_name, "AI_APICallError");
+                assert_eq!(message, "AI_APICallError (500): upstream boom");
             }
             other => panic!("expected ApiFailure, got {other:?}"),
         }
     }
 
     #[test]
-    fn classifies_auth_failure() {
+    fn api_failure_message_strips_request_body() {
+        let line = r#"ERROR 2026-04-21T19:30:26 +49275ms service=llm providerID=zai-coding-plan modelID=glm-5.1 session.id=ses_24e7a9448ffeyo7E2zcOHvsiOn small=false agent=explore mode=subagent error={"error":{"name":"AI_APICallError","url":"https://api.z.ai/api/coding/paas/v4/chat/completions","requestBodyValues":{"model":"glm-5.1","max_tokens":32000,"thinking":{"type":"enabled","clear_thinking":false},"messages":[{"role":"system","content":"You are a file search specialist with a very long system prompt that goes on and on"}]},"statusCode":400,"responseBody":"{\"error\":{\"code\":\"invalid_request\",\"message\":\"model does not support thinking\"}}"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure {
+                status_code,
+                error_name,
+                message,
+            } => {
+                assert_eq!(status_code, Some(400));
+                assert_eq!(error_name, "AI_APICallError");
+                assert!(
+                    !message.contains("system prompt"),
+                    "message should not contain the request body: {message}"
+                );
+                assert!(
+                    !message.contains("requestBodyValues"),
+                    "message should not contain requestBodyValues: {message}"
+                );
+                assert!(
+                    message.contains("model does not support thinking"),
+                    "message should contain provider error: {message}"
+                );
+                assert_eq!(message, "AI_APICallError (400): model does not support thinking");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn auth_failure_message_is_concise() {
         let line = r#"ERROR 2026-04-15T19:26:02 +5ms service=llm error={"error":{"name":"AuthenticationError","message":"Invalid API key"}}"#;
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::AuthFailure { .. } => {}
+            LogClassification::AuthFailure { message } => {
+                assert_eq!(message, "AuthenticationError: Invalid API key");
+            }
             other => panic!("expected AuthFailure, got {other:?}"),
         }
     }
@@ -1659,12 +1693,13 @@ mod tests {
             SemanticEvent::Error {
                 terminal,
                 kind,
+                message,
                 extra,
-                ..
             } => {
                 assert!(*terminal);
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert_string(extra, "classification", "auth_failure");
+                assert_eq!(message, "AuthenticationError: Invalid API key");
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -1681,14 +1716,15 @@ mod tests {
             SemanticEvent::Error {
                 terminal,
                 kind,
+                message,
                 extra,
-                ..
             } => {
                 assert!(*terminal);
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert_string(extra, "classification", "api_failure");
                 assert_string(extra, "error_name", "AI_APICallError");
                 assert_eq!(extra.get("status_code"), Some(&json!(500)));
+                assert_eq!(message, "AI_APICallError (500): upstream boom");
             }
             other => panic!("expected Error, got {other:?}"),
         }
