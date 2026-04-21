@@ -920,6 +920,10 @@ fn run_provider_wrapper_inner(
         edit_requested,
         yolo_requested,
         model_override = %args.model.as_deref().unwrap_or(""),
+        provider = %provider,
+        session_id = tracing::field::Empty,
+        child_pid = tracing::field::Empty,
+        structured_mode = tracing::field::Empty,
     );
     let _wrapper_guard = wrapper_span.enter();
 
@@ -1429,6 +1433,7 @@ fn run_provider_wrapper_inner(
         && effective_non_interactive
         && args.output.is_none()
         && !has_explicit_native_output_request(provider, &child_args);
+    wrapper_span.record("structured_mode", use_structured);
     let stream_verbosity = structured_verbosity(silent_requested, quiet_requested);
 
     // `step_timeout` is only enforceable in structured-stream mode because
@@ -1638,6 +1643,9 @@ fn run_provider_wrapper_inner(
                 None,
             )?;
             let mut summary = stream_result.data;
+            if let Some(ref sid) = summary.session_id {
+                wrapper_span.record("session_id", tracing::field::display(sid));
+            }
             if let Some(codex_output) = structured_codex_output.as_ref() {
                 codex_output.apply_to_summary(&mut summary);
             }
