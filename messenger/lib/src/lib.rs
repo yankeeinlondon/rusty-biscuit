@@ -29,10 +29,18 @@ pub use provider::desktop::{
     DesktopNotificationRequest, LinuxDesktopConfig, MacOsDesktopConfig, MacOsNotificationStrategy,
     WindowsDesktopConfig,
 };
+#[cfg(feature = "apns")]
+pub use provider::apns::{ApnsConfig, ApnsProvider};
+#[cfg(feature = "fcm")]
+pub use provider::fcm::{FcmConfig, FcmProvider};
 pub use provider::{Messenger, Provider, SendPlan};
 pub use receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
 #[cfg(feature = "desktop")]
 pub use target::DesktopTarget;
+#[cfg(feature = "apns")]
+pub use target::ApnsTarget;
+#[cfg(feature = "fcm")]
+pub use target::FcmTarget;
 pub use target::Target;
 pub use validate::{
     CompatibilityWarning, normalize_dispatch, validate_dispatch, validate_message,

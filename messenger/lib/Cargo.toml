@@ -18,6 +18,7 @@ uuid = { version = "1", features = ["v4"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 twilight-http = { version = "0.17", optional = true }
 twilight-model = { version = "0.17", optional = true }
+jsonwebtoken = { version = "9", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = { version = "4", optional = true }
@@ -49,3 +50,5 @@ desktop = [
     "dep:objc2-foundation",
     "dep:objc2-user-notifications",
 ]
+apns = ["dep:reqwest", "dep:jsonwebtoken"]
+fcm = ["dep:reqwest"]
