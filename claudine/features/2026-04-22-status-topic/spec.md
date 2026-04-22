@@ -4,7 +4,7 @@ The 'status' recipe in @just/devops.just does what I want it to when no paramete
 
 - the variable should be optional (aka, set to "" by default)
 - when this variable is NOT set then the current behavior is run
-- when a subject is provided then we will try to "match" that subject with one of the directories in fixes or featues.
+- when a subject is provided then we will try to "match" that subject with one of the directories in fixes or features.
 - note: fixes and features have subdirectories `_completed` and `_unscheduled`:
     - `_completed` folder are tasks or features that have been completed and should be fully ignored for the 'status' recipe
     - `_unscheduled` folder are things which have been identified as needing be done but have not yet been
