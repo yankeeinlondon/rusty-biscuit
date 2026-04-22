@@ -167,7 +167,7 @@ status subject="":
 
     # Single scheduled match → immediate display
     if [[ ${#scheduled[@]} -eq 1 && -n "${scheduled[0]}" ]]; then
-        eza "${scheduled[0]}" -lga
+        eza "${scheduled[0]}" -lga --hyperlink
         exit 0
     fi
 
@@ -197,5 +197,5 @@ status subject="":
     fi
 
     matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
-    eza "${matched}" -lga
+    eza "${matched}" -lga --hyperlink
 
