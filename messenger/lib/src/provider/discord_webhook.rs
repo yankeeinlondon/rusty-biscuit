@@ -201,15 +201,20 @@ impl super::Provider for DiscordWebhookProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        const DISCORD_WEBHOOK_CAPABILITIES: CapabilitySet = CapabilitySet {
+        CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: false,
-            supports_attachments: true,
+            supported_attachment_kinds: std::collections::BTreeSet::from([
+                crate::AttachmentKind::Image,
+                crate::AttachmentKind::Audio,
+                crate::AttachmentKind::Video,
+                crate::AttachmentKind::Document,
+                crate::AttachmentKind::Binary,
+            ]),
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-        };
-        DISCORD_WEBHOOK_CAPABILITIES
+        }
     }
 
     #[tracing::instrument(skip_all, fields(
@@ -455,7 +460,14 @@ mod tests {
         let caps = super::super::Provider::capabilities(&provider);
         assert!(!caps.supports_reply);
         assert!(caps.supports_markdown_rendering);
-        assert!(caps.supports_attachments);
+        assert!(
+            caps.supported_attachment_kinds
+                .contains(&crate::AttachmentKind::Image)
+        );
+        assert!(
+            caps.supported_attachment_kinds
+                .contains(&crate::AttachmentKind::Document)
+        );
         assert!(caps.supports_location);
         assert!(!caps.supports_silent_delivery);
         assert!(!caps.supports_link_preview_control);

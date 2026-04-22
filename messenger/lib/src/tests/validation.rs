@@ -2,11 +2,13 @@ use crate::receipt::MessageRef;
 use crate::{
     Attachment, AttachmentSource, CapabilitySet, CompatibilityMode, Dispatch, Message,
     MessengerError, ProviderKind, Target, normalize_dispatch, validate_dispatch, validate_message,
+    validate_message_for_provider,
 };
 
 #[test]
 fn empty_message_is_invalid() {
     let msg = Message {
+        title: None,
         body: None,
         attachments: vec![],
         location: None,
@@ -19,6 +21,67 @@ fn empty_message_is_invalid() {
 #[test]
 fn non_empty_message_is_valid() {
     assert!(validate_message(&Message::text("hi")).is_ok());
+}
+
+#[cfg(feature = "desktop")]
+#[test]
+fn title_only_is_invalid_for_non_desktop_providers() {
+    let message = Message {
+        title: Some("Title".into()),
+        body: None,
+        attachments: vec![],
+        location: None,
+        metadata: Default::default(),
+    };
+
+    for provider in [
+        ProviderKind::Discord,
+        ProviderKind::DiscordWebhook,
+        ProviderKind::Slack,
+        ProviderKind::SlackWebhook,
+        ProviderKind::Signal,
+        ProviderKind::WhatsApp,
+        ProviderKind::Telegram,
+    ] {
+        assert!(
+            matches!(
+                validate_message_for_provider(&message, provider),
+                Err(MessengerError::InvalidMessage(_))
+            ),
+            "title-only must be invalid for {provider}"
+        );
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[test]
+fn title_only_is_valid_for_desktop_provider() {
+    let message = Message {
+        title: Some("Title".into()),
+        body: None,
+        attachments: vec![],
+        location: None,
+        metadata: Default::default(),
+    };
+
+    assert!(validate_message_for_provider(&message, ProviderKind::Desktop).is_ok());
+}
+
+#[cfg(feature = "desktop")]
+#[test]
+fn empty_message_is_invalid_even_for_desktop() {
+    let message = Message {
+        title: None,
+        body: None,
+        attachments: vec![],
+        location: None,
+        metadata: Default::default(),
+    };
+
+    assert!(matches!(
+        validate_message_for_provider(&message, ProviderKind::Desktop),
+        Err(MessengerError::InvalidMessage(_))
+    ));
 }
 
 #[cfg(all(feature = "discord", feature = "slack"))]
@@ -109,7 +172,7 @@ fn strict_mode_rejects_unsupported_attachments() {
         alt_text: None,
     });
     let caps = CapabilitySet {
-        supports_attachments: false,
+        supported_attachment_kinds: std::collections::BTreeSet::new(),
         ..CapabilitySet::none()
     };
 
@@ -273,10 +336,7 @@ fn best_effort_mode_errors_if_everything_is_dropped() {
 fn attachment_path_must_exist() {
     let dispatch = Dispatch::to(Target::discord_channel("123"));
     let msg = Message::text("hi").image("/definitely/missing/file.png");
-    let caps = CapabilitySet {
-        supports_attachments: true,
-        ..CapabilitySet::all()
-    };
+    let caps = CapabilitySet::all();
 
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(err, MessengerError::InvalidMessage(_)));
@@ -292,10 +352,7 @@ fn attachment_provider_file_id_must_be_non_empty() {
         caption: None,
         alt_text: None,
     });
-    let caps = CapabilitySet {
-        supports_attachments: true,
-        ..CapabilitySet::all()
-    };
+    let caps = CapabilitySet::all();
 
     let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
     assert!(matches!(err, MessengerError::InvalidMessage(_)));

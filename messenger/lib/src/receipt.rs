@@ -18,19 +18,14 @@ pub enum ProviderKind {
     Signal,
     WhatsApp,
     Telegram,
+    Desktop,
+    #[serde(rename = "apns")]
+    Apns,
+    #[serde(rename = "fcm")]
+    Fcm,
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 7] = [
-        Self::Discord,
-        Self::DiscordWebhook,
-        Self::Slack,
-        Self::SlackWebhook,
-        Self::Signal,
-        Self::WhatsApp,
-        Self::Telegram,
-    ];
-
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Discord => "discord",
@@ -40,7 +35,11 @@ impl ProviderKind {
             Self::Signal => "signal",
             Self::WhatsApp => "whatsapp",
             Self::Telegram => "telegram",
+            Self::Desktop => "desktop",
+            Self::Apns => "apns",
+            Self::Fcm => "fcm",
         }
+    }
     }
 
     /// Create a [`MessengerError::Transport`] for this provider.
@@ -62,6 +61,29 @@ impl fmt::Display for ProviderKind {
             Self::Signal => write!(f, "Signal"),
             Self::WhatsApp => write!(f, "WhatsApp"),
             Self::Telegram => write!(f, "Telegram"),
+            Self::Desktop => write!(f, "Desktop"),
+            Self::Apns => write!(f, "APNs"),
+            Self::Fcm => write!(f, "FCM"),
+        }
+    }
+}
+
+/// Host OS targeted by a desktop notification delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DesktopPlatform {
+    #[serde(rename = "macos")]
+    MacOS,
+    Linux,
+    Windows,
+}
+
+impl fmt::Display for DesktopPlatform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MacOS => write!(f, "macOS"),
+            Self::Linux => write!(f, "Linux"),
+            Self::Windows => write!(f, "Windows"),
         }
     }
 }
@@ -102,6 +124,17 @@ pub enum MessageRef {
         message_id: i64,
         thread_id: Option<i64>,
     },
+    Desktop {
+        platform: DesktopPlatform,
+        notification_id: String,
+    },
+    Apns {
+        apns_id: String,
+    },
+    Fcm {
+        message_id: String,
+        project_id: String,
+    },
 }
 
 impl MessageRef {
@@ -115,6 +148,9 @@ impl MessageRef {
             Self::Signal { .. } => ProviderKind::Signal,
             Self::WhatsApp { .. } => ProviderKind::WhatsApp,
             Self::Telegram { .. } => ProviderKind::Telegram,
+            Self::Desktop { .. } => ProviderKind::Desktop,
+            Self::Apns { .. } => ProviderKind::Apns,
+            Self::Fcm { .. } => ProviderKind::Fcm,
         }
     }
 

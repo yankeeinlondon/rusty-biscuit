@@ -18,6 +18,7 @@ Unified outbound messaging for Rust applications and shell workflows.
 | Signal | `signal` | No | Plain text fallback | Yes | No | Text fallback | No | No |
 | WhatsApp | `whatsapp` | No | Plain text fallback | Yes | No | Native | No | No |
 | Telegram | `telegram` | No | Yes | Yes | No | Native | Yes | Yes |
+| Desktop | `desktop` | No | Plain text fallback | No | Images only | No | Yes | No |
 
 The CLI enables every provider listed above. The library enables `discord` (both bot and webhook adapters) and `slack` (both bot and webhook adapters) by default, with the other providers behind opt-in Cargo features.
 
@@ -30,10 +31,13 @@ For outbound sends, `messenger` uses provider API credentials plus an explicit d
 - Signal: JSON-RPC account + recipient/group ID
 - WhatsApp: Cloud API credentials + recipient phone number
 - Telegram: bot token + chat ID
+- Desktop: host OS notification center (no credentials or destination identifier; see the [desktop platform guide](./docs/platforms/desktop.md))
 
 Both Slack adapters share the Slack mrkdwn renderer and link-preview controls. Receipts from the webhook adapter have an empty `raw_id` and no `thread_ts`, because Slack incoming webhooks do not return a message identifier; successful delivery is confirmed via `metadata["delivery_confirmed"] = "true"`.
 
 The Discord-Webhook adapter is notification-only: `plan_send()` and `send()` reject `reply_to` with `MessengerError::UnsupportedFeature` before any network call. Discord bot sends and Discord webhook sends share the same Markdown renderer; the practical difference is transport capability, not formatting syntax.
+
+The Desktop adapter delivers local OS notifications via D-Bus on Linux, AppleScript (or native `UserNotifications.framework` when explicitly opted in) on macOS, and WinRT toasts on Windows. Desktop is the only provider that does not require a destination identifier, so `--provider desktop` is valid without `--channel`. On Windows, `messenger setup desktop` must run first to create a Start Menu shortcut and register the App User Model ID; `send` never writes outside `~/.messenger/`.
 
 ## How It Works
 
@@ -83,6 +87,9 @@ messenger send "Deploy succeeded"
 # Send to an ad-hoc route
 messenger send --provider slack --channel C01234567 "Deploy succeeded"
 
+# Send a local desktop notification (no --channel required)
+messenger send --provider desktop --title "Build" "Green across the board"
+
 # Reply using a saved receipt
 messenger send --route slack.ops --reply-to ~/.messenger/receipts/1712345678000-slack.json "Acknowledged"
 ```
@@ -111,3 +118,19 @@ just build
 just test
 just lint
 ```
+
+## Release Notes
+
+### Unreleased — Desktop Notifications
+
+**New**
+
+- `desktop` provider for local OS notifications (Linux D-Bus, Windows WinRT toast, macOS AppleScript or native `UserNotifications.framework`). Opt-in via the `desktop` library feature; the CLI enables it by default.
+- `Message::title(...)` builder plus `--title`, `--subtitle`, `--icon`, `--category`, `--urgency`, and `--timeout-ms` CLI flags.
+- `messenger setup desktop` registers the Windows Start Menu shortcut and AUMID. `send` never writes outside `~/.messenger/`.
+
+**Breaking**
+
+- `CapabilitySet::supports_attachments: bool` has been replaced with `supported_attachment_kinds: BTreeSet<AttachmentKind>`. Providers can now advertise exactly which attachment kinds (`Image`, `Audio`, `Video`, `Document`, `Binary`) they accept. Library consumers who build or inspect a `CapabilitySet` directly must migrate from the boolean to the set.
+  - Migration (typical): replace `supports_attachments: true` with `supported_attachment_kinds: BTreeSet::from([AttachmentKind::Image, AttachmentKind::Audio, AttachmentKind::Video, AttachmentKind::Document, AttachmentKind::Binary])`, and `supports_attachments: false` with `supported_attachment_kinds: BTreeSet::new()`. Use `CapabilitySet::all()` or `CapabilitySet::none()` for the two extremes.
+  - Best-effort normalization now drops attachments whose kind is missing from the set instead of dropping all attachments when the boolean was `false`. Strict mode still fails with `MessengerError::UnsupportedFeature { feature: "attachments" }` when any unsupported attachment is present.

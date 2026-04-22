@@ -6,6 +6,56 @@ use clap::ValueEnum;
 use color_eyre::eyre::Result;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// Desktop notification action persisted in route config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationAction {
+    pub id: String,
+    pub label: String,
+}
+
+/// Desktop notification progress indicator persisted in route config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationProgress {
+    pub current: u32,
+    pub total: u32,
+}
+
+/// Portable urgency levels that match `messenger::NotificationUrgency`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum RouteUrgency {
+    Low,
+    #[default]
+    Normal,
+    Critical,
+}
+
+impl RouteUrgency {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Normal => "normal",
+            Self::Critical => "critical",
+        }
+    }
+}
+
+impl fmt::Display for RouteUrgency {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Selector for the macOS notification delivery strategy in route config.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteMacOsStrategy {
+    #[default]
+    Auto,
+    NativeUserNotifications,
+    AppleScript,
+}
+
 /// CLI configuration loaded from `~/.messenger.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Config {
@@ -35,10 +85,12 @@ pub enum RouteProvider {
     WhatsApp,
     #[value(name = "telegram")]
     Telegram,
+    #[value(name = "desktop")]
+    Desktop,
 }
 
 impl RouteProvider {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Discord,
         Self::DiscordWebhook,
         Self::Slack,
@@ -46,6 +98,7 @@ impl RouteProvider {
         Self::Signal,
         Self::WhatsApp,
         Self::Telegram,
+        Self::Desktop,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -57,7 +110,18 @@ impl RouteProvider {
             Self::Signal => "signal",
             Self::WhatsApp => "whatsapp",
             Self::Telegram => "telegram",
+            Self::Desktop => "desktop",
         }
+    }
+
+    /// Whether this provider requires a `--channel` / target identifier when
+    /// used as an ad-hoc route via `--provider`.
+    ///
+    /// Desktop notifications are always delivered to the host OS notification
+    /// center and therefore have no target identifier. Every chat provider
+    /// still needs an explicit channel, recipient, or chat id.
+    pub fn requires_target(self) -> bool {
+        !matches!(self, Self::Desktop)
     }
 }
 
@@ -111,6 +175,43 @@ pub enum RouteConfig {
         bot_token: Option<String>,
         bot_token_env: String,
     },
+    Desktop {
+        app_name: String,
+        default_title: Option<String>,
+        icon: Option<String>,
+        category: Option<String>,
+        urgency: RouteUrgency,
+        timeout_ms: Option<u32>,
+        actions: Vec<NotificationAction>,
+        progress: Option<NotificationProgress>,
+        badge_count: Option<u32>,
+        windows: DesktopWindowsConfig,
+        macos: DesktopMacOsConfig,
+        linux: DesktopLinuxConfig,
+    },
+}
+
+/// Windows-specific fields persisted in the desktop route config.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopWindowsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+}
+
+/// macOS-specific fields persisted in the desktop route config.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopMacOsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    #[serde(default)]
+    pub strategy: RouteMacOsStrategy,
+}
+
+/// Linux-specific fields persisted in the desktop route config.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopLinuxConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop_entry: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -173,6 +274,48 @@ enum RouteConfigRepr {
         #[serde(default = "default_telegram_token_env")]
         bot_token_env: String,
     },
+    Desktop {
+        #[serde(default = "default_desktop_app_name")]
+        app_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default_title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        category: Option<String>,
+        #[serde(default)]
+        urgency: RouteUrgency,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u32>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        actions: Vec<NotificationAction>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        progress: Option<NotificationProgress>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        badge_count: Option<u32>,
+        #[serde(default, skip_serializing_if = "is_default_windows")]
+        windows: DesktopWindowsConfig,
+        #[serde(default, skip_serializing_if = "is_default_macos")]
+        macos: DesktopMacOsConfig,
+        #[serde(default, skip_serializing_if = "is_default_linux")]
+        linux: DesktopLinuxConfig,
+    },
+}
+
+fn default_desktop_app_name() -> String {
+    "Messenger".into()
+}
+
+fn is_default_windows(value: &DesktopWindowsConfig) -> bool {
+    value == &DesktopWindowsConfig::default()
+}
+
+fn is_default_macos(value: &DesktopMacOsConfig) -> bool {
+    value == &DesktopMacOsConfig::default()
+}
+
+fn is_default_linux(value: &DesktopLinuxConfig) -> bool {
+    value == &DesktopLinuxConfig::default()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -200,6 +343,7 @@ impl RouteConfig {
             Self::Signal { .. } => RouteProvider::Signal,
             Self::WhatsApp { .. } => RouteProvider::WhatsApp,
             Self::Telegram { .. } => RouteProvider::Telegram,
+            Self::Desktop { .. } => RouteProvider::Desktop,
         }
     }
 
@@ -243,6 +387,25 @@ impl RouteConfig {
                 bot_token: None,
                 bot_token_env: default_telegram_token_env(),
             },
+            RouteProvider::Desktop => Self::desktop_default(),
+        }
+    }
+
+    /// Build a desktop route filled with platform defaults.
+    pub fn desktop_default() -> Self {
+        Self::Desktop {
+            app_name: default_desktop_app_name(),
+            default_title: None,
+            icon: None,
+            category: None,
+            urgency: RouteUrgency::default(),
+            timeout_ms: None,
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
+            windows: DesktopWindowsConfig::default(),
+            macos: DesktopMacOsConfig::default(),
+            linux: DesktopLinuxConfig::default(),
         }
     }
 }
@@ -339,6 +502,33 @@ impl From<RouteConfigRepr> for RouteConfig {
                 bot_token,
                 bot_token_env,
             },
+            RouteConfigRepr::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                actions,
+                progress,
+                badge_count,
+                windows,
+                macos,
+                linux,
+            } => Self::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                actions,
+                progress,
+                badge_count,
+                windows,
+                macos,
+                linux,
+            },
         }
     }
 }
@@ -413,6 +603,33 @@ impl From<RouteConfig> for RouteConfigRepr {
                 bot_token,
                 bot_token_env,
             },
+            RouteConfig::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                actions,
+                progress,
+                badge_count,
+                windows,
+                macos,
+                linux,
+            } => Self::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                actions,
+                progress,
+                badge_count,
+                windows,
+                macos,
+                linux,
+            },
         }
     }
 }
@@ -463,6 +680,10 @@ impl From<LegacyRouteConfig> for RouteConfig {
                 bot_token: None,
                 bot_token_env: token_env.unwrap_or_else(default_telegram_token_env),
             },
+            // The legacy single-shape config never carried a desktop route, so
+            // we simply materialize a defaulted desktop route here; any legacy
+            // field values like `channel_id` are irrelevant for desktop.
+            RouteProvider::Desktop => Self::desktop_default(),
         }
     }
 }

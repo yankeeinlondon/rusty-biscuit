@@ -24,8 +24,11 @@ The built-in providers follow the provider API models currently implemented in t
 - Signal: JSON-RPC URL + sending account + recipient/group ID
 - WhatsApp: Cloud API access token + phone number ID + recipient
 - Telegram: bot token + chat ID
+- Desktop: host OS notification center (no credentials; runtime backend picks D-Bus, WinRT toast, or AppleScript)
 
 Discord and Slack each ship both a bot-token adapter and a webhook-URL adapter. The Discord webhook adapter is notification-only and does not support replies. The Slack webhook adapter supports mrkdwn and reply threading, but does not support attachments, and successful sends produce receipts with an empty `raw_id` and no `thread_ts` since Slack incoming webhooks do not return a message identifier.
+
+Desktop is a single provider (`DesktopNotificationProvider`) that picks its backend at construction time based on the host OS: `notify-rust` on Linux, AppleScript or native `UserNotifications.framework` on macOS, and `winrt-notification` on Windows. Desktop sends accept only image attachments and accept title-only messages so notifications can carry a summary without a body.
 
 ## Prelude
 
@@ -51,8 +54,11 @@ Available features:
 - `signal`
 - `whatsapp`
 - `telegram`
+- `desktop`
 
 Default features: `discord`, `slack`
+
+The `desktop` feature pulls in platform-specific dependencies per target: `notify-rust` on Linux, `winrt-notification` on Windows, and `objc2-foundation` + `objc2-user-notifications` on macOS.
 
 ## Core Types
 
@@ -94,12 +100,14 @@ If you want visibility before sending, use `plan_send` and inspect `SendPlan::wa
 | Signal          | Plain-text fallback | Yes     | No          | Appends text fallback   | No     | No            |
 | WhatsApp        | Plain-text fallback | Yes     | No          | Native location payload | No     | No            |
 | Telegram        | HTML rendering      | Yes     | No          | Native location payload | Yes    | Yes           |
+| Desktop         | Plain-text fallback | No      | Images only | Dropped                 | Yes    | No            |
 
 Two details matter when integrating:
 
 - A provider can report `supports_location = true` even when it does not have a native location API. Discord, Slack, and Signal keep the location by appending a formatted text line to the rendered body.
-- Markdown is parsed for all Markdown messages, but Signal and WhatsApp warn that rich rendering is unsupported and fall back to plain text.
+- Markdown is parsed for all Markdown messages, but Signal, WhatsApp, and Desktop warn that rich rendering is unsupported and fall back to plain text.
 - Telegram and WhatsApp send native location requests. If a message contains both text and location, the location is sent and the text body is not.
+- Desktop accepts only image attachments; multiple images collapse to the first image in best-effort mode. Locations are dropped in best-effort and fail in strict. A title-only desktop message is valid — `plan_send()` skips the "empty body" check when the resolved provider is `desktop`.
 
 ## Example
 
@@ -152,7 +160,36 @@ let with_file = Message::markdown("Artifact ready")
 
 Attachment sources can be local files, URLs, in-memory bytes, or provider-native file identifiers. Validation rejects missing files, unreadable paths, empty URLs, and malformed provider file IDs before a send is attempted.
 
-Only the Discord adapters (bot and webhook) support attachments today. Attachments must come from a local file or in-memory bytes; URL-based and provider-file-ID attachments are rejected by both adapters.
+The Discord adapters (bot and webhook) support the full attachment-kind set today. The Desktop provider accepts image attachments only. Every other provider accepts no attachments. Attachments must come from a local file or in-memory bytes; URL-based and provider-file-ID attachments are rejected by both Discord adapters.
+
+## Desktop Notifications
+
+Register the desktop provider like any other:
+
+```rust
+use messenger::prelude::*;
+use messenger::provider::desktop::{DesktopConfig, DesktopNotificationProvider};
+
+#[tokio::main]
+async fn main() -> Result<(), messenger::MessengerError> {
+    let mut messenger = Messenger::new();
+    messenger.register(Box::new(DesktopNotificationProvider::new(DesktopConfig {
+        app_name: "Messenger".into(),
+        ..DesktopConfig::default()
+    })));
+
+    // Title-only desktop messages are valid.
+    let message = Message::text("Build finished in 42s").title("Build");
+    let dispatch = Dispatch::to(Target::desktop());
+    let receipt = messenger.send(dispatch, &message).await?;
+    println!("delivered: {}", receipt.raw_id);
+    Ok(())
+}
+```
+
+The backend is selected at construction time from the compile target. See [`messenger/docs/platforms/desktop.md`](../docs/platforms/desktop.md) for platform caveats, including the Windows Start Menu shortcut requirement and the macOS AppleScript-vs-native strategy.
+
+Per-dispatch overrides (subtitle, category, urgency, timeout, replace ID, custom icon) ride on `ProviderOverrides::Desktop(DesktopOverrides { .. })`.
 
 ## Dispatch And Replies
 
@@ -188,7 +225,7 @@ Markdown is parsed with `pulldown-cmark` into an internal AST and then rendered 
 - Discord: Discord-flavored Markdown
 - Slack: Slack mrkdwn
 - Telegram: Telegram Bot API HTML
-- Signal / WhatsApp: plain text
+- Signal / WhatsApp / Desktop: plain text
 
 The parser currently handles the formatting primitives that show up in the codebase and tests: paragraphs, headings, bold, italic, strikethrough, links, inline code, fenced code blocks, and lists. Unsupported Markdown constructs are flattened to their children instead of preserved as provider-specific syntax.
 
@@ -235,6 +272,7 @@ The crate includes:
 - `twilight-http` and `twilight-model` for the Discord bot adapter
 - `thiserror` for the public error type
 - `serde` / `serde_json` for typed receipts and reply references
+- `notify-rust` (Linux), `winrt-notification` (Windows), `objc2-foundation` + `objc2-user-notifications` (macOS), and `uuid` (shared) for the `desktop` feature
 
 ## Lessons Learned
 
