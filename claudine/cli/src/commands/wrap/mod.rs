@@ -751,8 +751,11 @@ pub fn run_provider_wrapper(
         return Ok(());
     }
 
+    let wrapper_start = std::time::Instant::now();
+    let mut perf_collector = startup_timings.map(WrapperPerfCollector::new);
+
     let (code, stderr_capture, model_source) =
-        match run_provider_wrapper_inner(provider, args, verbose, startup_timings) {
+        match run_provider_wrapper_inner(provider, args, verbose, perf_collector.as_mut()) {
             Ok((code, stderr, source)) => (code, stderr, source),
             Err(error) => {
                 if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
@@ -771,6 +774,12 @@ pub fn run_provider_wrapper(
             model_source.as_ref(),
         );
         report.render(&term);
+    }
+
+    if let Some(collector) = perf_collector {
+        let total = wrapper_start.elapsed();
+        let report = collector.into_report(total);
+        eprint!("{}", crate::perf::render_perf_report(&report));
     }
 
     std::process::exit(code);
@@ -836,7 +845,7 @@ fn run_provider_wrapper_inner(
     provider: Provider,
     args: WrapperArgs,
     verbose: u8,
-    _startup_timings: Option<crate::perf::StartupTimings>,
+    mut perf_collector: Option<&mut WrapperPerfCollector>,
 ) -> Result<(i32, Option<String>, Option<profile::OpenCodeModelSource>)> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
@@ -1346,6 +1355,10 @@ fn run_provider_wrapper_inner(
         log::info(&crate::output::format_launch_directory(child_cwd));
     }
 
+    if let Some(collector) = perf_collector.as_mut() {
+        collector.mark_env_setup_complete();
+    }
+
     // --dry-run: print what would be executed and exit
     let sp_display_lines = crate::commands::wrap::system_prompt::describe_effective(&effective_sp);
     if args.dry_run {
@@ -1360,6 +1373,9 @@ fn run_provider_wrapper_inner(
             &term,
             sp_display_lines.as_deref(),
         );
+        if let Some(collector) = perf_collector.as_mut() {
+            collector.set_dry_run();
+        }
         return Ok((0, None, None));
     }
 
@@ -1580,7 +1596,7 @@ fn run_provider_wrapper_inner(
             };
             let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
-            let harness_code = run_harness_loop(
+            let (harness_code, harness_perf) = run_harness_loop(
                 provider,
                 profile,
                 binary_path.as_path(),
@@ -1610,6 +1626,9 @@ fn run_provider_wrapper_inner(
                 &default_lifecycle_emitter,
                 true,
             )?;
+            if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
+                collector.set_agent_perf(perf);
+            }
             (harness_code, None)
         } else if use_structured {
             let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -1653,6 +1672,10 @@ fn run_provider_wrapper_inner(
                 None,
             )?;
             let mut summary = stream_result.data;
+            let api_duration_ms = summary.duration_ms;
+            if let Some(collector) = perf_collector.as_mut() {
+                collector.set_agent_perf(stream_result.telemetry.into_agent_perf(api_duration_ms));
+            }
             if let Some(ref sid) = summary.session_id {
                 wrapper_span.record("session_id", tracing::field::display(sid));
             }
@@ -1705,6 +1728,9 @@ fn run_provider_wrapper_inner(
                 },
                 &mut _spawned,
             )?;
+            if let Some(collector) = perf_collector.as_mut() {
+                collector.set_agent_perf(result.telemetry.into_agent_perf(None));
+            }
             (result.data, None)
         };
 
@@ -2079,7 +2105,7 @@ fn execute_harness_attempt(
     term: &Terminal,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
-) -> Result<claudine::harness::AttemptOutcome> {
+) -> Result<(claudine::harness::AttemptOutcome, Option<crate::perf::AgentExecutionPerf>)> {
     let _attempt_span = info_span!(
         "harness_attempt",
         provider = %provider,
@@ -2111,7 +2137,7 @@ fn execute_harness_attempt(
         launch.clone()
     };
     let launch = &launch;
-    let (exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
+    let (exit_code, termination, session_id, final_response, stderr_text, perf) = if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
         let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
@@ -2145,6 +2171,8 @@ fn execute_harness_attempt(
             stderr_bridge,
             prompt_timing,
         )?;
+        let api_duration_ms = stream_result.data.duration_ms;
+        let perf = Some(stream_result.telemetry.into_agent_perf(api_duration_ms));
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {
@@ -2184,6 +2212,7 @@ fn execute_harness_attempt(
             summary.session_id.clone(),
             summary.assistant_text.clone(),
             summary.stderr_text.clone(),
+            perf,
         )
     } else {
         let capture = exec::run_child_capture(
@@ -2199,6 +2228,7 @@ fn execute_harness_attempt(
             },
             child_spawned,
         )?;
+        let perf = Some(capture.telemetry.into_agent_perf(None));
         let termination = capture.termination;
         let stdout = capture.data.stdout;
         let stderr = capture.data.stderr;
@@ -2230,6 +2260,7 @@ fn execute_harness_attempt(
             None,
             response,
             (!stderr.trim().is_empty()).then_some(stderr),
+            perf,
         )
     };
 
@@ -2246,14 +2277,17 @@ fn execute_harness_attempt(
         );
     }
 
-    Ok(claudine::harness::AttemptOutcome {
-        attempt,
-        session_id,
-        final_response,
-        exit_code,
-        termination,
-        stderr_text,
-    })
+    Ok((
+        claudine::harness::AttemptOutcome {
+            attempt,
+            session_id,
+            final_response,
+            exit_code,
+            termination,
+            stderr_text,
+        },
+        perf,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2707,6 +2741,7 @@ fn handler_action_name(action: &claudine::harness::HandlerAction) -> &'static st
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(unused_assignments)]
 pub(crate) fn run_harness_loop(
     provider: Provider,
     profile: &dyn WrapperProfile,
@@ -2742,7 +2777,7 @@ pub(crate) fn run_harness_loop(
     // pass `false` to suppress the header entirely; composition callers
     // pass `true`.
     emit_prompt_timing: bool,
-) -> Result<i32> {
+) -> Result<(i32, Option<crate::perf::AgentExecutionPerf>)> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
     let mut guard =
         claudine::composition::LifecycleRunGuard::new(lifecycle, lifecycle_ctx, lifecycle_emitter);
@@ -2755,6 +2790,7 @@ pub(crate) fn run_harness_loop(
     );
     let mut attempt = 1u32;
     let mut initial_materialized = initial_materialized;
+    let mut last_perf: Option<crate::perf::AgentExecutionPerf> = None;
 
     loop {
         let _attempt_cycle_span = info_span!(
@@ -3051,7 +3087,7 @@ pub(crate) fn run_harness_loop(
         };
 
         let mut child_spawned = false;
-        let outcome = execute_harness_attempt(
+        let attempt_result = execute_harness_attempt(
             attempt,
             provider,
             profile,
@@ -3082,7 +3118,8 @@ pub(crate) fn run_harness_loop(
         if child_spawned {
             guard.mark_provider_launched();
         }
-        let outcome = outcome?;
+        let (outcome, perf) = attempt_result?;
+        last_perf = perf;
 
         if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
             // Surface the interrupt to the user before we let the guard
@@ -3090,7 +3127,7 @@ pub(crate) fn run_harness_loop(
             // and the operator has no feedback that Claudine noticed.
             eprintln!("{}", crate::output::format_user_interrupt_status());
             guard.emit_terminal(LifecycleSignal::Failure);
-            return Ok(outcome.exit_code);
+            return Ok((outcome.exit_code, last_perf));
         }
 
         if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
@@ -3220,7 +3257,7 @@ pub(crate) fn run_harness_loop(
 
         if post_report.all_passed() {
             guard.emit_terminal(LifecycleSignal::Success);
-            return Ok(outcome.exit_code);
+            return Ok((outcome.exit_code, last_perf));
         }
 
         let failures = post_report.failures();
@@ -3644,6 +3681,7 @@ fn print_wrapper_help(provider: Provider) {
          \x20     --mcp                 Enable Claudine-managed MCP session composition\n\
          \x20     --use <ID>            Activate specific MCP servers by ID or alias\n\
          \x20     --strict              Treat unresolved or ambiguous MCP tags as hard errors\n\
+         \x20     --perf                Emit a performance report to stderr after command completion\n\
          \x20 -h, --help               Print help"
     );
 }
@@ -3659,6 +3697,67 @@ struct ExtractedWrapperFlags {
     verbose: bool,
     operation: Option<String>,
     perf: bool,
+}
+
+/// Collector for wrapper-level performance telemetry.
+///
+/// Only constructed when `--perf` is enabled. Measures environment setup
+/// duration and aggregates child-process telemetry into the shared perf
+/// report shape.
+#[derive(Debug)]
+struct WrapperPerfCollector {
+    startup: crate::perf::StartupTimings,
+    env_setup_started_at: Option<std::time::Instant>,
+    env_setup_elapsed: std::time::Duration,
+    agent_perf: Option<crate::perf::AgentExecutionPerf>,
+    dry_run: bool,
+}
+
+impl WrapperPerfCollector {
+    fn new(startup: crate::perf::StartupTimings) -> Self {
+        Self {
+            startup,
+            env_setup_started_at: Some(std::time::Instant::now()),
+            env_setup_elapsed: std::time::Duration::ZERO,
+            agent_perf: None,
+            dry_run: false,
+        }
+    }
+
+    fn mark_env_setup_complete(&mut self) {
+        if let Some(started) = self.env_setup_started_at.take() {
+            self.env_setup_elapsed = started.elapsed();
+        }
+    }
+
+    fn set_agent_perf(&mut self, perf: crate::perf::AgentExecutionPerf) {
+        self.agent_perf = Some(perf);
+    }
+
+    fn set_dry_run(&mut self) {
+        self.dry_run = true;
+        self.mark_env_setup_complete();
+    }
+
+    fn into_report(self, total_elapsed: std::time::Duration) -> crate::perf::CommandPerfReport {
+        crate::perf::CommandPerfReport {
+            title: "Wrapper",
+            total_elapsed,
+            cli: crate::perf::CliOverheadReport {
+                arg_parsing: self.startup.arg_parsing,
+                config_loading: self.startup.config_loading,
+                tracing_init: self.startup.tracing_init,
+                environment_setup: self.env_setup_elapsed,
+            },
+            composition: None,
+            agent: if self.dry_run { None } else { self.agent_perf },
+            notes: if self.dry_run {
+                vec!["Agent execution skipped (dry run)".into()]
+            } else {
+                vec![]
+            },
+        }
+    }
 }
 
 /// Locate the POSIX `--` separator in the wrapper passthrough vector.
@@ -4018,6 +4117,16 @@ mod tests {
         let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert_eq!(extracted.operation.as_deref(), Some("review"));
+        assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_lifts_perf_from_passthrough() {
+        let mut args = vec!["do something".to_string(), "--perf".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
+
+        assert!(extracted.perf);
         assert_eq!(args, vec!["do something"]);
     }
 

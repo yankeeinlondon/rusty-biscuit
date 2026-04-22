@@ -27,6 +27,8 @@ pub struct PrepareOptions {
     pub pre_approved_commands: Option<std::collections::HashSet<String>>,
     /// Extra environment variables to inject into the composition context.
     pub env_overrides: BTreeMap<String, String>,
+    /// Enable Darkmatter composition performance collection.
+    pub perf_enabled: bool,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -62,15 +64,16 @@ pub fn prepare_direct(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts =
-        ComposeOptions::new_with_context(ctx).with_source_file(&source.resolved_path);
+    let mut compose_opts = ComposeOptions::new_with_context(ctx)
+        .with_source_file(&source.resolved_path)
+        .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
     }
-    let (composed, _report) = source
+    let (composed, report) = source
         .markdown
         .compose_with(compose_opts)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
@@ -90,6 +93,7 @@ pub fn prepare_direct(
         effective_agent_hint,
         closure: CompositionClosurePlan::Direct,
         lifecycle,
+        compose_perf: report.perf,
     })
 }
 
@@ -124,15 +128,16 @@ pub fn prepare_inline(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let mut compose_opts =
-        ComposeOptions::new_with_context(ctx).with_source_file(&source.resolved_path);
+    let mut compose_opts = ComposeOptions::new_with_context(ctx)
+        .with_source_file(&source.resolved_path)
+        .with_perf(options.perf_enabled);
     if let Some(overrides) = options.set_overrides {
         compose_opts = compose_opts.with_set_overrides(overrides);
     }
     if let Some(approved) = options.pre_approved_commands {
         compose_opts = compose_opts.with_pre_approved_commands(approved);
     }
-    let (composed, _report) = temp_md
+    let (composed, report) = temp_md
         .compose_with(compose_opts)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
@@ -164,6 +169,7 @@ pub fn prepare_inline(
             original_body_hash,
         }),
         lifecycle,
+        compose_perf: report.perf,
     })
 }
 
@@ -368,5 +374,65 @@ mod tests {
 
         let prepared = prepare_direct(&source, options).unwrap();
         assert!(prepared.prompt.contains("FAIL_FAST is false"));
+    }
+
+    #[test]
+    fn direct_composition_perf_disabled_yields_none() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("title", json!("Test"))],
+            "Simple content.",
+        );
+
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+        assert!(prepared.compose_perf.is_none());
+    }
+
+    #[test]
+    fn direct_composition_perf_enabled_yields_some() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("title", json!("Test"))],
+            "Simple content.",
+        );
+
+        let options = PrepareOptions {
+            perf_enabled: true,
+            ..Default::default()
+        };
+        let prepared = prepare_direct(&source, options).unwrap();
+        assert!(prepared.compose_perf.is_some());
+    }
+
+    #[test]
+    fn inline_composition_preserves_closure_with_perf_enabled() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("prompt", json!("List three colors")),
+                ("agent", json!("claude")),
+            ],
+            "Old content",
+        );
+
+        let options = PrepareOptions {
+            perf_enabled: true,
+            ..Default::default()
+        };
+        let prepared = prepare_inline(&source, options).unwrap();
+        assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
+        assert!(prepared.compose_perf.is_some());
+
+        // Closure should still be Inline with captured hash
+        match &prepared.closure {
+            CompositionClosurePlan::Inline(plan) => {
+                assert!(!plan.original_document_text.is_empty());
+                assert_ne!(plan.original_body_hash, 0);
+            }
+            CompositionClosurePlan::Direct => panic!("expected Inline closure plan"),
+        }
     }
 }

@@ -223,3 +223,23 @@ _dasherize str:
     s="${s//_/-}"
     s="${s// /-}"
     echo "${s}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_ ]+/-/g' | sed -E 's/^-//'
+
+# Present options from a file via fzf with a NONE fallback.
+# Reads one option per line from `options_file`, appends NONE, and presents
+# them in fzf with the given label.
+# Exits 1 if NONE is chosen, fzf is cancelled, or fzf is not installed.
+# Outputs the selected option to stdout on success.
+_fzf_select label options_file:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    label="{{label}}"
+    file="{{options_file}}"
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo -e "{{red}}fzf is not installed{{reset}}" >&2
+        exit 1
+    fi
+    result="$( ( cat "${file}"; echo "NONE" ) | fzf --height=15 --border --border-label "${label}")"
+    if [[ -z "${result}" || "${result}" == "NONE" ]]; then
+        exit 1
+    fi
+    echo "${result}"

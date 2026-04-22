@@ -237,6 +237,7 @@ exit 0
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env_remove("MODEL")
         .current_dir(workspace.path())
         .args(["sequence", "--opencode", md_file.to_str().unwrap()])
         .assert()
