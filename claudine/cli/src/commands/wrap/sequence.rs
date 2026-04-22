@@ -176,6 +176,7 @@ pub(crate) fn execute_sequence(
             set_overrides: Some(step_set_overrides.clone()),
             pre_approved_commands: Some(cumulative_approved.clone()),
             env_overrides: env_overrides.clone(),
+            perf_enabled: shared.perf,
         };
 
         let prepared = composition::prepare_direct(source, prepare_options)

@@ -335,6 +335,7 @@ fn run_compose_inner(
         composition::PrepareOptions {
             set_overrides,
             pre_approved_commands: Some(preflight.approved_commands),
+            perf_enabled: shared.perf,
             ..Default::default()
         },
     )
@@ -468,6 +469,7 @@ fn run_inline_compose_inner(
         composition::PrepareOptions {
             set_overrides,
             pre_approved_commands: Some(preflight.approved_commands),
+            perf_enabled: shared.perf,
             ..Default::default()
         },
     )
