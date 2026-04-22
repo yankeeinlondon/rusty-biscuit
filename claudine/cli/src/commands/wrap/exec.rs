@@ -30,10 +30,32 @@ pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdin_seed: Option<&'a str>,
 }
 
+/// Execution telemetry collected for a single child process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProcessTelemetry {
+    pub total_elapsed: Duration,
+    pub first_response_latency: Option<Duration>,
+}
+
+#[allow(dead_code)]
+impl ProcessTelemetry {
+    /// Convert telemetry into the shared [`AgentExecutionPerf`] model.
+    pub(crate) fn into_agent_perf(self, api_duration_ms: Option<u64>) -> crate::perf::AgentExecutionPerf {
+        crate::perf::AgentExecutionPerf {
+            launches: 1,
+            total_elapsed: self.total_elapsed,
+            first_response_latency: self.first_response_latency,
+            provider_api_duration: api_duration_ms.map(Duration::from_millis),
+        }
+    }
+}
+
 /// Result of a child process execution, enriched with termination info.
 pub(crate) struct ProcessResult<T> {
     pub(crate) data: T,
     pub(crate) termination: claudine::harness::ProcessTermination,
+    #[allow(dead_code)]
+    pub(crate) telemetry: ProcessTelemetry,
 }
 
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.
@@ -397,9 +419,24 @@ pub(crate) fn run_child(
         command.process_group(0);
     }
 
+    let spawned_at = Instant::now();
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
+
+    // Shared first-response trackers. Each channel stamps the first
+    // non-filtered line it sees so we can compute best-effort latency
+    // even on the legacy passthrough path.
+    let first_stdout_at: Option<Arc<std::sync::Mutex<Option<Instant>>>> = if filter_stdout {
+        Some(Arc::new(std::sync::Mutex::new(None)))
+    } else {
+        None
+    };
+    let first_stderr_at: Option<Arc<std::sync::Mutex<Option<Instant>>>> = if filter_stderr {
+        Some(Arc::new(std::sync::Mutex::new(None)))
+    } else {
+        None
+    };
 
     // Spawn stdout/stderr reader threads BEFORE writing stdin to avoid a
     // pipe deadlock: if the prompt exceeds the OS pipe buffer (~64 KB on
@@ -415,6 +452,7 @@ pub(crate) fn run_child(
             .map(|s| s.to_string())
             .collect();
         let plain = crate::log::is_plain();
+        let first_at = first_stdout_at.clone().expect("set when filter_stdout");
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut out = std::io::stdout().lock();
@@ -422,6 +460,12 @@ pub(crate) fn run_child(
                 let Ok(line) = line else { break };
                 if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                     continue;
+                }
+                {
+                    let mut g = first_at.lock().unwrap();
+                    if g.is_none() {
+                        *g = Some(Instant::now());
+                    }
                 }
                 let stripped = if plain {
                     biscuit_terminal::prelude::strip_escape_codes(&line)
@@ -445,6 +489,7 @@ pub(crate) fn run_child(
             .map(|s| s.to_string())
             .collect();
         let plain = crate::log::is_plain();
+        let first_at = first_stderr_at.clone().expect("set when filter_stderr");
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut err = std::io::stderr().lock();
@@ -452,6 +497,12 @@ pub(crate) fn run_child(
                 let Ok(line) = line else { break };
                 if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                     continue;
+                }
+                {
+                    let mut g = first_at.lock().unwrap();
+                    if g.is_none() {
+                        *g = Some(Instant::now());
+                    }
                 }
                 let stripped = if plain {
                     biscuit_terminal::prelude::strip_escape_codes(&line)
@@ -491,9 +542,21 @@ pub(crate) fn run_child(
         join_with_timeout(handle, thread_join_timeout);
     }
 
+    let total_elapsed = spawned_at.elapsed();
+    let first_response = resolve_first_response(
+        None,
+        first_stdout_at.as_ref().and_then(|a| *a.lock().unwrap()),
+        first_stderr_at.as_ref().and_then(|a| *a.lock().unwrap()),
+        spawned_at,
+    );
+
     Ok(ProcessResult {
         data: exit_code,
         termination,
+        telemetry: ProcessTelemetry {
+            total_elapsed,
+            first_response_latency: first_response,
+        },
     })
 }
 
@@ -1148,9 +1211,14 @@ pub(crate) fn run_child_capture(
         command.process_group(0);
     }
 
+    let spawned_at = Instant::now();
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
+
+    // Shared first-response trackers (always piped in capture mode).
+    let first_stdout_at = Arc::new(std::sync::Mutex::new(None));
+    let first_stderr_at = Arc::new(std::sync::Mutex::new(None));
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
@@ -1164,6 +1232,7 @@ pub(crate) fn run_child_capture(
         .iter()
         .map(|s| s.to_string())
         .collect();
+    let first_stdout_at_clone = Arc::clone(&first_stdout_at);
     let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout_pipe);
         let mut captured = String::new();
@@ -1171,6 +1240,12 @@ pub(crate) fn run_child_capture(
             let Ok(line) = line else { break };
             if stdout_noise.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
+            }
+            {
+                let mut g = first_stdout_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
             }
             if !captured.is_empty() {
                 captured.push('\n');
@@ -1190,6 +1265,7 @@ pub(crate) fn run_child_capture(
         .iter()
         .map(|s| s.to_string())
         .collect();
+    let first_stderr_at_clone = Arc::clone(&first_stderr_at);
     let stderr_handle = thread::spawn(move || {
         let reader = BufReader::new(stderr_pipe);
         let mut captured = String::new();
@@ -1197,6 +1273,12 @@ pub(crate) fn run_child_capture(
             let Ok(line) = line else { break };
             if stderr_noise.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
+            }
+            {
+                let mut g = first_stderr_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
             }
             if !captured.is_empty() {
                 captured.push('\n');
@@ -1225,6 +1307,14 @@ pub(crate) fn run_child_capture(
     let stdout = join_with_timeout_or(stdout_handle, thread_join_timeout, String::new());
     let stderr = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
 
+    let total_elapsed = spawned_at.elapsed();
+    let first_response = resolve_first_response(
+        None,
+        *first_stdout_at.lock().unwrap(),
+        *first_stderr_at.lock().unwrap(),
+        spawned_at,
+    );
+
     Ok(ProcessResult {
         data: CapturedChildOutput {
             exit_code,
@@ -1232,6 +1322,10 @@ pub(crate) fn run_child_capture(
             stderr,
         },
         termination,
+        telemetry: ProcessTelemetry {
+            total_elapsed,
+            first_response_latency: first_response,
+        },
     })
 }
 
@@ -1773,6 +1867,12 @@ pub(crate) fn run_child_stream_semantic(
         None
     };
 
+    // First-response trackers for structured stream mode:
+    // semantic stdout (preferred), raw stdout (fallback), stderr (final fallback).
+    let first_semantic_at = Arc::new(std::sync::Mutex::new(None));
+    let first_raw_stdout_at = Arc::new(std::sync::Mutex::new(None));
+    let first_stderr_at = Arc::new(std::sync::Mutex::new(None));
+
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
     let stdout_pipe = child
         .stdout
@@ -1780,6 +1880,8 @@ pub(crate) fn run_child_stream_semantic(
         .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stream_span = Span::current();
     let stdout_renderer = text_renderer.clone();
+    let first_semantic_at_clone = Arc::clone(&first_semantic_at);
+    let first_raw_stdout_at_clone = Arc::clone(&first_raw_stdout_at);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -1791,7 +1893,14 @@ pub(crate) fn run_child_stream_semantic(
         let output_cb: OutputTextCallback = {
             let text = text_renderer.clone();
             let mut writer = stdout_output.stdout_writer();
+            let first_at = first_semantic_at_clone;
             Box::new(move |chunk: &str| {
+                if !chunk.is_empty() {
+                    let mut g = first_at.lock().unwrap();
+                    if g.is_none() {
+                        *g = Some(Instant::now());
+                    }
+                }
                 if let Ok(mut r) = text.lock() {
                     r.push(&mut writer, chunk);
                 }
@@ -1804,6 +1913,13 @@ pub(crate) fn run_child_stream_semantic(
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
+
+            {
+                let mut g = first_raw_stdout_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
+            }
 
             if fallback_mode {
                 let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
@@ -1855,6 +1971,7 @@ pub(crate) fn run_child_stream_semantic(
     };
     let has_bridge = bridge_for_thread.is_some();
     let capture_always = has_bridge;
+    let first_stderr_at_clone = Arc::clone(&first_stderr_at);
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let reader = BufReader::new(pipe);
@@ -1863,6 +1980,13 @@ pub(crate) fn run_child_stream_semantic(
             let Ok(line) = line else { break };
             if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
+            }
+
+            {
+                let mut g = first_stderr_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
             }
 
             // When a bridge is installed, offer the raw line first so it can
@@ -1991,10 +2115,36 @@ pub(crate) fn run_child_stream_semantic(
         finalize(&mut summary);
     }
 
+    let first_response = resolve_first_response(
+        *first_semantic_at.lock().unwrap(),
+        *first_raw_stdout_at.lock().unwrap(),
+        *first_stderr_at.lock().unwrap(),
+        started_at,
+    );
+
     Ok(ProcessResult {
         data: summary,
         termination,
+        telemetry: ProcessTelemetry {
+            total_elapsed: started_at.elapsed(),
+            first_response_latency: first_response,
+        },
     })
+}
+
+/// Resolve first-response latency from three observed timestamps.
+///
+/// Preferred precedence: semantic stdout > raw stdout > stderr.
+fn resolve_first_response(
+    semantic: Option<Instant>,
+    raw_stdout: Option<Instant>,
+    stderr: Option<Instant>,
+    spawned_at: Instant,
+) -> Option<Duration> {
+    semantic
+        .or(raw_stdout)
+        .or(stderr)
+        .map(|t| t.saturating_duration_since(spawned_at))
 }
 
 fn exit_code_from_status(status: ExitStatus) -> i32 {
@@ -2541,5 +2691,76 @@ mod tests {
                 .unwrap_or("")
                 .contains("no stream activity"),
         );
+    }
+
+    #[test]
+    fn first_response_preference_semantic_over_raw_over_stderr() {
+        let spawned_at = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let semantic = Some(Instant::now());
+        std::thread::sleep(Duration::from_millis(5));
+        let raw = Some(Instant::now());
+        std::thread::sleep(Duration::from_millis(5));
+        let stderr = Some(Instant::now());
+
+        let resolved = resolve_first_response(semantic, raw, stderr, spawned_at);
+        assert!(resolved.is_some());
+        // Semantic should win even though it is the earliest
+        assert!(resolved.unwrap() >= Duration::from_millis(5));
+        assert!(resolved.unwrap() < Duration::from_millis(15));
+    }
+
+    #[test]
+    fn first_response_falls_back_to_raw_when_no_semantic() {
+        let spawned_at = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let raw = Some(Instant::now());
+
+        let resolved = resolve_first_response(None, raw, None, spawned_at);
+        assert!(resolved.is_some());
+        assert!(resolved.unwrap() >= Duration::from_millis(5));
+    }
+
+    #[test]
+    fn first_response_falls_back_to_stderr_when_nothing_else() {
+        let spawned_at = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let stderr = Some(Instant::now());
+
+        let resolved = resolve_first_response(None, None, stderr, spawned_at);
+        assert!(resolved.is_some());
+        assert!(resolved.unwrap() >= Duration::from_millis(5));
+    }
+
+    #[test]
+    fn first_response_none_when_no_output_at_all() {
+        let spawned_at = Instant::now();
+        let resolved = resolve_first_response(None, None, None, spawned_at);
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn process_telemetry_into_agent_perf_populates_all_fields() {
+        let telemetry = ProcessTelemetry {
+            total_elapsed: Duration::from_secs(3),
+            first_response_latency: Some(Duration::from_millis(500)),
+        };
+        let perf = telemetry.into_agent_perf(Some(1200));
+        assert_eq!(perf.launches, 1);
+        assert_eq!(perf.total_elapsed, Duration::from_secs(3));
+        assert_eq!(perf.first_response_latency, Some(Duration::from_millis(500)));
+        assert_eq!(perf.provider_api_duration, Some(Duration::from_millis(1200)));
+    }
+
+    #[test]
+    fn process_telemetry_into_agent_perf_omits_api_when_none() {
+        let telemetry = ProcessTelemetry {
+            total_elapsed: Duration::from_secs(1),
+            first_response_latency: None,
+        };
+        let perf = telemetry.into_agent_perf(None);
+        assert_eq!(perf.launches, 1);
+        assert_eq!(perf.provider_api_duration, None);
+        assert_eq!(perf.first_response_latency, None);
     }
 }
