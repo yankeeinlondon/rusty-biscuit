@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use darkmatter::markdown::compose::ComposePerfReport;
 use darkmatter::markdown::Markdown;
 use serde::{Deserialize, Serialize};
 
@@ -91,6 +92,8 @@ pub struct PreparedComposition {
     pub closure: CompositionClosurePlan,
     /// Parsed lifecycle notification config from effective frontmatter.
     pub lifecycle: LifecycleConfig,
+    /// Darkmatter composition performance report, when enabled.
+    pub compose_perf: Option<ComposePerfReport>,
 }
 
 /// How the composition result should be applied after provider execution.
