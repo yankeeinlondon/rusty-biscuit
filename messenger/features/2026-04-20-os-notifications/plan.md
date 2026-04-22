@@ -50,6 +50,19 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1:
   - .claude/skills/messenger/SKILL.md
   - .claude/skills/messenger/providers.md
+source_files_during_phase_2:
+  - messenger/lib/src/provider/desktop/backend.rs
+  - messenger/lib/src/provider/desktop/linux.rs
+  - messenger/lib/src/provider/desktop/macos.rs
+  - messenger/lib/src/provider/desktop/mod.rs
+  - messenger/lib/src/provider/desktop/request.rs
+  - messenger/lib/src/provider/desktop/windows.rs
+  - messenger/lib/src/dispatch.rs
+  - messenger/cli/src/main.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .opencode/skill/messenger/SKILL.md
 ---
 
 # OS Notifications Execution Plan
@@ -95,15 +108,15 @@ skills_files_updated_during_phase_1:
 ## Phase 2: Enhanced Desktop Features
 
 ### Parallelizable Work
-- [ ] Improve macOS native delivery via `UserNotifications.framework`
-- [ ] Add notification replacement APIs using `MessageRef::Desktop`
-- [ ] Add notification dismissal APIs
-- [ ] Expose richer categories and grouping where portable
+- [x] Improve macOS native delivery via `UserNotifications.framework`
+- [x] Add notification replacement APIs using `MessageRef::Desktop`
+- [x] Add notification dismissal APIs
+- [x] Expose richer categories and grouping where portable
 
 ### Validation Checkpoints
-- [ ] Test native macOS notifications with explicit strategy config
-- [ ] Verify replacement/dismissal functionality works across platforms
-- [ ] Confirm backward compatibility with Phase 1 implementations
+- [x] Test native macOS notifications with explicit strategy config
+- [x] Verify replacement/dismissal functionality works across platforms
+- [x] Confirm backward compatibility with Phase 1 implementations
 
 ## Phase 3: Advanced Desktop Capabilities
 
