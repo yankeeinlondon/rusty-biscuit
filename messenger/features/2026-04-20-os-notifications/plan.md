@@ -1,7 +1,7 @@
 ---
 phases: 4
 created: 2026-04-21
-start_phase: 1
+start_phase: 4
 packages:
   - messenger
   - messenger-cli
