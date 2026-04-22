@@ -1,6 +1,8 @@
-set dotenv-load
-set positional-arguments
-set allow-duplicate-recipes
+set dotenv-load := true
+set positional-arguments := true
+
+# set allow-duplicate-recipes
+
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
@@ -10,7 +12,6 @@ import "../just/spec.just"
 import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
-
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -22,12 +23,9 @@ YELLOW := '\033[33m'
 BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
-
 PACKAGE := "Messenger"
 LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
-
-
 
 default:
     #!/usr/bin/env bash
@@ -38,7 +36,7 @@ default:
     fi
 
     echo
-    echo -e "{{BOLD}}{{PACKAGE}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
+    echo -e "{{ BOLD }}{{ PACKAGE }} ({{ RESET }}Library & CLI{{ BOLD }}){{ RESET }}"
     echo "======================================================================================"
     echo ""
     just --list | grep -v 'default'
@@ -46,9 +44,8 @@ default:
 
 # Build the library and CLI
 build *args="":
-    @just _build messenger "Messenger" {{args}}
-    @just _build messenger-cli "Messenger CLI" {{args}}
-
+    @just _build messenger "Messenger" {{ args }}
+    @just _build messenger-cli "Messenger CLI" {{ args }}
 
 # Test both library and CLI
 test:
@@ -60,21 +57,19 @@ lint:
     @just _lint messenger
     @just _lint messenger-cli
 
-
 lint-fix:
     @just _lint messenger || just _lint_fix messenger
     @just _lint messenger-cli || just _lint_fix messenger-cli
 
-
 # Install the CLI (enables native playback on macOS/Windows; Linux requires libasound2-dev)
 install *args="":
     @just build
-    @just _install "./cli" "Claudine" "{{args}}"
+    @just _install "./cli" "Claudine" "{{ args }}"
 
 # stages all files in package area and then commits and pushes
 cp:
     @echo ""
-    @echo "Staging all {{BOLD}}modified{{RESET}} or {{BOLD}}untracked{{RESET}} files for the {{PACKAGE}} package area."
+    @echo "Staging all {{ BOLD }}modified{{ RESET }} or {{ BOLD }}untracked{{ RESET }} files for the {{ PACKAGE }} package area."
     @echo ""
     @git add .
     @echo ""
@@ -85,20 +80,20 @@ cp:
     @git push
     @echo ""
     @just _play select-4
-    @echo "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
+    @echo "All committed files from {{ BOLD }}{{ PACKAGE }}{{ RESET }} have now been pushed to remote."
     @echo
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p {{LIBRARY}} -p {{CLI}}
+    @cargo check -p {{ LIBRARY }} -p {{ CLI }}
 
 # Show the dependencies for this package
 deps:
     @echo "Dependencies:"
-    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
-
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{ LIBRARY }}*:"
 
 # No-op recipe: reference color vars so linters won't report them as unused.
+
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true
