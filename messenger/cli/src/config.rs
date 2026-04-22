@@ -6,6 +6,20 @@ use clap::ValueEnum;
 use color_eyre::eyre::Result;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// Desktop notification action persisted in route config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationAction {
+    pub id: String,
+    pub label: String,
+}
+
+/// Desktop notification progress indicator persisted in route config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationProgress {
+    pub current: u32,
+    pub total: u32,
+}
+
 /// Portable urgency levels that match `messenger::NotificationUrgency`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -168,6 +182,9 @@ pub enum RouteConfig {
         category: Option<String>,
         urgency: RouteUrgency,
         timeout_ms: Option<u32>,
+        actions: Vec<NotificationAction>,
+        progress: Option<NotificationProgress>,
+        badge_count: Option<u32>,
         windows: DesktopWindowsConfig,
         macos: DesktopMacOsConfig,
         linux: DesktopLinuxConfig,
@@ -270,6 +287,12 @@ enum RouteConfigRepr {
         urgency: RouteUrgency,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u32>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        actions: Vec<NotificationAction>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        progress: Option<NotificationProgress>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        badge_count: Option<u32>,
         #[serde(default, skip_serializing_if = "is_default_windows")]
         windows: DesktopWindowsConfig,
         #[serde(default, skip_serializing_if = "is_default_macos")]
@@ -377,6 +400,9 @@ impl RouteConfig {
             category: None,
             urgency: RouteUrgency::default(),
             timeout_ms: None,
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
             windows: DesktopWindowsConfig::default(),
             macos: DesktopMacOsConfig::default(),
             linux: DesktopLinuxConfig::default(),
@@ -483,6 +509,9 @@ impl From<RouteConfigRepr> for RouteConfig {
                 category,
                 urgency,
                 timeout_ms,
+                actions,
+                progress,
+                badge_count,
                 windows,
                 macos,
                 linux,
@@ -493,6 +522,9 @@ impl From<RouteConfigRepr> for RouteConfig {
                 category,
                 urgency,
                 timeout_ms,
+                actions,
+                progress,
+                badge_count,
                 windows,
                 macos,
                 linux,
@@ -578,6 +610,9 @@ impl From<RouteConfig> for RouteConfigRepr {
                 category,
                 urgency,
                 timeout_ms,
+                actions,
+                progress,
+                badge_count,
                 windows,
                 macos,
                 linux,
@@ -588,6 +623,9 @@ impl From<RouteConfig> for RouteConfigRepr {
                 category,
                 urgency,
                 timeout_ms,
+                actions,
+                progress,
+                badge_count,
                 windows,
                 macos,
                 linux,

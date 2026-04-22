@@ -126,6 +126,79 @@ enum Commands {
         /// Group identifier for desktop notifications that support grouping.
         #[arg(long, value_name = "ID")]
         group_id: Option<String>,
+
+        /// Progress current value (desktop notifications).
+        #[arg(long, value_name = "N")]
+        progress_current: Option<u32>,
+
+        /// Progress total value (desktop notifications).
+        #[arg(long, value_name = "N")]
+        progress_total: Option<u32>,
+
+        /// Badge count for app icon (desktop notifications).
+        #[arg(long, value_name = "N")]
+        badge_count: Option<u32>,
+
+        /// Action button in "id:label" format (desktop notifications). Repeatable.
+        #[arg(long, value_name = "ID:LABEL")]
+        action: Vec<String>,
+    },
+    /// Replace an existing desktop notification using a saved receipt.
+    Replace {
+        /// Path to a saved receipt from a prior desktop send.
+        receipt: String,
+
+        /// Updated message text.
+        message: Option<String>,
+
+        /// Updated title.
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Use plain text instead of Markdown.
+        #[arg(long)]
+        plain: bool,
+
+        /// Updated subtitle.
+        #[arg(long)]
+        subtitle: Option<String>,
+
+        /// Updated icon name or path.
+        #[arg(long)]
+        icon: Option<String>,
+
+        /// Updated category.
+        #[arg(long)]
+        category: Option<String>,
+
+        /// Updated urgency.
+        #[arg(long, value_enum)]
+        urgency: Option<RouteUrgency>,
+
+        /// Updated timeout in milliseconds.
+        #[arg(long, value_name = "MS")]
+        timeout_ms: Option<u32>,
+
+        /// Updated progress current value.
+        #[arg(long, value_name = "N")]
+        progress_current: Option<u32>,
+
+        /// Updated progress total value.
+        #[arg(long, value_name = "N")]
+        progress_total: Option<u32>,
+
+        /// Updated badge count.
+        #[arg(long, value_name = "N")]
+        badge_count: Option<u32>,
+
+        /// Path to an image to attach.
+        #[arg(long)]
+        image: Option<PathBuf>,
+    },
+    /// Dismiss a delivered desktop notification using a saved receipt.
+    Dismiss {
+        /// Path to a saved receipt from a prior desktop send.
+        receipt: String,
     },
     /// Interactive provider configuration.
     Setup {
@@ -177,6 +250,10 @@ async fn main() -> Result<()> {
             timeout_ms,
             replace_id,
             group_id,
+            progress_current,
+            progress_total,
+            badge_count,
+            action,
         } => {
             send_message(SendArgs {
                 message,
@@ -198,8 +275,47 @@ async fn main() -> Result<()> {
                 timeout_ms,
                 replace_id,
                 group_id,
+                progress_current,
+                progress_total,
+                badge_count,
+                action,
             })
             .await?;
+        }
+        Commands::Replace {
+            receipt,
+            message,
+            title,
+            plain,
+            subtitle,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+            progress_current,
+            progress_total,
+            badge_count,
+            image,
+        } => {
+            replace_notification(ReplaceArgs {
+                receipt,
+                message,
+                title,
+                plain,
+                subtitle,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                progress_current,
+                progress_total,
+                badge_count,
+                image,
+            })
+            .await?;
+        }
+        Commands::Dismiss { receipt } => {
+            dismiss_notification(receipt).await?;
         }
         Commands::Setup { provider } | Commands::Init { provider } => {
             setup::run(provider)?;
@@ -275,6 +391,10 @@ struct SendArgs {
     timeout_ms: Option<u32>,
     replace_id: Option<String>,
     group_id: Option<String>,
+    progress_current: Option<u32>,
+    progress_total: Option<u32>,
+    badge_count: Option<u32>,
+    action: Vec<String>,
 }
 
 #[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
@@ -299,6 +419,10 @@ async fn send_message(args: SendArgs) -> Result<()> {
         timeout_ms,
         replace_id,
         group_id,
+        progress_current,
+        progress_total,
+        badge_count,
+        action,
     } = args;
 
     let config = Config::load()?;
@@ -376,6 +500,10 @@ async fn send_message(args: SendArgs) -> Result<()> {
             timeout_ms,
             replace_id,
             group_id,
+            progress_current,
+            progress_total,
+            badge_count,
+            action,
         });
         if !overrides_is_empty(&overrides) {
             dispatch = dispatch.with_overrides(messenger::ProviderOverrides::Desktop(overrides));
@@ -411,9 +539,34 @@ struct DesktopOverrideInputs {
     timeout_ms: Option<u32>,
     replace_id: Option<String>,
     group_id: Option<String>,
+    progress_current: Option<u32>,
+    progress_total: Option<u32>,
+    badge_count: Option<u32>,
+    action: Vec<String>,
 }
 
 fn build_desktop_overrides(inputs: DesktopOverrideInputs) -> messenger::DesktopOverrides {
+    let progress = match (inputs.progress_current, inputs.progress_total) {
+        (Some(current), Some(total)) => Some(messenger::NotificationProgress { current, total }),
+        _ => None,
+    };
+
+    let actions = inputs
+        .action
+        .into_iter()
+        .filter_map(|s| {
+            let parts: Vec<&str> = s.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                Some(messenger::NotificationAction {
+                    id: parts[0].to_string(),
+                    label: parts[1].to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
     messenger::DesktopOverrides {
         subtitle: inputs.subtitle,
         app_name: None,
@@ -423,6 +576,9 @@ fn build_desktop_overrides(inputs: DesktopOverrideInputs) -> messenger::DesktopO
         icon: inputs.icon.map(icon_string_to_messenger),
         replace_id: inputs.replace_id,
         group_id: inputs.group_id,
+        actions,
+        progress,
+        badge_count: inputs.badge_count,
     }
 }
 
@@ -435,6 +591,9 @@ fn overrides_is_empty(o: &messenger::DesktopOverrides) -> bool {
         && o.icon.is_none()
         && o.replace_id.is_none()
         && o.group_id.is_none()
+        && o.actions.is_empty()
+        && o.progress.is_none()
+        && o.badge_count.is_none()
 }
 
 fn route_urgency_to_messenger(urgency: RouteUrgency) -> messenger::NotificationUrgency {
@@ -456,6 +615,199 @@ fn icon_string_to_messenger(value: String) -> messenger::NotificationIcon {
 fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning]) {
     for warning in warnings {
         eprintln!("{warning}");
+    }
+}
+
+struct ReplaceArgs {
+    receipt: String,
+    message: Option<String>,
+    title: Option<String>,
+    plain: bool,
+    subtitle: Option<String>,
+    icon: Option<String>,
+    category: Option<String>,
+    urgency: Option<RouteUrgency>,
+    timeout_ms: Option<u32>,
+    progress_current: Option<u32>,
+    progress_total: Option<u32>,
+    badge_count: Option<u32>,
+    image: Option<PathBuf>,
+}
+
+#[tracing::instrument(skip_all)]
+async fn replace_notification(args: ReplaceArgs) -> Result<()> {
+    let receipt = receipt_store::load_receipt(&args.receipt)?;
+    if receipt.provider != messenger::ProviderKind::Desktop {
+        return Err(eyre!(
+            "replace only supports Desktop receipts; got {}",
+            receipt.provider
+        ));
+    }
+
+    let config = Config::load()?;
+    let route_name = config
+        .routes
+        .iter()
+        .find(|(_, route)| route.provider() == RouteProvider::Desktop)
+        .map(|(name, _)| name.clone());
+
+    let route = route_name
+        .as_ref()
+        .and_then(|name| config.routes.get(name).cloned())
+        .unwrap_or_else(RouteConfig::desktop_default);
+
+    let mut message = match args.message.as_deref() {
+        Some(text) if !text.is_empty() => {
+            if args.plain {
+                messenger::Message::text(text)
+            } else {
+                messenger::Message::markdown(text)
+            }
+        }
+        _ => messenger::Message {
+            title: None,
+            body: None,
+            attachments: Vec::new(),
+            location: None,
+            metadata: std::collections::BTreeMap::new(),
+        },
+    };
+
+    if let Some(t) = args.title {
+        message = message.title(t);
+    }
+    if let Some(image_path) = args.image {
+        message = message.image(image_path);
+    }
+
+    let dispatch = messenger::Dispatch::to(messenger::Target::desktop());
+    let overrides = build_desktop_overrides(DesktopOverrideInputs {
+        subtitle: args.subtitle,
+        icon: args.icon,
+        category: args.category,
+        urgency: args.urgency,
+        timeout_ms: args.timeout_ms,
+        replace_id: None,
+        group_id: None,
+        progress_current: args.progress_current,
+        progress_total: args.progress_total,
+        badge_count: args.badge_count,
+        action: Vec::new(),
+    });
+    let dispatch = if overrides_is_empty(&overrides) {
+        dispatch
+    } else {
+        dispatch.with_overrides(messenger::ProviderOverrides::Desktop(overrides))
+    };
+
+    let prepared = messenger::PreparedMessage::new(&message);
+
+    // Build a standalone DesktopNotificationProvider from route config.
+    let desktop_provider = build_desktop_provider_from_route(&route)?;
+
+    let new_receipt = desktop_provider.replace(&receipt, &dispatch, &prepared).await?;
+    let receipt_path = receipt_store::save_receipt(&new_receipt, route_name.as_deref())?;
+    tracing::info!(
+        provider = %new_receipt.provider,
+        raw_id = %new_receipt.raw_id,
+        receipt_path = %receipt_path.display(),
+        "CLI replace complete"
+    );
+    eprintln!(
+        "Replaced via {} (id: {})\nReceipt: {}",
+        new_receipt.provider,
+        new_receipt.raw_id,
+        receipt_path.display()
+    );
+
+    Ok(())
+}
+
+async fn dismiss_notification(receipt_spec: String) -> Result<()> {
+    let receipt = receipt_store::load_receipt(&receipt_spec)?;
+    if receipt.provider != messenger::ProviderKind::Desktop {
+        return Err(eyre!(
+            "dismiss only supports Desktop receipts; got {}",
+            receipt.provider
+        ));
+    }
+
+    let config = Config::load()?;
+    let route = config
+        .routes
+        .iter()
+        .find(|(_, route)| route.provider() == RouteProvider::Desktop)
+        .map(|(_, route)| route.clone())
+        .unwrap_or_else(RouteConfig::desktop_default);
+
+    let desktop_provider = build_desktop_provider_from_route(&route)?;
+
+    desktop_provider.dismiss(&receipt).await?;
+    tracing::info!(raw_id = %receipt.raw_id, "CLI dismiss complete");
+    eprintln!("Dismissed notification {}", receipt.raw_id);
+
+    Ok(())
+}
+
+fn build_desktop_provider_from_route(
+    route: &RouteConfig,
+) -> Result<messenger::DesktopNotificationProvider> {
+    match route {
+        RouteConfig::Desktop {
+            app_name,
+            default_title,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+            actions,
+            progress,
+            badge_count,
+            windows,
+            macos,
+            linux,
+        } => {
+            let config = messenger::DesktopConfig {
+                app_name: app_name.clone(),
+                default_title: default_title.clone(),
+                category: category.clone(),
+                urgency: route_urgency_to_messenger(*urgency),
+                timeout_ms: *timeout_ms,
+                icon: icon.clone().map(icon_string_to_messenger),
+                actions: actions
+                    .iter()
+                    .map(|a| messenger::NotificationAction {
+                        id: a.id.clone(),
+                        label: a.label.clone(),
+                    })
+                    .collect(),
+                progress: progress.map(|p| messenger::NotificationProgress {
+                    current: p.current,
+                    total: p.total,
+                }),
+                badge_count: *badge_count,
+                windows: messenger::WindowsDesktopConfig {
+                    app_id: windows.app_id.clone(),
+                },
+                macos: messenger::MacOsDesktopConfig {
+                    bundle_id: macos.bundle_id.clone(),
+                    strategy: match macos.strategy {
+                        config::RouteMacOsStrategy::Auto => messenger::MacOsNotificationStrategy::Auto,
+                        config::RouteMacOsStrategy::NativeUserNotifications => {
+                            messenger::MacOsNotificationStrategy::NativeUserNotifications
+                        }
+                        config::RouteMacOsStrategy::AppleScript => {
+                            messenger::MacOsNotificationStrategy::AppleScript
+                        }
+                    },
+                },
+                linux: messenger::LinuxDesktopConfig {
+                    desktop_entry: linux.desktop_entry.clone(),
+                },
+            };
+            Ok(messenger::DesktopNotificationProvider::new(config))
+        }
+        _ => Err(eyre!("expected Desktop route")),
     }
 }
 
@@ -628,6 +980,9 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
             category,
             urgency,
             timeout_ms,
+            actions,
+            progress,
+            badge_count,
             windows,
             macos,
             linux,
@@ -639,6 +994,18 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 urgency: route_urgency_to_messenger(*urgency),
                 timeout_ms: *timeout_ms,
                 icon: icon.clone().map(icon_string_to_messenger),
+                actions: actions
+                    .iter()
+                    .map(|a| messenger::NotificationAction {
+                        id: a.id.clone(),
+                        label: a.label.clone(),
+                    })
+                    .collect(),
+                progress: progress.map(|p| messenger::NotificationProgress {
+                    current: p.current,
+                    total: p.total,
+                }),
+                badge_count: *badge_count,
                 windows: messenger::WindowsDesktopConfig {
                     app_id: windows.app_id.clone(),
                 },
@@ -1186,6 +1553,9 @@ mod tests {
             category: Some("im.received".into()),
             urgency: config::RouteUrgency::Critical,
             timeout_ms: Some(5000),
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
             windows: config::DesktopWindowsConfig {
                 app_id: Some("RustyBiscuit.Messenger".into()),
             },
@@ -1238,6 +1608,9 @@ mod tests {
                 category,
                 urgency,
                 timeout_ms,
+                actions,
+                progress,
+                badge_count,
                 windows,
                 macos,
                 linux,
@@ -1248,6 +1621,9 @@ mod tests {
                 assert_eq!(category.as_deref(), Some("im.received"));
                 assert_eq!(urgency, config::RouteUrgency::Normal);
                 assert_eq!(timeout_ms, Some(5000));
+                assert!(actions.is_empty());
+                assert!(progress.is_none());
+                assert!(badge_count.is_none());
                 assert_eq!(windows.app_id.as_deref(), Some("RustyBiscuit.Messenger"));
                 assert_eq!(
                     macos.bundle_id.as_deref(),
@@ -1272,6 +1648,9 @@ mod tests {
                 category,
                 urgency,
                 timeout_ms,
+                actions,
+                progress,
+                badge_count,
                 windows,
                 macos,
                 linux,
@@ -1282,6 +1661,9 @@ mod tests {
                 assert!(category.is_none());
                 assert_eq!(urgency, config::RouteUrgency::Normal);
                 assert!(timeout_ms.is_none());
+                assert!(actions.is_empty());
+                assert!(progress.is_none());
+                assert!(badge_count.is_none());
                 assert!(windows.app_id.is_none());
                 assert!(macos.bundle_id.is_none());
                 assert_eq!(macos.strategy, config::RouteMacOsStrategy::Auto);
@@ -1447,6 +1829,134 @@ mod tests {
                 assert_eq!(group_id.as_deref(), Some("build-alerts"));
             }
             _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_progress_flags() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--progress-current",
+            "42",
+            "--progress-total",
+            "100",
+            "Uploading",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                progress_current,
+                progress_total,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Uploading"));
+                assert_eq!(progress_current, Some(42));
+                assert_eq!(progress_total, Some(100));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_badge_count_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--badge-count",
+            "5",
+            "New alerts",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                badge_count,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("New alerts"));
+                assert_eq!(badge_count, Some(5));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_action_flags() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--action",
+            "ok:Approve",
+            "--action",
+            "reject:Reject",
+            "Approval needed",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send { message, action, .. } => {
+                assert_eq!(message.as_deref(), Some("Approval needed"));
+                assert_eq!(action, vec!["ok:Approve", "reject:Reject"]);
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn replace_cli_parses_basic_args() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "replace",
+            "/tmp/receipt.json",
+            "Updated message",
+            "--title",
+            "Updated",
+            "--badge-count",
+            "3",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Replace {
+                receipt,
+                message,
+                title,
+                badge_count,
+                ..
+            } => {
+                assert_eq!(receipt, "/tmp/receipt.json");
+                assert_eq!(message.as_deref(), Some("Updated message"));
+                assert_eq!(title.as_deref(), Some("Updated"));
+                assert_eq!(badge_count, Some(3));
+            }
+            _ => panic!("expected Replace subcommand"),
+        }
+    }
+
+    #[test]
+    fn dismiss_cli_parses_receipt_arg() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from(["messenger", "dismiss", "/tmp/receipt.json"]).unwrap();
+
+        match cli.command {
+            Commands::Dismiss { receipt } => {
+                assert_eq!(receipt, "/tmp/receipt.json");
+            }
+            _ => panic!("expected Dismiss subcommand"),
         }
     }
 }
