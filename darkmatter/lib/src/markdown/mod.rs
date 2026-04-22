@@ -27,6 +27,7 @@
 //! assert_eq!(title, Some("Hello World".to_string()));
 //! ```
 
+pub mod block;
 pub mod cleanup;
 pub mod compose;
 pub mod delta;

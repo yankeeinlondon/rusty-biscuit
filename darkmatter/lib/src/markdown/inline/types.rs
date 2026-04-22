@@ -31,6 +31,16 @@ pub enum InlineTag {
     // Superscript,  // ^text^
 }
 
+/// Attributes for horizontal rule with custom styling.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HorizontalRuleAttrs {
+    pub style: Option<String>,
+    pub placement: Option<String>,
+    pub weight: Option<String>,
+    pub width: Option<String>,
+    pub color: Option<String>,
+}
+
 /// Wrapper for pulldown-cmark events with custom inline extensions.
 ///
 /// This enum wraps standard pulldown-cmark events while adding support
@@ -62,6 +72,9 @@ pub enum InlineEvent<'a> {
 
     /// End of a custom inline tag.
     End(InlineTag),
+
+    /// Horizontal rule with attributes.
+    HorizontalRule(HorizontalRuleAttrs),
 }
 
 impl<'a> From<Event<'a>> for InlineEvent<'a> {
@@ -89,6 +102,12 @@ impl InlineEvent<'_> {
         matches!(self, InlineEvent::End(_))
     }
 
+    /// Returns `true` if this is a horizontal rule event.
+    #[inline]
+    pub fn is_horizontal_rule(&self) -> bool {
+        matches!(self, InlineEvent::HorizontalRule(_))
+    }
+
     /// Returns the inner standard event if this is a Standard variant.
     pub fn as_standard(&self) -> Option<&Event<'_>> {
         match self {
@@ -101,7 +120,15 @@ impl InlineEvent<'_> {
     pub fn inline_tag(&self) -> Option<InlineTag> {
         match self {
             InlineEvent::Start(tag) | InlineEvent::End(tag) => Some(*tag),
-            InlineEvent::Standard(_) => None,
+            InlineEvent::Standard(_) | InlineEvent::HorizontalRule(_) => None,
+        }
+    }
+
+    /// Returns the horizontal rule attributes if this is a HorizontalRule variant.
+    pub fn horizontal_rule_attrs(&self) -> Option<&HorizontalRuleAttrs> {
+        match self {
+            InlineEvent::HorizontalRule(attrs) => Some(attrs),
+            _ => None,
         }
     }
 }

@@ -1,4 +1,5 @@
 ---
+name: rust-developer
 description: Sub-agent specialized for Rust development, testing, and DevOps with expertise in the Rust ecosystem
 ---
 

@@ -160,6 +160,7 @@ mod tests {
             effective_agent_hint: agent_hint,
             closure: CompositionClosurePlan::Direct,
             lifecycle: LifecycleConfig::default(),
+            compose_perf: None,
         }
     }
 
