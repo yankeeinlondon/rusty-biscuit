@@ -40,7 +40,6 @@ impl ProviderKind {
             Self::Fcm => "fcm",
         }
     }
-    }
 
     /// Create a [`MessengerError::Transport`] for this provider.
     pub fn transport_error(self, message: impl fmt::Display) -> MessengerError {
