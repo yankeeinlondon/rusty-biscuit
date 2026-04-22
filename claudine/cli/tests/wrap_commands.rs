@@ -185,6 +185,10 @@ fn wrapper_help_includes_expected_flags() {
         plain.contains("--edit"),
         "help output should describe prompt editing; stdout was: {plain}"
     );
+    assert!(
+        plain.contains("--perf"),
+        "help output should describe performance reporting; stdout was: {plain}"
+    );
 }
 
 #[test]
@@ -972,6 +976,69 @@ exit 1
     assert!(plain.contains("DRY RUN"));
     assert!(plain.contains("Command:"));
     assert!(plain.contains("codex"));
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_perf_emits_report_to_stderr_only() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["codex", "--perf", "--", "--version"])
+        .assert()
+        .success()
+        .stdout("");
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(plain.contains("Performance"), "stderr should contain Performance section; got: {plain}");
+    assert!(plain.contains("CLI Overhead"), "stderr should contain CLI Overhead section; got: {plain}");
+    assert!(plain.contains("Agent Execution"), "stderr should contain Agent Execution section; got: {plain}");
+    assert!(plain.contains("launches:"), "stderr should show launch count; got: {plain}");
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_dry_run_perf_emits_report_with_skipped_note() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+echo "SHOULD NOT RUN"
+exit 1
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["codex", "--dry-run", "--perf", "--", "--version"])
+        .assert()
+        .success()
+        .stdout("");
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(plain.contains("Performance"), "stderr should contain Performance section; got: {plain}");
+    assert!(plain.contains("CLI Overhead"), "stderr should contain CLI Overhead section; got: {plain}");
+    assert!(
+        plain.contains("dry run") || plain.contains("skipped"),
+        "stderr should mention dry run; got: {plain}"
+    );
 }
 
 #[cfg(unix)]

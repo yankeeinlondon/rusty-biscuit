@@ -881,7 +881,7 @@ pub(crate) fn execute_composition_request_inner(
 
         // Harness loop manages the guard internally; defuse ours.
         guard.defuse();
-        let exit_code = run_harness_loop(
+        let (exit_code, _telemetry) = run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),

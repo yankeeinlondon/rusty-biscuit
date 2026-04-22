@@ -26,6 +26,7 @@ pub(crate) struct CliOverheadReport {
     pub environment_setup: Duration,
 }
 
+#[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct StartupTimings {
     pub arg_parsing: Duration,
