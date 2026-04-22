@@ -1,0 +1,1 @@
+../../.claude/agents/spec-writer.md
