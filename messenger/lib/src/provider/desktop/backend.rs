@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 
 use crate::error::MessengerError;
-use crate::receipt::DesktopPlatform;
+use crate::receipt::{DesktopPlatform, ProviderKind};
 
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
@@ -27,4 +27,31 @@ pub(crate) trait DesktopBackend: Send + Sync {
         &self,
         request: DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, MessengerError>;
+
+    /// Replace an existing notification using its platform identifier.
+    ///
+    /// Default implementation returns [`MessengerError::UnsupportedFeature`].
+    /// Platforms that support replacement (Linux D-Bus, macOS native)
+    /// override this method.
+    async fn replace(
+        &self,
+        _id: &str,
+        _request: DesktopNotificationRequest,
+    ) -> Result<DesktopNotificationReceipt, MessengerError> {
+        Err(MessengerError::UnsupportedFeature {
+            provider: ProviderKind::Desktop,
+            feature: "notification replacement",
+        })
+    }
+
+    /// Dismiss a delivered notification using its platform identifier.
+    ///
+    /// Default implementation returns [`MessengerError::UnsupportedFeature`].
+    /// Platforms that support dismissal (macOS native) override this method.
+    async fn dismiss(&self, _id: &str) -> Result<(), MessengerError> {
+        Err(MessengerError::UnsupportedFeature {
+            provider: ProviderKind::Desktop,
+            feature: "notification dismissal",
+        })
+    }
 }

@@ -159,6 +159,62 @@ impl DesktopNotificationProvider {
         &self.config
     }
 
+    /// Replace an existing desktop notification.
+    ///
+    /// The `receipt` must be a [`SendReceipt`] from a prior desktop send.
+    /// Backends that support replacement (Linux D-Bus, macOS native) will
+    /// update the notification in-place; others return
+    /// [`MessengerError::UnsupportedFeature`].
+    pub async fn replace(
+        &self,
+        receipt: &SendReceipt,
+        dispatch: &Dispatch,
+        message: &PreparedMessage,
+    ) -> Result<SendReceipt, MessengerError> {
+        if receipt.provider != ProviderKind::Desktop {
+            return Err(MessengerError::InvalidMessage(
+                "replace requires a Desktop receipt".into(),
+            ));
+        }
+
+        let platform = self.backend.platform();
+        tracing::Span::current().record("platform", tracing::field::display(platform));
+
+        let request = build_request(&self.config, dispatch, message)?;
+        let backend_receipt = self.backend.replace(&receipt.raw_id, request).await?;
+
+        let mut metadata = backend_receipt.metadata;
+        if !metadata.contains_key("platform") {
+            metadata.insert("platform".to_string(), platform.to_string());
+        }
+
+        Ok(SendReceipt {
+            provider: ProviderKind::Desktop,
+            message_ref: MessageRef::Desktop {
+                platform,
+                notification_id: backend_receipt.notification_id.clone(),
+            },
+            raw_id: backend_receipt.notification_id,
+            metadata,
+        })
+    }
+
+    /// Dismiss a delivered desktop notification.
+    ///
+    /// The `receipt` must be a [`SendReceipt`] from a prior desktop send.
+    /// Backends that support dismissal (macOS native) will remove the
+    /// notification from the notification center; others return
+    /// [`MessengerError::UnsupportedFeature`].
+    pub async fn dismiss(&self, receipt: &SendReceipt) -> Result<(), MessengerError> {
+        if receipt.provider != ProviderKind::Desktop {
+            return Err(MessengerError::InvalidMessage(
+                "dismiss requires a Desktop receipt".into(),
+            ));
+        }
+
+        self.backend.dismiss(&receipt.raw_id).await
+    }
+
     /// Capability set advertised by the desktop provider.
     ///
     /// The set is a module-level constant so both
@@ -284,6 +340,7 @@ pub(crate) fn build_request(
 
     let subtitle = overrides.and_then(|o| o.subtitle.clone());
     let replace_id = overrides.and_then(|o| o.replace_id.clone());
+    let group_id = overrides.and_then(|o| o.group_id.clone());
 
     Ok(DesktopNotificationRequest {
         title,
@@ -297,6 +354,7 @@ pub(crate) fn build_request(
         urgency,
         timeout_ms,
         replace_id,
+        group_id,
     })
 }
 
@@ -444,6 +502,25 @@ mod tests {
                 .unwrap_or_else(|| DesktopNotificationReceipt::new("fake-id-1"));
             Ok(receipt)
         }
+
+        async fn replace(
+            &self,
+            _id: &str,
+            request: DesktopNotificationRequest,
+        ) -> Result<DesktopNotificationReceipt, MessengerError> {
+            *self.captured.lock().unwrap() = Some(request);
+            let receipt = self
+                .response
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| DesktopNotificationReceipt::new("fake-id-replaced"));
+            Ok(receipt)
+        }
+
+        async fn dismiss(&self, _id: &str) -> Result<(), MessengerError> {
+            Ok(())
+        }
     }
 
     fn default_config() -> DesktopConfig {
@@ -528,6 +605,7 @@ mod tests {
             timeout_ms: Some(5000),
             icon: Some(NotificationIcon::Named("override-icon".into())),
             replace_id: Some("replace-1".into()),
+            group_id: None,
         });
 
         let request = build_request(&config, &dispatch, &prepared).unwrap();
@@ -693,5 +771,126 @@ mod tests {
         let captured = backend.last_request();
         assert_eq!(captured.title, "Title Only");
         assert!(captured.body.is_none());
+    }
+
+    #[tokio::test]
+    async fn replace_produces_typed_receipt() {
+        let backend = Arc::new(CapturingBackend::with_platform(DesktopPlatform::Linux));
+        let provider = DesktopNotificationProvider::with_backend(default_config(), backend.clone());
+
+        let original_receipt = SendReceipt {
+            provider: ProviderKind::Desktop,
+            message_ref: MessageRef::Desktop {
+                platform: DesktopPlatform::Linux,
+                notification_id: "orig-123".into(),
+            },
+            raw_id: "orig-123".into(),
+            metadata: BTreeMap::new(),
+        };
+
+        let message = Message::text("updated body").title("Updated");
+        let prepared = PreparedMessage::new(&message);
+        let dispatch = Dispatch::to(Target::desktop());
+
+        let receipt = provider.replace(&original_receipt, &dispatch, &prepared)
+            .await
+            .unwrap();
+
+        assert_eq!(receipt.provider, ProviderKind::Desktop);
+        assert_eq!(receipt.raw_id, "fake-id-replaced");
+
+        let captured = backend.last_request();
+        assert_eq!(captured.title, "Updated");
+        assert_eq!(captured.body.as_deref(), Some("updated body"));
+    }
+
+    #[tokio::test]
+    async fn replace_rejects_non_desktop_receipt() {
+        let backend = Arc::new(CapturingBackend::with_platform(DesktopPlatform::Linux));
+        let provider = DesktopNotificationProvider::with_backend(default_config(), backend);
+
+        let slack_receipt = SendReceipt {
+            provider: ProviderKind::Slack,
+            message_ref: MessageRef::Slack {
+                channel_id: "C123".into(),
+                thread_ts: "1234567890".into(),
+            },
+            raw_id: "1234567890".into(),
+            metadata: BTreeMap::new(),
+        };
+
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+        let dispatch = Dispatch::to(Target::desktop());
+
+        let result = provider.replace(&slack_receipt, &dispatch, &prepared).await;
+        assert!(matches!(result, Err(MessengerError::InvalidMessage(_))));
+    }
+
+    #[tokio::test]
+    async fn dismiss_succeeds_with_desktop_receipt() {
+        let backend = Arc::new(CapturingBackend::with_platform(DesktopPlatform::MacOS));
+        let provider = DesktopNotificationProvider::with_backend(default_config(), backend);
+
+        let receipt = SendReceipt {
+            provider: ProviderKind::Desktop,
+            message_ref: MessageRef::Desktop {
+                platform: DesktopPlatform::MacOS,
+                notification_id: "notif-42".into(),
+            },
+            raw_id: "notif-42".into(),
+            metadata: BTreeMap::new(),
+        };
+
+        provider.dismiss(&receipt).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dismiss_rejects_non_desktop_receipt() {
+        let backend = Arc::new(CapturingBackend::with_platform(DesktopPlatform::Linux));
+        let provider = DesktopNotificationProvider::with_backend(default_config(), backend);
+
+        let slack_receipt = SendReceipt {
+            provider: ProviderKind::Slack,
+            message_ref: MessageRef::Slack {
+                channel_id: "C123".into(),
+                thread_ts: "1234567890".into(),
+            },
+            raw_id: "1234567890".into(),
+            metadata: BTreeMap::new(),
+        };
+
+        let result = provider.dismiss(&slack_receipt).await;
+        assert!(matches!(result, Err(MessengerError::InvalidMessage(_))));
+    }
+
+    #[test]
+    fn group_id_override_is_passed_through() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut dispatch = Dispatch::to(Target::desktop());
+        dispatch.overrides = ProviderOverrides::Desktop(DesktopOverrides {
+            group_id: Some("build-alerts".into()),
+            ..Default::default()
+        });
+
+        let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
+        assert_eq!(request.group_id.as_deref(), Some("build-alerts"));
+    }
+
+    #[test]
+    fn replace_id_override_is_passed_through() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut dispatch = Dispatch::to(Target::desktop());
+        dispatch.overrides = ProviderOverrides::Desktop(DesktopOverrides {
+            replace_id: Some("prev-123".into()),
+            ..Default::default()
+        });
+
+        let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
+        assert_eq!(request.replace_id.as_deref(), Some("prev-123"));
     }
 }

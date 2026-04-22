@@ -45,6 +45,9 @@ pub struct DesktopNotificationRequest {
     pub timeout_ms: Option<u32>,
     /// Optional identifier of a prior notification to replace.
     pub replace_id: Option<String>,
+    /// Optional group identifier for backends that support notification
+    /// grouping or threading.
+    pub group_id: Option<String>,
 }
 
 /// Receipt returned by a [`DesktopBackend`] after a successful send.

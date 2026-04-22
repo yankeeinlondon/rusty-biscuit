@@ -118,6 +118,14 @@ enum Commands {
         /// Expiry timeout in milliseconds (desktop notifications).
         #[arg(long, value_name = "MS")]
         timeout_ms: Option<u32>,
+
+        /// Replace an existing desktop notification by its ID.
+        #[arg(long, value_name = "ID")]
+        replace_id: Option<String>,
+
+        /// Group identifier for desktop notifications that support grouping.
+        #[arg(long, value_name = "ID")]
+        group_id: Option<String>,
     },
     /// Interactive provider configuration.
     Setup {
@@ -167,6 +175,8 @@ async fn main() -> Result<()> {
             category,
             urgency,
             timeout_ms,
+            replace_id,
+            group_id,
         } => {
             send_message(SendArgs {
                 message,
@@ -186,6 +196,8 @@ async fn main() -> Result<()> {
                 category,
                 urgency,
                 timeout_ms,
+                replace_id,
+                group_id,
             })
             .await?;
         }
@@ -261,6 +273,8 @@ struct SendArgs {
     category: Option<String>,
     urgency: Option<RouteUrgency>,
     timeout_ms: Option<u32>,
+    replace_id: Option<String>,
+    group_id: Option<String>,
 }
 
 #[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
@@ -283,6 +297,8 @@ async fn send_message(args: SendArgs) -> Result<()> {
         category,
         urgency,
         timeout_ms,
+        replace_id,
+        group_id,
     } = args;
 
     let config = Config::load()?;
@@ -358,6 +374,8 @@ async fn send_message(args: SendArgs) -> Result<()> {
             category,
             urgency,
             timeout_ms,
+            replace_id,
+            group_id,
         });
         if !overrides_is_empty(&overrides) {
             dispatch = dispatch.with_overrides(messenger::ProviderOverrides::Desktop(overrides));
@@ -391,6 +409,8 @@ struct DesktopOverrideInputs {
     category: Option<String>,
     urgency: Option<RouteUrgency>,
     timeout_ms: Option<u32>,
+    replace_id: Option<String>,
+    group_id: Option<String>,
 }
 
 fn build_desktop_overrides(inputs: DesktopOverrideInputs) -> messenger::DesktopOverrides {
@@ -401,7 +421,8 @@ fn build_desktop_overrides(inputs: DesktopOverrideInputs) -> messenger::DesktopO
         urgency: inputs.urgency.map(route_urgency_to_messenger),
         timeout_ms: inputs.timeout_ms,
         icon: inputs.icon.map(icon_string_to_messenger),
-        replace_id: None,
+        replace_id: inputs.replace_id,
+        group_id: inputs.group_id,
     }
 }
 
@@ -413,6 +434,7 @@ fn overrides_is_empty(o: &messenger::DesktopOverrides) -> bool {
         && o.timeout_ms.is_none()
         && o.icon.is_none()
         && o.replace_id.is_none()
+        && o.group_id.is_none()
 }
 
 fn route_urgency_to_messenger(urgency: RouteUrgency) -> messenger::NotificationUrgency {
@@ -1368,5 +1390,63 @@ mod tests {
         use clap::ValueEnum;
         let parsed = RouteProvider::from_str("desktop", true).unwrap();
         assert_eq!(parsed, RouteProvider::Desktop);
+    }
+
+    #[test]
+    fn send_cli_parses_replace_id_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--replace-id",
+            "notif-123",
+            "Updated status",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                provider,
+                replace_id,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Updated status"));
+                assert_eq!(provider, Some(RouteProvider::Desktop));
+                assert_eq!(replace_id.as_deref(), Some("notif-123"));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_group_id_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--group-id",
+            "build-alerts",
+            "Build failed",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                provider,
+                group_id,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Build failed"));
+                assert_eq!(provider, Some(RouteProvider::Desktop));
+                assert_eq!(group_id.as_deref(), Some("build-alerts"));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
     }
 }

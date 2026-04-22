@@ -82,6 +82,38 @@ impl DesktopBackend for MacOsBackend {
             }
         }
     }
+
+    async fn replace(
+        &self,
+        id: &str,
+        request: DesktopNotificationRequest,
+    ) -> Result<DesktopNotificationReceipt, MessengerError> {
+        match self.resolved_strategy() {
+            MacOsNotificationStrategy::AppleScript | MacOsNotificationStrategy::Auto => {
+                Err(MessengerError::UnsupportedFeature {
+                    provider: ProviderKind::Desktop,
+                    feature: "notification replacement",
+                })
+            }
+            MacOsNotificationStrategy::NativeUserNotifications => {
+                send_native_with_id(&request, self.bundle_id.as_deref(), id)
+            }
+        }
+    }
+
+    async fn dismiss(&self, id: &str) -> Result<(), MessengerError> {
+        match self.resolved_strategy() {
+            MacOsNotificationStrategy::AppleScript | MacOsNotificationStrategy::Auto => {
+                Err(MessengerError::UnsupportedFeature {
+                    provider: ProviderKind::Desktop,
+                    feature: "notification dismissal",
+                })
+            }
+            MacOsNotificationStrategy::NativeUserNotifications => {
+                dismiss_native(id)
+            }
+        }
+    }
 }
 
 fn send_applescript(
@@ -149,16 +181,27 @@ fn escape_applescript(input: &str) -> String {
 #[cfg(target_os = "macos")]
 fn send_native(
     request: &DesktopNotificationRequest,
+    bundle_id: Option<&str>,
+) -> Result<DesktopNotificationReceipt, MessengerError> {
+    let id = request
+        .replace_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    send_native_with_id(request, bundle_id, &id)
+}
+
+#[cfg(target_os = "macos")]
+fn send_native_with_id(
+    request: &DesktopNotificationRequest,
     _bundle_id: Option<&str>,
+    id: &str,
 ) -> Result<DesktopNotificationReceipt, MessengerError> {
     use objc2_foundation::NSString;
     use objc2_user_notifications::{
         UNMutableNotificationContent, UNNotificationRequest, UNUserNotificationCenter,
     };
 
-    let notification_id = uuid::Uuid::new_v4().to_string();
-
-    // The native path is intentionally fire-and-forget in v1: we submit the
+    // The native path is intentionally fire-and-forget: we submit the
     // request to the system center without a completion handler. This keeps
     // the code free of block2 glue while still exercising the native API. A
     // future phase that ships a signed, bundled app can wire completion
@@ -177,15 +220,29 @@ fn send_native(
         content.setCategoryIdentifier(&NSString::from_str(category));
     }
 
-    let identifier = NSString::from_str(&notification_id);
+    let identifier = NSString::from_str(id);
     let notification_request =
         UNNotificationRequest::requestWithIdentifier_content_trigger(&identifier, &content, None);
 
     center.addNotificationRequest_withCompletionHandler(&notification_request, None);
 
-    Ok(DesktopNotificationReceipt::new(notification_id)
+    Ok(DesktopNotificationReceipt::new(id.to_string())
         .with_metadata("delivery", "native")
         .with_metadata("delivery_confirmed", "false"))
+}
+
+#[cfg(target_os = "macos")]
+fn dismiss_native(id: &str) -> Result<(), MessengerError> {
+    use objc2_foundation::{NSArray, NSString};
+    use objc2_user_notifications::UNUserNotificationCenter;
+
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let identifier = NSString::from_str(id);
+    let identifiers = NSArray::from_retained_slice(&[identifier]);
+    center.removeDeliveredNotificationsWithIdentifiers(&identifiers);
+    center.removePendingNotificationRequestsWithIdentifiers(&identifiers);
+
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -197,6 +254,28 @@ fn send_native(
         provider: ProviderKind::Desktop,
         code: None,
         message: "native macOS notification delivery is only available on macOS hosts".into(),
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn send_native_with_id(
+    _request: &DesktopNotificationRequest,
+    _bundle_id: Option<&str>,
+    _id: &str,
+) -> Result<DesktopNotificationReceipt, MessengerError> {
+    Err(MessengerError::Provider {
+        provider: ProviderKind::Desktop,
+        code: None,
+        message: "native macOS notification delivery is only available on macOS hosts".into(),
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn dismiss_native(_id: &str) -> Result<(), MessengerError> {
+    Err(MessengerError::Provider {
+        provider: ProviderKind::Desktop,
+        code: None,
+        message: "native macOS notification dismissal is only available on macOS hosts".into(),
     })
 }
 
@@ -218,6 +297,7 @@ mod tests {
             urgency: NotificationUrgency::Normal,
             timeout_ms: None,
             replace_id: None,
+            group_id: None,
         }
     }
 

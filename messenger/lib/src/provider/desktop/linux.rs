@@ -89,11 +89,85 @@ impl DesktopBackend for LinuxBackend {
             notification.timeout(Timeout::Milliseconds(timeout_ms));
         }
 
+        if let Some(replace_id) = request.replace_id.as_deref() {
+            if let Ok(id_u32) = replace_id.parse::<u32>() {
+                notification.id(id_u32);
+            }
+        }
+
+        if let Some(group_id) = request.group_id.as_deref() {
+            notification.hint(Hint::Custom("group".to_string(), group_id.to_string()));
+        }
+
         let handle = notification.show_async().await.map_err(|error| {
             ProviderKind::Desktop.transport_error(format!("D-Bus notification failed: {error}"))
         })?;
 
         Ok(DesktopNotificationReceipt::new(handle.id().to_string()))
+    }
+
+    async fn replace(
+        &self,
+        id: &str,
+        request: DesktopNotificationRequest,
+    ) -> Result<DesktopNotificationReceipt, MessengerError> {
+        let mut notification = Notification::new();
+        notification.summary(&request.title);
+        notification.appname(&request.app_name);
+
+        if let Some(body) = request.body.as_deref() {
+            notification.body(body);
+        }
+
+        if let Some(icon) = request.icon.as_ref() {
+            match icon {
+                NotificationIcon::Named(name) => {
+                    notification.icon(name);
+                }
+                NotificationIcon::Path(path) => {
+                    notification.icon(&path.to_string_lossy());
+                }
+            }
+        }
+
+        notification.urgency(map_urgency(request.urgency));
+
+        if let Some(category) = request.category.as_deref() {
+            notification.hint(Hint::Category(category.to_string()));
+        }
+
+        if let Some(entry) = self.desktop_entry.as_deref() {
+            notification.hint(Hint::DesktopEntry(entry.to_string()));
+        }
+
+        if let Some(image_path) = request.image.as_ref() {
+            notification.hint(Hint::ImagePath(image_path.to_string_lossy().into_owned()));
+        }
+
+        if request.silent {
+            notification.hint(Hint::SuppressSound(true));
+        }
+
+        if let Some(timeout_ms) = request.timeout_ms {
+            notification.timeout(Timeout::Milliseconds(timeout_ms));
+        }
+
+        let id_u32 = id.parse::<u32>().map_err(|_| {
+            ProviderKind::Desktop.transport_error(format!(
+                "invalid Linux notification id for replacement: {id}"
+            ))
+        })?;
+        notification.id(id_u32);
+
+        if let Some(group_id) = request.group_id.as_deref() {
+            notification.hint(Hint::Custom("group".to_string(), group_id.to_string()));
+        }
+
+        let handle = notification.show_async().await.map_err(|error| {
+            ProviderKind::Desktop.transport_error(format!("D-Bus notification replace failed: {error}"))
+        })?;
+
+        Ok(DesktopNotificationReceipt::new(handle.id().to_string()).with_metadata("replaced", id))
     }
 }
 

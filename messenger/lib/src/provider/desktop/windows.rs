@@ -84,6 +84,24 @@ impl DesktopBackend for WindowsBackend {
         let app_id = self.check_bootstrap()?;
         send_toast(app_id, &request)
     }
+
+    async fn replace(
+        &self,
+        _id: &str,
+        _request: DesktopNotificationRequest,
+    ) -> Result<DesktopNotificationReceipt, MessengerError> {
+        Err(MessengerError::UnsupportedFeature {
+            provider: ProviderKind::Desktop,
+            feature: "notification replacement",
+        })
+    }
+
+    async fn dismiss(&self, _id: &str) -> Result<(), MessengerError> {
+        Err(MessengerError::UnsupportedFeature {
+            provider: ProviderKind::Desktop,
+            feature: "notification dismissal",
+        })
+    }
 }
 
 /// Outcome of the Start Menu shortcut bootstrap check.
@@ -199,6 +217,7 @@ mod tests {
             urgency: crate::dispatch::NotificationUrgency::Normal,
             timeout_ms: None,
             replace_id: None,
+            group_id: None,
         };
 
         let error = backend.send(request).await.unwrap_err();

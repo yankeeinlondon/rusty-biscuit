@@ -102,6 +102,7 @@ pub struct DesktopOverrides {
     pub timeout_ms: Option<u32>,
     pub icon: Option<NotificationIcon>,
     pub replace_id: Option<String>,
+    pub group_id: Option<String>,
 }
 
 /// Portable urgency level for desktop notifications.
