@@ -19,20 +19,13 @@ pub enum ProviderKind {
     WhatsApp,
     Telegram,
     Desktop,
+    #[serde(rename = "apns")]
+    Apns,
+    #[serde(rename = "fcm")]
+    Fcm,
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 8] = [
-        Self::Discord,
-        Self::DiscordWebhook,
-        Self::Slack,
-        Self::SlackWebhook,
-        Self::Signal,
-        Self::WhatsApp,
-        Self::Telegram,
-        Self::Desktop,
-    ];
-
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Discord => "discord",
@@ -43,7 +36,10 @@ impl ProviderKind {
             Self::WhatsApp => "whatsapp",
             Self::Telegram => "telegram",
             Self::Desktop => "desktop",
+            Self::Apns => "apns",
+            Self::Fcm => "fcm",
         }
+    }
     }
 
     /// Create a [`MessengerError::Transport`] for this provider.
@@ -66,6 +62,8 @@ impl fmt::Display for ProviderKind {
             Self::WhatsApp => write!(f, "WhatsApp"),
             Self::Telegram => write!(f, "Telegram"),
             Self::Desktop => write!(f, "Desktop"),
+            Self::Apns => write!(f, "APNs"),
+            Self::Fcm => write!(f, "FCM"),
         }
     }
 }
@@ -130,6 +128,13 @@ pub enum MessageRef {
         platform: DesktopPlatform,
         notification_id: String,
     },
+    Apns {
+        apns_id: String,
+    },
+    Fcm {
+        message_id: String,
+        project_id: String,
+    },
 }
 
 impl MessageRef {
@@ -144,6 +149,8 @@ impl MessageRef {
             Self::WhatsApp { .. } => ProviderKind::WhatsApp,
             Self::Telegram { .. } => ProviderKind::Telegram,
             Self::Desktop { .. } => ProviderKind::Desktop,
+            Self::Apns { .. } => ProviderKind::Apns,
+            Self::Fcm { .. } => ProviderKind::Fcm,
         }
     }
 

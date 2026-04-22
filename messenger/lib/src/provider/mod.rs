@@ -16,6 +16,10 @@ pub mod slack_webhook;
 pub mod telegram;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp;
+#[cfg(feature = "apns")]
+pub mod apns;
+#[cfg(feature = "fcm")]
+pub mod fcm;
 
 use std::collections::HashMap;
 
@@ -26,7 +30,9 @@ use futures::future::join_all;
     feature = "slack",
     feature = "signal",
     feature = "whatsapp",
-    feature = "telegram"
+    feature = "telegram",
+    feature = "apns",
+    feature = "fcm",
 ))]
 pub(crate) mod http_helpers;
 

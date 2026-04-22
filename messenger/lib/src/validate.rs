@@ -379,6 +379,10 @@ pub fn target_provider_kind(target: &Target) -> ProviderKind {
         Target::Telegram(_) => ProviderKind::Telegram,
         #[cfg(feature = "desktop")]
         Target::Desktop(_) => ProviderKind::Desktop,
+        #[cfg(feature = "apns")]
+        Target::Apns(_) => ProviderKind::Apns,
+        #[cfg(feature = "fcm")]
+        Target::Fcm(_) => ProviderKind::Fcm,
         _ => unreachable!("no provider features enabled"),
     }
 }

@@ -17,6 +17,10 @@ pub enum Target {
     Telegram(TelegramTarget),
     #[cfg(feature = "desktop")]
     Desktop(DesktopTarget),
+    #[cfg(feature = "apns")]
+    Apns(ApnsTarget),
+    #[cfg(feature = "fcm")]
+    Fcm(FcmTarget),
 }
 
 /// Discord channel target.
@@ -103,6 +107,22 @@ pub enum TelegramChatId {
 #[derive(Debug, Clone, Default)]
 pub struct DesktopTarget {}
 
+/// Apple Push Notification service target.
+#[cfg(feature = "apns")]
+#[derive(Debug, Clone)]
+pub struct ApnsTarget {
+    /// The hex-encoded device token for the iOS device.
+    pub device_token: String,
+}
+
+/// Firebase Cloud Messaging target.
+#[cfg(feature = "fcm")]
+#[derive(Debug, Clone)]
+pub struct FcmTarget {
+    /// The FCM registration token for the Android device.
+    pub device_token: String,
+}
+
 // Convenience constructors on Target
 impl Target {
     #[cfg(feature = "discord")]
@@ -169,5 +189,21 @@ impl Target {
     #[cfg(feature = "desktop")]
     pub fn desktop() -> Self {
         Self::Desktop(DesktopTarget::default())
+    }
+
+    /// Build an Apple Push Notification target for the given device token.
+    #[cfg(feature = "apns")]
+    pub fn apns(device_token: impl Into<String>) -> Self {
+        Self::Apns(ApnsTarget {
+            device_token: device_token.into(),
+        })
+    }
+
+    /// Build a Firebase Cloud Messaging target for the given device token.
+    #[cfg(feature = "fcm")]
+    pub fn fcm(device_token: impl Into<String>) -> Self {
+        Self::Fcm(FcmTarget {
+            device_token: device_token.into(),
+        })
     }
 }
