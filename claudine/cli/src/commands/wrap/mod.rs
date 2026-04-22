@@ -721,6 +721,10 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub strict: bool,
 
+    /// Emit a performance report to stderr after command completion.
+    #[arg(long)]
+    pub perf: bool,
+
     /// Arguments forwarded to the wrapped provider CLI.
     ///
     /// Because wrapper subcommands use `ignore_errors(true)` (see `parse_cli`
@@ -736,14 +740,19 @@ pub struct WrapperArgs {
 }
 
 /// Run a wrapped provider command.
-pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) -> Result<()> {
+pub fn run_provider_wrapper(
+    provider: Provider,
+    args: WrapperArgs,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<()> {
     if args.help {
         print_wrapper_help(provider);
         return Ok(());
     }
 
     let (code, stderr_capture, model_source) =
-        match run_provider_wrapper_inner(provider, args, verbose) {
+        match run_provider_wrapper_inner(provider, args, verbose, startup_timings) {
             Ok((code, stderr, source)) => (code, stderr, source),
             Err(error) => {
                 if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
@@ -827,6 +836,7 @@ fn run_provider_wrapper_inner(
     provider: Provider,
     args: WrapperArgs,
     verbose: u8,
+    _startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<(i32, Option<String>, Option<profile::OpenCodeModelSource>)> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
@@ -3648,6 +3658,7 @@ struct ExtractedWrapperFlags {
     silent: bool,
     verbose: bool,
     operation: Option<String>,
+    perf: bool,
 }
 
 /// Locate the POSIX `--` separator in the wrapper passthrough vector.
@@ -3730,6 +3741,10 @@ fn extract_wrapper_flags_from_passthrough_with_boundary(
             }
             "-v" | "--verbose" => {
                 extracted.verbose = true;
+                remove_indices.push(i);
+            }
+            "--perf" => {
+                extracted.perf = true;
                 remove_indices.push(i);
             }
             "--operation" | "--op" => {

@@ -163,7 +163,7 @@ _get_design_doc dir:
 _choose_model:
     #!/usr/bin/env bash
     set -euo pipefail
-    model="$(printf '%s\n' 'zai-coding-plan/glm-5.1' 'minimax/MiniMax-M2.7-highspeed' | fzf --border --border-label 'Choose a Model')"
+    model="$(printf '%s\n' 'zai-coding-plan/glm-5.1' 'minimax/MiniMax-M2.7-highspeed' 'openrouter/qwen/qwen3.6-plus' 'openrouter/qwen/qwen3-max' 'openrouter/moonshotai/kimi-k2.6' | fzf --border --border-label 'Choose a Model')"
     echo "${model}"
 
 # return a list of all `*review*.md` files found features, fixes, and reviews

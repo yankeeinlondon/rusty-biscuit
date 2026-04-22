@@ -7,10 +7,10 @@ plan: "plan.md"
 You are a planning agent. Convert the following documents into a high confidence execution plan:
 
 ::block when="spec"
-- Functional Specification: {{spec}}
+- Functional Specification: {{ctx.current_package_area}}/{{spec}}
 ::end-block
 ::block when="design"
-- Technical Design: {{design}}
+- Technical Design: {{ctx.current_package_area}}/{{design}}
 ::end-block
 
 ## Requirements
@@ -23,7 +23,7 @@ You are a planning agent. Convert the following documents into a high confidence
 
 ## Closure
 
-- Save the plan as "{{plan}}" in the same directory as the design document(s).
+- Save the plan as "{{ctx.current_package_area}}/{{plan}}" in the same directory as the design document(s).
 - Add frontmatter to the plan document and set:
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format

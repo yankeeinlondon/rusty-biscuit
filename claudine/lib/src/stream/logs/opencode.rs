@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 
 /// Log severity, matching the levels OpenCode emits in the header.
@@ -76,6 +76,8 @@ pub enum LogClassification {
         status_code: u16,
         error_name: String,
         reset_at: Option<DateTime<Utc>>,
+        provider_id: Option<String>,
+        model_id: Option<String>,
         provider_error: String,
     },
     MalformedAsset {
@@ -456,6 +458,8 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         }
         .to_string();
         let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
         let provider_error = record
             .tags
             .get("error")
@@ -465,6 +469,8 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             status_code,
             error_name,
             reset_at,
+            provider_id,
+            model_id,
             provider_error,
         });
     }
@@ -690,12 +696,16 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 status_code,
                 ref error_name,
                 reset_at,
+                ref provider_id,
+                ref model_id,
                 ref provider_error,
             } => self.on_rate_limit(
                 &record,
                 status_code,
                 error_name.clone(),
                 reset_at,
+                provider_id.clone(),
+                model_id.clone(),
                 provider_error.clone(),
             ),
             LogClassification::MalformedAsset {
@@ -731,10 +741,12 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         status_code: u16,
         error_name: String,
         reset_at: Option<DateTime<Utc>>,
+        provider_id: Option<String>,
+        model_id: Option<String>,
         provider_error: String,
     ) -> StderrIngestOutcome {
         let stdout_seen = self.stdout_event_seen.load(Ordering::SeqCst);
-        let rendered_message = render_rate_limit_message(reset_at);
+        let rendered_message = render_rate_limit_message(provider_id, model_id, reset_at);
 
         {
             let mut state = self.state.lock().expect("stderr state poisoned");
@@ -988,13 +1000,27 @@ fn asset_type_as_str(asset_type: AssetType) -> &'static str {
     }
 }
 
-fn render_rate_limit_message(reset_at: Option<DateTime<Utc>>) -> String {
+fn render_rate_limit_message(
+    provider_id: Option<String>,
+    model_id: Option<String>,
+    reset_at: Option<DateTime<Utc>>,
+) -> String {
+    let target = match (provider_id, model_id) {
+        (Some(p), Some(m)) => format!(" for {m} ({p})"),
+        (None, Some(m)) => format!(" for {m}"),
+        (Some(p), None) => format!(" for {p}"),
+        (None, None) => "".to_string(),
+    };
+
     match reset_at {
-        Some(reset) => format!(
-            "OpenCode usage limit reached; resets at {}",
-            reset.format("%Y-%m-%d %H:%M:%S UTC")
-        ),
-        None => "OpenCode usage limit reached".to_string(),
+        Some(reset) => {
+            let local_time = reset.with_timezone(&Local);
+            format!(
+                "Usage limit reached{target}; resets at {}",
+                local_time.format("%Y-%m-%d %H:%M:%S")
+            )
+        }
+        None => format!("Usage limit reached{target}"),
     }
 }
 
@@ -1618,8 +1644,12 @@ mod tests {
         assert_eq!(bridge.sink.events.len(), 1);
         match &bridge.sink.events[0] {
             SemanticEvent::Warning { message, extra } => {
-                assert!(message.contains("usage limit"), "{message}");
-                assert!(message.contains("2026-04-16 04:18:56"), "{message}");
+                assert!(
+                    message.to_lowercase().contains("usage limit"),
+                    "{message}"
+                );
+                // We no longer assert the exact timestamp because it's converted to local time
+                assert!(message.contains("2026-04-"), "{message}");
                 assert_string(extra, "classification", "rate_limit");
                 assert_string(extra, "error_name", "AI_RetryError");
             }
@@ -1651,14 +1681,14 @@ mod tests {
             } => {
                 assert!(*terminal);
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
-                assert!(message.contains("usage limit"));
+                assert!(message.to_lowercase().contains("usage limit"));
                 assert_string(extra, "classification", "rate_limit");
             }
             other => panic!("expected Error, got {other:?}"),
         }
         match rx.try_recv() {
             Ok(EarlyTermination::RateLimit { message, reset_at }) => {
-                assert!(message.contains("usage limit"));
+                assert!(message.to_lowercase().contains("usage limit"));
                 let reset = reset_at.expect("reset_at should be forwarded");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -1874,7 +1904,7 @@ mod tests {
             rate_limit: Some(RateLimitInfo {
                 is_throttled: Some(true),
                 retry_after_ms: None,
-                message: Some("OpenCode usage limit reached".into()),
+                message: Some("Usage limit reached".into()),
                 reset_at: Some(reset),
             }),
         }));
