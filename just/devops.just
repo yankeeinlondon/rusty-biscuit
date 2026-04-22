@@ -1,4 +1,5 @@
 import 'notify.just'
+mod util
 
 bold := '\033[1m'
 reset := '\033[0m'
@@ -113,32 +114,88 @@ _test pkg *args="":
 _readme_files:
     @sniff docs --readme --json "$(sniff repo package-area)"
 
-status:
+status subject="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    echo
-    echo -e "{{bold}}{{blue}}{{underline}}Features{{reset}}"
-    echo
-    if [[ -d features ]]; then
-        eza features -lDga -I '_*' || echo -e "  {{italic}}no features found{{reset}}"
-    else
-        echo -e "  {{italic}}no features directory{{reset}}"
+    # No subject — show full overview (original behaviour)
+    if [[ -z "{{subject}}" ]]; then
+        echo
+        echo -e "{{bold}}{{blue}}{{underline}}Features{{reset}}"
+        echo
+        if [[ -d features ]]; then
+            eza features -lDga -I '_*' || echo -e "  {{italic}}no features found{{reset}}"
+        else
+            echo -e "  {{italic}}no features directory{{reset}}"
+        fi
+        echo
+        echo -e "{{bold}}Unscheduled{{reset}}"
+        echo
+        if [[ -d features/_unscheduled ]]; then
+            eza features/_unscheduled -lDga -s modified || echo -e "  {{italic}}no unscheduled features{{reset}}"
+        else
+            echo -e "  {{italic}}no unscheduled directory{{reset}}"
+        fi
+        echo
+        echo -e "{{bold}}{{blue}}{{underline}}Fixes{{reset}}"
+        echo
+        if [[ -d fixes ]]; then
+            eza fixes -lDga -I '_*' || echo -e "  {{italic}}no fixes found{{reset}}"
+        else
+            echo -e "  {{italic}}no fixes directory{{reset}}"
+        fi
+        exit 0
     fi
-    echo
-    echo -e "{{bold}}Unscheduled{{reset}}"
-    echo
-    if [[ -d features/_unscheduled ]]; then
-        eza features/_unscheduled -lDga -s modified || echo -e "  {{italic}}no unscheduled features{{reset}}"
-    else
-        echo -e "  {{italic}}no unscheduled directory{{reset}}"
+
+    # Subject provided — match against features and fixes
+    subj="{{subject}}"
+    tmpfile=$(mktemp)
+    trap 'rm -f "${tmpfile}"' EXIT
+
+    # First pass: scheduled items only
+    mapfile -t scheduled < <(
+        for d in features fixes; do
+            [[ -d "${d}" ]] || continue
+            find "${d}" -maxdepth 1 -mindepth 1 -type d ! -name '_*' -print0 2>/dev/null | while IFS= read -r -d '' dir; do
+                basename="${dir##*/}"
+                if [[ "${basename}" == *"${subj}"* ]]; then
+                    printf '%s\n' "${dir}"
+                fi
+            done
+        done
+    )
+
+    # Single scheduled match → immediate display
+    if [[ ${#scheduled[@]} -eq 1 && -n "${scheduled[0]}" ]]; then
+        eza "${scheduled[0]}" -lga --hyperlink
+        exit 0
     fi
-    echo
-    echo -e "{{bold}}{{blue}}{{underline}}Fixes{{reset}}"
-    echo
-    if [[ -d fixes ]]; then
-        eza fixes -lDga -I '_*' || echo -e "  {{italic}}no fixes found{{reset}}"
-    else
-        echo -e "  {{italic}}no fixes directory{{reset}}"
+
+    # Build full candidate list (scheduled + unscheduled fallback)
+    (
+        if [[ ${#scheduled[@]} -gt 0 ]]; then
+            printf '%s\n' "${scheduled[@]}"
+        fi
+        for d in features/_unscheduled fixes/_unscheduled; do
+            [[ -d "${d}" ]] || continue
+            find "${d}" -maxdepth 1 -mindepth 1 -type d ! -name '_*' -print0 2>/dev/null | while IFS= read -r -d '' dir; do
+                basename="${dir##*/}"
+                if [[ "${basename}" == *"${subj}"* ]]; then
+                    printf '%s\n' "${dir}"
+                fi
+            done
+        done
+    ) > "${tmpfile}"
+
+    # Remove duplicates while preserving order
+    awk '!seen[$0]++' "${tmpfile}" > "${tmpfile}.uniq"
+    mv "${tmpfile}.uniq" "${tmpfile}"
+
+    if [[ ! -s "${tmpfile}" ]]; then
+        echo -e "{{red}}No matches found for '{{bold}}{{subject}}{{reset}}{{red}}'{{reset}}" >&2
+        exit 1
     fi
+
+    matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
+    eza "${matched}" -lga --hyperlink
 

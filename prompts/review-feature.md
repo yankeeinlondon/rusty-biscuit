@@ -2,21 +2,21 @@
 dir: "$(pwd)"
 spec: ""
 design: ""
-review: "review"
 iteration: 1
+area: "{{ctx.current_package_area}}"
 success:
-    say: "Feature review {{iteration}} has completed"
+    say: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
 failure:
-    say: "Feature review {{iteration}} failed to complete!"
+    say: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
 ---
 
-We have just completed a feature defined in "{{dir}}":
+We have just completed a feature defined in "{{area}}/{{dir}}":
 
 ::block when="spec"
-- specification: "{{dir}}/{{spec}}"
+- specification: "{{area}}/{{dir}}/{{spec}}"
 ::end-block
 ::block when="design"
-- technical design: "{{dir}}/{{design}}"
+- technical design: "{{area}}/{{dir}}/{{design}}"
 ::end-block
 
 ::block when="And(spec, design)"
@@ -42,8 +42,8 @@ Read both the specification document and then perform a review on the implementa
 
 ## Closure
 
-- Save your review suggestions to "{{dir}}/{{review}}-{{iteration}}.md"
-- based on your review suggestions indicate whether you think this feature is ready for production by setting the `ready` frontmatter property on "{{dir}}/{{review}}-{{iteration}}.md"
+- Save your review suggestions to "{{area}}/{{dir}}/review-{{iteration}}.md"
+- based on your review suggestions indicate whether you think this feature is ready for production by setting the `ready` frontmatter property on "{{area}}/{{dir}}/review-{{iteration}}.md"
 
 **IMPORTANT:**
 

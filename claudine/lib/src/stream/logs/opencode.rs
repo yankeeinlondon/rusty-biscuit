@@ -394,23 +394,21 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
 }
 
 fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
-    if let Some(msg) = envelope.get("message").and_then(|v| v.as_str()) {
-        if !msg.is_empty() {
-            return Some(msg.to_string());
-        }
+    if let Some(msg) = envelope.get("message").and_then(|v| v.as_str())
+        && !msg.is_empty()
+    {
+        return Some(msg.to_string());
     }
 
     if let Some(body_str) = envelope.get("responseBody").and_then(|v| v.as_str()) {
-        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str) {
-            if let Some(msg) = body
+        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str)
+            && let Some(msg) = body
                 .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(|v| v.as_str())
-            {
-                if !msg.is_empty() {
-                    return Some(msg.to_string());
-                }
-            }
+            && !msg.is_empty()
+        {
+            return Some(msg.to_string());
         }
         if !body_str.is_empty() {
             return Some(body_str.to_string());
@@ -735,6 +733,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn on_rate_limit(
         &mut self,
         record: &OpenCodeLogRecord,

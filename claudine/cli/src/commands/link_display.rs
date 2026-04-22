@@ -31,9 +31,9 @@ pub(crate) fn repo_canonical_needs_init(
     if !repo_path.exists() {
         return true;
     }
-    match claudine::dispatch::loader::load_claudine_config(Some(&repo_path), None) {
-        Ok(config) => config.canonical_provider.is_none(),
-        Err(_) => true,
+    match claudine::dispatch::loader::load_repo_override_config(&repo_path) {
+        Ok(Some(config)) => config.canonical_provider.is_none(),
+        Ok(None) | Err(_) => true,
     }
 }
 
@@ -55,8 +55,9 @@ pub(crate) fn render_canonical_providers(
 
     let line = if is_git_repo {
         let repo_path = paths.repo_root().join(".claudine").join("config.json");
-        let repo_config =
-            claudine::dispatch::loader::load_claudine_config(Some(&repo_path), None).ok();
+        let repo_config = claudine::dispatch::loader::load_repo_override_config(&repo_path)
+            .ok()
+            .flatten();
         let repo_canonical = repo_config.as_ref().and_then(|c| c.canonical_provider);
         let repo_part = match repo_canonical {
             Some(p) => format!("repo: <b>{p}</b>"),

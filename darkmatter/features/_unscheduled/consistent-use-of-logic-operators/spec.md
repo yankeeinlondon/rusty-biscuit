@@ -142,8 +142,11 @@ No migration tool is planned for this feature. If adoption friction becomes a re
 1. **Does `||` keep distinct meanings per mode, or should it unify?**
     - Today (and under this spec as written) `||` means fallback in interpolation and logical OR in conditions. The spec preserves that split because interpolation's job is to produce values, not booleans.
     - A stricter unification would have `||` always mean logical OR and introduce a second operator (for example `??`) for fallback. That is a larger change with its own migration cost and is **not** part of this feature unless the reviewer decides otherwise.
+    - **DECISION:** `||` should always mean logical OR, `|` should never act as a logical OR
 2. **Should the removal be a hard error or a deprecation warning in the first release?**
     - Default assumption: hard error at parse time.
     - Alternative: emit a compose warning for one release cycle and flip to a hard error after.
+    - **DECISION:** hard error
 3. **Does any consumer rely on `|` appearing as a literal pipe inside an expression?**
     - The existing lexer already treats `|` as a structural token, so literal pipes would have to be wrapped in string literals today. This should be verified but is unlikely to be a blocker.
+    - NOTE: literal pipes are allowed and used on shell commands
