@@ -22,6 +22,8 @@
         "Qwen",
         "rankdir",
         "sparklines",
+        "tolower",
+        "toupper",
         "underspecified",
         "yazi"
     ]
