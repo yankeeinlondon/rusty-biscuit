@@ -33,6 +33,7 @@ use crate::markdown::{Markdown, MarkdownResult};
 use crate::mermaid::Mermaid;
 use crate::render::{ImageRef, Link};
 use biscuit_terminal::components::horizontal_rule::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
+use biscuit_terminal::components::renderable::BrowserRenderable;
 use html_escape;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
