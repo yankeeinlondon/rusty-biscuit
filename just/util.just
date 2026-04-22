@@ -96,6 +96,13 @@ _choose_feature feat="":
     file="$(fd -g '*{spec,design}\.md' features/ --exclude '_completed' | {{ if feat == ""  { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
     echo "${file}"
 
+# chooses a spec or design file to identify the fix
+_choose_fix feat="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file="$(fd -g '*{spec,design}\.md' fixes/ --exclude '_completed' | {{ if feat == ""  { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+    echo "${file}"
+
 _choose_agent:
     #!/usr/bin/env bash
     set -euo pipefail

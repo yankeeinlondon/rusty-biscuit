@@ -93,12 +93,18 @@ feature feat:
 
 
 # adds a new fix topic to the package area
-fix name:
+fix name="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    descriptive="$(just _title_case "{{name}}")"
-    dasherized="$(just _dasherize "{{name}}")"
+    if [[ -z "{{name}}" ]]; then
+        use_name="$(just _choose_fix)"
+    else
+        use_name="{{name}}"
+    fi
+
+    descriptive="$(just _title_case "${use_name}")"
+    dasherized="$(just _dasherize "${use_name}")"
 
     mapfile -t matches < <(find fixes -maxdepth 1 -not -path "fixes/_completed*" -type d -name "*-${dasherized}" 2>/dev/null)
     relative_dir=""
@@ -245,7 +251,7 @@ design filter="":
         just plan-feature spec:="${file}" design:="${dir}/tech-design.md"
     fi
 
-clarify filter="":
+clarify filter="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -255,14 +261,17 @@ clarify filter="":
         file="$(fd -g '*{spec,design}*.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     fi
 
-    agent="$(just _choose_agent)"
+    use_agent="{{agent}}"
+    if [[ -z "${use_agent}" ]]; then
+        use_agent="$(just _choose_agent)"
+    fi
     model=""
     if [[ "${use_agent}" == "opencode" ]];then
         model="--model $(just _choose_model)"
     fi
     doc_path="$(sniff repo package-area)/${file}"
     link="$(just _link "${file}")"
-    claudine compose "@prompts/clarify.md" --${agent} -y -i doc="${doc_path}" ${model} || (
+    claudine compose "@prompts/clarify.md" --${use_agent} -y -i doc="${doc_path}" ${model} || (
         echo
         echo -e "Failed to complete the {{yellow}}Clarify{{reset}} prompt for ${link}"
         echo
