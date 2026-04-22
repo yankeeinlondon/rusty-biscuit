@@ -991,126 +991,101 @@ pub(crate) fn get_repo_status_counts_detailed(repo: &Repository) -> (bool, usize
 /// HEAD commit, dirty status, and ahead/behind counts relative to the base
 /// repository's default branch.
 pub(crate) fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
-    let mut worktrees = HashMap::new();
+    use rayon::prelude::*;
 
     let worktree_names = match repo.worktrees() {
         Ok(names) => names,
-        Err(_) => return worktrees,
+        Err(_) => return HashMap::new(),
     };
 
     // Resolve the base branch name and its commit OID for ahead/behind calculations.
     // Try the base repo's HEAD first; fall back to "main" then "master".
     let (base_branch, base_oid) = resolve_base_branch(repo);
 
-    for name in worktree_names.iter().flatten() {
-        let worktree = match repo.find_worktree(name) {
-            Ok(wt) => wt,
-            Err(_) => continue,
-        };
+    // Collect (name, path) pairs up front — cheap sequential work — so per-worktree
+    // analysis can fan out in parallel. git2::Repository is !Sync, so each worker
+    // opens its own handles rather than sharing `repo`.
+    let base_repo_path = repo.path().to_path_buf();
+    let worktree_paths: Vec<(String, PathBuf)> = worktree_names
+        .iter()
+        .flatten()
+        .filter_map(|name| {
+            let wt = repo.find_worktree(name).ok()?;
+            Some((name.to_string(), wt.path().to_path_buf()))
+        })
+        .collect();
 
-        let worktree_path = worktree.path();
-        let worktree_repo = match Repository::open(worktree_path) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
+    worktree_paths
+        .par_iter()
+        .filter_map(|(name, worktree_path)| {
+            let worktree_repo = Repository::open(worktree_path).ok()?;
 
-        // Get branch name from worktree's HEAD
-        let branch = worktree_repo
-            .head()
-            .map_err(|e| {
-                debug!(worktree = name, error = %e, "could not read worktree HEAD");
-                e
-            })
-            .ok()
-            .and_then(|h| h.shorthand().map(String::from))
-            .unwrap_or_else(|| name.to_string());
+            // Get branch name and HEAD commit from worktree
+            let head = worktree_repo.head().ok();
+            let branch = head
+                .as_ref()
+                .and_then(|h| h.shorthand().map(String::from))
+                .unwrap_or_else(|| name.to_string());
+            let head_commit = head.and_then(|h| h.peel_to_commit().ok());
+            let sha = head_commit
+                .as_ref()
+                .map(|c| c.id().to_string())
+                .unwrap_or_default();
 
-        // Get HEAD commit SHA and OID
-        let head_commit = worktree_repo
-            .head()
-            .map_err(|e| {
-                debug!(worktree = name, error = %e, "could not read worktree HEAD for commit");
-                e
-            })
-            .ok()
-            .and_then(|h| {
-                h.peel_to_commit()
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not peel worktree HEAD to commit");
-                        e
-                    })
-                    .ok()
-            });
-        let sha = head_commit
-            .as_ref()
-            .map(|c| c.id().to_string())
-            .unwrap_or_default();
+            // Open a per-thread handle on the base repo for graph/merge queries
+            // (git2::Repository is !Sync, so we can't share the caller's handle).
+            let base_repo = Repository::open(&base_repo_path).ok();
 
-        // Compute ahead/behind relative to base branch
-        let (ahead, behind) = base_oid
-            .zip(head_commit.as_ref())
-            .and_then(|(base, wt_commit)| {
-                repo.graph_ahead_behind(wt_commit.id(), base)
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not compute worktree ahead/behind");
-                        e
-                    })
-                    .ok()
-            })
-            .unwrap_or((0, 0));
+            let (ahead, behind) = base_repo
+                .as_ref()
+                .zip(base_oid)
+                .zip(head_commit.as_ref())
+                .and_then(|((base_repo, base), wt_commit)| {
+                    base_repo.graph_ahead_behind(wt_commit.id(), base).ok()
+                })
+                .unwrap_or((0, 0));
 
-        // Check if worktree branch is fully merged into base (ancestor of base HEAD)
-        let merged = base_oid
-            .zip(head_commit.as_ref())
-            .map(|(base, wt_commit)| {
-                repo.graph_descendant_of(base, wt_commit.id())
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
+            let merged = base_repo
+                .as_ref()
+                .zip(base_oid)
+                .zip(head_commit.as_ref())
+                .map(|((base_repo, base), wt_commit)| {
+                    base_repo
+                        .graph_descendant_of(base, wt_commit.id())
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
 
-        // Check for merge conflicts by performing an in-memory merge
-        let has_conflicts = base_oid
-            .zip(head_commit.as_ref())
-            .and_then(|(base_id, wt_commit)| {
-                let base_commit = repo
-                    .find_commit(base_id)
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not find base commit");
-                        e
-                    })
-                    .ok()?;
-                let index = repo
-                    .merge_commits(wt_commit, &base_commit, None)
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not perform merge check");
-                        e
-                    })
-                    .ok()?;
-                Some(index.has_conflicts())
-            })
-            .unwrap_or(false);
+            let has_conflicts = base_repo
+                .as_ref()
+                .zip(base_oid)
+                .zip(head_commit.as_ref())
+                .and_then(|((base_repo, base_id), wt_commit)| {
+                    let base_commit = base_repo.find_commit(base_id).ok()?;
+                    let index = base_repo.merge_commits(wt_commit, &base_commit, None).ok()?;
+                    Some(index.has_conflicts())
+                })
+                .unwrap_or(false);
 
-        // Check if worktree is dirty and count changed files
-        let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
+            let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
 
-        worktrees.insert(
-            branch.clone(),
-            WorktreeInfo {
-                branch,
-                filepath: worktree_path.to_path_buf(),
-                sha,
-                dirty,
-                ahead,
-                behind,
-                base_branch: base_branch.clone(),
-                has_conflicts,
-                merged,
-                changed_files,
-            },
-        );
-    }
-
-    worktrees
+            Some((
+                branch.clone(),
+                WorktreeInfo {
+                    branch,
+                    filepath: worktree_path.clone(),
+                    sha,
+                    dirty,
+                    ahead,
+                    behind,
+                    base_branch: base_branch.clone(),
+                    has_conflicts,
+                    merged,
+                    changed_files,
+                },
+            ))
+        })
+        .collect()
 }
 
 /// Resolves the base branch name and its commit OID for ahead/behind calculations.

@@ -2352,7 +2352,7 @@ mod tests {
             ..Default::default()
         };
         let termination = EarlyTermination::RateLimit {
-            message: "OpenCode usage limit reached; resets at 2026-04-16 04:18:56 UTC".into(),
+            message: "Usage limit reached; resets at 2026-04-16 04:18:56 UTC".into(),
             reset_at: Some(reset_at),
         };
 
@@ -2366,12 +2366,18 @@ mod tests {
                 .error_message
                 .as_deref()
                 .unwrap_or("")
+                .to_lowercase()
                 .contains("usage limit"),
         );
         let rl = summary.rate_limit.as_ref().expect("rate_limit populated");
         assert_eq!(rl.is_throttled, Some(true));
         assert_eq!(rl.reset_at, Some(reset_at));
-        assert!(rl.message.as_deref().unwrap_or("").contains("usage limit"));
+        assert!(rl
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("usage limit"));
     }
 
     #[test]
@@ -2391,7 +2397,7 @@ mod tests {
             .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
             .unwrap();
         let termination = EarlyTermination::RateLimit {
-            message: "OpenCode usage limit reached".into(),
+            message: "Usage limit reached".into(),
             reset_at: Some(incoming_reset),
         };
 

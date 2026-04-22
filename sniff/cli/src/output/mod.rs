@@ -205,7 +205,7 @@ pub(crate) fn format_uptime(seconds: u64) -> String {
     }
 }
 
-fn render_performance_section(report: &PerformanceReport) -> String {
+pub fn render_performance_section(report: &PerformanceReport) -> String {
     let mut out = String::new();
     out.push_str("\n## Performance\n\n");
     out.push_str(&format!("Total: {:.2} ms\n", report.total_duration_ms));
@@ -605,10 +605,6 @@ pub fn render_text(
                 "Programs, Services, Just, BlastRadius, and Remote filters should be handled separately"
             )
         }
-    }
-
-    if let Some(ref performance) = result.performance {
-        out.push_str(&render_performance_section(performance));
     }
 
     out

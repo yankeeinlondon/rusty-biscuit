@@ -39,8 +39,12 @@ fn parse_boolish(s: &str) -> Result<bool, String> {
 }
 
 /// Entry point for `claudine sequence`.
-pub fn run_sequence(args: SequenceArgs, verbose: u8) -> Result<()> {
-    let code = match run_sequence_inner(args, verbose) {
+pub fn run_sequence(
+    args: SequenceArgs,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<()> {
+    let code = match run_sequence_inner(args, verbose, startup_timings) {
         Ok(code) => code,
         Err(error) => {
             if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
@@ -52,7 +56,11 @@ pub fn run_sequence(args: SequenceArgs, verbose: u8) -> Result<()> {
     std::process::exit(code);
 }
 
-fn run_sequence_inner(args: SequenceArgs, verbose: u8) -> Result<i32> {
+fn run_sequence_inner(
+    args: SequenceArgs,
+    verbose: u8,
+    _startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<i32> {
     let SequenceArgs {
         shared,
         args,

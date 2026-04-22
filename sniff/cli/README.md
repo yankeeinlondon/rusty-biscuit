@@ -253,6 +253,27 @@ sniff filesystem --refresh-remotes --latest-versions
 - Package-level update summaries in text output
 - `latest_version`, `is_updatable`, and `has_major_update` fields in JSON output
 
+### Performance Reporting
+
+The `--perf` flag appends structured performance timings to any command:
+
+```bash
+# Rich terminal output: perf appended to stdout
+sniff programs --perf
+sniff repo --perf
+
+# Scriptable text output: perf emitted to stderr (stdout stays clean)
+sniff repo packages --perf        # CSV names on stdout, timings on stderr
+sniff repo package-area --perf    # Area name on stdout, timings on stderr
+sniff repo root --perf            # Path on stdout, timings on stderr
+
+# JSON output: perf embedded in the JSON object
+sniff repo packages --perf --json
+```
+
+Performance data includes total wall-clock time, per-stage timings (calls, total,
+max, last), and aggregated counters (cache hits/misses, etc.).
+
 ## Output Examples
 
 ### Text Output (Default)

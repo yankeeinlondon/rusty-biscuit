@@ -4,7 +4,7 @@ use chrono::Utc;
 use sniff::filesystem::git::{PeriodSpecifier, parse_period};
 
 use crate::args::{RecentCommitActionArg, RepoAction};
-use crate::commands::handle_no_results;
+use crate::commands::{CliPerf, handle_no_results};
 use crate::output::commit_blocks::{CommitCentricFilter, render_commit_set_styled};
 use crate::output::emit_text;
 
@@ -14,6 +14,7 @@ pub(crate) fn handle_recent_commits_command(
     json: bool,
     plain: bool,
     _verbose: u8,
+    perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RecentCommitsParams {
         period,
@@ -76,11 +77,12 @@ pub(crate) fn handle_recent_commits_command(
 
     if commit_set.commits.is_empty() {
         let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
-        return handle_no_results(no_error, &Some(msg), plain);
+        return handle_no_results(no_error, &Some(msg), plain, perf);
     }
 
     if json {
         println!("{}", serde_json::to_string_pretty(&commit_set)?);
+        perf.emit_stdout(None);
         return Ok(());
     }
 
@@ -95,9 +97,10 @@ pub(crate) fn handle_recent_commits_command(
 
         if markdown.is_empty() {
             let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
-            return handle_no_results(no_error, &Some(msg), plain);
+            return handle_no_results(no_error, &Some(msg), plain, perf);
         }
         emit_text(&markdown, true);
+        perf.emit_stderr(None);
         return Ok(());
     }
 
@@ -114,10 +117,11 @@ pub(crate) fn handle_recent_commits_command(
 
     if rendered.is_empty() {
         let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
-        return handle_no_results(no_error, &Some(msg), plain);
+        return handle_no_results(no_error, &Some(msg), plain, perf);
     }
 
     emit_text(&rendered, false);
+    perf.emit_stderr(None);
     Ok(())
 }
 
