@@ -47,6 +47,8 @@ pub(crate) struct SingleCompositionOutcome {
     pub exit_code: i32,
     /// The provider that ran the step.
     pub provider: Provider,
+    /// Execution perf metadata, when `--perf` was enabled.
+    pub agent_perf: Option<crate::perf::AgentExecutionPerf>,
 }
 
 /// Result of running a structured composition stream.
@@ -64,6 +66,8 @@ struct CompositionStreamResult {
     /// emitters see consistent section state. Only the compose caller uses
     /// this; inline-compose ignores it.
     section_stream: super::section::SectionStream,
+    /// Child-process telemetry for perf reporting.
+    telemetry: exec::ProcessTelemetry,
 }
 
 /// Mode-specific inputs for [`execute_without_harness`].
@@ -80,6 +84,72 @@ enum CompositionExecutionMode<'a> {
         session_interactive: bool,
         show_checks: bool,
     },
+}
+
+/// Collector for composition-level performance telemetry.
+///
+/// Only constructed when `--perf` is enabled. Measures environment setup
+/// duration and aggregates child-process telemetry into the shared perf
+/// report shape.
+#[derive(Debug)]
+struct CompositionPerfCollector {
+    startup: crate::perf::StartupTimings,
+    env_setup_started_at: Option<std::time::Instant>,
+    env_setup_elapsed: std::time::Duration,
+    agent_perf: Option<crate::perf::AgentExecutionPerf>,
+    composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
+    dry_run: bool,
+}
+
+impl CompositionPerfCollector {
+    fn new(
+        startup: crate::perf::StartupTimings,
+        composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
+    ) -> Self {
+        Self {
+            startup,
+            env_setup_started_at: Some(std::time::Instant::now()),
+            env_setup_elapsed: std::time::Duration::ZERO,
+            agent_perf: None,
+            composition_perf,
+            dry_run: false,
+        }
+    }
+
+    fn mark_env_setup_complete(&mut self) {
+        if let Some(started) = self.env_setup_started_at.take() {
+            self.env_setup_elapsed = started.elapsed();
+        }
+    }
+
+    fn set_agent_perf(&mut self, perf: crate::perf::AgentExecutionPerf) {
+        self.agent_perf = Some(perf);
+    }
+
+    fn set_dry_run(&mut self) {
+        self.dry_run = true;
+        self.mark_env_setup_complete();
+    }
+
+    fn into_report(self, total_elapsed: std::time::Duration) -> crate::perf::CommandPerfReport {
+        crate::perf::CommandPerfReport {
+            title: "Composition",
+            total_elapsed,
+            cli: crate::perf::CliOverheadReport {
+                arg_parsing: self.startup.arg_parsing,
+                config_loading: self.startup.config_loading,
+                tracing_init: self.startup.tracing_init,
+                environment_setup: self.env_setup_elapsed,
+            },
+            composition: self.composition_perf,
+            agent: if self.dry_run { None } else { self.agent_perf },
+            notes: if self.dry_run {
+                vec!["Agent execution skipped (dry run)".into()]
+            } else {
+                vec![]
+            },
+        }
+    }
 }
 
 /// Build a [`PromptTimingContext`] from a resolved prompt path, the
@@ -162,8 +232,11 @@ fn composition_dispatch_context(
 pub(crate) fn execute_composition_request(
     request: CompositionExecutionRequest,
     verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    perf_enabled: bool,
 ) -> Result<i32> {
-    let outcome = execute_composition_request_inner(request, verbose)?;
+    let outcome =
+        execute_composition_request_inner(request, verbose, startup_timings, perf_enabled)?;
     Ok(outcome.exit_code)
 }
 
@@ -175,7 +248,18 @@ pub(crate) fn execute_composition_request(
 pub(crate) fn execute_composition_request_inner(
     request: CompositionExecutionRequest,
     verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+    perf_enabled: bool,
 ) -> Result<SingleCompositionOutcome> {
+    let total_start = std::time::Instant::now();
+    let mut perf_collector = if perf_enabled {
+        startup_timings.map(|timings| {
+            CompositionPerfCollector::new(timings, request.prepared.compose_perf.clone())
+        })
+    } else {
+        None
+    };
+
     let _span = tracing::info_span!("composition_prepare").entered();
 
     let term = wrap_terminal();
@@ -652,6 +736,10 @@ pub(crate) fn execute_composition_request_inner(
 
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
 
+    if let Some(collector) = perf_collector.as_mut() {
+        collector.mark_env_setup_complete();
+    }
+
     // --dry-run: print what would be executed and exit
     if request.dry_run {
         crate::output::log_dry_run(
@@ -665,10 +753,20 @@ pub(crate) fn execute_composition_request_inner(
             &term,
             sp_display_lines.as_deref(),
         );
-        return Ok(SingleCompositionOutcome {
+        if let Some(collector) = perf_collector.as_mut() {
+            collector.set_dry_run();
+        }
+        let outcome = SingleCompositionOutcome {
             exit_code: 0,
             provider,
-        });
+            agent_perf: None,
+        };
+        if let Some(collector) = perf_collector {
+            let total = total_start.elapsed();
+            let report = collector.into_report(total);
+            eprint!("{}", crate::perf::render_perf_report(&report));
+        }
+        return Ok(outcome);
     }
 
     switch_process_cwd(child_cwd)?;
@@ -881,7 +979,7 @@ pub(crate) fn execute_composition_request_inner(
 
         // Harness loop manages the guard internally; defuse ours.
         guard.defuse();
-        let (exit_code, _telemetry) = run_harness_loop(
+        let (exit_code, harness_perf) = run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),
@@ -911,10 +1009,20 @@ pub(crate) fn execute_composition_request_inner(
             &emitter,
             true,
         )?;
-        Ok(SingleCompositionOutcome {
+        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
+            collector.set_agent_perf(perf);
+        }
+        let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-        })
+            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf),
+        };
+        if let Some(collector) = perf_collector {
+            let total = total_start.elapsed();
+            let report = collector.into_report(total);
+            eprint!("{}", crate::perf::render_perf_report(&report));
+        }
+        Ok(outcome)
     } else {
         guard.emit_start_once();
 
@@ -945,6 +1053,7 @@ pub(crate) fn execute_composition_request_inner(
         ));
 
         let mut child_spawned = false;
+        let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;
         let exit_result = execute_without_harness(
             mode,
             provider,
@@ -965,6 +1074,7 @@ pub(crate) fn execute_composition_request_inner(
             &term,
             &mut child_spawned,
             prompt_timing,
+            &mut agent_perf,
         );
 
         // Mark launched as soon as spawn succeeded — before propagating
@@ -981,10 +1091,20 @@ pub(crate) fn execute_composition_request_inner(
             guard.emit_terminal(LifecycleSignal::Failure);
         }
 
-        Ok(SingleCompositionOutcome {
+        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), agent_perf) {
+            collector.set_agent_perf(perf);
+        }
+        let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-        })
+            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf),
+        };
+        if let Some(collector) = perf_collector {
+            let total = total_start.elapsed();
+            let report = collector.into_report(total);
+            eprint!("{}", crate::perf::render_perf_report(&report));
+        }
+        Ok(outcome)
     }
 }
 
@@ -1025,6 +1145,7 @@ fn execute_without_harness(
     term: &Terminal,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
+    agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
 
@@ -1046,6 +1167,7 @@ fn execute_without_harness(
             child_spawned,
             prompt_timing,
         )?;
+        *agent_perf_out = Some(result.telemetry.into_agent_perf(result.summary.duration_ms));
 
         // Render assistant text to stdout when the provider did not stream
         // it live. Compose routes through the section stream so the trailer
@@ -1097,6 +1219,7 @@ fn execute_without_harness(
                         },
                         child_spawned,
                     )?;
+                    *agent_perf_out = Some(result.telemetry.into_agent_perf(None));
                     let response = if provider == Provider::Codex {
                         if let Some(output) = structured_codex_output {
                             let text = std::fs::read_to_string(&output.last_message_path)
@@ -1126,6 +1249,7 @@ fn execute_without_harness(
                         },
                         child_spawned,
                     )?;
+                    *agent_perf_out = Some(capture.telemetry.into_agent_perf(None));
                     let response = profile.parse_captured_output(&capture.data.stdout);
                     if !response.trim().is_empty() {
                         if std::io::stdout().is_terminal() {
@@ -1163,6 +1287,7 @@ fn execute_without_harness(
                     },
                     child_spawned,
                 )?;
+                *agent_perf_out = Some(result.telemetry.into_agent_perf(None));
                 (result.data, String::new(), None)
             }
         }
@@ -1423,6 +1548,7 @@ fn run_structured_composition(
         stderr_bridge,
         prompt_timing,
     )?;
+    let telemetry = stream_result.telemetry;
     let mut summary = stream_result.data;
 
     let had_streamed_assistant =
@@ -1439,6 +1565,7 @@ fn run_structured_composition(
         details,
         had_streamed_assistant,
         section_stream,
+        telemetry,
     })
 }
 

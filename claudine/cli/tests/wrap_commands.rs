@@ -4188,3 +4188,223 @@ exit 0
         );
     }
 }
+
+// ============================================================================
+// Performance flag tests
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn compose_perf_emits_report_to_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: perf test\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Agent response'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
+    assert!(
+        plain.contains("Agent Execution"),
+        "stderr should contain Agent Execution section; got: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_perf_stdout_matches_non_perf() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: perf test\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Agent response'\nexit 0\n",
+    );
+
+    let perf_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let plain_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let perf_stdout = String::from_utf8_lossy(&perf_assert.get_output().stdout);
+    let plain_stdout = String::from_utf8_lossy(&plain_assert.get_output().stdout);
+
+    assert_eq!(
+        perf_stdout, plain_stdout,
+        "stdout must be identical between --perf and non-perf runs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_perf_emits_report_to_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: inline perf\nprompt: say hello\n---\n# Body\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["inline-compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
+    assert!(
+        plain.contains("Agent Execution"),
+        "stderr should contain Agent Execution section; got: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_perf_stdout_matches_non_perf() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file_perf = workspace.path().join("test-perf.md");
+    let md_file_plain = workspace.path().join("test-plain.md");
+    let content = "---\ntitle: inline perf\nprompt: say hello\n---\n# Body\n";
+    fs::write(&md_file_perf, content).unwrap();
+    fs::write(&md_file_plain, content).unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
+    );
+
+    let perf_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["inline-compose", "--goose", "--perf", md_file_perf.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let plain_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["inline-compose", "--goose", md_file_plain.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let perf_stdout = String::from_utf8_lossy(&perf_assert.get_output().stdout);
+    let plain_stdout = String::from_utf8_lossy(&plain_assert.get_output().stdout);
+
+    assert_eq!(
+        perf_stdout, plain_stdout,
+        "stdout must be identical between --perf and non-perf runs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_perf_renders_report_without_agent_execution() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: dry run perf\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'should not run'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--perf",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("dry run"),
+        "perf report should note dry run; got: {plain}"
+    );
+
+    // Provider should NOT have run in dry-run mode.
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        !stdout.contains("should not run"),
+        "provider should not execute in dry-run mode"
+    );
+}

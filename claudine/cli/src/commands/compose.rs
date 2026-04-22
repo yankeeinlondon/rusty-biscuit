@@ -277,7 +277,7 @@ pub fn run_inline_compose(
 fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
-    _startup_timings: Option<crate::perf::StartupTimings>,
+    startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let ComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
@@ -369,13 +369,13 @@ fn run_compose_inner(
         sequence: false,
     };
 
-    execute_composition_request(request, verbose)
+    execute_composition_request(request, verbose, startup_timings, shared.perf)
 }
 
 fn run_inline_compose_inner(
     args: InlineComposeArgs,
     verbose: u8,
-    _startup_timings: Option<crate::perf::StartupTimings>,
+    startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let InlineComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
@@ -503,7 +503,7 @@ fn run_inline_compose_inner(
         sequence: false,
     };
 
-    execute_composition_request(request, verbose)
+    execute_composition_request(request, verbose, startup_timings, shared.perf)
 }
 
 /// Parse `--set` JSON/JSON5, validate it's an object, return as `serde_json::Value`.
