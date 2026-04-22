@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::dispatch::{NotificationIcon, NotificationUrgency};
+use crate::dispatch::{NotificationAction, NotificationIcon, NotificationProgress, NotificationUrgency};
 use crate::receipt::DesktopPlatform;
 
 /// Normalized desktop notification request ready for backend delivery.
@@ -48,6 +48,12 @@ pub struct DesktopNotificationRequest {
     /// Optional group identifier for backends that support notification
     /// grouping or threading.
     pub group_id: Option<String>,
+    /// Interactive actions for backends that support notification buttons.
+    pub actions: Vec<NotificationAction>,
+    /// Progress indicator for backends that support it.
+    pub progress: Option<NotificationProgress>,
+    /// Badge count for app icon badges on supported platforms.
+    pub badge_count: Option<u32>,
 }
 
 /// Receipt returned by a [`DesktopBackend`] after a successful send.

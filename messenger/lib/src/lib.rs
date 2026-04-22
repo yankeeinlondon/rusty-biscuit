@@ -16,7 +16,9 @@ pub use attachment::{Attachment, AttachmentKind, AttachmentSource};
 pub use capabilities::CapabilitySet;
 pub use dispatch::{CompatibilityMode, DeliveryOptions, Dispatch, ProviderOverrides};
 #[cfg(feature = "desktop")]
-pub use dispatch::{DesktopOverrides, NotificationIcon, NotificationUrgency};
+pub use dispatch::{
+    DesktopOverrides, NotificationAction, NotificationIcon, NotificationProgress, NotificationUrgency,
+};
 pub use error::MessengerError;
 pub use message::{Location, Message, MessageBody};
 #[doc(hidden)]

@@ -298,6 +298,9 @@ mod tests {
             timeout_ms: None,
             replace_id: None,
             group_id: None,
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
         }
     }
 

@@ -49,6 +49,12 @@ pub struct DesktopConfig {
     pub timeout_ms: Option<u32>,
     /// Default icon reference.
     pub icon: Option<NotificationIcon>,
+    /// Default notification actions.
+    pub actions: Vec<crate::dispatch::NotificationAction>,
+    /// Default progress indicator.
+    pub progress: Option<crate::dispatch::NotificationProgress>,
+    /// Default badge count.
+    pub badge_count: Option<u32>,
     /// Windows-specific configuration.
     pub windows: WindowsDesktopConfig,
     /// macOS-specific configuration.
@@ -66,6 +72,9 @@ impl Default for DesktopConfig {
             urgency: NotificationUrgency::default(),
             timeout_ms: None,
             icon: None,
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
             windows: WindowsDesktopConfig::default(),
             macos: MacOsDesktopConfig::default(),
             linux: LinuxDesktopConfig::default(),
@@ -342,6 +351,18 @@ pub(crate) fn build_request(
     let replace_id = overrides.and_then(|o| o.replace_id.clone());
     let group_id = overrides.and_then(|o| o.group_id.clone());
 
+    let actions = overrides
+        .and_then(|o| if o.actions.is_empty() { None } else { Some(o.actions.clone()) })
+        .unwrap_or_else(|| config.actions.clone());
+
+    let progress = overrides
+        .and_then(|o| o.progress)
+        .or(config.progress);
+
+    let badge_count = overrides
+        .and_then(|o| o.badge_count)
+        .or(config.badge_count);
+
     Ok(DesktopNotificationRequest {
         title,
         body,
@@ -355,6 +376,9 @@ pub(crate) fn build_request(
         timeout_ms,
         replace_id,
         group_id,
+        actions,
+        progress,
+        badge_count,
     })
 }
 
@@ -892,5 +916,118 @@ mod tests {
 
         let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
         assert_eq!(request.replace_id.as_deref(), Some("prev-123"));
+    }
+
+    #[test]
+    fn actions_override_is_passed_through() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut dispatch = Dispatch::to(Target::desktop());
+        dispatch.overrides = ProviderOverrides::Desktop(DesktopOverrides {
+            actions: vec![
+                crate::dispatch::NotificationAction {
+                    id: "ok".into(),
+                    label: "OK".into(),
+                },
+                crate::dispatch::NotificationAction {
+                    id: "cancel".into(),
+                    label: "Cancel".into(),
+                },
+            ],
+            ..Default::default()
+        });
+
+        let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
+        assert_eq!(request.actions.len(), 2);
+        assert_eq!(request.actions[0].id, "ok");
+        assert_eq!(request.actions[0].label, "OK");
+        assert_eq!(request.actions[1].id, "cancel");
+        assert_eq!(request.actions[1].label, "Cancel");
+    }
+
+    #[test]
+    fn progress_override_is_passed_through() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut dispatch = Dispatch::to(Target::desktop());
+        dispatch.overrides = ProviderOverrides::Desktop(DesktopOverrides {
+            progress: Some(crate::dispatch::NotificationProgress {
+                current: 42,
+                total: 100,
+            }),
+            ..Default::default()
+        });
+
+        let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
+        assert_eq!(request.progress, Some(crate::dispatch::NotificationProgress {
+            current: 42,
+            total: 100,
+        }));
+    }
+
+    #[test]
+    fn badge_count_override_is_passed_through() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut dispatch = Dispatch::to(Target::desktop());
+        dispatch.overrides = ProviderOverrides::Desktop(DesktopOverrides {
+            badge_count: Some(7),
+            ..Default::default()
+        });
+
+        let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
+        assert_eq!(request.badge_count, Some(7));
+    }
+
+    #[test]
+    fn config_actions_used_when_override_empty() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut config = default_config();
+        config.actions = vec![crate::dispatch::NotificationAction {
+            id: "view".into(),
+            label: "View".into(),
+        }];
+
+        let dispatch = Dispatch::to(Target::desktop());
+        let request = build_request(&config, &dispatch, &prepared).unwrap();
+        assert_eq!(request.actions.len(), 1);
+        assert_eq!(request.actions[0].id, "view");
+    }
+
+    #[test]
+    fn config_progress_used_when_override_none() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut config = default_config();
+        config.progress = Some(crate::dispatch::NotificationProgress {
+            current: 10,
+            total: 50,
+        });
+
+        let dispatch = Dispatch::to(Target::desktop());
+        let request = build_request(&config, &dispatch, &prepared).unwrap();
+        assert_eq!(request.progress, Some(crate::dispatch::NotificationProgress {
+            current: 10,
+            total: 50,
+        }));
+    }
+
+    #[test]
+    fn config_badge_count_used_when_override_none() {
+        let message = Message::text("body");
+        let prepared = PreparedMessage::new(&message);
+
+        let mut config = default_config();
+        config.badge_count = Some(3);
+
+        let dispatch = Dispatch::to(Target::desktop());
+        let request = build_request(&config, &dispatch, &prepared).unwrap();
+        assert_eq!(request.badge_count, Some(3));
     }
 }

@@ -99,6 +99,28 @@ impl DesktopBackend for LinuxBackend {
             notification.hint(Hint::Custom("group".to_string(), group_id.to_string()));
         }
 
+        if let Some(progress) = request.progress {
+            notification.hint(Hint::Custom(
+                "progress".to_string(),
+                format!("{}/{}", progress.current, progress.total),
+            ));
+            notification.hint(Hint::Custom(
+                "progress-value".to_string(),
+                format!("{:.2}", progress.current as f64 / progress.total.max(1) as f64),
+            ));
+        }
+
+        if let Some(badge_count) = request.badge_count {
+            notification.hint(Hint::Custom(
+                "badge-count".to_string(),
+                badge_count.to_string(),
+            ));
+        }
+
+        for action in &request.actions {
+            notification.action(&action.id, &action.label);
+        }
+
         let handle = notification.show_async().await.map_err(|error| {
             ProviderKind::Desktop.transport_error(format!("D-Bus notification failed: {error}"))
         })?;
@@ -161,6 +183,28 @@ impl DesktopBackend for LinuxBackend {
 
         if let Some(group_id) = request.group_id.as_deref() {
             notification.hint(Hint::Custom("group".to_string(), group_id.to_string()));
+        }
+
+        if let Some(progress) = request.progress {
+            notification.hint(Hint::Custom(
+                "progress".to_string(),
+                format!("{}/{}", progress.current, progress.total),
+            ));
+            notification.hint(Hint::Custom(
+                "progress-value".to_string(),
+                format!("{:.2}", progress.current as f64 / progress.total.max(1) as f64),
+            ));
+        }
+
+        if let Some(badge_count) = request.badge_count {
+            notification.hint(Hint::Custom(
+                "badge-count".to_string(),
+                badge_count.to_string(),
+            ));
+        }
+
+        for action in &request.actions {
+            notification.action(&action.id, &action.label);
         }
 
         let handle = notification.show_async().await.map_err(|error| {

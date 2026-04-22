@@ -40,6 +40,7 @@ pub enum CompatibilityMode {
 
 /// Provider-specific overrides that escape the shared API.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ProviderOverrides {
     None,
     #[cfg(feature = "discord")]
@@ -103,6 +104,40 @@ pub struct DesktopOverrides {
     pub icon: Option<NotificationIcon>,
     pub replace_id: Option<String>,
     pub group_id: Option<String>,
+    /// Notification actions for backends that support interactive buttons.
+    pub actions: Vec<NotificationAction>,
+    /// Progress indicator for backends that support it.
+    pub progress: Option<NotificationProgress>,
+    /// Badge count for app icon badges on supported platforms.
+    pub badge_count: Option<u32>,
+}
+
+/// An interactive action attached to a desktop notification.
+///
+/// Actions are presented as buttons or contextual menu items depending on the
+/// host OS and notification center. Callback handling requires a packaged,
+/// signed application with a running event loop; CLI sends will surface the
+/// action UI but cannot receive callbacks.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationAction {
+    /// Machine-readable identifier returned when the action is triggered.
+    pub id: String,
+    /// Human-readable label shown in the notification UI.
+    pub label: String,
+}
+
+/// Progress indicator for long-running operations delivered as a desktop
+/// notification.
+///
+/// Backends that do not support progress UI will drop this silently.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotificationProgress {
+    /// Current progress value.
+    pub current: u32,
+    /// Maximum progress value.
+    pub total: u32,
 }
 
 /// Portable urgency level for desktop notifications.
