@@ -28,6 +28,7 @@
 //! ```
 
 use crate::markdown::{
+    block::RuleProcessor,
     Markdown, MarkdownError,
     dsl::parse_code_info,
     highlighting::{
@@ -35,6 +36,7 @@ use crate::markdown::{
     },
     inline::{InlineEvent, InlineTag, MarkProcessor},
 };
+use biscuit_terminal::components::horizontal_rule::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
@@ -799,11 +801,12 @@ pub fn write_terminal<W: std::io::Write>(
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
     // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
+    // and RuleProcessor for horizontal rules with attributes
     let parser = Parser::new_ext(
         md.content(),
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     );
-    let events = MarkProcessor::new(parser);
+    let events = RuleProcessor::new(MarkProcessor::new(parser));
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -880,6 +883,57 @@ pub fn write_terminal<W: std::io::Write>(
             InlineEvent::End(InlineTag::Mark) => {
                 in_mark = false;
                 scope_stack.pop();
+            }
+
+            // Handle horizontal rule with attributes
+            InlineEvent::HorizontalRule(attrs) => {
+                // Create HorizontalRule from attributes
+                let mut rule = HorizontalRule::new();
+                
+                if let Some(style) = &attrs.style {
+                    match style.as_str() {
+                        "dashes" => rule = rule.style(RuleStyle::Dashes),
+                        "dots" => rule = rule.style(RuleStyle::Dots),
+                        "waves" => rule = rule.style(RuleStyle::Waves),
+                        "line-star" => rule = rule.style(RuleStyle::LineStar),
+                        "line-circle" => rule = rule.style(RuleStyle::LineCircle),
+                        "inset-line" => rule = rule.style(RuleStyle::InsetLine),
+                        "curtain-rod" => rule = rule.style(RuleStyle::CurtainRod),
+                        _ => {} // Keep default style
+                    }
+                }
+                
+                if let Some(placement) = &attrs.placement {
+                    match placement.as_str() {
+                        "full" => rule = rule.placement(RulePlacement::Full),
+                        "centered" => rule = rule.placement(RulePlacement::Centered),
+                        "left" => rule = rule.placement(RulePlacement::Left),
+                        "right" => rule = rule.placement(RulePlacement::Right),
+                        _ => {} // Keep default placement
+                    }
+                }
+                
+                if let Some(weight) = &attrs.weight {
+                    match weight.as_str() {
+                        "thin" => rule = rule.weight(RuleWeight::Thin),
+                        "medium" => rule = rule.weight(RuleWeight::Medium),
+                        "thick" => rule = rule.weight(RuleWeight::Thick),
+                        _ => {} // Keep default weight
+                    }
+                }
+                
+                if let Some(width) = &attrs.width {
+                    rule = rule.width(width.clone());
+                }
+                
+                if let Some(color) = &attrs.color {
+                    rule = rule.color(color.clone());
+                }
+                
+                // Render the horizontal rule
+                let rule_output = rule.render(&Terminal::new());
+                wrapper.push_with_newlines(&rule_output);
+                wrapper.push_with_newlines("\n\n"); // Add spacing after rule
             }
 
             // Standard pulldown-cmark events
