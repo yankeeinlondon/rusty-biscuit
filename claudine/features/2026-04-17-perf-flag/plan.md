@@ -1,10 +1,19 @@
 ---
 phases: 6
 created: 2026-04-17
-start_phase: 1
+start_phase: 2
 packages:
   - claudine
   - claudine-cli
+source_files_during_phase_2:
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/select.rs
+  - claudine/cli/src/commands/compose.rs
+  - claudine/cli/src/commands/wrap/sequence.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 # Execution Plan — Performance Flag (`--perf`)
 
