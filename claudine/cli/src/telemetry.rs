@@ -545,6 +545,7 @@ mod tests {
             mcp: false,
             mcp_use: Vec::new(),
             strict: false,
+            perf: false,
             passthrough: Vec::new(),
         }
     }

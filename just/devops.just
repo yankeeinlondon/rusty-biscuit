@@ -114,16 +114,31 @@ _readme_files:
     @sniff docs --readme --json "$(sniff repo package-area)"
 
 status:
-    @echo
-    @echo -e "{{bold}}{{blue}}{{underline}}Features{{reset}}"
-    @echo
-    @eza features -lDga -I '_*'
-    @echo
-    @echo -e "{{bold}}Unscheduled{{reset}}"
-    @echo
-    @eza features/_unscheduled -lDga -s modified
-    @echo
-    @echo -e "{{bold}}{{blue}}{{underline}}Fixes{{reset}}"
-    @echo
-    @eza fixes -lDga -I '_*'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "{{bold}}{{blue}}{{underline}}Features{{reset}}"
+    echo
+    if [[ -d features ]]; then
+        eza features -lDga -I '_*' || echo -e "  {{italic}}no features found{{reset}}"
+    else
+        echo -e "  {{italic}}no features directory{{reset}}"
+    fi
+    echo
+    echo -e "{{bold}}Unscheduled{{reset}}"
+    echo
+    if [[ -d features/_unscheduled ]]; then
+        eza features/_unscheduled -lDga -s modified || echo -e "  {{italic}}no unscheduled features{{reset}}"
+    else
+        echo -e "  {{italic}}no unscheduled directory{{reset}}"
+    fi
+    echo
+    echo -e "{{bold}}{{blue}}{{underline}}Fixes{{reset}}"
+    echo
+    if [[ -d fixes ]]; then
+        eza fixes -lDga -I '_*' || echo -e "  {{italic}}no fixes found{{reset}}"
+    else
+        echo -e "  {{italic}}no fixes directory{{reset}}"
+    fi
 

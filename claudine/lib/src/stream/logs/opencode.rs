@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use regex::Regex;
 
 /// Log severity, matching the levels OpenCode emits in the header.
@@ -76,6 +76,8 @@ pub enum LogClassification {
         status_code: u16,
         error_name: String,
         reset_at: Option<DateTime<Utc>>,
+        provider_id: Option<String>,
+        model_id: Option<String>,
         provider_error: String,
     },
     MalformedAsset {
@@ -339,6 +341,101 @@ fn detect_asset_suffix(value: &str) -> Option<AssetType> {
     }
 }
 
+fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
+    let error_tag = match record.tags.get("error") {
+        Some(tag) => tag,
+        None => return String::new(),
+    };
+
+    let root: serde_json::Value = match serde_json::from_str(error_tag) {
+        Ok(v) => v,
+        Err(_) => return String::new(),
+    };
+
+    let envelope = root.get("error").unwrap_or(&root);
+
+    let error_name = envelope
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let status_code = envelope
+        .get("statusCode")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            envelope
+                .get("errors")
+                .and_then(|errors| errors.get(0))
+                .and_then(|e| e.get("statusCode"))
+                .and_then(|v| v.as_u64())
+        })
+        .or_else(|| {
+            envelope
+                .get("lastError")
+                .and_then(|e| e.get("statusCode"))
+                .and_then(|v| v.as_u64())
+        });
+
+    let provider_message = extract_provider_message(envelope);
+
+    let mut parts = Vec::new();
+
+    if let Some(code) = status_code {
+        parts.push(format!("{error_name} ({code})"));
+    } else {
+        parts.push(error_name.to_string());
+    }
+
+    if let Some(msg) = &provider_message {
+        parts.push(msg.clone());
+    }
+
+    parts.join(": ")
+}
+
+fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
+    if let Some(msg) = envelope.get("message").and_then(|v| v.as_str()) {
+        if !msg.is_empty() {
+            return Some(msg.to_string());
+        }
+    }
+
+    if let Some(body_str) = envelope.get("responseBody").and_then(|v| v.as_str()) {
+        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str) {
+            if let Some(msg) = body
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|v| v.as_str())
+            {
+                if !msg.is_empty() {
+                    return Some(msg.to_string());
+                }
+            }
+        }
+        if !body_str.is_empty() {
+            return Some(body_str.to_string());
+        }
+    }
+
+    for source in ["errors", "lastError"] {
+        let entries = match source {
+            "errors" => envelope.get("errors").and_then(|v| v.as_array()).cloned(),
+            _ => envelope
+                .get(source)
+                .map(|v| vec![v.clone()]),
+        };
+        if let Some(arr) = entries {
+            for entry in &arr {
+                if let Some(msg) = extract_provider_message(entry) {
+                    return Some(msg);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<LogClassification> {
     let haystack = record.raw.as_str();
 
@@ -348,7 +445,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
     ) || (service == "llm" && haystack.contains("fetch failed"))
     {
         return Some(LogClassification::AuthFailure {
-            message: haystack.to_string(),
+            message: summarize_error_json(record),
         });
     }
 
@@ -361,6 +458,8 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         }
         .to_string();
         let reset_at = extract_reset_at(haystack);
+        let provider_id = record.tags.get("providerID").cloned();
+        let model_id = record.tags.get("modelID").cloned();
         let provider_error = record
             .tags
             .get("error")
@@ -370,6 +469,8 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             status_code,
             error_name,
             reset_at,
+            provider_id,
+            model_id,
             provider_error,
         });
     }
@@ -378,7 +479,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         return Some(LogClassification::ApiFailure {
             status_code: extract_status_code(haystack),
             error_name: "AI_APICallError".to_string(),
-            message: haystack.to_string(),
+            message: summarize_error_json(record),
         });
     }
 
@@ -595,12 +696,16 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 status_code,
                 ref error_name,
                 reset_at,
+                ref provider_id,
+                ref model_id,
                 ref provider_error,
             } => self.on_rate_limit(
                 &record,
                 status_code,
                 error_name.clone(),
                 reset_at,
+                provider_id.clone(),
+                model_id.clone(),
                 provider_error.clone(),
             ),
             LogClassification::MalformedAsset {
@@ -636,10 +741,12 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         status_code: u16,
         error_name: String,
         reset_at: Option<DateTime<Utc>>,
+        provider_id: Option<String>,
+        model_id: Option<String>,
         provider_error: String,
     ) -> StderrIngestOutcome {
         let stdout_seen = self.stdout_event_seen.load(Ordering::SeqCst);
-        let rendered_message = render_rate_limit_message(reset_at);
+        let rendered_message = render_rate_limit_message(provider_id, model_id, reset_at);
 
         {
             let mut state = self.state.lock().expect("stderr state poisoned");
@@ -754,6 +861,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         extra_map.insert("error_name".into(), Value::String(error_name.clone()));
         if let Some(code) = status_code {
             extra_map.insert("status_code".into(), json!(code));
+        }
+        if let Some(raw_error) = record.tags.get("error") {
+            extra_map.insert("raw_error".into(), Value::String(raw_error.clone()));
         }
 
         let rendered = if !message.is_empty() {
@@ -890,13 +1000,27 @@ fn asset_type_as_str(asset_type: AssetType) -> &'static str {
     }
 }
 
-fn render_rate_limit_message(reset_at: Option<DateTime<Utc>>) -> String {
+fn render_rate_limit_message(
+    provider_id: Option<String>,
+    model_id: Option<String>,
+    reset_at: Option<DateTime<Utc>>,
+) -> String {
+    let target = match (provider_id, model_id) {
+        (Some(p), Some(m)) => format!(" for {m} ({p})"),
+        (None, Some(m)) => format!(" for {m}"),
+        (Some(p), None) => format!(" for {p}"),
+        (None, None) => "".to_string(),
+    };
+
     match reset_at {
-        Some(reset) => format!(
-            "OpenCode usage limit reached; resets at {}",
-            reset.format("%Y-%m-%d %H:%M:%S UTC")
-        ),
-        None => "OpenCode usage limit reached".to_string(),
+        Some(reset) => {
+            let local_time = reset.with_timezone(&Local);
+            format!(
+                "Usage limit reached{target}; resets at {}",
+                local_time.format("%Y-%m-%d %H:%M:%S")
+            )
+        }
+        None => format!("Usage limit reached{target}"),
     }
 }
 
@@ -1162,23 +1286,58 @@ mod tests {
             LogClassification::ApiFailure {
                 status_code,
                 error_name,
-                ..
+                message,
             } => {
                 assert_eq!(status_code, Some(500));
                 assert_eq!(error_name, "AI_APICallError");
+                assert_eq!(message, "AI_APICallError (500): upstream boom");
             }
             other => panic!("expected ApiFailure, got {other:?}"),
         }
     }
 
     #[test]
-    fn classifies_auth_failure() {
+    fn api_failure_message_strips_request_body() {
+        let line = r#"ERROR 2026-04-21T19:30:26 +49275ms service=llm providerID=zai-coding-plan modelID=glm-5.1 session.id=ses_24e7a9448ffeyo7E2zcOHvsiOn small=false agent=explore mode=subagent error={"error":{"name":"AI_APICallError","url":"https://api.z.ai/api/coding/paas/v4/chat/completions","requestBodyValues":{"model":"glm-5.1","max_tokens":32000,"thinking":{"type":"enabled","clear_thinking":false},"messages":[{"role":"system","content":"You are a file search specialist with a very long system prompt that goes on and on"}]},"statusCode":400,"responseBody":"{\"error\":{\"code\":\"invalid_request\",\"message\":\"model does not support thinking\"}}"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure {
+                status_code,
+                error_name,
+                message,
+            } => {
+                assert_eq!(status_code, Some(400));
+                assert_eq!(error_name, "AI_APICallError");
+                assert!(
+                    !message.contains("system prompt"),
+                    "message should not contain the request body: {message}"
+                );
+                assert!(
+                    !message.contains("requestBodyValues"),
+                    "message should not contain requestBodyValues: {message}"
+                );
+                assert!(
+                    message.contains("model does not support thinking"),
+                    "message should contain provider error: {message}"
+                );
+                assert_eq!(message, "AI_APICallError (400): model does not support thinking");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn auth_failure_message_is_concise() {
         let line = r#"ERROR 2026-04-15T19:26:02 +5ms service=llm error={"error":{"name":"AuthenticationError","message":"Invalid API key"}}"#;
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::AuthFailure { .. } => {}
+            LogClassification::AuthFailure { message } => {
+                assert_eq!(message, "AuthenticationError: Invalid API key");
+            }
             other => panic!("expected AuthFailure, got {other:?}"),
         }
     }
@@ -1485,8 +1644,12 @@ mod tests {
         assert_eq!(bridge.sink.events.len(), 1);
         match &bridge.sink.events[0] {
             SemanticEvent::Warning { message, extra } => {
-                assert!(message.contains("usage limit"), "{message}");
-                assert!(message.contains("2026-04-16 04:18:56"), "{message}");
+                assert!(
+                    message.to_lowercase().contains("usage limit"),
+                    "{message}"
+                );
+                // We no longer assert the exact timestamp because it's converted to local time
+                assert!(message.contains("2026-04-"), "{message}");
                 assert_string(extra, "classification", "rate_limit");
                 assert_string(extra, "error_name", "AI_RetryError");
             }
@@ -1518,14 +1681,14 @@ mod tests {
             } => {
                 assert!(*terminal);
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
-                assert!(message.contains("usage limit"));
+                assert!(message.to_lowercase().contains("usage limit"));
                 assert_string(extra, "classification", "rate_limit");
             }
             other => panic!("expected Error, got {other:?}"),
         }
         match rx.try_recv() {
             Ok(EarlyTermination::RateLimit { message, reset_at }) => {
-                assert!(message.contains("usage limit"));
+                assert!(message.to_lowercase().contains("usage limit"));
                 let reset = reset_at.expect("reset_at should be forwarded");
                 assert_eq!(
                     reset.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -1560,12 +1723,13 @@ mod tests {
             SemanticEvent::Error {
                 terminal,
                 kind,
+                message,
                 extra,
-                ..
             } => {
                 assert!(*terminal);
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert_string(extra, "classification", "auth_failure");
+                assert_eq!(message, "AuthenticationError: Invalid API key");
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -1582,14 +1746,15 @@ mod tests {
             SemanticEvent::Error {
                 terminal,
                 kind,
+                message,
                 extra,
-                ..
             } => {
                 assert!(*terminal);
                 assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert_string(extra, "classification", "api_failure");
                 assert_string(extra, "error_name", "AI_APICallError");
                 assert_eq!(extra.get("status_code"), Some(&json!(500)));
+                assert_eq!(message, "AI_APICallError (500): upstream boom");
             }
             other => panic!("expected Error, got {other:?}"),
         }
@@ -1739,7 +1904,7 @@ mod tests {
             rate_limit: Some(RateLimitInfo {
                 is_throttled: Some(true),
                 retry_after_ms: None,
-                message: Some("OpenCode usage limit reached".into()),
+                message: Some("Usage limit reached".into()),
                 reset_at: Some(reset),
             }),
         }));

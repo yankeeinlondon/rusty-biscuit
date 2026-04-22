@@ -86,7 +86,13 @@ Within a section, consecutive blank lines collapse to one.
 
 Section interleaving is provider-dependent. Claude and Codex keep `FinalStdout` strictly at the end of the turn, so `ToolUseAndEvents` never re-opens once stdout starts. For Claude specifically, assistant prose that shares an envelope with a `tool_use` is reclassified to `Reasoning` instead of `OutputText`; this keeps "Let me investigate..." style tool-preface narration in `Section::Thinking` and avoids opening `FinalStdout` mid-run. OpenCode (and any provider that emits true assistant text mid-turn) interleaves `FinalStdout` with `ToolUseAndEvents` — the sink re-enters `FinalStdout` on each `OutputText` event and returns to `ToolUseAndEvents` on the next tool call.
 
-Because interleaving is supported, the transition separator rule has one suppression: when the stdout stream already ends on a blank line (the provider's text ended with `\n\n` or more), the transition from `FinalStdout` back to a stderr section does **not** insert a separator blank. The stdout trailing blank already provides the visual gap; adding another would produce a double-blank gutter around every interleaved prose paragraph. `LiveSemanticSink` tracks cumulative trailing `\n` bytes across `OutputText` events and clears the counter whenever non-blank stderr content emits, so a stderr line between two stdout blocks still forces a full separator on the return trip into `FinalStdout`.
+Because interleaving is supported, the transition separator rule has two suppression conditions that together guarantee no consecutive blank lines in the combined stdout+stderr output:
+
+1. **Visual blank row.** `LiveSemanticSink` maintains a unified `at_blank_row` flag that tracks whether the last emission to *either* stream left the output at a visually blank row. The flag is set when a blank stderr line is written (section separator or explicit blank) or when stdout text ending with `\n\n` is forwarded. It is cleared when non-blank content is written to either stream. When the flag is true, the automatic section-transition separator is suppressed because injecting another blank would produce consecutive blank lines.
+
+2. **Leading newline in OutputText.** When the `OutputText` payload itself starts with `\n`, the text provides its own visual break. The separator into `FinalStdout` is suppressed so the text's own newline creates the gap rather than a redundant stderr blank.
+
+These two rules work together with the `SectionTracker`'s same-section blank dedup to ensure that tool transitions are tightly packed (single newline), section changes have exactly one blank line, and no combination of stream output and injected separators ever produces `\n\n\n` (two consecutive visual blank lines).
 
 ## Tool Call Rendering
 
