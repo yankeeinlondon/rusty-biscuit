@@ -168,3 +168,78 @@ fn send_receipt_telegram_json_roundtrip() {
     let parsed = SendReceipt::from_json_str(&json).unwrap();
     assert_eq!(receipt, parsed);
 }
+
+#[cfg(feature = "apns")]
+#[test]
+fn message_ref_provider_kind_apns() {
+    let msg_ref = MessageRef::Apns {
+        apns_id: "abc-123".into(),
+    };
+    assert_eq!(msg_ref.provider_kind(), ProviderKind::Apns);
+}
+
+#[cfg(feature = "apns")]
+#[test]
+fn message_ref_apns_json_roundtrip() {
+    let msg_ref = MessageRef::Apns {
+        apns_id: "abc-123".into(),
+    };
+    let json = msg_ref.to_pretty_json().unwrap();
+    let parsed = MessageRef::from_json_str(&json).unwrap();
+    assert_eq!(msg_ref, parsed);
+}
+
+#[cfg(feature = "apns")]
+#[test]
+fn send_receipt_apns_json_roundtrip() {
+    let receipt = SendReceipt {
+        provider: ProviderKind::Apns,
+        message_ref: MessageRef::Apns {
+            apns_id: "abc-123".into(),
+        },
+        raw_id: "abc-123".into(),
+        metadata: BTreeMap::new(),
+    };
+    let json = receipt.to_pretty_json().unwrap();
+    let parsed = SendReceipt::from_json_str(&json).unwrap();
+    assert_eq!(receipt, parsed);
+}
+
+#[cfg(feature = "fcm")]
+#[test]
+fn message_ref_provider_kind_fcm() {
+    let msg_ref = MessageRef::Fcm {
+        message_id: "projects/test/messages/0:123".into(),
+        project_id: "test".into(),
+    };
+    assert_eq!(msg_ref.provider_kind(), ProviderKind::Fcm);
+}
+
+#[cfg(feature = "fcm")]
+#[test]
+fn message_ref_fcm_json_roundtrip() {
+    let msg_ref = MessageRef::Fcm {
+        message_id: "projects/test/messages/0:123".into(),
+        project_id: "test".into(),
+    };
+    let json = msg_ref.to_pretty_json().unwrap();
+    let parsed = MessageRef::from_json_str(&json).unwrap();
+    assert_eq!(msg_ref, parsed);
+}
+
+#[cfg(feature = "fcm")]
+#[test]
+fn send_receipt_fcm_json_roundtrip() {
+    let receipt = SendReceipt {
+        provider: ProviderKind::Fcm,
+        message_ref: MessageRef::Fcm {
+            message_id: "projects/test/messages/0:123".into(),
+            project_id: "test".into(),
+        },
+        raw_id: "projects/test/messages/0:123".into(),
+        metadata: BTreeMap::new(),
+    };
+    let json = receipt.to_pretty_json().unwrap();
+    let parsed = SendReceipt::from_json_str(&json).unwrap();
+    assert_eq!(receipt, parsed);
+}
