@@ -68,7 +68,6 @@ impl ApnsProvider {
         let claims = ApnsJwtClaims {
             iss: self.config.team_id.clone(),
             iat: now,
-            exp: now + 3000, // 50 minutes; Apple recommends max 1 hour
         };
 
         let mut header = Header::new(Algorithm::ES256);
@@ -95,7 +94,6 @@ impl ApnsProvider {
 struct ApnsJwtClaims {
     iss: String,
     iat: u64,
-    exp: u64,
 }
 
 #[derive(Serialize)]
@@ -126,6 +124,7 @@ struct ApnsErrorResponse {
     #[serde(default)]
     reason: String,
     #[serde(default)]
+    #[allow(dead_code)]
     timestamp: Option<u64>,
 }
 
