@@ -2770,3 +2770,163 @@ fn test_repo_packages_json_output() {
     let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
     assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
 }
+
+// ============================================================================
+// repo package-areas Subcommand Tests
+// ============================================================================
+
+#[test]
+fn test_repo_package_areas_csv_default() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a, pkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_md_format() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--md",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "- pkg-a\n- pkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_list_format() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a\npkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_md_and_list_conflict() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--md",
+            "--list",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_package_areas_package_area_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--package-area",
+            "pkg-b",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_verbose_shows_root_dir() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--list",
+            "--verbose",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("pkg-a(./pkg-a)"),
+        "Verbose list output should include the area root, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("pkg-b(./pkg-b)"),
+        "Verbose list output should include the area root, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_repo_package_areas_verbose_does_not_emit_tracing() {
+    let (_dir, path) = create_cli_monorepo();
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--verbose",
+        ])
+        .output()
+        .expect("failed to run sniff");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("performance stage complete"),
+        "--verbose must not leak tracing output to stderr, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("INFO"),
+        "--verbose must not emit INFO tracing, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_repo_package_areas_json_output() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
+    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+}
