@@ -347,8 +347,8 @@ pub fn detect_ntp_status() -> NtpStatus {
 
     // timedatectl outputs values in the order the properties were requested:
     // line 0 -> NTPSynchronized, line 1 -> NTP
-    let ntp_synchronized = lines.first().map(str::trim);
-    let ntp_active = lines.get(1).map(str::trim);
+    let ntp_synchronized = lines.first().copied().map(str::trim);
+    let ntp_active = lines.get(1).copied().map(str::trim);
 
     match ntp_synchronized {
         Some("yes") => NtpStatus::Synchronized,
