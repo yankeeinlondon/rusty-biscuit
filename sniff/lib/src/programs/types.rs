@@ -317,6 +317,39 @@ impl InstallationMethod {
     }
 }
 
+/// How to detect whether a `SystemPrerequisite` is already installed on the
+/// host. The probe decides whether the prereq's install command needs to run.
+///
+/// ## Notes
+///
+/// Windows behavior for `SharedLibrary`: always reports satisfied. On Windows,
+/// shared libraries travel with the Python/npm package that consumes them
+/// (e.g., the `sounddevice` wheel bundles `portaudio.dll`), so a system-wide
+/// probe has no meaningful target. Reporting satisfied silently skips the
+/// prereq on Windows, which is correct for every v1 consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrereqProbe {
+    /// Shared-library lookup via the dynamic linker search path.
+    /// Linux: `ldconfig -p` cache. macOS: dyld default search paths.
+    /// Windows: always satisfied (see type-level Notes).
+    SharedLibrary(&'static str),
+    /// Binary lookup on PATH.
+    Binary(&'static str),
+}
+
+/// A system-level dependency that must be present before a program's
+/// tool-level install runs. Resolved to a single `InstallationMethod` per
+/// host using the same bucket logic as `build_install_plan`.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemPrerequisite {
+    /// User-facing name shown in the combined install plan rendering.
+    pub name: &'static str,
+    /// Presence check used to decide whether installation is needed.
+    pub probe: PrereqProbe,
+    /// OS-specific install methods. Exactly one wins per host.
+    pub methods: &'static [InstallationMethod],
+}
+
 /// Generic program detector for any category enum.
 ///
 /// Stores detection results (path + source) indexed by enum variant ordinal.
@@ -1568,5 +1601,27 @@ mod tests {
                 editor
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod prereq_type_tests {
+    use super::*;
+
+    #[test]
+    fn system_prerequisite_is_constructible_as_const() {
+        const PREREQ: SystemPrerequisite = SystemPrerequisite {
+            name: "PortAudio",
+            probe: PrereqProbe::SharedLibrary("libportaudio.so.2"),
+            methods: &[InstallationMethod::Apt("libportaudio2")],
+        };
+        assert_eq!(PREREQ.name, "PortAudio");
+        assert!(matches!(PREREQ.probe, PrereqProbe::SharedLibrary(_)));
+    }
+
+    #[test]
+    fn prereq_probe_binary_variant() {
+        const PROBE: PrereqProbe = PrereqProbe::Binary("ffmpeg");
+        assert!(matches!(PROBE, PrereqProbe::Binary("ffmpeg")));
     }
 }

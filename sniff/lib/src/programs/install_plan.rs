@@ -754,6 +754,7 @@ mod execute_tests {
         os_availability: &[OsType::MacOS],
         repo: None,
         installation_methods: &[InstallationMethod::Brew("ripgrep")],
+        system_prerequisites: &[],
     };
 
     struct FakeProgram;
@@ -878,6 +879,7 @@ mod selection_tests {
             InstallationMethod::Brew("bat"),
             InstallationMethod::Cargo("bat"),
         ],
+        system_prerequisites: &[],
     };
 
     fn host_macos_with_brew() -> HostCapabilities {
@@ -932,6 +934,7 @@ mod selection_tests {
         os_availability: &[OsType::Linux],
         repo: None,
         installation_methods: &[InstallationMethod::Apt("htop")],
+        system_prerequisites: &[],
     };
 
     #[test]
@@ -993,6 +996,7 @@ mod selection_tests {
             InstallationMethod::Pnpm("typescript"),
             InstallationMethod::Npm("typescript"),
         ],
+        system_prerequisites: &[],
     };
 
     #[test]
@@ -1062,6 +1066,7 @@ mod selection_tests {
         os_availability: &[],
         repo: None,
         installation_methods: &[InstallationMethod::Pip("conan")],
+        system_prerequisites: &[],
     };
 
     static UV_ONLY: ProgramInfo = ProgramInfo {
@@ -1077,6 +1082,7 @@ mod selection_tests {
         os_availability: &[],
         repo: None,
         installation_methods: &[InstallationMethod::Uv("kimi-cli")],
+        system_prerequisites: &[],
     };
 
     static PIP_AND_UV: ProgramInfo = ProgramInfo {
@@ -1095,6 +1101,7 @@ mod selection_tests {
             InstallationMethod::Pip("aider"),
             InstallationMethod::Uv("aider-chat"),
         ],
+        system_prerequisites: &[],
     };
 
     static BREW_AND_PIP: ProgramInfo = ProgramInfo {
@@ -1113,6 +1120,7 @@ mod selection_tests {
             InstallationMethod::Brew("poetry"),
             InstallationMethod::Pip("poetry"),
         ],
+        system_prerequisites: &[],
     };
 
     static BREW_VIM_ONLY: ProgramInfo = ProgramInfo {
@@ -1128,6 +1136,7 @@ mod selection_tests {
         os_availability: &[],
         repo: None,
         installation_methods: &[InstallationMethod::Brew("vim")],
+        system_prerequisites: &[],
     };
 
     static PIP_AND_EXPLICIT_UVI: ProgramInfo = ProgramInfo {
@@ -1146,6 +1155,7 @@ mod selection_tests {
             InstallationMethod::Pip("foo"),
             InstallationMethod::UvWithInstall("foo"),
         ],
+        system_prerequisites: &[],
     };
 
     static CARGO_AND_PIP: ProgramInfo = ProgramInfo {
@@ -1164,6 +1174,7 @@ mod selection_tests {
             InstallationMethod::Cargo("foo"),
             InstallationMethod::Pip("foo"),
         ],
+        system_prerequisites: &[],
     };
 
     fn host_linux_with(
