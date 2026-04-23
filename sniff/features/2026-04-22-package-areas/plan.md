@@ -17,6 +17,13 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - sniff/cli/src/commands.rs
+  - sniff/cli/src/output/filesystem.rs
+  - sniff/cli/src/output/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - sniff-cli
 ---
