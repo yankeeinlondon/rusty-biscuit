@@ -8,13 +8,20 @@ use darkmatter::markdown::{Markdown, MarkdownError};
 
 /// Convert a `MarkdownError` into a `CompositionError`, preserving the
 /// structured `ShellExpansion` variant so the CLI can render rich errors.
+///
+/// Shell errors route to the `ShellExpansionFailed` variant so the CLI's
+/// renderer has the composing file's path available alongside the structured
+/// error. All other `MarkdownError` variants ride through `ComposeFailed`
+/// while retaining their typed source in the error chain (via `#[source]`)
+/// so the top-level `as_block_error` walker can still produce a rich
+/// `BlockError` report.
 fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> CompositionError {
     match err {
         MarkdownError::ShellExpansion(shell_err) => CompositionError::ShellExpansionFailed {
             source_path: source_path.to_path_buf(),
             error: Box::new(shell_err),
         },
-        other => CompositionError::ComposeFailed(other.to_string()),
+        other => CompositionError::ComposeFailed(other),
     }
 }
 

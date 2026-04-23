@@ -65,8 +65,8 @@ review feat="" agent="":
 
     echo -e "Review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
-    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
-    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
+    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename "${spec}"){{reset}}"
+    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename "${design}"){{reset}}"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
     echo -e "    - Review Iteration:  {{dim}}${iteration}{{reset}}"
     echo
@@ -82,7 +82,12 @@ review feat="" agent="":
         exit 0
     fi
 
-    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" iteration="${iteration}" --${use_agent} ${use_model} || (
+    spec_name=""
+    [[ -n "${spec}" ]] && spec_name="$(basename "${spec}")"
+    design_name=""
+    [[ -n "${design}" ]] && design_name="$(basename "${design}")"
+
+    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" --${use_agent} ${use_model} || (
         just _play two-tone
         echo -e "{{red}}ERROR:{{reset}} There was a problem trying to create the review for ${feature}"
     )
@@ -181,8 +186,13 @@ implement-feature-review filter="" spec="" design="" agent="":
         exit 0
     fi
 
+    spec_name=""
+    [[ -n "${spec_file}" ]] && spec_name="$(basename "${spec_file}")"
+    design_name=""
+    [[ -n "${design_file}" ]] && design_name="$(basename "${design_file}")"
+
     echo -e "🏃‍♂️ Starting the {{bold}}implementation{{reset}} of the review suggestions (#${iteration})"
-    if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="$(basename "${spec_file}")" design="$(basename "${design_file}")" iteration="${iteration}" ${model}; then
+    if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" ${model}; then
         echo
         echo -e "🎉 Implemented all the suggestions found in the $(just _link "${review}") review!"
         echo

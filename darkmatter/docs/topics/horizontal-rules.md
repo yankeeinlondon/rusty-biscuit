@@ -39,8 +39,8 @@ The `placement` attribute controls where the rule appears horizontally:
 
 The `weight` attribute controls the thickness of the rule:
 
-- `thin` - Thin line (default)
-- `medium` - Medium thickness
+- `thin` - Thin line
+- `medium` - Medium thickness (default)
 - `thick` - Thick line
 
 ### Width

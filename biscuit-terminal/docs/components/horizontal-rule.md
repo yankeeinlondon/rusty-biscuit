@@ -5,13 +5,17 @@ The `HorizontalRule` component provides customizable horizontal separator lines 
 ## Struct Definition
 
 ```rust
-pub struct HorizontalRule {
-    pub style: RuleStyle,
-    pub placement: RulePlacement,
-    pub weight: RuleWeight,
-    pub width: Option<String>,
-    pub color: Option<String>,
-}
+let rule = HorizontalRule::new()
+    .style(RuleStyle::Waves)
+    .placement(RulePlacement::Centered)
+    .weight(RuleWeight::Medium)
+    .width("75%");
+
+// Terminal rendering
+let output = rule.render(&terminal);
+
+// Browser rendering  
+let svg = rule.render_to_browser();
 ```
 
 ## Enums

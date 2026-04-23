@@ -88,6 +88,7 @@ use std::collections::VecDeque;
 ///         InlineEvent::Start(InlineTag::Mark) => println!("<mark>"),
 ///         InlineEvent::End(InlineTag::Mark) => println!("</mark>"),
 ///         InlineEvent::Standard(e) => println!("{:?}", e),
+///         InlineEvent::HorizontalRule(_) => println!("<hr/>"),
 ///     }
 /// }
 /// ```

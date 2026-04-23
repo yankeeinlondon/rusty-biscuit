@@ -166,8 +166,7 @@ pub(crate) fn execute_sequence(
             Some(&compose_options),
             None,
             &approval_options,
-        )
-        .map_err(|e| eyre!("{e}"))?;
+        )?;
 
         cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
 
@@ -179,8 +178,7 @@ pub(crate) fn execute_sequence(
             perf_enabled: shared.perf,
         };
 
-        let prepared = composition::prepare_direct(source, prepare_options)
-            .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
+        let prepared = composition::prepare_direct(source, prepare_options)?;
 
         // ── Harness pre-flight ────────────────────────────────────────
         if has_harness_properties(&prepared.effective_frontmatter) {

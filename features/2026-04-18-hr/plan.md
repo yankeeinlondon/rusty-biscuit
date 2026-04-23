@@ -6,11 +6,42 @@ source_files_during_phase_1:
   - "biscuit-terminal/lib/src/components/renderable.rs"
   - "biscuit-terminal/lib/src/components/horizontal_rule.rs"
   - "biscuit-terminal/lib/src/components/mod.rs"
+  - "darkmatter/lib/src/markdown/block/rule_processor.rs"
+  - "darkmatter/lib/src/markdown/inline/mod.rs"
+  - "darkmatter/lib/tests/horizontal_rule_integration.rs"
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - "darkmatter/lib/src/markdown/mod.rs"
+  - "darkmatter/lib/src/markdown/block/mod.rs"
+  - "darkmatter/lib/src/markdown/block/rule_processor.rs"
+  - "darkmatter/lib/src/markdown/inline/types.rs"
+  - "darkmatter/lib/src/markdown/inline/mod.rs"
+  - "darkmatter/lib/src/markdown/output/terminal.rs"
+  - "darkmatter/lib/src/markdown/output/html.rs"
+  - "darkmatter/lib/tests/horizontal_rule_integration.rs"
+  - "darkmatter/lib/tests/horizontal_rule_snapshots.rs"
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2:
+  - ".claude/skills/darkmatter/SKILL.md"
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+  - "darkmatter/docs/topics/horizontal-rules.md"
+  - "biscuit-terminal/docs/components/horizontal-rule.md"
+  - "biscuit-terminal/docs/components/browser-renderable-trait.md"
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3:
+  - ".claude/skills/biscuit-terminal/SKILL.md"
+source_files_during_phase_4:
+  - "biscuit-terminal/lib/src/components/horizontal_rule.rs"
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 packages:
   - "biscuit-terminal"
+  - "darkmatter"
 ---
 
 # Execution Plan: Horizontal Rule Component

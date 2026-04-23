@@ -13,6 +13,12 @@ use std::collections::VecDeque;
 /// - `*** { placement: centered, weight: thick }`
 /// - `___ { width: "50%", color: "red" }`
 ///
+/// ## Important
+///
+/// This processor only intercepts paragraphs that contain a **single text event**
+/// matching the horizontal rule pattern. Paragraphs with inline formatting
+/// (bold, italic, links, etc.) are passed through unchanged.
+///
 /// ## Examples
 ///
 /// ```
@@ -33,10 +39,12 @@ where
 {
     inner: I,
     pending: VecDeque<InlineEvent<'a>>,
-    /// Buffer to accumulate text content within a paragraph
-    paragraph_buffer: Option<String>,
+    /// Buffer to accumulate all events within a paragraph
+    paragraph_buffer: Vec<InlineEvent<'a>>,
     /// Track if we're inside a paragraph
     in_paragraph: bool,
+    /// Track if the current paragraph has only text (no nested elements)
+    paragraph_is_simple: bool,
 }
 
 impl<'a, I> RuleProcessor<'a, I>
@@ -48,8 +56,9 @@ where
         Self {
             inner,
             pending: VecDeque::new(),
-            paragraph_buffer: None,
+            paragraph_buffer: Vec::new(),
             in_paragraph: false,
+            paragraph_is_simple: true,
         }
     }
 
@@ -150,17 +159,29 @@ where
         attrs
     }
 
-    /// Processes a paragraph that might be a horizontal rule with attributes.
-    fn process_paragraph(&mut self, text: String) {
-        if let Some((_, attributes)) = Self::matches_horizontal_rule_pattern(&text) {
+    /// Processes a completed paragraph buffer.
+    ///
+    /// If the paragraph contains exactly one text event that matches the
+    /// horizontal rule pattern, emits a HorizontalRule event.
+    /// Otherwise, emits all buffered events in order.
+    fn process_paragraph_buffer(&mut self) {
+        // Only check for HR pattern if paragraph has exactly one text event and nothing else
+        if self.paragraph_is_simple
+            && self.paragraph_buffer.len() == 1
+            && let InlineEvent::Standard(Event::Text(text)) = &self.paragraph_buffer[0]
+            && let Some((_, attributes)) = Self::matches_horizontal_rule_pattern(text)
+        {
             let attrs = Self::parse_attributes(&attributes);
             self.pending.push_back(InlineEvent::HorizontalRule(attrs));
-        } else {
-            // Not a horizontal rule pattern, emit the original paragraph events
-            self.pending.push_back(InlineEvent::Standard(Event::Start(Tag::Paragraph)));
-            self.pending.push_back(InlineEvent::Standard(Event::Text(text.into())));
-            self.pending.push_back(InlineEvent::Standard(Event::End(TagEnd::Paragraph)));
+            return;
         }
+        
+        // Not a horizontal rule - emit all buffered events plus paragraph wrapper
+        self.pending.push_back(InlineEvent::Standard(Event::Start(Tag::Paragraph)));
+        for event in self.paragraph_buffer.drain(..) {
+            self.pending.push_back(event);
+        }
+        self.pending.push_back(InlineEvent::Standard(Event::End(TagEnd::Paragraph)));
     }
 }
 
@@ -180,27 +201,28 @@ where
         match self.inner.next() {
             Some(InlineEvent::Standard(Event::Start(Tag::Paragraph))) => {
                 self.in_paragraph = true;
-                self.paragraph_buffer = Some(String::new());
-                // Don't emit the paragraph start yet, wait to see if it's a horizontal rule
+                self.paragraph_is_simple = true;
+                self.paragraph_buffer.clear();
+                // Don't emit the paragraph start yet, buffer events instead
                 self.next()
             }
             Some(InlineEvent::Standard(Event::End(TagEnd::Paragraph))) if self.in_paragraph => {
                 self.in_paragraph = false;
-                if let Some(buffer) = self.paragraph_buffer.take() {
-                    self.process_paragraph(buffer);
-                    return self.pending.pop_front();
-                }
-                // Should not happen, but if it does, emit the end event
-                Some(InlineEvent::Standard(Event::End(TagEnd::Paragraph)))
+                self.process_paragraph_buffer();
+                self.pending.pop_front()
             }
             Some(InlineEvent::Standard(Event::Text(text))) if self.in_paragraph => {
-                if let Some(buffer) = &mut self.paragraph_buffer {
-                    buffer.push_str(&text);
-                }
+                self.paragraph_buffer.push(InlineEvent::Standard(Event::Text(text)));
+                self.next()
+            }
+            Some(event) if self.in_paragraph => {
+                // Non-text event inside paragraph - paragraph is not simple
+                self.paragraph_is_simple = false;
+                self.paragraph_buffer.push(event);
                 self.next()
             }
             Some(event) => {
-                // For any other event (including custom inline events), emit as-is
+                // For any other event, emit as-is
                 Some(event)
             }
             None => None,
@@ -284,6 +306,15 @@ mod tests {
     }
     
     #[test]
+    fn test_paragraph_with_bold_text() {
+        let events = process_text("This is **bold** text.");
+        // Should have paragraph start, text, strong start, text, strong end, text, paragraph end
+        assert!(events.len() >= 3);
+        assert!(matches!(events[0], InlineEvent::Standard(Event::Start(Tag::Paragraph))));
+        assert!(matches!(events[events.len()-1], InlineEvent::Standard(Event::End(TagEnd::Paragraph))));
+    }
+    
+    #[test]
     fn test_insufficient_markers() {
         let events = process_text("-- { style: waves }");
         assert_eq!(events.len(), 3);
@@ -302,11 +333,12 @@ mod tests {
     
     #[test]
     fn test_no_attributes() {
-        // "---" by itself should be a paragraph that doesn't match our pattern
+        // "---" by itself is parsed by pulldown-cmark as Event::Rule, not a paragraph
+        // RuleProcessor should pass it through unchanged
         let events = process_text("---");
-        // This should be 3 events: Start(Paragraph), Text("---"), End(Paragraph)
-        assert_eq!(events.len(), 3, "Expected 3 events for '---', got {:?}", events);
-        assert!(matches!(events[0], InlineEvent::Standard(Event::Start(Tag::Paragraph))));
+        // This should be 1 event: Standard(Rule)
+        assert_eq!(events.len(), 1, "Expected 1 event for '---', got {:?}", events);
+        assert!(matches!(events[0], InlineEvent::Standard(Event::Rule)));
     }
 
     #[test]

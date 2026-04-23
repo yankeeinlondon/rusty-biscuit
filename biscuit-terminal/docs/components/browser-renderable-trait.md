@@ -5,12 +5,17 @@ The `BrowserRenderable` trait provides a standardized interface for components t
 ## Trait Definition
 
 ```rust
-pub trait BrowserRenderable {
-    /// Render the component to browser output as a String
+pub trait BrowserRenderable: std::fmt::Debug + Any {
+    /// Renders the component to browser-compatible HTML/SVG.
     fn render_to_browser(&self) -> String;
-    
-    /// Render the component to browser output with inline CSS variables
-    fn render_to_browser_with_inline_variables(&self) -> String;
+
+    /// Renders the component to browser-compatible HTML/SVG with inline CSS variables.
+    fn render_to_browser_with_inline_variables(
+        &self,
+        variables: &HashMap<String, String>,
+    ) -> String;
+
+    fn as_any(&self) -> &dyn Any;
 }
 ```
 
@@ -49,7 +54,10 @@ impl BrowserRenderable for HorizontalRule {
 </svg>"#, self.path_data(), self.stroke_width())
     }
     
-    fn render_to_browser_with_inline_variables(&self) -> String {
+    fn render_to_browser_with_inline_variables(
+        &self,
+        variables: &HashMap<String, String>,
+    ) -> String {
         // Generate SVG with CSS variables
         format!(r#"<svg viewBox="0 0 100 10" xmlns="http://www.w3.org/2000/svg" 
   style="--hr-width: {}; --hr-color: {};">
@@ -60,6 +68,10 @@ impl BrowserRenderable for HorizontalRule {
             self.color.as_deref().unwrap_or("currentColor"),
             self.path_data(),
             self.stroke_width())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 ```

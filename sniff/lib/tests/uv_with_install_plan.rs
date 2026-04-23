@@ -24,6 +24,7 @@ static PIP_ONLY: ProgramInfo = ProgramInfo {
     os_availability: &[],
     repo: None,
     installation_methods: &[InstallationMethod::Pip("aider-chat")],
+    system_prerequisites: &[],
 };
 
 struct FakeProgram;
