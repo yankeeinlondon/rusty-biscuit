@@ -58,9 +58,9 @@ schedule name="":
             fd --type d --max-depth 1 . "${dir}" | while read -r d; do
                 base="$(basename "${d}")"
                 [[ "${base}" == _* ]] && continue
-                echo "${d}"
+                printf '%s\t%s\n' "${base}" "${d}"
             done
-        done)
+        done | sort -t$'\t' -k1 | cut -f2)
         if [[ ${#dirs[@]} -eq 0 ]]; then
             echo -e "{{red}}No unscheduled features or fixes to schedule.{{reset}}"
             exit 1
@@ -73,6 +73,12 @@ schedule name="":
     fi
 
     base="$(basename "${selected}")"
+
+    # Strip single-digit priority prefix (e.g., "1-foo" → "foo")
+    if [[ "${base}" =~ ^[0-9]-(.*)$ ]]; then
+        base="${BASH_REMATCH[1]}"
+    fi
+
     parent="$(dirname "${selected}")"
     category_root="$(dirname "${parent}")"
     category="$(basename "${category_root}")"

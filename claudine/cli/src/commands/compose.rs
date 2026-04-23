@@ -18,7 +18,6 @@ use color_eyre::eyre::{Result, eyre};
 use tracing::info_span;
 
 use super::wrap::composition::execute_composition_request;
-use crate::log;
 use crate::provider_values::provider_value_parser;
 
 /// Shared flags for composition commands.
@@ -239,38 +238,30 @@ pub struct InlineComposeArgs {
 }
 
 /// Entry point for `claudine compose`.
+///
+/// Errors returned here bubble up to the top-level walker in `main.rs`,
+/// which renders darkmatter `BlockError` reports for typed Markdown
+/// failures and falls back to `color_eyre` otherwise.
 pub fn run_compose(
     args: ComposeArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<()> {
-    let code = match run_compose_inner(args, verbose, startup_timings) {
-        Ok(code) => code,
-        Err(error) => {
-            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
-                log::error(&error.to_string());
-            }
-            1
-        }
-    };
+    let code = run_compose_inner(args, verbose, startup_timings)?;
     std::process::exit(code);
 }
 
 /// Entry point for `claudine inline-compose`.
+///
+/// Errors returned here bubble up to the top-level walker in `main.rs`,
+/// which renders darkmatter `BlockError` reports for typed Markdown
+/// failures and falls back to `color_eyre` otherwise.
 pub fn run_inline_compose(
     args: InlineComposeArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<()> {
-    let code = match run_inline_compose_inner(args, verbose, startup_timings) {
-        Ok(code) => code,
-        Err(error) => {
-            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
-                log::error(&error.to_string());
-            }
-            1
-        }
-    };
+    let code = run_inline_compose_inner(args, verbose, startup_timings)?;
     std::process::exit(code);
 }
 
@@ -293,7 +284,7 @@ fn run_compose_inner(
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
-    let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
+    let source = composition::resolve_composition_source(&file)?;
 
     let _compose_span = info_span!(
         "compose",
@@ -327,8 +318,7 @@ fn run_compose_inner(
         Some(&compose_options),
         None,
         &approval_options,
-    )
-    .map_err(|e| eyre!("{e}"))?;
+    )?;
 
     let prepared = composition::prepare_direct(
         &source,
@@ -338,8 +328,7 @@ fn run_compose_inner(
             perf_enabled: shared.perf,
             ..Default::default()
         },
-    )
-    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
+    )?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -415,7 +404,7 @@ fn run_inline_compose_inner(
             if let Some(ref t) = term {
                 claudine::harness::report::report_source_file(&file, std::path::Path::new(""), t);
             }
-            return Err(eyre!("{e}"));
+            return Err(e.into());
         }
     };
 
@@ -461,8 +450,7 @@ fn run_inline_compose_inner(
         Some(&compose_options),
         None,
         &approval_options,
-    )
-    .map_err(|e| eyre!("{e}"))?;
+    )?;
 
     let prepared = composition::prepare_inline(
         &source,
@@ -472,8 +460,7 @@ fn run_inline_compose_inner(
             perf_enabled: shared.perf,
             ..Default::default()
         },
-    )
-    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
+    )?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,

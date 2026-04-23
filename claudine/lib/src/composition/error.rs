@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
 use crate::events::Provider;
@@ -34,9 +35,14 @@ pub enum CompositionError {
     #[error("frontmatter `prompt` must be a string, got {0}")]
     PromptPropertyWrongType(String),
 
-    /// Darkmatter composition failed.
+    /// Darkmatter composition failed for a reason other than a known
+    /// structured shell-expansion failure.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker can
+    /// render a rich `BlockError` report (transclusion cycles, reference
+    /// errors, etc.) instead of a flat string.
     #[error("compose failed: {0}")]
-    ComposeFailed(String),
+    ComposeFailed(#[source] MarkdownError),
 
     /// A shell expansion directive inside the composed document failed in a
     /// structurally-known way. Carries the underlying `ShellExpansionError`
@@ -98,8 +104,13 @@ pub enum CompositionError {
     InsufficientFilePermissions(String),
 
     /// Pre-flight shell command discovery failed.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker can
+    /// render a rich `BlockError` report (e.g. transclusion cycles or
+    /// reference errors encountered while walking the document graph) instead
+    /// of a flat string.
     #[error("pre-flight discovery failed: {0}")]
-    PreFlightDiscoveryFailed(String),
+    PreFlightDiscoveryFailed(#[source] MarkdownError),
 
     /// A general pre-flight failure (blacklisted command, missing handler, etc.).
     #[error("pre-flight shell approval failed: {0}")]
@@ -114,6 +125,15 @@ pub enum CompositionError {
         command: String,
         source_file: PathBuf,
         line: usize,
+    },
+
+    /// A lifecycle notification property failed to deserialize.
+    #[error("invalid lifecycle property `{property}`: {message}")]
+    LifecycleInvalid {
+        /// The frontmatter property that failed to parse.
+        property: String,
+        /// The underlying deserialization error message.
+        message: String,
     },
 
     /// A lifecycle notification property has both `say` and `say_first`.

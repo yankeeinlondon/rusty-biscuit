@@ -132,7 +132,7 @@ status subject="":
         echo -e "{{bold}}Unscheduled{{reset}}"
         echo
         if [[ -d features/_unscheduled ]]; then
-            eza features/_unscheduled -lDga -s modified || echo -e "  {{italic}}no unscheduled features{{reset}}"
+            eza features/_unscheduled -lDga -s name || echo -e "  {{italic}}no unscheduled features{{reset}}"
         else
             echo -e "  {{italic}}no unscheduled directory{{reset}}"
         fi

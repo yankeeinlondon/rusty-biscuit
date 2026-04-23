@@ -422,15 +422,14 @@ impl LifecycleSignal {
     /// # use biscuit_terminal::components::status::StatusState;
     /// assert_eq!(LifecycleSignal::Start.status_state(), StatusState::Info);
     /// assert_eq!(LifecycleSignal::Success.status_state(), StatusState::Success);
-    /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Failure);
-    /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Failure);
+    /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Error);
+    /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Error);
     /// ```
-    #[allow(deprecated)]
     pub fn status_state(&self) -> StatusState {
         match self {
             Self::Start => StatusState::Info,
             Self::Success => StatusState::Success,
-            Self::Blocked | Self::Failure => StatusState::Failure,
+            Self::Blocked | Self::Failure => StatusState::Error,
         }
     }
 }
@@ -528,8 +527,9 @@ pub fn parse_lifecycle_config(
 
         // Deserialize the notification
         let mut notification: LifecycleNotification = serde_json::from_value(value.clone())
-            .map_err(|e| {
-                CompositionError::ComposeFailed(format!("invalid {}: {}", property_name, e))
+            .map_err(|e| CompositionError::LifecycleInvalid {
+                property: property_name.to_string(),
+                message: e.to_string(),
             })?;
 
         // Normalize empty strings to None
@@ -925,11 +925,11 @@ mod tests {
         );
         assert_eq!(
             LifecycleSignal::Blocked.status_state(),
-            StatusState::Failure
+            StatusState::Error
         );
         assert_eq!(
             LifecycleSignal::Failure.status_state(),
-            StatusState::Failure
+            StatusState::Error
         );
     }
 
