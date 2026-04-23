@@ -42,6 +42,7 @@ However, there are **numerous medium-to-high impact inefficiencies** at the next
 **Problem:** `PerformanceCollector` uses a `Mutex<BTreeMap>` for stage recording. Every file classification calls `record_stage`, which locks the mutex, mutates the map, and unlocks. On a 10,000-file repository with the parallel walker, this becomes a **global serialization point** across all worker threads.
 
 **Code:**
+
 ```rust
 fn record_stage(&self, name: &str, duration: Duration) {
     let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -51,6 +52,7 @@ fn record_stage(&self, name: &str, duration: Duration) {
 ```
 
 In `classify_file`, this is called unconditionally for *every* file:
+
 ```rust
 performance::record_stage(classification_stage_name(&classification), duration);
 ```
@@ -659,7 +661,3 @@ Several hot paths allocate strings unnecessarily:
 - `resolve_wan_ip_endpoints()` allocates `Vec<String>` from defaults
 
 **Recommendation:** Adopt a convention of accepting `&'static str` for known constant names and only falling back to `String` for dynamic values. Use `&'static [&'static str]` for default endpoint lists.
-
----
-
-*Consolidated review generated from static analysis by Kimi and Qwen Plus. Recommend validating fixes with the existing Criterion bench suite (`cargo bench -p sniff`).*
