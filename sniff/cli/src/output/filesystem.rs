@@ -1437,6 +1437,86 @@ fn select_repo_package_areas<'a>(
         .collect()
 }
 
+/// Compute the repo-relative area root directory for a given package.
+///
+/// For a package whose `package_area` is `"root"` (a top-level package living
+/// directly at the repo root, such as `model_id` in this workspace), returns
+/// `"."` — the repo root itself.
+///
+/// Otherwise, when `pkg.relative` starts with `pkg.package_area` (the common
+/// case — including multi-segment areas such as `apps/browser`), the area root
+/// is the `package_area` value verbatim. This preserves correctness for nested
+/// monorepo layouts where an area name can legitimately contain `/`.
+///
+/// If neither of those holds, falls back to the first path component of
+/// `pkg.relative`, which matches `Package::package_area` for the overwhelming
+/// majority of this workspace's layouts.
+///
+/// Returns a borrowed `&str` to avoid allocation in the hot render loop.
+fn package_area_root(pkg: &Package) -> &str {
+    if pkg.package_area == "root" {
+        return ".";
+    }
+
+    let relative = pkg.relative.trim_start_matches("./");
+
+    // Prefer `pkg.package_area` when it prefixes `relative` at a path boundary.
+    // This handles multi-segment areas like `apps/browser/my_package` where the
+    // area is `apps/browser` — naive `split('/').next()` would incorrectly
+    // return `apps`.
+    if relative == pkg.package_area {
+        return &pkg.package_area;
+    }
+    if let Some(rest) = relative.strip_prefix(pkg.package_area.as_str())
+        && rest.starts_with('/')
+    {
+        return &pkg.package_area;
+    }
+
+    relative.split('/').next().unwrap_or(relative)
+}
+
+/// Same selection logic as [`select_repo_package_areas`] but also returns the
+/// repo-relative area root directory derived from each area's first package.
+fn select_repo_package_areas_with_roots<'a>(
+    packages: &'a [Package],
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<(&'a str, &'a str)> {
+    // Capture the first package encountered for each area (deterministic via
+    // BTreeMap ordering) so we can derive the area root once.
+    let mut seen: std::collections::BTreeMap<&str, &Package> = std::collections::BTreeMap::new();
+    for pkg in packages {
+        seen.entry(pkg.package_area.as_str()).or_insert(pkg);
+    }
+
+    let scope = package_area.map(str::to_lowercase);
+    let filters: Vec<RepoFilter> = if repo_filter.is_empty() {
+        Vec::new()
+    } else {
+        repo_filter.iter().map(|f| RepoFilter::parse(f)).collect()
+    };
+
+    seen.into_iter()
+        .filter(|(area, _)| {
+            if let Some(needle) = scope.as_deref()
+                && area.to_lowercase() != needle
+            {
+                return false;
+            }
+            if filters.is_empty() {
+                return true;
+            }
+            let lower = area.to_lowercase();
+            filters.iter().any(|f| {
+                let hit = lower.contains(&f.query.to_lowercase());
+                if f.negate { !hit } else { hit }
+            })
+        })
+        .map(|(area, pkg)| (area, package_area_root(pkg)))
+        .collect()
+}
+
 /// Collect unique package area names matching the given filters and scope.
 ///
 /// Returns an empty vec when the repo is not a monorepo.
@@ -1477,7 +1557,7 @@ pub fn render_repo_package_areas_formatted(
         return String::new();
     };
 
-    let areas = select_repo_package_areas(packages, repo_filter, package_area);
+    let areas = select_repo_package_areas_with_roots(packages, repo_filter, package_area);
     if areas.is_empty() {
         return String::new();
     }
@@ -1485,9 +1565,19 @@ pub fn render_repo_package_areas_formatted(
     let term = Terminal::default();
     let entries: Vec<String> = areas
         .iter()
-        .map(|area| {
+        .map(|(area, root)| {
             let markup = if verbose > 0 {
-                format!("{area}(<dim><i>./{area}</i></dim>)")
+                // Special-case the "root" area so the annotation reads
+                // "root (./)" rather than "root (./root)" (a non-existent
+                // directory). Every other area renders as "./{root}".
+                let dir_label = if *root == "." {
+                    String::from("./")
+                } else {
+                    format!("./{root}")
+                };
+                // Note the SPACE before the open paren — spec requires
+                // "{package-area} (<dim><i>{dir}</i></dim>)".
+                format!("{area} (<dim><i>{dir_label}</i></dim>)")
             } else {
                 (*area).to_string()
             };
