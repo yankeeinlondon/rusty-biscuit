@@ -164,20 +164,20 @@ line.
   (`render_audio_devices_section`, `render_audio_device_list`)
   stable; internal helpers change freely.
 - Centralize the helpers so both entry points share them:
-  - kind-styling helper
-  - sample-rate → kHz formatting helper
-  - name-suffix disambiguation helper
-  - device-line builder
+    - kind-styling helper
+    - sample-rate → kHz formatting helper
+    - name-suffix disambiguation helper
+    - device-line builder
 - Preserve JSON output for `OutputFilter::AudioDevices` unchanged.
 
 ## Testing
 
 - Update the existing `insta` snapshots touched by the new format.
 - Add unit tests for the name-suffix helper covering:
-  - no collision (no suffix added)
-  - collision with a clean trailing suffix in both uids
-  - collision where uids are identical (fallback to `:1`, `:2`, …)
-  - collision where uids differ earlier in the string (suffix is the
+    - no collision (no suffix added)
+    - collision with a clean trailing suffix in both uids
+    - collision where uids are identical (fallback to `:1`, `:2`, …)
+    - collision where uids differ earlier in the string (suffix is the
     full trailing remainder after the longest common prefix)
 - Add unit tests for the kHz formatting helper covering 44100, 48000,
   88200, 96000, and a non-integer kHz result.
