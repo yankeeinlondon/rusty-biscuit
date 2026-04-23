@@ -5,13 +5,13 @@ set positional-arguments := true
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-import "../just/lifecycle.just"
-import "../just/plan.just"
-import "../just/review.just"
-import "../just/notify.just"
-import "../just/ai.just"
-import "../just/devops.just"
-import "../just/spec.just"
+import "./just/lifecycle.just"
+import "./just/plan.just"
+import "./just/review.just"
+import "./just/notify.just"
+import "./just/ai.just"
+import "./just/devops.just"
+import "./just/spec.just"
 
 # List of areas in this monorepo
 
