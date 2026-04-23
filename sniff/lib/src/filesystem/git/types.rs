@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use git2::Repository;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -475,6 +476,8 @@ fn extract_remote_host(url: &str) -> Option<&str> {
 pub struct GitRepo {
     repo: Repository,
     repo_root: PathBuf,
+    /// Cached ref decorations to avoid recomputing on every commit query.
+    ref_decorations: RefCell<Option<HashMap<git2::Oid, Vec<RefDecoration>>>>,
 }
 
 impl std::fmt::Debug for GitRepo {
@@ -482,6 +485,18 @@ impl std::fmt::Debug for GitRepo {
         f.debug_struct("GitRepo")
             .field("repo_root", &self.repo_root)
             .finish_non_exhaustive()
+    }
+}
+
+impl GitRepo {
+    /// Returns cached ref decorations, computing them once on first access.
+    pub(crate) fn ref_decorations(&self) -> std::cell::Ref<'_, HashMap<git2::Oid, Vec<RefDecoration>>> {
+        // If not yet computed, compute and cache
+        if self.ref_decorations.borrow().is_none() {
+            let decorations = super::detection::collect_ref_decorations(&self.repo);
+            *self.ref_decorations.borrow_mut() = Some(decorations);
+        }
+        std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
     }
 }
 
@@ -502,7 +517,11 @@ impl GitRepo {
             .workdir()
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
             .to_path_buf();
-        Ok(Some(Self { repo, repo_root }))
+        Ok(Some(Self {
+            repo,
+            repo_root,
+            ref_decorations: RefCell::new(None),
+        }))
     }
 
     /// Absolute path to the repository working directory.
@@ -561,7 +580,8 @@ impl GitRepo {
 
     /// Recent commits from HEAD.
     pub fn recent_commits(&self, count: usize) -> Vec<CommitInfo> {
-        super::detection::get_recent_commits(&self.repo, count)
+        let decorations = self.ref_decorations();
+        super::detection::get_recent_commits_with_decorations(&self.repo, count, Some(&*decorations))
     }
 
     /// Configured remotes.

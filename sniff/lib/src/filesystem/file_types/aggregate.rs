@@ -43,7 +43,7 @@ pub fn summarize_languages(inventory: &FileInventory) -> LanguageSummary {
     let mut language_map: HashMap<ProgrammingLanguage, LanguageAccumulator> = HashMap::new();
     let mut framework_map: HashMap<FrameworkKind, FrameworkAccumulator> = HashMap::new();
 
-    for classification in &inventory.classifications {
+    for classification in inventory.classifications.iter() {
         if classification.association == FileAssociation::ProgrammingLanguage
             && let Some(language) = classification.language
         {
@@ -167,7 +167,7 @@ pub fn summarize_languages(inventory: &FileInventory) -> LanguageSummary {
 fn summarize_associations(inventory: &FileInventory) -> Vec<FileAssociationStats> {
     let mut associations: HashMap<FileAssociation, Vec<PathBuf>> = HashMap::new();
 
-    for classification in &inventory.classifications {
+    for classification in inventory.classifications.iter() {
         associations
             .entry(classification.association)
             .or_default()
