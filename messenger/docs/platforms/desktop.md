@@ -32,6 +32,19 @@ messenger = { version = "0.1", features = ["desktop"] }
 
 CLI: `messenger-cli` enables `desktop` by default.
 
+## Quick Test
+
+Send a test notification to verify the provider is working:
+
+```bash
+messenger send --provider desktop --title "Test Notification" "Hello from messenger"
+```
+
+Platform-specific notes:
+
+- **Linux / macOS** — no prior setup is required; the command works immediately.
+- **Windows** — run `messenger setup desktop` first to create the required Start Menu shortcut and App User Model ID.
+
 Platform-specific dependencies pulled in by the `desktop` feature:
 
 | Target | Crates |
@@ -85,6 +98,98 @@ Receipt metadata includes a `delivery` key — `applescript` or `native` — so 
 Portable fields on the AppleScript path collapse to title/body only; `subtitle`, `icon`, and images are best-effort and may be ignored. The native path maps `title` → `title`, `subtitle` → `subtitle`, `body` → `body`, first image → attachment, `category` → `categoryIdentifier`, and may later map `urgency` → `interruptionLevel`.
 
 Both paths return a UUID as `notification_id`; AppleScript does not expose a system handle, and the native submit path is fire-and-forget. `MessageRef::Desktop` on macOS therefore preserves the UUID so future versions can add replacement/dismissal without changing the type.
+
+### The "Show" Button
+
+macOS notifications include a default **Show** button that appears on hover. What it does depends on the delivery strategy:
+
+| Strategy | "Show" Behavior | Controllable? |
+|----------|-----------------|---------------|
+| **AppleScript** | Opens **Script Editor** (the host process of `osascript`) | **No** — AppleScript offers no API to override the default action. The notification is associated with the `osascript` process, and the system routes the click to its parent application. |
+| **NativeUserNotifications** | Does nothing by default (fire-and-forget) | **Partially** — You can register `UNNotificationAction` buttons via `UNNotificationCategory`, but the default "Show" behavior for a plain notification with no category still has no effect. |
+
+If you need actionable notifications on macOS, you must use the **NativeUserNotifications** strategy, bundle the binary into a signed `.app`, and register a `UNNotificationCategory` with explicit actions. See [Moving to Native UserNotifications](#moving-to-native-usernotifications-on-macos) below.
+
+### Moving to Native UserNotifications on macOS
+
+The AppleScript strategy works out of the box but has limited features and the unintuitive "Show → Script Editor" behavior. To unlock the full macOS notification API (action buttons, replacement, dismissal, interruption levels), you need to switch to the native `UserNotifications.framework` backend. This requires more than a config change — it requires a **bundled, signed application identity**.
+
+**Prerequisites**
+
+- macOS 10.14+ (UserNotifications framework requirement)
+- Apple Developer ID or personal signing certificate
+- The `messenger` binary must be inside a `.app` bundle (see step 2)
+
+**Step-by-step migration**
+
+1. **Switch strategy in config**
+   Update your desktop route to use the native strategy:
+   ```json
+   {
+     "routes": {
+       "desktop.local": {
+         "provider": "desktop",
+         "macos": {
+           "strategy": "native_user_notifications",
+           "bundle_id": "com.yourorg.messenger"
+         }
+       }
+     }
+   }
+   ```
+
+2. **Bundle the binary**
+   The native framework rejects notifications from unpackaged processes. Create a minimal app bundle:
+   ```bash
+   APP="Messenger.app"
+   mkdir -p "$APP/Contents/MacOS"
+   cp $(which messenger) "$APP/Contents/MacOS/"
+   cat > "$APP/Contents/Info.plist" <<'EOF'
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+   <dict>
+     <key>CFBundleIdentifier</key>
+     <string>com.yourorg.messenger</string>
+     <key>CFBundleName</key>
+     <string>Messenger</string>
+     <key>CFBundleExecutable</key>
+     <string>messenger</string>
+     <key>CFBundleVersion</key>
+     <string>1.0</string>
+     <key>LSUIElement</key>
+     <true/>
+   </dict>
+   </plist>
+   EOF
+   ```
+   The `LSUIElement` key prevents a dock icon from appearing.
+
+3. **Code-sign the bundle**
+   Sign with your Developer ID or ad-hoc certificate:
+   ```bash
+   codesign --force --deep --sign "Developer ID Application: Your Name" Messenger.app
+   ```
+   For local testing, you can use ad-hoc signing:
+   ```bash
+   codesign --force --deep --sign - Messenger.app
+   ```
+
+4. **Request notification authorization**
+   On first launch, the system will prompt the user to allow notifications from your app. The current native implementation is fire-and-forget and does not explicitly request authorization — the prompt appears automatically on first `send`. For production apps, you should call `requestAuthorizationWithOptions:completionHandler:` in a proper app delegate before sending.
+
+5. **Run from the bundle**
+   Always invoke the bundled binary, not the raw `cargo install`ed executable:
+   ```bash
+   ./Messenger.app/Contents/MacOS/messenger send --provider desktop --title "Hello" "Native notification"
+   ```
+
+**Known limitations of the current native implementation**
+
+- **Actions are not wired**: The `actions` field on `DesktopConfig` / `DesktopOverrides` is accepted but not passed through to `UNNotificationCategory`. Adding action buttons requires extending `send_native_with_id` to create a `UNNotificationCategory`, register it with `setNotificationCategories:`, and attach it to the `UNMutableNotificationContent`.
+- **No completion handler**: Delivery is fire-and-forget. The receipt's `metadata["delivery_confirmed"]` is always `"false"`.
+- **Replace/dismiss are available**: Unlike AppleScript, the native backend supports `replace` and `dismiss` via `UNUserNotificationCenter`.
+- **Urgency is not mapped**: `NotificationUrgency` is not yet translated to `interruptionLevel`.
 
 ## Windows (WinRT toast)
 

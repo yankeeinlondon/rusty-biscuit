@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Result, eyre};
@@ -425,6 +427,8 @@ async fn send_message(args: SendArgs) -> Result<()> {
         action,
     } = args;
 
+    let message_text = message_text.as_deref().map(unescape);
+
     let config = Config::load()?;
     let resolved_route = resolve_route(provider_opt, channel_opt, route_opt, &config)?;
     let route_label = resolved_route.name.as_deref().unwrap_or("<ad-hoc>");
@@ -614,7 +618,17 @@ fn icon_string_to_messenger(value: String) -> messenger::NotificationIcon {
 
 fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning]) {
     for warning in warnings {
-        eprintln!("{warning}");
+        if warning.provider == messenger::ProviderKind::Desktop
+            && warning.feature == "markdown rendering"
+        {
+            let status = Status::from_prose(
+                "the <b>Desktop</b> platform will drop any Markdown formatting provided",
+            )
+            .state(StatusState::Info);
+            eprintln!("{}", status.render_optimistic(Some(80)));
+        } else {
+            eprintln!("{warning}");
+        }
     }
 }
 
@@ -636,6 +650,8 @@ struct ReplaceArgs {
 
 #[tracing::instrument(skip_all)]
 async fn replace_notification(args: ReplaceArgs) -> Result<()> {
+    let message_text = args.message.as_deref().map(unescape);
+
     let receipt = receipt_store::load_receipt(&args.receipt)?;
     if receipt.provider != messenger::ProviderKind::Desktop {
         return Err(eyre!(
@@ -656,7 +672,7 @@ async fn replace_notification(args: ReplaceArgs) -> Result<()> {
         .and_then(|name| config.routes.get(name).cloned())
         .unwrap_or_else(RouteConfig::desktop_default);
 
-    let mut message = match args.message.as_deref() {
+    let mut message = match message_text.as_deref() {
         Some(text) if !text.is_empty() => {
             if args.plain {
                 messenger::Message::text(text)
@@ -705,7 +721,9 @@ async fn replace_notification(args: ReplaceArgs) -> Result<()> {
     // Build a standalone DesktopNotificationProvider from route config.
     let desktop_provider = build_desktop_provider_from_route(&route)?;
 
-    let new_receipt = desktop_provider.replace(&receipt, &dispatch, &prepared).await?;
+    let new_receipt = desktop_provider
+        .replace(&receipt, &dispatch, &prepared)
+        .await?;
     let receipt_path = receipt_store::save_receipt(&new_receipt, route_name.as_deref())?;
     tracing::info!(
         provider = %new_receipt.provider,
@@ -792,7 +810,9 @@ fn build_desktop_provider_from_route(
                 macos: messenger::MacOsDesktopConfig {
                     bundle_id: macos.bundle_id.clone(),
                     strategy: match macos.strategy {
-                        config::RouteMacOsStrategy::Auto => messenger::MacOsNotificationStrategy::Auto,
+                        config::RouteMacOsStrategy::Auto => {
+                            messenger::MacOsNotificationStrategy::Auto
+                        }
                         config::RouteMacOsStrategy::NativeUserNotifications => {
                             messenger::MacOsNotificationStrategy::NativeUserNotifications
                         }
@@ -1093,6 +1113,35 @@ fn resolve_secret(value: Option<&str>, env_name: &str) -> Result<String> {
     })
 }
 
+/// Replace common backslash escape sequences with their actual characters.
+///
+/// Supports `\n`, `\t`, `\r`, and `\\`. All other backslash-letter
+/// combinations are left untouched.
+fn unescape(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('t') => result.push('\t'),
+                Some('r') => result.push('\r'),
+                Some('\\') => result.push('\\'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
 /// Parse a "LAT,LON" string into (f64, f64).
 fn parse_location(s: &str) -> Result<(f64, f64)> {
     let parts: Vec<&str> = s.splitn(2, ',').collect();
@@ -1117,6 +1166,54 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn unescape_converts_backslash_n_to_newline() {
+        assert_eq!(unescape("hello\\nworld"), "hello\nworld");
+    }
+
+    #[test]
+    fn unescape_converts_backslash_t_to_tab() {
+        assert_eq!(unescape("col1\\tcol2"), "col1\tcol2");
+    }
+
+    #[test]
+    fn unescape_converts_backslash_r_to_cr() {
+        assert_eq!(unescape("line1\\rline2"), "line1\rline2");
+    }
+
+    #[test]
+    fn unescape_converts_double_backslash_to_single() {
+        assert_eq!(unescape("path\\\\to\\\\file"), "path\\to\\file");
+    }
+
+    #[test]
+    fn unescape_leaves_unknown_escapes_intact() {
+        assert_eq!(unescape("hello\\xworld"), "hello\\xworld");
+    }
+
+    #[test]
+    fn unescape_leaves_trailing_backslash_intact() {
+        assert_eq!(unescape("ends with \\"), "ends with \\");
+    }
+
+    #[test]
+    fn unescape_handles_empty_string() {
+        assert_eq!(unescape(""), "");
+    }
+
+    #[test]
+    fn unescape_handles_no_escapes() {
+        assert_eq!(unescape("plain text"), "plain text");
+    }
+
+    #[test]
+    fn unescape_handles_mixed_escapes() {
+        assert_eq!(
+            unescape("line1\\nline2\\tcol1\\tcol2\\\\end"),
+            "line1\nline2\tcol1\tcol2\\end"
+        );
+    }
 
     #[test]
     fn resolve_route_builds_ad_hoc_provider_route() {
@@ -1493,6 +1590,29 @@ mod tests {
         assert_eq!(
             warning.to_string(),
             "⚠️ the attachments feature is not supported on Slack and will be dropped"
+        );
+    }
+
+    #[test]
+    fn desktop_markdown_warning_renders_as_info_status() {
+        let _warning = messenger::CompatibilityWarning {
+            provider: messenger::ProviderKind::Desktop,
+            feature: "markdown rendering",
+        };
+
+        let status = Status::from_prose(
+            "the <b>Desktop</b> platform will drop any Markdown formatting provided",
+        )
+        .state(StatusState::Info);
+        let rendered = status.render_optimistic(Some(80));
+
+        assert!(
+            rendered.contains("Desktop"),
+            "rendered output should contain 'Desktop': {rendered}"
+        );
+        assert!(
+            rendered.contains("will drop any Markdown formatting provided"),
+            "rendered output should contain message: {rendered}"
         );
     }
 
@@ -1907,7 +2027,9 @@ mod tests {
         .unwrap();
 
         match cli.command {
-            Commands::Send { message, action, .. } => {
+            Commands::Send {
+                message, action, ..
+            } => {
                 assert_eq!(message.as_deref(), Some("Approval needed"));
                 assert_eq!(action, vec!["ok:Approve", "reject:Reject"]);
             }

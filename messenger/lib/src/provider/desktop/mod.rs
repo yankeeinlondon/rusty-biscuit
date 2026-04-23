@@ -630,6 +630,9 @@ mod tests {
             icon: Some(NotificationIcon::Named("override-icon".into())),
             replace_id: Some("replace-1".into()),
             group_id: None,
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
         });
 
         let request = build_request(&config, &dispatch, &prepared).unwrap();

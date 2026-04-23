@@ -31,6 +31,8 @@ pub fn render_nodes_for_provider(nodes: &[RichNode], provider: ProviderKind) -> 
         ProviderKind::Signal | ProviderKind::WhatsApp | ProviderKind::Desktop => {
             plain_text::render_plain_text(nodes)
         }
+        // Mobile push notifications don't support rich text
+        ProviderKind::Apns | ProviderKind::Fcm => plain_text::render_plain_text(nodes),
     }
 }
 

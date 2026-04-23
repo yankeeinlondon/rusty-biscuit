@@ -67,6 +67,34 @@ fn title_only_is_valid_for_desktop_provider() {
     assert!(validate_message_for_provider(&message, ProviderKind::Desktop).is_ok());
 }
 
+#[cfg(feature = "apns")]
+#[test]
+fn title_only_is_valid_for_apns_provider() {
+    let message = Message {
+        title: Some("Title".into()),
+        body: None,
+        attachments: vec![],
+        location: None,
+        metadata: Default::default(),
+    };
+
+    assert!(validate_message_for_provider(&message, ProviderKind::Apns).is_ok());
+}
+
+#[cfg(feature = "fcm")]
+#[test]
+fn title_only_is_valid_for_fcm_provider() {
+    let message = Message {
+        title: Some("Title".into()),
+        body: None,
+        attachments: vec![],
+        location: None,
+        metadata: Default::default(),
+    };
+
+    assert!(validate_message_for_provider(&message, ProviderKind::Fcm).is_ok());
+}
+
 #[cfg(feature = "desktop")]
 #[test]
 fn empty_message_is_invalid_even_for_desktop() {
@@ -80,6 +108,40 @@ fn empty_message_is_invalid_even_for_desktop() {
 
     assert!(matches!(
         validate_message_for_provider(&message, ProviderKind::Desktop),
+        Err(MessengerError::InvalidMessage(_))
+    ));
+}
+
+#[cfg(feature = "apns")]
+#[test]
+fn empty_message_is_invalid_even_for_apns() {
+    let message = Message {
+        title: None,
+        body: None,
+        attachments: vec![],
+        location: None,
+        metadata: Default::default(),
+    };
+
+    assert!(matches!(
+        validate_message_for_provider(&message, ProviderKind::Apns),
+        Err(MessengerError::InvalidMessage(_))
+    ));
+}
+
+#[cfg(feature = "fcm")]
+#[test]
+fn empty_message_is_invalid_even_for_fcm() {
+    let message = Message {
+        title: None,
+        body: None,
+        attachments: vec![],
+        location: None,
+        metadata: Default::default(),
+    };
+
+    assert!(matches!(
+        validate_message_for_provider(&message, ProviderKind::Fcm),
         Err(MessengerError::InvalidMessage(_))
     ));
 }

@@ -27,10 +27,11 @@ pub fn validate_message(message: &Message) -> Result<(), MessengerError> {
 /// Provider-aware message validity check.
 ///
 /// Matches [`validate_message`] for every provider except
-/// [`ProviderKind::Desktop`], where a title-only message is permitted.
-/// Desktop notifications treat `title` as first-class content: a "Deploy
-/// finished" toast with no body is valid and should not error out before
-/// a backend ever sees it.
+/// [`ProviderKind::Desktop`], [`ProviderKind::Apns`], and [`ProviderKind::Fcm`],
+/// where a title-only message is permitted. Desktop notifications and mobile
+/// push notifications treat `title` as first-class content: a "Deploy finished"
+/// toast or "New Message" push with no body is valid and should not error out
+/// before a backend ever sees it.
 pub fn validate_message_for_provider(
     message: &Message,
     provider: ProviderKind,
@@ -44,7 +45,17 @@ pub fn validate_message_for_provider(
         }
         return Ok(());
     }
-    let _ = provider;
+
+    // Mobile push providers allow title-only messages
+    if provider == ProviderKind::Apns || provider == ProviderKind::Fcm {
+        if message.is_empty() && message.title.is_none() {
+            return Err(MessengerError::InvalidMessage(
+                "message has no title, body, attachments, or location".into(),
+            ));
+        }
+        return Ok(());
+    }
+
     validate_message(message)
 }
 
@@ -291,6 +302,14 @@ pub fn normalize_dispatch(
 fn is_undeliverable_after_normalization(message: &Message, provider: ProviderKind) -> bool {
     #[cfg(feature = "desktop")]
     if provider == ProviderKind::Desktop {
+        return message.is_empty() && message.title.is_none();
+    }
+    #[cfg(feature = "apns")]
+    if provider == ProviderKind::Apns {
+        return message.is_empty() && message.title.is_none();
+    }
+    #[cfg(feature = "fcm")]
+    if provider == ProviderKind::Fcm {
         return message.is_empty() && message.title.is_none();
     }
     let _ = provider;

@@ -79,6 +79,20 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .opencode/skill/messenger/SKILL.md
+source_files_during_phase_4:
+  - messenger/lib/src/provider/apns.rs
+  - messenger/lib/src/provider/fcm.rs
+  - messenger/lib/src/markdown/mod.rs
+  - messenger/lib/src/receipt.rs
+  - messenger/lib/src/validate.rs
+  - messenger/lib/src/tests/apns_integration.rs
+  - messenger/lib/src/tests/fcm_integration.rs
+  - messenger/lib/src/tests/receipts.rs
+  - messenger/lib/src/tests/validation.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .opencode/skill/messenger/SKILL.md
 packages:
   - messenger
   - messenger-cli
@@ -152,16 +166,16 @@ packages:
 ## Phase 4: Mobile Push Providers
 
 ### Parallelizable Work
-- [ ] Implement separate `apns` provider for iOS push notifications
-- [ ] Implement separate `fcm` provider for Android push notifications
-- [ ] Add mobile-specific authentication and targeting models
-- [ ] Create mobile-specific documentation and examples
+- [x] Implement separate `apns` provider for iOS push notifications
+- [x] Implement separate `fcm` provider for Android push notifications
+- [x] Add mobile-specific authentication and targeting models
+- [x] Create mobile-specific documentation and examples
 
 ### Validation Checkpoints
-- [ ] Verify APNs provider integrates with Apple Push Notification service
-- [ ] Confirm FCM provider works with Firebase Cloud Messaging
-- [ ] Test mobile providers independently from desktop provider
-- [ ] Validate mobile-specific capabilities and constraints
+- [x] Verify APNs provider integrates with Apple Push Notification service
+- [x] Confirm FCM provider works with Firebase Cloud Messaging
+- [x] Test mobile providers independently from desktop provider
+- [x] Validate mobile-specific capabilities and constraints
 
 ## Cross-Cutting Validation
 

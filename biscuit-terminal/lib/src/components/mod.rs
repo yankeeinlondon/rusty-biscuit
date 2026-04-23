@@ -2,6 +2,7 @@ pub mod block_quote;
 pub mod compose;
 pub mod filesystem;
 pub mod graph_expression;
+pub mod horizontal_rule;
 pub mod image_options;
 pub mod inline_content;
 pub mod list;
@@ -19,4 +20,5 @@ pub mod text_block;
 pub mod todo;
 pub mod two_column;
 
+pub use horizontal_rule::{HorizontalRule, RulePlacement, RuleStyle, RuleWeight};
 pub use status_block::StatusBlock;
