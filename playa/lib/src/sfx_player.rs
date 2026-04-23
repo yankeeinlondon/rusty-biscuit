@@ -196,7 +196,9 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
                 PulsePlaybackOutcome::PlaybackCompleted | PulsePlaybackOutcome::PlaybackStarted => {
                     return Ok(());
                 }
-                PulsePlaybackOutcome::SetupFailed(_) => {}
+                PulsePlaybackOutcome::SetupFailed(e) => {
+                    eprintln!("playa: PulseAudio setup failed, falling back to rodio: {e}");
+                }
             }
         }
     }
