@@ -356,9 +356,7 @@ mod tests {
         #[test]
         fn test_find_macos_app_bundle_vscode() {
             // This test requires VS Code to be installed
-            let result = find_macos_app_bundle("code");
-            if result.is_some() {
-                let path = result.unwrap();
+            if let Some(path) = find_macos_app_bundle("code") {
                 assert!(path.exists(), "Path should exist: {:?}", path);
                 assert!(
                     path.to_string_lossy().contains("Visual Studio Code"),
@@ -371,9 +369,7 @@ mod tests {
 
         #[test]
         fn test_find_macos_app_bundle_wezterm() {
-            let result = find_macos_app_bundle("wezterm");
-            if result.is_some() {
-                let path = result.unwrap();
+            if let Some(path) = find_macos_app_bundle("wezterm") {
                 assert!(path.exists());
                 assert!(path.to_string_lossy().contains("WezTerm"));
             }
@@ -381,9 +377,7 @@ mod tests {
 
         #[test]
         fn test_find_macos_app_bundle_kitty() {
-            let result = find_macos_app_bundle("kitty");
-            if result.is_some() {
-                let path = result.unwrap();
+            if let Some(path) = find_macos_app_bundle("kitty") {
                 assert!(path.exists());
                 assert!(path.to_string_lossy().contains("kitty"));
             }
@@ -391,9 +385,7 @@ mod tests {
 
         #[test]
         fn test_find_macos_app_bundle_alacritty() {
-            let result = find_macos_app_bundle("alacritty");
-            if result.is_some() {
-                let path = result.unwrap();
+            if let Some(path) = find_macos_app_bundle("alacritty") {
                 assert!(path.exists());
                 assert!(path.to_string_lossy().contains("Alacritty"));
             }

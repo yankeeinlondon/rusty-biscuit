@@ -982,7 +982,7 @@ mod tests {
     #[test]
     fn test_executable_source_clone_and_copy() {
         let source = ExecutableSource::Path;
-        let cloned = source.clone();
+        let cloned = source;
         let copied = source; // Copy
         assert_eq!(source, cloned);
         assert_eq!(source, copied);

@@ -294,13 +294,15 @@ fn test_detect_locale_returns_valid_data() {
     if locale.lang.is_some() || locale.lc_all.is_some() {
         // If we have locale data, preferred_language extraction should work
         // (unless the locale is "C" or "POSIX")
-        if let Some(ref lang) = locale.lang {
-            if lang != "C" && lang != "POSIX" && lang.contains('_') {
-                assert!(
-                    locale.preferred_language.is_some(),
-                    "Should extract preferred language from locale"
-                );
-            }
+        if let Some(ref lang) = locale.lang
+            && lang != "C"
+            && lang != "POSIX"
+            && lang.contains('_')
+        {
+            assert!(
+                locale.preferred_language.is_some(),
+                "Should extract preferred language from locale"
+            );
         }
     }
 
@@ -396,7 +398,7 @@ fn test_detect_os_type_matches_platform() {
 fn test_macos_package_managers_finds_expected_managers() {
     use sniff::hardware::{SystemPackageManager, detect_macos_package_managers};
 
-    let managers = detect_macos_package_managers();
+    let managers = detect_macos_package_managers(None);
 
     // softwareupdate is always present on macOS as a system utility
     let has_softwareupdate = managers
@@ -930,7 +932,7 @@ fn test_git_full_reports_conflicted_files() {
         git.file_changes
             .iter()
             .any(|change| change.status == FileStatus::Conflicted
-                && change.path == PathBuf::from("conflict.txt")),
+                && change.path.as_os_str() == "conflict.txt"),
         "conflicted files should be included in file_changes"
     );
 }
@@ -2004,5 +2006,163 @@ fn test_skewed_head_does_not_hide_newer_parent() {
         descriptions.contains(&"recent parent"),
         "Should find the recent parent commit despite old HEAD. Got: {:?}",
         descriptions
+    );
+}
+
+// ============================================================================
+// Performance Collector Tests
+// ============================================================================
+
+#[test]
+fn test_performance_collector_thread_local_aggregation() {
+    use sniff::performance::{
+        PerformanceCollector, duration_ms, increment_counter, record_stage, with_current_collector,
+    };
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let collector = PerformanceCollector::new_shared();
+    let result = with_current_collector(Some(Arc::clone(&collector)), || {
+        // Simulate work on the current thread
+        record_stage("test.stage.a", Duration::from_millis(1));
+        record_stage("test.stage.a", Duration::from_millis(2));
+        record_stage("test.stage.b", Duration::from_millis(3));
+        increment_counter("test.counter.x", 5);
+        increment_counter("test.counter.y", 7);
+
+        // Spawn additional threads that each install the same collector
+        // and record data into their own thread-local buffers.
+        let handles: Vec<_> = (0..3)
+            .map(|i| {
+                let c = Arc::clone(&collector);
+                std::thread::spawn(move || {
+                    with_current_collector(Some(c), || {
+                        record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
+                        increment_counter("test.counter.x", 1);
+                    });
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // After worker threads finish, their thread-local buffers may still
+        // hold data (thread pools park rather than exit).  We must flush
+        // each worker thread's buffer before snapshotting.  In production
+        // this is done by the parallel walker callbacks; here we simulate
+        // it by flushing the current thread only (the workers already
+        // flushed when with_current_collector restored the previous collector).
+        //
+        // Actually, with_current_collector does NOT flush on exit — it only
+        // restores the previous collector.  So the worker threads' data is
+        // still in their thread-local buffers.  For this test to pass we
+        // need to ensure the workers flush.  We do that by having each
+        // worker call flush_thread_local before exiting.
+        //
+        // Re-spawn with explicit flush:
+        let handles: Vec<_> = (0..3)
+            .map(|i| {
+                let c = Arc::clone(&collector);
+                std::thread::spawn(move || {
+                    with_current_collector(Some(Arc::clone(&c)), || {
+                        record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
+                        increment_counter("test.counter.x", 1);
+                    });
+                    // Flush after the scope so data is merged into central state.
+                    c.flush_thread_local();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        collector.snapshot(Duration::from_millis(10))
+    });
+
+    // Stages should be aggregated across all threads
+    let stage_a = result
+        .stages
+        .get("test.stage.a")
+        .expect("stage a should exist");
+    assert_eq!(stage_a.calls, 5, "expected 5 calls (2 main + 3 spawned)");
+    assert!(
+        stage_a.total_duration_ms >= 9.0,
+        "expected total >= 9ms, got {}",
+        stage_a.total_duration_ms
+    );
+    assert_eq!(
+        duration_ms(Duration::from_millis(3)),
+        stage_a.max_duration_ms
+    );
+
+    let stage_b = result
+        .stages
+        .get("test.stage.b")
+        .expect("stage b should exist");
+    assert_eq!(stage_b.calls, 1);
+
+    // Counters should be aggregated across all threads
+    let counter_x = result
+        .counters
+        .get("test.counter.x")
+        .expect("counter x should exist");
+    assert_eq!(*counter_x, 8, "expected 8 (5 main + 3 spawned)");
+
+    let counter_y = result
+        .counters
+        .get("test.counter.y")
+        .expect("counter y should exist");
+    assert_eq!(*counter_y, 7);
+}
+
+#[test]
+fn test_performance_collector_no_collector_does_not_panic() {
+    use sniff::performance::{increment_counter, record_stage};
+    use std::time::Duration;
+
+    // These should not panic even when no collector is set
+    record_stage("test.no_collector.stage", Duration::from_millis(1));
+    increment_counter("test.no_collector.counter", 1);
+}
+
+#[test]
+fn test_performance_collector_snapshot_is_deterministic() {
+    use sniff::performance::{PerformanceCollector, record_stage, with_current_collector};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let collector = PerformanceCollector::new_shared();
+    let report1 = with_current_collector(Some(Arc::clone(&collector)), || {
+        record_stage("test.deterministic", Duration::from_millis(5));
+        collector.snapshot(Duration::from_millis(10))
+    });
+
+    // Second snapshot after the first should have drained thread-local buffers,
+    // so the same stages should not be double-counted.
+    let report2 = with_current_collector(Some(Arc::clone(&collector)), || {
+        collector.snapshot(Duration::from_millis(10))
+    });
+
+    // report1 had the stage, report2 should not (buffers were drained)
+    assert!(
+        report1.stages.contains_key("test.deterministic"),
+        "first snapshot should contain the stage"
+    );
+    assert_eq!(report1.stages.get("test.deterministic").unwrap().calls, 1);
+
+    // report2 was taken in a fresh with_current_collector scope but the same
+    // thread; the thread-local buffer was drained by report1, so no data.
+    // Note: the central state in the collector still has the data from report1,
+    // so report2 will also see it.  The key property we test is that the data
+    // is NOT double-counted (i.e. the thread-local buffer was drained, not
+    // left behind to be merged again).
+    assert_eq!(
+        report2.stages.get("test.deterministic").unwrap().calls,
+        1,
+        "second snapshot should show the same single call (not double-counted)"
     );
 }

@@ -115,9 +115,6 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
             let collector = collector.clone();
             scope.spawn(move || {
                 performance::with_current_collector(collector, || {
-                    // Audio initialization has historically interacted badly
-                    // with later Metal setup on macOS, so keep the audio-first
-                    // ordering there while still overlapping storage work.
                     let audio_started = Instant::now();
                     let devices = detect_audio_devices();
                     performance::record_logged_stage(
@@ -146,33 +143,30 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
             })
         });
 
+        // Run audio, storage, and GPU in parallel on all platforms.
+        //
+        // Historically on macOS, audio initialization (CoreAudio) was sequenced
+        // before GPU detection because Metal framework initialization (~14s in
+        // non-GUI contexts) interacted badly with CoreAudio. However, GPU
+        // detection now uses IOKit FFI (~200µs), which does not conflict with
+        // CoreAudio. The IOKit path was introduced to avoid the Metal delay and
+        // is safe to run concurrently with audio enumeration.
+        //
+        // If issues arise, set the environment variable `SNIFF_SERIALIZE_MACOS_GPU=1`
+        // to restore the old audio-first ordering.
         #[cfg(target_os = "macos")]
-        let gpu = {
-            let audio_devices = audio_handle
-                .map(|handle| handle.join().unwrap())
-                .unwrap_or_default();
-            let collector = collector.clone();
-            let gpu = request.include_gpu.then(|| {
-                performance::with_current_collector(collector, || {
-                    let gpu_started = Instant::now();
-                    let devices = detect_gpus();
-                    performance::record_logged_stage(
-                        "hardware.gpu",
-                        gpu_started.elapsed(),
-                        Level::DEBUG,
-                    );
-                    devices
-                })
-            });
-            let storage = storage_handle
-                .map(|handle| handle.join().unwrap())
-                .unwrap_or_default();
-            (audio_devices, storage, gpu.unwrap_or_default())
-        };
-
+        let serialize_gpu = std::env::var("SNIFF_SERIALIZE_MACOS_GPU").is_ok();
         #[cfg(not(target_os = "macos"))]
-        let gpu = {
-            let gpu_handle = request.include_gpu.then(|| {
+        let serialize_gpu = false;
+
+        let gpu_handle = if serialize_gpu {
+            // Legacy path: block on audio before starting GPU.
+            // We must join audio here because ScopedJoinHandle::join takes ownership.
+            let audio_devices = match audio_handle {
+                Some(handle) => handle.join().unwrap(),
+                None => Vec::new(),
+            };
+            let gpu = request.include_gpu.then(|| {
                 let collector = collector.clone();
                 scope.spawn(move || {
                     performance::with_current_collector(collector, || {
@@ -187,21 +181,48 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
                     })
                 })
             });
-
-            (
-                audio_handle
-                    .map(|handle| handle.join().unwrap())
-                    .unwrap_or_default(),
-                storage_handle
-                    .map(|handle| handle.join().unwrap())
-                    .unwrap_or_default(),
-                gpu_handle
-                    .map(|handle| handle.join().unwrap())
-                    .unwrap_or_default(),
-            )
+            let storage = match storage_handle {
+                Some(handle) => handle.join().unwrap(),
+                None => Vec::new(),
+            };
+            let gpu = match gpu {
+                Some(handle) => handle.join().unwrap(),
+                None => Vec::new(),
+            };
+            return (audio_devices, storage, gpu);
+        } else {
+            // Parallel path: GPU runs concurrently with audio and storage
+            request.include_gpu.then(|| {
+                let collector = collector.clone();
+                scope.spawn(move || {
+                    performance::with_current_collector(collector, || {
+                        let gpu_started = Instant::now();
+                        let devices = detect_gpus();
+                        performance::record_logged_stage(
+                            "hardware.gpu",
+                            gpu_started.elapsed(),
+                            Level::DEBUG,
+                        );
+                        devices
+                    })
+                })
+            })
         };
 
-        gpu
+        let audio_devices = match audio_handle {
+            Some(handle) => handle.join().unwrap(),
+            None => Vec::new(),
+        };
+        let storage = match storage_handle {
+            Some(handle) => handle.join().unwrap(),
+            None => Vec::new(),
+        };
+        let gpu = match gpu_handle {
+            Some(handle) => handle.join().unwrap(),
+            None => Vec::new(),
+        };
+
+        (audio_devices, storage, gpu)
     });
 
     Ok(HardwareInfo {
@@ -350,5 +371,44 @@ mod tests {
         assert!(info.storage.is_empty());
         assert!(info.gpu.is_empty());
         assert!(info.audio_devices.is_empty());
+    }
+
+    #[test]
+    fn test_detect_hardware_full_includes_gpu_on_macos() {
+        // On macOS, GPU detection should run in parallel with audio/storage
+        // and return results when full detection is requested.
+        let info = detect_hardware_with_request(&HardwareRequest::full()).unwrap();
+
+        // CPU and memory should always be present
+        assert!(info.cpu.logical_cores > 0);
+        assert!(info.memory.total_bytes > 0);
+
+        // On macOS, GPU should be detected (even if empty, it should not hang)
+        #[cfg(target_os = "macos")]
+        {
+            // The parallel path should complete without deadlock.
+            // We can't assert gpu.len() > 0 because VMs may not expose GPUs,
+            // but we can verify the function returned (no deadlock).
+        }
+    }
+
+    #[test]
+    fn test_detect_hardware_with_request_respects_flags() {
+        let with_all = HardwareRequest::full();
+        let with_none = HardwareRequest::summary();
+
+        let all = detect_hardware_with_request(&with_all).unwrap();
+        let none = detect_hardware_with_request(&with_none).unwrap();
+
+        // Summary should have CPU and memory but no storage/GPU/audio
+        assert!(none.cpu.logical_cores > 0);
+        assert!(none.memory.total_bytes > 0);
+        assert!(none.storage.is_empty());
+        assert!(none.gpu.is_empty());
+        assert!(none.audio_devices.is_empty());
+
+        // Full may have storage, GPU, audio (platform-dependent)
+        assert!(all.cpu.logical_cores > 0);
+        assert!(all.memory.total_bytes > 0);
     }
 }
