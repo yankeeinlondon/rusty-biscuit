@@ -1,5 +1,5 @@
 pub(crate) mod error_report;
-pub(crate) mod shell_expansion_error;
+pub(crate) mod error_walker;
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;

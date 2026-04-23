@@ -1,0 +1,143 @@
+//! Integration coverage for the unified contextual-error redesign.
+//!
+//! Exercises the three headline failure paths described in
+//! `claudine/features/2026-04-21-contextual-errors/spec.md` and asserts
+//! that the CLI's top-level cause-chain walker surfaces a rich darkmatter
+//! `BlockError` report (path, line number, hint) instead of flat text.
+
+use assert_cmd::cargo::cargo_bin_cmd;
+use std::fs;
+use tempfile::tempdir;
+
+mod common;
+use common::{strip_ansi, write_executable};
+
+/// Shell-expansion failure during `claudine compose`.
+///
+/// Uses a blacklisted command (`rm -rf /`) so the test works deterministically
+/// without needing a whitelist file or an approval handler: shell expansion
+/// rejects it at pre-flight with a structured `Blacklisted` variant that the
+/// darkmatter `BlockError` renderer turns into a rich report.
+#[cfg(unix)]
+#[test]
+fn compose_shell_expansion_failure_renders_rich_block() {
+    let workspace = tempdir().unwrap();
+    let md_file = workspace.path().join("compose.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rm -rf /\n\nPost.\n",
+    )
+    .unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("blacklisted") || plain.contains("Blacklisted"),
+        "expected rich shell-expansion report to mention blacklist; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("rm") || plain.contains("rm -rf"),
+        "expected the denied command to appear in the report; got:\n{plain}"
+    );
+    assert!(
+        !plain.contains("__claudine_pre_rendered__"),
+        "legacy pre-render marker must never reach the user; got:\n{plain}"
+    );
+}
+
+/// System-prompt composition failure via `--append-system-prompt`.
+///
+/// The system prompt file contains a blacklisted `::shell` directive.
+/// `ClaudineError::SystemPromptComposition` now carries the typed
+/// `MarkdownError`, so the top-level walker must surface the shell
+/// expansion's structured `Blacklisted` report.
+#[cfg(unix)]
+#[test]
+fn compose_system_prompt_shell_failure_renders_rich_block() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("prompt.md");
+    fs::write(&md_file, "---\ntitle: demo\n---\nHello compose\n").unwrap();
+
+    // Broken system prompt: ::shell with a blacklisted command.
+    let sp_file = workspace.path().join("append-system-prompt.md");
+    fs::write(&sp_file, "Base system prompt.\n\n::shell rm -rf /\n").unwrap();
+
+    // Fake codex binary so the wrapper pipeline picks a provider and
+    // reaches system-prompt resolution.
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "compose",
+            "--codex",
+            "--append-system-prompt",
+            sp_file.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("blacklisted") || plain.contains("Blacklisted"),
+        "expected system-prompt shell failure to render blacklist report; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("rm"),
+        "expected the denied command to appear in the report; got:\n{plain}"
+    );
+    assert!(
+        !plain.contains("__claudine_pre_rendered__"),
+        "legacy pre-render marker must never reach the user; got:\n{plain}"
+    );
+}
+
+/// Transclusion cycle surfaced during `claudine compose`.
+///
+/// Two files transclude one another in a loop. The top-level walker should
+/// surface darkmatter's `TransclusionError::CycleDetected` report with both
+/// file paths in the chain.
+#[test]
+fn compose_transclusion_cycle_renders_file_chain() {
+    let workspace = tempdir().unwrap();
+    let a = workspace.path().join("a.md");
+    let b = workspace.path().join("b.md");
+    fs::write(&a, "Start a.\n\n::file ./b.md\n\nEnd a.\n").unwrap();
+    fs::write(&b, "Start b.\n\n::file ./a.md\n\nEnd b.\n").unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", a.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("cycle") || plain.contains("Cycle"),
+        "expected transclusion-cycle report to mention a cycle; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("a.md") && plain.contains("b.md"),
+        "expected both files in the cycle chain to be reported; got:\n{plain}"
+    );
+    assert!(
+        !plain.contains("__claudine_pre_rendered__"),
+        "legacy pre-render marker must never reach the user; got:\n{plain}"
+    );
+}

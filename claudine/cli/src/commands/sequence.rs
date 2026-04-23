@@ -6,7 +6,6 @@ use color_eyre::eyre::{Result, eyre};
 use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
-use crate::log;
 
 /// Run a Markdown document as a serial sequence of composition steps.
 ///
@@ -39,20 +38,16 @@ fn parse_boolish(s: &str) -> Result<bool, String> {
 }
 
 /// Entry point for `claudine sequence`.
+///
+/// Errors returned here bubble up to the top-level walker in `main.rs`,
+/// which renders darkmatter `BlockError` reports for typed Markdown
+/// failures and falls back to `color_eyre` otherwise.
 pub fn run_sequence(
     args: SequenceArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<()> {
-    let code = match run_sequence_inner(args, verbose, startup_timings) {
-        Ok(code) => code,
-        Err(error) => {
-            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
-                log::error(&error.to_string());
-            }
-            1
-        }
-    };
+    let code = run_sequence_inner(args, verbose, startup_timings)?;
     std::process::exit(code);
 }
 
@@ -82,7 +77,7 @@ fn run_sequence_inner(
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
 
-    let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
+    let source = composition::resolve_composition_source(&file)?;
 
     let _sequence_span = info_span!(
         "sequence",
@@ -91,8 +86,7 @@ fn run_sequence_inner(
     )
     .entered();
 
-    let plan = composition::resolve_sequence_plan(&source)
-        .map_err(|e| eyre!("{e}"))?
+    let plan = composition::resolve_sequence_plan(&source)?
         .ok_or_else(|| {
             eyre!(
                 "file '{}' does not define a `sequence` frontmatter property",
