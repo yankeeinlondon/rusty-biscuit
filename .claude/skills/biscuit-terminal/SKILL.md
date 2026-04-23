@@ -118,38 +118,14 @@ body border lines up with the preceding `Status` icon/header line.
 ```rust
 use biscuit_terminal::components::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
 
-let rule = HorizontalRule {
-    style: RuleStyle::Waves,
-    placement: RulePlacement::Centered,
-    weight: RuleWeight::Medium,
-    width: Some("75%".to_string()),
-    color: None,
-};
+let rule = HorizontalRule::new()
+    .style(RuleStyle::Waves)
+    .placement(RulePlacement::Centered)
+    .weight(RuleWeight::Medium)
+    .width("75%");
 
 // Terminal rendering
-rule.render(&mut terminal)?;
-
-// Browser rendering  
-let svg = rule.render_to_browser();
-```
-
-The `HorizontalRule` component implements both `Renderable` (for terminal output) and `BrowserRenderable` (for HTML/SVG output) traits. It provides three-tier progressive enhancement for terminal rendering: SVG→PNG via resvg, Unicode fallback characters, or ASCII fallback characters.
-
-### Horizontal Rules
-
-```rust
-use biscuit_terminal::components::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
-
-let rule = HorizontalRule {
-    style: RuleStyle::Waves,
-    placement: RulePlacement::Centered,
-    weight: RuleWeight::Medium,
-    width: Some("75%".to_string()),
-    color: None,
-};
-
-// Terminal rendering
-rule.render(&mut terminal)?;
+let output = rule.render(&terminal);
 
 // Browser rendering  
 let svg = rule.render_to_browser();
