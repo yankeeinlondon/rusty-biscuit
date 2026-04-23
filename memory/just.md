@@ -16,3 +16,11 @@ mod util
 This is especially useful in a monorepo where multiple shared recipe files in `just/*.just` may define the same ANSI color variables or other helpers.
 
 Note: `mod` was stabilized in just 1.31.0.
+
+## Unscheduled Feature Priority Prefixes
+
+Unscheduled features and fixes in `features/_unscheduled/` and `fixes/_unscheduled/` may be prefixed with a single digit priority: `{#}-{name}` where `1` is highest priority. The `just schedule` recipe will:
+- Sort the fzf picker by priority (lowest number first)
+- Strip the numeric prefix when moving to a scheduled `YYYY-MM-DD-{name}` directory
+
+The `just status` recipe lists unscheduled features sorted by name, which respects the priority prefix order.
