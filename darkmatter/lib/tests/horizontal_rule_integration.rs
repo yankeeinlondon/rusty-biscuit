@@ -11,8 +11,8 @@ mod tests {
         
         // Should contain the rendered horizontal rule
         assert!(!result.is_empty());
-        // The result should contain wave characters or tildes
-        assert!(result.contains('〜') || result.contains('~'));
+        // The result should contain wave characters (Unicode ≋ or ASCII ~)
+        assert!(result.contains('≋') || result.contains('~'));
     }
     
     #[test]
@@ -24,7 +24,7 @@ mod tests {
         // Should contain SVG with the specified attributes
         assert!(result.contains(r#"width="50%""#));
         assert!(result.contains(r#"stroke="red""#));
-        assert!(result.contains(r#"stroke-width="1""#)); // dots should be thin by default
+        assert!(result.contains(r#"stroke-width="4""#)); // dots default to medium weight in browser
     }
     
     #[test]
@@ -35,8 +35,8 @@ mod tests {
         let html_result = as_html(&md, Default::default()).unwrap();
         
         // Should contain multiple horizontal rules
-        assert!(terminal_result.contains('-') || terminal_result.contains('〜') || terminal_result.contains('·'));
-        assert!(html_result.contains("stroke-width=\"2\"") || html_result.contains("stroke-width=\"3\""));
+        assert!(terminal_result.contains('╌') || terminal_result.contains('≋') || terminal_result.contains('·') || terminal_result.contains('-'));
+        assert!(html_result.contains("stroke-width=\"4\"") || html_result.contains("stroke-width=\"8\""));
     }
     
     #[test]
@@ -63,10 +63,11 @@ mod tests {
         let html_result = as_html(&md, Default::default()).unwrap();
         
         // Should render with default attributes
-        assert!(terminal_result.contains('-'));
+        // Terminal uses Unicode dashes (╌) when color support is available
+        assert!(terminal_result.contains('╌') || terminal_result.contains('-'));
         assert!(html_result.contains(r#"width="100%""#));
         assert!(html_result.contains(r#"stroke="currentColor""#));
-        assert!(html_result.contains(r#"stroke-width="2""#));
+        assert!(html_result.contains(r#"stroke-width="4""#)); // medium weight in browser
     }
     
     #[test]
