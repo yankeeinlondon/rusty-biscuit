@@ -51,8 +51,9 @@ pub fn load_receipt(spec: &str) -> Result<messenger::SendReceipt> {
     }
 
     // Try parsing the spec directly as a SendReceipt JSON
-    messenger::SendReceipt::from_json_str(spec)
-        .map_err(|_| eyre!("unable to parse receipt. Pass a saved receipt path or a SendReceipt JSON blob."))
+    messenger::SendReceipt::from_json_str(spec).map_err(|_| {
+        eyre!("unable to parse receipt. Pass a saved receipt path or a SendReceipt JSON blob.")
+    })
 }
 
 pub fn load_message_ref(spec: &str) -> Result<messenger::MessageRef> {
