@@ -1,4 +1,5 @@
 use biscuit_file::YamlParseError;
+use darkmatter::markdown::MarkdownError;
 use std::path::PathBuf;
 
 use crate::events::Provider;
@@ -225,8 +226,12 @@ pub enum ClaudineError {
     SystemPromptFileNotFound(String),
 
     /// System prompt composition through Darkmatter failed.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker can
+    /// render a rich `BlockError` report (path, line, hint, transclusion
+    /// chain, etc.) instead of a flat string.
     #[error("system prompt composition failed: {0}")]
-    SystemPromptComposition(String),
+    SystemPromptComposition(#[from] MarkdownError),
 }
 
 /// Convenience type alias for Claudine results.

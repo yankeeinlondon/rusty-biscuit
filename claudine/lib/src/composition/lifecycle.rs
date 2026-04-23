@@ -528,8 +528,9 @@ pub fn parse_lifecycle_config(
 
         // Deserialize the notification
         let mut notification: LifecycleNotification = serde_json::from_value(value.clone())
-            .map_err(|e| {
-                CompositionError::ComposeFailed(format!("invalid {}: {}", property_name, e))
+            .map_err(|e| CompositionError::LifecycleInvalid {
+                property: property_name.to_string(),
+                message: e.to_string(),
             })?;
 
         // Normalize empty strings to None
@@ -925,11 +926,11 @@ mod tests {
         );
         assert_eq!(
             LifecycleSignal::Blocked.status_state(),
-            StatusState::Failure
+            StatusState::Error
         );
         assert_eq!(
             LifecycleSignal::Failure.status_state(),
-            StatusState::Failure
+            StatusState::Error
         );
     }
 
