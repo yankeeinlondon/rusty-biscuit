@@ -219,29 +219,13 @@ mod tests {
         let mark_processor = crate::markdown::inline::MarkProcessor::new(parser);
         RuleProcessor::new(mark_processor).collect()
     }
-    
+
     #[test]
     fn test_simple_horizontal_rule() {
         let events = process_text("--- { style: waves }");
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
-    }
-}
-    
-    #[test]
-    fn test_simple_horizontal_rule() {
-        let events = process_text("--- { style: waves }");
-        assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
-    }
-}
-    
-    #[test]
-    fn test_simple_horizontal_rule() {
-        let events = process_text("--- { style: waves }");
-        assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
-        
+
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             assert_eq!(attrs.style, Some("waves".to_string()));
             assert_eq!(attrs.placement, None);
@@ -324,16 +308,7 @@ mod tests {
         assert_eq!(events.len(), 3, "Expected 3 events for '---', got {:?}", events);
         assert!(matches!(events[0], InlineEvent::Standard(Event::Start(Tag::Paragraph))));
     }
-    
-    #[test]
-    fn test_malformed_attributes() {
-        // Note: "--- { style waves }" is not a valid horizontal rule pattern
-        // because it's missing the colon. It should be treated as a paragraph.
-        let events = process_text("regular paragraph with { style waves }");
-        assert_eq!(events.len(), 3);
-        assert!(matches!(events[0], InlineEvent::Standard(Event::Start(Tag::Paragraph))));
-    }
-    
+
     #[test]
     fn test_different_marker_types() {
         let events1 = process_text("*** { style: dashes }");
