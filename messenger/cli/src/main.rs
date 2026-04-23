@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Result, eyre};
@@ -614,7 +616,17 @@ fn icon_string_to_messenger(value: String) -> messenger::NotificationIcon {
 
 fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning]) {
     for warning in warnings {
-        eprintln!("{warning}");
+        if warning.provider == messenger::ProviderKind::Desktop
+            && warning.feature == "markdown rendering"
+        {
+            let status = Status::from_prose(
+                "the <b>Desktop</b> platform will drop any Markdown formatting provided",
+            )
+            .state(StatusState::Info);
+            eprintln!("{}", status.render_optimistic(Some(80)));
+        } else {
+            eprintln!("{warning}");
+        }
     }
 }
 
@@ -1494,6 +1506,23 @@ mod tests {
             warning.to_string(),
             "⚠️ the attachments feature is not supported on Slack and will be dropped"
         );
+    }
+
+    #[test]
+    fn desktop_markdown_warning_renders_as_info_status() {
+        let _warning = messenger::CompatibilityWarning {
+            provider: messenger::ProviderKind::Desktop,
+            feature: "markdown rendering",
+        };
+
+        let status = Status::from_prose(
+            "the <b>Desktop</b> platform will drop any Markdown formatting provided",
+        )
+        .state(StatusState::Info);
+        let rendered = status.render_optimistic(Some(80));
+
+        assert!(rendered.contains("Desktop"), "rendered output should contain 'Desktop': {rendered}");
+        assert!(rendered.contains("will drop any Markdown formatting provided"), "rendered output should contain message: {rendered}");
     }
 
     #[test]
