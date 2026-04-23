@@ -57,36 +57,36 @@ mark {
     border-radius: 2px;
 }
 </style>
-<h1>Horizontal Rule Examples</h1><h2>Basic Styles</h2><svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="8,4"/>
+<h1>Horizontal Rule Examples</h1><h2>Basic Styles</h2><svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" stroke-linecap="round" stroke-dasharray="8,4"/>
 </svg>
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="2,6"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" stroke-linecap="round" stroke-dasharray="2,6"/>
 </svg>
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" fill="none" stroke-linecap="round"/>
 </svg>
-<h2>Placement Options</h2><svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="currentColor" stroke-width="4" fill="none" stroke-linecap="round"/>
+<h2>Placement Options</h2><svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" fill="none" stroke-linecap="round"/>
 </svg>
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="2,6"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" stroke-linecap="round" stroke-dasharray="2,6"/>
 </svg>
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="8,4"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" stroke-linecap="round" stroke-dasharray="8,4"/>
 </svg>
-<h2>Weight Variations</h2><svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+<h2>Weight Variations</h2><svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 2; --hr-color: currentColor; --hr-width: 100%;">
+  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 2)" fill="none" stroke-linecap="round"/>
 </svg>
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="2,6"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" stroke-linecap="round" stroke-dasharray="2,6"/>
 </svg>
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-dasharray="8,4"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 8; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 8)" stroke-linecap="round" stroke-dasharray="8,4"/>
 </svg>
-<h2>Custom Attributes</h2><svg width="60%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="#ff0000" stroke-width="4" fill="none" stroke-linecap="round"/>
+<h2>Custom Attributes</h2><svg width="60%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: #ff0000; --hr-width: 60%;">
+  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="var(--hr-color, #ff0000)" stroke-width="var(--hr-weight, 4)" fill="none" stroke-linecap="round"/>
 </svg>
-<svg width="80%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="green" stroke-width="8" stroke-linecap="round" stroke-dasharray="2,6"/>
+<svg width="80%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 8; --hr-color: green; --hr-width: 80%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, green)" stroke-width="var(--hr-weight, 8)" stroke-linecap="round" stroke-dasharray="2,6"/>
 </svg>

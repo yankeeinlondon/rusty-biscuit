@@ -42,7 +42,7 @@
 
 mod types;
 
-pub use types::{InlineEvent, InlineTag, HorizontalRuleAttrs};
+pub use types::{HorizontalRuleAttrs, InlineEvent, InlineTag};
 
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 use std::collections::VecDeque;

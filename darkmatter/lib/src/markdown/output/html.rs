@@ -24,7 +24,7 @@
 //! assert!(html.contains("<code"));
 //! ```
 
-use crate::markdown::block::RuleProcessor;
+use crate::markdown::block::{RuleProcessor, build_rule};
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
@@ -32,7 +32,7 @@ use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
 use crate::mermaid::Mermaid;
 use crate::render::{ImageRef, Link};
-use biscuit_terminal::components::horizontal_rule::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
+use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::renderable::BrowserRenderable;
 use html_escape;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
@@ -73,6 +73,18 @@ pub struct HtmlOptions {
     /// - `Image`: Render as interactive mermaid diagrams (includes mermaid.js)
     /// - `Text`: Show as fenced code blocks (fallback format)
     pub mermaid_mode: MermaidMode,
+    /// Optional overrides for horizontal-rule CSS custom properties.
+    ///
+    /// When `Some`, each emitted `<svg>` for a [`HorizontalRule`] is run
+    /// through
+    /// [`BrowserRenderable::render_to_browser_with_inline_variables`],
+    /// which substitutes `var(--hr-*)` tokens with concrete values. Keys
+    /// match the CSS variable names *without* the `--` prefix (e.g.,
+    /// `hr-weight`, `hr-color`, `hr-width`).
+    ///
+    /// When `None` (default), the generated SVG keeps its `var(--hr-*, …)`
+    /// expressions so page-level CSS or downstream code can override them.
+    pub hr_css_variables: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Default for HtmlOptions {
@@ -84,6 +96,7 @@ impl Default for HtmlOptions {
             include_line_numbers: false,
             include_styles: true,
             mermaid_mode: MermaidMode::default(),
+            hr_css_variables: None,
         }
     }
 }
@@ -146,51 +159,25 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             }
             // Handle horizontal rule with attributes
             InlineEvent::HorizontalRule(attrs) => {
-                // Create HorizontalRule from attributes
-                let mut rule = HorizontalRule::new();
-                
-                if let Some(style) = &attrs.style {
-                    match style.as_str() {
-                        "dashes" => rule = rule.style(RuleStyle::Dashes),
-                        "dots" => rule = rule.style(RuleStyle::Dots),
-                        "waves" => rule = rule.style(RuleStyle::Waves),
-                        "line-star" => rule = rule.style(RuleStyle::LineStar),
-                        "line-circle" => rule = rule.style(RuleStyle::LineCircle),
-                        "inset-line" => rule = rule.style(RuleStyle::InsetLine),
-                        "curtain-rod" => rule = rule.style(RuleStyle::CurtainRod),
-                        _ => {} // Keep default style
-                    }
-                }
-                
-                if let Some(placement) = &attrs.placement {
-                    match placement.as_str() {
-                        "full" => rule = rule.placement(RulePlacement::Full),
-                        "centered" => rule = rule.placement(RulePlacement::Centered),
-                        "left" => rule = rule.placement(RulePlacement::Left),
-                        "right" => rule = rule.placement(RulePlacement::Right),
-                        _ => {} // Keep default placement
-                    }
-                }
-                
-                if let Some(weight) = &attrs.weight {
-                    match weight.as_str() {
-                        "thin" => rule = rule.weight(RuleWeight::Thin),
-                        "medium" => rule = rule.weight(RuleWeight::Medium),
-                        "thick" => rule = rule.weight(RuleWeight::Thick),
-                        _ => {} // Keep default weight
-                    }
-                }
-                
-                if let Some(width) = &attrs.width {
-                    rule = rule.width(width.clone());
-                }
-                
-                if let Some(color) = &attrs.color {
-                    rule = rule.color(color.clone());
-                }
-                
-                // Render the horizontal rule for browser
-                output.push_str(&rule.render_to_browser());
+                // Create HorizontalRule from attributes via the shared builder
+                // so terminal and HTML renderers stay consistent (Phase 5).
+                let rule = build_rule(&attrs);
+                output.push_str(&render_rule_browser(
+                    &rule,
+                    options.hr_css_variables.as_ref(),
+                ));
+                output.push('\n');
+            }
+            // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
+            // pulldown-cmark `Event::Rule`. Handle them explicitly so the
+            // browser output gets a default SVG instead of falling through
+            // the catch-all arm.
+            InlineEvent::Standard(Event::Rule) => {
+                let rule = HorizontalRule::new();
+                output.push_str(&render_rule_browser(
+                    &rule,
+                    options.hr_css_variables.as_ref(),
+                ));
                 output.push('\n');
             }
             // Handle standard pulldown-cmark events
@@ -452,6 +439,26 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     }
 
     Ok(output)
+}
+
+/// Renders a [`HorizontalRule`] to browser SVG, optionally substituting
+/// `var(--hr-*)` custom properties with caller-provided overrides.
+///
+/// ## Notes
+///
+/// When `vars` is `Some`, each `var(--name)` token in the default SVG is
+/// replaced via
+/// [`BrowserRenderable::render_to_browser_with_inline_variables`]. When
+/// `vars` is `None`, the SVG keeps its `var(--…)` expressions so page-level
+/// CSS (or downstream post-processing) can control the appearance.
+fn render_rule_browser(
+    rule: &HorizontalRule,
+    vars: Option<&std::collections::HashMap<String, String>>,
+) -> String {
+    match vars {
+        Some(map) if !map.is_empty() => rule.render_to_browser_with_inline_variables(map),
+        _ => rule.render_to_browser(),
+    }
 }
 
 fn image_ref_from_parts(alt: &str, src: &str, title: &str) -> Option<ImageRef> {

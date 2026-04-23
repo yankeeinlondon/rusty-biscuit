@@ -69,6 +69,7 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 # System detection (OS, hardware, repo, docs)
 sniff = { path = "../../sniff/lib" }
 serde_yaml = "0.9.34"
+serde_yaml_ng = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
@@ -76,4 +77,3 @@ tracing-test = "0.2"
 insta = "1.41"
 serial_test = "3.0"
 git2 = "0.20"
-serde_yaml_ng = "0.10"

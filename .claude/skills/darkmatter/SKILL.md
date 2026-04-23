@@ -139,15 +139,24 @@ Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
 
 ### Horizontal Rules
 
-`HorizontalRule` is a `Renderable` component that provides customizable horizontal separator lines with support for various styles, placements, weights, and colors. It integrates with biscuit-terminal's `HorizontalRule` component and supports the `BrowserRenderable` trait for HTML output.
+Darkmatter extends CommonMark `---` / `___` / `***` horizontal rules with an optional attribute block (YAML flow-mapping syntax) and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
 
 - **Markdown syntax**: `--- { style: waves, width: "50%" }`
-- **Styles**: dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod
-- **Placements**: full, centered, left, right
-- **Weights**: thin, medium, thick
-- **Custom width and color support**
+- **Supported attributes** (all optional):
+  - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+  - `placement`: `full` (default), `centered`, `left`, `right`
+  - `weight`: `thin`, `medium` (default), `thick`
+  - `width`: CSS-like string (`"75%"`, `"200px"`)
+  - `color`: CSS color name or `#rrggbb`
+- **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
+- **Bare `---`:** produces a default dashed rule in both terminal and HTML output.
+- **Terminal rendering tiers:**
+  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`): deferred** — not yet implemented.
+  2. **Tier 2 (Unicode):** primary path when the locale signals UTF-8.
+  3. **Tier 3 (ASCII):** fallback otherwise.
+- **Browser rendering:** SVG with `--hr-weight`, `--hr-color`, `--hr-width` CSS variables; per-instance overrides via `render_to_browser_with_inline_variables`.
 
-Located in `darkmatter/lib/src/markdown/inline/types.rs` and `darkmatter/lib/src/markdown/output/`.
+Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/markdown/block/rule_processor.rs`, and `darkmatter/lib/src/markdown/output/`.
 
 ## See Also
 

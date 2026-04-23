@@ -1,3 +1,5 @@
+> **Status (Review 1, 2026-04-23):** The Tier 1 image path (SVG → PNG via `resvg` + `TerminalImage`) is **deferred**. The initial release ships Tier 2 (Unicode) and Tier 3 (ASCII) only — see [`tech-design.md`](./tech-design.md) "Deferred Work" and [`review-plan-1.md`](./review-plan-1.md) Phase 7.
+
 In Markdown the "horizontal rule" (e.g., a horizontal line used to more visibly separate sections in a document) is represented by any of the following when it is on it's own line (and though not _required_ by Markdown but considered good practice, having a blank line before and afterwards):
 
 - `---` (three dashes)
