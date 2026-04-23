@@ -286,6 +286,7 @@ fn build_payload(
 
 fn empty_message() -> Message {
     Message {
+        title: None,
         body: None,
         attachments: Vec::new(),
         location: None,
@@ -407,6 +408,9 @@ fn provider_kind_label(kind: &ProviderKind) -> &'static str {
         ProviderKind::WhatsApp => "whatsapp",
         ProviderKind::Telegram => "telegram",
         ProviderKind::SlackWebhook => "slack_webhook",
+        ProviderKind::Desktop => "desktop",
+        ProviderKind::Apns => "apns",
+        ProviderKind::Fcm => "fcm",
     }
 }
 
