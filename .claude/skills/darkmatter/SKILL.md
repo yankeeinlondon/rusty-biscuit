@@ -137,6 +137,30 @@ md graph doc.md --validate       # Inline validation overlays
 
 Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
 
+### Horizontal Rules
+
+`HorizontalRule` is a `Renderable` component that provides customizable horizontal separator lines with support for various styles, placements, weights, and colors. It integrates with biscuit-terminal's `HorizontalRule` component and supports the `BrowserRenderable` trait for HTML output.
+
+- **Markdown syntax**: `--- { style: waves, width: "50%" }`
+- **Styles**: dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod
+- **Placements**: full, centered, left, right
+- **Weights**: thin, medium, thick
+- **Custom width and color support**
+
+Located in `darkmatter/lib/src/markdown/inline/types.rs` and `darkmatter/lib/src/markdown/output/`.
+
+### Horizontal Rules
+
+`HorizontalRule` is a `Renderable` component that provides customizable horizontal separator lines with support for various styles, placements, weights, and colors. It integrates with biscuit-terminal's `HorizontalRule` component and supports the `BrowserRenderable` trait for HTML output.
+
+- **Markdown syntax**: `--- { style: waves, width: "50%" }`
+- **Styles**: dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod
+- **Placements**: full, centered, left, right
+- **Weights**: thin, medium, thick
+- **Custom width and color support**
+
+Located in `darkmatter/lib/src/markdown/inline/types.rs` and `darkmatter/lib/src/markdown/output/`.
+
 ## See Also
 
 - [biscuit-terminal skill](../biscuit-terminal/SKILL.md) - Terminal rendering dependency

@@ -37,7 +37,7 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | Topic | Description |
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
-| [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, StatusBlock, Table, TerminalImage, TextBlock, Todo, TwoColumn |
+| [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, HorizontalRule, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, StatusBlock, Table, TerminalImage, TextBlock, Todo, TwoColumn |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | Terminal-facing `MermaidDiagram` adapter backed by biscuit-visualized |
 | [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |
@@ -112,6 +112,50 @@ Use `StatusBlock` when you need the common Claudine-style `Status` header plus a
 `BlockQuote` body and optional hint as one renderable. It defaults to a `┃ ` border,
 `left_margin = 0`, `right_margin = 5`, and `WordWrap::WrapProse(Some(8), None)` so the
 body border lines up with the preceding `Status` icon/header line.
+
+### Horizontal Rules
+
+```rust
+use biscuit_terminal::components::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
+
+let rule = HorizontalRule {
+    style: RuleStyle::Waves,
+    placement: RulePlacement::Centered,
+    weight: RuleWeight::Medium,
+    width: Some("75%".to_string()),
+    color: None,
+};
+
+// Terminal rendering
+rule.render(&mut terminal)?;
+
+// Browser rendering  
+let svg = rule.render_to_browser();
+```
+
+The `HorizontalRule` component implements both `Renderable` (for terminal output) and `BrowserRenderable` (for HTML/SVG output) traits. It provides three-tier progressive enhancement for terminal rendering: SVG→PNG via resvg, Unicode fallback characters, or ASCII fallback characters.
+
+### Horizontal Rules
+
+```rust
+use biscuit_terminal::components::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
+
+let rule = HorizontalRule {
+    style: RuleStyle::Waves,
+    placement: RulePlacement::Centered,
+    weight: RuleWeight::Medium,
+    width: Some("75%".to_string()),
+    color: None,
+};
+
+// Terminal rendering
+rule.render(&mut terminal)?;
+
+// Browser rendering  
+let svg = rule.render_to_browser();
+```
+
+The `HorizontalRule` component implements both `Renderable` (for terminal output) and `BrowserRenderable` (for HTML/SVG output) traits. It provides three-tier progressive enhancement for terminal rendering: SVG→PNG via resvg, Unicode fallback characters, or ASCII fallback characters.
 
 `StatusState::Error` is now the canonical error severity. `StatusState::Failure` remains as a
 deprecated compatibility variant, and persisted JSON `"Failure"` still deserializes as
