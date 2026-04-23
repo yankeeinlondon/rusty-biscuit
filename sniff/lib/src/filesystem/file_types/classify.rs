@@ -374,6 +374,7 @@ fn finish_classification(
     classification
 }
 
+#[cfg(feature = "metrics")]
 fn classification_stage_name(classification: &FileClassification) -> &'static str {
     match classification.source {
         ClassificationSource::ExactFilename => "filesystem.file_inventory.classify.exact_filename",
@@ -389,6 +390,7 @@ fn classification_stage_name(classification: &FileClassification) -> &'static st
     }
 }
 
+#[cfg(feature = "metrics")]
 fn classification_counter_name(classification: &FileClassification) -> &'static str {
     match classification.source {
         ClassificationSource::ExactFilename => {
