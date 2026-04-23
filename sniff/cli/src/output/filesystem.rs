@@ -1400,6 +1400,112 @@ pub fn render_repo_packages_formatted(
     }
 }
 
+/// Collect unique package area names, honoring the optional scope and filters.
+fn select_repo_package_areas<'a>(
+    packages: &'a [Package],
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a str> {
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for pkg in packages {
+        seen.insert(pkg.package_area.as_str());
+    }
+
+    let scope = package_area.map(str::to_lowercase);
+    let filters: Vec<RepoFilter> = if repo_filter.is_empty() {
+        Vec::new()
+    } else {
+        repo_filter.iter().map(|f| RepoFilter::parse(f)).collect()
+    };
+
+    seen.into_iter()
+        .filter(|area| {
+            if let Some(needle) = scope.as_deref()
+                && area.to_lowercase() != needle
+            {
+                return false;
+            }
+            if filters.is_empty() {
+                return true;
+            }
+            let lower = area.to_lowercase();
+            filters.iter().any(|f| {
+                let hit = lower.contains(&f.query.to_lowercase());
+                if f.negate { !hit } else { hit }
+            })
+        })
+        .collect()
+}
+
+/// Collect unique package area names matching the given filters and scope.
+///
+/// Returns an empty vec when the repo is not a monorepo.
+pub fn collect_repo_package_area_names<'a>(
+    repo: &'a RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a str> {
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    select_repo_package_areas(packages, repo_filter, package_area)
+}
+
+/// Render the unique package area list for `sniff repo package-areas` in the
+/// requested format.
+///
+/// Honors `--md` (Markdown unordered list), `--list` (one entry per line), and
+/// the default csv form. With `verbose > 0`, each entry is annotated with the
+/// dimmed repo-relative area directory.
+pub fn render_repo_package_areas_formatted(
+    repo: &RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+    format: PackagesFormat,
+    verbose: u8,
+) -> String {
+    if !repo.is_monorepo {
+        return String::from(
+            "- the \"package-areas\" subcommand is only intended to be used in a monorepo",
+        );
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return String::new();
+    };
+
+    let areas = select_repo_package_areas(packages, repo_filter, package_area);
+    if areas.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let entries: Vec<String> = areas
+        .iter()
+        .map(|area| {
+            let markup = if verbose > 0 {
+                format!("{area}(<dim><i>./{area}</i></dim>)")
+            } else {
+                (*area).to_string()
+            };
+            Prose::new(markup).render(&term)
+        })
+        .collect();
+
+    match format {
+        PackagesFormat::Csv => entries.join(", "),
+        PackagesFormat::Markdown => entries
+            .iter()
+            .map(|e| format!("- {e}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        PackagesFormat::List => entries.join("\n"),
+    }
+}
+
 /// Collect package names that have uncommitted changes (dirty or untracked files).
 ///
 /// Cross-references git status dirty/untracked file paths with package relative
