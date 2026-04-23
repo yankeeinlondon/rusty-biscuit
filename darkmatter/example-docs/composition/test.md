@@ -1,12 +1,12 @@
 ---
 epilogue: "---\n\n- No [animals](./animals.md) were hurt in the preparation of this document"
 ---
+
 # Testing Composition
 
 <meta property="og:site_name" content="testing">
 <meta property="og:description" content="a test of document composition">
 <link rel="stylesheet" href="./style.css">
-
 
 <img src="https://www.nerdfonts.com/assets/img/sankey-glyphs-combined-diagram.png" />
 
@@ -24,6 +24,8 @@ flowchart LR
 ::file ./preparation.md
 
 ::file ./what-is-transclusion.md exclude="## Secret Section"
+
+--- { style: waves, width: "50%" }
 
 ## Conditional Disclosure
 
