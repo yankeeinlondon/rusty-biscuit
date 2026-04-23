@@ -262,6 +262,18 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, codegen_
 
+- [messenger](./messenger/lib) _v0.1.0_
+
+    _Unified outbound messaging library for Rust (Discord, Slack, Signal, WhatsApp, Telegram, desktop OS notifications)._
+
+    _Tags: workspace, library, messaging, notifications_
+
+- [messenger-cli](./messenger/cli) _v0.1.0_
+
+    _Messenger CLI binary (`messenger`) with route config, receipts, and interactive setup._
+
+    _Tags: workspace, cli, messaging, notifications_
+
 ## Production Dependencies
 
 ### AI & LLM
@@ -660,6 +672,32 @@ This is a Rust workspace with the following modules:
 
     _Tags: pdf, rendering, pdfium_
 
+### Notifications & Messaging
+
+- [notify-rust](https://github.com/hoodie/notify-rust) _v4_ [📄](https://docs.rs/notify-rust)
+
+    _Cross-platform desktop notifications via the freedesktop.org D-Bus Notifications interface. Used by `messenger`'s Linux desktop backend._
+
+    _Tags: notifications, dbus, linux, desktop_
+
+- [winrt-notification](https://github.com/allenbenz/winrt-notification) _v0.5_ [📄](https://docs.rs/winrt-notification)
+
+    _Thin wrapper around the WinRT toast notification API. Used by `messenger`'s Windows desktop backend for unpackaged Win32 apps._
+
+    _Tags: notifications, winrt, windows, toast_
+
+- [objc2-user-notifications](https://github.com/madsmtm/objc2) _v0.3_ [📄](https://docs.rs/objc2-user-notifications)
+
+    _Safe Rust bindings to Apple's `UserNotifications.framework`. Used as the opt-in native path for `messenger`'s macOS desktop backend._
+
+    _Tags: notifications, macos, objc, framework_
+
+- [objc2-foundation](https://github.com/madsmtm/objc2) _v0.3_ [📄](https://docs.rs/objc2-foundation)
+
+    _Safe Rust bindings to Apple's Foundation framework (NSString, NSError, NSDictionary). Companion crate to `objc2-user-notifications` in the macOS desktop backend._
+
+    _Tags: foundation, macos, objc, bindings_
+
 ### Platform-Specific
 
 - [coreaudio-sys](https://crates.io/crates/coreaudio-sys) _v0.2_
@@ -707,6 +745,12 @@ This is a Rust workspace with the following modules:
     _Random number generators with fast implementations and broad distribution support._
 
     _Tags: random, rng, generation_
+
+- [uuid](https://github.com/uuid-rs/uuid) _v1_ [📄](https://docs.rs/uuid)
+
+    _Universally unique identifier (UUID) generation and parsing. Used by `messenger`'s desktop backends to synthesize stable `notification_id` values on macOS (AppleScript/native) and Windows (WinRT toast)._
+
+    _Tags: uuid, identifiers, random_
 
 ### Regex & Text Processing
 

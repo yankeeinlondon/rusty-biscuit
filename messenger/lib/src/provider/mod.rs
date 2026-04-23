@@ -1,5 +1,7 @@
 #[cfg(feature = "discord")]
 pub(crate) mod attachment_helpers;
+#[cfg(feature = "desktop")]
+pub mod desktop;
 #[cfg(feature = "discord")]
 pub mod discord;
 #[cfg(feature = "discord")]
@@ -14,6 +16,10 @@ pub mod slack_webhook;
 pub mod telegram;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp;
+#[cfg(feature = "apns")]
+pub mod apns;
+#[cfg(feature = "fcm")]
+pub mod fcm;
 
 use std::collections::HashMap;
 
@@ -24,7 +30,9 @@ use futures::future::join_all;
     feature = "slack",
     feature = "signal",
     feature = "whatsapp",
-    feature = "telegram"
+    feature = "telegram",
+    feature = "apns",
+    feature = "fcm",
 ))]
 pub(crate) mod http_helpers;
 
@@ -35,7 +43,7 @@ use crate::message::Message;
 use crate::prepared::PreparedMessage;
 use crate::receipt::{ProviderKind, SendReceipt};
 use crate::validate::{
-    CompatibilityWarning, normalize_dispatch, target_provider_kind, validate_message,
+    CompatibilityWarning, normalize_dispatch, target_provider_kind, validate_message_for_provider,
 };
 
 /// A messaging provider that can send messages to a specific platform.
@@ -56,7 +64,7 @@ pub trait Provider: Send + Sync {
     ) -> Result<SendReceipt, MessengerError> {
         let provider = self.kind();
         tracing::debug!(provider = %provider, "sending directly through provider");
-        validate_message(message)?;
+        validate_message_for_provider(message, provider)?;
         let normalized = normalize_dispatch(dispatch, message, &self.capabilities(), provider)?;
         let prepared = PreparedMessage::new(&normalized.message);
         tracing::debug!(provider = %provider, "provider message prepared");
@@ -111,10 +119,9 @@ impl Messenger {
         dispatch: Dispatch,
         message: &Message,
     ) -> Result<SendPlan, MessengerError> {
-        validate_message(message)?;
-
         let provider_kind = target_provider_kind(&dispatch.target);
         tracing::Span::current().record("provider", tracing::field::display(provider_kind));
+        validate_message_for_provider(message, provider_kind)?;
         let provider =
             self.providers
                 .get(&provider_kind)

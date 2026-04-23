@@ -98,3 +98,4 @@ When you start your work read the memory/just.md file (if it exists) as it provi
 ### Completing a Task
 
 If you feel like you learned something novel about `just` and not within your normal training set that is worth remembering then you should append that learning to the `memory/just.md` file (create the file if it doesn't exist).
+

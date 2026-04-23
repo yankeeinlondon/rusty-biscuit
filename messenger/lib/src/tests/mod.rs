@@ -13,3 +13,7 @@ mod telegram_integration;
 mod validation;
 #[cfg(feature = "whatsapp")]
 mod whatsapp_integration;
+#[cfg(feature = "apns")]
+mod apns_integration;
+#[cfg(feature = "fcm")]
+mod fcm_integration;

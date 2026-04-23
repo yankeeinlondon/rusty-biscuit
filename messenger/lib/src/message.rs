@@ -5,6 +5,7 @@ use crate::attachment::{Attachment, AttachmentKind, AttachmentSource};
 /// Portable message content, independent of any destination.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
+    pub title: Option<String>,
     pub body: Option<MessageBody>,
     pub attachments: Vec<Attachment>,
     pub location: Option<Location>,
@@ -50,6 +51,7 @@ impl Message {
     /// Create a plain-text message.
     pub fn text(text: impl Into<String>) -> Self {
         Self {
+            title: None,
             body: Some(MessageBody::Plain(text.into())),
             attachments: Vec::new(),
             location: None,
@@ -60,6 +62,7 @@ impl Message {
     /// Create a Markdown message.
     pub fn markdown(md: impl Into<String>) -> Self {
         Self {
+            title: None,
             body: Some(MessageBody::Markdown(md.into())),
             attachments: Vec::new(),
             location: None,
@@ -70,6 +73,7 @@ impl Message {
     /// Create a location-only message.
     pub fn location(lat: f64, lon: f64) -> Self {
         Self {
+            title: None,
             body: None,
             attachments: Vec::new(),
             location: Some(Location {
@@ -80,6 +84,15 @@ impl Message {
             }),
             metadata: BTreeMap::new(),
         }
+    }
+
+    /// Set the portable title for this message.
+    ///
+    /// The title is used by providers that distinguish a summary line from the body,
+    /// such as desktop notifications. Providers without a native title concept ignore it.
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
     }
 
     /// Attach a location to the message.

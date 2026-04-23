@@ -15,8 +15,11 @@ The outbound send model in `messenger` is provider API credentials plus an expli
 - Signal: JSON-RPC URL + account + recipient/group ID
 - WhatsApp: Cloud API credentials + recipient phone number
 - Telegram: bot token + chat ID
+- Desktop: host OS notification center (no credentials, no destination identifier)
 
 Discord and Slack each ship with two distinct adapters: a bot-token adapter (full capability, replies supported) and a webhook adapter (notification-only, no attachments, receipts are not addressable).
+
+Desktop is the odd provider out: it targets the running host OS rather than a remote API, so it needs no credentials and no target identifier. Runtime behavior varies by platform — see [`docs/platforms/desktop.md`](./platforms/desktop.md) for Linux D-Bus, Windows WinRT toast, and macOS AppleScript/native specifics.
 
 ### Discord (Bot)
 
@@ -217,6 +220,38 @@ Prefer a Slack **incoming webhook** over a bot when you only need one-way notifi
 
 ---
 
+### Desktop
+
+The desktop provider delivers a local notification to the host OS notification center. It is unlike every other provider in two ways:
+
+- there are no credentials to provision — the target is the running desktop session
+- there is no destination identifier — `--channel` is not used, and `Target::desktop()` carries no fields
+
+**What you need:**
+
+- Linux: a running notification daemon that speaks freedesktop.org notifications over D-Bus (typical on GNOME, KDE Plasma, XFCE, MATE, Cinnamon). No permission prompt.
+- macOS: nothing extra for the default `strategy: auto`, which uses `osascript display notification`. The native path (`strategy: native_user_notifications`) requires a bundled and signed app identity and will trigger an authorization prompt on first use.
+- Windows: run `messenger setup desktop` once. Setup registers a Start Menu shortcut tied to an App User Model ID (AUMID) — WinRT toasts require this pairing for unpackaged desktop applications. `send` never creates, repairs, or removes the shortcut; if the shortcut is missing, `send` returns `MessengerError::MissingConfiguration` with remediation text pointing back to `setup desktop`.
+
+**Helpful resources:**
+
+- [freedesktop.org Notification Spec](https://specifications.freedesktop.org/notification-spec/latest/)
+- [WinRT toast notifications overview](https://learn.microsoft.com/en-us/windows/apps/design/shell/tiles-and-notifications/toast-ux-guidance)
+- [Apple `UserNotifications` framework](https://developer.apple.com/documentation/usernotifications)
+
+**Environment variables:** none — desktop routes persist all configuration in `~/.messenger.json`.
+
+**Capability notes:**
+
+- Title: `Message::title(...)` (library) or `--title` (CLI). Title-only messages are valid.
+- Body: rendered as plain text (Markdown is downgraded with a warning in best-effort mode).
+- Attachments: image attachments only. Multiple images collapse to the first image in best-effort mode; non-image attachments are dropped in best-effort and fail in strict mode.
+- Locations: dropped in best-effort, fail in strict.
+- Replies: unsupported.
+- Silent delivery: supported (maps to `suppress-sound` on Linux, `sound(None)` on Windows, omitted sound on macOS).
+
+---
+
 ## CLI Configuration
 
 ### Config File Location
@@ -265,6 +300,17 @@ The config examples below intentionally follow the implemented transport models:
       "recipient": "+15559876543",
       "access_token_env": "WHATSAPP_ACCESS_TOKEN",
       "phone_number_id_env": "WHATSAPP_PHONE_NUMBER_ID"
+    },
+    "desktop.local": {
+      "provider": "desktop",
+      "app_name": "Messenger",
+      "default_title": "Messenger",
+      "icon": "dialog-information",
+      "urgency": "normal",
+      "timeout_ms": 5000,
+      "windows": { "app_id": "RustyBiscuit.Messenger" },
+      "macos": { "bundle_id": "com.rustybiscuit.messenger", "strategy": "auto" },
+      "linux": { "desktop_entry": "messenger" }
     }
   }
 }
@@ -288,6 +334,7 @@ The config examples below intentionally follow the implemented transport models:
 | Signal | `provider`, `recipient` | `rpc_url`, `rpc_url_env`, `account`, `account_env` |
 | WhatsApp | `provider`, `recipient` | `access_token`, `access_token_env`, `phone_number_id`, `phone_number_id_env` |
 | Telegram | `provider`, `chat_id` | `bot_token`, `bot_token_env` |
+| Desktop | `provider`, `app_name` | `default_title`, `icon`, `category`, `urgency`, `timeout_ms`, `windows.app_id`, `macos.bundle_id`, `macos.strategy`, `linux.desktop_entry` |
 
 For `discord-webhook` routes, at least one of `webhook_url` or a resolvable `webhook_url_env` must be present at send time. The webhook URL is the single credential; there is no `channel_id` field because the URL already binds the channel.
 
@@ -326,6 +373,16 @@ Key behavioral differences from the Slack bot route:
 - No file uploads: attachments are rejected or dropped per the usual compatibility rules.
 - Receipts have no message ID: `raw_id` is always empty and `message_ref.thread_ts` is `None` on success. A webhook receipt cannot be used on its own as the reply target of a later send.
 - Replies are still possible by supplying `--reply-to` from a Slack bot receipt or any other source that carries a Slack `thread_ts`.
+
+### Desktop Route Setup
+
+`messenger setup desktop` collects the portable fields first (app name, default title, icon, category, urgency, timeout) and then branches by platform:
+
+- **Windows** — prompts for an optional `app_id` (defaults to `RustyBiscuit.Messenger`) and then writes a Start Menu shortcut keyed on that AUMID. The shortcut path is printed on success. A shortcut must exist before any Windows desktop send will succeed; `send` never creates or repairs it.
+- **macOS** — prompts for an optional `bundle_id` and a strategy. `auto` (default) uses AppleScript and does not trigger a notification authorization prompt. `native_user_notifications` uses `UserNotifications.framework` and requires a bundled, signed app identity. `applescript` is an explicit synonym for the default.
+- **Linux** — prompts for an optional `desktop_entry` value used as the D-Bus `desktop-entry` hint.
+
+Desktop routes persist configuration only — no secrets. Running `messenger send --provider desktop` ad-hoc (without a route) uses the library defaults for every field, which is enough for a simple `--title "..."` notification.
 
 ### Receipt Storage
 
@@ -482,8 +539,9 @@ messenger send --provider discord-webhook \
 | Signal | `SignalConfig` | `rpc_url: String`, `account: String` |
 | WhatsApp | `WhatsAppConfig` | `access_token: SecretString`, `phone_number_id: String` |
 | Telegram | `TelegramConfig` | `bot_token: SecretString` |
+| Desktop | `DesktopConfig` | `app_name: String` (plus optional per-platform nested config) |
 
-All config structs except `DiscordConfig`, `DiscordWebhookConfig`, `SlackWebhookConfig`, and `SignalConfig` have an optional `api_base_url: Option<String>` field for testing or proxy use. `WhatsAppConfig` also has an optional `api_version: Option<String>` (defaults to `v23.0`). `DiscordWebhookConfig` and `SlackWebhookConfig` bind their endpoints through the `webhook_url` itself; integration tests construct them through provider-specific test-only helpers that relax the runtime host validation so a wiremock server can stand in for the production host.
+All config structs except `DiscordConfig`, `DiscordWebhookConfig`, `SlackWebhookConfig`, `SignalConfig`, and `DesktopConfig` have an optional `api_base_url: Option<String>` field for testing or proxy use. `WhatsAppConfig` also has an optional `api_version: Option<String>` (defaults to `v23.0`). `DiscordWebhookConfig` and `SlackWebhookConfig` bind their endpoints through the `webhook_url` itself; integration tests construct them through provider-specific test-only helpers that relax the runtime host validation so a wiremock server can stand in for the production host. `DesktopConfig` has no network endpoint — it captures `app_name`, default title/icon/category/urgency/timeout, and nested `WindowsDesktopConfig`, `MacOsDesktopConfig`, `LinuxDesktopConfig` blocks.
 
 ### Slack Webhook Library Example
 
@@ -512,3 +570,36 @@ async fn main() -> Result<(), messenger::MessengerError> {
 ```
 
 `SlackWebhookProvider::try_new` enforces production URL rules (https scheme, `hooks.slack.com` host, `/services/{T}/{B}/{token}` path). Malformed URLs return `MessengerError::InvalidMessage`; missing configuration is surfaced by the CLI resolution layer as `MessengerError::MissingConfiguration`.
+
+### Desktop Notification Library Example
+
+```rust
+use messenger::prelude::*;
+use messenger::provider::desktop::{DesktopConfig, DesktopNotificationProvider};
+
+#[tokio::main]
+async fn main() -> Result<(), messenger::MessengerError> {
+    let mut messenger = Messenger::new();
+
+    messenger.register(Box::new(DesktopNotificationProvider::new(DesktopConfig {
+        app_name: "Messenger".into(),
+        ..DesktopConfig::default()
+    })));
+
+    // Title-only sends are valid for desktop notifications.
+    let message = Message::text("Build finished in 42s").title("Build");
+    let dispatch = Dispatch::to(Target::desktop());
+
+    let receipt = messenger.send(dispatch, &message).await?;
+    println!(
+        "delivered via {:?}: id={}",
+        receipt.message_ref,
+        receipt.raw_id,
+    );
+    Ok(())
+}
+```
+
+`DesktopNotificationProvider::new` picks the runtime backend based on the compile target: `notify-rust` on Linux, AppleScript or native `UserNotifications.framework` on macOS, and `winrt-notification` on Windows. Platform-specific behavior — including the Windows setup prerequisite and the macOS strategy choice — is covered in [`docs/platforms/desktop.md`](./platforms/desktop.md).
+
+Per-dispatch overrides (subtitle, category, urgency, timeout, icon, replace ID, app name) are supplied via `ProviderOverrides::Desktop(DesktopOverrides { .. })` on the `Dispatch`.

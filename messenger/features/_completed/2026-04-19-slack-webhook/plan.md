@@ -1,7 +1,7 @@
 ---
 phases: 5
 created: 2026-04-19
-start_phase: 4
+start_phase: 5
 packages:
   - messenger
 source_files_during_phase_1:
@@ -40,7 +40,10 @@ docs_updated_during_phase_5:
   - messenger/lib/README.md
   - messenger/cli/README.md
 docs_created_during_phase_5: []
-skills_files_updated_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/messenger/SKILL.md
+  - .claude/skills/messenger/providers.md
+  - .claude/skills/messenger/cli-reference.md
 ---
 
 # Slack Webhook Provider - Execution Plan

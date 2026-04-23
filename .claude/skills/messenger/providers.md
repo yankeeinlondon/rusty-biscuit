@@ -21,7 +21,7 @@ pub trait Provider: Send + Sync {
 }
 ```
 
-`ProviderKind` enum: `Discord`, `DiscordWebhook`, `Slack`, `Signal`, `WhatsApp`, `Telegram`.
+`ProviderKind` enum: `Discord`, `DiscordWebhook`, `Slack`, `SlackWebhook`, `Signal`, `WhatsApp`, `Telegram`, `Desktop`.
 
 ## Discord
 
@@ -79,6 +79,31 @@ pub struct SlackConfig {
 **API**: `chat.postMessage` with `thread_ts` for replies, `unfurl_links`/`unfurl_media` for link previews
 **Target**: `Target::slack_channel("C01234567")`
 **MessageRef**: `MessageRef::Slack { channel_id, thread_ts }`
+
+## Slack-Webhook
+
+**Feature**: `slack` (default, same flag as the bot adapter)
+**HTTP crate**: `reqwest`
+**Module**: `provider/slack_webhook.rs`
+
+```rust
+pub struct SlackWebhookConfig {
+    pub webhook_url: SecretString,
+}
+```
+
+**Capabilities**: markdown_rendering (mrkdwn), reply, location (text fallback), link_preview_control — **no attachments**, no silent delivery. File uploads require the Web API; incoming webhooks do not accept multipart.
+**API**: `POST` to the incoming webhook URL (`https://hooks.slack.com/services/{T}/{B}/{token}`) with a JSON body. The same mrkdwn renderer is shared with the bot adapter; `disable_link_preview` sets `unfurl_links` and `unfurl_media` to `false`.
+**Target**: `Target::slack_webhook()` — the webhook URL binds the channel, so the target carries no channel id.
+**MessageRef**: `MessageRef::SlackWebhook { thread_ts: Option<String> }`. Webhook responses never return a `thread_ts`, so a webhook receipt always carries `thread_ts: None`; reply threading requires a `thread_ts` sourced from a Slack bot receipt (or any external channel that surfaces Slack thread timestamps).
+
+**Receipt semantics**: Successful webhook sends produce `SendReceipt { provider: SlackWebhook, raw_id: "", message_ref: MessageRef::SlackWebhook { thread_ts: None }, metadata: {"delivery_confirmed": "true"} }`. Because the Slack response does not carry a message id, webhook receipts cannot be used on their own as the `reply_to` target of a later send.
+
+**URL parsing**: `try_new` enforces `https` scheme, case-insensitive host `hooks.slack.com` (no subdomains), path prefix `/services/` followed by exactly three non-empty decoded segments, and rejects trailing slash, query strings, fragments, and whitespace-only segments. Malformed URLs produce `MessengerError::InvalidMessage`; absent configuration surfaces as `MessengerError::MissingConfiguration` from the CLI resolution layer.
+
+**Error mapping**: Slack webhook `ok: false` responses map `invalid_token`/`action_prohibited` to `MessengerError::Authentication`, `invalid_payload`/`channel_is_archived` to `MessengerError::InvalidMessage`, and any other response code to `MessengerError::Provider`. HTTP `429` with `Retry-After` maps to `MessengerError::RateLimited`; HTTP `5xx` maps to `MessengerError::Transport`.
+
+**Plan-time validation**: `Messenger::plan_send()` with `Target::SlackWebhook` and `reply_to = MessageRef::Slack { .. }` returns `MessengerError::InvalidMessage` (provider mismatch) before transport execution.
 
 ## Signal
 
@@ -139,20 +164,51 @@ pub struct TelegramConfig {
 **Target**: `Target::telegram_chat(TelegramChatId::Id(-1001234567890))` or `TelegramChatId::Username("@ops")`
 **MessageRef**: `MessageRef::Telegram { chat_id, message_id, thread_id }`
 
+## Desktop
+
+**Feature**: `desktop`
+**Backend crates**: `notify-rust` (Linux), `winrt-notification` (Windows), `objc2-user-notifications` / `osascript` (macOS)
+**Module**: `provider/desktop/mod.rs`
+
+```rust
+pub struct DesktopConfig {
+    pub app_name: String,
+    pub default_title: Option<String>,
+    pub icon: Option<NotificationIcon>,
+    pub category: Option<String>,
+    pub urgency: Option<NotificationUrgency>,
+    pub timeout_ms: Option<u64>,
+    pub windows: Option<WindowsDesktopConfig>,
+    pub macos: Option<MacOsDesktopConfig>,
+    pub linux: Option<LinuxDesktopConfig>,
+}
+```
+
+**Capabilities**: `supported_attachment_kinds: { Image }` only, `silent_delivery: true` — no markdown, no replies, no location, no link preview.
+**Target**: `Target::desktop()` — no credentials, no destination identifier.
+**MessageRef**: `MessageRef::Desktop { platform: DesktopPlatform, notification_id: String }`.
+
+Title-only messages are valid. `Message::title(...)` is accepted without a body when the resolved provider is `Desktop`.
+
+Platform behavior:
+- **Linux**: D-Bus (freedesktop.org Notifications). No setup required.
+- **macOS**: `strategy: auto` (default) uses AppleScript — no authorization prompt. `strategy: native_user_notifications` uses `UserNotifications.framework` and requires a bundled app identity.
+- **Windows**: requires `messenger setup desktop` to create the Start Menu shortcut and register the AUMID. `send` never writes outside `~/.messenger/`. If the shortcut is missing, `send` returns `MessengerError::MissingConfiguration`.
+
 ## CapabilitySet
 
 ```rust
 pub struct CapabilitySet {
     pub markdown_rendering: bool,
     pub reply: bool,
-    pub attachments: bool,
+    pub supported_attachment_kinds: BTreeSet<AttachmentKind>,
     pub location: bool,
     pub silent_delivery: bool,
     pub link_preview_control: bool,
 }
 ```
 
-Location can be `true` without native API support (Discord, Slack, Signal append formatted text).
+`supported_attachment_kinds` declares exactly which kinds (`Image`, `Audio`, `Video`, `Document`, `Binary`) a provider accepts. Location can be `true` without native API support (Discord, Slack, Signal append formatted text).
 
 ## Capability Normalization
 

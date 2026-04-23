@@ -15,6 +15,12 @@ pub enum Target {
     WhatsApp(WhatsAppTarget),
     #[cfg(feature = "telegram")]
     Telegram(TelegramTarget),
+    #[cfg(feature = "desktop")]
+    Desktop(DesktopTarget),
+    #[cfg(feature = "apns")]
+    Apns(ApnsTarget),
+    #[cfg(feature = "fcm")]
+    Fcm(FcmTarget),
 }
 
 /// Discord channel target.
@@ -90,6 +96,33 @@ pub enum TelegramChatId {
     Username(String),
 }
 
+/// Desktop notification destination.
+///
+/// Carries no channel or recipient — desktop sends always deliver to the
+/// current host OS notification center. The empty struct preserves the
+/// enum-variant-plus-typed-struct pattern used by the other targets so
+/// future fields (e.g. transient routing hints) can land without breaking
+/// pattern matches.
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Default)]
+pub struct DesktopTarget {}
+
+/// Apple Push Notification service target.
+#[cfg(feature = "apns")]
+#[derive(Debug, Clone)]
+pub struct ApnsTarget {
+    /// The hex-encoded device token for the iOS device.
+    pub device_token: String,
+}
+
+/// Firebase Cloud Messaging target.
+#[cfg(feature = "fcm")]
+#[derive(Debug, Clone)]
+pub struct FcmTarget {
+    /// The FCM registration token for the Android device.
+    pub device_token: String,
+}
+
 // Convenience constructors on Target
 impl Target {
     #[cfg(feature = "discord")]
@@ -149,6 +182,28 @@ impl Target {
         Self::Telegram(TelegramTarget {
             chat_id,
             thread_id: None,
+        })
+    }
+
+    /// Build a desktop notification target for the current host OS.
+    #[cfg(feature = "desktop")]
+    pub fn desktop() -> Self {
+        Self::Desktop(DesktopTarget::default())
+    }
+
+    /// Build an Apple Push Notification target for the given device token.
+    #[cfg(feature = "apns")]
+    pub fn apns(device_token: impl Into<String>) -> Self {
+        Self::Apns(ApnsTarget {
+            device_token: device_token.into(),
+        })
+    }
+
+    /// Build a Firebase Cloud Messaging target for the given device token.
+    #[cfg(feature = "fcm")]
+    pub fn fcm(device_token: impl Into<String>) -> Self {
+        Self::Fcm(FcmTarget {
+            device_token: device_token.into(),
         })
     }
 }

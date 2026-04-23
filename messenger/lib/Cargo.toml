@@ -14,9 +14,21 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
+uuid = { version = "1", features = ["v4"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 twilight-http = { version = "0.17", optional = true }
 twilight-model = { version = "0.17", optional = true }
+jsonwebtoken = { version = "9", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = { version = "4", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winrt-notification = { version = "0.5", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", optional = true }
+objc2-user-notifications = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
@@ -31,3 +43,12 @@ slack = ["dep:reqwest"]
 signal = ["dep:reqwest"]
 whatsapp = ["dep:reqwest"]
 telegram = ["dep:reqwest"]
+desktop = [
+    "dep:uuid",
+    "dep:notify-rust",
+    "dep:winrt-notification",
+    "dep:objc2-foundation",
+    "dep:objc2-user-notifications",
+]
+apns = ["dep:reqwest", "dep:jsonwebtoken"]
+fcm = ["dep:reqwest"]
