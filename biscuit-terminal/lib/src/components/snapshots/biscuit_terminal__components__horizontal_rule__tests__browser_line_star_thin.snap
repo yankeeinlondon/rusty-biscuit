@@ -2,8 +2,8 @@
 source: biscuit-terminal/lib/src/components/horizontal_rule.rs
 expression: result
 ---
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="45%" y2="50%" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-  <path d="M50% 35% L52% 45% L62% 45% L54% 52% L57% 62% L50% 55% L43% 62% L46% 52% L38% 45% L48% 45% Z" fill="currentColor"/>
-  <line x1="55%" y1="50%" x2="100%" y2="50%" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 2; --hr-color: currentColor; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="45%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 2)" stroke-linecap="round"/>
+  <path d="M50% 35% L52% 45% L62% 45% L54% 52% L57% 62% L50% 55% L43% 62% L46% 52% L38% 45% L48% 45% Z" fill="var(--hr-color, currentColor)"/>
+  <line x1="55%" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 2)" stroke-linecap="round"/>
 </svg>

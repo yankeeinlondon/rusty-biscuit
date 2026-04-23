@@ -5,6 +5,8 @@ The `HorizontalRule` component provides customizable horizontal separator lines 
 ## Struct Definition
 
 ```rust
+use biscuit_terminal::prelude::*;
+
 let rule = HorizontalRule::new()
     .style(RuleStyle::Waves)
     .placement(RulePlacement::Centered)
@@ -12,9 +14,10 @@ let rule = HorizontalRule::new()
     .width("75%");
 
 // Terminal rendering
+let terminal = Terminal::default();
 let output = rule.render(&terminal);
 
-// Browser rendering  
+// Browser rendering
 let svg = rule.render_to_browser();
 ```
 
@@ -67,46 +70,106 @@ pub enum RuleWeight {
 
 The `HorizontalRule` implements the `Renderable` trait for terminal output with three-tier progressive enhancement:
 
-1. **Tier 1**: SVG→PNG via resvg with `TerminalImage` (when terminal supports inline images)
-2. **Tier 2**: Unicode fallback characters (when terminal supports Unicode)
-3. **Tier 3**: ASCII fallback characters (basic compatibility)
+1. **Tier 1**: SVG → PNG via `resvg` with `TerminalImage` — **deferred** in the initial release; see the "Deferred" section below and the tech-design's "Deferred Work" subsection.
+2. **Tier 2**: Unicode fallback characters (primary path when the terminal's locale signals UTF-8).
+3. **Tier 3**: ASCII fallback characters (basic compatibility).
 
 ### BrowserRenderable (Browser Rendering)
 
 The `HorizontalRule` implements the `BrowserRenderable` trait for web output:
 
-- Generates SVG with `stroke="currentColor"` for proper CSS inheritance
-- Uses CSS variables for dynamic scaling and theming
+- Generates SVG with `stroke="var(--hr-color, currentColor)"` for proper CSS inheritance
+- Declares `--hr-weight`, `--hr-color`, and `--hr-width` CSS custom properties on the root `<svg>`
 - Supports all style, placement, weight, width, and color attributes
 
 ## Usage Example
 
 ```rust
-use biscuit_terminal::components::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
+use biscuit_terminal::prelude::*;
 
-let rule = HorizontalRule {
-    style: RuleStyle::Waves,
-    placement: RulePlacement::Centered,
-    weight: RuleWeight::Medium,
-    width: Some("75%".to_string()),
-    color: None,
-};
+let rule = HorizontalRule::new()
+    .style(RuleStyle::Waves)
+    .placement(RulePlacement::Centered)
+    .weight(RuleWeight::Medium)
+    .width("75%");
 
 // Terminal rendering
-rule.render(&mut terminal)?;
+let terminal = Terminal::default();
+let _ = rule.render(&terminal);
 
-// Browser rendering  
+// Browser rendering
 let svg = rule.render_to_browser();
 ```
 
 ## Style Matrix
 
-| Style | SVG | Unicode | ASCII |
-|-------|-----|---------|-------|
-| Dashes | SVG path | `─` | `-` |
-| Dots | SVG circles | `•` | `*` |
-| Waves | SVG wave path | `~` | `~` |
-| LineStar | SVG with stars | `*` | `*` |
-| LineCircle | SVG with circles | `○` | `o` |
-| InsetLine | SVG inset effect | `═` | `=` |
-| CurtainRod | SVG curtain rod | `≡` | `=` |
+| Style       | SVG            | Unicode           | ASCII       |
+|-------------|----------------|-------------------|-------------|
+| Dashes      | dashed line    | `╌` / `╍` (thick) | `-`         |
+| Dots        | dotted line    | `·` / `•` (thick) | `.`         |
+| Waves       | wavy path      | `≋`               | `~`         |
+| LineStar    | line + star    | `─★─` / `━★━`     | `---*---`   |
+| LineCircle  | line + circle  | `─●─` / `━●━`     | `---o---`   |
+| InsetLine   | centered line  | `  ─  ` / `  ━  ` | `  -  `     |
+| CurtainRod  | line + ends    | `┤─┤─...─├`       | `[---]`     |
+
+## Weight
+
+`RuleWeight` maps to the terminal and browser as follows:
+
+| Weight   | Terminal (Unicode)                  | Terminal (ASCII) | Browser (SVG stroke-width) |
+|----------|-------------------------------------|------------------|----------------------------|
+| `Thin`   | Single-line chars (`╌`, `·`, `─`)   | `-`, `.`, …      | `2`                        |
+| `Medium` | Single-line chars (`╌`, `·`, `─`)   | `-`, `.`, …      | `4`                        |
+| `Thick`  | Heavy variants (`╍`, `•`, `━`)      | `-`, `.`, …      | `8`                        |
+
+### Unicode thick substitutions
+
+- `╌` → `╍` (dashes)
+- `·` → `•` (dots)
+- `─` → `━` (line-*, inset-line, curtain-rod body)
+
+### Limitations
+
+- **Waves** has no heavy Unicode variant — `≋` is used for every weight. `weight=thick` is still honored in the browser (8px stroke) but produces the same terminal characters as `medium`.
+- **ASCII** has no heavy variants — weight is a no-op in Tier 3.
+
+## CSS Variables
+
+`render_to_browser` declares three custom properties on the root `<svg>`:
+
+| Variable      | Default source                                            |
+|---------------|-----------------------------------------------------------|
+| `--hr-weight` | numeric stroke width derived from `RuleWeight`            |
+| `--hr-color`  | `self.color` if set, otherwise `currentColor`             |
+| `--hr-width`  | `self.width` if set, otherwise `100%`                     |
+
+Shape primitives reference these with `var(--hr-weight, <fallback>)` etc., so the SVG stays valid even if the inline style is stripped.
+
+`render_to_browser_with_inline_variables` takes a `HashMap<String, String>` and substitutes each `var(--<key>)` token before returning the string — letting callers override stroke width, color, or width per-instance:
+
+```rust
+use std::collections::HashMap;
+use biscuit_terminal::prelude::*;
+
+let rule = HorizontalRule::new().style(RuleStyle::Dashes);
+let mut overrides = HashMap::new();
+overrides.insert("hr-weight".to_string(), "12".to_string());
+let svg = rule.render_to_browser_with_inline_variables(&overrides);
+// `var(--hr-weight, …)` occurrences are replaced with `12`.
+```
+
+## Color
+
+`color` applies to both targets:
+
+- **Browser**: sets the `--hr-color` CSS variable (and `stroke="var(--hr-color, currentColor)"`).
+- **Terminal**: wraps the rendered content in an ANSI color escape **when** `term.color_depth != ColorDepth::None`. Supported forms:
+  - CSS basic-16 names: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, plus `bright_*` variants and `gray`/`grey` (alias for bright black).
+  - `#rrggbb` hex — upgraded to 24-bit RGB on `ColorDepth::TrueColor` terminals; mapped to the nearest basic color otherwise.
+
+Unrecognized color strings are ignored for terminal rendering (the raw string is preserved for the browser target) and emit a `tracing::warn!`.
+
+## Deferred
+
+**Tier 1 (SVG → PNG via `resvg` + `TerminalImage`) is not yet implemented.** The initial release of this component ships Tier 2 (Unicode) and Tier 3 (ASCII) rendering only. See [`darkmatter/features/2026-04-18-hr/tech-design.md`](../../../darkmatter/features/2026-04-18-hr/tech-design.md) "Deferred Work" and [`review-plan-1.md`](../../../darkmatter/features/2026-04-18-hr/review-plan-1.md) for the decision trail. Adding Tier 1 in a future phase is a purely additive change — the `Renderable` implementation already routes through `use_fancy_chars()` and can grow an image branch gated on `term.image_support`.

@@ -116,7 +116,7 @@ body border lines up with the preceding `Status` icon/header line.
 ### Horizontal Rules
 
 ```rust
-use biscuit_terminal::components::{HorizontalRule, RuleStyle, RulePlacement, RuleWeight};
+use biscuit_terminal::prelude::*;  // HorizontalRule, RuleStyle, RulePlacement, RuleWeight, BrowserRenderable
 
 let rule = HorizontalRule::new()
     .style(RuleStyle::Waves)
@@ -124,14 +124,36 @@ let rule = HorizontalRule::new()
     .weight(RuleWeight::Medium)
     .width("75%");
 
-// Terminal rendering
+// Terminal rendering — honors color_depth and width from the passed `Terminal`
 let output = rule.render(&terminal);
 
-// Browser rendering  
+// Browser rendering — default SVG declares --hr-weight / --hr-color / --hr-width
 let svg = rule.render_to_browser();
+
+// Browser rendering with per-instance CSS variable overrides
+use std::collections::HashMap;
+let mut overrides = HashMap::new();
+overrides.insert("hr-weight".to_string(), "12".to_string());
+let svg_override = rule.render_to_browser_with_inline_variables(&overrides);
 ```
 
-The `HorizontalRule` component implements both `Renderable` (for terminal output) and `BrowserRenderable` (for HTML/SVG output) traits. It provides three-tier progressive enhancement for terminal rendering: SVG→PNG via resvg, Unicode fallback characters, or ASCII fallback characters.
+The `HorizontalRule` component implements both `Renderable` (terminal output) and `BrowserRenderable` (HTML/SVG output).
+
+**Supported attributes:**
+
+- `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+- `placement`: `full` (default), `centered`, `left`, `right`
+- `weight`: `thin`, `medium` (default), `thick` — heavy Unicode glyphs in Tier 2, 2/4/8px stroke in browser
+- `width`: CSS-like string (e.g. `"75%"`, `"200px"`)
+- `color`: CSS color name or `#rrggbb` — emits ANSI escapes in terminal when `color_depth` supports it
+
+**Terminal rendering tiers:**
+
+1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`): deferred.** Not implemented in the initial release; planned as a future additive change.
+2. **Tier 2 (Unicode):** primary path; gated on `locale::env_says_utf8()`.
+3. **Tier 3 (ASCII):** fallback when the locale does not signal UTF-8.
+
+All four main types (`HorizontalRule`, `RuleStyle`, `RulePlacement`, `RuleWeight`) plus the `BrowserRenderable` trait are re-exported through `biscuit_terminal::prelude`.
 
 `StatusState::Error` is now the canonical error severity. `StatusState::Failure` remains as a
 deprecated compatibility variant, and persisted JSON `"Failure"` still deserializes as

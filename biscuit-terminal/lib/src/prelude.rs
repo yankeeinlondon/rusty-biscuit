@@ -4,6 +4,9 @@ pub use crate::components::filesystem::{FileMetrics, FileSystem, FileSystemError
 pub use crate::components::graph_expression::{
     GraphExpression, GraphInputSyntax, GraphOrientation, GraphRenderError,
 };
+pub use crate::components::horizontal_rule::{
+    HorizontalRule, RulePlacement, RuleStyle, RuleWeight,
+};
 pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOptionsBuilder};
 pub use crate::components::inline_content::InlineContent;
 pub use crate::components::list::{OrderedList, UnorderedList};
@@ -14,7 +17,7 @@ pub use crate::components::mermaid::{
 pub use crate::components::pad::{PadLeft, PadRight};
 pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
-pub use crate::components::renderable::{Renderable, RenderableContent};
+pub use crate::components::renderable::{BrowserRenderable, Renderable, RenderableContent};
 pub use crate::components::section::{HeadingLevel, Section};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::status_block::StatusBlock;

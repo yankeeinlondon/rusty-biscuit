@@ -8,7 +8,7 @@ use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
 /// A struct or enum which implements the **Renderable** trait
 /// can be reduced down to a string designed to be displayed
 /// in a terminal.
-/// 
+///
 /// Every implementor owns a [`Layout`] that controls margins,
 /// alignment, word-wrap, and row-fill strategy. The required
 /// accessors `layout()` / `layout_mut()` expose it, while
@@ -207,7 +207,10 @@ pub trait BrowserRenderable: std::fmt::Debug + Any {
     /// Renders the component to browser-compatible HTML/SVG with inline CSS variables.
     /// The `variables` parameter provides CSS variable definitions that can be used
     /// in the rendered output for dynamic styling.
-    fn render_to_browser_with_inline_variables(&self, _variables: &HashMap<String, String>) -> String {
+    fn render_to_browser_with_inline_variables(
+        &self,
+        _variables: &HashMap<String, String>,
+    ) -> String {
         // Default implementation ignores variables and calls the basic render method
         self.render_to_browser()
     }
