@@ -829,6 +829,10 @@ mod linux {
     pub(crate) enum PulsePlaybackOutcome {
         /// PulseAudio setup (context/stream connection) failed before audio was
         /// written to the server. Safe to fall back to another playback path.
+        ///
+        /// The inner error is carried for future diagnostics (e.g. tracing) but
+        /// is not currently read; callers only branch on the variant.
+        #[allow(dead_code)]
         SetupFailed(Box<dyn std::error::Error>),
         /// Audio was written to PulseAudio and the drain completed. Fully done.
         PlaybackCompleted,
