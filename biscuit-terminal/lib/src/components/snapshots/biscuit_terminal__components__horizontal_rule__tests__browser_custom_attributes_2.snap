@@ -1,0 +1,7 @@
+---
+source: biscuit-terminal/lib/src/components/horizontal_rule.rs
+expression: browser_result2
+---
+<svg width="50ch" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#00ff00" stroke-width="2" stroke-linecap="round" stroke-dasharray="2,6"/>
+</svg>
