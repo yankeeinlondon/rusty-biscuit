@@ -509,9 +509,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 return handle_repo_packages(
                     base_dir.as_deref(),
-                    filter,
-                    package_area.as_deref(),
-                    *format,
+                    RepoPackagesArgs {
+                        filter,
+                        package_area: package_area.as_deref(),
+                        format: *format,
+                    },
                     cli.json,
                     cli.plain,
                     cli.verbose,
@@ -1136,6 +1138,13 @@ fn resolve_package_path(
     .into())
 }
 
+/// Subcommand-specific args for `sniff repo packages`.
+struct RepoPackagesArgs<'a> {
+    filter: &'a [String],
+    package_area: Option<&'a str>,
+    format: PackagesFormat,
+}
+
 /// Fast-path handler for `sniff repo packages`.
 ///
 /// Skips the full detection pipeline and calls `detect_repo_structure` directly,
@@ -1143,14 +1152,17 @@ fn resolve_package_path(
 /// formatting work. Typical wall time on a large monorepo: well under 50ms.
 fn handle_repo_packages(
     base_dir: Option<&std::path::Path>,
-    filter: &[String],
-    package_area: Option<&str>,
-    format: PackagesFormat,
+    args: RepoPackagesArgs<'_>,
     json: bool,
     plain: bool,
     verbose: u8,
     perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let RepoPackagesArgs {
+        filter,
+        package_area,
+        format,
+    } = args;
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
     let root = if base_dir.is_some() {
