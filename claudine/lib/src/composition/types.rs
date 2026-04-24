@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use darkmatter::markdown::compose::ComposePerfReport;
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::ComposePerfReport;
 use serde::{Deserialize, Serialize};
 
 use super::lifecycle::LifecycleConfig;

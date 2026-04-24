@@ -418,9 +418,7 @@ fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
     for source in ["errors", "lastError"] {
         let entries = match source {
             "errors" => envelope.get("errors").and_then(|v| v.as_array()).cloned(),
-            _ => envelope
-                .get(source)
-                .map(|v| vec![v.clone()]),
+            _ => envelope.get(source).map(|v| vec![v.clone()]),
         };
         if let Some(arr) = entries {
             for entry in &arr {
@@ -1321,7 +1319,10 @@ mod tests {
                     message.contains("model does not support thinking"),
                     "message should contain provider error: {message}"
                 );
-                assert_eq!(message, "AI_APICallError (400): model does not support thinking");
+                assert_eq!(
+                    message,
+                    "AI_APICallError (400): model does not support thinking"
+                );
             }
             other => panic!("expected ApiFailure, got {other:?}"),
         }
@@ -1643,10 +1644,7 @@ mod tests {
         assert_eq!(bridge.sink.events.len(), 1);
         match &bridge.sink.events[0] {
             SemanticEvent::Warning { message, extra } => {
-                assert!(
-                    message.to_lowercase().contains("usage limit"),
-                    "{message}"
-                );
+                assert!(message.to_lowercase().contains("usage limit"), "{message}");
                 // We no longer assert the exact timestamp because it's converted to local time
                 assert!(message.contains("2026-04-"), "{message}");
                 assert_string(extra, "classification", "rate_limit");

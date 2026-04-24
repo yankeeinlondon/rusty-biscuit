@@ -139,6 +139,46 @@ pub fn execute_resolved_message(
     });
 }
 
+/// Register a webhook provider on a messenger from a webhook route config.
+///
+/// This helper is shared between the production send path and the config TUI
+/// test-connection path so that both use identical provider construction and
+/// redaction logic.
+fn register_webhook_provider(
+    messenger: &mut Messenger,
+    config: &MessagingRouteConfig,
+) -> Result<(Target, ProviderKind), String> {
+    match config {
+        MessagingRouteConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
+                .map_err(|e| format!("Discord webhook URL: {}", e))?;
+            let provider = DiscordWebhookProvider::try_new(DiscordWebhookConfig {
+                webhook_url: SecretString::from(url),
+            })
+            .map_err(|e| redact_webhook_urls(&format!("Discord webhook: {}", e)))?;
+            messenger.register(Box::new(provider));
+            Ok((Target::discord_webhook(), ProviderKind::DiscordWebhook))
+        }
+        MessagingRouteConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
+                .map_err(|e| format!("Slack webhook URL: {}", e))?;
+            let provider = SlackWebhookProvider::try_new(SlackWebhookConfig {
+                webhook_url: SecretString::from(url),
+            })
+            .map_err(|e| redact_webhook_urls(&format!("Slack webhook: {}", e)))?;
+            messenger.register(Box::new(provider));
+            Ok((Target::slack_webhook(), ProviderKind::SlackWebhook))
+        }
+        _ => Err("Not a webhook route".to_string()),
+    }
+}
+
 /// Test a webhook connection by sending a short test message.
 ///
 /// This helper is designed for the config TUI test-connection workflow.
@@ -153,51 +193,14 @@ pub fn execute_resolved_message(
 /// with a redacted error string suitable for display in the TUI.
 pub async fn test_webhook_connection(config: &MessagingRouteConfig) -> Result<(), String> {
     let mut messenger = Messenger::new();
+    let (target, _kind) = register_webhook_provider(&mut messenger, config)?;
 
-    match config {
-        MessagingRouteConfig::DiscordWebhook {
-            webhook_url,
-            webhook_url_env,
-        } => {
-            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
-                .map_err(|e| format!("Discord webhook URL: {}", e))?;
-            let provider =
-                DiscordWebhookProvider::try_new(DiscordWebhookConfig {
-                    webhook_url: SecretString::from(url),
-                })
-                .map_err(|e| redact_webhook_urls(&format!("Discord webhook: {}", e)))?;
-            messenger.register(Box::new(provider));
-
-            let message = Message::text("Claudine test connection".to_string());
-            let dispatch = Dispatch::to(Target::discord_webhook());
-            messenger
-                .send(dispatch, &message)
-                .await
-                .map_err(|e| redact_webhook_urls(&format!("Send failed: {}", e)))?;
-        }
-        MessagingRouteConfig::SlackWebhook {
-            webhook_url,
-            webhook_url_env,
-        } => {
-            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
-                .map_err(|e| format!("Slack webhook URL: {}", e))?;
-            let provider = SlackWebhookProvider::try_new(SlackWebhookConfig {
-                webhook_url: SecretString::from(url),
-            })
-            .map_err(|e| redact_webhook_urls(&format!("Slack webhook: {}", e)))?;
-            messenger.register(Box::new(provider));
-
-            let message = Message::text("Claudine test connection".to_string());
-            let dispatch = Dispatch::to(Target::slack_webhook());
-            messenger
-                .send(dispatch, &message)
-                .await
-                .map_err(|e| redact_webhook_urls(&format!("Send failed: {}", e)))?;
-        }
-        _ => {
-            return Err("Not a webhook route".to_string());
-        }
-    }
+    let message = Message::text("Claudine test connection".to_string());
+    let dispatch = Dispatch::to(target);
+    messenger
+        .send(dispatch, &message)
+        .await
+        .map_err(|e| redact_webhook_urls(&format!("Send failed: {}", e)))?;
 
     Ok(())
 }
@@ -217,12 +220,31 @@ pub fn execute_notification(title: &str) {
         return;
     }
 
+    let handle = match tokio::runtime::Handle::try_current() {
+        Ok(h) => h,
+        Err(_) => {
+            tracing::warn!("Cannot execute desktop notification: no Tokio runtime active");
+            return;
+        }
+    };
+
     let owned = trimmed.to_string();
-    tokio::spawn(async move {
+    handle.spawn(async move {
         if let Err(e) = send_desktop_notification(&owned).await {
             report_notification_failure(&e);
         }
     });
+}
+
+/// Build a title-only message suitable for desktop notifications.
+fn build_notification_message(title: &str) -> Message {
+    Message {
+        title: Some(title.to_string()),
+        body: None,
+        attachments: Vec::new(),
+        location: None,
+        metadata: BTreeMap::new(),
+    }
 }
 
 /// Build a transient messenger, register the desktop provider, and dispatch
@@ -232,7 +254,7 @@ async fn send_desktop_notification(title: &str) -> Result<(), String> {
     let provider = DesktopNotificationProvider::new(DesktopConfig::default());
     messenger.register(Box::new(provider));
 
-    let message = Message::text(title.to_string()).title(title.to_string());
+    let message = build_notification_message(title);
     let dispatch = Dispatch::to(Target::desktop());
 
     messenger
@@ -320,6 +342,14 @@ fn failure_hint(error: &str) -> Option<&'static str> {
         Some("Re-check the configured webhook URL format.")
     } else if lower.contains("no_service") {
         Some("The Slack webhook was disabled or deleted — recreate it in Slack.")
+    } else if lower.contains("429")
+        || lower.contains("rate limit")
+        || lower.contains("retry_after")
+    {
+        Some(
+            "Discord rate limit hit. Wait a few seconds before retrying, \
+             or reduce message frequency.",
+        )
     } else if lower.contains("unauthorized")
         || lower.contains("401")
         || lower.contains("invalid_auth")
@@ -363,10 +393,17 @@ fn redact_webhook_urls(input: &str) -> String {
     redacted.into_owned()
 }
 
-/// Escape angle brackets so arbitrary error text can't be interpreted as
-/// Prose markup when embedded in a `Status::from_prose` body.
+/// Escape Prose markup tokens so arbitrary error text can't be interpreted
+/// as markup when embedded in a `Status::from_prose` body.
+///
+/// Covers `< >` (HTML-style tags), `{{ }}` (template syntax), and `**`
+/// (bold) which are the most likely to appear in reqwest/serde error strings.
 fn prose_escape(text: &str) -> String {
-    text.replace('<', "\\<").replace('>', "\\>")
+    text.replace('<', "\\<")
+        .replace('>', "\\>")
+        .replace("{{", "\\{{")
+        .replace("}}", "\\}}")
+        .replace("**", "\\*\\*")
 }
 
 /// Internal payload structure for the async send task.
@@ -541,30 +578,8 @@ async fn send_payload(
             });
             messenger.register(Box::new(provider));
         }
-        MessagingRouteConfig::DiscordWebhook {
-            webhook_url,
-            webhook_url_env,
-        } => {
-            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
-                .map_err(|e| format!("Discord webhook URL: {}", e))?;
-            let provider =
-                DiscordWebhookProvider::try_new(DiscordWebhookConfig {
-                    webhook_url: SecretString::from(url),
-                })
-                .map_err(|e| redact_webhook_urls(&format!("Discord webhook: {}", e)))?;
-            messenger.register(Box::new(provider));
-        }
-        MessagingRouteConfig::SlackWebhook {
-            webhook_url,
-            webhook_url_env,
-        } => {
-            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)
-                .map_err(|e| format!("Slack webhook URL: {}", e))?;
-            let provider = SlackWebhookProvider::try_new(SlackWebhookConfig {
-                webhook_url: SecretString::from(url),
-            })
-            .map_err(|e| redact_webhook_urls(&format!("Slack webhook: {}", e)))?;
-            messenger.register(Box::new(provider));
+        MessagingRouteConfig::DiscordWebhook { .. } | MessagingRouteConfig::SlackWebhook { .. } => {
+            register_webhook_provider(&mut messenger, &payload.route_config)?;
         }
     }
 
@@ -789,10 +804,30 @@ mod tests {
     }
 
     #[test]
+    fn failure_hint_discord_rate_limit() {
+        let hint = failure_hint("Discord returned 429: rate limited, retry_after: 5000");
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("rate limit"));
+
+        assert!(failure_hint("429 Too Many Requests").unwrap().contains("rate limit"));
+        assert!(failure_hint("Hit retry_after").unwrap().contains("rate limit"));
+    }
+
+    #[test]
     fn prose_escape_neutralizes_angle_brackets() {
         assert_eq!(
             prose_escape("<script>alert('x')</script>"),
             "\\<script\\>alert('x')\\</script\\>"
+        );
+    }
+
+    #[test]
+    fn prose_escape_neutralizes_template_and_bold_tokens() {
+        assert_eq!(prose_escape("{{variable}}"), "\\{{variable\\}}");
+        assert_eq!(prose_escape("**bold**"), "\\*\\*bold\\*\\*");
+        assert_eq!(
+            prose_escape("Error: {{url}} and **token**"),
+            "Error: \\{{url\\}} and \\*\\*token\\*\\*"
         );
     }
 
@@ -913,6 +948,68 @@ mod tests {
     }
 
     // =====================================================================
+    // HookAction::Message through webhook route (Finding #6)
+    // =====================================================================
+
+    #[test]
+    fn build_payload_discord_webhook_message_body() {
+        let route = route(
+            "alerts",
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url: Some("https://discord.com/api/webhooks/123/abc".to_string()),
+                webhook_url_env: "DISCORD_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let payload = build_payload(
+            &route,
+            "Hello webhook".to_string(),
+            None,
+            Some("/workspace"),
+            None,
+        )
+        .expect("discord webhook payload should build");
+
+        assert!(matches!(payload.target, Target::DiscordWebhook(_)));
+        assert_eq!(payload.provider_kind, ProviderKind::DiscordWebhook);
+        assert_eq!(
+            payload.message.body,
+            Some(messenger::MessageBody::Markdown(
+                "Hello webhook".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn build_payload_slack_webhook_message_body() {
+        let route = route(
+            "deploys",
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url: Some("https://hooks.slack.com/services/T1/B1/X".to_string()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let payload = build_payload(
+            &route,
+            "Hello slack webhook".to_string(),
+            None,
+            Some("/workspace"),
+            None,
+        )
+        .expect("slack webhook payload should build");
+
+        assert!(matches!(payload.target, Target::SlackWebhook(_)));
+        assert_eq!(payload.provider_kind, ProviderKind::SlackWebhook);
+        assert_eq!(
+            payload.message.body,
+            Some(messenger::MessageBody::Markdown(
+                "Hello slack webhook".to_string()
+            ))
+        );
+    }
+
+    // =====================================================================
     // Redaction tests (Phase 2)
     // =====================================================================
 
@@ -950,6 +1047,30 @@ mod tests {
     }
 
     #[test]
+    fn redactor_covers_every_valid_webhook_url() {
+        let samples = [
+            // Discord
+            "https://discord.com/api/webhooks/123456789/abcDEF123.-_",
+            "https://discordapp.com/api/webhooks/987654321/XYZ789",
+            // Slack
+            "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+            "https://hooks.slack.com/services/T123/B456/abc123DEF",
+        ];
+
+        for url in &samples {
+            let is_valid = super::super::config::validate_discord_webhook_url(url)
+                || super::super::config::validate_slack_webhook_url(url);
+            assert!(is_valid, "sample URL should be valid: {url}");
+
+            let redacted = redact_webhook_urls(&format!("prefix {url} suffix"));
+            assert!(
+                !redacted.contains(url),
+                "redaction failed on valid URL: {url}"
+            );
+        }
+    }
+
+    #[test]
     fn redact_webhook_urls_masks_multiple_urls_in_one_string() {
         let input = "first https://discord.com/api/webhooks/1/aaa and second \
                      https://hooks.slack.com/services/T0/B0/ccc both leaked";
@@ -976,12 +1097,25 @@ mod tests {
 
     #[test]
     fn execute_notification_blank_is_noop() {
-        // Calling outside any tokio runtime — if the function reached
-        // `tokio::spawn`, it would panic. The empty-title early return keeps
-        // the call site safe and synchronous.
+        // Blank titles are no-ops and return immediately.
         execute_notification("   ");
         execute_notification("");
         execute_notification("\n\t");
+    }
+
+    #[test]
+    fn execute_notification_no_panic_without_runtime() {
+        // Must not panic when called outside a Tokio runtime.
+        execute_notification("test title");
+    }
+
+    #[test]
+    fn execute_notification_message_is_title_only() {
+        let title = "Deployment Successful";
+        let message = build_notification_message(title);
+        assert_eq!(message.title.as_deref(), Some(title));
+        assert!(message.body.is_none());
+        assert!(message.attachments.is_empty());
     }
 
     // =====================================================================
@@ -1025,32 +1159,21 @@ mod tests {
         assert!(err.contains("secret not found"));
     }
 
-    #[tokio::test]
-    async fn test_webhook_connection_redacts_url_in_send_error() {
-        // Use a well-formed URL that will fail at the network layer so we
-        // can verify any error text is redacted.
-        let route = MessagingRouteConfig::DiscordWebhook {
-            webhook_url: Some(
-                "https://discord.com/api/webhooks/123456/abc_secret".to_string(),
-            ),
-            webhook_url_env: "DISCORD_WEBHOOK_URL".to_string(),
-        };
-
-        // Wrap in a short timeout so the test doesn't hang on network failure.
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            test_webhook_connection(&route),
-        )
-        .await;
-
-        // Should either time out or fail quickly; either way we get an error.
-        let err = match result {
-            Ok(Ok(())) => panic!("expected network failure in test"),
-            Ok(Err(e)) => e,
-            Err(_) => "timed out".to_string(),
-        };
-
-        // The error must not contain the raw webhook token.
-        assert!(!err.contains("abc_secret"), "error leaked webhook token: {}", err);
+    #[test]
+    fn redact_webhook_urls_in_error_strings() {
+        // Deterministic test: verify the redactor strips URLs from known
+        // reqwest-style error strings without relying on network timing.
+        let url = "https://discord.com/api/webhooks/123/abc_secret";
+        let error =
+            format!("reqwest error: error sending request for url ({url}): connection failed");
+        let redacted = redact_webhook_urls(&error);
+        assert!(
+            !redacted.contains(url),
+            "URL must be redacted in error: {redacted}"
+        );
+        assert!(
+            redacted.contains("<redacted-webhook-url>"),
+            "redaction marker should be present"
+        );
     }
 }
