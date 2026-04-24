@@ -43,7 +43,13 @@ fn input_table_fails_with_unknown_column_type() {
 #[test]
 fn input_table_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
     cargo_bin_cmd!("question")
-        .args(["input-table", "--columns", r#"[{"type":"text-input","id":"name"}]"#, "--output", "raw"])
+        .args([
+            "input-table",
+            "--columns",
+            r#"[{"type":"text-input","id":"name"}]"#,
+            "--output",
+            "raw",
+        ])
         .assert()
         .failure()
         .code(1)

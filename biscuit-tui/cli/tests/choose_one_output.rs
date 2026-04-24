@@ -38,7 +38,15 @@ fn choose_one_fails_when_no_option_source_provided() {
 #[test]
 fn choose_one_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
     cargo_bin_cmd!("question")
-        .args(["choose-one", "--options", "Red,Green,Blue", "--initial", "Red", "--output", "raw"])
+        .args([
+            "choose-one",
+            "--options",
+            "Red,Green,Blue",
+            "--initial",
+            "Red",
+            "--output",
+            "raw",
+        ])
         .assert()
         .failure()
         .code(1)
