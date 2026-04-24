@@ -116,6 +116,24 @@ fn choose_many_initial_flag_is_hidden_from_help() {
 }
 
 #[test]
+fn choose_one_help_lists_filter_opt_out() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--no-filter"));
+}
+
+#[test]
+fn choose_many_help_lists_filter_opt_out() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--no-filter"));
+}
+
+#[test]
 fn choose_one_help_lists_border_flags() {
     cargo_bin_cmd!("question")
         .args(["choose-one", "--help"])
@@ -237,16 +255,7 @@ fn choose_one_margin_flag_reaches_event_loop() {
 #[test]
 fn choose_one_margin_with_per_side_overrides_reaches_event_loop() {
     cargo_bin_cmd!("question")
-        .args([
-            "choose-one",
-            "a",
-            "b",
-            "c",
-            "--margin",
-            "2",
-            "--mt",
-            "0",
-        ])
+        .args(["choose-one", "a", "b", "c", "--margin", "2", "--mt", "0"])
         .assert()
         .failure()
         .code(1)

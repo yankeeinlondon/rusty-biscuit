@@ -45,6 +45,14 @@ pub struct ChooseChromeArgs {
     #[arg(long, value_enum, default_value_t = SortOrderArg::Natural)]
     pub sort: SortOrderArg,
 
+    /// Disable inline fuzzy filtering.
+    ///
+    /// Filtering is enabled by default for CLI choose prompts so
+    /// typing alphanumeric characters opens the search prompt instead
+    /// of using the legacy first-letter shortcut behaviour.
+    #[arg(long)]
+    pub no_filter: bool,
+
     /// Draw a border around the prompt.
     ///
     /// Implies [`BorderStyleArg::Rounded`] when `--border-style` is
@@ -657,10 +665,8 @@ mod tests {
 
     #[test]
     fn apply_sort_reorders_labels_lexically_when_asc() {
-        let mut options = build_options(
-            vec!["Berry".into(), "Apple".into(), "Cherry".into()],
-            None,
-        );
+        let mut options =
+            build_options(vec!["Berry".into(), "Apple".into(), "Cherry".into()], None);
         apply_sort(&mut options, SortOrder::Asc);
         let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
@@ -671,10 +677,7 @@ mod tests {
         // With `--delimiter :` the label is the part before the colon.
         // Sorting ascending should order by label ("Apple" < "Berry"),
         // not by raw string ("Apple:zzz" vs "Berry:aaa").
-        let mut options = build_options(
-            vec!["Berry:aaa".into(), "Apple:zzz".into()],
-            Some(':'),
-        );
+        let mut options = build_options(vec!["Berry:aaa".into(), "Apple:zzz".into()], Some(':'));
         apply_sort(&mut options, SortOrder::Asc);
         assert_eq!(options[0].label, "Apple");
         assert_eq!(options[0].value, "zzz");
@@ -684,10 +687,8 @@ mod tests {
 
     #[test]
     fn apply_sort_natural_is_no_op() {
-        let mut options = build_options(
-            vec!["Berry".into(), "Apple".into(), "Cherry".into()],
-            None,
-        );
+        let mut options =
+            build_options(vec!["Berry".into(), "Apple".into(), "Cherry".into()], None);
         apply_sort(&mut options, SortOrder::Natural);
         let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Berry", "Apple", "Cherry"]);

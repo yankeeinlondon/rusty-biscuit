@@ -188,7 +188,7 @@ fn build_choice_input(args: &ChooseManyArgs) -> io::Result<ChoiceInput<String>> 
             .with_options(build_options(resolved, args.chrome.delimiter))
     };
     apply_sort(&mut input.options, args.chrome.sort.into());
-    Ok(input)
+    Ok(input.with_filter_enabled(!args.chrome.no_filter))
 }
 
 fn parse_initial_ids(raw: &str) -> Vec<String> {
@@ -239,6 +239,43 @@ mod tests {
         };
         let input = build_choice_input(&args).unwrap();
         assert_eq!(input.options.len(), 2);
+        assert_eq!(input.selection_mode, SelectionMode::Multiple);
+    }
+
+    #[test]
+    fn build_choice_input_enables_filter_for_positional_args_by_default() {
+        let args = ChooseManyArgs {
+            positional: vec!["a".into(), "b".into()],
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert!(input.filter_enabled);
+        assert_eq!(input.selection_mode, SelectionMode::Multiple);
+    }
+
+    #[test]
+    fn build_choice_input_enables_filter_for_legacy_csv_by_default() {
+        let args = ChooseManyArgs {
+            options: Some("a,b,c".into()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert!(input.filter_enabled);
+        assert_eq!(input.selection_mode, SelectionMode::Multiple);
+    }
+
+    #[test]
+    fn build_choice_input_respects_no_filter_flag() {
+        let args = ChooseManyArgs {
+            positional: vec!["a".into(), "b".into()],
+            chrome: ChooseChromeArgs {
+                no_filter: true,
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert!(!input.filter_enabled);
         assert_eq!(input.selection_mode, SelectionMode::Multiple);
     }
 
@@ -398,6 +435,177 @@ mod tests {
 
         assert_eq!(status, 0);
         assert_eq!(output, b"Red\nBlue\n");
+    }
+
+    #[test]
+    fn run_writes_selected_values_from_positional_args() {
+        let args = ChooseManyArgs {
+            positional: vec!["alpha".into(), "beta".into(), "gamma".into()],
+            selected: vec!["alpha,gamma".into()],
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.options()[0].label, "alpha");
+                assert_eq!(state.options()[2].label, "gamma");
+                assert_eq!(state.selected_ids(), vec!["alpha", "gamma"]);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"alpha\ngamma\n");
+    }
+
+    #[test]
+    fn run_writes_delimited_positional_values() {
+        let args = ChooseManyArgs {
+            positional: vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()],
+            selected: vec!["1,3".into()],
+            chrome: ChooseChromeArgs {
+                delimiter: Some(':'),
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Json,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.options()[0].label, "Apple");
+                assert_eq!(state.options()[0].id, "1");
+                assert_eq!(state.options()[0].value, "1");
+                assert_eq!(state.selected_ids(), vec!["1", "3"]);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(String::from_utf8(output).unwrap(), "[\"1\",\"3\"]\n");
+    }
+
+    #[test]
+    fn run_selected_defaults_match_delimited_values() {
+        let args = ChooseManyArgs {
+            positional: vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()],
+            selected: vec!["2".into(), "3".into()],
+            chrome: ChooseChromeArgs {
+                delimiter: Some(':'),
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.selected_ids(), vec!["2", "3"]);
+                assert_eq!(state.selected_count(), 2);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"2\n3\n");
+    }
+
+    #[test]
+    fn run_builds_filter_enabled_state_by_default() {
+        let args = ChooseManyArgs {
+            positional: vec!["alpha".into(), "beta".into()],
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert!(state.filter_pattern().is_empty());
+                assert!(!state.filter_visible());
+                assert_eq!(state.visible_indices(), &[0, 1]);
+                Ok(Vec::new())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn run_select_all_outputs_all_values() {
+        let args = ChooseManyArgs {
+            positional: vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()],
+            chrome: ChooseChromeArgs {
+                delimiter: Some(':'),
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |mut state, _height| {
+                state.select_all();
+                assert_eq!(state.selected_ids(), vec!["1", "2", "3"]);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"1\n2\n3\n");
+    }
+
+    #[test]
+    fn run_deselect_all_outputs_no_values() {
+        let args = ChooseManyArgs {
+            options: Some("Red,Green,Blue".into()),
+            selected: vec!["Red,Green,Blue".into()],
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |mut state, _height| {
+                assert_eq!(state.selected_count(), 3);
+                state.deselect_all();
+                assert_eq!(state.selected_count(), 0);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert!(output.is_empty());
     }
 
     #[test]
