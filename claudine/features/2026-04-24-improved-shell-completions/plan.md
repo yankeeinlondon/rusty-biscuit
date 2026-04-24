@@ -18,6 +18,20 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/engine.rs
+  - claudine/cli/src/completion/scopes.rs
+  - claudine/cli/src/completion/frontmatter.rs
+  - claudine/cli/src/completion/fuzzy.rs
+  - claudine/cli/src/completion/composition.rs
+  - claudine/cli/tests/completion_cli.rs
+  - claudine/cli/tests/completion_compose.rs
+  - claudine/cli/tests/completion_inline_compose.rs
+  - claudine/cli/tests/completion_sequence.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - claudine-cli
 ---
