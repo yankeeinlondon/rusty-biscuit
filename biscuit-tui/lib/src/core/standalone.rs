@@ -769,4 +769,98 @@ mod tests {
         assert_ne!(top_left, " ");
         assert_ne!(bottom_right, " ");
     }
+
+    #[test]
+    fn drive_event_loop_with_chrome_preserves_search_prompt_inside_border() {
+        use crate::components::{ChoiceInput, ChoiceOption, ChooseOne, ChooseOneState};
+        use crate::core::frame::{BorderStyle, FrameChromeConfig};
+
+        let backend = TestBackend::new(30, 8);
+        let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
+        let input = ChoiceInput::new("colour", "Pick a colour")
+            .with_filter_enabled(true)
+            .with_options(vec![
+                ChoiceOption::new("r", "Red", "red".to_string()),
+                ChoiceOption::new("g", "Green", "green".to_string()),
+                ChoiceOption::new("b", "Blue", "blue".to_string()),
+            ]);
+        let mut state = ChooseOneState::new(input);
+        let chrome = FrameChromeConfig {
+            border: BorderStyle::Rounded,
+            border_label: Some("Pick".to_string()),
+            ..Default::default()
+        };
+        // Seed the filter with pattern "re" by routing key events through
+        // the same event iterator the existing chrome tests use, then
+        // submit with Enter so the loop exits cleanly.
+        let events = vec![
+            key_event(KeyCode::Char('r')),
+            key_event(KeyCode::Char('e')),
+            key_event(KeyCode::Enter),
+        ];
+        let mut iter = events.into_iter();
+        let _result = drive_event_loop_with_chrome(
+            &mut terminal,
+            ChooseOne::<String>::new(),
+            &mut state,
+            || {
+                iter.next()
+                    .ok_or_else(|| io::Error::other("no more events"))
+            },
+            None,
+            &chrome,
+        );
+
+        let buf = terminal.backend().buffer().clone();
+        // (a) Border glyphs in the expected corners.
+        let top_left = buf[(0, 0)].symbol().to_string();
+        let bottom_right = buf[(29, 7)].symbol().to_string();
+        assert_ne!(top_left, " ", "top-left corner should contain a border glyph");
+        assert_ne!(
+            bottom_right, " ",
+            "bottom-right corner should contain a border glyph"
+        );
+
+        // Helper: read a row from the buffer as a single string.
+        let row_text = |y: u16| -> String {
+            let mut s = String::new();
+            for x in buf.area.left()..buf.area.right() {
+                s.push_str(buf[(x, y)].symbol());
+            }
+            s
+        };
+
+        // (b) The search prompt row is drawn inside the border. Scan
+        // interior rows (1..height-1) for the theme's default search
+        // indicator ("/ ") followed by the seeded pattern "re".
+        let mut found_prompt = false;
+        for y in 1..7 {
+            let row = row_text(y);
+            if row.contains("/ re") {
+                found_prompt = true;
+                break;
+            }
+        }
+        assert!(
+            found_prompt,
+            "expected a row inside the border to contain '/ re'; buffer rows:\n{}",
+            (0..8).map(row_text).collect::<Vec<_>>().join("\n"),
+        );
+
+        // (c) At least one row inside the border contains a non-space
+        // char from "Red" or "Green" — proves the filter pattern routed
+        // through to the visible list.
+        let mut found_match = false;
+        for y in 1..7 {
+            let row = row_text(y);
+            if row.contains("Red") || row.contains("Green") {
+                found_match = true;
+                break;
+            }
+        }
+        assert!(
+            found_match,
+            "expected a visible label (Red or Green) inside the border",
+        );
+    }
 }

@@ -229,8 +229,32 @@ pub fn resolve_option_strings(
              --options, --options-from-file, --options-from-dictionary",
         ));
     }
+    let lines = read_option_strings_from(io::stdin().lock())?;
+    Ok(Some(lines))
+}
+
+/// Reads option strings from an arbitrary [`Read`] source.
+///
+/// Encapsulates the `read_to_string` → split lines → CR-trim →
+/// filter-empty → empty-check pipeline so the stdin branch of
+/// [`resolve_option_strings`] is reachable from unit tests via
+/// [`std::io::Cursor`] (or any in-memory reader).
+///
+/// ## Returns
+///
+/// `Ok(Vec<String>)` containing one option per non-empty input line,
+/// with any trailing `\r` stripped so Windows-style line endings
+/// round-trip cleanly.
+///
+/// ## Errors
+///
+/// Returns [`io::ErrorKind::InvalidInput`] when the resulting vec is
+/// empty (no non-blank lines), matching the message emitted by
+/// [`resolve_option_strings`] when its STDIN branch produces nothing.
+/// Propagates any [`io::Error`] raised by the underlying reader.
+pub(crate) fn read_option_strings_from<R: Read>(mut reader: R) -> io::Result<Vec<String>> {
     let mut buf = String::new();
-    io::stdin().read_to_string(&mut buf)?;
+    reader.read_to_string(&mut buf)?;
     let lines: Vec<String> = buf
         .lines()
         .map(|line| line.trim_end_matches('\r'))
@@ -244,7 +268,7 @@ pub fn resolve_option_strings(
              --options, --options-from-file, --options-from-dictionary",
         ));
     }
-    Ok(Some(lines))
+    Ok(lines)
 }
 
 /// Splits an option string into `(label, value)` on the first
@@ -447,6 +471,38 @@ mod tests {
     fn resolve_option_strings_prefers_positional_over_stdin() {
         let resolved = resolve_option_strings(false, vec!["a".into(), "b".into()]).unwrap();
         assert_eq!(resolved, Some(vec!["a".to_string(), "b".to_string()]));
+    }
+
+    #[test]
+    fn read_option_strings_strips_trailing_carriage_return() {
+        let cursor = std::io::Cursor::new(b"alpha\r\nbeta\r\n");
+        let lines = read_option_strings_from(cursor).unwrap();
+        assert_eq!(lines, vec!["alpha".to_string(), "beta".to_string()]);
+    }
+
+    #[test]
+    fn read_option_strings_filters_empty_lines() {
+        let cursor = std::io::Cursor::new(b"\nalpha\n\n\nbeta\n");
+        let lines = read_option_strings_from(cursor).unwrap();
+        assert_eq!(lines, vec!["alpha".to_string(), "beta".to_string()]);
+    }
+
+    #[test]
+    fn read_option_strings_empty_input_is_invalid_input() {
+        let cursor = std::io::Cursor::new(b"");
+        let err = read_option_strings_from(cursor).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("no options provided"));
+    }
+
+    #[test]
+    fn read_option_strings_whitespace_only_lines_are_kept_as_is() {
+        // Whitespace-only labels are preserved — the caller is
+        // responsible for trimming (via `parse_label_value`). Only
+        // wholly empty lines are dropped.
+        let cursor = std::io::Cursor::new(b"  alpha  \nbeta\n");
+        let lines = read_option_strings_from(cursor).unwrap();
+        assert_eq!(lines, vec!["  alpha  ".to_string(), "beta".to_string()]);
     }
 
     #[test]
