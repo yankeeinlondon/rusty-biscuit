@@ -21,7 +21,7 @@
 use std::io::{self, IsTerminal, Read};
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, SortOrder};
+use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, Margin, SortOrder};
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
@@ -67,6 +67,34 @@ pub struct ChooseChromeArgs {
     /// Any value other than `none` implies `--border`.
     #[arg(long, value_enum, value_name = "STYLE")]
     pub border_style: Option<BorderStyleArg>,
+
+    /// Margin (in cells) applied to all four sides outside the border.
+    ///
+    /// Per-side flags (`--mt`, `--mb`, `--ml`, `--mr`) override the
+    /// umbrella value for that side only — `--margin 2 --mt 0` yields
+    /// `Margin { top: 0, bottom: 2, left: 2, right: 2 }`.
+    #[arg(long, value_name = "CELLS")]
+    pub margin: Option<u16>,
+
+    /// Override the top margin (cells). Takes precedence over
+    /// `--margin` for the top side only.
+    #[arg(long, value_name = "CELLS")]
+    pub mt: Option<u16>,
+
+    /// Override the bottom margin (cells). Takes precedence over
+    /// `--margin` for the bottom side only.
+    #[arg(long, value_name = "CELLS")]
+    pub mb: Option<u16>,
+
+    /// Override the left margin (cells). Takes precedence over
+    /// `--margin` for the left side only.
+    #[arg(long, value_name = "CELLS")]
+    pub ml: Option<u16>,
+
+    /// Override the right margin (cells). Takes precedence over
+    /// `--margin` for the right side only.
+    #[arg(long, value_name = "CELLS")]
+    pub mr: Option<u16>,
 }
 
 /// CLI-facing sort-order mirror.
@@ -260,16 +288,34 @@ pub fn apply_sort(options: &mut [ChoiceOption<String>], order: SortOrder) {
 /// Builds a [`FrameChromeConfig`] from the shared CLI args.
 ///
 /// Phase 9 wires the `--border`, `--border-label`, and
-/// `--border-style` flags. The `--border-label` and a non-`none`
-/// `--border-style` both implicitly enable the border, matching the
-/// spec's "any border-flag implies a border" rule. Phases 10 and 11
-/// populate margin and height fields.
+/// `--border-style` flags. Phase 10 wires the `--margin`, `--mt`,
+/// `--mb`, `--ml`, `--mr` family. The `--border-label` and a
+/// non-`none` `--border-style` both implicitly enable the border,
+/// matching the spec's "any border-flag implies a border" rule. Phase
+/// 11 populates the height field.
 pub fn build_chrome(args: &ChooseChromeArgs) -> FrameChromeConfig {
     let border = resolve_border_style(args);
     FrameChromeConfig {
         border,
         border_label: args.border_label.clone(),
+        margin: resolve_margin(args),
         ..Default::default()
+    }
+}
+
+/// Resolves the effective [`Margin`] from the supplied args.
+///
+/// `--margin` seeds every side; each per-side flag (`--mt`, `--mb`,
+/// `--ml`, `--mr`) overrides the matching side when set. Omitted
+/// umbrella and per-side flags fall through to zero, matching the
+/// default `Margin`.
+fn resolve_margin(args: &ChooseChromeArgs) -> Margin {
+    let base = args.margin.unwrap_or(0);
+    Margin {
+        top: args.mt.unwrap_or(base),
+        bottom: args.mb.unwrap_or(base),
+        left: args.ml.unwrap_or(base),
+        right: args.mr.unwrap_or(base),
     }
 }
 
@@ -477,6 +523,100 @@ mod tests {
     #[test]
     fn sort_order_arg_default_is_natural() {
         assert_eq!(SortOrderArg::default(), SortOrderArg::Natural);
+    }
+
+    #[test]
+    fn build_chrome_default_margin_is_zero() {
+        let args = ChooseChromeArgs::default();
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.margin, Margin::default());
+    }
+
+    #[test]
+    fn build_chrome_margin_sets_all_sides() {
+        let args = ChooseChromeArgs {
+            margin: Some(2),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.margin, Margin::uniform(2));
+        // Margin alone is enough to mark the chrome as non-empty so
+        // the render path wraps the widget with a FrameChrome.
+        assert!(!chrome.is_empty());
+    }
+
+    #[test]
+    fn build_chrome_per_side_overrides_umbrella_margin() {
+        // `--margin 2 --mt 0` should produce a margin with zero on top
+        // and two on the other three sides, per spec §7.2.
+        let args = ChooseChromeArgs {
+            margin: Some(2),
+            mt: Some(0),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.margin,
+            Margin {
+                top: 0,
+                bottom: 2,
+                left: 2,
+                right: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_per_side_only_margins_default_other_sides_to_zero() {
+        let args = ChooseChromeArgs {
+            ml: Some(3),
+            mr: Some(4),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.margin,
+            Margin {
+                top: 0,
+                bottom: 0,
+                left: 3,
+                right: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_all_per_side_overrides_applied() {
+        let args = ChooseChromeArgs {
+            margin: Some(5),
+            mt: Some(1),
+            mb: Some(2),
+            ml: Some(3),
+            mr: Some(4),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.margin,
+            Margin {
+                top: 1,
+                bottom: 2,
+                left: 3,
+                right: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_combines_border_and_margin() {
+        let args = ChooseChromeArgs {
+            border: true,
+            margin: Some(2),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::Rounded);
+        assert_eq!(chrome.margin, Margin::uniform(2));
     }
 
     #[test]
