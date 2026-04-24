@@ -45,10 +45,7 @@ schedule name="":
         elif [[ ${#matches[@]} -eq 1 ]]; then
             selected="${matches[0]}"
         else
-            echo -e "{{yellow}}Multiple matches for{{reset}} {{blue}}${name}{{reset}}:"
-            printf '  %s\n' "${matches[@]}"
-            echo -e "{{yellow}}Please be more specific.{{reset}}"
-            exit 1
+            selected="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Multiple matches found. Choose one')"
         fi
     fi
 
