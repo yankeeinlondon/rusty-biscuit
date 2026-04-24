@@ -32,9 +32,7 @@ fn compose_prompt_markdown(
         options = options.with_source_file(path);
     }
 
-    let (composed, _report) = md
-        .compose_with(options)
-        .map_err(|e| crate::error::ClaudineError::SystemPromptComposition(e.to_string()))?;
+    let (composed, _report) = md.compose_with(options)?;
 
     Ok(composed.content().to_string())
 }

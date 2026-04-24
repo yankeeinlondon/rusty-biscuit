@@ -56,6 +56,9 @@ pub struct TimeInfo {
     pub monotonic_available: bool,
 }
 
+/// Default timeout for NTP detection commands (3 seconds).
+const NTP_TIMEOUT_SECS: u64 = 3;
+
 /// Runs a command with a timeout, returning stdout as a string if successful.
 ///
 /// ## Arguments
@@ -329,25 +332,31 @@ fn detect_timezone_name() -> Option<String> {
 /// unsupported platforms, or when the status cannot be determined.
 #[cfg(target_os = "linux")]
 pub fn detect_ntp_status() -> NtpStatus {
-    // Use timedatectl to check NTP status
+    // Use a single timedatectl call to check both NTP synchronized and NTP active status.
+    // This halves the command overhead compared to two separate invocations.
     let output = run_command_with_timeout(
         "timedatectl",
-        &["show", "--property=NTPSynchronized", "--value"],
-        5,
+        &["show", "--property=NTPSynchronized,NTP", "--value"],
+        NTP_TIMEOUT_SECS,
     );
 
-    match output.as_deref().map(str::trim) {
+    let lines: Vec<&str> = output
+        .as_deref()
+        .map(|s| s.lines().collect())
+        .unwrap_or_default();
+
+    // timedatectl outputs values in the order the properties were requested:
+    // line 0 -> NTPSynchronized, line 1 -> NTP
+    let ntp_synchronized = lines.first().copied().map(str::trim);
+    let ntp_active = lines.get(1).copied().map(str::trim);
+
+    match ntp_synchronized {
         Some("yes") => NtpStatus::Synchronized,
-        Some("no") => {
-            // Check if NTP is active but not synced vs inactive
-            let ntp_active =
-                run_command_with_timeout("timedatectl", &["show", "--property=NTP", "--value"], 5);
-            match ntp_active.as_deref().map(str::trim) {
-                Some("yes") => NtpStatus::Unsynchronized,
-                Some("no") => NtpStatus::Inactive,
-                _ => NtpStatus::Unknown,
-            }
-        }
+        Some("no") => match ntp_active {
+            Some("yes") => NtpStatus::Unsynchronized,
+            Some("no") => NtpStatus::Inactive,
+            _ => NtpStatus::Unknown,
+        },
         _ => NtpStatus::Unknown,
     }
 }
@@ -367,7 +376,7 @@ pub fn detect_ntp_status() -> NtpStatus {
         .unwrap_or_else(|| "time.apple.com".to_string());
 
     // sntp ships with macOS and works without admin privileges
-    let output = run_command_with_timeout("sntp", &[&server], 5);
+    let output = run_command_with_timeout("sntp", &[&server], NTP_TIMEOUT_SECS);
     match output {
         // A successful response contains the offset, e.g. "+0.001527 +/- 0.004895 time.apple.com"
         Some(text) if text.contains("+/-") => NtpStatus::Synchronized,
@@ -377,7 +386,7 @@ pub fn detect_ntp_status() -> NtpStatus {
 
 #[cfg(target_os = "windows")]
 pub fn detect_ntp_status() -> NtpStatus {
-    let output = run_command_with_timeout("w32tm", &["/query", "/status"], 5);
+    let output = run_command_with_timeout("w32tm", &["/query", "/status"], NTP_TIMEOUT_SECS);
     match output {
         Some(text) if text.contains("Leap Indicator: 0") => NtpStatus::Synchronized,
         Some(text) if text.contains("Leap Indicator:") => NtpStatus::Unsynchronized,
@@ -647,5 +656,27 @@ mod tests {
 
         assert_eq!(map_windows_timezone_to_iana("Nonexistent/Zone"), None);
         assert_eq!(map_windows_timezone_to_iana(""), None);
+    }
+
+    // ============================================================================
+    // NTP timeout tests (issue #19)
+    // ============================================================================
+
+    #[test]
+    fn test_ntp_timeout_is_three_seconds() {
+        // The timeout was reduced from 5s to 3s as part of issue #19.
+        assert_eq!(NTP_TIMEOUT_SECS, 3);
+    }
+
+    #[test]
+    fn test_run_command_with_timeout_respects_timeout() {
+        // Use a command that sleeps longer than the timeout
+        let start = std::time::Instant::now();
+        let result = run_command_with_timeout("sleep", &["10"], 1);
+        let elapsed = start.elapsed();
+
+        // Should return None (timeout) and take less than 5 seconds
+        assert!(result.is_none());
+        assert!(elapsed < std::time::Duration::from_secs(5));
     }
 }

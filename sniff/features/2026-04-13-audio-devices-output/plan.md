@@ -1,6 +1,5 @@
 # Audio Devices Output Redesign — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rewrite the `sniff audio-devices` text output (and the embedded "Audio Devices" block in `sniff hardware`) so it renders via `biscuit-terminal` components, groups devices by Input/Output, styles kinds, shows available sample rates inline in kHz, and marks the system defaults.
 

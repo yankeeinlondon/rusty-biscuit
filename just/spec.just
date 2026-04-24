@@ -90,12 +90,18 @@ feature feat:
     fi
 
 # adds a new fix topic to the package area
-fix name:
+fix name="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    descriptive="$(just _title_case "{{ name }}")"
-    dasherized="$(just _dasherize "{{ name }}")"
+    if [[ -z "{{name}}" ]]; then
+        use_name="$(just _choose_fix)"
+    else
+        use_name="{{name}}"
+    fi
+
+    descriptive="$(just _title_case "${use_name}")"
+    dasherized="$(just _dasherize "${use_name}")"
 
     mapfile -t matches < <(find fixes -maxdepth 1 -not -path "fixes/_completed*" -type d -name "*-${dasherized}" 2>/dev/null)
     relative_dir=""
@@ -226,7 +232,7 @@ design filter="":
     dir="$(dirname ${file})"
     echo
     echo -e "Creating a technical design from the spec file: {{ blue }}${file}{{ reset }}. Using {{ bold }}${use_agent}{{ reset }} agent."
-    claudine compose @prompts/design.md --${use_agent} -y --set spec="$(basename "${file}")" dir="${dir}" ${model} || (
+    claudine compose @prompts/design.md --${use_agent} -y spec="$(basename "${file}")" dir="${dir}" ${model} || (
         echo
         echo -e "Failed to complete the design for {{ blue }}$(just _link "${file}"){{ reset }} using the {{ yellow }}${use_agent}{{ reset }} agent"
         echo
@@ -237,7 +243,7 @@ design filter="":
     link="$(just _link "${dir}/tech-design.md")"
     echo -e "We now have a {{ bold }}technical design{{ reset }} document for {{ blue }}${link}{{ reset }}"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
-        just plan-feature spec:="${file}" design:="${dir}/tech-design.md"
+        just plan-feature "${file}" "${dir}/tech-design.md"
     fi
 
 clarify filter="" agent="":
@@ -250,7 +256,7 @@ clarify filter="" agent="":
         file="$(fd -g '*{spec,design}*.md' | rg "{{ filter }}" | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     fi
 
-    use_agent="{{ agent }}"
+    use_agent="{{agent}}"
     if [[ -z "${use_agent}" ]]; then
         use_agent="$(just _choose_agent)"
     fi
@@ -260,6 +266,7 @@ clarify filter="" agent="":
     fi
     doc_path="$(sniff repo package-area)/${file}"
     link="$(just _link "${file}")"
+    claudine compose "@prompts/clarify.md" --${use_agent} -y -i doc="${doc_path}" ${model} || (
     claudine compose "@prompts/clarify.md" --${use_agent} -y -i doc="${doc_path}" ${model} || (
         echo
         echo -e "Failed to complete the {{ yellow }}Clarify{{ reset }} prompt for ${link}"

@@ -82,15 +82,20 @@ impl super::Provider for DiscordProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        const DISCORD_CAPABILITIES: CapabilitySet = CapabilitySet {
+        CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
-            supports_attachments: true,
+            supported_attachment_kinds: std::collections::BTreeSet::from([
+                crate::AttachmentKind::Image,
+                crate::AttachmentKind::Audio,
+                crate::AttachmentKind::Video,
+                crate::AttachmentKind::Document,
+                crate::AttachmentKind::Binary,
+            ]),
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-        };
-        DISCORD_CAPABILITIES
+        }
     }
 
     #[tracing::instrument(skip_all, fields(provider = "discord", channel = tracing::field::Empty))]
@@ -202,7 +207,15 @@ mod tests {
             bot_token: secrecy::SecretString::new("token".into()),
         });
 
-        assert!(provider.capabilities().supports_attachments);
+        let caps = provider.capabilities();
+        assert!(
+            caps.supported_attachment_kinds
+                .contains(&crate::AttachmentKind::Image)
+        );
+        assert!(
+            caps.supported_attachment_kinds
+                .contains(&crate::AttachmentKind::Document)
+        );
     }
 
     #[test]

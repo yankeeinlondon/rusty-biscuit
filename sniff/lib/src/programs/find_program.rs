@@ -459,7 +459,7 @@ pub fn find_program_with_source<P: AsRef<OsStr>>(
     #[cfg(target_os = "windows")]
     {
         let key = program_str.to_ascii_lowercase();
-        let idx = super::windows_apps::build_windows_index();
+        let idx = super::windows_apps::get_or_build_windows_index();
         if let Some(path) = idx.app_paths.get(&key) {
             return Some((path.clone(), ExecutableSource::WindowsAppPaths));
         }

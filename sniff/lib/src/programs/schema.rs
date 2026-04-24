@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::os::OsType;
-use crate::programs::types::InstallationMethod;
+use crate::programs::types::{InstallationMethod, SystemPrerequisite};
 
 /// Errors that can occur during program version detection.
 #[derive(Debug, Error)]
@@ -133,6 +133,11 @@ pub struct ProgramInfo {
 
     /// Methods for installing this program (brew, apt, cargo, etc.).
     pub installation_methods: &'static [InstallationMethod],
+
+    /// System-level prerequisites required before the tool-level install runs.
+    /// Empty slice for most programs. Treated as required — all must resolve
+    /// on the host for the `FullInstallPlan` to be successful.
+    pub system_prerequisites: &'static [SystemPrerequisite],
 }
 
 impl ProgramInfo {
@@ -156,6 +161,7 @@ impl ProgramInfo {
             os_availability: &[],
             repo: None,
             installation_methods: &[],
+            system_prerequisites: &[],
         }
     }
 
@@ -180,6 +186,7 @@ impl ProgramInfo {
             os_availability: &[],
             repo: None,
             installation_methods: &[],
+            system_prerequisites: &[],
         }
     }
 
@@ -198,6 +205,7 @@ impl ProgramInfo {
         os_availability: &'static [OsType],
         repo: Option<&'static str>,
         installation_methods: &'static [InstallationMethod],
+        system_prerequisites: &'static [SystemPrerequisite],
     ) -> Self {
         Self {
             binary_name,
@@ -212,6 +220,7 @@ impl ProgramInfo {
             os_availability,
             repo,
             installation_methods,
+            system_prerequisites,
         }
     }
 }
@@ -550,6 +559,7 @@ mod tests {
             os_availability: &[],
             repo: None,
             installation_methods: &[],
+            system_prerequisites: &[],
         };
         let output = "Some program version 1.23.456-beta+build.123";
         let result = parse_version(output, &info);

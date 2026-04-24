@@ -509,9 +509,29 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 return handle_repo_packages(
                     base_dir.as_deref(),
-                    filter,
-                    package_area.as_deref(),
-                    *format,
+                    RepoPackagesArgs {
+                        filter,
+                        package_area: package_area.as_deref(),
+                        format: *format,
+                    },
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::PackageAreas {
+                filter,
+                package_area,
+                format,
+            } => {
+                return handle_repo_package_areas(
+                    base_dir.as_deref(),
+                    RepoPackageAreasArgs {
+                        filter,
+                        package_area: package_area.as_deref(),
+                        format: *format,
+                    },
                     cli.json,
                     cli.plain,
                     cli.verbose,
@@ -1136,6 +1156,13 @@ fn resolve_package_path(
     .into())
 }
 
+/// Subcommand-specific args for `sniff repo packages`.
+struct RepoPackagesArgs<'a> {
+    filter: &'a [String],
+    package_area: Option<&'a str>,
+    format: PackagesFormat,
+}
+
 /// Fast-path handler for `sniff repo packages`.
 ///
 /// Skips the full detection pipeline and calls `detect_repo_structure` directly,
@@ -1143,14 +1170,17 @@ fn resolve_package_path(
 /// formatting work. Typical wall time on a large monorepo: well under 50ms.
 fn handle_repo_packages(
     base_dir: Option<&std::path::Path>,
-    filter: &[String],
-    package_area: Option<&str>,
-    format: PackagesFormat,
+    args: RepoPackagesArgs<'_>,
     json: bool,
     plain: bool,
     verbose: u8,
     perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let RepoPackagesArgs {
+        filter,
+        package_area,
+        format,
+    } = args;
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
     let root = if base_dir.is_some() {
@@ -1172,12 +1202,73 @@ fn handle_repo_packages(
     if json {
         let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
         println!("{}", serde_json::to_string(&names)?);
-        perf.emit_stdout(None);
+        perf.emit_stderr(None);
         return Ok(());
     }
 
     let rendered =
         output::render_repo_packages_formatted(&info, filter, package_area, format, verbose);
+    let with_newline = if rendered.ends_with('\n') {
+        rendered
+    } else {
+        format!("{rendered}\n")
+    };
+    output::emit_text(&with_newline, plain);
+    perf.emit_stderr(None);
+    Ok(())
+}
+
+/// Subcommand-specific args for `sniff repo package-areas`.
+struct RepoPackageAreasArgs<'a> {
+    filter: &'a [String],
+    package_area: Option<&'a str>,
+    format: PackagesFormat,
+}
+
+/// Fast-path handler for `sniff repo package-areas`.
+///
+/// Uses `detect_repo_structure` (same fast path as `sniff repo packages`) so
+/// the command returns well under 100 ms even on large monorepos.
+fn handle_repo_package_areas(
+    base_dir: Option<&std::path::Path>,
+    args: RepoPackageAreasArgs<'_>,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+    perf: &CliPerf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let RepoPackageAreasArgs {
+        filter,
+        package_area,
+        format,
+    } = args;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let explicit = base_dir.unwrap_or(&cwd);
+    let root = if base_dir.is_some() {
+        explicit.to_path_buf()
+    } else {
+        git2::Repository::discover(explicit)
+            .ok()
+            .and_then(|repo| repo.workdir().map(std::path::PathBuf::from))
+            .unwrap_or_else(|| explicit.to_path_buf())
+    };
+
+    let info = match sniff::filesystem::repo::detect_repo_structure(&root)? {
+        Some(info) => info,
+        None => {
+            return Err("Not inside a recognized repository".into());
+        }
+    };
+
+    if json {
+        let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
+        println!("{}", serde_json::to_string(&names)?);
+        perf.emit_stderr(None);
+        return Ok(());
+    }
+
+    let rendered =
+        output::render_repo_package_areas_formatted(&info, filter, package_area, format, verbose);
     let with_newline = if rendered.ends_with('\n') {
         rendered
     } else {

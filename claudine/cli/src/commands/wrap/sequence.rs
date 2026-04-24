@@ -166,8 +166,7 @@ pub(crate) fn execute_sequence(
             Some(&compose_options),
             None,
             &approval_options,
-        )
-        .map_err(|e| eyre!("{e}"))?;
+        )?;
 
         cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
 
@@ -176,10 +175,10 @@ pub(crate) fn execute_sequence(
             set_overrides: Some(step_set_overrides.clone()),
             pre_approved_commands: Some(cumulative_approved.clone()),
             env_overrides: env_overrides.clone(),
+            perf_enabled: shared.perf,
         };
 
-        let prepared = composition::prepare_direct(source, prepare_options)
-            .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
+        let prepared = composition::prepare_direct(source, prepare_options)?;
 
         // ── Harness pre-flight ────────────────────────────────────────
         if has_harness_properties(&prepared.effective_frontmatter) {
@@ -285,12 +284,15 @@ pub(crate) fn execute_sequence(
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
         };
 
-        let step_result = super::composition::execute_composition_request_inner(request, verbose);
+        let step_result =
+            super::composition::execute_composition_request_inner(request, verbose, None, false);
 
         let duration = start.elapsed();
 
         match step_result {
             Ok(outcome) if outcome.exit_code == 0 => {
+                // Phase 6 will aggregate agent_perf across sequence steps.
+                let _ = outcome.agent_perf;
                 summary.succeeded += 1;
                 summary.steps.push(SequenceStepResult {
                     step: step_index + 1,

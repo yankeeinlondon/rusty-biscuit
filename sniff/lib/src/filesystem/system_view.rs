@@ -9,6 +9,7 @@ use ignore::{DirEntry, WalkBuilder, WalkState};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
 use std::time::Instant;
 use tracing::Level;
 
@@ -123,7 +124,7 @@ pub(crate) fn build_filesystem_system_view(
             exclude_roots: Vec::new(),
         },
         total_files_scanned: accumulated.classifications.len(),
-        classifications: std::mem::take(&mut accumulated.classifications),
+        classifications: Arc::new(std::mem::take(&mut accumulated.classifications)),
     });
 
     let docs = options.collect_docs.then(|| {

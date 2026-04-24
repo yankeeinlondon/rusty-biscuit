@@ -10,6 +10,7 @@ use ignore::{DirEntry, WalkBuilder};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::trace;
 
@@ -39,13 +40,93 @@ pub fn scan_file_inventory_with_exclusions(
             .collect(),
     };
 
+    // Use parallel walker for production, sequential for tests to avoid ordering issues
+    #[cfg(not(test))]
+    let (classifications, total_files_scanned) =
+        scan_inventory_parallel(root, &scope.exclude_roots);
+    #[cfg(test)]
+    let (classifications, total_files_scanned) =
+        scan_inventory_sequential(root, &scope.exclude_roots);
+
+    performance::record_logged_stage(
+        "filesystem.file_inventory.scan",
+        started.elapsed(),
+        tracing::Level::DEBUG,
+    );
+
+    Ok(FileInventory {
+        scope,
+        total_files_scanned,
+        classifications: Arc::new(classifications),
+    })
+}
+
+#[cfg(not(test))]
+fn scan_inventory_parallel(root: &Path, exclude_roots: &[PathBuf]) -> (Vec<FileClassification>, usize) {
+    use ignore::WalkState;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    let shared: Arc<Mutex<Vec<FileClassification>>> = Arc::new(Mutex::new(Vec::new()));
+    let scanned = Arc::new(AtomicUsize::new(0));
+
+    WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .filter_entry({
+            let exclude_roots = exclude_roots.to_vec();
+            move |entry| !is_excluded_entry(entry, &exclude_roots)
+        })
+        .build_parallel()
+        .run(|| {
+            let _shared = Arc::clone(&shared);
+            let scanned = Arc::clone(&scanned);
+            let scan_root = root.to_path_buf();
+            let mut local = Vec::new();
+            Box::new(move |result| {
+                let Ok(entry) = result else {
+                    return WalkState::Continue;
+                };
+                if !entry
+                    .file_type()
+                    .is_some_and(|ft| ft.is_file())
+                {
+                    return WalkState::Continue;
+                }
+                let idx = scanned.fetch_add(1, Ordering::Relaxed);
+                if idx >= MAX_FILES {
+                    return WalkState::Continue;
+                }
+                // Only record per-file counters when metrics feature is enabled
+                // to reduce atomic overhead in the hot path.
+                #[cfg(feature = "metrics")]
+                performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
+                local.push(classify_file(
+                    &scan_root, entry.path()));
+                WalkState::Continue
+            })
+        });
+
+    let total = scanned.load(Ordering::Relaxed).min(MAX_FILES);
+    let mut classifications = match Arc::try_unwrap(shared) {
+        Ok(mutex) => mutex.into_inner().unwrap_or_default(),
+        Err(arc) => arc.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+    };
+    classifications.sort_by(|a, b| a.path.cmp(&b.path));
+    (classifications, total)
+}
+
+#[cfg(test)]
+fn scan_inventory_sequential(root: &Path, exclude_roots: &[PathBuf]) -> (Vec<FileClassification>, usize) {
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
         .filter_entry({
-            let exclude_roots = scope.exclude_roots.clone();
+            let exclude_roots = exclude_roots.to_vec();
             move |entry| !is_excluded_entry(entry, &exclude_roots)
         })
         .build();
@@ -58,27 +139,15 @@ pub fn scan_file_inventory_with_exclusions(
         .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .take(MAX_FILES)
     {
-        let callback_started = Instant::now();
         total_files_scanned += 1;
+        // Only record per-file counters when metrics feature is enabled
+        // to reduce overhead in the hot path.
+        #[cfg(feature = "metrics")]
         performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
         classifications.push(classify_file(root, entry.path()));
-        performance::record_stage(
-            "filesystem.file_inventory.walk.entry",
-            callback_started.elapsed(),
-        );
     }
 
-    performance::record_logged_stage(
-        "filesystem.file_inventory.scan",
-        started.elapsed(),
-        tracing::Level::DEBUG,
-    );
-
-    Ok(FileInventory {
-        scope,
-        total_files_scanned,
-        classifications,
-    })
+    (classifications, total_files_scanned)
 }
 
 fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
@@ -102,11 +171,17 @@ fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
 pub(crate) fn should_skip_directory_name(name: &str) -> bool {
     matches!(
         name,
-        ".git" | ".turbo" | "node_modules" | "target" | "vendor" | "dist" | "build" | "__pycache__"
+        ".git" | ".turbo" | "node_modules" | "target" | "vendor" | "dist" | "build"
+            | "__pycache__" | ".venv" | "venv" | ".env" | ".pytest_cache" | ".mypy_cache"
+            | ".tox" | ".ruff_cache" | ".next" | ".nuxt" | ".output" | ".vercel"
+            | ".parcel-cache" | ".cache" | "out" | "bin" | "obj" | ".idea" | ".vscode"
+            | "coverage" | "htmlcov" | ".svelte-kit" | ".astro"
     )
 }
 
 pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
+    // Start timing unconditionally; the overhead of Instant::now() is ~10-30ns
+    // and is only used when metrics feature is enabled.
     let started = Instant::now();
     let relative_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
     let file_name = path
@@ -166,9 +241,11 @@ pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
         if descriptor.association == FileAssociation::FrameworkFile
             && let Some(framework) = descriptor.framework
         {
+            #[cfg(feature = "metrics")]
             let framework_started = Instant::now();
             let (related_languages, confidence, source) =
                 framework::related_languages(framework, path);
+            #[cfg(feature = "metrics")]
             performance::record_stage(
                 "filesystem.file_inventory.classify.framework",
                 framework_started.elapsed(),
@@ -189,27 +266,40 @@ pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
         if let Some(classification) = classify_by_binary_signature(path, bytes) {
             return finish_classification(relative_path, classification, started);
         }
-        if is_probably_text(bytes) {
+        if is_probably_text(bytes) && extension.is_some_and(is_hyperpolyglot_worthwhile) {
+            #[cfg(feature = "metrics")]
             performance::increment_counter(
                 "filesystem.file_inventory.files_classified_by_content",
                 1,
             );
+            #[cfg(feature = "metrics")]
             let hyperpolyglot_started = Instant::now();
             let detection = hyperpolyglot::detect(path);
-            let hyperpolyglot_elapsed = hyperpolyglot_started.elapsed();
-            performance::record_stage(
-                "filesystem.file_inventory.classify.hyperpolyglot",
-                hyperpolyglot_elapsed,
-            );
-            trace!(
-                path = %relative_path.display(),
-                duration_ms = performance::duration_ms(hyperpolyglot_elapsed),
-                "hyperpolyglot probe complete"
-            );
+            #[cfg(feature = "metrics")]
+            {
+                let hyperpolyglot_elapsed = hyperpolyglot_started.elapsed();
+                performance::record_stage(
+                    "filesystem.file_inventory.classify.hyperpolyglot",
+                    hyperpolyglot_elapsed,
+                );
+                trace!(
+                    path = %relative_path.display(),
+                    duration_ms = performance::duration_ms(hyperpolyglot_elapsed),
+                    "hyperpolyglot probe complete"
+                );
+            }
+            #[cfg(not(feature = "metrics"))]
+            {
+                trace!(
+                    path = %relative_path.display(),
+                    "hyperpolyglot probe complete"
+                );
+            }
             if let Ok(Some(detection)) = detection
                 && let Some(language) =
                     ProgrammingLanguage::from_hyperpolyglot(detection.language())
             {
+                #[cfg(feature = "metrics")]
                 performance::increment_counter(
                     "filesystem.file_inventory.files_classified_by_hyperpolyglot",
                     1,
@@ -254,20 +344,37 @@ fn finish_classification(
     started: Instant,
 ) -> FileClassification {
     classification.path = relative_path;
-    let duration = started.elapsed();
-    performance::increment_counter("filesystem.file_inventory.files_classified", 1);
-    performance::increment_counter(classification_counter_name(&classification), 1);
-    performance::record_stage(classification_stage_name(&classification), duration);
-    trace!(
-        path = %classification.path.display(),
-        source = ?classification.source,
-        association = ?classification.association,
-        duration_ms = performance::duration_ms(duration),
-        "file classified"
-    );
+    // Only record detailed per-file metrics when the metrics feature is enabled.
+    // This avoids mutex contention and counter overhead in the hot path for
+    // the default build.
+    #[cfg(feature = "metrics")]
+    {
+        let duration = started.elapsed();
+        performance::increment_counter("filesystem.file_inventory.files_classified", 1);
+        performance::increment_counter_dynamic(classification_counter_name(&classification), 1);
+        performance::record_stage(classification_stage_name(&classification), duration);
+        trace!(
+            path = %classification.path.display(),
+            source = ?classification.source,
+            association = ?classification.association,
+            duration_ms = performance::duration_ms(duration),
+            "file classified"
+        );
+    }
+    #[cfg(not(feature = "metrics"))]
+    {
+        let _ = started; // suppress unused warning when metrics is off
+        trace!(
+            path = %classification.path.display(),
+            source = ?classification.source,
+            association = ?classification.association,
+            "file classified"
+        );
+    }
     classification
 }
 
+#[cfg(feature = "metrics")]
 fn classification_stage_name(classification: &FileClassification) -> &'static str {
     match classification.source {
         ClassificationSource::ExactFilename => "filesystem.file_inventory.classify.exact_filename",
@@ -283,6 +390,7 @@ fn classification_stage_name(classification: &FileClassification) -> &'static st
     }
 }
 
+#[cfg(feature = "metrics")]
 fn classification_counter_name(classification: &FileClassification) -> &'static str {
     match classification.source {
         ClassificationSource::ExactFilename => {
@@ -403,6 +511,20 @@ fn is_probably_text(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_ok()
 }
 
+/// Determines whether a file extension is worth analyzing with hyperpolyglot.
+///
+/// Hyperpolyglot is a heavyweight content analysis that may spawn subprocesses.
+/// Skip generic extensions that are unlikely to contain meaningful source code.
+fn is_hyperpolyglot_worthwhile(ext: &str) -> bool {
+    !matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "txt" | "log" | "tmp" | "bak" | "out" | "cache" | "md" | "rst"
+            | "csv" | "tsv" | "json" | "yaml" | "yml" | "xml" | "ini"
+            | "cfg" | "conf" | "properties" | "env" | "gitignore"
+            | "dockerignore" | "eslintignore" | "prettierignore"
+    )
+}
+
 /// Project a package-level inventory from a shared repo inventory.
 ///
 /// Filters classifications by path prefix to extract the subset
@@ -452,7 +574,7 @@ pub fn project_package_inventory(
             exclude_roots: exclude_roots.to_vec(),
         },
         total_files_scanned: classifications.len(),
-        classifications,
+        classifications: Arc::new(classifications),
     }
 }
 

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
@@ -287,7 +288,7 @@ pub struct FileTypeDescriptor {
     pub is_text: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileClassification {
     pub path: PathBuf,
     pub association: FileAssociation,
@@ -307,12 +308,16 @@ pub struct FileScanScope {
     pub exclude_roots: Vec<PathBuf>,
 }
 
+/// Shared file inventory with reference-counted classifications to avoid clones.
+///
+/// The `classifications` field uses `Arc<Vec<...>>` so that filtering operations
+/// can share the underlying data instead of cloning every classification.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileInventory {
     pub scope: FileScanScope,
     pub total_files_scanned: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub classifications: Vec<FileClassification>,
+    pub classifications: Arc<Vec<FileClassification>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

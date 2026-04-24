@@ -11,6 +11,23 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// Global cached Windows index, built once per process.
+///
+/// This eliminates the per-lookup cost of registry enumeration and
+/// filesystem walks when [`find_program_with_source`] is called repeatedly.
+static WINDOWS_INDEX: OnceLock<WindowsIndex> = OnceLock::new();
+
+/// Returns the cached Windows index, building it on first access.
+///
+/// The index is shared across all threads and built at most once per
+/// process lifetime. This replaces the previous per-call
+/// `build_windows_index()` pattern that caused severe slowdowns when
+/// looking up multiple programs.
+pub(super) fn get_or_build_windows_index() -> &'static WindowsIndex {
+    WINDOWS_INDEX.get_or_init(build_windows_index)
+}
 
 /// Builds the Windows-specific fallback index.
 ///
@@ -22,7 +39,8 @@ use std::path::PathBuf;
 /// ## Cost
 ///
 /// Typical warm-cache cost: 40–80 ms serial. Called once per
-/// `ExecutableIndex::build()` on Windows.
+/// `ExecutableIndex::build()` on Windows, and once for
+/// [`find_program_with_source`] fallback lookups.
 pub(super) fn build_windows_index() -> WindowsIndex {
     WindowsIndex {
         app_paths: scan_app_paths(),

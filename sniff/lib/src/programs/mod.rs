@@ -148,7 +148,10 @@ pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{CategoryDetector, ExecutableSource, InstallationMethod, ProgramDetector};
+pub use types::{
+    CategoryDetector, ExecutableSource, InstallationMethod, PrereqProbe, ProgramDetector,
+    SystemPrerequisite,
+};
 pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.

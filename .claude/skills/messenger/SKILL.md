@@ -39,12 +39,54 @@ let receipt = messenger.send(dispatch, &message).await?;
 | Discord | `discord` (default) | Markdown | Yes | Yes | Text fallback | No | No |
 | Discord-Webhook | `discord` (default) | Markdown | No | Yes | Text fallback | No | No |
 | Slack | `slack` (default) | mrkdwn | Yes | No | Text fallback | No | Yes |
+| Slack-Webhook | `slack` (default) | mrkdwn | Yes | No | Text fallback | No | Yes |
 | Signal | `signal` | Plain text | Yes | No | Text fallback | No | No |
 | WhatsApp | `whatsapp` | Plain text | Yes | No | Native | No | No |
 | Telegram | `telegram` | HTML | Yes | No | Native | Yes | Yes |
+| Desktop | `desktop` | Plain text | No | Images only | No | Yes | No |
+| APNs | `apns` | Plain text | No | No | No | Yes | No |
+| FCM | `fcm` | Plain text | No | No | No | Yes | No |
+
+### Desktop Provider
+
+### Mobile Push Providers
+
+| Provider | Feature flag | Rich text | Replies | Attachments | Location | Silent | Link preview |
+|----------|-------------|-----------|---------|-------------|----------|--------|-------------|
+| APNs | `apns` | Plain text | No | No | No | Yes | No |
+| FCM | `fcm` | Plain text | No | No | No | Yes | No |
+
+**APNs** (Apple Push Notification service) sends iOS push notifications via Apple's HTTP/2 API. Authentication uses JWT (ES256) signed with a `.p8` private key. Requires: team ID, key ID, private key, bundle ID. Supports sandbox and production environments.
+
+**FCM** (Firebase Cloud Messaging) sends Android push notifications via the FCM HTTP v1 API. Authentication uses OAuth2 access tokens with `https://www.googleapis.com/auth/firebase.messaging` scope. Requires: project ID, access token.
+
+Both mobile providers support title-only messages (like desktop) and silent delivery. They do not support rich text rendering, replies, attachments, location, or link preview control.
+
+### Desktop Provider
+
+The desktop provider delivers notifications to the host OS notification center (Linux D-Bus, macOS native/AppleScript, Windows WinRT). Beyond basic send, it exposes:
+
+- **`DesktopNotificationProvider::replace(receipt, dispatch, message)`** — update an existing notification by its `SendReceipt` (supported on Linux D-Bus and macOS native; returns `UnsupportedFeature` on AppleScript and Windows)
+- **`DesktopNotificationProvider::dismiss(receipt)`** — remove a delivered notification (supported on macOS native; returns `UnsupportedFeature` on other backends)
+
+Desktop-specific overrides on `Dispatch`:
+
+- `subtitle`, `app_name`, `category`, `urgency`, `timeout_ms`, `icon` — per-send overrides
+- `replace_id` — replace a notification at send time (Linux/macOS native)
+- `group_id` — grouping hint (best-effort custom hint on Linux)
+- `actions` — interactive action buttons (best-effort; callback handling requires a packaged app)
+- `progress` — progress indicator with `current` and `total` values (best-effort hint on Linux)
+- `badge_count` — app icon badge count (best-effort hint on Linux/macOS native)
+
+CLI commands for desktop notifications:
+
+- `messenger replace <receipt> [message]` — replace an existing desktop notification using a saved receipt
+- `messenger dismiss <receipt>` — dismiss a delivered desktop notification using a saved receipt
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.
+
+Slack also ships two adapters behind the `slack` feature: `SlackProvider` (bot token, full capability with addressable receipts) and `SlackWebhookProvider` (webhook URL, notification-only). The webhook adapter reuses the same Slack mrkdwn renderer and supports reply threading via `MessageRef::SlackWebhook { thread_ts: Some(...) }`, but rejects attachments (file uploads require the Web API). Successful webhook sends produce receipts with `raw_id == ""`, `message_ref.thread_ts == None`, and `metadata["delivery_confirmed"] = "true"` because Slack incoming webhooks do not return a message identifier.
 
 ## Key Types
 
@@ -80,7 +122,7 @@ Use `plan_send()` to inspect `SendPlan::warnings` before sending. Use `send_many
 messenger/
   lib/           # Reusable library crate
     src/
-      provider/  # Discord, Discord-Webhook, Slack, Signal, WhatsApp, Telegram adapters
+      provider/  # Discord, Discord-Webhook, Slack, Slack-Webhook, Signal, WhatsApp, Telegram, Desktop, APNs, FCM adapters
       markdown/  # AST, parser, per-provider renderers
       tests/     # Unit + wiremock integration tests
   cli/           # messenger binary (send, setup, completions)

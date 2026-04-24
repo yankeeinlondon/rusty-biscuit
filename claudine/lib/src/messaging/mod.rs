@@ -7,9 +7,9 @@ mod config;
 mod resolve;
 mod send;
 
-pub use config::{MessagingRouteConfig, ScopedMessagingSettings};
+pub use config::{MessagingRouteConfig, ScopedMessagingSettings, validate_discord_webhook_url, validate_slack_webhook_url};
 pub use resolve::{
     MessagingScope, ResolvedMessagingRoute, RuntimeMessagingSettings, SignalRecipient,
     parse_signal_recipient, resolve_effective_route, resolve_image_path, resolve_secret,
 };
-pub use send::{execute_message, execute_resolved_message};
+pub use send::{execute_message, execute_notification, execute_resolved_message, test_webhook_connection};

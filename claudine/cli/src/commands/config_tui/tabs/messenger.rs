@@ -4,6 +4,7 @@ use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, ModalState};
 use claudine::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
+use claudine::messaging::MessagingRouteConfig;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_detail = app.mode == AppMode::Detail;
@@ -88,11 +89,27 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let items: Vec<ListItem> = configs
             .iter()
             .map(|(name, config)| {
-                let provider_type = match config {
-                    MessengerProviderConfig::Discord { .. } => "Discord",
-                    MessengerProviderConfig::Slack { .. } => "Slack",
-                    MessengerProviderConfig::Signal { .. } => "Signal",
-                    MessengerProviderConfig::Whatsapp { .. } => "Whatsapp",
+                let (provider_type, masked_detail) = match config {
+                    MessengerProviderConfig::Discord { .. } => ("Discord", None),
+                    MessengerProviderConfig::Slack { .. } => ("Slack", None),
+                    MessengerProviderConfig::Signal { .. } => ("Signal", None),
+                    MessengerProviderConfig::Whatsapp { .. } => ("Whatsapp", None),
+                    MessengerProviderConfig::DiscordWebhook { webhook_url, .. } => (
+                        "Discord Webhook",
+                        if webhook_url.is_some() {
+                            Some("webhook: ********")
+                        } else {
+                            None
+                        },
+                    ),
+                    MessengerProviderConfig::SlackWebhook { webhook_url, .. } => (
+                        "Slack Webhook",
+                        if webhook_url.is_some() {
+                            Some("webhook: ********")
+                        } else {
+                            None
+                        },
+                    ),
                 };
                 let is_active = app
                     .config
@@ -106,13 +123,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 } else {
                     Style::default()
                 };
+                let detail = masked_detail
+                    .map(|d| format!(" ({provider_type}) · {d}"))
+                    .unwrap_or_else(|| format!(" ({provider_type})"));
                 ListItem::new(Line::from(vec![
                     Span::raw("  "),
                     Span::styled(name.as_str(), style.add_modifier(Modifier::BOLD)),
-                    Span::styled(
-                        format!(" ({provider_type})"),
-                        Style::default().fg(Color::Gray),
-                    ),
+                    Span::styled(detail, Style::default().fg(Color::Gray)),
                     Span::styled(marker, Style::default().fg(Color::Green)),
                 ]))
             })
@@ -153,7 +170,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     if let Some(ModalState::MessengerAdd { highlighted }) = &app.modal {
-        let providers = ["discord", "slack", "signal", "whatsapp"];
+        let providers = [
+            "discord",
+            "discord_webhook",
+            "slack",
+            "slack_webhook",
+            "signal",
+            "whatsapp",
+        ];
         let items: Vec<String> = providers.iter().map(|s| s.to_string()).collect();
         super::super::widgets::modal::render_list_modal(
             frame,
@@ -169,21 +193,36 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         field_index,
         label,
         buffer,
+        is_secret,
+        error,
+        test_status,
         ..
     }) = &app.modal
     {
         let total = messenger_fields_with_name(provider).len();
         let title = format!("{} ({}/{})", provider, field_index + 1, total);
+        let is_webhook = provider == "discord_webhook" || provider == "slack_webhook";
+        let can_test = is_webhook && *field_index >= 1;
+        let has_error = error.is_some();
+        let has_status = test_status.is_some();
         super::super::widgets::modal::render_modal(frame, area, &title, 55, 20, |frame, area| {
+            let mut constraints: Vec<Constraint> = vec![
+                Constraint::Length(1), // label
+                Constraint::Length(1), // input line
+            ];
+            if has_error {
+                constraints.push(Constraint::Length(1)); // error line
+            }
+            if has_status {
+                constraints.push(Constraint::Length(1)); // test status line
+            }
+            constraints.push(Constraint::Length(1)); // blank
+            constraints.push(Constraint::Length(1)); // hotkeys
+            constraints.push(Constraint::Min(0));
+
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1), // label
-                    Constraint::Length(1), // input line
-                    Constraint::Length(1), // blank
-                    Constraint::Length(1), // hotkeys
-                    Constraint::Min(0),
-                ])
+                .constraints(constraints)
                 .split(area);
 
             let label_widget = Paragraph::new(Span::styled(
@@ -194,9 +233,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ));
             frame.render_widget(label_widget, chunks[0]);
 
+            let display_buffer = if *is_secret {
+                "●".repeat(buffer.chars().count())
+            } else {
+                buffer.clone()
+            };
             let input_line = Line::from(vec![
                 Span::styled("> ", Style::default().fg(Color::Yellow)),
-                Span::raw(buffer.as_str()),
+                Span::raw(display_buffer),
                 Span::styled(
                     "_",
                     Style::default()
@@ -206,14 +250,41 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ]);
             frame.render_widget(Paragraph::new(input_line), chunks[1]);
 
-            let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
-                ("ENTER", "Next"),
-                ("ESC", "Cancel"),
-            ]);
+            let mut chunk_idx = 2;
+            if has_error {
+                let error_text = error.as_ref().unwrap();
+                let error_widget = Paragraph::new(Span::styled(
+                    error_text.as_str(),
+                    Style::default().fg(Color::Red),
+                ));
+                frame.render_widget(error_widget, chunks[chunk_idx]);
+                chunk_idx += 1;
+            }
+
+            if has_status {
+                let status_text = test_status.as_ref().unwrap();
+                let status_color = if status_text.starts_with("✓") {
+                    Color::Green
+                } else {
+                    Color::Yellow
+                };
+                let status_widget = Paragraph::new(Span::styled(
+                    status_text.as_str(),
+                    Style::default().fg(status_color),
+                ));
+                frame.render_widget(status_widget, chunks[chunk_idx]);
+                chunk_idx += 1;
+            }
+
+            let mut hotkeys = vec![("ENTER", "Next"), ("ESC", "Cancel")];
+            if can_test {
+                hotkeys.push(("T", "Test"));
+            }
+            let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&hotkeys);
             let hotkey_widget = Paragraph::new(hotkey_line)
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(Color::Indexed(236)));
-            frame.render_widget(hotkey_widget, chunks[3]);
+            frame.render_widget(hotkey_widget, chunks[chunk_idx]);
         });
     }
 }
@@ -407,7 +478,14 @@ fn open_messenger_select_modal(app: &mut App) {
 }
 
 pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
-    let providers = ["discord", "slack", "signal", "whatsapp"];
+    let providers = [
+        "discord",
+        "discord_webhook",
+        "slack",
+        "slack_webhook",
+        "signal",
+        "whatsapp",
+    ];
     let count = providers.len();
     match key.code {
         KeyCode::Up => {
@@ -433,6 +511,9 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
                     fields: Vec::new(),
                     buffer: String::new(),
                     label: "Configuration Name".to_string(),
+                    is_secret: false,
+                    error: None,
+                    test_status: None,
                 });
             }
         }
@@ -443,45 +524,85 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Returns the ordered list of (label, default_value) for a messenger provider,
+/// Field definition for a messenger provider input field.
+/// (label, default_value, is_secret)
+type MessengerField = (String, String, bool);
+
+/// Returns the ordered list of fields for a messenger provider,
 /// **including** the leading "Configuration Name" field at index 0.
-fn messenger_fields_with_name(provider: &str) -> Vec<(String, String)> {
-    let mut fields = vec![("Configuration Name".to_string(), provider.to_string())];
+fn messenger_fields_with_name(provider: &str) -> Vec<MessengerField> {
+    let mut fields = vec![("Configuration Name".to_string(), provider.to_string(), false)];
     fields.extend(messenger_fields(provider));
     fields
 }
 
-/// Returns the ordered list of (label, default_value) for a messenger provider.
-fn messenger_fields(provider: &str) -> Vec<(String, String)> {
+/// Returns the ordered list of fields for a messenger provider.
+fn messenger_fields(provider: &str) -> Vec<MessengerField> {
     match provider {
         "discord" => vec![
-            ("Channel ID".to_string(), String::new()),
+            ("Channel ID".to_string(), String::new(), false),
             (
                 "Bot Token Env Var".to_string(),
                 "DISCORD_BOT_TOKEN".to_string(),
+                false,
             ),
         ],
         "slack" => vec![
-            ("Channel ID".to_string(), String::new()),
+            ("Channel ID".to_string(), String::new(), false),
             (
                 "Bot Token Env Var".to_string(),
                 "SLACK_BOT_TOKEN".to_string(),
+                false,
             ),
         ],
         "signal" => vec![
-            ("Recipient".to_string(), String::new()),
-            ("RPC URL Env Var".to_string(), "SIGNAL_RPC_URL".to_string()),
-            ("Account Env Var".to_string(), "SIGNAL_ACCOUNT".to_string()),
+            ("Recipient".to_string(), String::new(), false),
+            (
+                "RPC URL Env Var".to_string(),
+                "SIGNAL_RPC_URL".to_string(),
+                false,
+            ),
+            (
+                "Account Env Var".to_string(),
+                "SIGNAL_ACCOUNT".to_string(),
+                false,
+            ),
         ],
         "whatsapp" => vec![
-            ("Recipient".to_string(), String::new()),
+            ("Recipient".to_string(), String::new(), false),
             (
                 "Access Token Env Var".to_string(),
                 "WHATSAPP_ACCESS_TOKEN".to_string(),
+                false,
             ),
             (
                 "Phone Number ID Env Var".to_string(),
                 "WHATSAPP_PHONE_NUMBER_ID".to_string(),
+                false,
+            ),
+        ],
+        "discord_webhook" => vec![
+            (
+                "Webhook URL".to_string(),
+                String::new(),
+                true,
+            ),
+            (
+                "Webhook URL Env Var".to_string(),
+                "DISCORD_WEBHOOK_URL".to_string(),
+                false,
+            ),
+        ],
+        "slack_webhook" => vec![
+            (
+                "Webhook URL".to_string(),
+                String::new(),
+                true,
+            ),
+            (
+                "Webhook URL Env Var".to_string(),
+                "SLACK_WEBHOOK_URL".to_string(),
+                false,
             ),
         ],
         _ => vec![],
@@ -530,6 +651,85 @@ fn build_messenger_from_fields(
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| "WHATSAPP_PHONE_NUMBER_ID".to_string()),
         }),
+        "discord_webhook" => {
+            let webhook_url = fields.first().map(|(_, v)| v.clone());
+            let webhook_url = if webhook_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                None
+            } else {
+                webhook_url
+            };
+            Some(MessengerProviderConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env: fields
+                    .get(1)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| "DISCORD_WEBHOOK_URL".to_string()),
+            })
+        }
+        "slack_webhook" => {
+            let webhook_url = fields.first().map(|(_, v)| v.clone());
+            let webhook_url = if webhook_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                None
+            } else {
+                webhook_url
+            };
+            Some(MessengerProviderConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env: fields
+                    .get(1)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| "SLACK_WEBHOOK_URL".to_string()),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Build a temporary [`MessagingRouteConfig`] from the current modal state
+/// for test-connection workflow. Combines collected fields with the current
+/// buffer to produce a complete (but unsaved) webhook route.
+fn build_test_route_from_modal(
+    provider: &str,
+    fields: &[(String, String)],
+    buffer: &str,
+    field_index: usize,
+) -> Option<MessagingRouteConfig> {
+    let all_field_defs = messenger_fields_with_name(provider);
+
+    // Build complete field values including the current buffer
+    let mut complete = fields.to_vec();
+    if field_index < all_field_defs.len() {
+        let value = if buffer.trim().is_empty() {
+            all_field_defs[field_index].1.clone()
+        } else {
+            buffer.to_string()
+        };
+        if complete.len() <= field_index {
+            complete.push((all_field_defs[field_index].0.clone(), value));
+        } else {
+            complete[field_index] = (all_field_defs[field_index].0.clone(), value);
+        }
+    }
+
+    // Skip config name (index 0) to get provider-specific fields
+    let provider_fields: Vec<(String, String)> = complete.into_iter().skip(1).collect();
+    let config = build_messenger_from_fields(provider, &provider_fields)?;
+
+    match config {
+        MessengerProviderConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => Some(MessagingRouteConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        }),
+        MessengerProviderConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => Some(MessagingRouteConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        }),
         _ => None,
     }
 }
@@ -549,14 +749,76 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
     };
 
     match key.code {
+        KeyCode::Char('t') | KeyCode::Char('T') => {
+            let is_webhook =
+                _provider == "discord_webhook" || _provider == "slack_webhook";
+            if !is_webhook || field_index < 1 {
+                return;
+            }
+
+            // Build temporary route config from modal state
+            let (buffer, fields, provider_name) = match &app.modal {
+                Some(ModalState::MessengerInput {
+                    buffer,
+                    fields,
+                    provider,
+                    ..
+                }) => (buffer.clone(), fields.clone(), provider.clone()),
+                _ => return,
+            };
+
+            let Some(route_config) =
+                build_test_route_from_modal(&provider_name, &fields, &buffer, field_index)
+            else {
+                return;
+            };
+
+            // Run the test (blocking with timeout). The TUI event loop is
+            // synchronous, so we block the thread briefly — good enough for a
+            // single test ping.
+            let result = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        claudine::messaging::test_webhook_connection(&route_config),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err("Connection test timed out".to_string()))
+                })
+            });
+
+            let test_status = match result {
+                Ok(()) => "✓ Test connection successful".to_string(),
+                Err(e) => format!("✗ {}", e),
+            };
+
+            // Update modal state with test status (do NOT mark dirty)
+            if let Some(ModalState::MessengerInput {
+                test_status: ts,
+                error,
+                ..
+            }) = &mut app.modal
+            {
+                *ts = Some(test_status);
+                *error = None;
+            }
+        }
         KeyCode::Char(c) => {
-            if let Some(ModalState::MessengerInput { buffer, .. }) = &mut app.modal {
+            if let Some(ModalState::MessengerInput { buffer, error, test_status, .. }) =
+                &mut app.modal
+            {
                 buffer.push(c);
+                *error = None; // Clear error on input
+                *test_status = None; // Clear test status on input
             }
         }
         KeyCode::Backspace => {
-            if let Some(ModalState::MessengerInput { buffer, .. }) = &mut app.modal {
+            if let Some(ModalState::MessengerInput { buffer, error, test_status, .. }) =
+                &mut app.modal
+            {
                 buffer.pop();
+                *error = None; // Clear error on input
+                *test_status = None; // Clear test status on input
             }
         }
         KeyCode::Enter => {
@@ -576,15 +838,46 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
             let value = if current_buffer.is_empty() {
                 all_field_defs
                     .get(field_index)
-                    .map(|(_, def)| def.clone())
+                    .map(|(_, def, _)| def.clone())
                     .unwrap_or_default()
             } else {
                 current_buffer
             };
+
+            // Validate webhook URL fields before advancing
+            if let Some((label, _, is_secret)) = all_field_defs.get(field_index)
+                && *is_secret
+                && !value.trim().is_empty()
+            {
+                let valid = match provider_name.as_str() {
+                    "discord_webhook" => {
+                        claudine::messaging::validate_discord_webhook_url(&value)
+                    }
+                    "slack_webhook" => {
+                        claudine::messaging::validate_slack_webhook_url(&value)
+                    }
+                    _ => true,
+                };
+                if !valid {
+                    let error_msg = format!("Invalid {} format", label);
+                    app.modal = Some(ModalState::MessengerInput {
+                        provider: provider_name,
+                        field_index,
+                        fields: collected_fields,
+                        buffer: value,
+                        label: label.clone(),
+                        is_secret: *is_secret,
+                        error: Some(error_msg),
+                        test_status: None,
+                    });
+                    return;
+                }
+            }
+
             collected_fields.push((
                 all_field_defs
                     .get(field_index)
-                    .map(|(l, _)| l.clone())
+                    .map(|(l, _, _)| l.clone())
                     .unwrap_or_default(),
                 value,
             ));
@@ -592,13 +885,16 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
             if field_index + 1 < total_fields {
                 // Advance to next field
                 let next_idx = field_index + 1;
-                let (next_label, next_default) = all_field_defs[next_idx].clone();
+                let (next_label, next_default, next_secret) = all_field_defs[next_idx].clone();
                 app.modal = Some(ModalState::MessengerInput {
                     provider: provider_name,
                     field_index: next_idx,
                     fields: collected_fields,
                     buffer: next_default,
                     label: next_label,
+                    is_secret: next_secret,
+                    error: None,
+                    test_status: None,
                 });
             } else {
                 // All fields collected. Index 0 is the user-defined config name;
@@ -708,5 +1004,416 @@ mod tests {
                 for_repo: false
             })
         ));
+    }
+
+    #[test]
+    fn webhook_provider_field_definitions() {
+        let discord_fields = messenger_fields("discord_webhook");
+        assert_eq!(discord_fields.len(), 2);
+        assert_eq!(discord_fields[0].0, "Webhook URL");
+        assert!(discord_fields[0].2); // is_secret
+        assert_eq!(discord_fields[0].1, ""); // default empty
+        assert_eq!(discord_fields[1].0, "Webhook URL Env Var");
+        assert!(!discord_fields[1].2); // not secret
+        assert_eq!(discord_fields[1].1, "DISCORD_WEBHOOK_URL");
+
+        let slack_fields = messenger_fields("slack_webhook");
+        assert_eq!(slack_fields.len(), 2);
+        assert_eq!(slack_fields[0].0, "Webhook URL");
+        assert!(slack_fields[0].2); // is_secret
+        assert_eq!(slack_fields[1].0, "Webhook URL Env Var");
+        assert!(!slack_fields[1].2); // not secret
+        assert_eq!(slack_fields[1].1, "SLACK_WEBHOOK_URL");
+    }
+
+    #[test]
+    fn build_messenger_from_fields_discord_webhook() {
+        let fields = vec![
+            ("Webhook URL".to_string(), "https://discord.com/api/webhooks/123/abc".to_string()),
+            ("Webhook URL Env Var".to_string(), "DISCORD_WEBHOOK_URL".to_string()),
+        ];
+        let config = build_messenger_from_fields("discord_webhook", &fields).unwrap();
+        match config {
+            MessengerProviderConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, Some("https://discord.com/api/webhooks/123/abc".to_string()));
+                assert_eq!(webhook_url_env, "DISCORD_WEBHOOK_URL");
+            }
+            _ => panic!("expected DiscordWebhook"),
+        }
+    }
+
+    #[test]
+    fn build_messenger_from_fields_slack_webhook_env_only() {
+        let fields = vec![
+            ("Webhook URL".to_string(), "".to_string()),
+            ("Webhook URL Env Var".to_string(), "SLACK_WEBHOOK_URL".to_string()),
+        ];
+        let config = build_messenger_from_fields("slack_webhook", &fields).unwrap();
+        match config {
+            MessengerProviderConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, None); // blank becomes None
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+            _ => panic!("expected SlackWebhook"),
+        }
+    }
+
+    #[test]
+    fn add_modal_includes_webhook_providers() {
+        let mut app = test_app();
+        handle_key(&mut app, key(KeyCode::Char('a')));
+
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerAdd { highlighted: 0 })
+        ));
+
+        // The providers array should have 6 entries including webhooks
+        // We verify by checking that discord_webhook and slack_webhook
+        // can be selected
+        if let Some(ModalState::MessengerAdd { .. }) = &app.modal {
+            // Move down to discord_webhook (index 1)
+            handle_messenger_add_modal(&mut app, key(KeyCode::Down));
+            assert_eq!(app.modal_highlighted(), 1);
+
+            // Select it
+            handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
+            assert!(matches!(
+                app.modal,
+                Some(ModalState::MessengerInput {
+                    provider,
+                    field_index: 0,
+                    label,
+                    is_secret: false,
+                    error: None,
+                    ..
+                }) if provider == "discord_webhook" && label == "Configuration Name"
+            ));
+        }
+    }
+
+    #[test]
+    fn webhook_url_validation_rejects_invalid_url() {
+        let mut app = test_app();
+        // Start a discord_webhook input flow
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord_webhook".to_string(),
+            field_index: 1, // Webhook URL field (index 0 is name, index 1 is URL)
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "not-a-valid-url".to_string(),
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+            test_status: None,
+        });
+
+        handle_messenger_input_modal(&mut app, key(KeyCode::Enter));
+
+        // Should stay on the same field with an error
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerInput {
+                provider,
+                field_index: 1,
+                error: Some(_),
+                is_secret: true,
+                ..
+            }) if provider == "discord_webhook"
+        ));
+    }
+
+    #[test]
+    fn webhook_url_validation_accepts_valid_url() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord_webhook".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "https://discord.com/api/webhooks/123/abc".to_string(),
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+            test_status: None,
+        });
+
+        handle_messenger_input_modal(&mut app, key(KeyCode::Enter));
+
+        // Should advance to the next field (env var)
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerInput {
+                provider,
+                field_index: 2,
+                label,
+                is_secret: false,
+                error: None,
+                ..
+            }) if provider == "discord_webhook" && label == "Webhook URL Env Var"
+        ));
+    }
+
+    #[test]
+    fn env_only_webhook_skips_url_validation() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "slack_webhook".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "".to_string(), // empty URL
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+            test_status: None,
+        });
+
+        handle_messenger_input_modal(&mut app, key(KeyCode::Enter));
+
+        // Should advance to env var field since URL is blank
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerInput {
+                provider,
+                field_index: 2,
+                label,
+                is_secret: false,
+                error: None,
+                ..
+            }) if provider == "slack_webhook" && label == "Webhook URL Env Var"
+        ));
+    }
+
+    #[test]
+    fn no_desktop_provider_in_add_modal() {
+        let mut app = test_app();
+        handle_key(&mut app, key(KeyCode::Char('a')));
+
+        if let Some(ModalState::MessengerAdd { .. }) = &app.modal {
+            // Try to find "desktop" in the provider list by scrolling through all
+            let providers = [
+                "discord", "discord_webhook", "slack", "slack_webhook",
+                "signal", "whatsapp",
+            ];
+            for i in 0..providers.len() {
+                app.set_modal_highlighted(i);
+                handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
+                if let Some(ModalState::MessengerInput { provider, .. }) = &app.modal {
+                    assert_ne!(provider, "desktop");
+                    // Cancel and reopen
+                    app.modal = Some(ModalState::MessengerAdd { highlighted: i });
+                }
+            }
+        }
+    }
+
+    // =====================================================================
+    // Webhook test connection workflow (Phase 5)
+    // =====================================================================
+
+    #[test]
+    fn build_test_route_from_modal_uses_current_buffer() {
+        let fields = vec![("Configuration Name".to_string(), "test".to_string())];
+        let route = build_test_route_from_modal(
+            "discord_webhook",
+            &fields,
+            "https://discord.com/api/webhooks/123/abc",
+            1,
+        );
+        assert!(route.is_some());
+        match route.unwrap() {
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(
+                    webhook_url,
+                    Some("https://discord.com/api/webhooks/123/abc".to_string())
+                );
+                assert_eq!(webhook_url_env, "DISCORD_WEBHOOK_URL");
+            }
+            _ => panic!("expected DiscordWebhook"),
+        }
+    }
+
+    #[test]
+    fn build_test_route_from_modal_uses_collected_fields() {
+        let fields = vec![
+            ("Configuration Name".to_string(), "test".to_string()),
+            ("Webhook URL".to_string(), "https://hooks.slack.com/services/T1/B1/X".to_string()),
+        ];
+        let route = build_test_route_from_modal("slack_webhook", &fields, "MY_SLACK_URL", 2);
+        assert!(route.is_some());
+        match route.unwrap() {
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(
+                    webhook_url,
+                    Some("https://hooks.slack.com/services/T1/B1/X".to_string())
+                );
+                assert_eq!(webhook_url_env, "MY_SLACK_URL");
+            }
+            _ => panic!("expected SlackWebhook"),
+        }
+    }
+
+    #[test]
+    fn build_test_route_from_modal_returns_none_for_non_webhook() {
+        let fields = vec![("Configuration Name".to_string(), "test".to_string())];
+        let route = build_test_route_from_modal("discord", &fields, "123", 1);
+        assert!(route.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_connection_key_sets_status_for_webhook() {
+
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord_webhook".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "not-a-valid-url".to_string(),
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+            test_status: None,
+        });
+
+        handle_messenger_input_modal(&mut app,
+            KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE),
+        );
+
+        assert!(
+            matches!(
+                &app.modal,
+                Some(ModalState::MessengerInput {
+                    test_status: Some(_),
+                    ..
+                })
+            ),
+            "expected test_status to be set, got {:?}",
+            app.modal
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_connection_key_does_not_mark_dirty() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "slack_webhook".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "bad-url".to_string(),
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+            test_status: None,
+        });
+
+        handle_messenger_input_modal(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE),
+        );
+
+        assert!(!app.dirty, "test connection should not mark config dirty");
+    }
+
+    #[test]
+    fn test_connection_key_ignored_for_non_webhook() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "123".to_string(),
+            label: "Channel ID".to_string(),
+            is_secret: false,
+            error: None,
+            test_status: None,
+        });
+
+        handle_messenger_input_modal(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE),
+        );
+
+        assert!(
+            matches!(
+                &app.modal,
+                Some(ModalState::MessengerInput {
+                    test_status: None,
+                    ..
+                })
+            ),
+            "test_status should remain None for non-webhook provider"
+        );
+    }
+
+    #[test]
+    fn test_connection_key_ignored_before_url_field() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord_webhook".to_string(),
+            field_index: 0, // still on config name
+            fields: vec![],
+            buffer: "test".to_string(),
+            label: "Configuration Name".to_string(),
+            is_secret: false,
+            error: None,
+            test_status: None,
+        });
+
+        handle_messenger_input_modal(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE),
+        );
+
+        assert!(
+            matches!(
+                &app.modal,
+                Some(ModalState::MessengerInput {
+                    test_status: None,
+                    ..
+                })
+            ),
+            "test_status should remain None before URL field"
+        );
+    }
+
+    #[test]
+    fn typing_clears_test_status() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord_webhook".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: String::new(),
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+            test_status: Some("previous result".to_string()),
+        });
+
+        handle_messenger_input_modal(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        );
+
+        assert!(
+            matches!(
+                &app.modal,
+                Some(ModalState::MessengerInput {
+                    test_status: None,
+                    ..
+                })
+            ),
+            "typing should clear test_status"
+        );
     }
 }

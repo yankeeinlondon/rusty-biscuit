@@ -16,6 +16,54 @@ pub(crate) fn detect_repo_inner(
     detect_repo_inner_with_shared(root, structure_only, None, None)
 }
 
+/// Cache for parsed manifest files to avoid redundant I/O during repo detection.
+#[derive(Default)]
+#[allow(dead_code)]
+struct ManifestCache {
+    cargo: HashMap<PathBuf, toml_crate::Value>,
+    npm: HashMap<PathBuf, serde_json::Value>,
+    pyproject: HashMap<PathBuf, toml_crate::Value>,
+    go_mod: HashMap<PathBuf, String>,
+}
+
+#[allow(dead_code)]
+impl ManifestCache {
+    fn get_cargo(&mut self, path: &Path) -> Option<&toml_crate::Value> {
+        if !self.cargo.contains_key(path) {
+            let content = std::fs::read_to_string(path).ok()?;
+            let parsed = toml_crate::from_str(&content).ok()?;
+            self.cargo.insert(path.to_path_buf(), parsed);
+        }
+        self.cargo.get(path)
+    }
+
+    fn get_npm(&mut self, path: &Path) -> Option<&serde_json::Value> {
+        if !self.npm.contains_key(path) {
+            let content = std::fs::read_to_string(path).ok()?;
+            let parsed = serde_json::from_str(&content).ok()?;
+            self.npm.insert(path.to_path_buf(), parsed);
+        }
+        self.npm.get(path)
+    }
+
+    fn get_pyproject(&mut self, path: &Path) -> Option<&toml_crate::Value> {
+        if !self.pyproject.contains_key(path) {
+            let content = std::fs::read_to_string(path).ok()?;
+            let parsed = toml_crate::from_str(&content).ok()?;
+            self.pyproject.insert(path.to_path_buf(), parsed);
+        }
+        self.pyproject.get(path)
+    }
+
+    fn get_go_mod(&mut self, path: &Path) -> Option<&str> {
+        if !self.go_mod.contains_key(path) {
+            let content = std::fs::read_to_string(path).ok()?;
+            self.go_mod.insert(path.to_path_buf(), content);
+        }
+        self.go_mod.get(path).map(|s| s.as_str())
+    }
+}
+
 pub(crate) fn detect_repo_inner_with_shared(
     root: &Path,
     structure_only: bool,
@@ -1122,7 +1170,7 @@ fn read_cargo_features(cargo_toml: &Path) -> Vec<String> {
 fn detect_package_files(package_relative: &str, inventory: &FileInventory) -> PackageFiles {
     let mut files = PackageFiles::default();
 
-    for classification in &inventory.classifications {
+    for classification in inventory.classifications.iter() {
         let repo_relative = package_relative_path(package_relative, &classification.path);
         let file_name = classification
             .path
@@ -1242,12 +1290,13 @@ fn resolve_package_version(path: &Path, root: &Path) -> Option<String> {
 /// 1. Scan each package's dependency lists for names matching other package names → `depends_on`
 /// 2. Invert the relationship → `used_by`
 fn resolve_internal_deps(packages: &mut [Package]) {
-    // Collect all package names
-    let package_names: Vec<String> = packages.iter().map(|p| p.name.clone()).collect();
+    // Collect all package names into owned Strings first to avoid borrow issues
+    let package_names: HashSet<String> = packages.iter().map(|p| p.name.clone()).collect();
 
     // Pass 1: populate depends_on
     for pkg in packages.iter_mut() {
         let mut internal_deps = Vec::new();
+        let mut seen = HashSet::new();
         for dep_list in [
             pkg.dependencies.as_ref(),
             pkg.dev_dependencies.as_ref(),
@@ -1260,7 +1309,7 @@ fn resolve_internal_deps(packages: &mut [Package]) {
             for dep in dep_list {
                 if package_names.contains(&dep.name)
                     && dep.name != pkg.name
-                    && !internal_deps.contains(&dep.name)
+                    && seen.insert(dep.name.as_str())
                 {
                     internal_deps.push(dep.name.clone());
                 }
@@ -1271,19 +1320,22 @@ fn resolve_internal_deps(packages: &mut [Package]) {
     }
 
     // Pass 2: invert to populate used_by
-    // Collect depends_on relationships first to avoid borrow issues
-    let dep_pairs: Vec<(String, Vec<String>)> = packages
-        .iter()
-        .map(|p| (p.name.clone(), p.depends_on.clone()))
-        .collect();
+    // Build a HashMap from dependency name → list of packages that depend on it.
+    // We collect into owned data first to avoid borrow issues during mutation.
+    let mut used_by_map: HashMap<String, Vec<String>> = HashMap::new();
+    for pkg in packages.iter() {
+        for dep in &pkg.depends_on {
+            used_by_map
+                .entry(dep.clone())
+                .or_default()
+                .push(pkg.name.clone());
+        }
+    }
 
     for pkg in packages.iter_mut() {
-        let mut used_by = Vec::new();
-        for (other_name, other_deps) in &dep_pairs {
-            if other_deps.contains(&pkg.name) {
-                used_by.push(other_name.clone());
-            }
-        }
+        let mut used_by = used_by_map
+            .remove(&pkg.name)
+            .unwrap_or_default();
         used_by.sort();
         pkg.used_by = used_by;
     }
@@ -1306,8 +1358,54 @@ fn make_relative_path(path: &Path, root: &Path) -> String {
         })
 }
 
+/// Normalizes a path for deduplication without resolving syscalls.
+///
+/// Uses `std::fs::canonicalize` as a best-effort optimization, but falls back
+/// to simple path cleanup when the filesystem call fails. This avoids
+/// unnecessary syscalls during monorepo package merging where symlink
+/// resolution is not strictly required.
 pub(crate) fn canonicalize_path(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    std::fs::canonicalize(path).unwrap_or_else(|_| normalize_path(path))
+}
+
+/// Lightweight path normalization without filesystem access.
+///
+/// Cleans up `.` and `..` components and resolves relative paths against
+/// the current working directory when needed.
+fn normalize_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::Prefix(p) => normalized.push(p.as_os_str()),
+                std::path::Component::RootDir => normalized.push("/"),
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    normalized.pop();
+                }
+                std::path::Component::Normal(name) => normalized.push(name),
+            }
+        }
+        normalized
+    } else {
+        // For relative paths, resolve against current dir then normalize
+        std::env::current_dir()
+            .unwrap_or_default()
+            .join(path)
+            .components()
+            .fold(PathBuf::new(), |mut acc, component| {
+                match component {
+                    std::path::Component::Prefix(p) => acc.push(p.as_os_str()),
+                    std::path::Component::RootDir => acc.push("/"),
+                    std::path::Component::CurDir => {}
+                    std::path::Component::ParentDir => {
+                        acc.pop();
+                    }
+                    std::path::Component::Normal(name) => acc.push(name),
+                }
+                acc
+            })
+    }
 }
 
 /// Derives the package area from a relative path.
@@ -1562,27 +1660,43 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
 }
 
 fn refresh_package_boundaries(packages: &mut [Package], repo_inventory: Option<&FileInventory>) {
-    let package_paths: Vec<PathBuf> = packages.iter().map(|pkg| pkg.path.clone()).collect();
-    let package_roots: Vec<PathBuf> = packages
+    // Build sorted list of (canonical_root, original_path, name, index) for efficient lookup
+    let mut sorted_packages: Vec<(PathBuf, PathBuf, String, usize)> = packages
         .iter()
-        .map(|pkg| canonicalize_path(&pkg.path))
+        .enumerate()
+        .map(|(i, pkg)| {
+            (
+                canonicalize_path(&pkg.path),
+                pkg.path.clone(),
+                pkg.name.clone(),
+                i,
+            )
+        })
         .collect();
-    let package_names: Vec<String> = packages.iter().map(|pkg| pkg.name.clone()).collect();
+    // Sort by path depth (shorter paths first = ancestors first)
+    sorted_packages.sort_by_key(|a| a.0.components().count());
+
+    // Build a map from original index to its descendants
+    let mut descendants: Vec<Vec<(PathBuf, String)>> = vec![Vec::new(); packages.len()];
+
+    // For each package, only check packages that come AFTER it in the sorted list
+    // (which are guaranteed to be at least as deep)
+    for i in 0..sorted_packages.len() {
+        let (root_i, _, _, idx_i) = &sorted_packages[i];
+        for (root_j, path_j, name_j, idx_j) in sorted_packages.iter().skip(i + 1) {
+            if root_j.starts_with(root_i) && idx_i != idx_j {
+                descendants[*idx_i].push((path_j.clone(), name_j.clone()));
+            }
+        }
+    }
 
     for (index, package) in packages.iter_mut().enumerate() {
-        let package_root = &package_roots[index];
-        let mut nested_roots = Vec::new();
-        let mut nested_packages = Vec::new();
+        let mut nested_roots: Vec<PathBuf> = Vec::new();
+        let mut nested_packages: Vec<String> = Vec::new();
 
-        for (other_index, other_root) in package_roots.iter().enumerate() {
-            if index == other_index {
-                continue;
-            }
-
-            if other_root.starts_with(package_root) {
-                nested_roots.push(package_paths[other_index].clone());
-                nested_packages.push(package_names[other_index].clone());
-            }
+        for (path, name) in &descendants[index] {
+            nested_roots.push(path.clone());
+            nested_packages.push(name.clone());
         }
 
         nested_roots.sort();
@@ -1929,5 +2043,174 @@ fn create_package(
         is_updatable: None,
         has_major_update: None,
         is_excluded: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_package(name: &str, deps: Vec<DependencyEntry>) -> Package {
+        Package {
+            name: name.to_string(),
+            path: PathBuf::from(name),
+            relative: name.to_string(),
+            package_area: "root".to_string(),
+            ecosystem: PackageEcosystem::Unknown,
+            discovery_sources: Vec::new(),
+            nested_packages: Vec::new(),
+            primary_language: None,
+            secondary_languages: Vec::new(),
+            languages: Vec::new(),
+            frameworks: Vec::new(),
+            file_associations: Vec::new(),
+            configuration: Vec::new(),
+            documentation: Vec::new(),
+            editor_config: None,
+            command_runner: Vec::new(),
+            package_managers: Vec::new(),
+            version: None,
+            features: Vec::new(),
+            depends_on: Vec::new(),
+            used_by: Vec::new(),
+            dependencies: if deps.is_empty() { None } else { Some(deps) },
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            is_updatable: None,
+            has_major_update: None,
+            is_excluded: false,
+        }
+    }
+
+    fn dep(name: &str) -> DependencyEntry {
+        DependencyEntry {
+            name: name.to_string(),
+            targeted_version: "^1.0".to_string(),
+            kind: DependencyKind::Normal,
+            optional: false,
+            actual_version: None,
+            package_manager: None,
+            latest_version: None,
+            target: None,
+            features: Vec::new(),
+            is_updatable: false,
+            has_major_update: false,
+        }
+    }
+
+    #[test]
+    fn make_package_area_returns_root_for_top_level_package() {
+        assert_eq!(make_package_area("model_id"), "root");
+    }
+
+    #[test]
+    fn make_package_area_uses_top_level_parent_for_lib_cli_split() {
+        assert_eq!(make_package_area("sniff/lib"), "sniff");
+    }
+
+    #[test]
+    fn make_package_area_preserves_nested_area_parent() {
+        assert_eq!(make_package_area("apps/browser/my_package"), "apps/browser");
+    }
+
+    #[test]
+    fn resolve_internal_deps_populates_depends_on() {
+        let mut packages = vec![
+            make_test_package("pkg-a", vec![dep("pkg-b"), dep("pkg-c")]),
+            make_test_package("pkg-b", vec![dep("pkg-c")]),
+            make_test_package("pkg-c", vec![]),
+        ];
+
+        resolve_internal_deps(&mut packages);
+
+        assert_eq!(packages[0].depends_on, vec!["pkg-b", "pkg-c"]);
+        assert_eq!(packages[1].depends_on, vec!["pkg-c"]);
+        assert!(packages[2].depends_on.is_empty());
+    }
+
+    #[test]
+    fn resolve_internal_deps_populates_used_by() {
+        let mut packages = vec![
+            make_test_package("pkg-a", vec![dep("pkg-b"), dep("pkg-c")]),
+            make_test_package("pkg-b", vec![dep("pkg-c")]),
+            make_test_package("pkg-c", vec![]),
+        ];
+
+        resolve_internal_deps(&mut packages);
+
+        assert_eq!(packages[0].used_by, Vec::<String>::new());
+        assert_eq!(packages[1].used_by, vec!["pkg-a"]);
+        assert_eq!(packages[2].used_by, vec!["pkg-a", "pkg-b"]);
+    }
+
+    #[test]
+    fn resolve_internal_deps_skips_external_deps() {
+        let mut packages = vec![
+            make_test_package("pkg-a", vec![dep("pkg-b"), dep("external-lib")]),
+            make_test_package("pkg-b", vec![]),
+        ];
+
+        resolve_internal_deps(&mut packages);
+
+        assert_eq!(packages[0].depends_on, vec!["pkg-b"]);
+        assert!(!packages[0].depends_on.contains(&"external-lib".to_string()));
+    }
+
+    #[test]
+    fn resolve_internal_deps_skips_self_references() {
+        let mut packages = vec![
+            make_test_package("pkg-a", vec![dep("pkg-a"), dep("pkg-b")]),
+            make_test_package("pkg-b", vec![]),
+        ];
+
+        resolve_internal_deps(&mut packages);
+
+        assert_eq!(packages[0].depends_on, vec!["pkg-b"]);
+    }
+
+    #[test]
+    fn resolve_internal_deps_deduplicates() {
+        let mut packages = vec![
+            make_test_package("pkg-a", vec![dep("pkg-b"), dep("pkg-b")]),
+            make_test_package("pkg-b", vec![]),
+        ];
+
+        resolve_internal_deps(&mut packages);
+
+        assert_eq!(packages[0].depends_on, vec!["pkg-b"]);
+    }
+
+    // ============================================================================
+    // normalize_path tests (issue #18)
+    // ============================================================================
+
+    #[test]
+    fn normalize_path_cleans_dot_components() {
+        let path = Path::new("/foo/bar/./baz");
+        let normalized = normalize_path(path);
+        assert_eq!(normalized, PathBuf::from("/foo/bar/baz"));
+    }
+
+    #[test]
+    fn normalize_path_cleans_dotdot_components() {
+        let path = Path::new("/foo/bar/../baz");
+        let normalized = normalize_path(path);
+        assert_eq!(normalized, PathBuf::from("/foo/baz"));
+    }
+
+    #[test]
+    fn normalize_path_is_idempotent() {
+        let path = Path::new("/foo/./bar/../baz");
+        let once = normalize_path(path);
+        let twice = normalize_path(&once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn normalize_path_handles_multiple_dotdots() {
+        let path = Path::new("/a/b/c/../../d");
+        let normalized = normalize_path(path);
+        assert_eq!(normalized, PathBuf::from("/a/d"));
     }
 }

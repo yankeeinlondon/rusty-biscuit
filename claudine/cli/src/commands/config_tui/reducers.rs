@@ -92,6 +92,14 @@ pub fn create_messenger_config(provider: &str) -> Option<MessengerProviderConfig
             access_token_env: "WHATSAPP_ACCESS_TOKEN".to_string(),
             phone_number_id_env: "WHATSAPP_PHONE_NUMBER_ID".to_string(),
         }),
+        "discord_webhook" => Some(MessengerProviderConfig::DiscordWebhook {
+            webhook_url: None,
+            webhook_url_env: "DISCORD_WEBHOOK_URL".to_string(),
+        }),
+        "slack_webhook" => Some(MessengerProviderConfig::SlackWebhook {
+            webhook_url: None,
+            webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+        }),
         _ => None,
     }
 }
@@ -242,6 +250,36 @@ mod tests {
     fn messenger_whatsapp() {
         let config = create_messenger_config("whatsapp").unwrap();
         assert!(matches!(config, MessengerProviderConfig::Whatsapp { .. }));
+    }
+
+    #[test]
+    fn messenger_discord_webhook() {
+        let config = create_messenger_config("discord_webhook").unwrap();
+        match config {
+            MessengerProviderConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, None);
+                assert_eq!(webhook_url_env, "DISCORD_WEBHOOK_URL");
+            }
+            _ => panic!("expected DiscordWebhook"),
+        }
+    }
+
+    #[test]
+    fn messenger_slack_webhook() {
+        let config = create_messenger_config("slack_webhook").unwrap();
+        match config {
+            MessengerProviderConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, None);
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+            _ => panic!("expected SlackWebhook"),
+        }
     }
 
     #[test]

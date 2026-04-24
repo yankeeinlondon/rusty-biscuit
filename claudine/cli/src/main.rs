@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 
 use claudine::events::Provider;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Report, Result};
 
 mod args;
 mod argv;
@@ -107,6 +107,31 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
 fn main() -> Result<()> {
     color_eyre::install()?;
 
+    match run() {
+        Ok(()) => Ok(()),
+        Err(report) => {
+            render_top_level_error(&report);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Try to render `report` as a darkmatter `BlockError` via the cause-chain
+/// walker. Falls back to the CLI's generic `log::error` formatting
+/// (preserving the styled `Error:` label) when no cause in the chain
+/// implements `BlockError`.
+fn render_top_level_error(report: &Report) {
+    let term = log::terminal();
+    if let Some(rendered) = output::error_walker::try_render_block_report(report, &term) {
+        log::message("");
+        log::message(&rendered);
+        log::message("");
+        return;
+    }
+    log::error(&report.to_string());
+}
+
+fn run() -> Result<()> {
     // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
     // `maybe_complete` writes either a registration snippet or candidate
     // list to stdout and exits before returning. In normal runs it is a

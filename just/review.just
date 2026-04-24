@@ -17,7 +17,7 @@ cyan := '\033[36m'
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
-review feat="":
+review feat="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
     doc="$(just _choose_feature {{feat}}'')"
@@ -47,23 +47,53 @@ review feat="":
     fi
     feature="$(basename "${dir}")"
     feature="$(just _title_case ${feature#????-??-??-})"
-    agent="$(just _choose_agent)"
+    use_agent="{{agent}}"
+    if [[ -z "${use_agent}" ]]; then
+        use_agent="$(just _choose_agent)"
+    fi
+    model=""
+    use_model=""
+    if [[ "${use_agent}" == "opencode" ]];then
+        model="$(just _choose_model)"
+        use_model="--model ${model}"
+    fi
 
     iteration=1
     while [[ -f "${dir}/review-${iteration}.md" ]]; do
         (( iteration++ ))
     done
 
-    echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
+    echo -e "Review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
-    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
-    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
+    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename "${spec}"){{reset}}"
+    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename "${design}"){{reset}}"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
     echo -e "    - Review Iteration:  {{dim}}${iteration}{{reset}}"
-
-    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" iteration="${iteration}" --${agent}
     echo
-    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
+    if [[ -z "${model}" ]];then
+        echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used"
+    else
+        echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used {{italic}}with{{reset}} the model {{green}}${model}{{reset}}"
+    fi
+
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
+
+    spec_name=""
+    [[ -n "${spec}" ]] && spec_name="$(basename "${spec}")"
+    design_name=""
+    [[ -n "${design}" ]] && design_name="$(basename "${design}")"
+
+    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" --${use_agent} ${use_model} || (
+        just _play two-tone
+        echo -e "{{red}}ERROR:{{reset}} There was a problem trying to create the review for ${feature}"
+    )
+
+    echo
+    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: $(just _link "$(sniff repo package-area)/${dir}/review-${iteration}.md" "${dir}/review-${iteration}.md")"
     echo
 
 # implement a review that was conducted (not a feature review)
@@ -156,11 +186,32 @@ implement-feature-review filter="" spec="" design="" agent="":
         exit 0
     fi
 
+    spec_name=""
+    [[ -n "${spec_file}" ]] && spec_name="$(basename "${spec_file}")"
+    design_name=""
+    [[ -n "${design_file}" ]] && design_name="$(basename "${design_file}")"
+
     echo -e "🏃‍♂️ Starting the {{bold}}implementation{{reset}} of the review suggestions (#${iteration})"
-    if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="$(basename "${spec_file}")" design="$(basename "${design_file}")" iteration="${iteration}" ${model}; then
-        echo
-        echo -e "🎉 Implemented all the suggestions found in the $(just _link "${review}") review!"
-        echo
+    if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" ${model}; then
+
+        ready="$(md get "${review}" "ready")"
+        if [[ ready == "false" ]]; then
+            echo
+            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
+            echo -e "👎 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is {{red}}not{{reset}} production ready!"
+            echo
+
+        elif [[ "$ready" == "true" ]]; then
+            echo
+            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
+            echo -e "🎉 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is production ready!"
+            echo
+        else
+            echo
+            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
+            echo -e "🤨 the 'ready' frontmatter property was not set!"
+            echo
+        fi
         just _speak "The implementation of review suggestions in "$(sniff repo package-area)" package area has completed"
     else
         echo

@@ -21,9 +21,9 @@ libc = "0.2"
 metrics = { version = "0.24", optional = true }
 rayon = "1.11.0"
 regex = "1.11"
-reqwest = { version = "0.13", features = ["json"], default-features = false, optional = true }
+reqwest = { version = "0.13", features = ["json", "blocking"], default-features = false, optional = true }
 schematic-schema = { path = "../../schematic/schema" }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = { version = "0.28", features = ["derive"] }
 sysinfo = "0.38.2"

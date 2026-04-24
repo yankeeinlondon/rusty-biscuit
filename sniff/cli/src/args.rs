@@ -43,6 +43,11 @@ pub enum RepoAction {
         package_area: Option<String>,
         format: PackagesFormat,
     },
+    PackageAreas {
+        filter: Vec<String>,
+        package_area: Option<String>,
+        format: PackagesFormat,
+    },
     Package {
         no_error: bool,
         on_error: Option<String>,
@@ -676,6 +681,21 @@ pub enum RepoSubcommand {
         #[arg(long, conflicts_with = "md")]
         list: bool,
     },
+    /// Output only package area names as a comma-separated list
+    #[command(name = "package-areas")]
+    PackageAreas {
+        /// Filter by area name; prefix with ! to exclude
+        filter: Vec<String>,
+        /// Restrict output to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Render as a Markdown unordered list (one `- name` per line)
+        #[arg(long, conflicts_with = "list")]
+        md: bool,
+        /// Render as a raw list (one entry per line, no bullet)
+        #[arg(long, conflicts_with = "md")]
+        list: bool,
+    },
     /// Output the package name for the current directory
     Package {
         /// Exit 0 with no output when no results found (default is exit 1)
@@ -1084,6 +1104,26 @@ impl Commands {
                     md,
                     list,
                 }) => RepoAction::Packages {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package_area: package_area.clone(),
+                    format: if *md {
+                        PackagesFormat::Markdown
+                    } else if *list {
+                        PackagesFormat::List
+                    } else {
+                        PackagesFormat::Csv
+                    },
+                },
+                Some(RepoSubcommand::PackageAreas {
+                    filter: sub_filter,
+                    package_area,
+                    md,
+                    list,
+                }) => RepoAction::PackageAreas {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
                     } else {
@@ -1585,6 +1625,15 @@ mod tests {
                 cli.command,
                 Some(Commands::Repo {
                     repo_subcommand: Some(RepoSubcommand::Packages { .. }),
+                    ..
+                })
+            ));
+
+            let cli = parse_args(&["repo", "package-areas"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::PackageAreas { .. }),
                     ..
                 })
             ));

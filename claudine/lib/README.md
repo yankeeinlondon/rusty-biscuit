@@ -375,3 +375,18 @@ Typed pre/post validations, timeouts, handler resolution, and shell policy for c
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.
 - **Legacy single-brace templates are deprecated**: `{placeholder}` is automatically rewritten to `{{placeholder}}` with a tracing warning. New configs should use Handlebars-style double braces.
+
+## Compatibility Notes
+
+### Contextual Errors (2026-04)
+
+Several error variants were refactored to carry typed `darkmatter::markdown::MarkdownError` values instead of pre-stringified text so the CLI's cause-chain walker can render rich `BlockError` reports (path, line, hint, transclusion chain, etc.).
+
+- `ClaudineError::SystemPromptComposition(String)` → `SystemPromptComposition(#[from] MarkdownError)`
+- `composition::CompositionError::ComposeFailed(String)` → `ComposeFailed(#[source] MarkdownError)`
+- `composition::CompositionError::PreFlightDiscoveryFailed(String)` → `PreFlightDiscoveryFailed(#[source] MarkdownError)`
+- `composition::CompositionError::LifecycleInvalid { property, message }` — new variant that replaces the previous `ComposeFailed(format!("invalid …"))` route for frontmatter lifecycle deserialization failures.
+
+External consumers that pattern-match on these variants or inspect their string payload need to update their matches. The `Display` output for each variant still begins with the same human-readable prefix (`"system prompt composition failed: …"`, `"compose failed: …"`, `"pre-flight discovery failed: …"`), so consumers that only format-and-log these errors are unaffected.
+
+The harness sites at `harness/parse.rs` (`tokenize()`) and `harness/audit.rs` (`parse_directives()`) remain deliberately out of scope; they discard darkmatter error detail on internal paths that are not user-facing today and are tracked for a follow-up.

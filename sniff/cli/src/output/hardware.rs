@@ -533,8 +533,8 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
         })
         .collect();
 
-    input_devs.sort_by(|(_, a), (_, b)| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    output_devs.sort_by(|(_, a), (_, b)| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    input_devs.sort_by_key(|(_, a)| a.name.to_lowercase());
+    output_devs.sort_by_key(|(_, a)| a.name.to_lowercase());
 
     let input_group = build_group_list("Input", &input_devs, &suffixes, GroupSide::Input, verbose);
     let output_group = build_group_list(

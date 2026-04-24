@@ -2,6 +2,7 @@
 dir: ""
 spec: ""
 design: ""
+area: "$(sniff repo package-area)"
 iteration: 1
 pkg: {{ctx.current_package_area}}
 ---
@@ -40,18 +41,18 @@ You are to act as an orchestrator and follow these steps serially and precisely:
           ::end-block
           - review: {{pkg}}/{{dir}}/review-{{iteration}}.md
       - Ask them to build a high confidence plan to implement all the fixes suggested in the review along with ensuring test coverage is high and all tests pass and no lint warnings or errors exist. 
-      - Tell them to save the plan to {{dir}}/review-plan-{{iteration}}.md 
+      - Tell them to save the plan to {{area}}/{{dir}}/review-plan-{{iteration}}.md 
       - Ask them to provide you a summary of the plan including how many phases (if phases are used) are included in the plan
 2. Instantiate a `rust-developer` subagent.
     - Provide them with references to:
         ::block when="spec"
-        - spec: {{pkg}}/{{dir}}/{{spec}}
+        - spec: {{dir}}/{{spec}}
         ::end-block
         ::block when="design"
-        - tech-design: {{pkg}}/{{dir}}/{{design }}
+        - tech-design: {{dir}}/{{design }}
         ::end-block
-        - review: {{pkg}}/{{dir}}/review-{{iteration}}.md
-        - plan: {{pkg}}/{{dir}}/review-plan-{{iteration}}.md
+        - review: {{dir}}/review-{{iteration}}.md
+        - plan: {{dir}}/review-plan-{{iteration}}.md
     - Ask them to implement the "next" phase of the plan (or the entire plan if it's not broken down by phases). 
     - They are responsible for:
         - implementing all the recommendations/fixes discussed in this phase

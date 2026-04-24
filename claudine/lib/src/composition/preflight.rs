@@ -54,8 +54,8 @@ pub fn resolve_shell_approvals(
 
     // -- Source 1: Template ::shell directives ---------------------------------
     if let (Some(md), Some(opts)) = (markdown, compose_options) {
-        let entries = collect_shell_commands(md, opts)
-            .map_err(|e| CompositionError::PreFlightDiscoveryFailed(e.to_string()))?;
+        let entries =
+            collect_shell_commands(md, opts).map_err(CompositionError::PreFlightDiscoveryFailed)?;
         for entry in &entries {
             all_commands.push((
                 entry.normalized.clone(),

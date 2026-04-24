@@ -29,12 +29,14 @@
 
 use crate::markdown::{
     Markdown, MarkdownError,
+    block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
     dsl::parse_code_info,
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
     inline::{InlineEvent, InlineTag, MarkProcessor},
 };
+use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
@@ -786,6 +788,7 @@ pub fn write_terminal<W: std::io::Write>(
     tracing::debug!(terminal_width, "Terminal width for rendering");
 
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    let hr_defaults = hr_defaults_from_frontmatter(md);
 
     // Load prose theme for ProseHighlighter
     let prose_syntect_theme =
@@ -799,11 +802,12 @@ pub fn write_terminal<W: std::io::Write>(
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
     // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
+    // and RuleProcessor for horizontal rules with attributes
     let parser = Parser::new_ext(
         md.content(),
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     );
-    let events = MarkProcessor::new(parser);
+    let events = RuleProcessor::new(MarkProcessor::new(parser));
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -818,7 +822,11 @@ pub fn write_terminal<W: std::io::Write>(
     let mut table_alignments: Vec<Alignment> = Vec::new();
     let mut current_row: Vec<String> = Vec::new();
     let mut current_cell = String::new();
-    let table_terminal = Terminal::builder()
+    // Single outer `Terminal` context shared by every component that renders
+    // inside this pipeline (tables, horizontal rules, ...). Built once from
+    // the resolved options so every consumer honors `max_width`, `color_depth`,
+    // and `emit_hyperlinks` without re-running capability detection (B2).
+    let render_terminal = Terminal::builder()
         .width(terminal_width as u32)
         .osc_link_support(emit_hyperlinks)
         .color_depth(match color_depth {
@@ -880,6 +888,25 @@ pub fn write_terminal<W: std::io::Write>(
             InlineEvent::End(InlineTag::Mark) => {
                 in_mark = false;
                 scope_stack.pop();
+            }
+
+            // Handle horizontal rule with attributes
+            InlineEvent::HorizontalRule(attrs) => {
+                // Build the rule from attributes via the shared helper so the
+                // terminal and HTML code paths stay consistent (Phase 5).
+                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
+                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+            }
+            // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
+            // pulldown-cmark `Event::Rule`. Handle them explicitly so the
+            // terminal output gets a default dashed rule instead of falling
+            // through the catch-all arm.
+            InlineEvent::Standard(Event::Rule) => {
+                let rule = build_rule_with_defaults(
+                    hr_defaults.as_ref(),
+                    &crate::markdown::inline::HorizontalRuleAttrs::default(),
+                );
+                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
             }
 
             // Standard pulldown-cmark events
@@ -1280,7 +1307,7 @@ pub fn write_terminal<W: std::io::Write>(
                             in_emphasis,
                             in_strong,
                         },
-                        &table_terminal,
+                        &render_terminal,
                     ));
                 } else {
                     let style = resolve_prose_text_style(
@@ -2231,6 +2258,55 @@ impl LineWrapper {
     /// Gets the current column position.
     fn current_col(&self) -> usize {
         self.current_col
+    }
+}
+
+/// Emits a rendered [`HorizontalRule`] into `wrapper`, honoring the rule's
+/// [`Layout`](biscuit_terminal::utils::layout::Layout) margins (B3) and using
+/// the outer [`Terminal`] context (B2).
+///
+/// The rule's `top_margin` and `bottom_margin` are resolved to character
+/// counts via [`Layout::resolve_margin`](biscuit_terminal::utils::layout::Layout::resolve_margin)
+/// and emitted as blank lines. A default-layout rule (`Margin::None`) produces
+/// a single trailing blank line to match the surrounding markdown rhythm —
+/// replacing the previous hardcoded double `\n\n` spacing.
+fn write_horizontal_rule(
+    wrapper: &mut LineWrapper,
+    rule: &HorizontalRule,
+    term: &Terminal,
+    terminal_width: u16,
+) {
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::utils::layout::{Layout, Margin};
+
+    // If we're mid-line, break to column 0 before emitting margins.
+    if wrapper.current_col() > 0 {
+        wrapper.newline();
+    }
+
+    let layout = rule.layout();
+    let top = Layout::resolve_margin(&layout.top_margin, terminal_width as u32);
+    for _ in 0..top {
+        wrapper.newline();
+    }
+
+    // `render` returns the rule content without a trailing newline; use
+    // `push_with_newlines` + an explicit `\n` so wrapper column tracking
+    // resets correctly.
+    wrapper.push_with_newlines(&rule.render(term));
+    wrapper.push_with_newlines("\n");
+
+    let bottom = Layout::resolve_margin(&layout.bottom_margin, terminal_width as u32);
+    if matches!(layout.bottom_margin, Margin::None) {
+        // Default behavior: one blank line after the rule so subsequent
+        // blocks visually separate without forcing authors to set an
+        // explicit margin. Callers that want tighter or looser spacing can
+        // configure `layout.bottom_margin` on the rule.
+        wrapper.push_with_newlines("\n");
+    } else {
+        for _ in 0..bottom {
+            wrapper.newline();
+        }
     }
 }
 

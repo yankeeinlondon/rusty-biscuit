@@ -127,7 +127,7 @@ impl InstallInterviewDelegate for CliInstallUi {
                 text,
             } => {
                 let rendered = Status::from_prose(text.clone())
-                    .state(StatusState::Failure)
+                    .state(StatusState::Error)
                     .theme(StatusTheme::Circular)
                     .render(&self.terminal);
                 let line = if rendered.ends_with('\n') {

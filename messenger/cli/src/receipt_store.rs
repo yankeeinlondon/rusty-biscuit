@@ -41,6 +41,21 @@ pub fn save_receipt(receipt: &messenger::SendReceipt, route_name: Option<&str>) 
     Ok(path)
 }
 
+pub fn load_receipt(spec: &str) -> Result<messenger::SendReceipt> {
+    tracing::debug!(spec = %spec, "loading receipt");
+    let candidate_path = Path::new(spec);
+    if candidate_path.exists() {
+        tracing::debug!(path = %candidate_path.display(), "loading receipt from file");
+        let contents = std::fs::read_to_string(candidate_path)?;
+        return parse_receipt_contents(&contents);
+    }
+
+    // Try parsing the spec directly as a SendReceipt JSON
+    messenger::SendReceipt::from_json_str(spec).map_err(|_| {
+        eyre!("unable to parse receipt. Pass a saved receipt path or a SendReceipt JSON blob.")
+    })
+}
+
 pub fn load_message_ref(spec: &str) -> Result<messenger::MessageRef> {
     tracing::debug!(spec = %spec, "loading message ref");
     let candidate_path = Path::new(spec);
@@ -51,6 +66,23 @@ pub fn load_message_ref(spec: &str) -> Result<messenger::MessageRef> {
     }
 
     parse_message_ref_contents(spec)
+}
+
+fn parse_receipt_contents(contents: &str) -> Result<messenger::SendReceipt> {
+    tracing::trace!("attempting StoredReceipt parse");
+    if let Ok(stored) = serde_json::from_str::<StoredReceipt>(contents) {
+        tracing::trace!("parsed as StoredReceipt");
+        return Ok(stored.receipt);
+    }
+    tracing::trace!("attempting SendReceipt parse");
+    if let Ok(receipt) = messenger::SendReceipt::from_json_str(contents) {
+        tracing::trace!("parsed as SendReceipt");
+        return Ok(receipt);
+    }
+
+    Err(eyre!(
+        "unable to parse receipt. Pass a saved receipt path or a SendReceipt JSON blob."
+    ))
 }
 
 fn parse_message_ref_contents(contents: &str) -> Result<messenger::MessageRef> {

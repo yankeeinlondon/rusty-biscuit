@@ -294,7 +294,7 @@ mod tests {
             SERVICE_PAUSED_STATE,
         ];
         for state in pending_states {
-            let svc = service_from_raw_status(format!("Svc-{state}").into(), state, 0);
+            let svc = service_from_raw_status(format!("Svc-{state}"), state, 0);
             assert!(
                 !svc.running,
                 "service with SCM state {state} should not be marked running"
@@ -306,7 +306,7 @@ mod tests {
     fn test_service_state_filter_running() {
         use crate::services::ServiceState;
 
-        let services = vec![
+        let services = [
             service_from_raw_status("RunningSvc".into(), SERVICE_RUNNING_STATE, 100),
             service_from_raw_status("StoppedSvc".into(), SERVICE_STOPPED_STATE, 0),
             service_from_raw_status("PendingSvc".into(), SERVICE_START_PENDING_STATE, 0),
@@ -324,7 +324,7 @@ mod tests {
     fn test_service_state_filter_stopped() {
         use crate::services::ServiceState;
 
-        let services = vec![
+        let services = [
             service_from_raw_status("RunningSvc".into(), SERVICE_RUNNING_STATE, 100),
             service_from_raw_status("StoppedSvc".into(), SERVICE_STOPPED_STATE, 0),
             service_from_raw_status("AnotherStopped".into(), SERVICE_STOPPED_STATE, 0),
@@ -341,7 +341,7 @@ mod tests {
     fn test_service_state_filter_all() {
         use crate::services::ServiceState;
 
-        let services = vec![
+        let services = [
             service_from_raw_status("RunningSvc".into(), SERVICE_RUNNING_STATE, 100),
             service_from_raw_status("StoppedSvc".into(), SERVICE_STOPPED_STATE, 0),
             service_from_raw_status("PendingSvc".into(), SERVICE_START_PENDING_STATE, 0),

@@ -35,8 +35,10 @@ fn round_trip_preserves_capabilities() {
 #[test]
 fn stale_cache_returns_none() {
     let (_dir, path) = tmp_cache_path();
-    let mut host = HostCapabilities::default();
-    host.detected_at = Utc::now() - Duration::days(100);
+    let host = HostCapabilities {
+        detected_at: Utc::now() - Duration::days(100),
+        ..Default::default()
+    };
     save_host_capabilities_to(&path, &host).unwrap();
     assert!(load_host_capabilities_from(&path).is_none());
 }
