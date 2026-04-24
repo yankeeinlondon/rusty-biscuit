@@ -28,8 +28,10 @@ pub(crate) mod command_factory;
 pub(crate) mod engine;
 pub(crate) mod file_reference;
 pub(crate) mod root_menu;
+pub(crate) mod scopes;
 pub(crate) mod supplement;
 pub(crate) mod validate;
+pub(crate) mod walker;
 
 use clap_complete::CompleteEnv;
 

@@ -10,6 +10,14 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/scopes.rs
+  - claudine/cli/src/completion/walker.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
   - claudine-cli
 ---
