@@ -113,7 +113,21 @@ impl RootContext {
 /// Classifies the cursor position, dispatches to the appropriate
 /// slot-specific completer, and returns the rendered candidate strings
 /// (one per line on stdout).
+///
+/// ## Notes
+///
+/// Wrapped in a `claudine::completion::run` span so callers running
+/// `RUST_LOG=claudine::completion=trace` (and optionally
+/// `CLAUDINE_COMPLETION_PROFILE=1`) capture per-invocation latency
+/// without instrumenting every internal call site.
 pub(crate) fn run(argv: &[String], current_index: usize) -> Vec<String> {
+    let _span = tracing::trace_span!(
+        target: "claudine::completion",
+        "completion::run",
+        current_index = current_index,
+        argc = argv.len(),
+    )
+    .entered();
     let ctx = RootContext::discover();
     run_with_context(argv, current_index, &ctx)
 }
@@ -126,12 +140,30 @@ pub(crate) fn run_with_context(
     ctx: &RootContext,
 ) -> Vec<String> {
     match classify_completion_target(argv, current_index) {
-        CompletionTarget::Root(partial) => root_menu::render(&partial, ctx),
+        CompletionTarget::Root(partial) => {
+            let _span = tracing::trace_span!(
+                target: "claudine::completion",
+                "completion::root_menu",
+            )
+            .entered();
+            root_menu::render(&partial, ctx)
+        }
         CompletionTarget::CompositionPositional { mode, partial } => {
+            let _span = tracing::trace_span!(
+                target: "claudine::completion",
+                "completion::composition",
+                mode = ?mode,
+            )
+            .entered();
             let scope_ctx = ScopeContext::discover();
             composition::run(mode, &scope_ctx, &partial)
         }
         CompletionTarget::SetterValue { token } => {
+            let _span = tracing::trace_span!(
+                target: "claudine::completion",
+                "completion::setter_value",
+            )
+            .entered();
             let scope_ctx = ScopeContext::discover();
             setter_value::run(&token, &scope_ctx)
         }
