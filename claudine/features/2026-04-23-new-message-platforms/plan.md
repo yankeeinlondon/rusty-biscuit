@@ -1,7 +1,8 @@
 ---
 phases: 7
 created: 2026-04-24
-start_phase: 0
+start_phase: 3
+memory: implement-new-message-platforms
 packages:
   - claudine
   - claudine-cli
@@ -13,6 +14,30 @@ source_files_during_phase_0: []
 docs_updated_during_phase_0: []
 docs_created_during_phase_0: []
 skills_files_updated_during_phase_0: []
+source_files_during_phase_1:
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/messaging/config.rs
+  - claudine/lib/src/messaging/mod.rs
+  - claudine/lib/src/messaging/send.rs
+  - claudine/lib/src/dispatch/loader.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - claudine/lib/Cargo.toml
+  - claudine/lib/src/messaging/send.rs
+  - claudine/lib/src/messaging/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+  - claudine/lib/src/composition/lifecycle.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
+packages_during_phase_3:
+  - claudine
 ---
 
 # New Message and Notification Platforms - Execution Plan

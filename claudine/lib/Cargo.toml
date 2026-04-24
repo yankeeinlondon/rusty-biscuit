@@ -19,7 +19,7 @@ biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }
 darkmatter = { path = "../../darkmatter/lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
-messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp"] }
+messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp", "desktop"] }
 secrecy = "0.10"
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
