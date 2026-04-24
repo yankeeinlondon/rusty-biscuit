@@ -158,6 +158,10 @@ pub enum ModalState {
         fields: Vec<(String, String)>,
         buffer: String,
         label: String,
+        /// Whether the current field should be rendered as a secret (masked).
+        is_secret: bool,
+        /// Optional validation error to display for the current field.
+        error: Option<String>,
     },
     /// Multi-field editor for an individual action's properties.
     ActionFieldList {

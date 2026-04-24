@@ -88,13 +88,27 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let items: Vec<ListItem> = configs
             .iter()
             .map(|(name, config)| {
-                let provider_type = match config {
-                    MessengerProviderConfig::Discord { .. } => "Discord",
-                    MessengerProviderConfig::Slack { .. } => "Slack",
-                    MessengerProviderConfig::Signal { .. } => "Signal",
-                    MessengerProviderConfig::Whatsapp { .. } => "Whatsapp",
-                    MessengerProviderConfig::DiscordWebhook { .. } => "Discord Webhook",
-                    MessengerProviderConfig::SlackWebhook { .. } => "Slack Webhook",
+                let (provider_type, masked_detail) = match config {
+                    MessengerProviderConfig::Discord { .. } => ("Discord", None),
+                    MessengerProviderConfig::Slack { .. } => ("Slack", None),
+                    MessengerProviderConfig::Signal { .. } => ("Signal", None),
+                    MessengerProviderConfig::Whatsapp { .. } => ("Whatsapp", None),
+                    MessengerProviderConfig::DiscordWebhook { webhook_url, .. } => (
+                        "Discord Webhook",
+                        if webhook_url.is_some() {
+                            Some("webhook: ********")
+                        } else {
+                            None
+                        },
+                    ),
+                    MessengerProviderConfig::SlackWebhook { webhook_url, .. } => (
+                        "Slack Webhook",
+                        if webhook_url.is_some() {
+                            Some("webhook: ********")
+                        } else {
+                            None
+                        },
+                    ),
                 };
                 let is_active = app
                     .config
@@ -108,13 +122,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 } else {
                     Style::default()
                 };
+                let detail = masked_detail
+                    .map(|d| format!(" ({provider_type}) · {d}"))
+                    .unwrap_or_else(|| format!(" ({provider_type})"));
                 ListItem::new(Line::from(vec![
                     Span::raw("  "),
                     Span::styled(name.as_str(), style.add_modifier(Modifier::BOLD)),
-                    Span::styled(
-                        format!(" ({provider_type})"),
-                        Style::default().fg(Color::Gray),
-                    ),
+                    Span::styled(detail, Style::default().fg(Color::Gray)),
                     Span::styled(marker, Style::default().fg(Color::Green)),
                 ]))
             })
@@ -155,7 +169,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     if let Some(ModalState::MessengerAdd { highlighted }) = &app.modal {
-        let providers = ["discord", "slack", "signal", "whatsapp"];
+        let providers = [
+            "discord",
+            "discord_webhook",
+            "slack",
+            "slack_webhook",
+            "signal",
+            "whatsapp",
+        ];
         let items: Vec<String> = providers.iter().map(|s| s.to_string()).collect();
         super::super::widgets::modal::render_list_modal(
             frame,
@@ -171,21 +192,36 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         field_index,
         label,
         buffer,
+        is_secret,
+        error,
         ..
     }) = &app.modal
     {
         let total = messenger_fields_with_name(provider).len();
         let title = format!("{} ({}/{})", provider, field_index + 1, total);
         super::super::widgets::modal::render_modal(frame, area, &title, 55, 20, |frame, area| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
+            let has_error = error.is_some();
+            let constraints = if has_error {
+                vec![
+                    Constraint::Length(1), // label
+                    Constraint::Length(1), // input line
+                    Constraint::Length(1), // error line
+                    Constraint::Length(1), // blank
+                    Constraint::Length(1), // hotkeys
+                    Constraint::Min(0),
+                ]
+            } else {
+                vec![
                     Constraint::Length(1), // label
                     Constraint::Length(1), // input line
                     Constraint::Length(1), // blank
                     Constraint::Length(1), // hotkeys
                     Constraint::Min(0),
-                ])
+                ]
+            };
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(constraints)
                 .split(area);
 
             let label_widget = Paragraph::new(Span::styled(
@@ -196,9 +232,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ));
             frame.render_widget(label_widget, chunks[0]);
 
+            let display_buffer = if *is_secret {
+                "●".repeat(buffer.chars().count())
+            } else {
+                buffer.clone()
+            };
             let input_line = Line::from(vec![
                 Span::styled("> ", Style::default().fg(Color::Yellow)),
-                Span::raw(buffer.as_str()),
+                Span::raw(display_buffer),
                 Span::styled(
                     "_",
                     Style::default()
@@ -208,6 +249,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ]);
             frame.render_widget(Paragraph::new(input_line), chunks[1]);
 
+            let hotkey_idx = if has_error { 4 } else { 3 };
+            if has_error {
+                let error_text = error.as_ref().unwrap();
+                let error_widget = Paragraph::new(Span::styled(
+                    error_text.as_str(),
+                    Style::default().fg(Color::Red),
+                ));
+                frame.render_widget(error_widget, chunks[2]);
+            }
+
             let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
                 ("ENTER", "Next"),
                 ("ESC", "Cancel"),
@@ -215,7 +266,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let hotkey_widget = Paragraph::new(hotkey_line)
                 .alignment(Alignment::Center)
                 .style(Style::default().bg(Color::Indexed(236)));
-            frame.render_widget(hotkey_widget, chunks[3]);
+            frame.render_widget(hotkey_widget, chunks[hotkey_idx]);
         });
     }
 }
@@ -409,7 +460,14 @@ fn open_messenger_select_modal(app: &mut App) {
 }
 
 pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
-    let providers = ["discord", "slack", "signal", "whatsapp"];
+    let providers = [
+        "discord",
+        "discord_webhook",
+        "slack",
+        "slack_webhook",
+        "signal",
+        "whatsapp",
+    ];
     let count = providers.len();
     match key.code {
         KeyCode::Up => {
@@ -435,6 +493,8 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
                     fields: Vec::new(),
                     buffer: String::new(),
                     label: "Configuration Name".to_string(),
+                    is_secret: false,
+                    error: None,
                 });
             }
         }
@@ -445,45 +505,85 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Returns the ordered list of (label, default_value) for a messenger provider,
+/// Field definition for a messenger provider input field.
+/// (label, default_value, is_secret)
+type MessengerField = (String, String, bool);
+
+/// Returns the ordered list of fields for a messenger provider,
 /// **including** the leading "Configuration Name" field at index 0.
-fn messenger_fields_with_name(provider: &str) -> Vec<(String, String)> {
-    let mut fields = vec![("Configuration Name".to_string(), provider.to_string())];
+fn messenger_fields_with_name(provider: &str) -> Vec<MessengerField> {
+    let mut fields = vec![("Configuration Name".to_string(), provider.to_string(), false)];
     fields.extend(messenger_fields(provider));
     fields
 }
 
-/// Returns the ordered list of (label, default_value) for a messenger provider.
-fn messenger_fields(provider: &str) -> Vec<(String, String)> {
+/// Returns the ordered list of fields for a messenger provider.
+fn messenger_fields(provider: &str) -> Vec<MessengerField> {
     match provider {
         "discord" => vec![
-            ("Channel ID".to_string(), String::new()),
+            ("Channel ID".to_string(), String::new(), false),
             (
                 "Bot Token Env Var".to_string(),
                 "DISCORD_BOT_TOKEN".to_string(),
+                false,
             ),
         ],
         "slack" => vec![
-            ("Channel ID".to_string(), String::new()),
+            ("Channel ID".to_string(), String::new(), false),
             (
                 "Bot Token Env Var".to_string(),
                 "SLACK_BOT_TOKEN".to_string(),
+                false,
             ),
         ],
         "signal" => vec![
-            ("Recipient".to_string(), String::new()),
-            ("RPC URL Env Var".to_string(), "SIGNAL_RPC_URL".to_string()),
-            ("Account Env Var".to_string(), "SIGNAL_ACCOUNT".to_string()),
+            ("Recipient".to_string(), String::new(), false),
+            (
+                "RPC URL Env Var".to_string(),
+                "SIGNAL_RPC_URL".to_string(),
+                false,
+            ),
+            (
+                "Account Env Var".to_string(),
+                "SIGNAL_ACCOUNT".to_string(),
+                false,
+            ),
         ],
         "whatsapp" => vec![
-            ("Recipient".to_string(), String::new()),
+            ("Recipient".to_string(), String::new(), false),
             (
                 "Access Token Env Var".to_string(),
                 "WHATSAPP_ACCESS_TOKEN".to_string(),
+                false,
             ),
             (
                 "Phone Number ID Env Var".to_string(),
                 "WHATSAPP_PHONE_NUMBER_ID".to_string(),
+                false,
+            ),
+        ],
+        "discord_webhook" => vec![
+            (
+                "Webhook URL".to_string(),
+                String::new(),
+                true,
+            ),
+            (
+                "Webhook URL Env Var".to_string(),
+                "DISCORD_WEBHOOK_URL".to_string(),
+                false,
+            ),
+        ],
+        "slack_webhook" => vec![
+            (
+                "Webhook URL".to_string(),
+                String::new(),
+                true,
+            ),
+            (
+                "Webhook URL Env Var".to_string(),
+                "SLACK_WEBHOOK_URL".to_string(),
+                false,
             ),
         ],
         _ => vec![],
@@ -532,6 +632,36 @@ fn build_messenger_from_fields(
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| "WHATSAPP_PHONE_NUMBER_ID".to_string()),
         }),
+        "discord_webhook" => {
+            let webhook_url = fields.first().map(|(_, v)| v.clone());
+            let webhook_url = if webhook_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                None
+            } else {
+                webhook_url
+            };
+            Some(MessengerProviderConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env: fields
+                    .get(1)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| "DISCORD_WEBHOOK_URL".to_string()),
+            })
+        }
+        "slack_webhook" => {
+            let webhook_url = fields.first().map(|(_, v)| v.clone());
+            let webhook_url = if webhook_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+                None
+            } else {
+                webhook_url
+            };
+            Some(MessengerProviderConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env: fields
+                    .get(1)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| "SLACK_WEBHOOK_URL".to_string()),
+            })
+        }
         _ => None,
     }
 }
@@ -552,13 +682,15 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
 
     match key.code {
         KeyCode::Char(c) => {
-            if let Some(ModalState::MessengerInput { buffer, .. }) = &mut app.modal {
+            if let Some(ModalState::MessengerInput { buffer, error, .. }) = &mut app.modal {
                 buffer.push(c);
+                *error = None; // Clear error on input
             }
         }
         KeyCode::Backspace => {
-            if let Some(ModalState::MessengerInput { buffer, .. }) = &mut app.modal {
+            if let Some(ModalState::MessengerInput { buffer, error, .. }) = &mut app.modal {
                 buffer.pop();
+                *error = None; // Clear error on input
             }
         }
         KeyCode::Enter => {
@@ -578,15 +710,45 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
             let value = if current_buffer.is_empty() {
                 all_field_defs
                     .get(field_index)
-                    .map(|(_, def)| def.clone())
+                    .map(|(_, def, _)| def.clone())
                     .unwrap_or_default()
             } else {
                 current_buffer
             };
+
+            // Validate webhook URL fields before advancing
+            if let Some((label, _, is_secret)) = all_field_defs.get(field_index)
+                && *is_secret
+                && !value.trim().is_empty()
+            {
+                let valid = match provider_name.as_str() {
+                    "discord_webhook" => {
+                        claudine::messaging::validate_discord_webhook_url(&value)
+                    }
+                    "slack_webhook" => {
+                        claudine::messaging::validate_slack_webhook_url(&value)
+                    }
+                    _ => true,
+                };
+                if !valid {
+                    let error_msg = format!("Invalid {} format", label);
+                    app.modal = Some(ModalState::MessengerInput {
+                        provider: provider_name,
+                        field_index,
+                        fields: collected_fields,
+                        buffer: value,
+                        label: label.clone(),
+                        is_secret: *is_secret,
+                        error: Some(error_msg),
+                    });
+                    return;
+                }
+            }
+
             collected_fields.push((
                 all_field_defs
                     .get(field_index)
-                    .map(|(l, _)| l.clone())
+                    .map(|(l, _, _)| l.clone())
                     .unwrap_or_default(),
                 value,
             ));
@@ -594,13 +756,15 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
             if field_index + 1 < total_fields {
                 // Advance to next field
                 let next_idx = field_index + 1;
-                let (next_label, next_default) = all_field_defs[next_idx].clone();
+                let (next_label, next_default, next_secret) = all_field_defs[next_idx].clone();
                 app.modal = Some(ModalState::MessengerInput {
                     provider: provider_name,
                     field_index: next_idx,
                     fields: collected_fields,
                     buffer: next_default,
                     label: next_label,
+                    is_secret: next_secret,
+                    error: None,
                 });
             } else {
                 // All fields collected. Index 0 is the user-defined config name;
@@ -710,5 +874,207 @@ mod tests {
                 for_repo: false
             })
         ));
+    }
+
+    #[test]
+    fn webhook_provider_field_definitions() {
+        let discord_fields = messenger_fields("discord_webhook");
+        assert_eq!(discord_fields.len(), 2);
+        assert_eq!(discord_fields[0].0, "Webhook URL");
+        assert!(discord_fields[0].2); // is_secret
+        assert_eq!(discord_fields[0].1, ""); // default empty
+        assert_eq!(discord_fields[1].0, "Webhook URL Env Var");
+        assert!(!discord_fields[1].2); // not secret
+        assert_eq!(discord_fields[1].1, "DISCORD_WEBHOOK_URL");
+
+        let slack_fields = messenger_fields("slack_webhook");
+        assert_eq!(slack_fields.len(), 2);
+        assert_eq!(slack_fields[0].0, "Webhook URL");
+        assert!(slack_fields[0].2); // is_secret
+        assert_eq!(slack_fields[1].0, "Webhook URL Env Var");
+        assert!(!slack_fields[1].2); // not secret
+        assert_eq!(slack_fields[1].1, "SLACK_WEBHOOK_URL");
+    }
+
+    #[test]
+    fn build_messenger_from_fields_discord_webhook() {
+        let fields = vec![
+            ("Webhook URL".to_string(), "https://discord.com/api/webhooks/123/abc".to_string()),
+            ("Webhook URL Env Var".to_string(), "DISCORD_WEBHOOK_URL".to_string()),
+        ];
+        let config = build_messenger_from_fields("discord_webhook", &fields).unwrap();
+        match config {
+            MessengerProviderConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, Some("https://discord.com/api/webhooks/123/abc".to_string()));
+                assert_eq!(webhook_url_env, "DISCORD_WEBHOOK_URL");
+            }
+            _ => panic!("expected DiscordWebhook"),
+        }
+    }
+
+    #[test]
+    fn build_messenger_from_fields_slack_webhook_env_only() {
+        let fields = vec![
+            ("Webhook URL".to_string(), "".to_string()),
+            ("Webhook URL Env Var".to_string(), "SLACK_WEBHOOK_URL".to_string()),
+        ];
+        let config = build_messenger_from_fields("slack_webhook", &fields).unwrap();
+        match config {
+            MessengerProviderConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, None); // blank becomes None
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+            _ => panic!("expected SlackWebhook"),
+        }
+    }
+
+    #[test]
+    fn add_modal_includes_webhook_providers() {
+        let mut app = test_app();
+        handle_key(&mut app, key(KeyCode::Char('a')));
+
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerAdd { highlighted: 0 })
+        ));
+
+        // The providers array should have 6 entries including webhooks
+        // We verify by checking that discord_webhook and slack_webhook
+        // can be selected
+        if let Some(ModalState::MessengerAdd { .. }) = &app.modal {
+            // Move down to discord_webhook (index 1)
+            handle_messenger_add_modal(&mut app, key(KeyCode::Down));
+            assert_eq!(app.modal_highlighted(), 1);
+
+            // Select it
+            handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
+            assert!(matches!(
+                app.modal,
+                Some(ModalState::MessengerInput {
+                    provider,
+                    field_index: 0,
+                    label,
+                    is_secret: false,
+                    error: None,
+                    ..
+                }) if provider == "discord_webhook" && label == "Configuration Name"
+            ));
+        }
+    }
+
+    #[test]
+    fn webhook_url_validation_rejects_invalid_url() {
+        let mut app = test_app();
+        // Start a discord_webhook input flow
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord_webhook".to_string(),
+            field_index: 1, // Webhook URL field (index 0 is name, index 1 is URL)
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "not-a-valid-url".to_string(),
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+        });
+
+        handle_messenger_input_modal(&mut app, key(KeyCode::Enter));
+
+        // Should stay on the same field with an error
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerInput {
+                provider,
+                field_index: 1,
+                error: Some(_),
+                is_secret: true,
+                ..
+            }) if provider == "discord_webhook"
+        ));
+    }
+
+    #[test]
+    fn webhook_url_validation_accepts_valid_url() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "discord_webhook".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "https://discord.com/api/webhooks/123/abc".to_string(),
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+        });
+
+        handle_messenger_input_modal(&mut app, key(KeyCode::Enter));
+
+        // Should advance to the next field (env var)
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerInput {
+                provider,
+                field_index: 2,
+                label,
+                is_secret: false,
+                error: None,
+                ..
+            }) if provider == "discord_webhook" && label == "Webhook URL Env Var"
+        ));
+    }
+
+    #[test]
+    fn env_only_webhook_skips_url_validation() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::MessengerInput {
+            provider: "slack_webhook".to_string(),
+            field_index: 1,
+            fields: vec![("Configuration Name".to_string(), "test".to_string())],
+            buffer: "".to_string(), // empty URL
+            label: "Webhook URL".to_string(),
+            is_secret: true,
+            error: None,
+        });
+
+        handle_messenger_input_modal(&mut app, key(KeyCode::Enter));
+
+        // Should advance to env var field since URL is blank
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerInput {
+                provider,
+                field_index: 2,
+                label,
+                is_secret: false,
+                error: None,
+                ..
+            }) if provider == "slack_webhook" && label == "Webhook URL Env Var"
+        ));
+    }
+
+    #[test]
+    fn no_desktop_provider_in_add_modal() {
+        let mut app = test_app();
+        handle_key(&mut app, key(KeyCode::Char('a')));
+
+        if let Some(ModalState::MessengerAdd { .. }) = &app.modal {
+            // Try to find "desktop" in the provider list by scrolling through all
+            let providers = [
+                "discord", "discord_webhook", "slack", "slack_webhook",
+                "signal", "whatsapp",
+            ];
+            for i in 0..providers.len() {
+                app.set_modal_highlighted(i);
+                handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
+                if let Some(ModalState::MessengerInput { provider, .. }) = &app.modal {
+                    assert_ne!(provider, "desktop");
+                    // Cancel and reopen
+                    app.modal = Some(ModalState::MessengerAdd { highlighted: i });
+                }
+            }
+        }
     }
 }
