@@ -18,6 +18,7 @@
 
 pub mod event;
 pub mod frame;
+pub mod fuzzy;
 pub mod keybindings;
 pub mod label;
 pub mod sort;
@@ -27,6 +28,7 @@ pub mod validation;
 
 pub use event::EventOutcome;
 pub use frame::{BorderStyle, FrameChrome, FrameChromeConfig, HeightSpec, Margin};
+pub use fuzzy::FuzzyFilter;
 pub use keybindings::KeyBindings;
 pub use label::{Label, LabelPosition, render_with_label};
 pub use sort::SortOrder;
