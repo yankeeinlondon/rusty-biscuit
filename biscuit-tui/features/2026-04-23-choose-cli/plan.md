@@ -52,6 +52,12 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase5: []
+source_files_during_phase_6:
+  - biscuit-tui/lib/src/core/keybindings.rs
+  - biscuit-tui/lib/src/components/choose_many.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase6: []
 packages:
   - tui-chrome
   - tui-chrome-cli
