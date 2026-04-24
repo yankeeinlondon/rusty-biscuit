@@ -26,7 +26,8 @@ pub use components::{
     RowCell, SelectionMode, TextAreaInput, TextAreaInputState, TextInput, TextInputState,
 };
 pub use core::{
-    BorderStyle, CANCELLED_KIND, ComponentTheme, EventOutcome, FrameChrome, FrameChromeConfig,
-    HandleEvent, HeightSpec, KeyBindings, Label, LabelPosition, Margin, SortOrder, StandaloneState,
-    ValidationState, drive_event_loop, render_with_label, run_standalone,
+    ABORTED_KIND, BorderStyle, CANCELLED_KIND, ComponentTheme, EventOutcome, FrameChrome,
+    FrameChromeConfig, HandleEvent, HeightSpec, KeyBindings, Label, LabelPosition, LoopExit,
+    Margin, SortOrder, StandaloneState, ValidationState, drive_event_loop, render_with_label,
+    run_standalone,
 };

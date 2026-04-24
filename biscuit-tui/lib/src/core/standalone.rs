@@ -76,16 +76,52 @@ pub trait HandleEvent: StatefulWidget {
     ) -> EventOutcome;
 }
 
-/// Error returned by [`run_standalone`] when the user cancels.
+/// Error kind returned by [`run_standalone`] when the user presses
+/// `Ctrl-C`.
 ///
-/// The runner surfaces cancellation through [`std::io::Error`] with
-/// [`std::io::ErrorKind::Interrupted`] so callers can match on the
-/// kind without pulling in a custom error enum.
+/// Maps to `SIGINT`-style cancellation. The runner pairs this with the
+/// message `"interrupted"` so downstream CLI code can branch on the
+/// [`io::ErrorKind`] without parsing the message.
 pub const CANCELLED_KIND: io::ErrorKind = io::ErrorKind::Interrupted;
+
+/// Error kind returned by [`run_standalone`] when the user presses
+/// `Esc` (or the component otherwise returns
+/// [`EventOutcome::Cancelled`]).
+///
+/// Distinct from [`CANCELLED_KIND`] so that the CLI can surface a
+/// different exit code for user-initiated Esc versus `Ctrl-C`.
+pub const ABORTED_KIND: io::ErrorKind = io::ErrorKind::ConnectionAborted;
+
+/// The three terminal outcomes of a single standalone event loop.
+///
+/// Returned by [`drive_event_loop`] and [`drive_event_loop_with_hint`].
+/// [`run_standalone`] maps the variants back onto [`io::Result`] so
+/// existing call sites keep working without change.
+///
+/// ## Variants
+///
+/// - [`LoopExit::Submitted`] — the component returned
+///   [`EventOutcome::Submitted`]; carries the owned `value()` from the
+///   component state.
+/// - [`LoopExit::CtrlC`] — the user pressed `Ctrl-C`. The runner
+///   intercepts this before delegating to the component.
+/// - [`LoopExit::Esc`] — the component returned
+///   [`EventOutcome::Cancelled`] (typically because the user pressed
+///   `Esc`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoopExit<V> {
+    /// The component submitted `value`.
+    Submitted(V),
+    /// The user pressed `Ctrl-C`.
+    CtrlC,
+    /// The user pressed `Esc` (or the component otherwise returned
+    /// [`EventOutcome::Cancelled`]).
+    Esc,
+}
 
 /// Drives an event loop against an existing [`Terminal`] until the
 /// component returns [`EventOutcome::Submitted`] or
-/// [`EventOutcome::Cancelled`].
+/// [`EventOutcome::Cancelled`], or until `Ctrl-C` is pressed.
 ///
 /// `read_event` yields the next event (blocking). Separating the
 /// event source from the loop body lets tests inject synthetic events
@@ -93,10 +129,10 @@ pub const CANCELLED_KIND: io::ErrorKind = io::ErrorKind::Interrupted;
 ///
 /// ## Returns
 ///
-/// - `Ok(Some(value))` — the user submitted. The value comes from
-///   `state.value()`.
-/// - `Ok(None)` — the user cancelled.
-/// - `Err(e)` — a terminal I/O error occurred.
+/// `Ok(LoopExit::Submitted(value))` on submission,
+/// `Ok(LoopExit::Esc)` on component-level cancellation (Esc), and
+/// `Ok(LoopExit::CtrlC)` when the runner observes `Ctrl-C`. Returns
+/// `Err` only for terminal I/O errors.
 ///
 /// ## Notes
 ///
@@ -106,14 +142,14 @@ pub const CANCELLED_KIND: io::ErrorKind = io::ErrorKind::Interrupted;
 ///   key release events skip the redraw.
 /// - Key release events (sent by crossterm on some platforms) are
 ///   silently skipped.
-/// - `Ctrl-C` is mapped to cancellation at the runner layer so that
-///   every component honours it without needing its own binding.
+/// - `Ctrl-C` is mapped to [`LoopExit::CtrlC`] at the runner layer so
+///   that every component honours it without needing its own binding.
 pub fn drive_event_loop<C, S, B, F>(
     terminal: &mut Terminal<B>,
     component: C,
     state: &mut S,
     read_event: F,
-) -> io::Result<Option<S::Value>>
+) -> io::Result<LoopExit<S::Value>>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState,
@@ -131,7 +167,7 @@ pub fn drive_event_loop_with_hint<C, S, B, F>(
     state: &mut S,
     mut read_event: F,
     help_hint: Option<&str>,
-) -> io::Result<Option<S::Value>>
+) -> io::Result<LoopExit<S::Value>>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState,
@@ -166,11 +202,11 @@ where
                     continue;
                 }
                 if is_ctrl_c(&key) {
-                    return Ok(None);
+                    return Ok(LoopExit::CtrlC);
                 }
                 match component.handle_event(state, key) {
-                    EventOutcome::Submitted => return Ok(Some(state.value())),
-                    EventOutcome::Cancelled => return Ok(None),
+                    EventOutcome::Submitted => return Ok(LoopExit::Submitted(state.value())),
+                    EventOutcome::Cancelled => return Ok(LoopExit::Esc),
                     EventOutcome::Consumed => {
                         needs_redraw = true;
                     }
@@ -203,8 +239,9 @@ where
 ///
 /// ## Errors
 ///
-/// Returns [`io::ErrorKind::Interrupted`] on cancellation (Esc or
-/// `Ctrl-C`). Propagates any other terminal I/O error.
+/// Returns [`CANCELLED_KIND`] when the user pressed `Ctrl-C`, and
+/// [`ABORTED_KIND`] when the user pressed `Esc`. Propagates any other
+/// terminal I/O error.
 pub fn run_standalone<C, S, V>(component: C, mut state: S, height: Option<u16>) -> io::Result<V>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
@@ -228,13 +265,24 @@ where
     } else {
         Some(hint.as_str())
     };
-    let loop_result = drive_event_loop_with_hint(&mut terminal, component, &mut state, event::read, hint_opt);
+    let loop_result =
+        drive_event_loop_with_hint(&mut terminal, component, &mut state, event::read, hint_opt);
 
     restore_terminal(fullscreen);
 
-    match loop_result? {
-        Some(value) => Ok(value),
-        None => Err(io::Error::new(CANCELLED_KIND, "cancelled")),
+    loop_exit_to_result(loop_result?)
+}
+
+/// Maps a [`LoopExit`] onto the [`io::Result`] contract used by the
+/// public [`run_standalone`] API.
+///
+/// Factored out so unit tests can exercise the mapping without
+/// spinning up a real terminal.
+fn loop_exit_to_result<V>(exit: LoopExit<V>) -> io::Result<V> {
+    match exit {
+        LoopExit::Submitted(v) => Ok(v),
+        LoopExit::CtrlC => Err(io::Error::new(CANCELLED_KIND, "interrupted")),
+        LoopExit::Esc => Err(io::Error::new(ABORTED_KIND, "cancelled")),
     }
 }
 
@@ -322,7 +370,7 @@ mod tests {
         Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
     }
 
-    fn run(events: Vec<Event>) -> io::Result<Option<String>> {
+    fn run(events: Vec<Event>) -> io::Result<LoopExit<String>> {
         let backend = TestBackend::new(20, 3);
         let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
         let mut state = EchoState::default();
@@ -333,7 +381,7 @@ mod tests {
         })
     }
 
-    fn run_capturing_state(events: Vec<Event>) -> (io::Result<Option<String>>, EchoState) {
+    fn run_capturing_state(events: Vec<Event>) -> (io::Result<LoopExit<String>>, EchoState) {
         let backend = TestBackend::new(20, 3);
         let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
         let mut state = EchoState::default();
@@ -353,14 +401,14 @@ mod tests {
             key_event(KeyCode::Enter),
         ];
         let result = run(events).expect("drive loop");
-        assert_eq!(result, Some("hi".to_string()));
+        assert_eq!(result, LoopExit::Submitted("hi".to_string()));
     }
 
     #[test]
     fn cancels_on_esc() {
         let events = vec![key_event(KeyCode::Char('x')), key_event(KeyCode::Esc)];
         let result = run(events).expect("drive loop");
-        assert_eq!(result, None);
+        assert_eq!(result, LoopExit::Esc);
     }
 
     #[test]
@@ -370,7 +418,20 @@ mod tests {
             KeyModifiers::CONTROL,
         ))];
         let result = run(events).expect("drive loop");
-        assert_eq!(result, None);
+        assert_eq!(result, LoopExit::CtrlC);
+    }
+
+    #[test]
+    fn loop_exit_distinguishes_esc_from_ctrl_c() {
+        let esc = run(vec![key_event(KeyCode::Esc)]).expect("drive loop");
+        let ctrl_c = run(vec![Event::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))])
+        .expect("drive loop");
+        assert_eq!(esc, LoopExit::Esc);
+        assert_eq!(ctrl_c, LoopExit::CtrlC);
+        assert_ne!(esc, ctrl_c);
     }
 
     #[test]
@@ -382,7 +443,7 @@ mod tests {
             key_event(KeyCode::Enter),
         ];
         let result = run(events).expect("drive loop");
-        assert_eq!(result, Some("a".to_string()));
+        assert_eq!(result, LoopExit::Submitted("a".to_string()));
     }
 
     #[test]
@@ -398,7 +459,7 @@ mod tests {
             key_event(KeyCode::Enter),
         ];
         let result = run(events).expect("drive loop");
-        assert_eq!(result, Some("b".to_string()));
+        assert_eq!(result, LoopExit::Submitted("b".to_string()));
     }
 
     #[test]
@@ -409,7 +470,10 @@ mod tests {
             key_event(KeyCode::Enter),
         ];
         let (result, state) = run_capturing_state(events);
-        assert_eq!(result.expect("drive loop"), Some(String::new()));
+        assert_eq!(
+            result.expect("drive loop"),
+            LoopExit::Submitted(String::new())
+        );
         // Initial draw (1). F5/F6 are Ignored — no extra draws. Enter
         // submits and exits the loop without a further draw.
         assert_eq!(state.render_count, 1);
@@ -423,7 +487,10 @@ mod tests {
             key_event(KeyCode::Enter),
         ];
         let (result, state) = run_capturing_state(events);
-        assert_eq!(result.expect("drive loop"), Some("ab".to_string()));
+        assert_eq!(
+            result.expect("drive loop"),
+            LoopExit::Submitted("ab".to_string())
+        );
         // Initial draw + 2 Consumed events = 3 draws.
         assert_eq!(state.render_count, 3);
     }
@@ -432,7 +499,10 @@ mod tests {
     fn resize_events_trigger_a_redraw() {
         let events = vec![Event::Resize(40, 10), key_event(KeyCode::Enter)];
         let (result, state) = run_capturing_state(events);
-        assert_eq!(result.expect("drive loop"), Some(String::new()));
+        assert_eq!(
+            result.expect("drive loop"),
+            LoopExit::Submitted(String::new())
+        );
         // Initial draw + resize redraw = 2 draws.
         assert_eq!(state.render_count, 2);
     }
@@ -462,7 +532,33 @@ mod tests {
             iter.next()
                 .ok_or_else(|| io::Error::other("no more events"))
         });
-        assert_eq!(result.expect("drive loop"), Some("hi".to_string()));
+        assert_eq!(
+            result.expect("drive loop"),
+            LoopExit::Submitted("hi".to_string())
+        );
         assert_eq!(state.render_count, 3);
+    }
+
+    #[test]
+    fn run_standalone_returns_aborted_kind_on_esc() {
+        let err = loop_exit_to_result::<()>(LoopExit::Esc).unwrap_err();
+        assert_eq!(err.kind(), ABORTED_KIND);
+    }
+
+    #[test]
+    fn run_standalone_returns_cancelled_kind_on_ctrl_c() {
+        let err = loop_exit_to_result::<()>(LoopExit::CtrlC).unwrap_err();
+        assert_eq!(err.kind(), CANCELLED_KIND);
+    }
+
+    #[test]
+    fn run_standalone_aborted_and_cancelled_kinds_are_distinct() {
+        assert_ne!(CANCELLED_KIND, ABORTED_KIND);
+    }
+
+    #[test]
+    fn loop_exit_to_result_forwards_submitted_value() {
+        let ok = loop_exit_to_result(LoopExit::Submitted("payload".to_string())).unwrap();
+        assert_eq!(ok, "payload");
     }
 }

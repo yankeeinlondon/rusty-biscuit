@@ -31,7 +31,8 @@ pub use keybindings::KeyBindings;
 pub use label::{Label, LabelPosition, render_with_label};
 pub use sort::SortOrder;
 pub use standalone::{
-    CANCELLED_KIND, HandleEvent, StandaloneState, drive_event_loop, run_standalone,
+    ABORTED_KIND, CANCELLED_KIND, HandleEvent, LoopExit, StandaloneState, drive_event_loop,
+    run_standalone,
 };
 pub use theme::ComponentTheme;
 pub use validation::ValidationState;
