@@ -21,7 +21,7 @@
 use std::io::{self, IsTerminal, Read};
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, Margin, SortOrder};
+use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, SortOrder};
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
@@ -300,6 +300,42 @@ pub fn build_chrome(args: &ChooseChromeArgs) -> FrameChromeConfig {
         border_label: args.border_label.clone(),
         margin: resolve_margin(args),
         ..Default::default()
+    }
+}
+
+/// Parses a `--height` argument into a [`HeightSpec`].
+///
+/// Accepts either a bare integer (interpreted as absolute cells) or
+/// an integer followed by `%` (interpreted as a percentage of the
+/// terminal height).
+///
+/// ## Errors
+///
+/// Returns an error message when the input is empty, fails to parse
+/// as an unsigned integer, or specifies a percentage outside
+/// `1..=100`.
+pub fn parse_height_spec(s: &str) -> Result<HeightSpec, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("height must not be empty".to_string());
+    }
+    if let Some(num) = trimmed.strip_suffix('%') {
+        let raw = num.trim();
+        let parsed: u8 = raw
+            .parse()
+            .map_err(|_| format!("invalid height percent: {raw}"))?;
+        if !(1..=100).contains(&parsed) {
+            return Err("percent must be between 1 and 100".to_string());
+        }
+        Ok(HeightSpec::Percent(parsed))
+    } else {
+        let parsed: u16 = trimmed
+            .parse()
+            .map_err(|_| format!("invalid height: {trimmed}"))?;
+        if parsed == 0 {
+            return Err("height must be greater than 0".to_string());
+        }
+        Ok(HeightSpec::Cells(parsed))
     }
 }
 
@@ -655,5 +691,43 @@ mod tests {
         apply_sort(&mut options, SortOrder::Natural);
         let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn parse_height_spec_accepts_bare_integer_as_cells() {
+        assert_eq!(parse_height_spec("10"), Ok(HeightSpec::Cells(10)));
+        assert_eq!(parse_height_spec(" 5 "), Ok(HeightSpec::Cells(5)));
+    }
+
+    #[test]
+    fn parse_height_spec_accepts_percent_suffix() {
+        assert_eq!(parse_height_spec("50%"), Ok(HeightSpec::Percent(50)));
+        assert_eq!(parse_height_spec("100%"), Ok(HeightSpec::Percent(100)));
+        assert_eq!(parse_height_spec("1%"), Ok(HeightSpec::Percent(1)));
+    }
+
+    #[test]
+    fn parse_height_spec_rejects_empty_input() {
+        assert!(parse_height_spec("").is_err());
+        assert!(parse_height_spec("   ").is_err());
+    }
+
+    #[test]
+    fn parse_height_spec_rejects_zero_cells() {
+        // HeightSpec::Cells(0) would collapse the inline viewport to
+        // nothing; reject it at parse time with a clear message.
+        assert!(parse_height_spec("0").is_err());
+    }
+
+    #[test]
+    fn parse_height_spec_rejects_out_of_range_percent() {
+        assert!(parse_height_spec("0%").is_err());
+        assert!(parse_height_spec("101%").is_err());
+    }
+
+    #[test]
+    fn parse_height_spec_rejects_non_numeric_input() {
+        assert!(parse_height_spec("tall").is_err());
+        assert!(parse_height_spec("twenty%").is_err());
     }
 }

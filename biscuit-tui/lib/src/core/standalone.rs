@@ -27,7 +27,7 @@ use ratatui::{
 };
 
 use super::event::EventOutcome;
-use super::frame::{FrameChrome, FrameChromeConfig};
+use super::frame::{FrameChrome, FrameChromeConfig, HeightSpec};
 
 /// State types that can be driven to completion by [`run_standalone`].
 ///
@@ -311,8 +311,10 @@ where
 ///   (widgets in this crate are zero-sized markers).
 /// - `state` — the initial component state. Consumed by the runner.
 /// - `height` — `None` runs the prompt fullscreen (alternate screen).
-///   `Some(h)` runs inline using ratatui's [`Viewport::Inline`] for
-///   `h` lines below the current cursor.
+///   `Some(HeightSpec::Cells(n))` runs inline for `n` rows below the
+///   cursor. `Some(HeightSpec::Percent(p))` queries the current
+///   terminal size to translate the percentage into an absolute row
+///   count.
 ///
 /// ## Returns
 ///
@@ -323,7 +325,11 @@ where
 /// Returns [`CANCELLED_KIND`] when the user pressed `Ctrl-C`, and
 /// [`ABORTED_KIND`] when the user pressed `Esc`. Propagates any other
 /// terminal I/O error.
-pub fn run_standalone<C, S, V>(component: C, state: S, height: Option<u16>) -> io::Result<V>
+pub fn run_standalone<C, S, V>(
+    component: C,
+    state: S,
+    height: Option<HeightSpec>,
+) -> io::Result<V>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState<Value = V>,
@@ -338,10 +344,19 @@ where
 /// Behaviour matches [`run_standalone`] when `chrome.is_empty()`. A
 /// non-empty chrome draws a border and/or margin around the component
 /// on every frame.
+///
+/// ## Parameters
+///
+/// - `height` — `None` runs the prompt fullscreen (alternate screen).
+///   `Some(HeightSpec::Cells(n))` runs inline for `n` rows below the
+///   cursor. `Some(HeightSpec::Percent(p))` queries the current
+///   terminal size to translate the percentage into an absolute row
+///   count (clamped to a floor of 3 rows so there is always room for a
+///   list plus an error row).
 pub fn run_standalone_with_chrome<C, S, V>(
     component: C,
     mut state: S,
-    height: Option<u16>,
+    height: Option<HeightSpec>,
     chrome: FrameChromeConfig,
 ) -> io::Result<V>
 where
@@ -352,9 +367,14 @@ where
     let fullscreen = height.is_none();
     prepare_terminal(fullscreen)?;
 
+    let resolved_rows = match height {
+        Some(spec) => Some(resolve_height_spec(spec)?),
+        None => None,
+    };
+
     let backend = CrosstermBackend::new(io::stdout());
     let options = TerminalOptions {
-        viewport: match height {
+        viewport: match resolved_rows {
             Some(h) => Viewport::Inline(h),
             None => Viewport::Fullscreen,
         },
@@ -413,6 +433,23 @@ fn restore_terminal(fullscreen: bool) {
 fn is_ctrl_c(key: &KeyEvent) -> bool {
     matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
         && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// Resolves a [`HeightSpec`] to an absolute row count.
+///
+/// `Cells` pass through the [`HeightSpec::resolve`] clamp against the
+/// current terminal height; `Percent` queries
+/// [`crossterm::terminal::size`] once so the percentage is applied to
+/// the live terminal geometry.
+///
+/// ## Errors
+///
+/// Propagates any terminal I/O error reported by crossterm. When the
+/// size cannot be determined (e.g. stdout is not a TTY), the caller
+/// sees the underlying [`io::Error`].
+fn resolve_height_spec(spec: HeightSpec) -> io::Result<u16> {
+    let (_cols, rows) = crossterm::terminal::size()?;
+    Ok(spec.resolve(rows))
 }
 
 #[cfg(test)]

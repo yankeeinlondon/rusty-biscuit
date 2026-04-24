@@ -13,7 +13,7 @@ use tui_chrome::helpers::choice_builders::{
     choose_one_from_csv, choose_one_from_dictionary, choose_one_from_markdown_list,
 };
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseOne, ChooseOneState, Label,
+    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseOne, ChooseOneState, HeightSpec, Label,
     run_standalone_with_chrome,
 };
 
@@ -76,7 +76,11 @@ pub struct ChooseOneArgs {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error.
-pub fn run(args: ChooseOneArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+pub fn run(
+    args: ChooseOneArgs,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
     let chrome = build_chrome(&args.chrome);
@@ -88,12 +92,12 @@ pub fn run(args: ChooseOneArgs, output: OutputMode, height: Option<u16>) -> io::
 fn run_with_writer<F, W>(
     args: ChooseOneArgs,
     output: OutputMode,
-    height: Option<u16>,
+    height: Option<HeightSpec>,
     writer: &mut W,
     run_prompt: F,
 ) -> io::Result<i32>
 where
-    F: FnOnce(ChooseOneState, Option<u16>) -> io::Result<Option<String>>,
+    F: FnOnce(ChooseOneState, Option<HeightSpec>) -> io::Result<Option<String>>,
     W: Write,
 {
     let mut input = build_choice_input(&args)?;
@@ -288,10 +292,10 @@ mod tests {
         let status = run_with_writer(
             args,
             OutputMode::Json,
-            Some(5),
+            Some(HeightSpec::Cells(5)),
             &mut output,
             |state, height| {
-                assert_eq!(height, Some(5));
+                assert_eq!(height, Some(HeightSpec::Cells(5)));
                 assert_eq!(state.selected_id(), Some("Green"));
                 Ok(state.selected_value().cloned())
             },
@@ -300,6 +304,31 @@ mod tests {
 
         assert_eq!(status, 0);
         assert_eq!(String::from_utf8(output).unwrap(), "\"Green\"\n");
+    }
+
+    #[test]
+    fn run_propagates_percent_height_to_prompt() {
+        let args = ChooseOneArgs {
+            options: Some("A,B,C".into()),
+            selected: Some("B".into()),
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            Some(HeightSpec::Percent(50)),
+            &mut output,
+            |state, height| {
+                assert_eq!(height, Some(HeightSpec::Percent(50)));
+                Ok(state.selected_value().cloned())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"B\n");
     }
 
     #[test]

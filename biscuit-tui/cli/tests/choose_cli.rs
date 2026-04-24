@@ -283,3 +283,97 @@ fn choose_many_per_side_margin_flags_reach_event_loop() {
         .code(1)
         .stderr(predicate::str::contains("question:"));
 }
+
+#[test]
+fn choose_one_help_lists_height_flag() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--height"));
+}
+
+#[test]
+fn choose_many_help_lists_height_flag() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--height"));
+}
+
+#[test]
+fn choose_one_height_rejects_non_numeric_value() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--height", "tall"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid"));
+}
+
+#[test]
+fn choose_one_height_rejects_zero_cells() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--height", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("greater than 0"));
+}
+
+#[test]
+fn choose_one_height_rejects_zero_percent() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--height", "0%"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("between 1 and 100"));
+}
+
+#[test]
+fn choose_one_height_rejects_percent_above_100() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--height", "101%"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("between 1 and 100"));
+}
+
+#[test]
+fn choose_one_height_cells_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "c", "--height", "5"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_one_height_percent_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "c", "--height", "50%"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_many_height_cells_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "a", "b", "c", "--height", "8"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_many_height_percent_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "a", "b", "c", "--height", "25%"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}

@@ -7,6 +7,7 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use tui_chrome::HeightSpec;
 
 mod commands;
 mod output;
@@ -14,6 +15,7 @@ mod output;
 use commands::boolean_switch::{BooleanSwitchArgs, run as run_boolean_switch};
 use commands::choose_many::{ChooseManyArgs, run as run_choose_many};
 use commands::choose_one::{ChooseOneArgs, run as run_choose_one};
+use commands::common_choose::parse_height_spec;
 use commands::input_table::{InputTableArgs, run as run_input_table};
 use commands::text_area_input::{TextAreaInputArgs, run as run_text_area_input};
 use commands::text_input::{TextInputArgs, run as run_text_input};
@@ -27,9 +29,14 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = OutputMode::Raw, global = true)]
     output: OutputMode,
 
-    /// Render inline in `N` rows below the cursor instead of fullscreen.
-    #[arg(long, global = true)]
-    height: Option<u16>,
+    /// Render inline at an explicit height instead of fullscreen.
+    ///
+    /// Accepts an integer cell count (e.g. `--height 10`) or a
+    /// percentage suffix (e.g. `--height 50%`). Percentages clamp to
+    /// a floor of 3 rows so the list always has room for a header plus
+    /// one option.
+    #[arg(long, global = true, value_name = "CELLS_OR_PERCENT", value_parser = parse_height_spec)]
+    height: Option<HeightSpec>,
 
     #[command(subcommand)]
     command: Commands,

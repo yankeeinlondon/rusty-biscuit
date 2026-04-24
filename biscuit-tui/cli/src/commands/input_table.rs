@@ -32,8 +32,8 @@ use tui_chrome::components::input_table::{
     BooleanSwitchConfig, CellValue, TextAreaInputConfig, TextInputConfig,
 };
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChoiceOption, InputTable, InputTableColumn,
-    InputTableState, Row, RowCell, run_standalone,
+    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChoiceOption, HeightSpec, InputTable,
+    InputTableColumn, InputTableState, Row, RowCell, run_standalone,
 };
 
 use crate::output::OutputMode;
@@ -57,7 +57,11 @@ pub struct InputTableArgs {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error or an invalid JSON payload.
-pub fn run(args: InputTableArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+pub fn run(
+    args: InputTableArgs,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
     run_with_writer(args, output, height, &mut lock, |state, height| {
@@ -68,12 +72,12 @@ pub fn run(args: InputTableArgs, output: OutputMode, height: Option<u16>) -> io:
 fn run_with_writer<F, W>(
     args: InputTableArgs,
     output: OutputMode,
-    height: Option<u16>,
+    height: Option<HeightSpec>,
     writer: &mut W,
     run_prompt: F,
 ) -> io::Result<i32>
 where
-    F: FnOnce(InputTableState, Option<u16>) -> io::Result<Vec<Row>>,
+    F: FnOnce(InputTableState, Option<HeightSpec>) -> io::Result<Vec<Row>>,
     W: Write,
 {
     let column_specs = parse_columns(&args.columns)?;
@@ -721,10 +725,10 @@ mod tests {
         let status = run_with_writer(
             args,
             OutputMode::Raw,
-            Some(8),
+            Some(HeightSpec::Cells(8)),
             &mut output,
             |state, height| {
-                assert_eq!(height, Some(8));
+                assert_eq!(height, Some(HeightSpec::Cells(8)));
                 let rows = state.value().to_vec();
                 assert_eq!(rows[0].get_text("name"), Some("alice"));
                 assert_eq!(rows[0].get_boolean("active"), Some(true));

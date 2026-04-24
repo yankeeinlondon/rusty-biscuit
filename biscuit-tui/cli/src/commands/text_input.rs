@@ -8,7 +8,8 @@ use std::io::{self, Write};
 
 use clap::{Args, ValueEnum};
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, Label, LabelPosition, TextInput, TextInputState, run_standalone,
+    ABORTED_KIND, CANCELLED_KIND, HeightSpec, Label, LabelPosition, TextInput, TextInputState,
+    run_standalone,
 };
 
 use crate::output::{OutputMode, write_scalar};
@@ -64,7 +65,11 @@ impl From<LabelPositionArg> for LabelPosition {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error.
-pub fn run(args: TextInputArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+pub fn run(
+    args: TextInputArgs,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
     run_with_writer(args, output, height, &mut lock, |state, height| {
@@ -75,12 +80,12 @@ pub fn run(args: TextInputArgs, output: OutputMode, height: Option<u16>) -> io::
 fn run_with_writer<F, W>(
     args: TextInputArgs,
     output: OutputMode,
-    height: Option<u16>,
+    height: Option<HeightSpec>,
     writer: &mut W,
     run_prompt: F,
 ) -> io::Result<i32>
 where
-    F: FnOnce(TextInputState, Option<u16>) -> io::Result<String>,
+    F: FnOnce(TextInputState, Option<HeightSpec>) -> io::Result<String>,
     W: Write,
 {
     let mut state = TextInputState::new();
@@ -143,10 +148,10 @@ mod tests {
         let status = run_with_writer(
             args,
             OutputMode::Json,
-            Some(4),
+            Some(HeightSpec::Cells(4)),
             &mut output,
             |state, height| {
-                assert_eq!(height, Some(4));
+                assert_eq!(height, Some(HeightSpec::Cells(4)));
                 assert_eq!(state.value(), "Ada");
                 assert_eq!(state.label().map(|label| label.text.as_str()), Some("Name"));
                 Ok(state.value().to_string())
