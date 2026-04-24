@@ -11,7 +11,7 @@ start_phase: 2
 ### Steps
 
 1. **Create BrowserRenderable trait** - Add `BrowserRenderable` trait to `biscuit-terminal/lib/src/components/renderable.rs` with `render_to_browser()` and `render_to_browser_with_inline_variables()` methods
-2. **Implement HorizontalRule data structures** - Create `biscuit-terminal/lib/src/components/horizontal_rule.rs` with `RuleStyle`, `RulePlacement`, `RuleWeight` enums and `HorizontalRule` struct
+2. **Implement HorizontalRule data structures** - Create `biscuit-terminal/lib/src/components/horizontal_rule.rs` with `RuleStyle`, `RuleAlignment`, `RuleWeight` enums and `HorizontalRule` struct
 3. **Implement terminal rendering logic** - Add `Renderable` implementation with progressive enhancement tiers (Image → Unicode → ASCII fallbacks)
 4. **Implement browser rendering logic** - Add `BrowserRenderable` implementation generating SVG strings with CSS variables and `currentColor` support
 5. **Create visual style SVG templates** - Implement SVG generation for all 7 visual styles (`dashes`, `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`)
@@ -36,7 +36,7 @@ start_phase: 2
 ### Validation Checkpoints
 
 - ✅ All markdown syntax variants (`---`, `***`, `___`) with attributes parse correctly
-- ✅ Attribute parsing handles all supported properties (style, placement, weight, width, color)
+- ✅ Attribute parsing handles all supported properties (style, alignment, weight, width, color)
 - ✅ Terminal output correctly renders through biscuit-terminal component
 - ✅ HTML output generates valid SVG with proper styling
 

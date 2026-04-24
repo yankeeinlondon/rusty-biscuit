@@ -17,11 +17,11 @@ The implementation is highly robust, well-documented, and thoroughly tested. The
 While the implementation meets all core requirements and passes its extensive test suite, the following items were identified for future consideration:
 
 ### 2.1 CSS Variable Substitution Bug (Minor)
-The `HorizontalRule::render_to_browser_with_inline_variables` implementation uses a simple string replacement:
+The `HorizontalRule::render_to_browser_with_inline_variables` implementation uses a simple string realignment:
 ```rust
 svg.replace(&format!("var(--{})", key), value)
 ```
-However, the `render_to_browser` method generates tokens with fallbacks, such as `var(--hr-color, blue)`. The current replacement logic will fail to match these tokens because of the embedded fallback value. 
+However, the `render_to_browser` method generates tokens with fallbacks, such as `var(--hr-color, blue)`. The current realignment logic will fail to match these tokens because of the embedded fallback value. 
 
 *   **Impact**: Per-instance overrides for internal variables (`hr-color`, `hr-weight`, `hr-width`) through the `variables` map will only work if the user has explicitly set those attributes to a bare `var(--name)` string. They do not override the default baked-in fallbacks.
 *   **Recommendation**: Use a regular expression for substitution that accounts for optional CSS variable fallbacks, or update the `style` attribute declarations in the root `<svg>` when these keys are present in the variables map.

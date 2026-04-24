@@ -36,7 +36,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 ### 1.1 Run `cargo fmt` and fix brace structure (B5)
 
 - File: `biscuit-terminal/lib/src/components/horizontal_rule.rs`
-- Run `cargo fmt -p biscuit-terminal`. Also manually inspect the `resolve_width` function (lines ~183-195) — the review flags broken brace indentation. After fmt, the `None => { match self.placement { ... } }` block should nest cleanly.
+- Run `cargo fmt -p biscuit-terminal`. Also manually inspect the `resolve_width` function (lines ~183-195) — the review flags broken brace indentation. After fmt, the `None => { match self.alignment { ... } }` block should nest cleanly.
 - Confirm `resolve_width` semantics are unchanged (Full → `term_width`, Centered/Left/Right → 80%).
 
 ### 1.2 Simplify `InsetLine`/`CurtainRod` halved repeats (B7)
@@ -175,7 +175,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 ### 3.2 Simplify `render_to_browser_with_inline_variables`
 
 - Same file.
-- Current: string-replaces `var(--name)` tokens. That's fine to keep, but now `render_to_browser()` actually contains `var(--hr-weight)` etc., so the replacement has real targets.
+- Current: string-replaces `var(--name)` tokens. That's fine to keep, but now `render_to_browser()` actually contains `var(--hr-weight)` etc., so the realignment has real targets.
 - Keep the method's signature. Behavior after 3.1 is automatically correct — no code change required beyond updating doc comments to reflect "this now overrides `--hr-weight`, `--hr-color`, `--hr-width` as declared by the default output." Variables passed in override via `var(--name)` string substitution.
 - Edge case: `HashMap` key ordering is nondeterministic; since each `--hr-*` variable is substituted independently, order does not matter. Assert this with a test.
 
@@ -205,7 +205,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 - File: `biscuit-terminal/lib/src/prelude.rs`.
 - Add:
   ```rust
-  pub use crate::components::horizontal_rule::{HorizontalRule, RulePlacement, RuleStyle, RuleWeight};
+  pub use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
   pub use crate::components::renderable::BrowserRenderable;
   ```
 - Place alphabetically with sibling exports (`block_quote`, `compose`, ...).
@@ -219,7 +219,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 
   let rule = HorizontalRule::new()
       .style(RuleStyle::Waves)
-      .placement(RulePlacement::Centered)
+      .alignment(RuleAlignment::Centered)
       .weight(RuleWeight::Medium)
       .width("75%");
   ```
@@ -253,7 +253,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 - Add an `examples` block (a `#[test] fn prelude_exports_compile()`) in `biscuit-terminal/lib/tests/prelude.rs` (or the existing integration test file for prelude — find with `grep -l 'biscuit_terminal::prelude' biscuit-terminal/lib/tests/`). Test body:
   ```rust
   use biscuit_terminal::prelude::*;
-  let _ = HorizontalRule::new().style(RuleStyle::Dashes).placement(RulePlacement::Full).weight(RuleWeight::Medium);
+  let _ = HorizontalRule::new().style(RuleStyle::Dashes).alignment(RuleAlignment::Full).weight(RuleWeight::Medium);
   fn takes_browser_renderable<T: BrowserRenderable>(_: T) {}
   takes_browser_renderable(HorizontalRule::new());
   ```
@@ -267,7 +267,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
   ///
   /// let rule = HorizontalRule::new()
   ///     .style(RuleStyle::Waves)
-  ///     .placement(RulePlacement::Centered)
+  ///     .alignment(RuleAlignment::Centered)
   ///     .weight(RuleWeight::Medium)
   ///     .width("75%");
   ///
@@ -358,7 +358,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 ### 5.4 Validate HR attribute values (B1)
 
 - File: `darkmatter/lib/src/markdown/block/rule_processor.rs`, inside `parse_attributes`.
-- For each of `style`, `placement`, `weight`: after the string is captured, validate against the allowed set. On mismatch, emit `tracing::warn!(attribute = "style", value = %clean_value, "unknown horizontal rule attribute value")` and **still** store the raw value (so the renderer's downstream match falls through to default — which is the current behavior; this preserves backward compatibility while making the failure visible).
+- For each of `style`, `alignment`, `weight`: after the string is captured, validate against the allowed set. On mismatch, emit `tracing::warn!(attribute = "style", value = %clean_value, "unknown horizontal rule attribute value")` and **still** store the raw value (so the renderer's downstream match falls through to default — which is the current behavior; this preserves backward compatibility while making the failure visible).
 - Allowed sets (factored out as constants near the top of the module):
   ```rust
   const ALLOWED_STYLES: &[&str] = &["dashes","dots","waves","line-star","line-circle","inset-line","curtain-rod"];
@@ -375,20 +375,20 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
   pub(crate) fn build_rule(attrs: &HorizontalRuleAttrs) -> biscuit_terminal::prelude::HorizontalRule {
       let mut rule = HorizontalRule::new();
       if let Some(s) = &attrs.style { rule = map_style(rule, s); }
-      if let Some(p) = &attrs.placement { rule = map_placement(rule, p); }
+      if let Some(p) = &attrs.alignment { rule = map_alignment(rule, p); }
       if let Some(w) = &attrs.weight { rule = map_weight(rule, w); }
       if let Some(w) = &attrs.width { rule = rule.width(w.clone()); }
       if let Some(c) = &attrs.color { rule = rule.color(c.clone()); }
       rule
   }
   ```
-- Terminal + HTML renderers both call `build_rule(attrs)`. This reduces drift, and also means B1 can log unknown enum values from *one* place. Log sites live inside `map_style`/`map_placement`/`map_weight` (each `_ =>` arm).
+- Terminal + HTML renderers both call `build_rule(attrs)`. This reduces drift, and also means B1 can log unknown enum values from *one* place. Log sites live inside `map_style`/`map_alignment`/`map_weight` (each `_ =>` arm).
 
 ### 5.6 Test coverage
 
 - New tests in `darkmatter/lib/src/markdown/block/rule_processor.rs` `#[cfg(test)] mod tests`:
   - `test_parse_attributes_unknown_style_logs_warning`: use `tracing-test`'s `traced_test` or assert via a custom subscriber — if neither is already wired, assert only that the parsed `attrs.style` equals the raw unknown value (so the contract is "store + warn", not "drop").
-  - `test_parse_attributes_unknown_placement_warns`: similar.
+  - `test_parse_attributes_unknown_alignment_warns`: similar.
   - `test_parse_attributes_unknown_weight_warns`: similar.
   - `test_parse_attributes_unknown_key_is_ignored_with_warning`: feed `--- { margin: 4 }`, assert the result has all fields `None`.
   - `test_horizontal_rule_in_list_item_not_transformed`: `- --- { style: dots }` — must produce list events, not a HR.
@@ -493,7 +493,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 ### 7.5 Update darkmatter user-facing docs (A4 tie-in, B1 tie-in)
 
 - File: `darkmatter/docs/topics/horizontal-rules.md`.
-- Add an "Attribute validation" subsection that describes: unknown `style`/`placement`/`weight` values fall back to the default silently-in-output but emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`). Unknown keys are ignored.
+- Add an "Attribute validation" subsection that describes: unknown `style`/`alignment`/`weight` values fall back to the default silently-in-output but emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`). Unknown keys are ignored.
 - Update the attribute table to note which attributes are honored in each target (terminal / browser).
 
 ### 7.6 Update agent skills (A1 deferral tie-in)
@@ -508,7 +508,7 @@ The review places A1 (Tier 1 image rendering) under "Nice to have" and allows th
 
 These are flagged as "nice to have" in the review. Implement the cheap ones:
 
-- **E1** (serde derives on `RuleStyle`/`RulePlacement`/`RuleWeight`): add `#[derive(Serialize, Deserialize)]` guarded by a new feature flag `serde` in `biscuit-terminal/lib/Cargo.toml` (pattern: other crates in the monorepo already gate serde this way — verify with `grep -l 'serde = \[' biscuit-terminal/`). Default off.
+- **E1** (serde derives on `RuleStyle`/`RuleAlignment`/`RuleWeight`): add `#[derive(Serialize, Deserialize)]` guarded by a new feature flag `serde` in `biscuit-terminal/lib/Cargo.toml` (pattern: other crates in the monorepo already gate serde this way — verify with `grep -l 'serde = \[' biscuit-terminal/`). Default off.
 - **E3** (redundant `to_string()` in `centered_symbol_pattern`): assign `let s = line_char.to_string();` once and reuse.
 - **E4** (intermediate `String` allocations): skip. The review itself marks this as "if this becomes hot" — defer until benchmarks justify.
 
@@ -581,7 +581,7 @@ And the snapshot deltas from Phases 2, 3, and 6 must all be `cargo insta review`
 ## Notable risks and assumptions
 
 1. **`tracing` dependency**: assumes `biscuit-terminal` and `darkmatter` already depend on `tracing` (darkmatter does; biscuit-terminal uses it per `tracing::debug!(terminal_width, ...)` found in terminal.rs). If biscuit-terminal does not, Phase 2.3 adds it as a workspace dep.
-2. **`serde_yaml_ng`**: per `MEMORY.md` it is the preferred replacement for `serde_yaml`. If darkmatter's Cargo.toml does not yet have it, Phase 6.1 adds it as a workspace dep.
+2. **`serde_yaml_ng`**: per `MEMORY.md` it is the preferred realignment for `serde_yaml`. If darkmatter's Cargo.toml does not yet have it, Phase 6.1 adds it as a workspace dep.
 3. **Snapshot churn**: Phases 2, 3, and 6 legitimately change 21+ snapshots. The executor must run `cargo insta review` and inspect each delta to confirm only the expected fields (ANSI codes, heavy chars, CSS variables) change.
 4. **Env-var race in 1.6**: `std::env::set_var` is `unsafe` in Rust 2024 edition. If the workspace is on 2024, wrap in `unsafe { ... }` with `// SAFETY: test is single-threaded per `#[serial]`` or skip the test and cover the path via dependency injection.
 5. **Tier 1 deferral is accepted by the review**. This plan does not implement it; if a future reviewer insists it must ship, add an eighth phase following the `mermaid.rs` resvg pattern.

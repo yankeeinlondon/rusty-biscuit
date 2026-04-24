@@ -1,4 +1,4 @@
-> **Status (Review 2, 2026-04-23):** The current implementation does not match the intended authoring model. This spec supersedes the earlier `placement` terminology with `alignment`, restores standard Markdown horizontal-rule syntax as the primary path, and makes page-level `hr` frontmatter the default styling mechanism. Terminal image rendering is no longer considered optional for capable terminals: when the terminal reports Kitty-compatible image support, Darkmatter should use the SVG/PNG image path before falling back to Unicode or ASCII.
+> **Status (Review 2, 2026-04-23):** The current implementation does not match the intended authoring model. This spec makes `alignment` the positioning terminology, restores standard Markdown horizontal-rule syntax as the primary path, and makes page-level `hr` frontmatter the default styling mechanism. Terminal image rendering is no longer considered optional for capable terminals: when the terminal reports Kitty-compatible image support, Darkmatter should use the SVG/PNG image path before falling back to Unicode or ASCII.
 
 In Markdown the "horizontal rule" (e.g., a horizontal line used to more visibly separate sections in a document) is represented by any of the following when it is on its own line:
 
@@ -69,7 +69,7 @@ Darkmatter offers rendering options based on the following dimensions:
 
 ### Alignment
 
-`alignment` describes where the horizontal rule appears horizontally. Earlier drafts and implementation used `placement`; that name was a mistake and must be corrected.
+`alignment` describes where the horizontal rule appears horizontally.
 
 1. **Full**
 
@@ -190,7 +190,7 @@ Darkmatter must preserve standard Markdown behavior:
 - Page-level `hr` frontmatter styles those blocks without changing the Markdown source.
 - Attribute-block HR syntax is non-standard but supported as a Darkmatter extension.
 - `alignment` is the canonical key.
-- `placement` should be accepted only as a temporary backward-compatible alias, warning that it is deprecated and will be removed.
+- Unknown HR keys should be treated like any other unknown key.
 
 ## Validation Requirements
 
@@ -199,7 +199,6 @@ Darkmatter should validate both frontmatter and per-rule attributes.
 - Unknown `style`, `alignment`, or `weight` values fall back to defaults and emit `tracing::warn!`.
 - Unknown HR keys are ignored and emit `tracing::warn!`.
 - Invalid width/color values should warn and fall back where validation is practical.
-- If both `alignment` and deprecated `placement` are provided, `alignment` wins and a warning is emitted for `placement`.
 
 ## Documentation
 

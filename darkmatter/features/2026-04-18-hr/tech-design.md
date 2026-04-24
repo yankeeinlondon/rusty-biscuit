@@ -64,7 +64,7 @@ pub enum RuleStyle {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub enum RulePlacement {
+pub enum RuleAlignment {
     #[default]
     Full,
     Centered,
@@ -82,7 +82,7 @@ pub enum RuleWeight {
 
 pub struct HorizontalRule {
     pub style: RuleStyle,
-    pub placement: RulePlacement,
+    pub alignment: RuleAlignment,
     pub weight: RuleWeight,
     pub width: String, // e.g., "50%", "100px"
     pub color: Option<String>,
@@ -139,7 +139,7 @@ pub enum InlineEvent<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct HorizontalRuleAttrs {
     pub style: Option<String>,
-    pub placement: Option<String>,
+    pub alignment: Option<String>,
     pub weight: Option<String>,
     pub width: Option<String>,
     pub color: Option<String>,
@@ -180,7 +180,7 @@ The `HorizontalRule` component translates abstract units into target-specific va
 | `weight="medium"` | `stroke-width: 4px` | 4px stroke in generated PNG | Single-line chars |
 | `weight="thick"` | `stroke-width: 8px` | 8px stroke in generated PNG | Double-line/Heavy chars |
 | `width="50%"` | `width: 50%` | Width = `term_width * 0.5` columns | Width = `term_width * 0.5` chars |
-| `placement="centered"`| `margin: 0 auto` | Center-aligned block | Center-aligned string |
+| `alignment="centered"`| `margin: 0 auto` | Center-aligned block | Center-aligned string |
 
 ## 5. Documentation & Maintenance
 

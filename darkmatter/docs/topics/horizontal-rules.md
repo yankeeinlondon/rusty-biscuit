@@ -1,115 +1,87 @@
 # Horizontal Rules
 
-Horizontal rules in darkmatter provide a rich set of visual separators that can be customized with various styles, placements, weights, and colors.
+Horizontal rules in darkmatter use standard Markdown markers (`---`, `___`, or `***`) and can be styled from page frontmatter or per-rule attributes.
 
 ## Markdown Syntax
 
-Horizontal rules are created using the standard markdown horizontal rule syntax (`---`, `___`, or `***`) followed by an attribute block in curly braces:
-
-```markdown
---- { style: waves, width: "50%" }
-___ { style: dots, placement: centered, weight: thick }
-*** { style: line-star, color: "#ff0000" }
-```
-
-## Available Options
-
-### Style
-
-The `style` attribute controls the visual appearance of the horizontal rule. Available styles:
-
-- `dashes` - Simple dashed line (default)
-- `dots` - Series of dots
-- `waves` - Wavy line
-- `line-star` - Line with star symbols
-- `line-circle` - Line with circle symbols  
-- `inset-line` - Inset line effect
-- `curtain-rod` - Curtain rod style
-
-### Placement
-
-The `placement` attribute controls where the rule appears horizontally:
-
-- `full` - Spans the full width (default)
-- `centered` - Centered with equal margins
-- `left` - Left-aligned with right margin
-- `right` - Right-aligned with left margin
-
-### Weight
-
-The `weight` attribute controls the thickness of the rule:
-
-- `thin` - Thin line
-- `medium` - Medium thickness (default)
-- `thick` - Thick line
-
-### Width
-
-The `width` attribute allows you to specify a custom width as a percentage or CSS length:
-
-```markdown
---- { width: "75%" }
---- { width: "200px" }
-```
-
-### Color
-
-The `color` attribute allows you to specify a custom color using CSS color values:
-
-```markdown
---- { color: "#ff0000" }
---- { color: "rgb(255, 0, 0)" }
---- { color: "red" }
-```
-
-## Examples
-
-### Basic Usage
+Bare rules are valid CommonMark and inherit any page-level `hr` defaults:
 
 ```markdown
 ---
+hr:
+  style: waves
+  alignment: centered
+  weight: thick
+  width: "50%"
+  color: red
+---
+
+---
+___
+***
 ```
 
-Renders as a simple dashed line spanning the full width.
-
-### Styled Rules
+Per-rule overrides use a YAML flow-mapping attribute block:
 
 ```markdown
---- { style: waves }
-___ { style: dots, weight: thick }
-*** { style: line-star, placement: centered }
+--- { style: waves, width: "50%" }
+___ { style: dots, alignment: centered, weight: thick }
+*** { style: line-star, color: "#ff0000" }
 ```
 
-### Custom Width and Color
+Per-rule attributes override only the keys they specify. The resolution order is:
+
+1. Per-rule attribute block
+2. Page frontmatter `hr`
+3. `HorizontalRule` component defaults
+
+## Available Options
+
+- `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+- `alignment`: `full` (default), `centered`, `left`, `right`
+- `weight`: `thin`, `medium` (default), `thick`
+- `width`: CSS-like string such as `"75%"`, `"200px"`, or `"20"`
+- `color`: CSS color name or `#rrggbb`
+
+## Examples
 
 ```markdown
---- { style: inset-line, width: "60%", color: "#007acc" }
+---
+hr:
+  style: waves
+  alignment: centered
+  width: "60%"
+---
+
+---
+
+--- { color: "#007acc" }
+
+*** { style: line-star, alignment: centered }
 ```
+
+The first bare rule uses all frontmatter defaults. The second rule inherits style, alignment, and width, then overrides only color.
 
 ## Terminal vs Browser Rendering
 
-Horizontal rules are rendered differently depending on the output target:
-
-- **Terminal**: Two-tier progressive enhancement today — Unicode characters when the locale signals UTF-8, or ASCII fallback characters otherwise. (A planned third tier that rasterizes SVGs to inline PNGs via `resvg` + `TerminalImage` is **deferred** in the initial release.)
-- **Browser**: Renders as SVG with `stroke="var(--hr-color, currentColor)"` and declares `--hr-weight`, `--hr-color`, `--hr-width` CSS custom properties on the root `<svg>` for per-instance overrides.
-
-The same markdown syntax works in both contexts, with appropriate fallbacks for terminal environments that don't support advanced graphics.
+- **Terminal**: image-first progressive enhancement. Terminals with Kitty-compatible image support receive a rasterized SVG via `resvg` and `TerminalImage`; failures fall back to Unicode, then ASCII when the locale does not signal UTF-8.
+- **Browser**: SVG with `stroke="var(--hr-color, currentColor)"` and root-level `--hr-weight`, `--hr-color`, and `--hr-width` custom properties.
 
 ## Attribute Honoring by Target
 
 | Attribute   | Terminal                                                | Browser                                  |
 |-------------|---------------------------------------------------------|------------------------------------------|
-| `style`     | Picks the Unicode / ASCII character pattern             | Picks the SVG shape primitive            |
-| `placement` | Centers / aligns the rendered string                    | `margin` attribute on the `<svg>` root   |
-| `weight`    | Heavy vs light Unicode glyphs (no-op in ASCII/waves)    | `stroke-width` via `--hr-weight`         |
+| `style`     | Image shape, Unicode pattern, or ASCII pattern          | SVG shape primitive                      |
+| `alignment` | Positions the rendered rule within terminal columns     | `margin` behavior on the root `<svg>`    |
+| `weight`    | Image height/stroke or heavy Unicode glyphs             | `stroke-width` via `--hr-weight`         |
 | `width`     | Clamped to the terminal's column width                  | `width` attribute + `--hr-width` CSS var |
-| `color`     | ANSI escape wrap (when `color_depth != None`)           | `stroke` via `--hr-color`                |
+| `color`     | Image stroke/fill or ANSI escape wrap                   | `stroke` / `fill` via `--hr-color`       |
 
-## Attribute Validation
+## Validation
 
-darkmatter validates the three enumerated attributes (`style`, `placement`, `weight`) against their allowed sets at parse time:
+darkmatter validates `style`, `alignment`, and `weight` through the same builder path for frontmatter defaults and per-rule overrides:
 
-- **Unknown values** fall back to the component default silently in the rendered output but emit a `tracing::warn!` diagnostic. Run with `RUST_LOG=darkmatter=warn` (or `info`) to see them.
-- **Unknown attribute keys** (e.g., `--- { margin: 4 }`) are ignored and similarly warned.
+- Unknown enum values fall back to the component default and emit `tracing::warn!`.
+- Unknown attribute keys are ignored and warned.
 
-This "warn + continue" contract keeps documents renderable when someone mistypes (`dashse` instead of `dashes`) while still surfacing the typo to anyone actively watching the log stream.
+Run with `RUST_LOG=darkmatter=warn` to see diagnostics.

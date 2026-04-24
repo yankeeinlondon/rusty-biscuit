@@ -5,23 +5,21 @@ created: 2026-04-23
 
 # Horizontal Rule Correction Plan
 
-This plan corrects the current HR implementation so it matches the intended authoring model: standard Markdown HR markers stay valid, page-level `hr` frontmatter provides defaults, per-rule attributes provide overrides, `alignment` replaces `placement`, and capable terminals use image rendering before text fallbacks.
+This plan corrects the current HR implementation so it matches the intended authoring model: standard Markdown HR markers stay valid, page-level `hr` frontmatter provides defaults, per-rule attributes provide overrides, `alignment` is the canonical positioning key, and capable terminals use image rendering before text fallbacks.
 
 ## Phase 1: Reconcile Data Model and Terminology
 
 ### Steps
 
-1. Replace the public `RulePlacement` concept with `RuleAlignment` in `biscuit-terminal`.
-2. Rename builder methods, fields, parsing structs, and docs from `placement` to `alignment`.
-3. Keep `placement` as a deprecated parse-time alias only.
-4. Make conflict resolution explicit: if both `alignment` and `placement` are present, use `alignment` and warn about `placement`.
-5. Update tests that currently assert `placement` behavior to assert `alignment`, with dedicated compatibility tests for deprecated `placement`.
+1. Use `RuleAlignment` as the public positioning enum in `biscuit-terminal`.
+2. Use `alignment` for builder methods, fields, parsing structs, and docs.
+3. Remove legacy positioning terminology from the public API and parser surface.
+4. Update tests to assert `alignment` behavior.
 
 ### Validation Checkpoints
 
 - `alignment` is the canonical key in code, docs, examples, snapshots, and skill files.
-- Existing documents using `placement` still render during the compatibility window.
-- Deprecated `placement` use emits a `tracing::warn!` diagnostic.
+- Unknown positioning keys are treated like any other unknown-key input.
 
 ## Phase 2: Add Frontmatter Defaults
 
@@ -66,7 +64,7 @@ This plan corrects the current HR implementation so it matches the intended auth
 2. Continue supporting the Darkmatter extension form `--- { ... }` for per-rule overrides.
 3. Update the HR attribute parser to prefer `alignment`.
 4. Map resolved Darkmatter HR settings into `biscuit-terminal::HorizontalRule` once, then use that shared path for terminal and HTML output.
-5. Add integration tests for standard HR markers, frontmatter defaults, per-rule overrides, deprecated `placement`, and invalid values.
+5. Add integration tests for standard HR markers, frontmatter defaults, per-rule overrides, unknown keys, and invalid values.
 
 ### Validation Checkpoints
 
@@ -78,7 +76,7 @@ This plan corrects the current HR implementation so it matches the intended auth
 
 ### Steps
 
-1. Update `darkmatter/docs/topics/horizontal-rules.md` to document frontmatter-first styling, per-rule overrides, `alignment`, deprecated `placement`, validation behavior, and terminal rendering tiers.
+1. Update `darkmatter/docs/topics/horizontal-rules.md` to document frontmatter-first styling, per-rule overrides, `alignment`, validation behavior, and terminal rendering tiers.
 2. Update `biscuit-terminal/docs/components/horizontal-rule.md` to document `RuleAlignment`, image-first progressive enhancement, and fallback behavior.
 3. Update `biscuit-terminal/docs/components/browser-renderable-trait.md` if trait behavior or examples changed while fixing browser rendering.
 4. Update `.claude/skills/darkmatter/SKILL.md` so future agents know that `hr` frontmatter is the preferred page-level configuration mechanism.
@@ -89,7 +87,7 @@ This plan corrects the current HR implementation so it matches the intended auth
 
 - Author-facing docs no longer imply that styling requires invalid/non-standard Markdown suffixes.
 - Skill files match the implemented architecture and current terminology.
-- Examples use `alignment`, not `placement`, except in the explicit deprecation note.
+- Examples use `alignment`.
 
 ## Suggested Verification Commands
 
