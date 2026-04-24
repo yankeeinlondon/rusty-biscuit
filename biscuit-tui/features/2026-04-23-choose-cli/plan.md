@@ -93,6 +93,21 @@ source_files_during_phase_10:
 docs_updated_during_phase_10: []
 docs_created_during_phase_10: []
 skills_files_updated_during_phase10: []
+source_files_during_phase_11:
+  - biscuit-tui/lib/src/core/standalone.rs
+  - biscuit-tui/cli/src/main.rs
+  - biscuit-tui/cli/src/commands/common_choose.rs
+  - biscuit-tui/cli/src/commands/choose_one.rs
+  - biscuit-tui/cli/src/commands/choose_many.rs
+  - biscuit-tui/cli/src/commands/text_input.rs
+  - biscuit-tui/cli/src/commands/text_area_input.rs
+  - biscuit-tui/cli/src/commands/boolean_switch.rs
+  - biscuit-tui/cli/src/commands/input_table.rs
+  - biscuit-tui/cli/tests/choose_cli.rs
+docs_updated_during_phase_11:
+  - biscuit-tui/lib/README.md
+docs_created_during_phase_11: []
+skills_files_updated_during_phase11: []
 packages:
   - tui-chrome
   - tui-chrome-cli
