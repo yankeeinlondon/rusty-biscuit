@@ -87,6 +87,12 @@ source_files_during_phase_9:
 docs_updated_during_phase_9: []
 docs_created_during_phase_9: []
 skills_files_updated_during_phase9: []
+source_files_during_phase_10:
+  - biscuit-tui/cli/src/commands/common_choose.rs
+  - biscuit-tui/cli/tests/choose_cli.rs
+docs_updated_during_phase_10: []
+docs_created_during_phase_10: []
+skills_files_updated_during_phase10: []
 packages:
   - tui-chrome
   - tui-chrome-cli
