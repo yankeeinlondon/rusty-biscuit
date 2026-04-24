@@ -9,15 +9,31 @@ The library provides the following interactive input components:
 - **TextInput** — single-line text input with configurable max length and label positioning
 - **TextAreaInput** — multi-line text editor with scrollbar and configurable dimensions
 - **BooleanSwitch** — toggle switch with customizable on/off labels and visual track
-- **ChooseOne** — single-selection list with hotkey support and vim navigation
+- **ChooseOne** — single-selection list with fuzzy filtering, hotkey support, and vim navigation
 - **ChooseMany** — multi-selection list with validation constraints (min/max selections)
-- **InputTable** — grid of mixed input cells (any combination of the above components)
+- **InputTable** — grid of mixed input cells (any combination of the above components plus static text)
 
 All components follow a consistent API:
 
 1. Each component is a `StatefulWidget` with an external `State` struct owned by the caller.
 2. Event handling returns `EventOutcome` (`Consumed` | `Ignored` | `Submitted` | `Cancelled`).
 3. Components can be embedded in a larger TUI or run as a standalone fullscreen/inline window via `run_standalone`.
+
+## Core Primitives
+
+The [`core`](src/core) module provides cross-cutting primitives shared by every component:
+
+- **`EventOutcome`** — canonical event result enum (`Consumed`, `Ignored`, `Submitted`, `Cancelled`)
+- **`StandaloneState`** / **`HandleEvent`** — traits that enable `run_standalone` and `drive_event_loop`
+- **`run_standalone`** — drives a single component in a dedicated terminal (fullscreen or inline)
+- **`KeyBindings`** — fully configurable key bindings with vim-compatible defaults (`h`/`j`/`k`/`l`)
+- **`ComponentTheme`** — centralized visual constants (glyphs, colors, styles)
+- **`FrameChrome`** / **`FrameChromeConfig`** — optional borders, margins, and height specs
+- **`FuzzyFilter`** — fast fuzzy search over option labels via `nucleo-matcher`
+- **`ValidationState`** — uniform read access to submit-time validation errors
+- **`Label`** / **`LabelPosition`** / **`render_with_label`** — shared label placement
+
+The [`prelude`](src/prelude.rs) module re-exports the most commonly used types for convenient glob imports.
 
 ## Usage
 
