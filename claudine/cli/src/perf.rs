@@ -171,11 +171,7 @@ pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
     // Agent Execution
     if let Some(agent) = &report.agent {
         body.push_str("\n<b>Agent Execution</b>\n");
-        body.push_str(&format!(
-            "  {:20}{}\n",
-            "launches:",
-            agent.launches
-        ));
+        body.push_str(&format!("  {:20}{}\n", "launches:", agent.launches));
         if let Some(latency) = agent.first_response_latency {
             body.push_str(&format!(
                 "  {:20}{}\n",
@@ -183,11 +179,7 @@ pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
                 fmt_duration(latency)
             ));
         } else {
-            body.push_str(&format!(
-                "  {:20}{}\n",
-                "first response:",
-                "--"
-            ));
+            body.push_str(&format!("  {:20}{}\n", "first response:", "--"));
         }
         body.push_str(&format!(
             "  {:20}{}\n",
@@ -195,11 +187,7 @@ pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
             fmt_duration(agent.total_elapsed)
         ));
         if let Some(api) = agent.provider_api_duration {
-            body.push_str(&format!(
-                "  {:20}{}\n",
-                "provider api:",
-                fmt_duration(api)
-            ));
+            body.push_str(&format!("  {:20}{}\n", "provider api:", fmt_duration(api)));
         }
     }
 
@@ -339,14 +327,38 @@ mod tests {
         };
 
         let rendered = render_perf_report(&report);
-        assert!(rendered.contains("Performance"), "missing title: {rendered}");
-        assert!(rendered.contains("CLI Overhead"), "missing CLI Overhead: {rendered}");
-        assert!(rendered.contains("arg parsing:"), "missing arg parsing: {rendered}");
-        assert!(rendered.contains("Composition Report"), "missing Composition Report: {rendered}");
-        assert!(rendered.contains("interpolation:"), "missing interpolation: {rendered}");
-        assert!(rendered.contains("Agent Execution"), "missing Agent Execution: {rendered}");
-        assert!(rendered.contains("first response:"), "missing first response: {rendered}");
-        assert!(rendered.contains("provider api:"), "missing provider api: {rendered}");
+        assert!(
+            rendered.contains("Performance"),
+            "missing title: {rendered}"
+        );
+        assert!(
+            rendered.contains("CLI Overhead"),
+            "missing CLI Overhead: {rendered}"
+        );
+        assert!(
+            rendered.contains("arg parsing:"),
+            "missing arg parsing: {rendered}"
+        );
+        assert!(
+            rendered.contains("Composition Report"),
+            "missing Composition Report: {rendered}"
+        );
+        assert!(
+            rendered.contains("interpolation:"),
+            "missing interpolation: {rendered}"
+        );
+        assert!(
+            rendered.contains("Agent Execution"),
+            "missing Agent Execution: {rendered}"
+        );
+        assert!(
+            rendered.contains("first response:"),
+            "missing first response: {rendered}"
+        );
+        assert!(
+            rendered.contains("provider api:"),
+            "missing provider api: {rendered}"
+        );
     }
 
     #[test]
@@ -370,8 +382,14 @@ mod tests {
             !rendered.contains("Composition Report"),
             "should omit composition: {rendered}"
         );
-        assert!(!rendered.contains("Agent Execution"), "should omit agent: {rendered}");
-        assert!(rendered.contains("partial metrics"), "missing note: {rendered}");
+        assert!(
+            !rendered.contains("Agent Execution"),
+            "should omit agent: {rendered}"
+        );
+        assert!(
+            rendered.contains("partial metrics"),
+            "missing note: {rendered}"
+        );
     }
 
     #[test]
@@ -396,8 +414,14 @@ mod tests {
         };
 
         let rendered = render_perf_report(&report);
-        assert!(rendered.contains("first response:     --"), "expected '--' fallback: {rendered}");
-        assert!(!rendered.contains("provider api:"), "should omit api when none: {rendered}");
+        assert!(
+            rendered.contains("first response:     --"),
+            "expected '--' fallback: {rendered}"
+        );
+        assert!(
+            !rendered.contains("provider api:"),
+            "should omit api when none: {rendered}"
+        );
     }
 
     #[test]
