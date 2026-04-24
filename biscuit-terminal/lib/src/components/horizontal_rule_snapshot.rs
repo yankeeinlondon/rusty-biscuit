@@ -18,11 +18,11 @@ mod tests {
             ("curtain_rod", RuleStyle::CurtainRod),
         ];
         
-        let placements = vec![
-            ("full", RulePlacement::Full),
-            ("centered", RulePlacement::Centered),
-            ("left", RulePlacement::Left),
-            ("right", RulePlacement::Right),
+        let alignments = vec![
+            ("full", RuleAlignment::Full),
+            ("centered", RuleAlignment::Centered),
+            ("left", RuleAlignment::Left),
+            ("right", RuleAlignment::Right),
         ];
         
         let weights = vec![
@@ -32,15 +32,15 @@ mod tests {
         ];
         
         for (style_name, style) in &styles {
-            for (placement_name, placement) in &placements {
+            for (alignment_name, alignment) in &alignments {
                 for (weight_name, weight) in &weights {
                     let hr = HorizontalRule::new()
                         .style(style.clone())
-                        .placement(placement.clone())
+                        .alignment(alignment.clone())
                         .weight(weight.clone());
                     
                     let result = hr.render(&term);
-                    assert_snapshot!(format!("terminal_{}_{}_{}", style_name, placement_name, weight_name), result);
+                    assert_snapshot!(format!("terminal_{}_{}_{}", style_name, alignment_name, weight_name), result);
                 }
             }
         }
@@ -84,7 +84,7 @@ mod tests {
         // Test with custom width and color
         let hr1 = HorizontalRule::new()
             .style(RuleStyle::Waves)
-            .placement(RulePlacement::Centered)
+            .alignment(RuleAlignment::Centered)
             .weight(RuleWeight::Thick)
             .width("75%")
             .color("red");
@@ -98,7 +98,7 @@ mod tests {
         // Test with different combinations
         let hr2 = HorizontalRule::new()
             .style(RuleStyle::Dots)
-            .placement(RulePlacement::Right)
+            .alignment(RuleAlignment::Right)
             .weight(RuleWeight::Thin)
             .width("50ch")
             .color("#00ff00");

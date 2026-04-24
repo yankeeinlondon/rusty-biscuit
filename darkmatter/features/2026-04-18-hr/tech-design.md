@@ -64,7 +64,7 @@ pub enum RuleStyle {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub enum RulePlacement {
+pub enum RuleAlignment {
     #[default]
     Full,
     Centered,
@@ -82,7 +82,7 @@ pub enum RuleWeight {
 
 pub struct HorizontalRule {
     pub style: RuleStyle,
-    pub placement: RulePlacement,
+    pub alignment: RuleAlignment,
     pub weight: RuleWeight,
     pub width: String, // e.g., "50%", "100px"
     pub color: Option<String>,
@@ -94,9 +94,13 @@ pub struct HorizontalRule {
 
 Implement `Renderable` for `HorizontalRule`:
 
-1.  **Tier 1 (Image):** If `Terminal::image_support` is available, render the style's SVG to a PNG (using `resvg`) and output using `TerminalImage`.
-2.  **Tier 2 (Unicode):** Fallback to Unicode characters if images are unavailable (e.g., `≋≋≋≋` for `waves`).
+1.  **Tier 1 (Image, deferred):** Rendering the style's SVG to a PNG via `resvg` + `TerminalImage` is planned but **not implemented in the initial release**. The component currently uses Tier 2 / Tier 3 only. Tier 1 can be added incrementally (see `biscuit-terminal/lib/src/components/mermaid.rs` for the working `resvg → tiny_skia → TerminalImage` pattern). See the "Deferred Work" subsection below.
+2.  **Tier 2 (Unicode):** Primary path when the terminal locale reports UTF-8 (e.g., `≋≋≋≋` for `waves`). Honors `weight` via heavy Unicode variants where they exist.
 3.  **Tier 3 (ASCII):** Final fallback for restricted environments (e.g., `~~~~` for `waves`).
+
+#### Deferred Work
+
+Review-1 explicitly accepts deferring Tier 1 (review §A1 classification: "Nice to have"). The `review-plan-1.md` Phase 7 documents this decision and aligns the component source, docs, and agent skills with the Tier 2 / Tier 3 baseline that actually ships. A future phase can revisit Tier 1 without any breaking change — the `Renderable` implementation already routes through `use_fancy_chars()` and can grow an image branch gated on `term.image_support`.
 
 #### Browser Rendering
 
@@ -135,7 +139,7 @@ pub enum InlineEvent<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct HorizontalRuleAttrs {
     pub style: Option<String>,
-    pub placement: Option<String>,
+    pub alignment: Option<String>,
     pub weight: Option<String>,
     pub width: Option<String>,
     pub color: Option<String>,
@@ -176,7 +180,7 @@ The `HorizontalRule` component translates abstract units into target-specific va
 | `weight="medium"` | `stroke-width: 4px` | 4px stroke in generated PNG | Single-line chars |
 | `weight="thick"` | `stroke-width: 8px` | 8px stroke in generated PNG | Double-line/Heavy chars |
 | `width="50%"` | `width: 50%` | Width = `term_width * 0.5` columns | Width = `term_width * 0.5` chars |
-| `placement="centered"`| `margin: 0 auto` | Center-aligned block | Center-aligned string |
+| `alignment="centered"`| `margin: 0 auto` | Center-aligned block | Center-aligned string |
 
 ## 5. Documentation & Maintenance
 

@@ -303,6 +303,20 @@ fn bridge_provider_config(cfg: &MessengerProviderConfig) -> MessagingRouteConfig
             phone_number_id: None,
             phone_number_id_env: phone_number_id_env.clone(),
         },
+        MessengerProviderConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => MessagingRouteConfig::DiscordWebhook {
+            webhook_url: webhook_url.clone(),
+            webhook_url_env: webhook_url_env.clone(),
+        },
+        MessengerProviderConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => MessagingRouteConfig::SlackWebhook {
+            webhook_url: webhook_url.clone(),
+            webhook_url_env: webhook_url_env.clone(),
+        },
     }
 }
 
@@ -911,6 +925,47 @@ mod tests {
                 assert_eq!(phone_number_id_env, "WA_PHONE");
             }
             other => panic!("expected WhatsApp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_discord_webhook() {
+        let cfg = MessengerProviderConfig::DiscordWebhook {
+            webhook_url: None,
+            webhook_url_env: "MY_DISCORD_URL".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, None);
+                assert_eq!(webhook_url_env, "MY_DISCORD_URL");
+            }
+            other => panic!("expected DiscordWebhook, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_slack_webhook() {
+        let cfg = MessengerProviderConfig::SlackWebhook {
+            webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXX".to_string()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(
+                    webhook_url,
+                    Some("https://hooks.slack.com/services/T000/B000/XXXX".to_string())
+                );
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+            other => panic!("expected SlackWebhook, got {other:?}"),
         }
     }
 

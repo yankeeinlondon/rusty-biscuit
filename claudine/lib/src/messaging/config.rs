@@ -4,8 +4,10 @@
 //! `config.json` files to configure messaging routes (Discord, Slack, Signal, WhatsApp).
 
 use crate::error::{ClaudineError, Result};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 // Default environment variable names for each provider
 fn default_discord_bot_token() -> String {
@@ -30,6 +32,34 @@ fn default_whatsapp_access_token() -> String {
 
 fn default_whatsapp_phone_number_id() -> String {
     "WHATSAPP_PHONE_NUMBER_ID".to_string()
+}
+
+fn default_discord_webhook_url() -> String {
+    "DISCORD_WEBHOOK_URL".to_string()
+}
+
+fn default_slack_webhook_url() -> String {
+    "SLACK_WEBHOOK_URL".to_string()
+}
+
+// Webhook URL validation regexes — intentionally conservative early validation.
+// The messenger provider constructors remain the production source of truth.
+static DISCORD_WEBHOOK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^https://(discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9._-]+$").unwrap()
+});
+
+static SLACK_WEBHOOK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^https://hooks\.slack\.com/services/[A-Z0-9]+/[A-Z0-9]+/[A-Za-z0-9]+$").unwrap()
+});
+
+/// Validate a Discord webhook URL with a conservative regex.
+pub fn validate_discord_webhook_url(url: &str) -> bool {
+    DISCORD_WEBHOOK_REGEX.is_match(url)
+}
+
+/// Validate a Slack webhook URL with a conservative regex.
+pub fn validate_slack_webhook_url(url: &str) -> bool {
+    SLACK_WEBHOOK_REGEX.is_match(url)
 }
 
 /// Messaging configuration for a specific provider/route.
@@ -94,6 +124,26 @@ pub enum MessagingRouteConfig {
         /// Environment variable name containing the phone number ID.
         #[serde(default = "default_whatsapp_phone_number_id")]
         phone_number_id_env: String,
+    },
+    /// Discord webhook configuration.
+    #[serde(rename = "discord_webhook")]
+    DiscordWebhook {
+        /// Optional inline webhook URL.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_url: Option<String>,
+        /// Environment variable name containing the webhook URL.
+        #[serde(default = "default_discord_webhook_url")]
+        webhook_url_env: String,
+    },
+    /// Slack webhook configuration.
+    #[serde(rename = "slack_webhook")]
+    SlackWebhook {
+        /// Optional inline webhook URL.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_url: Option<String>,
+        /// Environment variable name containing the webhook URL.
+        #[serde(default = "default_slack_webhook_url")]
+        webhook_url_env: String,
     },
 }
 
@@ -245,6 +295,50 @@ fn validate_route_config(
             if phone_number_id_env.trim().is_empty() {
                 return Err(ClaudineError::ConfigValidation(format!(
                     "{}: route '{}': phone_number_id_env cannot be blank",
+                    scope_label, name
+                )));
+            }
+        }
+        MessagingRouteConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            if webhook_url.as_ref().map(|s| s.trim()).is_none_or(|s| s.is_empty())
+                && webhook_url_env.trim().is_empty()
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "{}: route '{}': webhook_url_env cannot be blank when webhook_url is not set",
+                    scope_label, name
+                )));
+            }
+            if let Some(url) = webhook_url
+                && !url.trim().is_empty()
+                && !validate_discord_webhook_url(url)
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "{}: route '{}': webhook_url is not a valid Discord webhook URL",
+                    scope_label, name
+                )));
+            }
+        }
+        MessagingRouteConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            if webhook_url.as_ref().map(|s| s.trim()).is_none_or(|s| s.is_empty())
+                && webhook_url_env.trim().is_empty()
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "{}: route '{}': webhook_url_env cannot be blank when webhook_url is not set",
+                    scope_label, name
+                )));
+            }
+            if let Some(url) = webhook_url
+                && !url.trim().is_empty()
+                && !validate_slack_webhook_url(url)
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "{}: route '{}': webhook_url is not a valid Slack webhook URL",
                     scope_label, name
                 )));
             }
@@ -548,5 +642,251 @@ mod tests {
         };
 
         assert!(settings.validate("repo").is_ok());
+    }
+
+    #[test]
+    fn discord_webhook_config_deserializes_with_explicit_name() {
+        let json = r#"{
+            "provider": "discord_webhook",
+            "webhook_url_env": "MY_DISCORD_URL"
+        }"#;
+
+        let config: MessagingRouteConfig = serde_json::from_str(json).unwrap();
+
+        match config {
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, None);
+                assert_eq!(webhook_url_env, "MY_DISCORD_URL");
+            }
+            _ => panic!("Expected DiscordWebhook variant"),
+        }
+    }
+
+    #[test]
+    fn slack_webhook_config_deserializes_with_inline_url() {
+        let json = r#"{
+            "provider": "slack_webhook",
+            "webhook_url": "https://hooks.slack.com/services/T000/B000/XXXX",
+            "webhook_url_env": "SLACK_WEBHOOK_URL"
+        }"#;
+
+        let config: MessagingRouteConfig = serde_json::from_str(json).unwrap();
+
+        match config {
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(
+                    webhook_url,
+                    Some("https://hooks.slack.com/services/T000/B000/XXXX".to_string())
+                );
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+            _ => panic!("Expected SlackWebhook variant"),
+        }
+    }
+
+    #[test]
+    fn webhook_configs_round_trip() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "alerts".to_string(),
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url: None,
+                webhook_url_env: "DISCORD_WEBHOOK_URL".to_string(),
+            },
+        );
+        configs.insert(
+            "deploys".to_string(),
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXX".to_string()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let settings = ScopedMessagingSettings {
+            active: Some("alerts".to_string()),
+            configs,
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        let deserialized: ScopedMessagingSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(settings, deserialized);
+    }
+
+    #[test]
+    fn validate_rejects_blank_webhook_url_env_when_no_inline() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "broken".to_string(),
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url: None,
+                webhook_url_env: "".to_string(),
+            },
+        );
+
+        let settings = ScopedMessagingSettings {
+            active: None,
+            configs,
+        };
+
+        let result = settings.validate("global");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("webhook_url_env cannot be blank")
+        );
+    }
+
+    #[test]
+    fn validate_rejects_invalid_discord_webhook_url() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "bad".to_string(),
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url: Some("not-a-url".to_string()),
+                webhook_url_env: "DISCORD_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let settings = ScopedMessagingSettings {
+            active: None,
+            configs,
+        };
+
+        let result = settings.validate("test");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not a valid Discord webhook URL")
+        );
+    }
+
+    #[test]
+    fn validate_rejects_invalid_slack_webhook_url() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "bad".to_string(),
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url: Some("https://example.com/hook".to_string()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let settings = ScopedMessagingSettings {
+            active: None,
+            configs,
+        };
+
+        let result = settings.validate("test");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not a valid Slack webhook URL")
+        );
+    }
+
+    #[test]
+    fn validate_accepts_env_only_webhook_config() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "env-only".to_string(),
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url: None,
+                webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let settings = ScopedMessagingSettings {
+            active: None,
+            configs,
+        };
+
+        assert!(settings.validate("test").is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_valid_inline_discord_webhook_url() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "inline".to_string(),
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url: Some("https://discord.com/api/webhooks/123456/abcDEF".to_string()),
+                webhook_url_env: "DISCORD_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let settings = ScopedMessagingSettings {
+            active: None,
+            configs,
+        };
+
+        assert!(settings.validate("test").is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_valid_inline_slack_webhook_url() {
+        let mut configs = HashMap::new();
+        configs.insert(
+            "inline".to_string(),
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXX".to_string()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+            },
+        );
+
+        let settings = ScopedMessagingSettings {
+            active: None,
+            configs,
+        };
+
+        assert!(settings.validate("test").is_ok());
+    }
+
+    #[test]
+    fn validate_discord_webhook_url_accepts_production_urls() {
+        assert!(validate_discord_webhook_url(
+            "https://discord.com/api/webhooks/123456/abcDEF"
+        ));
+        assert!(validate_discord_webhook_url(
+            "https://discordapp.com/api/webhooks/999999/xyz_123.ABC"
+        ));
+    }
+
+    #[test]
+    fn validate_discord_webhook_url_rejects_malformed() {
+        assert!(!validate_discord_webhook_url("not-a-url"));
+        assert!(!validate_discord_webhook_url("http://discord.com/api/webhooks/123/abc"));
+        assert!(!validate_discord_webhook_url("https://example.com/api/webhooks/123/abc"));
+        assert!(!validate_discord_webhook_url(""));
+    }
+
+    #[test]
+    fn validate_slack_webhook_url_accepts_production_urls() {
+        assert!(validate_slack_webhook_url(
+            "https://hooks.slack.com/services/T000/B000/XXXX"
+        ));
+        assert!(validate_slack_webhook_url(
+            "https://hooks.slack.com/services/T123ABC/B456DEF/ghi789JKL"
+        ));
+    }
+
+    #[test]
+    fn validate_slack_webhook_url_rejects_malformed() {
+        assert!(!validate_slack_webhook_url("not-a-url"));
+        assert!(!validate_slack_webhook_url("http://hooks.slack.com/services/T000/B000/XXXX"));
+        assert!(!validate_slack_webhook_url("https://example.com/services/T000/B000/XXXX"));
+        assert!(!validate_slack_webhook_url(""));
     }
 }

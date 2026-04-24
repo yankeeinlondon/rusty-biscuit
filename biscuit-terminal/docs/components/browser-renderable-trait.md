@@ -48,26 +48,34 @@ When implementing `BrowserRenderable`:
 ```rust
 impl BrowserRenderable for HorizontalRule {
     fn render_to_browser(&self) -> String {
-        // Generate SVG with currentColor
-        format!(r#"<svg viewBox="0 0 100 10" xmlns="http://www.w3.org/2000/svg">
-  <path d="{}" stroke="currentColor" stroke-width="{}" fill="none"/>
-</svg>"#, self.path_data(), self.stroke_width())
+        // Emit the default SVG with a style block that declares
+        // --hr-weight / --hr-color / --hr-width so that
+        // render_to_browser_with_inline_variables has a real override surface.
+        format!(
+            r#"<svg viewBox="0 0 100 10" xmlns="http://www.w3.org/2000/svg" \
+  style="--hr-weight: {weight}; --hr-color: {color}; --hr-width: {width};">
+  <path d="{path}" stroke="var(--hr-color, currentColor)" \
+        stroke-width="var(--hr-weight, 4)" fill="none"/>
+</svg>"#,
+            weight = self.stroke_width(),
+            color = self.color.as_deref().unwrap_or("currentColor"),
+            width = self.width.as_deref().unwrap_or("100%"),
+            path = self.path_data(),
+        )
     }
-    
+
     fn render_to_browser_with_inline_variables(
         &self,
         variables: &HashMap<String, String>,
     ) -> String {
-        // Generate SVG with CSS variables
-        format!(r#"<svg viewBox="0 0 100 10" xmlns="http://www.w3.org/2000/svg" 
-  style="--hr-width: {}; --hr-color: {};">
-  <path d="{}" stroke="var(--hr-color, currentColor)" 
-        stroke-width="var(--hr-width, {})" fill="none"/>
-</svg>"#, 
-            self.width.as_deref().unwrap_or("100%"),
-            self.color.as_deref().unwrap_or("currentColor"),
-            self.path_data(),
-            self.stroke_width())
+        // Default output already contains `var(--hr-weight)` / `var(--hr-color)` /
+        // `var(--hr-width)` tokens — substitute each caller-supplied override into
+        // the matching `var(--…)` expression.
+        let mut svg = self.render_to_browser();
+        for (name, value) in variables {
+            svg = svg.replace(&format!("var(--{name})"), value);
+        }
+        svg
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -75,6 +83,18 @@ impl BrowserRenderable for HorizontalRule {
     }
 }
 ```
+
+### Variable Naming
+
+The reference `HorizontalRule` implementation declares three CSS variables on the root `<svg>`:
+
+| Variable      | Purpose                                     |
+|---------------|---------------------------------------------|
+| `--hr-weight` | Stroke width in pixels (derived from `RuleWeight`) |
+| `--hr-color`  | Stroke/fill color (falls back to `currentColor`)   |
+| `--hr-width`  | Total SVG width (falls back to `100%`)             |
+
+Each variable is referenced via `var(--hr-…, <fallback>)` inside the SVG body so the document still renders when the inline style is stripped.
 
 ## Integration with Darkmatter
 

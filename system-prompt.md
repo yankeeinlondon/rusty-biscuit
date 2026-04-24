@@ -6,7 +6,7 @@
 
 ## Best Practices
 
-- when rendering to the terminal ALWAYS use the `biscuit-terminal` and `darkmatter` skills!
+- when rendering to the terminal use the `biscuit-terminal` and `darkmatter` skills!
     - leverage the [`Prose`](biscuit-terminal/docs/components/prose.md) struct from biscuit-terminal for rich text (color, style), hyperlinks (OS8), and more
 - when attempting to do host discovery (hardware, software, os, file-system, repo/git) you should use the `sniff` skill
 - when doing file conversions between JSON, YAML, TOML always use the `biscuit-file` skill

@@ -93,7 +93,7 @@ review feat="" agent="":
     )
 
     echo
-    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: $(just _link "$(sniff repo package-area)/${dir}/review-${iteration}.md")"
+    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: $(just _link "$(sniff repo package-area)/${dir}/review-${iteration}.md" "${dir}/review-${iteration}.md")"
     echo
 
 # implement a review that was conducted (not a feature review)
@@ -193,9 +193,25 @@ implement-feature-review filter="" spec="" design="" agent="":
 
     echo -e "🏃‍♂️ Starting the {{bold}}implementation{{reset}} of the review suggestions (#${iteration})"
     if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" ${model}; then
-        echo
-        echo -e "🎉 Implemented all the suggestions found in the $(just _link "${review}") review!"
-        echo
+
+        ready="$(md get "${review}" "ready")"
+        if [[ ready == "false" ]]; then
+            echo
+            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
+            echo -e "👎 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is {{red}}not{{reset}} production ready!"
+            echo
+
+        elif [[ "$ready" == "true" ]]; then
+            echo
+            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
+            echo -e "🎉 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is production ready!"
+            echo
+        else
+            echo
+            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
+            echo -e "🤨 the 'ready' frontmatter property was not set!"
+            echo
+        fi
         just _speak "The implementation of review suggestions in "$(sniff repo package-area)" package area has completed"
     else
         echo
