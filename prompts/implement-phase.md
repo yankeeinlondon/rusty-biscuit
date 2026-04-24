@@ -16,6 +16,10 @@ failure:
 
 Your task is to implement phase {{phase}} of the plan found in {{plan}}.
 
+::block when="memory"
+> **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
+::end-block
+
 - use the '{{ctx.current_package_area}}' skill during this implementation
 
 You are done when:
@@ -29,6 +33,9 @@ You are done when:
     - `docs_created_during_phase_{{phase}}` should be set to all documentation files which were created during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - `skills_files_updated_during_phase{{phase}}` should be set to all agent skill files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
     - if this is a monorepo, then include `packages` as a list of packages in the monorepo which were touched by the implementation in phase {{phase}}
+::block when="memory"
+- Once all Frontmatter has been set to the plan file ({{plan}}), consider if there was anything surprising or novel that you discovered during this phase that would be valuable to know in future stages. If there is, then add a H2 heading `## Phase {{phase}}` to the end of the file `memory/{{memory}}.md`
+::end-block
 
 **IMPORTANT:** 
 

@@ -232,7 +232,7 @@ design filter="":
     dir="$(dirname ${file})"
     echo
     echo -e "Creating a technical design from the spec file: {{ blue }}${file}{{ reset }}. Using {{ bold }}${use_agent}{{ reset }} agent."
-    claudine compose @prompts/design.md --${use_agent} -y --set spec="$(basename "${file}")" dir="${dir}" ${model} || (
+    claudine compose @prompts/design.md --${use_agent} -y spec="$(basename "${file}")" dir="${dir}" ${model} || (
         echo
         echo -e "Failed to complete the design for {{ blue }}$(just _link "${file}"){{ reset }} using the {{ yellow }}${use_agent}{{ reset }} agent"
         echo
@@ -243,7 +243,7 @@ design filter="":
     link="$(just _link "${dir}/tech-design.md")"
     echo -e "We now have a {{ bold }}technical design{{ reset }} document for {{ blue }}${link}{{ reset }}"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
-        just plan-feature spec:="${file}" design:="${dir}/tech-design.md"
+        just plan-feature "${file}" "${dir}/tech-design.md"
     fi
 
 clarify filter="" agent="":
