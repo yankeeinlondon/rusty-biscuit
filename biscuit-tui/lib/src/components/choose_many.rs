@@ -662,7 +662,7 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
     }
 
     let visible_indices: Vec<usize> = state.filter.visible().to_vec();
-    adjust_scroll(state, visible, visible_indices.len());
+    adjust_scroll(state, visible, &visible_indices);
 
     let hover_style = state.theme.selected_style;
     let disabled_style = state.theme.disabled_style;
@@ -804,14 +804,14 @@ fn build_highlighted_spans(
 fn adjust_scroll<V: Clone + PartialEq>(
     state: &mut ChooseManyState<V>,
     visible: usize,
-    visible_len: usize,
+    visible_indices: &[usize],
 ) {
+    let visible_len = visible_indices.len();
     if visible == 0 || visible_len == 0 {
         state.scroll_offset = 0;
         return;
     }
-    let visible_slice = state.filter.visible();
-    let hover_pos = visible_slice
+    let hover_pos = visible_indices
         .iter()
         .position(|&i| i == state.hover)
         .unwrap_or(0);
@@ -1619,5 +1619,25 @@ mod tests {
         let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
         ChooseMany::new().handle_event(&mut state, ctrl_a);
         assert!(state.selected_count() > 0);
+    }
+
+    #[test]
+    fn build_highlighted_spans_styles_matched_chars_in_multibyte_label() {
+        // "Café" has a multi-byte 'é'. Char indices 0 and 1 (the 'C'
+        // and 'a') must be styled with `match_style` and the remainder
+        // ("fé") with `base_style`. This regression-tests that the
+        // char-index iteration on line ~773 does not slip into byte
+        // indexing when the suffix contains multi-byte chars.
+        use ratatui::style::{Color, Modifier};
+        let base_style = Style::default().fg(Color::White);
+        let match_style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let spans = build_highlighted_spans("Café", &[0, 1], base_style, match_style);
+        assert_eq!(spans.len(), 2, "expected two spans, got {spans:?}");
+        assert_eq!(spans[0].content, "Ca");
+        assert_eq!(spans[0].style, match_style);
+        assert_eq!(spans[1].content, "fé");
+        assert_eq!(spans[1].style, base_style);
     }
 }
