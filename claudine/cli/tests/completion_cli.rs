@@ -197,42 +197,28 @@ fn two_char_curated_match_finds_multiple_files_by_substring() {
 
     let got = run_complete_trailing(root, &["compose", "@pr"]);
 
-    for expected in [
-        "@prompts/plain.md",
-        "@prompts/with-prompt.md",
-        "@prompts/seq.md",
-    ]
-    .iter()
-    .copied()
-    {
-        // Curated-scope markdown whose filename contains `pr` (stripped of
-        // `.md`) must appear. `plain.md`/`seq.md` match via the parent
-        // segment containing `pr` — but matching is on the FILENAME only,
-        // so they should NOT match. Only `prompt`/`with-prompt`/`suppress`
-        // should fire. We assert this below.
-        let _ = expected; // silence unused warning
-    }
-
+    // The new engine strips the `@` sigil on selection (spec §5.5).
+    // Matching is fuzzy-subsequence on the filename stem.
     assert!(
-        got.iter().any(|c| c == "@prompts/with-prompt.md"),
+        got.iter().any(|c| c == "prompts/with-prompt.md"),
         "@pr should match `with-prompt.md`; got: {got:?}",
     );
     assert!(
-        got.iter().any(|c| c == "@prompts/suppress.md"),
-        "@pr should match `suppress.md` (substring); got: {got:?}",
+        got.iter().any(|c| c == "prompts/suppress.md"),
+        "@pr should match `suppress.md` (subsequence); got: {got:?}",
     );
     assert!(
-        got.iter().any(|c| c == "@prompts/my-prompt.md"),
-        "@pr should match `my-prompt.md` (substring); got: {got:?}",
+        got.iter().any(|c| c == "prompts/my-prompt.md"),
+        "@pr should match `my-prompt.md` (subsequence); got: {got:?}",
     );
-    // `plain.md` and `seq.md` filenames do NOT contain `pr`; they must
-    // NOT appear.
+    // `plain.md` and `seq.md` filenames do NOT have `p` before `r`; they
+    // must NOT appear.
     assert!(
-        !got.iter().any(|c| c == "@prompts/plain.md"),
+        !got.iter().any(|c| c.ends_with("plain.md")),
         "@pr matching must be on filename, not path; got: {got:?}",
     );
     assert!(
-        !got.iter().any(|c| c == "@prompts/seq.md"),
+        !got.iter().any(|c| c.ends_with("seq.md")),
         "@pr matching must be on filename, not path; got: {got:?}",
     );
 }
@@ -270,21 +256,23 @@ fn path_separator_reset_enumerates_inside_prompts_directory() {
     let root = workspace.path();
     seed_curated_fixtures(root);
 
-    let got = run_complete_trailing(root, &["compose", "@prompts/"]);
+    // `@prompts/` committed-directory form — new engine strips the `@`
+    // sigil on selection and delegates to the committed-directory walker.
+    let got = run_complete_trailing(root, &["compose", "prompts/"]);
 
     // Every file inside the repo `prompts/` directory should surface,
     // regardless of filename, because the segment after `/` is empty
     // (0 meaningful chars).
     assert!(
-        got.iter().any(|c| c == "@prompts/plain.md"),
+        got.iter().any(|c| c == "prompts/plain.md"),
         "path reset should surface plain.md: {got:?}",
     );
     assert!(
-        got.iter().any(|c| c == "@prompts/with-prompt.md"),
+        got.iter().any(|c| c == "prompts/with-prompt.md"),
         "path reset should surface with-prompt.md: {got:?}",
     );
     assert!(
-        got.iter().any(|c| c == "@prompts/seq.md"),
+        got.iter().any(|c| c == "prompts/seq.md"),
         "path reset should surface seq.md: {got:?}",
     );
     // The non-markdown `notes.txt` must still be dropped.
@@ -421,8 +409,10 @@ fn gitignored_files_excluded_from_curated_scan() {
 
     let got = run_complete_trailing(root, &["compose", "@"]);
 
+    // `@` with empty active segment — new engine strips `@` and emits
+    // relative paths.
     assert!(
-        got.iter().any(|c| c == "@prompts/kept.md"),
+        got.iter().any(|c| c == "prompts/kept.md"),
         "non-ignored curated match must surface: {got:?}"
     );
     assert!(
@@ -446,9 +436,11 @@ fn mid_filename_substring_match_fires() {
 
     let got = run_complete_trailing(root, &["compose", "@omp"]);
 
+    // New engine strips `@` on selection; fuzzy-subsequence matching on
+    // the stem matches `omp` against `prompt`.
     assert!(
-        got.iter().any(|c| c == "@prompts/prompt.md"),
-        "mid-filename substring match failed: {got:?}"
+        got.iter().any(|c| c == "prompts/prompt.md"),
+        "mid-filename subsequence match failed: {got:?}"
     );
 }
 
