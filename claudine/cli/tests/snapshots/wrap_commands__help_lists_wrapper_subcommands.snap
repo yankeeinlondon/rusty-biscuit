@@ -1,5 +1,6 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
+assertion_line: 159
 expression: strip_ansi(&stdout)
 ---
 Claudine
@@ -29,6 +30,7 @@ Wrapped Execution:
 Composition:
   compose           Compose a Markdown document and send as prompt
   inline-compose    Inline composition: generate and replace body
+  sequence          Run a serial sequence of composition steps from a single document
 
 Administration:
   config            Manage Claudine configuration with a TUI
