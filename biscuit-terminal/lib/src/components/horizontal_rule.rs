@@ -8,6 +8,16 @@ use crate::terminal::Terminal;
 use crate::utils::color::{BasicColor, RgbColor, TermColor};
 use crate::utils::layout::{Layout, Margin};
 
+/// Default cell width (in pixels) used by `render_image_tier` and
+/// `resolve_width`'s `"NNpx"` branch when the terminal does not advertise a
+/// concrete `cell_size`. Matches typical monospace fonts at common DPI.
+pub(crate) const DEFAULT_CELL_WIDTH: u32 = 8;
+
+/// Default cell height (in pixels) used by `render_image_tier` when the
+/// terminal does not advertise a concrete `cell_size`. Paired with
+/// [`DEFAULT_CELL_WIDTH`] for an assumed 8×16 cell.
+pub(crate) const DEFAULT_CELL_HEIGHT: u32 = 16;
+
 /// Defines the visual style of a horizontal rule.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -65,7 +75,7 @@ pub enum RuleWeight {
 }
 
 /// A horizontal rule component for terminal and browser rendering.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HorizontalRule {
     style: RuleStyle,
     alignment: RuleAlignment,
@@ -153,6 +163,15 @@ impl HorizontalRule {
     }
 
     /// Sets the width of the rule as a CSS-like string.
+    ///
+    /// Accepts `"NN%"`, `"NNch"`, `"NNpx"`, or a bare `"NN"`. Any other
+    /// non-empty string is treated as unrecognized at render time and
+    /// falls back to the terminal's full width with a `tracing::warn!`.
+    ///
+    /// The minimum effective width is 1 column; values smaller than 1
+    /// (e.g., `"0%"`, `"0px"`) are coerced to 1. The maximum is the
+    /// terminal's column count at render time — wider values are clamped
+    /// down.
     pub fn width(mut self, width: impl Into<String>) -> Self {
         self.width = Some(width.into());
         self
@@ -183,8 +202,10 @@ impl Renderable for HorizontalRule {
         let term_width = term.width() as usize;
         let rule_width = self.resolve_width(term_width);
 
-        // Clamp to reasonable minimum and maximum
-        let rule_width = rule_width.clamp(10, term_width);
+        // Floor at 1 column so explicit `width: 1`/`1%` still renders one
+        // visible glyph; ceiling at `term_width` so no rule exceeds the
+        // terminal.
+        let rule_width = rule_width.min(term_width).max(1);
 
         // Generate the rule content based on style and terminal capabilities
         let rule_content = self.generate_terminal_content(rule_width, term);
@@ -229,8 +250,31 @@ impl Renderable for HorizontalRule {
 }
 
 impl HorizontalRule {
-    /// Resolves the width of the rule in characters based on the terminal width
-    /// and the CSS-like width specification.
+    /// Resolves the width of the rule in characters based on the terminal
+    /// width and the CSS-like width specification.
+    ///
+    /// ## Supported Width Forms
+    ///
+    /// - `"NN%"` — percentage of `term_width` (e.g., `"50%"`)
+    /// - `"NNch"` — explicit character count (e.g., `"20ch"`)
+    /// - `"NNpx"` — pixel count, converted to columns using
+    ///   [`DEFAULT_CELL_WIDTH`] (currently 8 px/cell). The resulting column
+    ///   count is clamped to `[1, term_width]`.
+    /// - Bare `"NN"` — character count
+    ///
+    /// When `self.width` is `None`, the function returns a style-appropriate
+    /// default (`term_width` for `Full`; 80% of it otherwise) silently.
+    ///
+    /// ## Notes
+    ///
+    /// Any other non-empty string (e.g., `"10em"`, `"50vw"`, `"garbage"`)
+    /// emits a `tracing::warn!` and falls back to `term_width`. The `None`
+    /// path does not warn — that is the documented default.
+    ///
+    /// The `"NNpx"` path assumes 8 pixels per cell; `resolve_width` takes a
+    /// plain `term_width: usize` and does not consult `Terminal::cell_size()`
+    /// directly. Callers that need exact pixel sizing should prefer `ch` or
+    /// `%` widths.
     fn resolve_width(&self, term_width: usize) -> usize {
         match &self.width {
             Some(width_str) => {
@@ -241,16 +285,33 @@ impl HorizontalRule {
                 {
                     return ((term_width as f32 * pct / 100.0) as usize).max(1);
                 }
-                // Handle character width: "20ch" or "20"
-                let num_str = if let Some(s) = trimmed.strip_suffix("ch") {
-                    s.trim()
-                } else {
-                    trimmed
-                };
-                if let Ok(chars) = num_str.parse::<usize>() {
+                // Handle character width: "20ch"
+                if let Some(ch_str) = trimmed.strip_suffix("ch")
+                    && let Ok(chars) = ch_str.trim().parse::<usize>()
+                {
                     return chars.max(1);
                 }
-                // Fallback for unparseable width
+                // Handle pixel width: "200px" — convert to columns using the
+                // default cell width. Clamped to the terminal's column count.
+                if let Some(px_str) = trimmed.strip_suffix("px")
+                    && let Ok(pixels) = px_str.trim().parse::<u32>()
+                {
+                    let cell_width = DEFAULT_CELL_WIDTH.max(1) as usize;
+                    let cols = (pixels as usize / cell_width).max(1);
+                    return cols.min(term_width.max(1));
+                }
+                // Bare number: "20"
+                if let Ok(chars) = trimmed.parse::<usize>() {
+                    return chars.max(1);
+                }
+                // Unrecognized — warn and fall back to the full terminal
+                // width so that bad authoring is visible via
+                // `RUST_LOG=biscuit_terminal=warn` without rendering an
+                // empty or misleading rule.
+                tracing::warn!(
+                    width = %width_str,
+                    "unrecognized horizontal rule width; falling back to terminal width"
+                );
                 term_width
             }
             None => {
@@ -265,25 +326,84 @@ impl HorizontalRule {
         }
     }
 
+    /// Tier 1 image rendering: rasterize the HR's SVG to a PNG and emit it
+    /// through biscuit-terminal's Kitty-protocol image emitter.
+    ///
+    /// ## Activation Guard
+    ///
+    /// Tier 1 activates only when the terminal satisfies both:
+    ///
+    /// - `term.is_tty == true`
+    /// - `term.image_support` is one of [`ImageSupport::Kitty`] or
+    ///   [`ImageSupport::ITerm`]
+    ///
+    /// Both branches currently route through
+    /// [`TerminalImage::render_kitty_cells`]. Modern iTerm2 (and the other
+    /// iTerm-compatible emulators biscuit-terminal identifies) accept the
+    /// Kitty graphics protocol for cell-sized inline images, so a single
+    /// emitter is correct here; the iTerm2 `ESC ]1337;File=…` protocol
+    /// serves image-file upload workflows where aspect-preserving scaling
+    /// takes arguments this path does not produce. Adding a dedicated
+    /// iTerm branch remains a future option if visual parity ever drifts.
+    ///
+    /// ## Fallback Contract
+    ///
+    /// Returns `None` when the guard fails or when SVG rasterization fails
+    /// (in which case a `tracing::warn!` is logged). On `None` the caller
+    /// falls through to Tier 2 (Unicode) or Tier 3 (ASCII) via
+    /// `generate_terminal_content`.
+    ///
+    /// ## Cell Size
+    ///
+    /// When `term.cell_size()` is `None`, the tier assumes
+    /// [`DEFAULT_CELL_WIDTH`]×[`DEFAULT_CELL_HEIGHT`] (8×16 px) per cell.
+    /// This matches typical monospace fonts at common DPI; oversized fonts
+    /// render a proportionally thicker-looking rule.
     fn render_image_tier(&self, term: &Terminal) -> Option<String> {
-        if !term.is_tty || !matches!(term.image_support, ImageSupport::Kitty) {
+        if !term.is_tty
+            || !matches!(
+                term.image_support,
+                ImageSupport::Kitty | ImageSupport::ITerm
+            )
+        {
             return None;
         }
 
         let term_width = term.width() as usize;
-        let rule_width = self.resolve_width(term_width).clamp(10, term_width);
+        let rule_width = self.resolve_width(term_width).min(term_width).max(1);
         let height_cells = match self.weight {
             RuleWeight::Thin => 1,
             RuleWeight::Medium => 2,
             RuleWeight::Thick => 3,
         };
         let cell = term.cell_size();
-        let cell_width = cell.map(|c| c.width.max(1)).unwrap_or(8);
-        let cell_height = cell.map(|c| c.height.max(1)).unwrap_or(16);
+        let cell_width = cell
+            .map(|c| c.width.max(1))
+            .unwrap_or(DEFAULT_CELL_WIDTH);
+        let cell_height = cell
+            .map(|c| c.height.max(1))
+            .unwrap_or(DEFAULT_CELL_HEIGHT);
         let pixel_width = (rule_width as u32).saturating_mul(cell_width).max(1);
         let pixel_height = height_cells * cell_height;
 
         let svg = self.render_image_svg(pixel_width, pixel_height);
+        self.render_image_tier_from_svg(term, &svg, rule_width, height_cells)
+    }
+
+    /// SVG-injection seam used by [`render_image_tier`] and the test suite.
+    /// Rasterizes `svg`, emits the Kitty-graphics cells, and decorates the
+    /// output with cursor save/restore + downward motion so callers can
+    /// splice the escape sequence into a larger render without overlapping
+    /// subsequent content. Returns `None` (and logs a `tracing::warn!`)
+    /// when rasterization fails.
+    pub(crate) fn render_image_tier_from_svg(
+        &self,
+        term: &Terminal,
+        svg: &str,
+        rule_width: usize,
+        height_cells: u32,
+    ) -> Option<String> {
+        let term_width = term.width() as usize;
         let png = match rasterize_svg_to_png(svg.as_bytes()) {
             Ok(png) => png,
             Err(err) => {
@@ -295,6 +415,10 @@ impl HorizontalRule {
             }
         };
 
+        // Both Kitty-protocol terminals and modern iTerm2 accept
+        // `render_kitty_cells` for cell-sized inline images; see the rustdoc
+        // note on `render_image_tier` for the reasoning behind the unified
+        // emitter.
         let image =
             TerminalImage::default().render_kitty_cells(&png, rule_width as u32, height_cells);
         let content_width = rule_width;
@@ -547,7 +671,9 @@ impl HorizontalRule {
 
         tracing::warn!(
             color = %raw,
-            "unknown horizontal rule color string; rendering without ANSI wrapping"
+            "unknown horizontal rule color string; browser rendering will pass \
+             the value through to the SVG, but the terminal output is uncolored. \
+             Recognized: CSS basic-16 names, `gray`/`grey`, and `#rrggbb` hex."
         );
         content
     }
@@ -599,15 +725,18 @@ impl HorizontalRule {
     /// Unicode glyphs correctly, and `false` when we should emit the
     /// ASCII-only fallback.
     ///
-    /// We treat a missing locale as UTF-8-capable because every modern
-    /// terminal defaults to UTF-8. Explicit `C` / `POSIX` locales (or any
-    /// non-UTF-8 locale) fall through to the ASCII fallback.
-    fn use_fancy_chars(&self, _term: &Terminal) -> bool {
-        crate::discovery::locale::env_says_utf8().unwrap_or(true)
+    /// Consults [`Terminal::supports_unicode`], which is a capability flag
+    /// populated from [`crate::discovery::locale::env_says_utf8`] during
+    /// detection (and with a `true` fallback for unknown environments —
+    /// every modern terminal defaults to UTF-8). Callers that want to force
+    /// ASCII fallbacks can build a `Terminal` with
+    /// `.supports_unicode(false)`.
+    fn use_fancy_chars(&self, term: &Terminal) -> bool {
+        term.supports_unicode
     }
 }
 
-fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
     let tree = resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default())
         .map_err(|err| format!("SVG parse error: {err}"))?;
     let size = tree.size();
@@ -643,26 +772,49 @@ fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Parses a CSS basic-16 color name (case-insensitive) into a [`BasicColor`].
 /// Also accepts `gray` / `grey` as aliases for `BrightBlack`.
+///
+/// ## Notes
+///
+/// Matches without allocating — `eq_ignore_ascii_case` compares in place, so a
+/// rule rendered on every paragraph break in a large document no longer pays
+/// a per-call `String` allocation for the comparison.
 fn parse_basic_color(raw: &str) -> Option<BasicColor> {
-    match raw.to_ascii_lowercase().as_str() {
-        "black" => Some(BasicColor::Black),
-        "red" => Some(BasicColor::Red),
-        "green" => Some(BasicColor::Green),
-        "yellow" => Some(BasicColor::Yellow),
-        "blue" => Some(BasicColor::Blue),
-        "magenta" => Some(BasicColor::Magenta),
-        "cyan" => Some(BasicColor::Cyan),
-        "white" => Some(BasicColor::White),
-        "gray" | "grey" | "bright-black" | "brightblack" => Some(BasicColor::BrightBlack),
-        "bright-red" | "brightred" => Some(BasicColor::BrightRed),
-        "bright-green" | "brightgreen" => Some(BasicColor::BrightGreen),
-        "bright-yellow" | "brightyellow" => Some(BasicColor::BrightYellow),
-        "bright-blue" | "brightblue" => Some(BasicColor::BrightBlue),
-        "bright-magenta" | "brightmagenta" => Some(BasicColor::BrightMagenta),
-        "bright-cyan" | "brightcyan" => Some(BasicColor::BrightCyan),
-        "bright-white" | "brightwhite" => Some(BasicColor::BrightWhite),
-        _ => None,
-    }
+    // Static table keeps the allocation amortized across matches and makes
+    // extending the list a one-line change. Hyphenated and concatenated
+    // bright variants are kept alongside the canonical names for
+    // compatibility with existing callers.
+    const PAIRS: &[(&str, BasicColor)] = &[
+        ("black", BasicColor::Black),
+        ("red", BasicColor::Red),
+        ("green", BasicColor::Green),
+        ("yellow", BasicColor::Yellow),
+        ("blue", BasicColor::Blue),
+        ("magenta", BasicColor::Magenta),
+        ("cyan", BasicColor::Cyan),
+        ("white", BasicColor::White),
+        ("gray", BasicColor::BrightBlack),
+        ("grey", BasicColor::BrightBlack),
+        ("bright-black", BasicColor::BrightBlack),
+        ("brightblack", BasicColor::BrightBlack),
+        ("bright-red", BasicColor::BrightRed),
+        ("brightred", BasicColor::BrightRed),
+        ("bright-green", BasicColor::BrightGreen),
+        ("brightgreen", BasicColor::BrightGreen),
+        ("bright-yellow", BasicColor::BrightYellow),
+        ("brightyellow", BasicColor::BrightYellow),
+        ("bright-blue", BasicColor::BrightBlue),
+        ("brightblue", BasicColor::BrightBlue),
+        ("bright-magenta", BasicColor::BrightMagenta),
+        ("brightmagenta", BasicColor::BrightMagenta),
+        ("bright-cyan", BasicColor::BrightCyan),
+        ("brightcyan", BasicColor::BrightCyan),
+        ("bright-white", BasicColor::BrightWhite),
+        ("brightwhite", BasicColor::BrightWhite),
+    ];
+    PAIRS
+        .iter()
+        .find(|(name, _)| raw.eq_ignore_ascii_case(name))
+        .map(|(_, color)| *color)
 }
 
 /// Parses a `#rrggbb` hex color into an [`RgbColor`] with a nearest-primary
@@ -884,14 +1036,24 @@ impl MarginToCss for Margin {
             Margin::Percent(pct) => format!("{}%", pct),
             Margin::None => "0".to_string(),
             Margin::Offset(base, chars) => {
-                // For Offset, we'll use the base margin plus the chars
+                // `Margin::Offset(base, chars)` combines a heterogeneous base
+                // (percent / chars / none) with an additional character
+                // offset. Raw `{base} + {chars}ch` is not legal CSS —
+                // browsers reject it. Wrap the combination in `calc(...)`
+                // so the emitted `style="margin: calc(2% + 3ch) …"` stays
+                // valid. Two fast paths collapse degenerate cases:
+                //   - `chars == 0` returns the base verbatim (no
+                //     `calc(5% + 0ch)` noise)
+                //   - a `None` base (`base_value == "0"`) collapses to the
+                //     plain `{chars}ch` form
                 let base_value = base.to_css_value("0");
+                if *chars == 0 {
+                    return base_value;
+                }
                 if base_value == "0" {
                     format!("{}ch", chars)
                 } else {
-                    // This is a simplification - in a real implementation,
-                    // we'd need to parse and combine the values properly
-                    format!("{} + {}ch", base_value, chars)
+                    format!("calc({} + {}ch)", base_value, chars)
                 }
             }
         }
@@ -1243,6 +1405,138 @@ mod tests {
         assert!(result.contains('[') && result.contains(']'));
     }
 
+    // ================================================================
+    // Phase 3: C4 — hard assertion for CurtainRod + Thick + Right
+    //
+    // The 36-tuple sweep `test_all_styles_all_alignments_all_weights_unicode`
+    // only asserts `!result.is_empty()`, so a regression that (for example)
+    // dropped the right bracket or swapped the heavy glyph for medium would
+    // not be caught at unit-test granularity — the snapshot sweep would
+    // update silently under `cargo insta accept`. These two tests fail fast
+    // on the specific "hard" combination the review called out.
+    // ================================================================
+
+    /// C4 (Unicode path): CurtainRod + Thick + Right produces the expected
+    /// byte pattern on a 100-column terminal with `width("40")`.
+    ///
+    /// - Right alignment → 62 leading spaces (100 − visible_width = 38 → 62).
+    /// - First non-space char is `┤` (left cap).
+    /// - Last char is `├` (right cap).
+    /// - Body between caps is entirely `━` (heavy line, proving `Thick`).
+    ///
+    /// No color is set, so no ANSI escapes appear in `result`; the
+    /// assertions below can inspect the raw bytes.
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_render_curtain_rod_thick_right_has_brackets_and_heavy_line() {
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::CurtainRod)
+            .weight(RuleWeight::Thick)
+            .alignment(RuleAlignment::Right)
+            .width("40");
+        // `is_tty=false` keeps us out of Tier 1; TrueColor exercises the
+        // same code path as production TTYs without inviting the image tier.
+        let term = Terminal::builder()
+            .width(100)
+            .is_tty(false)
+            .color_depth(ColorDepth::TrueColor)
+            .image_support(ImageSupport::None)
+            .build();
+        let result = hr.render(&term);
+
+        // No color is configured → output is pure Unicode, no ANSI escapes.
+        assert!(
+            !result.contains('\x1b'),
+            "no color was configured, output must be ANSI-free: {result:?}"
+        );
+
+        // CurtainRod body: `┤` + `━`.repeat(inner_width) + `├` where
+        // `inner_width = 40 - 4 = 36`. Visible width = 1 + 36 + 1 = 38.
+        let expected_body: String = format!("┤{}├", "━".repeat(36));
+        let expected_leading_spaces = " ".repeat(62);
+        let expected = format!("{expected_leading_spaces}{expected_body}");
+        assert_eq!(
+            result, expected,
+            "CurtainRod+Thick+Right must render exactly 62 leading spaces, ┤, 36 heavy bars, ├: {result:?}"
+        );
+
+        // Cross-check individual invariants in case `expected` ever drifts.
+        assert!(
+            result.starts_with(&expected_leading_spaces),
+            "expected 62 leading spaces for width=40 on term_width=100 (right-aligned): {result:?}"
+        );
+        // `┤` is 3 UTF-8 bytes; so is `├` — strip them via char indexing.
+        let non_space: String = result.chars().skip_while(|c| *c == ' ').collect();
+        assert!(
+            non_space.starts_with('┤'),
+            "first non-space char must be ┤ (left cap): {non_space:?}"
+        );
+        assert!(
+            non_space.ends_with('├'),
+            "last char must be ├ (right cap): {non_space:?}"
+        );
+        let inner: String = non_space
+            .chars()
+            .skip(1)
+            .take_while(|c| *c == '━')
+            .collect();
+        assert_eq!(
+            inner.chars().count(),
+            36,
+            "heavy body between caps must be exactly 36 `━` glyphs (Thick variant): {non_space:?}"
+        );
+        // Visible width = 38 (1 + 36 + 1) — the CurtainRod reserves 4 cells
+        // for the bracket pair and inter-cap padding in its width math.
+        assert_eq!(
+            hr.visible_width(&non_space),
+            38,
+            "visible width of the rule body must be 38: {non_space:?}"
+        );
+    }
+
+    /// C4 (ASCII path): the same boundary combination under a `C` locale
+    /// falls through to ASCII and must use `[`/`]` and `-`.
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_render_curtain_rod_thick_right_ascii_fallback() {
+        let _guard = ScopedLcAll::force_c();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::CurtainRod)
+            .weight(RuleWeight::Thick)
+            .alignment(RuleAlignment::Right)
+            .width("40");
+        let term = Terminal::builder()
+            .width(100)
+            .is_tty(false)
+            .color_depth(ColorDepth::None)
+            .image_support(ImageSupport::None)
+            .build();
+        let result = hr.render(&term);
+
+        assert!(
+            !result.contains('\x1b'),
+            "no color was configured, output must be ANSI-free: {result:?}"
+        );
+
+        // ASCII body: `[` + `-`.repeat(36) + `]`. Visible width = 38.
+        let expected_body = format!("[{}]", "-".repeat(36));
+        let expected_leading_spaces = " ".repeat(62);
+        let expected = format!("{expected_leading_spaces}{expected_body}");
+        assert_eq!(
+            result, expected,
+            "CurtainRod+Thick+Right ASCII fallback must use `[` / `-` / `]`: {result:?}"
+        );
+
+        // ASCII fallback is weight-insensitive by design — this assertion
+        // is the canary that catches a regression that tried to "promote"
+        // ASCII to some heavy variant.
+        assert!(
+            !result.contains('━') && !result.contains('┤') && !result.contains('├'),
+            "ASCII fallback must not leak Unicode glyphs: {result:?}"
+        );
+    }
+
     #[test]
     #[serial_test::serial(locale_env)]
     fn test_render_centered() {
@@ -1398,6 +1692,229 @@ mod tests {
     fn test_resolve_width_default_centered() {
         let hr = HorizontalRule::new().alignment(RuleAlignment::Centered);
         assert_eq!(hr.resolve_width(100), 80);
+    }
+
+    // ================================================================
+    // Phase 2: B1 / C1 — invalid width warn+fallback
+    // ================================================================
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_resolve_width_invalid_warns_and_falls_back() {
+        let hr = HorizontalRule::new().width("garbage");
+        let resolved = hr.resolve_width(100);
+        assert_eq!(resolved, 100, "unparseable width should return term_width");
+        assert!(
+            logs_contain("unrecognized horizontal rule width"),
+            "expected a warn log for unrecognized width"
+        );
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_resolve_width_invalid_em_warns() {
+        let hr = HorizontalRule::new().width("10em");
+        let resolved = hr.resolve_width(100);
+        assert_eq!(resolved, 100);
+        assert!(
+            logs_contain("unrecognized horizontal rule width"),
+            "expected warn for `em` widths (unsupported)"
+        );
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_resolve_width_invalid_vw_warns() {
+        let hr = HorizontalRule::new().width("50vw");
+        let resolved = hr.resolve_width(100);
+        assert_eq!(resolved, 100);
+        assert!(
+            logs_contain("unrecognized horizontal rule width"),
+            "expected warn for `vw` widths (unsupported)"
+        );
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_resolve_width_none_is_silent() {
+        // The `None` branch is the documented default; it must not warn.
+        let hr = HorizontalRule::new();
+        let _ = hr.resolve_width(100);
+        assert!(
+            !logs_contain("unrecognized horizontal rule width"),
+            "no warn should be emitted when width is unset"
+        );
+    }
+
+    // ================================================================
+    // Phase 2: B2 — "NNNpx" width parsing
+    // ================================================================
+
+    #[test]
+    fn test_resolve_width_px_parses() {
+        let hr = HorizontalRule::new().width("160px");
+        // 160 / DEFAULT_CELL_WIDTH (8) == 20 columns.
+        assert_eq!(hr.resolve_width(100), 20);
+    }
+
+    #[test]
+    fn test_resolve_width_px_clamps_to_term_width() {
+        let hr = HorizontalRule::new().width("4000px");
+        // 4000 / 8 = 500 cols, clamped down to term_width.
+        assert_eq!(hr.resolve_width(100), 100);
+    }
+
+    #[test]
+    fn test_resolve_width_px_zero_is_one() {
+        let hr = HorizontalRule::new().width("0px");
+        assert_eq!(hr.resolve_width(100), 1, "0px should floor to 1 column");
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_resolve_width_px_malformed_warns() {
+        let hr = HorizontalRule::new().width("abcpx");
+        let resolved = hr.resolve_width(100);
+        assert_eq!(resolved, 100);
+        assert!(
+            logs_contain("unrecognized horizontal rule width"),
+            "malformed px value should warn"
+        );
+    }
+
+    // ================================================================
+    // Phase 2: B4 — minimum-width boundary coverage
+    // ================================================================
+
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_render_width_one_percent_yields_one_column() {
+        // Previously clamped to 10; now honors the explicit 1-column intent.
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Dashes)
+            .alignment(RuleAlignment::Full)
+            .width("1%");
+        let term = Terminal::builder().width(100).build();
+        let result = hr.render(&term);
+        assert_eq!(
+            hr.visible_width(&result),
+            1,
+            "1% of 100 cols should render exactly 1 visible column: {result:?}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_render_width_three_yields_three_columns() {
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Dashes)
+            .alignment(RuleAlignment::Left)
+            .width("3");
+        let term = Terminal::builder().width(100).build();
+        let result = hr.render(&term);
+        assert_eq!(
+            hr.visible_width(&result),
+            3,
+            "width:3 should render 3 columns with no hidden bump: {result:?}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_render_width_five_percent_yields_five_columns() {
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Dashes)
+            .alignment(RuleAlignment::Full)
+            .width("5%");
+        let term = Terminal::builder().width(100).build();
+        let result = hr.render(&term);
+        assert_eq!(
+            hr.visible_width(&result),
+            5,
+            "5% of 100 cols should render 5 columns (previously clamped to 10): {result:?}"
+        );
+    }
+
+    // ================================================================
+    // Phase 2: B5 — Tier 1 extends to ImageSupport::ITerm
+    // ================================================================
+
+    #[test]
+    fn test_render_uses_image_tier_when_iterm() {
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Dashes)
+            .alignment(RuleAlignment::Full)
+            .width("40");
+        let term = Terminal::builder()
+            .width(80)
+            .is_tty(true)
+            .image_support(ImageSupport::ITerm)
+            .build();
+
+        let result = hr.render(&term);
+        // Kitty-protocol graphics escape; see `render_image_tier` rustdoc
+        // for why iTerm routes through the same emitter today.
+        assert!(
+            result.contains("\x1b_G"),
+            "ImageSupport::ITerm should trigger Tier 1 image rendering: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_render_does_not_use_image_tier_when_unsupported() {
+        let hr = HorizontalRule::new().style(RuleStyle::Dashes).width("40");
+        let term = Terminal::builder()
+            .width(80)
+            .is_tty(true)
+            .image_support(ImageSupport::None)
+            .build();
+
+        let result = hr.render(&term);
+        assert!(
+            !result.contains("\x1b_G"),
+            "ImageSupport::None must not emit image escapes: {result:?}"
+        );
+    }
+
+    // ================================================================
+    // Phase 2: C3 — rasterization-failure fallback
+    // ================================================================
+
+    #[test]
+    fn test_rasterize_svg_to_png_fails_on_garbage() {
+        let result = rasterize_svg_to_png(b"<not-an-svg>");
+        assert!(
+            result.is_err(),
+            "garbage input must return Err from rasterize_svg_to_png"
+        );
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_render_image_tier_falls_through_on_rasterization_failure() {
+        // Feed `render_image_tier_from_svg` deliberately broken SVG bytes
+        // to exercise the warn+None fallback without stubbing the whole
+        // `render_image_tier` guard chain. The public contract is:
+        //   - return None
+        //   - log "horizontal rule image rendering failed"
+        let hr = HorizontalRule::new();
+        let term = Terminal::builder()
+            .width(80)
+            .is_tty(true)
+            .image_support(ImageSupport::Kitty)
+            .build();
+        let result = hr.render_image_tier_from_svg(&term, "<not-an-svg>", 10, 1);
+        assert!(
+            result.is_none(),
+            "rasterization failure must return None so the caller falls back to text"
+        );
+        assert!(
+            logs_contain("horizontal rule image rendering failed"),
+            "expected a warn log on rasterization failure"
+        );
     }
 
     #[test]
@@ -2396,6 +2913,148 @@ mod tests {
             result.contains("--hr-width: 60ch"),
             "expected --hr-width: 60ch: {result}"
         );
+    }
+
+    // ================================================================
+    // Phase 4: D1 — PartialEq derive on HorizontalRule
+    // ================================================================
+
+    /// Two rules built with the same builder calls compare equal.
+    #[test]
+    fn test_horizontal_rule_partial_eq_identity() {
+        let a = HorizontalRule::new()
+            .style(RuleStyle::Waves)
+            .alignment(RuleAlignment::Centered)
+            .weight(RuleWeight::Thick)
+            .width("75%")
+            .color("red");
+        let b = HorizontalRule::new()
+            .style(RuleStyle::Waves)
+            .alignment(RuleAlignment::Centered)
+            .weight(RuleWeight::Thick)
+            .width("75%")
+            .color("red");
+        assert_eq!(a, b);
+    }
+
+    /// Two rules that differ only in style must not compare equal.
+    #[test]
+    fn test_horizontal_rule_partial_eq_differs_on_style() {
+        let a = HorizontalRule::new().style(RuleStyle::Dashes);
+        let b = HorizontalRule::new().style(RuleStyle::Waves);
+        assert_ne!(a, b);
+    }
+
+    // ================================================================
+    // Phase 4: D2 — `supports_unicode` terminal capability
+    // ================================================================
+
+    /// When `supports_unicode` is `false`, the rule renders ASCII even if
+    /// `env_says_utf8()` would otherwise return `true`.
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_use_fancy_chars_honors_terminal_capability() {
+        // Force UTF-8 so the locale fallback would pick Unicode, then flip
+        // the explicit capability off to prove the capability dominates.
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Dashes)
+            .alignment(RuleAlignment::Full)
+            .width("10");
+        let term = Terminal::builder()
+            .width(20)
+            .supports_unicode(false)
+            .build();
+        let result = hr.render(&term);
+        assert!(
+            result.chars().all(|c| c == '-'),
+            "supports_unicode=false must emit ASCII dashes: {result:?}"
+        );
+    }
+
+    // ================================================================
+    // Phase 4: D4 — Margin::Offset CSS correctness (calc wrapper)
+    // ================================================================
+
+    /// `Margin::Offset(Percent(2.0), 3)` should emit `calc(2% + 3ch)` so the
+    /// CSS is browser-legal.
+    #[test]
+    fn test_margin_offset_percent_emits_calc() {
+        let margin = Margin::Offset(Box::new(Margin::Percent(2.0)), 3);
+        assert_eq!(margin.to_css_value("0"), "calc(2% + 3ch)");
+    }
+
+    /// `Margin::Offset(..., 0)` returns the base value unchanged — no
+    /// `calc(5% + 0ch)` noise.
+    #[test]
+    fn test_margin_offset_zero_chars_strips_calc() {
+        let margin = Margin::Offset(Box::new(Margin::Percent(2.0)), 0);
+        assert_eq!(margin.to_css_value("0"), "2%");
+    }
+
+    /// `Margin::Offset(None, 3)` collapses to the plain `3ch` fast path.
+    #[test]
+    fn test_margin_offset_zero_base_returns_ch() {
+        let margin = Margin::Offset(Box::new(Margin::None), 3);
+        assert_eq!(margin.to_css_value("0"), "3ch");
+    }
+
+    /// `Margin::Offset` composed into a full browser render emits legal
+    /// `calc(..)` CSS inside the outer `<svg>`'s inline style.
+    #[test]
+    fn test_render_to_browser_margin_offset_uses_calc() {
+        use crate::utils::layout::Layout;
+        let layout = Layout {
+            top_margin: Margin::Offset(Box::new(Margin::Percent(2.0)), 3),
+            ..Layout::default()
+        };
+        let hr = HorizontalRule::new().with_layout(layout);
+        let result = hr.render_to_browser();
+        assert!(
+            result.contains("margin: calc(2% + 3ch) auto"),
+            "expected calc(2% + 3ch) margin in browser output: {result}"
+        );
+    }
+
+    // ================================================================
+    // Phase 4: D6 — color drop asymmetry warn message
+    // ================================================================
+
+    /// When `apply_terminal_color` sees an unrecognized color name, the warn
+    /// log must explain that the browser SVG still receives the raw value.
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_apply_terminal_color_unknown_name_warns_with_asymmetry_note() {
+        let hr = HorizontalRule::new().color("tomato");
+        let term = Terminal::builder()
+            .width(40)
+            .color_depth(ColorDepth::TrueColor)
+            .build();
+        let _ = hr.apply_terminal_color("body".to_string(), &term);
+        assert!(
+            logs_contain("browser rendering will pass"),
+            "warn log must mention the browser-vs-terminal asymmetry"
+        );
+    }
+
+    // ================================================================
+    // Phase 4: D7 — case-insensitive color matching without allocation
+    // ================================================================
+
+    /// `parse_basic_color` continues to match mixed-case inputs after the
+    /// refactor that removed the per-call `to_ascii_lowercase` allocation.
+    #[test]
+    fn test_parse_basic_color_case_insensitive() {
+        assert_eq!(parse_basic_color("BLACK"), Some(BasicColor::Black));
+        assert_eq!(parse_basic_color("Red"), Some(BasicColor::Red));
+        assert_eq!(
+            parse_basic_color("bright-red"),
+            Some(BasicColor::BrightRed)
+        );
+        assert_eq!(parse_basic_color("BrightRed"), Some(BasicColor::BrightRed));
+        assert_eq!(parse_basic_color("Gray"), Some(BasicColor::BrightBlack));
+        assert_eq!(parse_basic_color("grey"), Some(BasicColor::BrightBlack));
+        assert_eq!(parse_basic_color("unknown-color-xyz"), None);
     }
 
     #[cfg(feature = "serde")]

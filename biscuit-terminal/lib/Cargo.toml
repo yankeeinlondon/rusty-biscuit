@@ -65,6 +65,7 @@ predicates = "3"
 proptest = "1.5"
 serial_test = "3"
 tempfile = "3"
+tracing-test = "0.2"
 
 [[bench]]
 name = "rendering"

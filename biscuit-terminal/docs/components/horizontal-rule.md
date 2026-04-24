@@ -170,6 +170,11 @@ let svg = rule.render_to_browser_with_inline_variables(&overrides);
 
 Unrecognized color strings are ignored for terminal rendering (the raw string is preserved for the browser target) and emit a `tracing::warn!`.
 
-## Deferred
+## Tier 1 Image Rendering
 
-**Tier 1 (SVG → PNG via `resvg` + `TerminalImage`) is not yet implemented.** The initial release of this component ships Tier 2 (Unicode) and Tier 3 (ASCII) rendering only. See [`darkmatter/features/2026-04-18-hr/tech-design.md`](../../../darkmatter/features/2026-04-18-hr/tech-design.md) "Deferred Work" and [`review-plan-1.md`](../../../darkmatter/features/2026-04-18-hr/review-plan-1.md) for the decision trail. Adding Tier 1 in a future phase is a purely additive change — the `Renderable` implementation already routes through `use_fancy_chars()` and can grow an image branch gated on `term.image_support`.
+The component ships Tier 1 rendering via `HorizontalRule::render_image_tier`, invoked from the `Renderable` impl before the Unicode / ASCII fallbacks.
+
+- **Capability gate:** Tier 1 activates only when **both** `term.is_tty == true` **and** `term.image_support == ImageSupport::Kitty`. Non-TTY sinks and terminals without Kitty-compatible image support skip straight to Tier 2 / Tier 3.
+- **Rasterization:** the same SVG produced for browser rendering is rasterized to a PNG via [`resvg`](https://crates.io/crates/resvg), then emitted through `TerminalImage::render_kitty_cells` as a Kitty graphics escape sequence.
+- **Cell sizing:** rule dimensions are computed against `term.cell_size()` when available; if the terminal does not report a cell size, an 8x16 pixel default is assumed.
+- **Fallback contract:** any rasterization failure logs a `tracing::warn!` and causes `render_image_tier` to return `None`, at which point `Renderable::render` proceeds to Tier 2 (Unicode) or Tier 3 (ASCII) using the same style / weight / alignment / color settings.

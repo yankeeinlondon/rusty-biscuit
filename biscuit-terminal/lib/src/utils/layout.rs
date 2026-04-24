@@ -397,7 +397,7 @@ impl WordWrap {
 ///     .left_margin(Margin::Chars(2))
 ///     .alignment(Alignment::Center);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     /// how much whitespace is required to the _left_ of this text block
     pub left_margin: Margin,
