@@ -578,8 +578,7 @@ mod tests {
         // A bool value for a recognized key still coerces to a String
         // ("true" / "false"), which is never a valid enum value — but
         // sibling keys (`style`, `color`) must survive.
-        let markdown =
-            "---\nhr:\n  style: waves\n  alignment: true\n  color: blue\n---\n\n---\n";
+        let markdown = "---\nhr:\n  style: waves\n  alignment: true\n  color: blue\n---\n\n---\n";
         let md: Markdown = markdown.into();
         let html = as_html(&md, Default::default()).unwrap();
         // Waves style survives.
@@ -641,7 +640,10 @@ mod tests {
         let bq_close = html
             .find("</blockquote>")
             .expect("blockquote close present (asserted above)");
-        assert!(bq_open < bq_close, "blockquote tags must nest correctly: {html}");
+        assert!(
+            bq_open < bq_close,
+            "blockquote tags must nest correctly: {html}"
+        );
         let inside = &html[bq_open..bq_close];
         assert!(
             inside.contains("<svg"),

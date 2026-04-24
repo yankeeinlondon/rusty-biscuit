@@ -253,6 +253,7 @@ fn map_weight(rule: HorizontalRule, raw: &str) -> HorizontalRule {
 mod tests {
     use super::*;
     use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+    use biscuit_terminal::discovery::detection::ImageSupport;
     use biscuit_terminal::terminal::Terminal;
 
     // --------------------------------------------------------------
@@ -347,7 +348,16 @@ mod tests {
         };
 
         let rule = build_rule(&attrs);
-        let term = Terminal::builder().width(40).build();
+        assert_eq!(rule.rule_style(), &RuleStyle::Waves);
+        assert_eq!(rule.rule_alignment(), &RuleAlignment::Centered);
+        assert_eq!(rule.rule_weight(), &RuleWeight::Thick);
+        assert_eq!(rule.rule_width(), Some("50%"));
+        assert_eq!(rule.rule_color(), Some("red"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::None)
+            .build();
         let out = rule.render(&term);
         // Waves uses ≋ in Unicode mode, ~ otherwise.
         assert!(out.contains('≋') || out.contains('~'));
