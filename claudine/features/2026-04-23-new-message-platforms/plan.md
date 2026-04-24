@@ -67,6 +67,22 @@ skills_files_updated_during_phase6: []
 packages_during_phase_6:
   - claudine
   - claudine-cli
+source_files_during_phase_7:
+  - .claude/skills/claudine/SKILL.md
+  - .opencode/skill/claudine/SKILL.md
+  - just/notify.just
+  - just/plan.just
+  - just/review.just
+  - just/spec.just
+  - prompts/implement-phase.md
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase7:
+  - .claude/skills/claudine/SKILL.md
+  - .opencode/skill/claudine/SKILL.md
+packages_during_phase_7:
+  - claudine
+  - claudine-cli
 ---
 
 # New Message and Notification Platforms - Execution Plan
@@ -421,6 +437,35 @@ Steps:
 Parallelization:
 - Steps 6.1, 6.2, and 6.3 can proceed in parallel after implementation stabilizes.
 - Steps 6.4 through 6.6 are serial release gates.
+
+## Phase 7 - Final Integration and Skill Update
+
+Goal: complete the feature by updating local skills, workflow templates, and recording final lessons learned.
+
+Steps:
+
+7.1 Update `.claude/skills/claudine/SKILL.md`.
+- Reflect the new webhook providers (Discord Webhook, Slack Webhook) and desktop notification support in the architecture summary.
+- Update the Config TUI Messenger Tab section to describe masked input, URL validation, and test connection workflow.
+- Observable result: skill file accurately describes the implemented messaging capabilities.
+
+7.2 Update plan implementation workflow.
+- Update `just/plan.just` to pass `total_phases` and `memory` variables to the implement-phase prompt.
+- Update `prompts/implement-phase.md` to include memory file reading and lessons learned recording instructions.
+- Observable result: future plan implementations can read memory files and record lessons learned automatically.
+
+7.3 Update notification workflow.
+- Add `_message` helper to `just/notify.just` for messenger send integration.
+- Observable result: just recipes can send messages through the messenger library.
+
+7.4 Record lessons learned.
+- Add a `## Phase 7` section to `memory/implement-new-message-platforms.md` documenting any surprising findings from the final integration.
+- Observable result: memory file contains lessons learned for all phases.
+
+Validation checkpoint:
+- Skill file renders correctly and contains accurate architecture descriptions.
+- `just lint` in the claudine package area passes.
+- All tests in the claudine package area pass (known flaky tests may be verified in isolation).
 
 ## Cross-Phase Invariants
 
