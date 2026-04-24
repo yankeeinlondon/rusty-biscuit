@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::io::Cursor;
 
 use crate::components::renderable::{BrowserRenderable, Renderable};
-use crate::discovery::detection::ColorDepth;
+use crate::components::terminal_image::TerminalImage;
+use crate::discovery::detection::{ColorDepth, ImageSupport};
 use crate::terminal::Terminal;
 use crate::utils::color::{BasicColor, RgbColor, TermColor};
 use crate::utils::layout::{Layout, Margin};
@@ -34,11 +36,11 @@ pub enum RuleStyle {
     CurtainRod,
 }
 
-/// Defines the placement of a horizontal rule within the available width.
+/// Defines the alignment of a horizontal rule within the available width.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
-pub enum RulePlacement {
+pub enum RuleAlignment {
     /// Span the full available width
     Full,
     /// Centered with equal margins on both sides
@@ -66,7 +68,7 @@ pub enum RuleWeight {
 #[derive(Debug, Clone)]
 pub struct HorizontalRule {
     style: RuleStyle,
-    placement: RulePlacement,
+    alignment: RuleAlignment,
     weight: RuleWeight,
     width: Option<String>, // CSS-like width specification (e.g., "50%", "200px")
     color: Option<String>, // CSS color specification
@@ -83,7 +85,7 @@ impl HorizontalRule {
     ///
     /// let rule = HorizontalRule::new()
     ///     .style(RuleStyle::Waves)
-    ///     .placement(RulePlacement::Centered)
+    ///     .alignment(RuleAlignment::Centered)
     ///     .weight(RuleWeight::Medium)
     ///     .width("75%");
     ///
@@ -93,7 +95,7 @@ impl HorizontalRule {
     pub fn new() -> Self {
         Self {
             style: RuleStyle::Dashes,
-            placement: RulePlacement::Full,
+            alignment: RuleAlignment::Full,
             weight: RuleWeight::Medium,
             width: None,
             color: None,
@@ -107,9 +109,40 @@ impl HorizontalRule {
         self
     }
 
-    /// Sets the placement of the rule.
-    pub fn placement(mut self, placement: RulePlacement) -> Self {
-        self.placement = placement;
+    /// Sets the alignment of the rule.
+    pub fn alignment(mut self, alignment: RuleAlignment) -> Self {
+        self.alignment = alignment;
+        self
+    }
+
+    /// Returns the resolved alignment.
+    pub fn rule_alignment(&self) -> &RuleAlignment {
+        &self.alignment
+    }
+
+    /// Returns the configured style.
+    pub fn rule_style(&self) -> &RuleStyle {
+        &self.style
+    }
+
+    /// Returns the configured weight.
+    pub fn rule_weight(&self) -> &RuleWeight {
+        &self.weight
+    }
+
+    /// Returns the configured width string, if any.
+    pub fn rule_width(&self) -> Option<&str> {
+        self.width.as_deref()
+    }
+
+    /// Returns the configured color string, if any.
+    pub fn rule_color(&self) -> Option<&str> {
+        self.color.as_deref()
+    }
+
+    /// Sets the layout.
+    pub fn with_layout(mut self, layout: Layout) -> Self {
+        self.layout = layout;
         self
     }
 
@@ -140,11 +173,13 @@ impl Default for HorizontalRule {
 
 impl Renderable for HorizontalRule {
     fn render(&self, term: &Terminal) -> String {
-        // Tier 1: SVG→PNG via resvg with TerminalImage
-        // If terminal supports images, we could generate an SVG and render it.
-        // For now, we use Tier 2/3 which are more universally compatible.
+        // Tier 1: SVG -> PNG -> Kitty graphics protocol. Any capability or
+        // rasterization failure falls through to the text tiers below.
+        if let Some(image) = self.render_image_tier(term) {
+            return image;
+        }
 
-        // Determine the width based on placement, custom width, and terminal width
+        // Determine the width based on alignment, custom width, and terminal width
         let term_width = term.width() as usize;
         let rule_width = self.resolve_width(term_width);
 
@@ -157,19 +192,19 @@ impl Renderable for HorizontalRule {
         // Wrap the rule content with ANSI color escapes when a color is set
         // and the terminal advertises any color support. Padding stays
         // outside the color wrap so the trailing reset comes *before* the
-        // placement padding, not after.
+        // alignment padding, not after.
         let rule_content = self.apply_terminal_color(rule_content, term);
 
-        // Apply placement (using character count, not byte length)
+        // Apply alignment (using character count, not byte length)
         let content_width = self.visible_width(&rule_content);
-        match self.placement {
-            RulePlacement::Full => rule_content,
-            RulePlacement::Centered => {
+        match self.alignment {
+            RuleAlignment::Full => rule_content,
+            RuleAlignment::Centered => {
                 let padding = (term_width.saturating_sub(content_width)) / 2;
                 format!("{}{}", " ".repeat(padding), rule_content)
             }
-            RulePlacement::Left => rule_content,
-            RulePlacement::Right => {
+            RuleAlignment::Left => rule_content,
+            RuleAlignment::Right => {
                 let padding = term_width.saturating_sub(content_width);
                 format!("{}{}", " ".repeat(padding), rule_content)
             }
@@ -219,15 +254,144 @@ impl HorizontalRule {
                 term_width
             }
             None => {
-                // Default width based on placement
-                match self.placement {
-                    RulePlacement::Full => term_width,
-                    RulePlacement::Centered | RulePlacement::Left | RulePlacement::Right => {
+                // Default width based on alignment
+                match self.alignment {
+                    RuleAlignment::Full => term_width,
+                    RuleAlignment::Centered | RuleAlignment::Left | RuleAlignment::Right => {
                         (term_width as f32 * 0.8) as usize
                     }
                 }
             }
         }
+    }
+
+    fn render_image_tier(&self, term: &Terminal) -> Option<String> {
+        if !term.is_tty || !matches!(term.image_support, ImageSupport::Kitty) {
+            return None;
+        }
+
+        let term_width = term.width() as usize;
+        let rule_width = self.resolve_width(term_width).clamp(10, term_width);
+        let height_cells = match self.weight {
+            RuleWeight::Thin => 1,
+            RuleWeight::Medium => 2,
+            RuleWeight::Thick => 3,
+        };
+        let cell = term.cell_size();
+        let cell_width = cell.map(|c| c.width.max(1)).unwrap_or(8);
+        let cell_height = cell.map(|c| c.height.max(1)).unwrap_or(16);
+        let pixel_width = (rule_width as u32).saturating_mul(cell_width).max(1);
+        let pixel_height = height_cells * cell_height;
+
+        let svg = self.render_image_svg(pixel_width, pixel_height);
+        let png = match rasterize_svg_to_png(svg.as_bytes()) {
+            Ok(png) => png,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "horizontal rule image rendering failed; falling back to text"
+                );
+                return None;
+            }
+        };
+
+        let image =
+            TerminalImage::default().render_kitty_cells(&png, rule_width as u32, height_cells);
+        let content_width = rule_width;
+        let x_offset = match self.alignment {
+            RuleAlignment::Full | RuleAlignment::Left => 0,
+            RuleAlignment::Centered => term_width.saturating_sub(content_width) / 2,
+            RuleAlignment::Right => term_width.saturating_sub(content_width),
+        };
+        let prefix = if x_offset > 0 {
+            format!("\x1b[{}C", x_offset)
+        } else {
+            String::new()
+        };
+
+        Some(format!(
+            "\x1b[s{}{}\x1b[u\x1b[{}B\r",
+            prefix, image, height_cells
+        ))
+    }
+
+    fn render_image_svg(&self, pixel_width: u32, pixel_height: u32) -> String {
+        let stroke_width = match self.weight {
+            RuleWeight::Thin => 2,
+            RuleWeight::Medium => 4,
+            RuleWeight::Thick => 8,
+        };
+        let color = self.color.as_deref().unwrap_or("currentColor");
+        let y = pixel_height as f32 / 2.0;
+        let width = pixel_width as f32;
+
+        let content = match self.style {
+            RuleStyle::Dashes => format!(
+                r#"<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round" stroke-dasharray="8,4"/>"#
+            ),
+            RuleStyle::Dots => format!(
+                r#"<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round" stroke-dasharray="2,6"/>"#
+            ),
+            RuleStyle::Waves => {
+                let mut path = format!("M0 {y}");
+                let mut x = 10.0;
+                while x <= width + 20.0 {
+                    path.push_str(&format!(" Q {} {} {} {}", x, y - 8.0, x + 10.0, y));
+                    x += 20.0;
+                }
+                format!(
+                    r#"<path d="{path}" stroke="{color}" stroke-width="{stroke_width}" fill="none" stroke-linecap="round"/>"#
+                )
+            }
+            RuleStyle::LineStar => format!(
+                r#"<line x1="0" y1="{y}" x2="{left}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round"/>
+  <path d="M{cx} {top} L{r1} {mid1} L{r2} {mid1} L{r3} {mid2} L{r4} {bot} L{cx} {low} L{l4} {bot} L{l3} {mid2} L{l2} {mid1} L{l1} {mid1} Z" fill="{color}"/>
+  <line x1="{right}" y1="{y}" x2="{width}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round"/>"#,
+                left = width * 0.45,
+                right = width * 0.55,
+                cx = width * 0.5,
+                top = y - 12.0,
+                mid1 = y - 4.0,
+                mid2 = y + 3.0,
+                bot = y + 12.0,
+                low = y + 6.0,
+                r1 = width * 0.52,
+                r2 = width * 0.58,
+                r3 = width * 0.53,
+                r4 = width * 0.55,
+                l1 = width * 0.48,
+                l2 = width * 0.42,
+                l3 = width * 0.47,
+                l4 = width * 0.45,
+            ),
+            RuleStyle::LineCircle => format!(
+                r#"<line x1="0" y1="{y}" x2="{left}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round"/>
+  <circle cx="{cx}" cy="{y}" r="{r}" fill="none" stroke="{color}" stroke-width="{stroke_width}"/>
+  <line x1="{right}" y1="{y}" x2="{width}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round"/>"#,
+                left = width * 0.45,
+                right = width * 0.55,
+                cx = width * 0.5,
+                r = stroke_width * 2,
+            ),
+            RuleStyle::InsetLine => format!(
+                r#"<line x1="{left}" y1="{y}" x2="{right}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round"/>"#,
+                left = width * 0.1,
+                right = width * 0.9,
+            ),
+            RuleStyle::CurtainRod => format!(
+                r#"<line x1="{left}" y1="{y}" x2="{right}" y2="{y}" stroke="{color}" stroke-width="{stroke_width}" stroke-linecap="round"/>
+  <circle cx="{left}" cy="{y}" r="4" fill="{color}"/>
+  <circle cx="{right}" cy="{y}" r="4" fill="{color}"/>"#,
+                left = width * 0.05,
+                right = width * 0.95,
+            ),
+        };
+
+        format!(
+            r#"<svg width="{pixel_width}" height="{pixel_height}" viewBox="0 0 {pixel_width} {pixel_height}" xmlns="http://www.w3.org/2000/svg">
+  {content}
+</svg>"#
+        )
     }
 
     /// Generates terminal content for the horizontal rule based on style and width.
@@ -390,7 +554,7 @@ impl HorizontalRule {
 
     /// Counts the number of *visible* columns in `content`, ignoring any
     /// ANSI CSI escape sequences that [`apply_terminal_color`] may have
-    /// wrapped around the rule body. Used to compute placement padding.
+    /// wrapped around the rule body. Used to compute alignment padding.
     fn visible_width(&self, content: &str) -> usize {
         let mut count = 0usize;
         let mut chars = content.chars();
@@ -441,6 +605,40 @@ impl HorizontalRule {
     fn use_fancy_chars(&self, _term: &Terminal) -> bool {
         crate::discovery::locale::env_says_utf8().unwrap_or(true)
     }
+}
+
+fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
+    let tree = resvg::usvg::Tree::from_data(svg_data, &resvg::usvg::Options::default())
+        .map_err(|err| format!("SVG parse error: {err}"))?;
+    let size = tree.size();
+    let width = size.width() as u32;
+    let height = size.height() as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+        .ok_or_else(|| format!("failed to create {width}x{height} pixmap"))?;
+    resvg::render(
+        &tree,
+        resvg::usvg::Transform::default(),
+        &mut pixmap.as_mut(),
+    );
+
+    let mut rgba = pixmap.data().to_vec();
+    for chunk in rgba.chunks_exact_mut(4) {
+        let a = chunk[3] as u16;
+        if a > 0 && a < 255 {
+            chunk[0] = ((chunk[0] as u16 * 255 + a / 2) / a).min(255) as u8;
+            chunk[1] = ((chunk[1] as u16 * 255 + a / 2) / a).min(255) as u8;
+            chunk[2] = ((chunk[2] as u16 * 255 + a / 2) / a).min(255) as u8;
+        }
+    }
+
+    let image = image::RgbaImage::from_raw(width, height, rgba)
+        .map(image::DynamicImage::ImageRgba8)
+        .ok_or_else(|| "failed to create image from SVG rasterization".to_string())?;
+    let mut buffer = Cursor::new(Vec::new());
+    image
+        .write_to(&mut buffer, image::ImageFormat::Png)
+        .map_err(|err| format!("PNG encoding failed: {err}"))?;
+    Ok(buffer.into_inner())
 }
 
 /// Parses a CSS basic-16 color name (case-insensitive) into a [`BasicColor`].
@@ -642,7 +840,7 @@ impl BrowserRenderable for HorizontalRule {
     /// - Key `"hr-color"` replaces every `var(--hr-color)` occurrence.
     /// - Key `"hr-width"` replaces every `var(--hr-width)` occurrence.
     ///
-    /// The replacement is independent per key — `HashMap` iteration order
+    /// The realignment is independent per key — `HashMap` iteration order
     /// does not affect the result because each `var(--name)` token is
     /// unique per key.
     ///
@@ -773,7 +971,7 @@ mod tests {
     fn test_horizontal_rule_new() {
         let hr = HorizontalRule::new();
         assert_eq!(hr.style, RuleStyle::Dashes);
-        assert_eq!(hr.placement, RulePlacement::Full);
+        assert_eq!(hr.alignment, RuleAlignment::Full);
         assert_eq!(hr.weight, RuleWeight::Medium);
         assert_eq!(hr.width, None);
         assert_eq!(hr.color, None);
@@ -783,13 +981,13 @@ mod tests {
     fn test_horizontal_rule_builder_methods() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
-            .placement(RulePlacement::Centered)
+            .alignment(RuleAlignment::Centered)
             .weight(RuleWeight::Thick)
             .width("50%")
             .color("red");
 
         assert_eq!(hr.style, RuleStyle::Waves);
-        assert_eq!(hr.placement, RulePlacement::Centered);
+        assert_eq!(hr.alignment, RuleAlignment::Centered);
         assert_eq!(hr.weight, RuleWeight::Thick);
         assert_eq!(hr.width, Some("50%".to_string()));
         assert_eq!(hr.color, Some("red".to_string()));
@@ -800,10 +998,43 @@ mod tests {
         let hr1 = HorizontalRule::new();
         let hr2 = HorizontalRule::default();
         assert_eq!(hr1.style, hr2.style);
-        assert_eq!(hr1.placement, hr2.placement);
+        assert_eq!(hr1.alignment, hr2.alignment);
         assert_eq!(hr1.weight, hr2.weight);
         assert_eq!(hr1.width, hr2.width);
         assert_eq!(hr1.color, hr2.color);
+    }
+
+    #[test]
+    fn test_render_uses_kitty_image_tier_when_supported() {
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Waves)
+            .alignment(RuleAlignment::Centered)
+            .width("50%")
+            .color("red");
+        let term = Terminal::builder()
+            .width(80)
+            .is_tty(true)
+            .image_support(ImageSupport::Kitty)
+            .build();
+
+        let result = hr.render(&term);
+        assert!(result.contains("\x1b_G"), "{result:?}");
+    }
+
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_image_tier_unavailable_falls_back_to_unicode() {
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("red");
+        let term = Terminal::builder()
+            .width(20)
+            .is_tty(true)
+            .image_support(ImageSupport::None)
+            .build();
+
+        let result = hr.render(&term);
+        assert!(!result.contains("\x1b_G"), "{result:?}");
+        assert!(result.contains('╌') || result.contains('-'), "{result:?}");
     }
 
     #[test]
@@ -812,7 +1043,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -826,7 +1057,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -840,7 +1071,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dots)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -854,7 +1085,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dots)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -868,7 +1099,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -882,7 +1113,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -896,7 +1127,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineStar)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -910,7 +1141,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineStar)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -925,7 +1156,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineCircle)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -939,7 +1170,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineCircle)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let result = hr.render(&term);
         assert!(!result.is_empty());
@@ -954,7 +1185,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::InsetLine)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() >= 3);
@@ -968,7 +1199,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new()
             .style(RuleStyle::InsetLine)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let result = hr.render(&term);
         assert!(result.len() >= 3);
@@ -983,7 +1214,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() >= 5);
@@ -1004,7 +1235,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let result = hr.render(&term);
         assert!(result.len() >= 5);
@@ -1018,7 +1249,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Centered);
+            .alignment(RuleAlignment::Centered);
         let term = Terminal::builder().width(100).build();
         let result = hr.render(&term);
         let term_width = 100_usize;
@@ -1035,7 +1266,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Left);
+            .alignment(RuleAlignment::Left);
         let term = Terminal::builder().width(100).build();
         let result = hr.render(&term);
         let rule_width = (100_f32 * 0.8) as usize;
@@ -1049,7 +1280,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Right);
+            .alignment(RuleAlignment::Right);
         let term = Terminal::builder().width(100).build();
         let result = hr.render(&term);
         let term_width = 100_usize;
@@ -1159,18 +1390,18 @@ mod tests {
 
     #[test]
     fn test_resolve_width_default_full() {
-        let hr = HorizontalRule::new().placement(RulePlacement::Full);
+        let hr = HorizontalRule::new().alignment(RuleAlignment::Full);
         assert_eq!(hr.resolve_width(100), 100);
     }
 
     #[test]
     fn test_resolve_width_default_centered() {
-        let hr = HorizontalRule::new().placement(RulePlacement::Centered);
+        let hr = HorizontalRule::new().alignment(RuleAlignment::Centered);
         assert_eq!(hr.resolve_width(100), 80);
     }
 
     #[test]
-    fn test_all_styles_all_placements_all_weights_unicode() {
+    fn test_all_styles_all_alignments_all_weights_unicode() {
         let term = Terminal::default();
         let styles = vec![
             RuleStyle::Dashes,
@@ -1181,27 +1412,27 @@ mod tests {
             RuleStyle::InsetLine,
             RuleStyle::CurtainRod,
         ];
-        let placements = vec![
-            RulePlacement::Full,
-            RulePlacement::Centered,
-            RulePlacement::Left,
-            RulePlacement::Right,
+        let alignments = vec![
+            RuleAlignment::Full,
+            RuleAlignment::Centered,
+            RuleAlignment::Left,
+            RuleAlignment::Right,
         ];
         let weights = vec![RuleWeight::Thin, RuleWeight::Medium, RuleWeight::Thick];
 
         for style in &styles {
-            for placement in &placements {
+            for alignment in &alignments {
                 for weight in &weights {
                     let hr = HorizontalRule::new()
                         .style(style.clone())
-                        .placement(placement.clone())
+                        .alignment(alignment.clone())
                         .weight(weight.clone());
                     let result = hr.render(&term);
                     assert!(
                         !result.is_empty(),
-                        "Failed for style={:?} placement={:?} weight={:?}",
+                        "Failed for style={:?} alignment={:?} weight={:?}",
                         style,
-                        placement,
+                        alignment,
                         weight
                     );
                 }
@@ -1210,7 +1441,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all_styles_all_placements_all_weights_ascii() {
+    fn test_all_styles_all_alignments_all_weights_ascii() {
         let term = Terminal::builder().color_depth(ColorDepth::None).build();
         let styles = vec![
             RuleStyle::Dashes,
@@ -1221,27 +1452,27 @@ mod tests {
             RuleStyle::InsetLine,
             RuleStyle::CurtainRod,
         ];
-        let placements = vec![
-            RulePlacement::Full,
-            RulePlacement::Centered,
-            RulePlacement::Left,
-            RulePlacement::Right,
+        let alignments = vec![
+            RuleAlignment::Full,
+            RuleAlignment::Centered,
+            RuleAlignment::Left,
+            RuleAlignment::Right,
         ];
         let weights = vec![RuleWeight::Thin, RuleWeight::Medium, RuleWeight::Thick];
 
         for style in &styles {
-            for placement in &placements {
+            for alignment in &alignments {
                 for weight in &weights {
                     let hr = HorizontalRule::new()
                         .style(style.clone())
-                        .placement(placement.clone())
+                        .alignment(alignment.clone())
                         .weight(weight.clone());
                     let result = hr.render(&term);
                     assert!(
                         !result.is_empty(),
-                        "Failed for style={:?} placement={:?} weight={:?}",
+                        "Failed for style={:?} alignment={:?} weight={:?}",
                         style,
-                        placement,
+                        alignment,
                         weight
                     );
                 }
@@ -1265,11 +1496,11 @@ mod tests {
             ("curtain_rod", RuleStyle::CurtainRod),
         ];
 
-        let placements = vec![
-            ("full", RulePlacement::Full),
-            ("centered", RulePlacement::Centered),
-            ("left", RulePlacement::Left),
-            ("right", RulePlacement::Right),
+        let alignments = vec![
+            ("full", RuleAlignment::Full),
+            ("centered", RuleAlignment::Centered),
+            ("left", RuleAlignment::Left),
+            ("right", RuleAlignment::Right),
         ];
 
         let weights = vec![
@@ -1279,16 +1510,16 @@ mod tests {
         ];
 
         for (style_name, style) in &styles {
-            for (placement_name, placement) in &placements {
+            for (alignment_name, alignment) in &alignments {
                 for (weight_name, weight) in &weights {
                     let hr = HorizontalRule::new()
                         .style(style.clone())
-                        .placement(placement.clone())
+                        .alignment(alignment.clone())
                         .weight(weight.clone());
 
                     let result = hr.render(&term);
                     assert_snapshot!(
-                        format!("terminal_{}_{}_{}", style_name, placement_name, weight_name),
+                        format!("terminal_{}_{}_{}", style_name, alignment_name, weight_name),
                         result
                     );
                 }
@@ -1354,7 +1585,7 @@ mod tests {
         for (style_name, style) in &styles {
             let hr = HorizontalRule::new()
                 .style(style.clone())
-                .placement(RulePlacement::Full)
+                .alignment(RuleAlignment::Full)
                 .weight(RuleWeight::Medium);
             let result = hr.render(&term);
             assert_snapshot!(format!("terminal_ascii_{}", style_name), result);
@@ -1376,7 +1607,7 @@ mod tests {
 
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Full)
+            .alignment(RuleAlignment::Full)
             .weight(RuleWeight::Medium);
         let prose = Prose::new("after the rule");
 
@@ -1408,7 +1639,7 @@ mod tests {
         // Test with custom width and color
         let hr1 = HorizontalRule::new()
             .style(RuleStyle::Waves)
-            .placement(RulePlacement::Centered)
+            .alignment(RuleAlignment::Centered)
             .weight(RuleWeight::Thick)
             .width("75%")
             .color("red");
@@ -1422,7 +1653,7 @@ mod tests {
         // Test with different combinations
         let hr2 = HorizontalRule::new()
             .style(RuleStyle::Dots)
-            .placement(RulePlacement::Right)
+            .alignment(RuleAlignment::Right)
             .weight(RuleWeight::Thin)
             .width("50ch")
             .color("#00ff00");
@@ -1503,7 +1734,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::builder().width(40).build();
         let result = hr.render(&term);
 
@@ -1829,13 +2060,13 @@ mod tests {
     #[test]
     #[serial_test::serial(locale_env)]
     fn test_render_color_padding_is_uncolored_for_centered() {
-        // With Centered placement, the leading padding should remain outside
+        // With Centered alignment, the leading padding should remain outside
         // the ANSI wrap — reset goes *before* any trailing content, and the
         // padding spaces should not be inside the color escape.
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Centered)
+            .alignment(RuleAlignment::Centered)
             .color("red");
         let term = Terminal::builder()
             .width(80)
@@ -1926,7 +2157,7 @@ mod tests {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new()
             .style(RuleStyle::InsetLine)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         // Use odd then even to prove the previous `inner_width/2 +
         // (inner_width - inner_width/2)` trick (needed for odd widths)
         // is correctly replaced by `inner_width`.
@@ -2169,7 +2400,7 @@ mod tests {
 
     #[cfg(feature = "serde")]
     mod serde_roundtrip {
-        use super::super::{RulePlacement, RuleStyle, RuleWeight};
+        use super::super::{RuleAlignment, RuleStyle, RuleWeight};
 
         #[test]
         fn test_rule_style_serde_roundtrip() {
@@ -2199,19 +2430,19 @@ mod tests {
         }
 
         #[test]
-        fn test_rule_placement_serde_roundtrip() {
+        fn test_rule_alignment_serde_roundtrip() {
             for value in [
-                RulePlacement::Full,
-                RulePlacement::Centered,
-                RulePlacement::Left,
-                RulePlacement::Right,
+                RuleAlignment::Full,
+                RuleAlignment::Centered,
+                RuleAlignment::Left,
+                RuleAlignment::Right,
             ] {
                 let json = serde_json::to_string(&value).unwrap();
-                let back: RulePlacement = serde_json::from_str(&json).unwrap();
+                let back: RuleAlignment = serde_json::from_str(&json).unwrap();
                 assert_eq!(value, back);
             }
             // Sanity check on lowercase representation.
-            let json = serde_json::to_string(&RulePlacement::Centered).unwrap();
+            let json = serde_json::to_string(&RuleAlignment::Centered).unwrap();
             assert_eq!(json, "\"centered\"");
         }
 

@@ -5,7 +5,7 @@ pub use crate::components::graph_expression::{
     GraphExpression, GraphInputSyntax, GraphOrientation, GraphRenderError,
 };
 pub use crate::components::horizontal_rule::{
-    HorizontalRule, RulePlacement, RuleStyle, RuleWeight,
+    HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
 };
 pub use crate::components::image_options::{TerminalImageOptions, TerminalImageOptionsBuilder};
 pub use crate::components::inline_content::InlineContent;

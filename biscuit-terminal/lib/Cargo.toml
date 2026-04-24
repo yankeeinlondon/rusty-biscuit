@@ -18,7 +18,7 @@ path = "src/lib.rs"
 clap = ["dep:clap"]
 # Enables `serde::{Serialize, Deserialize}` derives on a small subset of
 # public value types (currently: `components::horizontal_rule::{RuleStyle,
-# RulePlacement, RuleWeight}`). Off by default — opt in when persisting or
+# RuleAlignment, RuleWeight}`). Off by default — opt in when persisting or
 # round-tripping these values through JSON/YAML.
 serde = []
 

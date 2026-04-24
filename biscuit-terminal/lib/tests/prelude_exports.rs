@@ -9,7 +9,7 @@ fn prelude_exports_horizontal_rule_types() {
     // Builder-based construction compiles using only prelude imports.
     let rule = HorizontalRule::new()
         .style(RuleStyle::Dashes)
-        .placement(RulePlacement::Full)
+        .alignment(RuleAlignment::Full)
         .weight(RuleWeight::Medium);
 
     // Terminal rendering is reachable via the Renderable trait (also prelude).

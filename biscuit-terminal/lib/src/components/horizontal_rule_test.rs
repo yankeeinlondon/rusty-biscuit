@@ -8,7 +8,7 @@ mod tests {
     fn test_horizontal_rule_new() {
         let hr = HorizontalRule::new();
         assert_eq!(hr.style, RuleStyle::Dashes);
-        assert_eq!(hr.placement, RulePlacement::Full);
+        assert_eq!(hr.alignment, RuleAlignment::Full);
         assert_eq!(hr.weight, RuleWeight::Medium);
         assert_eq!(hr.width, None);
         assert_eq!(hr.color, None);
@@ -18,13 +18,13 @@ mod tests {
     fn test_horizontal_rule_builder_methods() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
-            .placement(RulePlacement::Centered)
+            .alignment(RuleAlignment::Centered)
             .weight(RuleWeight::Thick)
             .width("50%")
             .color("red");
             
         assert_eq!(hr.style, RuleStyle::Waves);
-        assert_eq!(hr.placement, RulePlacement::Centered);
+        assert_eq!(hr.alignment, RuleAlignment::Centered);
         assert_eq!(hr.weight, RuleWeight::Thick);
         assert_eq!(hr.width, Some("50%".to_string()));
         assert_eq!(hr.color, Some("red".to_string()));
@@ -35,7 +35,7 @@ mod tests {
         let hr1 = HorizontalRule::new();
         let hr2 = HorizontalRule::default();
         assert_eq!(hr1.style, hr2.style);
-        assert_eq!(hr1.placement, hr2.placement);
+        assert_eq!(hr1.alignment, hr2.alignment);
         assert_eq!(hr1.weight, hr2.weight);
         assert_eq!(hr1.width, hr2.width);
         assert_eq!(hr1.color, hr2.color);
@@ -45,7 +45,7 @@ mod tests {
     fn test_render_dashes_full() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() > 0);
@@ -56,7 +56,7 @@ mod tests {
     fn test_render_dots_full() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dots)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() > 0);
@@ -68,7 +68,7 @@ mod tests {
     fn test_render_waves_full() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() > 0);
@@ -80,7 +80,7 @@ mod tests {
     fn test_render_line_star() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineStar)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() > 0);
@@ -99,7 +99,7 @@ mod tests {
     fn test_render_line_circle() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineCircle)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() > 0);
@@ -118,7 +118,7 @@ mod tests {
     fn test_render_inset_line() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::InsetLine)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() >= 3);
@@ -131,7 +131,7 @@ mod tests {
     fn test_render_curtain_rod() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
-            .placement(RulePlacement::Full);
+            .alignment(RuleAlignment::Full);
         let term = Terminal::default();
         let result = hr.render(&term);
         assert!(result.len() >= 5);
@@ -144,7 +144,7 @@ mod tests {
     fn test_render_centered() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Centered);
+            .alignment(RuleAlignment::Centered);
         let term = Terminal::default();
         let result = hr.render(&term);
         let term_width = term.width() as usize;
@@ -158,7 +158,7 @@ mod tests {
     fn test_render_left() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Left);
+            .alignment(RuleAlignment::Left);
         let term = Terminal::default();
         let result = hr.render(&term);
         let term_width = term.width() as usize;
@@ -170,7 +170,7 @@ mod tests {
     fn test_render_right() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
-            .placement(RulePlacement::Right);
+            .alignment(RuleAlignment::Right);
         let term = Terminal::default();
         let result = hr.render(&term);
         let term_width = term.width() as usize;
