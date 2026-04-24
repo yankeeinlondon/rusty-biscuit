@@ -45,6 +45,13 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5:
+  - biscuit-tui/lib/src/components/choose_one.rs
+  - biscuit-tui/lib/src/components/choose_many.rs
+  - biscuit-tui/lib/src/components/input_table/cell.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - tui-chrome
   - tui-chrome-cli
