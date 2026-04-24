@@ -33,8 +33,7 @@ use tui_chrome::components::input_table::{
 };
 use tui_chrome::{
     ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChoiceOption, InputTable, InputTableColumn,
-    InputTableState, Row, RowCell,
-    run_standalone,
+    InputTableState, Row, RowCell, run_standalone,
 };
 
 use crate::output::OutputMode;
@@ -387,7 +386,9 @@ fn parse_rows_typed(columns: &[ColumnSpec], json: Option<&str>) -> io::Result<Ve
                 inner
                     .iter()
                     .zip(columns.iter())
-                    .map(|(val, col)| RowCell::new(col.id().to_string(), parse_cell_value(val, col)))
+                    .map(|(val, col)| {
+                        RowCell::new(col.id().to_string(), parse_cell_value(val, col))
+                    })
                     .collect(),
             ))
         })

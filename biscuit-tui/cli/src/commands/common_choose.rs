@@ -20,14 +20,14 @@
 
 use std::io::{self, IsTerminal, Read};
 
-use clap::Args;
-use tui_chrome::{ChoiceOption, FrameChromeConfig};
+use clap::{Args, ValueEnum};
+use tui_chrome::{ChoiceOption, FrameChromeConfig, SortOrder};
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
 /// Phase 3 introduces the source-resolution flag (`--delimiter`);
-/// later phases extend this struct with `--sort`, `--border`,
-/// `--margin`, and `--height`.
+/// Phase 4 adds `--sort`; later phases extend this struct with
+/// `--border`, `--margin`, and `--height`.
 #[derive(Debug, Args, Clone, Default)]
 pub struct ChooseChromeArgs {
     /// Split each option string into label and value on the first
@@ -37,6 +37,43 @@ pub struct ChooseChromeArgs {
     /// STDIN, positional, and legacy sources.
     #[arg(long, value_name = "CHAR")]
     pub delimiter: Option<char>,
+
+    /// Ordering applied to the option list before state construction.
+    ///
+    /// Runs after `--delimiter` so the sort operates on labels, not on
+    /// raw source strings.
+    #[arg(long, value_enum, default_value_t = SortOrderArg::Natural)]
+    pub sort: SortOrderArg,
+}
+
+/// CLI-facing sort-order mirror.
+///
+/// Kept separate from [`SortOrder`] so that clap's derive can render
+/// kebab-case help values without the library having to depend on
+/// clap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum SortOrderArg {
+    /// Preserve source order.
+    #[default]
+    Natural,
+    /// Reverse source order.
+    Reverse,
+    /// Sort lexically by label (ascending).
+    Asc,
+    /// Sort lexically by label (descending).
+    Desc,
+}
+
+impl From<SortOrderArg> for SortOrder {
+    fn from(value: SortOrderArg) -> Self {
+        match value {
+            SortOrderArg::Natural => SortOrder::Natural,
+            SortOrderArg::Reverse => SortOrder::Reverse,
+            SortOrderArg::Asc => SortOrder::Asc,
+            SortOrderArg::Desc => SortOrder::Desc,
+        }
+    }
 }
 
 /// Resolves the raw option strings from the CLI's source-precedence
@@ -127,6 +164,16 @@ pub fn build_options(
         .collect()
 }
 
+/// Applies the caller's [`SortOrder`] to `options` in place.
+///
+/// Sort runs after `--delimiter` parsing so users sort on labels, not
+/// on raw input strings. Invoked uniformly for every source (legacy
+/// `--options*`, positional, and STDIN) so the CLI's ordering is
+/// independent of source precedence.
+pub fn apply_sort(options: &mut [ChoiceOption<String>], order: SortOrder) {
+    order.apply(options);
+}
+
 /// Builds a [`FrameChromeConfig`] from the shared CLI args.
 ///
 /// Phase 3 returns the default config; Phases 9–11 populate border,
@@ -209,5 +256,56 @@ mod tests {
         let args = ChooseChromeArgs::default();
         let chrome = build_chrome(&args);
         assert!(chrome.is_empty());
+    }
+
+    #[test]
+    fn sort_order_arg_maps_to_library_enum() {
+        assert_eq!(SortOrder::from(SortOrderArg::Natural), SortOrder::Natural);
+        assert_eq!(SortOrder::from(SortOrderArg::Reverse), SortOrder::Reverse);
+        assert_eq!(SortOrder::from(SortOrderArg::Asc), SortOrder::Asc);
+        assert_eq!(SortOrder::from(SortOrderArg::Desc), SortOrder::Desc);
+    }
+
+    #[test]
+    fn sort_order_arg_default_is_natural() {
+        assert_eq!(SortOrderArg::default(), SortOrderArg::Natural);
+    }
+
+    #[test]
+    fn apply_sort_reorders_labels_lexically_when_asc() {
+        let mut options = build_options(
+            vec!["Berry".into(), "Apple".into(), "Cherry".into()],
+            None,
+        );
+        apply_sort(&mut options, SortOrder::Asc);
+        let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
+    }
+
+    #[test]
+    fn apply_sort_on_labels_not_raw_strings_when_delimiter_present() {
+        // With `--delimiter :` the label is the part before the colon.
+        // Sorting ascending should order by label ("Apple" < "Berry"),
+        // not by raw string ("Apple:zzz" vs "Berry:aaa").
+        let mut options = build_options(
+            vec!["Berry:aaa".into(), "Apple:zzz".into()],
+            Some(':'),
+        );
+        apply_sort(&mut options, SortOrder::Asc);
+        assert_eq!(options[0].label, "Apple");
+        assert_eq!(options[0].value, "zzz");
+        assert_eq!(options[1].label, "Berry");
+        assert_eq!(options[1].value, "aaa");
+    }
+
+    #[test]
+    fn apply_sort_natural_is_no_op() {
+        let mut options = build_options(
+            vec!["Berry".into(), "Apple".into(), "Cherry".into()],
+            None,
+        );
+        apply_sort(&mut options, SortOrder::Natural);
+        let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, vec!["Berry", "Apple", "Cherry"]);
     }
 }

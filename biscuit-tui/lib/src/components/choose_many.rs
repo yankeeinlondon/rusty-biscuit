@@ -131,6 +131,32 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
         self
     }
 
+    /// Pre-selects options by matching each entry in `values` against
+    /// the options' `value` field.
+    ///
+    /// Intended for CLI callers that expose `--selected <VALUE>`: the
+    /// option's `value` is the authoritative identity once a
+    /// `--delimiter` has split a `label⟂value` pair, and may differ
+    /// from the option's stable `id` when built from a dictionary
+    /// source. Unmatched entries are silently ignored.
+    pub fn with_initial_values(mut self, values: &[&str]) -> Self
+    where
+        V: PartialEq<str>,
+    {
+        for value in values {
+            if let Some((idx, _)) = self
+                .input
+                .options
+                .iter()
+                .enumerate()
+                .find(|(_, option)| option.value == **value)
+            {
+                self.selected[idx] = true;
+            }
+        }
+        self
+    }
+
     /// Returns the full list of options.
     pub fn options(&self) -> &[ChoiceOption<V>] {
         &self.input.options
@@ -735,6 +761,30 @@ mod tests {
         assert!(state.is_selected(0));
         assert!(!state.is_selected(1));
         assert!(state.is_selected(2));
+    }
+
+    #[test]
+    fn initial_values_pre_select_by_value() {
+        // `with_initial_values` matches the option's `value` field
+        // (rather than its `id`). We distinguish id/label/value so the
+        // test pins the by-value semantics.
+        let input: ChoiceInput<String> = ChoiceInput::new("toppings", "Pick toppings")
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pep-val"),
+                ChoiceOption::new("m", "Mushrooms", "mush-val"),
+                ChoiceOption::new("o", "Olives", "oliv-val"),
+            ]);
+        let state =
+            ChooseManyState::new(input).with_initial_values(&["pep-val", "oliv-val"]);
+        assert!(state.is_selected(0));
+        assert!(!state.is_selected(1));
+        assert!(state.is_selected(2));
+    }
+
+    #[test]
+    fn initial_values_ignore_unmatched_entries() {
+        let state = ChooseManyState::new(fixture_input()).with_initial_values(&["ghost"]);
+        assert_eq!(state.selected_count(), 0);
     }
 
     #[test]

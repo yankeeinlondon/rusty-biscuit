@@ -17,7 +17,9 @@ use tui_chrome::{
     run_standalone,
 };
 
-use crate::commands::common_choose::{ChooseChromeArgs, build_options, resolve_option_strings};
+use crate::commands::common_choose::{
+    ChooseChromeArgs, apply_sort, build_options, resolve_option_strings,
+};
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_list};
 
@@ -113,14 +115,14 @@ where
         input = input.with_max_selections(max);
     }
 
-    let ids = effective_selected(&args);
+    let values = effective_selected(&args);
     let mut state = ChooseManyState::new(input);
     if let Some(text) = args.label {
         state = state.with_label(Label::new(text, args.label_position.into()));
     }
-    if !ids.is_empty() {
-        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-        state = state.with_initial_selection(&refs);
+    if !values.is_empty() {
+        let refs: Vec<&str> = values.iter().map(String::as_str).collect();
+        state = state.with_initial_values(&refs);
     }
 
     match run_prompt(state, height) {
@@ -159,26 +161,27 @@ fn flatten_selected(values: &[String]) -> Vec<String> {
 }
 
 fn build_choice_input(args: &ChooseManyArgs) -> io::Result<ChoiceInput<String>> {
-    if let Some(csv) = args.options.as_deref() {
-        return Ok(choose_many_from_csv("choice", "", csv));
-    }
-    if let Some(path) = args.options_from_file.as_ref() {
+    let mut input = if let Some(csv) = args.options.as_deref() {
+        choose_many_from_csv("choice", "", csv)
+    } else if let Some(path) = args.options_from_file.as_ref() {
         let body = fs::read_to_string(path)?;
-        return Ok(choose_many_from_markdown_list("choice", "", &body));
-    }
-    if let Some(path) = args.options_from_dictionary.as_ref() {
+        choose_many_from_markdown_list("choice", "", &body)
+    } else if let Some(path) = args.options_from_dictionary.as_ref() {
         let body = fs::read_to_string(path)?;
         // choose_many variant: reuse choose_one_from_dictionary then
         // flip selection mode.
         let input = choose_one_from_dictionary("choice", "", &body)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        return Ok(input.with_selection_mode(SelectionMode::Multiple));
-    }
-    let resolved = resolve_option_strings(false, args.positional.clone())?
-        .expect("resolve_option_strings returns Some when no legacy source is set");
-    Ok(ChoiceInput::new("choice", "")
-        .with_selection_mode(SelectionMode::Multiple)
-        .with_options(build_options(resolved, args.chrome.delimiter)))
+        input.with_selection_mode(SelectionMode::Multiple)
+    } else {
+        let resolved = resolve_option_strings(false, args.positional.clone())?
+            .expect("resolve_option_strings returns Some when no legacy source is set");
+        ChoiceInput::new("choice", "")
+            .with_selection_mode(SelectionMode::Multiple)
+            .with_options(build_options(resolved, args.chrome.delimiter))
+    };
+    apply_sort(&mut input.options, args.chrome.sort.into());
+    Ok(input)
 }
 
 fn parse_initial_ids(raw: &str) -> Vec<String> {
@@ -238,6 +241,7 @@ mod tests {
             positional: vec!["Apple:1".into(), "Berry:2".into()],
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
+                ..ChooseChromeArgs::default()
             },
             ..default_args()
         };
@@ -290,6 +294,22 @@ mod tests {
     fn effective_selected_empty_when_neither_set() {
         let args = default_args();
         assert!(effective_selected(&args).is_empty());
+    }
+
+    #[test]
+    fn build_choice_input_applies_sort_reverse_across_positional_source() {
+        use crate::commands::common_choose::SortOrderArg;
+        let args = ChooseManyArgs {
+            positional: vec!["a".into(), "b".into(), "c".into()],
+            chrome: ChooseChromeArgs {
+                sort: SortOrderArg::Reverse,
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, vec!["c", "b", "a"]);
     }
 
     #[test]

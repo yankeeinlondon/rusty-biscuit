@@ -16,7 +16,9 @@ use tui_chrome::{
     ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseOne, ChooseOneState, Label, run_standalone,
 };
 
-use crate::commands::common_choose::{ChooseChromeArgs, build_options, resolve_option_strings};
+use crate::commands::common_choose::{
+    ChooseChromeArgs, apply_sort, build_options, resolve_option_strings,
+};
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_scalar};
 
@@ -102,8 +104,8 @@ where
     if let Some(text) = args.label {
         state = state.with_label(Label::new(text, args.label_position.into()));
     }
-    if let Some(id) = selected.as_deref() {
-        state = state.with_initial_selection(id);
+    if let Some(value) = selected.as_deref() {
+        state = state.with_initial_value(value);
     }
 
     match run_prompt(state, height) {
@@ -130,21 +132,22 @@ fn effective_selected(args: &ChooseOneArgs) -> Option<&str> {
 }
 
 fn build_choice_input(args: &ChooseOneArgs) -> io::Result<ChoiceInput<String>> {
-    if let Some(csv) = args.options.as_deref() {
-        return Ok(choose_one_from_csv("choice", "", csv));
-    }
-    if let Some(path) = args.options_from_file.as_ref() {
+    let mut input = if let Some(csv) = args.options.as_deref() {
+        choose_one_from_csv("choice", "", csv)
+    } else if let Some(path) = args.options_from_file.as_ref() {
         let body = fs::read_to_string(path)?;
-        return Ok(choose_one_from_markdown_list("choice", "", &body));
-    }
-    if let Some(path) = args.options_from_dictionary.as_ref() {
+        choose_one_from_markdown_list("choice", "", &body)
+    } else if let Some(path) = args.options_from_dictionary.as_ref() {
         let body = fs::read_to_string(path)?;
-        return choose_one_from_dictionary("choice", "", &body)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
-    }
-    let resolved = resolve_option_strings(false, args.positional.clone())?
-        .expect("resolve_option_strings returns Some when no legacy source is set");
-    Ok(ChoiceInput::new("choice", "").with_options(build_options(resolved, args.chrome.delimiter)))
+        choose_one_from_dictionary("choice", "", &body)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+    } else {
+        let resolved = resolve_option_strings(false, args.positional.clone())?
+            .expect("resolve_option_strings returns Some when no legacy source is set");
+        ChoiceInput::new("choice", "").with_options(build_options(resolved, args.chrome.delimiter))
+    };
+    apply_sort(&mut input.options, args.chrome.sort.into());
+    Ok(input)
 }
 
 #[cfg(test)]
@@ -194,6 +197,7 @@ mod tests {
             positional: vec!["Apple:1".into(), "Berry:2".into()],
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
+                ..ChooseChromeArgs::default()
             },
             ..default_args()
         };
@@ -202,6 +206,38 @@ mod tests {
         assert_eq!(input.options[0].label, "Apple");
         assert_eq!(input.options[0].value, "1");
         assert_eq!(input.options[0].id, "1");
+    }
+
+    #[test]
+    fn build_choice_input_applies_sort_ascending_across_positional_source() {
+        use crate::commands::common_choose::SortOrderArg;
+        let args = ChooseOneArgs {
+            positional: vec!["Berry".into(), "Apple".into(), "Cherry".into()],
+            chrome: ChooseChromeArgs {
+                sort: SortOrderArg::Asc,
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
+    }
+
+    #[test]
+    fn build_choice_input_applies_sort_ascending_across_legacy_csv_source() {
+        use crate::commands::common_choose::SortOrderArg;
+        let args = ChooseOneArgs {
+            options: Some("Berry,Apple,Cherry".into()),
+            chrome: ChooseChromeArgs {
+                sort: SortOrderArg::Asc,
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
     }
 
     #[test]

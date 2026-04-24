@@ -124,6 +124,32 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
         self
     }
 
+    /// Pre-selects an option by matching its `value` against `value`.
+    ///
+    /// Intended for CLI callers that expose `--selected <VALUE>`: the
+    /// option's `value` is the authoritative identity once a
+    /// `--delimiter` has split a `label⟂value` pair, and may differ
+    /// from the option's stable `id` when built from a dictionary
+    /// source.
+    ///
+    /// When no option matches, the state is returned unchanged.
+    pub fn with_initial_value(mut self, value: &str) -> Self
+    where
+        V: PartialEq<str>,
+    {
+        if let Some((idx, _)) = self
+            .input
+            .options
+            .iter()
+            .enumerate()
+            .find(|(_, option)| option.value == *value)
+        {
+            self.selected = Some(idx);
+            self.hover = idx;
+        }
+        self
+    }
+
     /// Returns the full list of options.
     pub fn options(&self) -> &[ChoiceOption<V>] {
         &self.input.options
@@ -671,6 +697,32 @@ mod tests {
         let state = ChooseOneState::new(fixture_input()).with_initial_selection("g");
         assert_eq!(state.selected_index(), Some(1));
         assert_eq!(state.hover(), Some(1));
+    }
+
+    #[test]
+    fn initial_value_pre_selects() {
+        // `with_initial_value` matches the option's `value` field
+        // (rather than its `id`). The fixture above uses the same
+        // string for id/label/value, so we build a fresh fixture that
+        // distinguishes them to pin the behaviour.
+        let input: ChoiceInput<String> = ChoiceInput::new("colour", "Pick a colour").with_options(
+            vec![
+                ChoiceOption::new("r", "Red", "red-value"),
+                ChoiceOption::new("g", "Green", "green-value"),
+                ChoiceOption::new("b", "Blue", "blue-value"),
+            ],
+        );
+        let state = ChooseOneState::new(input).with_initial_value("green-value");
+        assert_eq!(state.selected_index(), Some(1));
+        assert_eq!(state.hover(), Some(1));
+        assert_eq!(state.selected_value(), Some(&"green-value".to_string()));
+    }
+
+    #[test]
+    fn initial_value_with_no_match_leaves_state_unchanged() {
+        let state = ChooseOneState::new(fixture_input()).with_initial_value("nope");
+        assert!(state.selected_index().is_none());
+        assert_eq!(state.hover(), Some(0));
     }
 
     #[test]
