@@ -93,6 +93,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                     MessengerProviderConfig::Slack { .. } => "Slack",
                     MessengerProviderConfig::Signal { .. } => "Signal",
                     MessengerProviderConfig::Whatsapp { .. } => "Whatsapp",
+                    MessengerProviderConfig::DiscordWebhook { .. } => "Discord Webhook",
+                    MessengerProviderConfig::SlackWebhook { .. } => "Slack Webhook",
                 };
                 let is_active = app
                     .config
