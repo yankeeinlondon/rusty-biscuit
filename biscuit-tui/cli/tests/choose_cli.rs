@@ -187,3 +187,99 @@ fn choose_many_border_flag_reaches_event_loop() {
         .code(1)
         .stderr(predicate::str::contains("question:"));
 }
+
+#[test]
+fn choose_one_help_lists_margin_flags() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--margin"))
+        .stdout(predicate::str::contains("--mt"))
+        .stdout(predicate::str::contains("--mb"))
+        .stdout(predicate::str::contains("--ml"))
+        .stdout(predicate::str::contains("--mr"));
+}
+
+#[test]
+fn choose_many_help_lists_margin_flags() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--margin"))
+        .stdout(predicate::str::contains("--mt"))
+        .stdout(predicate::str::contains("--mb"))
+        .stdout(predicate::str::contains("--ml"))
+        .stdout(predicate::str::contains("--mr"));
+}
+
+#[test]
+fn choose_one_margin_rejects_non_integer_value() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--margin", "wobbly"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
+}
+
+#[test]
+fn choose_one_margin_flag_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "c", "--margin", "2"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_one_margin_with_per_side_overrides_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args([
+            "choose-one",
+            "a",
+            "b",
+            "c",
+            "--margin",
+            "2",
+            "--mt",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_many_margin_flag_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "a", "b", "c", "--margin", "1"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_many_per_side_margin_flags_reach_event_loop() {
+    cargo_bin_cmd!("question")
+        .args([
+            "choose-many",
+            "a",
+            "b",
+            "--mt",
+            "1",
+            "--mb",
+            "2",
+            "--ml",
+            "3",
+            "--mr",
+            "4",
+        ])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
