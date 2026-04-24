@@ -125,6 +125,84 @@ implement-plan filter="":
     echo
 
 
+# Interactive wrapper: pick a spec/design and optionally jump into plan-feature
+plan spec="" design="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    spec_file="{{spec}}"
+    design_file="{{design}}"
+
+    # If neither was provided, let the user pick a spec or design file, then
+    # optionally add the complementary doc from the same directory.
+    if [[ -z "${spec_file}" && -z "${design_file}" ]]; then
+        doc="$(just _choose_feature)"
+        if [[ -z "${doc}" ]]; then
+            echo -e "{{red}}No spec or design file selected — aborting.{{reset}}" >&2
+            exit 1
+        fi
+        doc_dir="$(dirname "${doc}")"
+        if [[ "$(basename "${doc}")" == *design* ]]; then
+            design_file="${doc}"
+            spec_file="$(sniff repo package-area)/$(just _get_spec_doc "${doc_dir}")"
+        else
+            spec_file="${doc}"
+            design_file="$(sniff repo package-area)/$(just _get_design_doc "${doc_dir}")"
+        fi
+    else
+        # Validate provided paths — resolve partial matches via filter
+        if [[ -n "${spec_file}" && ! -f "${spec_file}" ]]; then
+            mapfile -t matches < <(fd -g '*spec*.md' | rg "${spec_file}" || true)
+            if [[ ${#matches[@]} -eq 0 ]]; then
+                echo -e "{{red}}No spec files matching '${spec_file}' found{{reset}}" >&2
+                exit 1
+            elif [[ ${#matches[@]} -eq 1 ]]; then
+                spec_file="$(sniff repo package-area)/${matches[0]}"
+            else
+                spec_file="$(sniff repo package-area)/$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
+            fi
+        fi
+
+        if [[ -n "${design_file}" && ! -f "${design_file}" ]]; then
+            mapfile -t matches < <(fd -g '*design*.md' | rg "${design_file}" || true)
+            if [[ ${#matches[@]} -eq 0 ]]; then
+                echo -e "{{red}}No design files matching '${design_file}' found{{reset}}" >&2
+                exit 1
+            elif [[ ${#matches[@]} -eq 1 ]]; then
+                design_file="$(sniff repo package-area)/${matches[0]}"
+            else
+                design_file="$(sniff repo package-area)/$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
+            fi
+        fi
+
+        # Auto-find complementary doc from the same directory
+        if [[ -n "${spec_file}" && -z "${design_file}" ]]; then
+            doc_dir="$(sniff repo package-area)/$(dirname "${spec_file}")"
+            design_file="$(sniff repo package-area)/$(just _get_design_doc "${doc_dir}")"
+        elif [[ -n "${design_file}" && -z "${spec_file}" ]]; then
+            doc_dir="$(dirname "${design_file}")"
+            spec_file="$(sniff repo package-area)/$(just _get_spec_doc "${doc_dir}")"
+        fi
+    fi
+
+    echo
+    echo -e "Creating a detailed {{bold}}plan{{reset}} from:"
+    if [[ -n "${spec_file}" ]]; then
+        echo -e "  Specification:   {{blue}}$(just _link "${spec_file}"){{reset}}"
+    fi
+    if [[ -n "${design_file}" ]]; then
+        echo -e "  Design Document: {{blue}}$(just _link "${design_file}"){{reset}}"
+    fi
+    echo
+
+    if [[ "$(just _confirm "Do you want to create a plan now?")" == "y" ]]; then
+        just plan-feature "${spec_file}" "${design_file}"
+    else
+        echo "Ok. Bye."
+        exit 0
+    fi
+
+
 # create a plan from a feature spec (and optionally design document)
 plan-feature spec="" design="":
     #!/usr/bin/env bash
