@@ -8,9 +8,10 @@
 //! assert_cmd harness does not attach a real TTY — we lean on that
 //! "reached the event loop" signal as a proxy for "parsing worked".
 //!
-//! Phase 12 will replace the event-loop-level assertions with proper
-//! autosubmit-backed flows once the `QUESTION_TEST_AUTOSUBMIT` hook
-//! is wired up.
+//! The interactive-keystroke flows (Esc, Ctrl+C, Ctrl+A + submit)
+//! spawn the binary under a real PTY via `expectrl` and are gated
+//! behind `QUESTION_INTERACTIVE_PTY=1` so CI runs without a
+//! controlling terminal skip them by default.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -376,4 +377,126 @@ fn choose_many_height_percent_reaches_event_loop() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains("question:"));
+}
+
+// --- Phase 12: named regressions covering the finished CLI surface. --------
+
+/// Smoke-checks the positional-args path end-to-end.
+///
+/// Mirrors the `choose-one a b c` invocation from the manual QA
+/// checklist: clap should accept the trio, the stdin-fallback branch
+/// should be skipped, and the command should reach the event loop
+/// (where it then fails with exit code 1 because assert_cmd does not
+/// attach a TTY).
+#[test]
+fn choose_one_positional_args() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "alpha", "beta", "gamma"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+// --- PTY-backed keystroke flows --------------------------------------------
+//
+// These tests spawn `question` under a real PTY so that crossterm can
+// open /dev/tty and the event loop actually runs. They are gated
+// behind `QUESTION_INTERACTIVE_PTY=1` to keep headless CI green by
+// default; run them locally with:
+//
+//     QUESTION_INTERACTIVE_PTY=1 cargo test -p tui-chrome-cli --test choose_cli
+//
+// The test harness asserts exit codes, not rendered output, because
+// we only care that Esc / Ctrl+C / Ctrl+A are routed through the new
+// event-loop plumbing from Phase 2 + Phase 6.
+
+#[cfg(unix)]
+mod pty {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+
+    use expectrl::{process::unix::WaitStatus, session::OsSession, spawn};
+
+    fn interactive_enabled() -> bool {
+        std::env::var_os("QUESTION_INTERACTIVE_PTY").is_some()
+    }
+
+    fn spawn_question(args: &[&str]) -> OsSession {
+        let binary = assert_cmd::cargo::cargo_bin("question");
+        let mut cmd = binary.display().to_string();
+        for arg in args {
+            cmd.push(' ');
+            cmd.push('"');
+            cmd.push_str(arg);
+            cmd.push('"');
+        }
+        let mut p = spawn(&cmd).expect("spawn question under PTY");
+        p.set_expect_timeout(Some(Duration::from_secs(5)));
+        p
+    }
+
+    fn wait_exit_code(session: &OsSession) -> i32 {
+        match session.get_process().wait().expect("wait for child") {
+            WaitStatus::Exited(_, code) => code,
+            other => panic!("unexpected wait status: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn esc_exits_with_code_1() {
+        if !interactive_enabled() {
+            eprintln!("skipping: set QUESTION_INTERACTIVE_PTY=1 to enable");
+            return;
+        }
+        let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma"]);
+        std::thread::sleep(Duration::from_millis(200));
+        p.write_all(b"\x1b").expect("send Esc");
+        assert_eq!(wait_exit_code(&p), 1, "Esc must exit with code 1");
+    }
+
+    #[test]
+    fn ctrl_c_exits_with_code_130() {
+        if !interactive_enabled() {
+            eprintln!("skipping: set QUESTION_INTERACTIVE_PTY=1 to enable");
+            return;
+        }
+        let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma"]);
+        std::thread::sleep(Duration::from_millis(200));
+        p.write_all(b"\x03").expect("send Ctrl+C");
+        assert_eq!(wait_exit_code(&p), 130, "Ctrl+C must exit with code 130");
+    }
+
+    #[test]
+    fn choose_many_ctrl_a_then_submit_writes_all_values() {
+        if !interactive_enabled() {
+            eprintln!("skipping: set QUESTION_INTERACTIVE_PTY=1 to enable");
+            return;
+        }
+        let mut p = spawn_question(&["choose-many", "alpha", "beta", "gamma"]);
+        std::thread::sleep(Duration::from_millis(200));
+        p.write_all(b"\x01").expect("send Ctrl+A");
+        p.write_all(b"\r").expect("send Enter");
+
+        let mut buf = Vec::new();
+        // Drain the PTY's stdout until the child exits — read returns
+        // zero once the master side reports EOF.
+        let mut scratch = [0u8; 1024];
+        loop {
+            match p.read(&mut scratch) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&scratch[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+        let output = String::from_utf8_lossy(&buf).into_owned();
+        assert_eq!(wait_exit_code(&p), 0, "submit must exit with code 0");
+        for value in ["alpha", "beta", "gamma"] {
+            assert!(
+                output.contains(value),
+                "expected {value:?} in stdout, got {output:?}",
+            );
+        }
+    }
 }

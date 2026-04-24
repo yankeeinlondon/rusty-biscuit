@@ -90,7 +90,8 @@ where
             writer.flush()?;
             Ok(0)
         }
-        Err(e) if e.kind() == CANCELLED_KIND || e.kind() == ABORTED_KIND => Ok(130),
+        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == ABORTED_KIND => Ok(1),
         Err(e) => Err(e),
     }
 }
@@ -211,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn run_returns_130_without_output_on_cancel() {
+    fn run_returns_130_without_output_on_ctrl_c() {
         let args = TextAreaInputArgs {
             label: None,
             label_position: LabelPositionArg::Above,
@@ -226,11 +227,35 @@ mod tests {
             OutputMode::Raw,
             None,
             &mut output,
-            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "cancelled")),
+            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "interrupted")),
         )
         .unwrap();
 
         assert_eq!(status, 130);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn run_returns_1_without_output_on_esc() {
+        let args = TextAreaInputArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            width: 60,
+            scrollbar: false,
+            initial: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |_state, _height| Err(io::Error::new(ABORTED_KIND, "cancelled")),
+        )
+        .unwrap();
+
+        assert_eq!(status, 1);
         assert!(output.is_empty());
     }
 }

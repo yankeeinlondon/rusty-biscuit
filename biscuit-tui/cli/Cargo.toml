@@ -15,4 +15,5 @@ serde_json = "1"
 
 [dev-dependencies]
 assert_cmd = "2"
+expectrl = "0.8"
 predicates = "3"
