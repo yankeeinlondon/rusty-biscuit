@@ -27,6 +27,7 @@ use ratatui::{
 };
 
 use super::event::EventOutcome;
+use super::frame::{FrameChrome, FrameChromeConfig};
 
 /// State types that can be driven to completion by [`run_standalone`].
 ///
@@ -221,6 +222,86 @@ where
     }
 }
 
+/// Like [`drive_event_loop_with_hint`] but wraps the component in a
+/// [`FrameChrome`] built from `chrome` on every redraw.
+///
+/// When `chrome.is_empty()` the rendering is identical to
+/// [`drive_event_loop_with_hint`]; supplying a config with a visible
+/// border or non-zero margin draws the chrome around the component.
+///
+/// ## Notes
+///
+/// The chrome is rebuilt per draw so that the inner widget is drawn
+/// into the rectangle remaining after margin and border have claimed
+/// their space. The help hint, when present, still renders at the
+/// outer-area bottom — outside of the chrome — so it does not clash
+/// with a bordered frame.
+pub fn drive_event_loop_with_chrome<C, S, B, F>(
+    terminal: &mut Terminal<B>,
+    component: C,
+    state: &mut S,
+    mut read_event: F,
+    help_hint: Option<&str>,
+    chrome: &FrameChromeConfig,
+) -> io::Result<LoopExit<S::Value>>
+where
+    C: Clone + StatefulWidget<State = S> + HandleEvent,
+    S: StandaloneState,
+    B: Backend,
+    F: FnMut() -> io::Result<Event>,
+{
+    let mut needs_redraw = true;
+    loop {
+        if needs_redraw {
+            terminal.draw(|f| {
+                let area = f.area();
+                let widget = component.clone();
+                if chrome.is_empty() {
+                    f.render_stateful_widget(widget, area, state);
+                } else {
+                    let frame = FrameChrome::from_config(widget, chrome);
+                    f.render_stateful_widget(frame, area, state);
+                }
+                if let Some(hint_text) = help_hint
+                    && !hint_text.is_empty()
+                    && area.height > 1
+                {
+                    let y = area.bottom().saturating_sub(1);
+                    let hint_line = Line::styled(
+                        hint_text.to_string(),
+                        Style::default().add_modifier(Modifier::DIM),
+                    );
+                    f.buffer_mut().set_line(area.x, y, &hint_line, area.width);
+                }
+            })?;
+            needs_redraw = false;
+        }
+
+        match read_event()? {
+            Event::Key(key) => {
+                if key.kind == KeyEventKind::Release {
+                    continue;
+                }
+                if is_ctrl_c(&key) {
+                    return Ok(LoopExit::CtrlC);
+                }
+                match component.handle_event(state, key) {
+                    EventOutcome::Submitted => return Ok(LoopExit::Submitted(state.value())),
+                    EventOutcome::Cancelled => return Ok(LoopExit::Esc),
+                    EventOutcome::Consumed => {
+                        needs_redraw = true;
+                    }
+                    EventOutcome::Ignored => {}
+                }
+            }
+            Event::Resize(..) => {
+                needs_redraw = true;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Runs `component` in a dedicated terminal until submission or
 /// cancellation.
 ///
@@ -242,7 +323,27 @@ where
 /// Returns [`CANCELLED_KIND`] when the user pressed `Ctrl-C`, and
 /// [`ABORTED_KIND`] when the user pressed `Esc`. Propagates any other
 /// terminal I/O error.
-pub fn run_standalone<C, S, V>(component: C, mut state: S, height: Option<u16>) -> io::Result<V>
+pub fn run_standalone<C, S, V>(component: C, state: S, height: Option<u16>) -> io::Result<V>
+where
+    C: Clone + StatefulWidget<State = S> + HandleEvent,
+    S: StandaloneState<Value = V>,
+{
+    run_standalone_with_chrome(component, state, height, FrameChromeConfig::default())
+}
+
+/// Runs `component` in a dedicated terminal until submission or
+/// cancellation, wrapping the component in the supplied
+/// [`FrameChromeConfig`].
+///
+/// Behaviour matches [`run_standalone`] when `chrome.is_empty()`. A
+/// non-empty chrome draws a border and/or margin around the component
+/// on every frame.
+pub fn run_standalone_with_chrome<C, S, V>(
+    component: C,
+    mut state: S,
+    height: Option<u16>,
+    chrome: FrameChromeConfig,
+) -> io::Result<V>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState<Value = V>,
@@ -265,8 +366,14 @@ where
     } else {
         Some(hint.as_str())
     };
-    let loop_result =
-        drive_event_loop_with_hint(&mut terminal, component, &mut state, event::read, hint_opt);
+    let loop_result = drive_event_loop_with_chrome(
+        &mut terminal,
+        component,
+        &mut state,
+        event::read,
+        hint_opt,
+        &chrome,
+    );
 
     restore_terminal(fullscreen);
 
@@ -560,5 +667,69 @@ mod tests {
     fn loop_exit_to_result_forwards_submitted_value() {
         let ok = loop_exit_to_result(LoopExit::Submitted("payload".to_string())).unwrap();
         assert_eq!(ok, "payload");
+    }
+
+    #[test]
+    fn drive_event_loop_with_chrome_empty_renders_into_full_area() {
+        use crate::core::frame::FrameChromeConfig;
+
+        let backend = TestBackend::new(20, 4);
+        let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
+        let mut state = EchoState::default();
+        let events = vec![
+            key_event(KeyCode::Char('h')),
+            key_event(KeyCode::Char('i')),
+            key_event(KeyCode::Enter),
+        ];
+        let mut iter = events.into_iter();
+        let result = drive_event_loop_with_chrome(
+            &mut terminal,
+            Echo,
+            &mut state,
+            || {
+                iter.next()
+                    .ok_or_else(|| io::Error::other("no more events"))
+            },
+            None,
+            &FrameChromeConfig::default(),
+        );
+        assert_eq!(
+            result.expect("drive loop"),
+            LoopExit::Submitted("hi".to_string())
+        );
+    }
+
+    #[test]
+    fn drive_event_loop_with_chrome_draws_border_around_inner() {
+        use crate::core::frame::{BorderStyle, FrameChromeConfig};
+
+        let backend = TestBackend::new(8, 4);
+        let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
+        let mut state = EchoState::default();
+        let chrome = FrameChromeConfig {
+            border: BorderStyle::Rounded,
+            border_label: Some("T".to_string()),
+            ..Default::default()
+        };
+        let events = vec![key_event(KeyCode::Enter)];
+        let mut iter = events.into_iter();
+        let _result = drive_event_loop_with_chrome(
+            &mut terminal,
+            Echo,
+            &mut state,
+            || {
+                iter.next()
+                    .ok_or_else(|| io::Error::other("no more events"))
+            },
+            None,
+            &chrome,
+        );
+
+        let buf = terminal.backend().buffer().clone();
+        // Top-left and bottom-right corners are border glyphs.
+        let top_left = buf[(0, 0)].symbol().to_string();
+        let bottom_right = buf[(7, 3)].symbol().to_string();
+        assert_ne!(top_left, " ");
+        assert_ne!(bottom_right, " ");
     }
 }

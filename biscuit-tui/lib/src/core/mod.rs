@@ -34,7 +34,7 @@ pub use label::{Label, LabelPosition, render_with_label};
 pub use sort::SortOrder;
 pub use standalone::{
     ABORTED_KIND, CANCELLED_KIND, HandleEvent, LoopExit, StandaloneState, drive_event_loop,
-    run_standalone,
+    drive_event_loop_with_chrome, run_standalone, run_standalone_with_chrome,
 };
 pub use theme::ComponentTheme;
 pub use validation::ValidationState;

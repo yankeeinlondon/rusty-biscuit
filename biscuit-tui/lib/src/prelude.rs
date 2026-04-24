@@ -17,5 +17,5 @@ pub use crate::core::{
     ABORTED_KIND, BorderStyle, CANCELLED_KIND, ComponentTheme, EventOutcome, FrameChrome,
     FrameChromeConfig, FuzzyFilter, HandleEvent, HeightSpec, KeyBindings, Label, LabelPosition,
     LoopExit, Margin, SortOrder, StandaloneState, ValidationState, drive_event_loop,
-    render_with_label, run_standalone,
+    drive_event_loop_with_chrome, render_with_label, run_standalone, run_standalone_with_chrome,
 };
