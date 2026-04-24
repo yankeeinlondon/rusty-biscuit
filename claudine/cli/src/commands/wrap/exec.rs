@@ -40,7 +40,10 @@ pub(crate) struct ProcessTelemetry {
 #[allow(dead_code)]
 impl ProcessTelemetry {
     /// Convert telemetry into the shared [`AgentExecutionPerf`] model.
-    pub(crate) fn into_agent_perf(self, api_duration_ms: Option<u64>) -> crate::perf::AgentExecutionPerf {
+    pub(crate) fn into_agent_perf(
+        self,
+        api_duration_ms: Option<u64>,
+    ) -> crate::perf::AgentExecutionPerf {
         crate::perf::AgentExecutionPerf {
             launches: 1,
             total_elapsed: self.total_elapsed,
@@ -2522,12 +2525,13 @@ mod tests {
         let rl = summary.rate_limit.as_ref().expect("rate_limit populated");
         assert_eq!(rl.is_throttled, Some(true));
         assert_eq!(rl.reset_at, Some(reset_at));
-        assert!(rl
-            .message
-            .as_deref()
-            .unwrap_or("")
-            .to_lowercase()
-            .contains("usage limit"));
+        assert!(
+            rl.message
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("usage limit")
+        );
     }
 
     #[test]
@@ -2737,8 +2741,14 @@ mod tests {
         let perf = telemetry.into_agent_perf(Some(1200));
         assert_eq!(perf.launches, 1);
         assert_eq!(perf.total_elapsed, Duration::from_secs(3));
-        assert_eq!(perf.first_response_latency, Some(Duration::from_millis(500)));
-        assert_eq!(perf.provider_api_duration, Some(Duration::from_millis(1200)));
+        assert_eq!(
+            perf.first_response_latency,
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(
+            perf.provider_api_duration,
+            Some(Duration::from_millis(1200))
+        );
     }
 
     #[test]
