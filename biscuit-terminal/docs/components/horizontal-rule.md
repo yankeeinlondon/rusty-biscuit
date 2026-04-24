@@ -9,7 +9,7 @@ use biscuit_terminal::prelude::*;
 
 let rule = HorizontalRule::new()
     .style(RuleStyle::Waves)
-    .placement(RulePlacement::Centered)
+    .alignment(RuleAlignment::Centered)
     .weight(RuleWeight::Medium)
     .width("75%");
 
@@ -39,12 +39,12 @@ pub enum RuleStyle {
 }
 ```
 
-### RulePlacement
+### RuleAlignment
 
-Defines the horizontal placement of the rule:
+Defines the horizontal alignment of the rule:
 
 ```rust
-pub enum RulePlacement {
+pub enum RuleAlignment {
     Full,
     Centered,
     Left,
@@ -70,8 +70,8 @@ pub enum RuleWeight {
 
 The `HorizontalRule` implements the `Renderable` trait for terminal output with three-tier progressive enhancement:
 
-1. **Tier 1**: SVG → PNG via `resvg` with `TerminalImage` — **deferred** in the initial release; see the "Deferred" section below and the tech-design's "Deferred Work" subsection.
-2. **Tier 2**: Unicode fallback characters (primary path when the terminal's locale signals UTF-8).
+1. **Tier 1**: SVG → PNG via `resvg` and `TerminalImage` when the terminal advertises Kitty-compatible image support.
+2. **Tier 2**: Unicode fallback characters when image rendering is unavailable and the terminal's locale signals UTF-8.
 3. **Tier 3**: ASCII fallback characters (basic compatibility).
 
 ### BrowserRenderable (Browser Rendering)
@@ -80,7 +80,7 @@ The `HorizontalRule` implements the `BrowserRenderable` trait for web output:
 
 - Generates SVG with `stroke="var(--hr-color, currentColor)"` for proper CSS inheritance
 - Declares `--hr-weight`, `--hr-color`, and `--hr-width` CSS custom properties on the root `<svg>`
-- Supports all style, placement, weight, width, and color attributes
+- Supports all style, alignment, weight, width, and color attributes
 
 ## Usage Example
 
@@ -89,7 +89,7 @@ use biscuit_terminal::prelude::*;
 
 let rule = HorizontalRule::new()
     .style(RuleStyle::Waves)
-    .placement(RulePlacement::Centered)
+    .alignment(RuleAlignment::Centered)
     .weight(RuleWeight::Medium)
     .width("75%");
 

@@ -116,11 +116,11 @@ body border lines up with the preceding `Status` icon/header line.
 ### Horizontal Rules
 
 ```rust
-use biscuit_terminal::prelude::*;  // HorizontalRule, RuleStyle, RulePlacement, RuleWeight, BrowserRenderable
+use biscuit_terminal::prelude::*;  // HorizontalRule, RuleStyle, RuleAlignment, RuleWeight, BrowserRenderable
 
 let rule = HorizontalRule::new()
     .style(RuleStyle::Waves)
-    .placement(RulePlacement::Centered)
+    .alignment(RuleAlignment::Centered)
     .weight(RuleWeight::Medium)
     .width("75%");
 
@@ -142,18 +142,18 @@ The `HorizontalRule` component implements both `Renderable` (terminal output) an
 **Supported attributes:**
 
 - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
-- `placement`: `full` (default), `centered`, `left`, `right`
+- `alignment`: `full` (default), `centered`, `left`, `right`
 - `weight`: `thin`, `medium` (default), `thick` — heavy Unicode glyphs in Tier 2, 2/4/8px stroke in browser
 - `width`: CSS-like string (e.g. `"75%"`, `"200px"`)
 - `color`: CSS color name or `#rrggbb` — emits ANSI escapes in terminal when `color_depth` supports it
 
 **Terminal rendering tiers:**
 
-1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`): deferred.** Not implemented in the initial release; planned as a future additive change.
-2. **Tier 2 (Unicode):** primary path; gated on `locale::env_says_utf8()`.
+1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path when the terminal advertises Kitty-compatible image support.
+2. **Tier 2 (Unicode):** fallback; gated on `locale::env_says_utf8()`.
 3. **Tier 3 (ASCII):** fallback when the locale does not signal UTF-8.
 
-All four main types (`HorizontalRule`, `RuleStyle`, `RulePlacement`, `RuleWeight`) plus the `BrowserRenderable` trait are re-exported through `biscuit_terminal::prelude`.
+All four main types (`HorizontalRule`, `RuleStyle`, `RuleAlignment`, `RuleWeight`) plus the `BrowserRenderable` trait are re-exported through `biscuit_terminal::prelude`.
 
 `StatusState::Error` is now the canonical error severity. `StatusState::Failure` remains as a
 deprecated compatibility variant, and persisted JSON `"Failure"` still deserializes as
