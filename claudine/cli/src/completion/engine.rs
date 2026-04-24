@@ -19,9 +19,12 @@
 //!   against `docs/`, `features/`, `fixes/`, and `reviews/` at repo,
 //!   package-area, and package levels.
 //!
-//! Remaining slots (wrapper flag values, etc.) fall through to the legacy
-//! [`super::supplement`] engine so existing behavior is preserved. The
-//! bridge is removed in Phase 5 as each slot is rewritten.
+//! Remaining slots (wrapper flag values, administrative subcommands, etc.)
+//! emit zero candidates so the shell's native file / flag completion takes
+//! over. The new engine intentionally does **not** attach file completers
+//! to `--append-system-prompt` / `--replace-system-prompt` — the spec
+//! leaves that slot to clap's default (`_files` on zsh, default file
+//! completion on bash/fish).
 //!
 //! The classifier never invokes clap — wrapper subcommands use
 //! `ignore_errors(true)` in the lenient parse path so clap's view of argv is
@@ -52,9 +55,9 @@ pub(crate) enum CompletionTarget {
     /// The full `name=...` token is carried so the completer can split
     /// name from value and emit a whole-token replacement.
     SetterValue { token: String },
-    /// Cursor is anywhere else — a wrapper flag value, etc. Falls
-    /// through to the legacy supplement engine until later phases
-    /// rewrite each slot.
+    /// Cursor is anywhere else — a wrapper flag value, an administrative
+    /// subcommand, etc. The engine emits zero candidates so the shell
+    /// falls back to its native file / flag completion.
     Other,
 }
 
@@ -133,9 +136,9 @@ pub(crate) fn run_with_context(
             setter_value::run(&token, &scope_ctx)
         }
         CompletionTarget::Other => {
-            // Bridge — remaining slots keep the legacy supplement
-            // behavior until Phase 5 removes the fallback path.
-            super::supplement::run(argv, current_index)
+            // Unrecognized slot — emit zero candidates so the shell
+            // falls back to its native file / flag completion.
+            Vec::new()
         }
     }
 }
@@ -157,8 +160,8 @@ pub(crate) fn classify_completion_target(
     }
 
     // A literal `--` before the cursor means we've crossed into wrapper
-    // passthrough. Root-menu and supplement rules both decline to touch
-    // anything past that separator.
+    // passthrough. The root menu and every slot-specific completer
+    // decline to touch anything past that separator.
     for token in argv.iter().take(current_index) {
         if token == "--" {
             return CompletionTarget::Other;
@@ -347,6 +350,9 @@ fn is_global_bool_flag(token: &str) -> bool {
 /// (`.claudine/config.json5`) are accepted — JSON5 is a common hand-edited
 /// form in the wild even though `user_config_path()` in the library only
 /// probes `.json`.
+// ------------------------------------------------------------------
+// Filesystem probes — shared with [`RootContext::discover`].
+// ------------------------------------------------------------------
 fn user_config_exists(home: Option<&Path>) -> bool {
     let Some(home) = home else {
         return false;
@@ -362,8 +368,7 @@ fn user_config_exists(home: Option<&Path>) -> bool {
 /// config.
 ///
 /// Returns `(repo_config_exists, in_repo)`. `in_repo` is `true` as soon as
-/// a `.git` directory or worktree pointer is found — this matches the
-/// supplement engine's `find_enclosing_repo` semantics.
+/// a `.git` directory or worktree pointer is found.
 fn detect_repo_config(cwd: &Path) -> (bool, bool) {
     for ancestor in cwd.ancestors() {
         let dot_git = ancestor.join(".git");
