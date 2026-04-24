@@ -12,7 +12,9 @@ use clap::Args;
 use tui_chrome::helpers::choice_builders::{
     choose_many_from_csv, choose_many_from_markdown_list, choose_one_from_dictionary,
 };
-use tui_chrome::{CANCELLED_KIND, ChooseMany, ChooseManyState, Label, run_standalone};
+use tui_chrome::{
+    ABORTED_KIND, CANCELLED_KIND, ChooseMany, ChooseManyState, Label, run_standalone,
+};
 
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_list};
@@ -110,7 +112,7 @@ where
             writer.flush()?;
             Ok(0)
         }
-        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == CANCELLED_KIND || e.kind() == ABORTED_KIND => Ok(130),
         Err(e) => Err(e),
     }
 }

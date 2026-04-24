@@ -7,7 +7,9 @@
 use std::io::{self, Write};
 
 use clap::Args;
-use tui_chrome::{BooleanSwitch, BooleanSwitchState, CANCELLED_KIND, Label, run_standalone};
+use tui_chrome::{
+    ABORTED_KIND, BooleanSwitch, BooleanSwitchState, CANCELLED_KIND, Label, run_standalone,
+};
 
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_bool};
@@ -73,7 +75,7 @@ where
             writer.flush()?;
             Ok(0)
         }
-        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == CANCELLED_KIND || e.kind() == ABORTED_KIND => Ok(130),
         Err(e) => Err(e),
     }
 }

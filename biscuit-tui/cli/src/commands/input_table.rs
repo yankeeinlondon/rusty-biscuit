@@ -32,8 +32,8 @@ use tui_chrome::components::input_table::{
     BooleanSwitchConfig, CellValue, TextAreaInputConfig, TextInputConfig,
 };
 use tui_chrome::{
-    CANCELLED_KIND, ChoiceInput, ChoiceOption, InputTable, InputTableColumn, InputTableState, Row,
-    RowCell,
+    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChoiceOption, InputTable, InputTableColumn,
+    InputTableState, Row, RowCell,
     run_standalone,
 };
 
@@ -94,7 +94,7 @@ where
             writer.flush()?;
             Ok(0)
         }
-        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == CANCELLED_KIND || e.kind() == ABORTED_KIND => Ok(130),
         Err(e) => Err(e),
     }
 }

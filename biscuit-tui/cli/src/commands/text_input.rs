@@ -7,7 +7,9 @@
 use std::io::{self, Write};
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{CANCELLED_KIND, Label, LabelPosition, TextInput, TextInputState, run_standalone};
+use tui_chrome::{
+    ABORTED_KIND, CANCELLED_KIND, Label, LabelPosition, TextInput, TextInputState, run_standalone,
+};
 
 use crate::output::{OutputMode, write_scalar};
 
@@ -99,7 +101,7 @@ where
             writer.flush()?;
             Ok(0)
         }
-        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == CANCELLED_KIND || e.kind() == ABORTED_KIND => Ok(130),
         Err(e) => Err(e),
     }
 }
