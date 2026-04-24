@@ -382,18 +382,43 @@ size.
 
 ### Profiling
 
-Set `RUST_LOG=claudine::completion=trace` and
-`CLAUDINE_COMPLETION_PROFILE=1` to capture per-phase timing spans.
-Tracing writes to a log file because shells swallow stderr on
-completion and stdout is reserved for candidates.
+Set `RUST_LOG=claudine::completion=trace` to capture per-phase timing
+spans. The engine emits `tracing::trace_span!` markers at the
+top-level dispatch (`completion::run`), each slot-specific arm
+(`completion::root_menu`, `completion::composition`,
+`completion::setter_value`), and every walker invocation
+(`completion::walk_scope`). Spans are emitted on the existing CLI
+`tracing-subscriber` so wiring is automatic — no separate logger to
+configure. Optionally set `CLAUDINE_COMPLETION_PROFILE=1` to flag the
+run as a profiling capture; the variable is reserved for future
+file-based sinks (shells swallow stderr on completion and stdout is
+reserved for candidates).
+
+For end-to-end latency, the harness at
+[`claudine/cli/tests/completion_perf.rs`](../../cli/tests/completion_perf.rs)
+spawns a fresh `claudine` process per iteration against a fixture
+that mirrors the rusty-biscuit scale (~48 packages, ~2000 markdown
+files). Run it explicitly:
+
+```sh
+cargo test -p claudine-cli --test completion_perf --release \
+  -- --ignored --nocapture --test-threads=1
+```
+
+The harness records p50/p95/p99 across `compose`, `compose pla`, and
+`inline-compose` partials and asserts `p95 ≤ 100 ms`. A `p95` between
+100 ms and 150 ms emits a warning; above 150 ms the harness fails so
+CI forces the team to implement the fallback cache from §8.3 of the
+tech design.
 
 ### No cache today
 
-The engine does not persist candidates between invocations. The current
-performance budget is met by the scope / frontmatter / budget gates
-above. A stale-while-revalidate cache is reserved for future
-activation if profiling ever shows a p95 > 150 ms on representative
-hardware.
+The engine does not persist candidates between invocations. As of the
+2026-04-24 perf harness run on the reference monorepo fixture, the
+default no-cache path measures `p95 ≤ 19 ms` across all three
+scenarios — well inside the 100 ms target. A stale-while-revalidate
+cache is reserved for future activation if profiling ever shows a
+`p95 > 150 ms` on representative hardware.
 
 ## Legacy shells
 
