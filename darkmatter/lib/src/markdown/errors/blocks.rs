@@ -141,11 +141,13 @@ mod tests {
 
     #[test]
     fn frontmatter_parse_block_renders_yaml_error() {
-        let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(": [broken")
-            .unwrap_err();
+        let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(": [broken").unwrap_err();
         let out = render_block(&frontmatter_parse_block(&err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
-        assert!(out.contains("frontmatter parse failed"), "missing summary: {out}");
+        assert!(
+            out.contains("frontmatter parse failed"),
+            "missing summary: {out}"
+        );
         assert!(
             out.contains("error") || out.contains("Error"),
             "missing YAML error detail: {out}",
@@ -156,8 +158,14 @@ mod tests {
     fn frontmatter_merge_block_renders_message() {
         let out = render_block(&frontmatter_merge_block("conflict in 'title'"));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
-        assert!(out.contains("frontmatter merge failed"), "missing summary: {out}");
-        assert!(out.contains("conflict in 'title'"), "missing message: {out}");
+        assert!(
+            out.contains("frontmatter merge failed"),
+            "missing summary: {out}"
+        );
+        assert!(
+            out.contains("conflict in 'title'"),
+            "missing message: {out}"
+        );
     }
 
     #[test]
@@ -165,7 +173,10 @@ mod tests {
         let out = render_block(&theme_load_block("unknown theme `neon`"));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("theme load failed"), "missing summary: {out}");
-        assert!(out.contains("unknown theme `neon`"), "missing message: {out}");
+        assert!(
+            out.contains("unknown theme `neon`"),
+            "missing message: {out}"
+        );
     }
 
     #[test]
@@ -173,7 +184,10 @@ mod tests {
         let out = render_block(&ast_parse_block("line 3: unexpected token"));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("AST parse failed"), "missing summary: {out}");
-        assert!(out.contains("line 3: unexpected token"), "missing message: {out}");
+        assert!(
+            out.contains("line 3: unexpected token"),
+            "missing message: {out}"
+        );
     }
 
     #[test]
@@ -189,7 +203,10 @@ mod tests {
         let err = serde_json::from_str::<serde_json::Value>("{ bogus }").unwrap_err();
         let out = render_block(&serialization_block(&err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
-        assert!(out.contains("serialization failed"), "missing summary: {out}");
+        assert!(
+            out.contains("serialization failed"),
+            "missing summary: {out}"
+        );
         assert!(out.contains("line"), "missing line position: {out}");
         assert!(out.contains("column"), "missing column position: {out}");
     }

@@ -38,7 +38,11 @@
 
 - Subagents may see a different staged set than the prompt implies. Always verify the actual index state before committing.
 - In a shared worktree, concurrent agents share the same index. `git reset HEAD` without paths resets the entire staged set for everyone.
-- **Orchestrator staging discipline:** When committing from the same worktree with multiple subagents, the orchestrator MUST stage each group's files and have the subagent commit them BEFORE staging the next group. Never run concurrent commit subagents from the same worktree — the shared staging area means once one agent commits, other agents' staged files disappear from the index. All 4 of this session's commits succeeded but one included unintended files because concurrent subagents raced on the shared staging area.
+- **Orchestrator staging discipline:** When committing from the same worktree with multiple subagents, two strategies work:
+  1. **Sequential:** Stage each group's files and have the subagent commit BEFORE staging the next group. This is the safest approach.
+  2. **Concurrent with `--only`:** Pre-stage all files upfront, then launch concurrent subagents each using `git commit --only -m "..." -- <paths>`. Because `--only` limits the commit to only the named paths, it does NOT unstage other files — so concurrent commits from the same worktree can succeed safely when all agents use this form.
+  - Without `--only`, concurrent commits are unsafe because `git commit path` commits the path AND removes it from the staging area, racing against other agents.
+  - With `--only`, concurrent commits are safe because only the specified paths are committed; other staged files remain staged.
 - If another worker already committed some assigned files, a later commit may legitimately report `nothing to commit`. That does not mean the earlier commit was missing.
 - Auto-formatting workflows (e.g., rustfmt on save) may pre-commit files before an orchestrator assigns them. If a subagent finds no staged changes for an assigned file, it was likely auto-committed by a formatting hook.
 

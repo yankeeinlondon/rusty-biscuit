@@ -20,5 +20,5 @@ pub mod text_block;
 pub mod todo;
 pub mod two_column;
 
-pub use horizontal_rule::{HorizontalRule, RulePlacement, RuleStyle, RuleWeight};
+pub use horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
 pub use status_block::StatusBlock;

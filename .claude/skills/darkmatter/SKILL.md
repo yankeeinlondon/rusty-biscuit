@@ -139,15 +139,25 @@ Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
 
 ### Horizontal Rules
 
-`HorizontalRule` is a `Renderable` component that provides customizable horizontal separator lines with support for various styles, placements, weights, and colors. It integrates with biscuit-terminal's `HorizontalRule` component and supports the `BrowserRenderable` trait for HTML output.
+Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
 
 - **Markdown syntax**: `--- { style: waves, width: "50%" }`
-- **Styles**: dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod
-- **Placements**: full, centered, left, right
-- **Weights**: thin, medium, thick
-- **Custom width and color support**
+- **Supported attributes** (all optional):
+  - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+  - `alignment`: `full` (default), `centered`, `left`, `right`
+  - `weight`: `thin`, `medium` (default), `thick`
+  - `width`: CSS-like string (`"75%"`, `"200px"`)
+  - `color`: CSS color name or `#rrggbb`
+- **Preferred page defaults:** put these fields under frontmatter `hr:`; per-rule attributes override only specified keys.
+- **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
+- **Bare `---`:** produces a configured rule when `hr:` frontmatter is present, otherwise the default dashed rule.
+- **Terminal rendering tiers:**
+  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals.
+  2. **Tier 2 (Unicode):** fallback when image rendering is unavailable and the locale signals UTF-8.
+  3. **Tier 3 (ASCII):** fallback otherwise.
+- **Browser rendering:** SVG with `--hr-weight`, `--hr-color`, `--hr-width` CSS variables; per-instance overrides via `render_to_browser_with_inline_variables`.
 
-Located in `darkmatter/lib/src/markdown/inline/types.rs` and `darkmatter/lib/src/markdown/output/`.
+Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/markdown/block/rule_processor.rs`, and `darkmatter/lib/src/markdown/output/`.
 
 ## See Also
 

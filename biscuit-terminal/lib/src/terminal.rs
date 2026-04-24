@@ -67,6 +67,9 @@ fn new_terminal() -> Terminal {
         // raw tty responses into normal CLI rendering paths before a caller
         // has asked for image or geometry-aware output.
         cell_size: None,
+        // Default to the locale-derived answer, falling back to `true` for
+        // unknown environments (modern terminals all advertise UTF-8).
+        supports_unicode: crate::discovery::locale::env_says_utf8().unwrap_or(true),
     };
 
     tracing::debug!(
@@ -234,6 +237,18 @@ pub struct Terminal {
     /// normal detection so ordinary rendering does not perform live `/dev/tty`
     /// queries unless a caller explicitly asks for cell dimensions.
     pub cell_size: Option<CellSize>,
+
+    /// Whether the terminal is expected to render Unicode glyphs correctly.
+    ///
+    /// Components that choose between Unicode and ASCII fallbacks (e.g.,
+    /// [`crate::components::horizontal_rule::HorizontalRule`]) consult this
+    /// flag before consulting the `LC_ALL`/`LC_CTYPE`/`LANG` environment.
+    /// The default value mirrors
+    /// [`crate::discovery::locale::env_says_utf8`] with a `true` fallback for
+    /// unknown locales — every modern terminal advertises UTF-8 when asked.
+    /// Callers that need to force ASCII fallbacks can set
+    /// `supports_unicode = false` via [`TerminalBuilder::supports_unicode`].
+    pub supports_unicode: bool,
 }
 
 impl Default for Terminal {
@@ -270,6 +285,7 @@ impl From<&Terminal> for Terminal {
             fixed_width: value.fixed_width,
             fixed_height: value.fixed_height,
             cell_size: value.cell_size,
+            supports_unicode: value.supports_unicode,
         }
     }
 }
@@ -373,6 +389,7 @@ impl Terminal {
             fixed_width: Some(width),
             fixed_height: None,
             cell_size: None,
+            supports_unicode: true,
         }
     }
 
@@ -526,6 +543,7 @@ pub struct TerminalBuilder {
     fixed_width: Option<u32>,
     fixed_height: Option<u32>,
     cell_size: Option<CellSize>,
+    supports_unicode: Option<bool>,
 }
 
 impl TerminalBuilder {
@@ -617,6 +635,15 @@ impl TerminalBuilder {
         self
     }
 
+    /// Set whether the terminal renders Unicode glyphs correctly.
+    ///
+    /// Overrides the locale-derived default; see
+    /// [`Terminal::supports_unicode`] for details.
+    pub fn supports_unicode(mut self, value: bool) -> Self {
+        self.supports_unicode = Some(value);
+        self
+    }
+
     /// Build the Terminal, using auto-detected values for unset fields.
     pub fn build(self) -> Terminal {
         let detected = new_terminal();
@@ -647,6 +674,7 @@ impl TerminalBuilder {
             char_encoding: detected.char_encoding,
             locale: detected.locale,
             cell_size: self.cell_size.or(detected.cell_size),
+            supports_unicode: self.supports_unicode.unwrap_or(detected.supports_unicode),
         }
     }
 }

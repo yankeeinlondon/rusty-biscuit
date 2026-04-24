@@ -57,6 +57,6 @@ mark {
     border-radius: 2px;
 }
 </style>
-<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto;">
-  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="red" stroke-width="4" stroke-linecap="round" stroke-dasharray="2,6"/>
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: red; --hr-width: 100%;">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="var(--hr-color, red)" stroke-width="var(--hr-weight, 4)" stroke-linecap="round" stroke-dasharray="2,6"/>
 </svg>

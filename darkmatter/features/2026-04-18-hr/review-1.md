@@ -72,7 +72,7 @@ However, the implementation has several design-level gaps, silent-fail behaviors
 | `weight="medium"` | Single-line chars |
 | `weight="thick"` | Double-line/Heavy chars |
 
-**Actual:** `HorizontalRule::render()` never consults `self.weight`. Thin, Medium, and Thick produce identical terminal output. This is confirmed by inspecting the 36 per-style / per-placement / per-weight biscuit-terminal snapshots — the `thin`, `medium`, and `thick` variants of each `{style, placement}` pair are byte-identical.
+**Actual:** `HorizontalRule::render()` never consults `self.weight`. Thin, Medium, and Thick produce identical terminal output. This is confirmed by inspecting the 36 per-style / per-alignment / per-weight biscuit-terminal snapshots — the `thin`, `medium`, and `thick` variants of each `{style, alignment}` pair are byte-identical.
 
 **Fix:** Map `RuleWeight::Thick` to heavy box-drawing alternates in Tier 2:
 - `Dashes`: `╌` (thin/medium) vs `╍` (thick)
@@ -106,7 +106,7 @@ Add per-weight snapshots once implemented.
 - (preferred) Validate and convert strings to typed enums inside `RuleProcessor::parse_attributes` — return a parse error / warning when unknown values are present; OR
 - At minimum, log via `tracing::warn!` when an unknown value is seen so authors get feedback.
 
-Add tests for `--- { style: bogus }` / `--- { placement: foo }` / `--- { weight: zzz }`.
+Add tests for `--- { style: bogus }` / `--- { alignment: foo }` / `--- { weight: zzz }`.
 
 ### B2. Terminal renderer constructs a fresh `Terminal::new()` per rule
 
@@ -149,10 +149,10 @@ Standard pulldown-cmark `Event::Rule` — produced by plain `---`/`***`/`___` wi
 
 ```rust
 None => {
-    // Default width based on placement
-    match self.placement {
-        RulePlacement::Full => term_width,
-        RulePlacement::Centered | RulePlacement::Left | RulePlacement::Right => {
+    // Default width based on alignment
+    match self.alignment {
+        RuleAlignment::Full => term_width,
+        RuleAlignment::Centered | RuleAlignment::Left | RuleAlignment::Right => {
             (term_width as f32 * 0.8) as usize
     }
 }
@@ -190,7 +190,7 @@ This is identical to `line.repeat(inner_width)`. Replace with the simpler form.
 
 ### B8. CurtainRod uses CJK corner brackets (`「` `」`) which are visually wide
 
-In many monospace terminal fonts, `「` and `」` render as 2-column-wide glyphs. This breaks width calculation — the printed line will be wider than `rule_width` and will visibly misalign with other content/placement padding. Prefer single-width Unicode brackets (e.g., `⎡` `⎤`, `┤` `├`, or `═` delimiters with `●` ends), or measure actual display width and adjust.
+In many monospace terminal fonts, `「` and `」` render as 2-column-wide glyphs. This breaks width calculation — the printed line will be wider than `rule_width` and will visibly misalign with other content/alignment padding. Prefer single-width Unicode brackets (e.g., `⎡` `⎤`, `┤` `├`, or `═` delimiters with `●` ends), or measure actual display width and adjust.
 
 ---
 
@@ -212,7 +212,7 @@ Existing coverage is good on the happy path (36 component tests + 17 parser test
 - No test that `color: "red"` actually produces ANSI codes (see A2).
 - No test that `weight: thick` differs from `weight: thin` (see A3) — the 36 per-weight biscuit-terminal snapshots *prove* they are identical.
 - No test for `Terminal` width overrides flowing through to the HR (see B2).
-- No test for an invalid `style` / `placement` / `weight` value (see B1).
+- No test for an invalid `style` / `alignment` / `weight` value (see B1).
 
 ### C3. HTML renderer edge cases
 
@@ -236,7 +236,7 @@ Lines 87–93:
 ```rust
 let rule = HorizontalRule {
     style: RuleStyle::Waves,
-    placement: RulePlacement::Centered,
+    alignment: RuleAlignment::Centered,
     weight: RuleWeight::Medium,
     width: Some("75%".to_string()),
     color: None,
@@ -289,12 +289,12 @@ The review prompt references `darkmatter/features/2026-04-18-hr/spec.md`, but on
 
 ### D5. Component is not re-exported through `biscuit_terminal::prelude`
 
-`biscuit-terminal/lib/src/prelude.rs` exports every other component (`Prose`, `Table`, `Section`, `TerminalImage`, `Mermaid`, etc.) but not `HorizontalRule`, `RuleStyle`, `RulePlacement`, `RuleWeight`, or the new `BrowserRenderable` trait. This makes the ergonomics asymmetric with the rest of biscuit-terminal's public API.
+`biscuit-terminal/lib/src/prelude.rs` exports every other component (`Prose`, `Table`, `Section`, `TerminalImage`, `Mermaid`, etc.) but not `HorizontalRule`, `RuleStyle`, `RuleAlignment`, `RuleWeight`, or the new `BrowserRenderable` trait. This makes the ergonomics asymmetric with the rest of biscuit-terminal's public API.
 
 **Fix:** Add to `prelude.rs`:
 
 ```rust
-pub use crate::components::horizontal_rule::{HorizontalRule, RulePlacement, RuleStyle, RuleWeight};
+pub use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
 pub use crate::components::renderable::BrowserRenderable;
 ```
 
@@ -314,7 +314,7 @@ Never used. Remove the import.
 
 ### E1. Missing serde derives on public types
 
-Tech-design §1.2 "Validation" step for 1.2 says "serialize/deserialize works". `RuleStyle`, `RulePlacement`, `RuleWeight` do not derive `Serialize` / `Deserialize`. If the feature is intended to round-trip through (de)serialization — e.g., for JSON AST output or config files — add the derives behind a feature flag or unconditionally.
+Tech-design §1.2 "Validation" step for 1.2 says "serialize/deserialize works". `RuleStyle`, `RuleAlignment`, `RuleWeight` do not derive `Serialize` / `Deserialize`. If the feature is intended to round-trip through (de)serialization — e.g., for JSON AST output or config files — add the derives behind a feature flag or unconditionally.
 
 ### E2. Attribute parser is a hand-rolled ad-hoc splitter
 
