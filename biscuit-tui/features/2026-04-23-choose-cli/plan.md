@@ -2,6 +2,7 @@
 phases: 12
 created: 2026-04-23
 start_phase: 1
+memory: choose-cli
 source_files_during_phase_1:
   - biscuit-tui/lib/Cargo.toml
   - biscuit-tui/lib/src/core/sort.rs
@@ -12,8 +13,23 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - biscuit-tui/lib/src/core/standalone.rs
+  - biscuit-tui/lib/src/core/mod.rs
+  - biscuit-tui/lib/src/lib.rs
+  - biscuit-tui/lib/src/prelude.rs
+  - biscuit-tui/cli/src/commands/text_input.rs
+  - biscuit-tui/cli/src/commands/text_area_input.rs
+  - biscuit-tui/cli/src/commands/boolean_switch.rs
+  - biscuit-tui/cli/src/commands/choose_one.rs
+  - biscuit-tui/cli/src/commands/choose_many.rs
+  - biscuit-tui/cli/src/commands/input_table.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - tui-chrome
+  - tui-chrome-cli
 ---
 
 # Choose CLI Enhancements — Execution Plan
