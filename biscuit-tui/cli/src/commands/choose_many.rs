@@ -14,11 +14,11 @@ use tui_chrome::helpers::choice_builders::{
 };
 use tui_chrome::{
     ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseMany, ChooseManyState, Label, SelectionMode,
-    run_standalone,
+    run_standalone_with_chrome,
 };
 
 use crate::commands::common_choose::{
-    ChooseChromeArgs, apply_sort, build_options, resolve_option_strings,
+    ChooseChromeArgs, apply_sort, build_chrome, build_options, resolve_option_strings,
 };
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_list};
@@ -88,8 +88,9 @@ pub struct ChooseManyArgs {
 pub fn run(args: ChooseManyArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
+    let chrome = build_chrome(&args.chrome);
     run_with_writer(args, output, height, &mut lock, |state, height| {
-        run_standalone(ChooseMany::new(), state, height)
+        run_standalone_with_chrome(ChooseMany::new(), state, height, chrome)
     })
 }
 

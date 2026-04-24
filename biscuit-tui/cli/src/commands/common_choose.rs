@@ -21,13 +21,13 @@
 use std::io::{self, IsTerminal, Read};
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{ChoiceOption, FrameChromeConfig, SortOrder};
+use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, SortOrder};
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
 /// Phase 3 introduces the source-resolution flag (`--delimiter`);
-/// Phase 4 adds `--sort`; later phases extend this struct with
-/// `--border`, `--margin`, and `--height`.
+/// Phase 4 adds `--sort`; Phase 9 adds the `--border*` family. Later
+/// phases extend this struct with `--margin*` and `--height`.
 #[derive(Debug, Args, Clone, Default)]
 pub struct ChooseChromeArgs {
     /// Split each option string into label and value on the first
@@ -44,6 +44,29 @@ pub struct ChooseChromeArgs {
     /// raw source strings.
     #[arg(long, value_enum, default_value_t = SortOrderArg::Natural)]
     pub sort: SortOrderArg,
+
+    /// Draw a border around the prompt.
+    ///
+    /// Implies [`BorderStyleArg::Rounded`] when `--border-style` is
+    /// not also supplied. Setting `--border-label` or
+    /// `--border-style <non-none>` also implies a border without
+    /// requiring `--border` explicitly.
+    #[arg(long)]
+    pub border: bool,
+
+    /// Title rendered in the top-left of the border.
+    ///
+    /// Implies `--border` (defaults to rounded when no
+    /// `--border-style` is supplied). Long labels are silently
+    /// truncated by ratatui to fit the border width.
+    #[arg(long, value_name = "TEXT")]
+    pub border_label: Option<String>,
+
+    /// Border glyph style.
+    ///
+    /// Any value other than `none` implies `--border`.
+    #[arg(long, value_enum, value_name = "STYLE")]
+    pub border_style: Option<BorderStyleArg>,
 }
 
 /// CLI-facing sort-order mirror.
@@ -72,6 +95,66 @@ impl From<SortOrderArg> for SortOrder {
             SortOrderArg::Reverse => SortOrder::Reverse,
             SortOrderArg::Asc => SortOrder::Asc,
             SortOrderArg::Desc => SortOrder::Desc,
+        }
+    }
+}
+
+/// CLI-facing border-style mirror.
+///
+/// Kept separate from [`BorderStyle`] so clap renders kebab-case help
+/// values without forcing the library to depend on clap. The variants
+/// match [`BorderStyle`] one-to-one and convert via [`From`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum BorderStyleArg {
+    /// No border drawn (the default).
+    #[default]
+    None,
+    /// Rounded corners on all four sides.
+    Rounded,
+    /// Single-line border with sharp corners on all four sides.
+    Sharp,
+    /// Thick single-line border on all four sides.
+    Bold,
+    /// Double-line border on all four sides.
+    Double,
+    /// Block border (quadrant-outside) on all four sides.
+    Block,
+    /// Thin block border (quadrant-inside) on all four sides.
+    ThinBlock,
+    /// Plain border on top and bottom only.
+    Horizontal,
+    /// Plain border on left and right only.
+    Vertical,
+    /// A single horizontal rule on top.
+    Line,
+    /// Plain border on top only.
+    Top,
+    /// Plain border on bottom only.
+    Bottom,
+    /// Plain border on left only.
+    Left,
+    /// Plain border on right only.
+    Right,
+}
+
+impl From<BorderStyleArg> for BorderStyle {
+    fn from(value: BorderStyleArg) -> Self {
+        match value {
+            BorderStyleArg::None => BorderStyle::None,
+            BorderStyleArg::Rounded => BorderStyle::Rounded,
+            BorderStyleArg::Sharp => BorderStyle::Sharp,
+            BorderStyleArg::Bold => BorderStyle::Bold,
+            BorderStyleArg::Double => BorderStyle::Double,
+            BorderStyleArg::Block => BorderStyle::Block,
+            BorderStyleArg::ThinBlock => BorderStyle::ThinBlock,
+            BorderStyleArg::Horizontal => BorderStyle::Horizontal,
+            BorderStyleArg::Vertical => BorderStyle::Vertical,
+            BorderStyleArg::Line => BorderStyle::Line,
+            BorderStyleArg::Top => BorderStyle::Top,
+            BorderStyleArg::Bottom => BorderStyle::Bottom,
+            BorderStyleArg::Left => BorderStyle::Left,
+            BorderStyleArg::Right => BorderStyle::Right,
         }
     }
 }
@@ -176,14 +259,39 @@ pub fn apply_sort(options: &mut [ChoiceOption<String>], order: SortOrder) {
 
 /// Builds a [`FrameChromeConfig`] from the shared CLI args.
 ///
-/// Phase 3 returns the default config; Phases 9–11 populate border,
-/// margin, and height fields as they come online. Marked
-/// `#[allow(dead_code)]` because Phase 3 introduces the helper as
-/// scaffolding without yet threading it through the subcommand
-/// handlers.
-#[allow(dead_code)]
-pub fn build_chrome(_args: &ChooseChromeArgs) -> FrameChromeConfig {
-    FrameChromeConfig::default()
+/// Phase 9 wires the `--border`, `--border-label`, and
+/// `--border-style` flags. The `--border-label` and a non-`none`
+/// `--border-style` both implicitly enable the border, matching the
+/// spec's "any border-flag implies a border" rule. Phases 10 and 11
+/// populate margin and height fields.
+pub fn build_chrome(args: &ChooseChromeArgs) -> FrameChromeConfig {
+    let border = resolve_border_style(args);
+    FrameChromeConfig {
+        border,
+        border_label: args.border_label.clone(),
+        ..Default::default()
+    }
+}
+
+/// Resolves the effective [`BorderStyle`] from the supplied args.
+///
+/// Precedence:
+///
+/// 1. An explicit non-`none` `--border-style` always wins.
+/// 2. An explicit `--border-style none` wins even if `--border` /
+///    `--border-label` are set, so users can suppress an inherited
+///    style without removing the other flags.
+/// 3. `--border` or `--border-label` with no `--border-style`
+///    defaults to [`BorderStyle::Rounded`].
+/// 4. Otherwise, no border.
+fn resolve_border_style(args: &ChooseChromeArgs) -> BorderStyle {
+    if let Some(style) = args.border_style {
+        return style.into();
+    }
+    if args.border || args.border_label.is_some() {
+        return BorderStyle::Rounded;
+    }
+    BorderStyle::None
 }
 
 #[cfg(test)]
@@ -256,6 +364,106 @@ mod tests {
         let args = ChooseChromeArgs::default();
         let chrome = build_chrome(&args);
         assert!(chrome.is_empty());
+    }
+
+    #[test]
+    fn build_chrome_border_flag_defaults_to_rounded() {
+        let args = ChooseChromeArgs {
+            border: true,
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::Rounded);
+        assert!(chrome.border_label.is_none());
+        assert!(!chrome.is_empty());
+    }
+
+    #[test]
+    fn build_chrome_border_label_implies_border() {
+        let args = ChooseChromeArgs {
+            border_label: Some("Pick".to_string()),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::Rounded);
+        assert_eq!(chrome.border_label.as_deref(), Some("Pick"));
+    }
+
+    #[test]
+    fn build_chrome_explicit_border_style_overrides_default() {
+        let args = ChooseChromeArgs {
+            border: true,
+            border_style: Some(BorderStyleArg::Double),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::Double);
+    }
+
+    #[test]
+    fn build_chrome_border_style_alone_implies_border() {
+        let args = ChooseChromeArgs {
+            border_style: Some(BorderStyleArg::Bold),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::Bold);
+    }
+
+    #[test]
+    fn build_chrome_border_style_none_suppresses_border() {
+        // Explicit --border-style none overrides --border even when
+        // both are set, so users can keep the rest of their flag set
+        // and just kill the border.
+        let args = ChooseChromeArgs {
+            border: true,
+            border_label: Some("Pick".to_string()),
+            border_style: Some(BorderStyleArg::None),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::None);
+    }
+
+    #[test]
+    fn border_style_arg_default_is_none() {
+        assert_eq!(BorderStyleArg::default(), BorderStyleArg::None);
+    }
+
+    #[test]
+    fn border_style_arg_maps_to_library_enum() {
+        assert_eq!(BorderStyle::from(BorderStyleArg::None), BorderStyle::None);
+        assert_eq!(
+            BorderStyle::from(BorderStyleArg::Rounded),
+            BorderStyle::Rounded
+        );
+        assert_eq!(BorderStyle::from(BorderStyleArg::Bold), BorderStyle::Bold);
+        assert_eq!(
+            BorderStyle::from(BorderStyleArg::Double),
+            BorderStyle::Double
+        );
+        assert_eq!(BorderStyle::from(BorderStyleArg::Block), BorderStyle::Block);
+        assert_eq!(
+            BorderStyle::from(BorderStyleArg::ThinBlock),
+            BorderStyle::ThinBlock
+        );
+        assert_eq!(
+            BorderStyle::from(BorderStyleArg::Horizontal),
+            BorderStyle::Horizontal
+        );
+        assert_eq!(
+            BorderStyle::from(BorderStyleArg::Vertical),
+            BorderStyle::Vertical
+        );
+        assert_eq!(BorderStyle::from(BorderStyleArg::Line), BorderStyle::Line);
+        assert_eq!(BorderStyle::from(BorderStyleArg::Top), BorderStyle::Top);
+        assert_eq!(
+            BorderStyle::from(BorderStyleArg::Bottom),
+            BorderStyle::Bottom
+        );
+        assert_eq!(BorderStyle::from(BorderStyleArg::Left), BorderStyle::Left);
+        assert_eq!(BorderStyle::from(BorderStyleArg::Right), BorderStyle::Right);
+        assert_eq!(BorderStyle::from(BorderStyleArg::Sharp), BorderStyle::Sharp);
     }
 
     #[test]
