@@ -1129,6 +1129,33 @@ mod tests {
         }
     }
 
+    fn text_terminal() -> Terminal {
+        text_terminal_with_width(80)
+    }
+
+    fn text_terminal_with_width(width: u32) -> Terminal {
+        text_terminal_with_width_and_color_depth(width, ColorDepth::TrueColor)
+    }
+
+    fn text_terminal_with_color_depth(color_depth: ColorDepth) -> Terminal {
+        text_terminal_with_width_and_color_depth(80, color_depth)
+    }
+
+    fn text_terminal_with_width_and_color_depth(width: u32, color_depth: ColorDepth) -> Terminal {
+        let mut term = Terminal::new_optimistic(width);
+        term.is_tty = false;
+        term.image_support = ImageSupport::None;
+        term.color_depth = color_depth;
+        term.supports_unicode = crate::discovery::locale::env_says_utf8().unwrap_or(true);
+        term
+    }
+
+    fn text_terminal_with_width_and_unicode(width: u32, supports_unicode: bool) -> Terminal {
+        let mut term = text_terminal_with_width(width);
+        term.supports_unicode = supports_unicode;
+        term
+    }
+
     #[test]
     fn test_horizontal_rule_new() {
         let hr = HorizontalRule::new();
@@ -1206,7 +1233,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // Unicode terminal should use box drawing char
@@ -1220,7 +1247,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // ASCII fallback should use hyphens
@@ -1234,7 +1261,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dots)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // Unicode middle dot
@@ -1248,7 +1275,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dots)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // ASCII fallback
@@ -1262,7 +1289,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // Unicode wave dash
@@ -1276,7 +1303,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Waves)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // ASCII fallback
@@ -1290,7 +1317,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineStar)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // Should contain Unicode star symbol
@@ -1304,7 +1331,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineStar)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // ASCII fallback
@@ -1319,7 +1346,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineCircle)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // Should contain Unicode filled circle
@@ -1333,7 +1360,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineCircle)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let result = hr.render(&term);
         assert!(!result.is_empty());
         // ASCII fallback
@@ -1348,7 +1375,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::InsetLine)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.render(&term);
         assert!(result.len() >= 3);
         // Unicode: box drawing chars
@@ -1362,7 +1389,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::InsetLine)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let result = hr.render(&term);
         assert!(result.len() >= 3);
         // ASCII fallback: indented with hyphens
@@ -1377,7 +1404,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.render(&term);
         assert!(result.len() >= 5);
         // B8: single-width box-drawing tees, not CJK corner brackets.
@@ -1398,7 +1425,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let result = hr.render(&term);
         assert!(result.len() >= 5);
         // ASCII brackets
@@ -1437,12 +1464,7 @@ mod tests {
             .width("40");
         // `is_tty=false` keeps us out of Tier 1; TrueColor exercises the
         // same code path as production TTYs without inviting the image tier.
-        let term = Terminal::builder()
-            .width(100)
-            .is_tty(false)
-            .color_depth(ColorDepth::TrueColor)
-            .image_support(ImageSupport::None)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(100, ColorDepth::TrueColor);
         let result = hr.render(&term);
 
         // No color is configured → output is pure Unicode, no ANSI escapes.
@@ -1506,12 +1528,7 @@ mod tests {
             .weight(RuleWeight::Thick)
             .alignment(RuleAlignment::Right)
             .width("40");
-        let term = Terminal::builder()
-            .width(100)
-            .is_tty(false)
-            .color_depth(ColorDepth::None)
-            .image_support(ImageSupport::None)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(100, ColorDepth::None);
         let result = hr.render(&term);
 
         assert!(
@@ -1544,7 +1561,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Centered);
-        let term = Terminal::builder().width(100).build();
+        let term = text_terminal_with_width(100);
         let result = hr.render(&term);
         let term_width = 100_usize;
         let rule_width = (term_width as f32 * 0.8) as usize;
@@ -1561,7 +1578,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Left);
-        let term = Terminal::builder().width(100).build();
+        let term = text_terminal_with_width(100);
         let result = hr.render(&term);
         let rule_width = (100_f32 * 0.8) as usize;
         let rule_content = "╌".repeat(rule_width);
@@ -1575,7 +1592,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Right);
-        let term = Terminal::builder().width(100).build();
+        let term = text_terminal_with_width(100);
         let result = hr.render(&term);
         let term_width = 100_usize;
         let rule_width = (term_width as f32 * 0.8) as usize;
@@ -1795,7 +1812,7 @@ mod tests {
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Full)
             .width("1%");
-        let term = Terminal::builder().width(100).build();
+        let term = text_terminal_with_width(100);
         let result = hr.render(&term);
         assert_eq!(
             hr.visible_width(&result),
@@ -1812,7 +1829,7 @@ mod tests {
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Left)
             .width("3");
-        let term = Terminal::builder().width(100).build();
+        let term = text_terminal_with_width(100);
         let result = hr.render(&term);
         assert_eq!(
             hr.visible_width(&result),
@@ -1829,7 +1846,7 @@ mod tests {
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Full)
             .width("5%");
-        let term = Terminal::builder().width(100).build();
+        let term = text_terminal_with_width(100);
         let result = hr.render(&term);
         assert_eq!(
             hr.visible_width(&result),
@@ -1919,7 +1936,7 @@ mod tests {
 
     #[test]
     fn test_all_styles_all_alignments_all_weights_unicode() {
-        let term = Terminal::default();
+        let term = text_terminal();
         let styles = vec![
             RuleStyle::Dashes,
             RuleStyle::Dots,
@@ -1959,7 +1976,7 @@ mod tests {
 
     #[test]
     fn test_all_styles_all_alignments_all_weights_ascii() {
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
         let styles = vec![
             RuleStyle::Dashes,
             RuleStyle::Dots,
@@ -2001,7 +2018,7 @@ mod tests {
     #[serial_test::serial(locale_env)]
     fn test_snapshot_render_all_styles() {
         let _guard = ScopedLcAll::force_utf8();
-        let term = Terminal::default();
+        let term = text_terminal();
 
         let styles = vec![
             ("dashes", RuleStyle::Dashes),
@@ -2085,7 +2102,7 @@ mod tests {
         let _guard = ScopedLcAll::force_c();
         // `ColorDepth::None` also prevents any ANSI wrapping from leaking
         // into the snapshot if we later add ASCII colorization.
-        let term = Terminal::builder().color_depth(ColorDepth::None).build();
+        let term = text_terminal_with_color_depth(ColorDepth::None);
 
         let styles = vec![
             ("dashes", RuleStyle::Dashes),
@@ -2120,7 +2137,7 @@ mod tests {
         use crate::components::renderable::{Renderable, RenderableContent};
 
         let _guard = ScopedLcAll::force_utf8();
-        let term = Terminal::default();
+        let term = text_terminal();
 
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
@@ -2151,7 +2168,7 @@ mod tests {
     #[serial_test::serial(locale_env)]
     fn test_snapshot_render_with_custom_attributes() {
         let _guard = ScopedLcAll::force_utf8();
-        let term = Terminal::default();
+        let term = text_terminal();
 
         // Test with custom width and color
         let hr1 = HorizontalRule::new()
@@ -2187,7 +2204,7 @@ mod tests {
     fn test_use_fancy_chars_respects_locale_utf8() {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new();
-        let term = Terminal::default();
+        let term = text_terminal();
         assert!(
             hr.use_fancy_chars(&term),
             "LC_ALL=en_US.UTF-8 should enable fancy (Unicode) glyphs"
@@ -2199,7 +2216,7 @@ mod tests {
     fn test_use_fancy_chars_respects_locale_c() {
         let _guard = ScopedLcAll::force_c();
         let hr = HorizontalRule::new();
-        let term = Terminal::default();
+        let term = text_terminal();
         assert!(
             !hr.use_fancy_chars(&term),
             "LC_ALL=C should fall back to ASCII glyphs"
@@ -2220,7 +2237,7 @@ mod tests {
         }
 
         let hr = HorizontalRule::new();
-        let term = Terminal::default();
+        let term = text_terminal();
         let result = hr.use_fancy_chars(&term);
 
         // Restore
@@ -2252,7 +2269,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
             .alignment(RuleAlignment::Full);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
 
         use unicode_width::UnicodeWidthChar;
@@ -2292,7 +2309,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .weight(RuleWeight::Thick);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
         assert!(
             result.contains('╍'),
@@ -2311,7 +2328,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .weight(RuleWeight::Thin);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
         assert!(result.contains('╌'), "expected light ╌: {result:?}");
         assert!(!result.contains('╍'), "light should not use ╍: {result:?}");
@@ -2324,7 +2341,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dots)
             .weight(RuleWeight::Thick);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
         assert!(
             result.contains('•'),
@@ -2343,7 +2360,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineStar)
             .weight(RuleWeight::Thick);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
         assert!(
             result.contains('━'),
@@ -2363,7 +2380,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::LineCircle)
             .weight(RuleWeight::Thick);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
         assert!(
             result.contains('━'),
@@ -2379,7 +2396,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::InsetLine)
             .weight(RuleWeight::Thick);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
         assert!(
             result.contains('━'),
@@ -2398,7 +2415,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::CurtainRod)
             .weight(RuleWeight::Thick);
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let result = hr.render(&term);
         assert!(
             result.contains('━'),
@@ -2414,7 +2431,7 @@ mod tests {
     fn test_render_thick_waves_same_as_medium_waves() {
         // Documents the known limitation: Waves has no heavy variant.
         let _guard = ScopedLcAll::force_utf8();
-        let term = Terminal::builder().width(40).build();
+        let term = text_terminal_with_width(40);
         let medium = HorizontalRule::new()
             .style(RuleStyle::Waves)
             .weight(RuleWeight::Medium)
@@ -2431,10 +2448,7 @@ mod tests {
     fn test_render_ascii_weight_is_noop() {
         // ASCII fallback has no heavy variant for any style.
         let _guard = ScopedLcAll::force_c();
-        let term = Terminal::builder()
-            .width(40)
-            .color_depth(ColorDepth::None)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(40, ColorDepth::None);
         let thin = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .weight(RuleWeight::Thin)
@@ -2455,10 +2469,7 @@ mod tests {
     fn test_render_color_named_wraps_with_ansi() {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("red");
-        let term = Terminal::builder()
-            .width(40)
-            .color_depth(ColorDepth::Basic)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(40, ColorDepth::Basic);
         let result = hr.render(&term);
         assert!(
             result.contains("\x1b[31m"),
@@ -2476,10 +2487,7 @@ mod tests {
     fn test_render_color_named_case_insensitive() {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("RED");
-        let term = Terminal::builder()
-            .width(20)
-            .color_depth(ColorDepth::TrueColor)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(20, ColorDepth::TrueColor);
         let result = hr.render(&term);
         assert!(result.contains("\x1b[31m"), "uppercase should parse");
     }
@@ -2491,10 +2499,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .color("#ff0000");
-        let term = Terminal::builder()
-            .width(20)
-            .color_depth(ColorDepth::TrueColor)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(20, ColorDepth::TrueColor);
         let result = hr.render(&term);
         assert!(
             result.contains("\x1b[38;2;255;0;0m"),
@@ -2510,10 +2515,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .color("#00ff00");
-        let term = Terminal::builder()
-            .width(20)
-            .color_depth(ColorDepth::Basic)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(20, ColorDepth::Basic);
         let result = hr.render(&term);
         // Basic terminals should never emit 24-bit CSI.
         assert!(!result.contains("\x1b[38;2;"));
@@ -2529,10 +2531,7 @@ mod tests {
     fn test_render_color_no_effect_when_depth_none() {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("red");
-        let term = Terminal::builder()
-            .width(40)
-            .color_depth(ColorDepth::None)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(40, ColorDepth::None);
         let result = hr.render(&term);
         assert!(
             !result.contains('\x1b'),
@@ -2547,10 +2546,7 @@ mod tests {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .color("not-a-color");
-        let term = Terminal::builder()
-            .width(40)
-            .color_depth(ColorDepth::TrueColor)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(40, ColorDepth::TrueColor);
         let result = hr.render(&term);
         assert!(
             !result.contains('\x1b'),
@@ -2563,10 +2559,7 @@ mod tests {
     fn test_render_color_empty_string_is_noop() {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("");
-        let term = Terminal::builder()
-            .width(40)
-            .color_depth(ColorDepth::TrueColor)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(40, ColorDepth::TrueColor);
         let result = hr.render(&term);
         assert!(
             !result.contains('\x1b'),
@@ -2585,10 +2578,7 @@ mod tests {
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Centered)
             .color("red");
-        let term = Terminal::builder()
-            .width(80)
-            .color_depth(ColorDepth::Basic)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(80, ColorDepth::Basic);
         let result = hr.render(&term);
         assert!(result.starts_with(' '), "centered should have leading pad");
         // The ESC must come after the leading spaces.
@@ -2679,7 +2669,7 @@ mod tests {
         // (inner_width - inner_width/2)` trick (needed for odd widths)
         // is correctly replaced by `inner_width`.
         for width in [11, 12, 20, 21, 80] {
-            let term = Terminal::builder().width(width as u32).build();
+            let term = text_terminal_with_width(width as u32);
             let result = hr.render(&term);
             // inset produces "  " + inner + "  " = 4 padding + (width-4) body.
             assert_eq!(
@@ -2961,10 +2951,7 @@ mod tests {
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Full)
             .width("10");
-        let term = Terminal::builder()
-            .width(20)
-            .supports_unicode(false)
-            .build();
+        let term = text_terminal_with_width_and_unicode(20, false);
         let result = hr.render(&term);
         assert!(
             result.chars().all(|c| c == '-'),
@@ -3026,10 +3013,7 @@ mod tests {
     #[tracing_test::traced_test]
     fn test_apply_terminal_color_unknown_name_warns_with_asymmetry_note() {
         let hr = HorizontalRule::new().color("tomato");
-        let term = Terminal::builder()
-            .width(40)
-            .color_depth(ColorDepth::TrueColor)
-            .build();
+        let term = text_terminal_with_width_and_color_depth(40, ColorDepth::TrueColor);
         let _ = hr.apply_terminal_color("body".to_string(), &term);
         assert!(
             logs_contain("browser rendering will pass"),
@@ -3047,10 +3031,7 @@ mod tests {
     fn test_parse_basic_color_case_insensitive() {
         assert_eq!(parse_basic_color("BLACK"), Some(BasicColor::Black));
         assert_eq!(parse_basic_color("Red"), Some(BasicColor::Red));
-        assert_eq!(
-            parse_basic_color("bright-red"),
-            Some(BasicColor::BrightRed)
-        );
+        assert_eq!(parse_basic_color("bright-red"), Some(BasicColor::BrightRed));
         assert_eq!(parse_basic_color("BrightRed"), Some(BasicColor::BrightRed));
         assert_eq!(parse_basic_color("Gray"), Some(BasicColor::BrightBlack));
         assert_eq!(parse_basic_color("grey"), Some(BasicColor::BrightBlack));

@@ -5,9 +5,11 @@ design: ""
 iteration: 1
 area: "{{ctx.current_package_area}}"
 success:
-    say: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
+    stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
+    message: "Feature review {{iteration}} in the **{{ctx.current_package_area}}** package area has completed:\nSpecification: {{dir}}/{{spec}}\nDesign: {{dir}}/{{design}}\n\nThe review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
 failure:
-    say: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
+    stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
+    message: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
 ---
 
 We have just completed a feature defined in "{{area}}/{{dir}}":
