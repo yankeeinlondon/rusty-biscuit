@@ -13,15 +13,22 @@ use tui_chrome::helpers::choice_builders::{
     choose_many_from_csv, choose_many_from_markdown_list, choose_one_from_dictionary,
 };
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, ChooseMany, ChooseManyState, Label, run_standalone,
+    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseMany, ChooseManyState, Label, SelectionMode,
+    run_standalone,
 };
 
+use crate::commands::common_choose::{ChooseChromeArgs, build_options, resolve_option_strings};
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_list};
 
 /// Arguments accepted by the `choose-many` subcommand.
 #[derive(Debug, Args)]
 pub struct ChooseManyArgs {
+    /// Option strings. Trailing positional arguments become the list
+    /// of options when no legacy `--options*` flag is set.
+    #[arg(value_name = "OPTIONS")]
+    pub positional: Vec<String>,
+
     /// Comma-separated list of option values.
     #[arg(long, conflicts_with_all = ["options_from_file", "options_from_dictionary"])]
     pub options: Option<String>,
@@ -43,8 +50,15 @@ pub struct ChooseManyArgs {
     #[arg(long, value_enum, default_value_t = LabelPositionArg::Above)]
     pub label_position: LabelPositionArg,
 
-    /// Comma-separated list of pre-selected option ids.
-    #[arg(long)]
+    /// Pre-selected option values. Repeatable and/or comma-separated;
+    /// each repetition is split on `,` so `--selected a,b --selected c`
+    /// yields `[a, b, c]`.
+    #[arg(long, conflicts_with = "initial")]
+    pub selected: Vec<String>,
+
+    /// Deprecated alias for `--selected`. Will be removed in a future
+    /// release.
+    #[arg(long, hide = true)]
     pub initial: Option<String>,
 
     /// Submit fails validation when no selection is made.
@@ -58,6 +72,9 @@ pub struct ChooseManyArgs {
     /// Toggle-on is silently blocked once `N` options are selected.
     #[arg(long)]
     pub max_selections: Option<usize>,
+
+    #[command(flatten)]
+    pub chrome: ChooseChromeArgs,
 }
 
 /// Runs the `choose-many` subcommand.
@@ -96,12 +113,12 @@ where
         input = input.with_max_selections(max);
     }
 
+    let ids = effective_selected(&args);
     let mut state = ChooseManyState::new(input);
     if let Some(text) = args.label {
         state = state.with_label(Label::new(text, args.label_position.into()));
     }
-    if let Some(initial) = args.initial.as_deref() {
-        let ids = parse_initial_ids(initial);
+    if !ids.is_empty() {
         let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
         state = state.with_initial_selection(&refs);
     }
@@ -117,7 +134,31 @@ where
     }
 }
 
-fn build_choice_input(args: &ChooseManyArgs) -> io::Result<tui_chrome::ChoiceInput<String>> {
+fn effective_selected(args: &ChooseManyArgs) -> Vec<String> {
+    if !args.selected.is_empty() {
+        return flatten_selected(&args.selected);
+    }
+    if let Some(initial) = args.initial.as_deref() {
+        eprintln!("question: warning: --initial is deprecated; use --selected instead");
+        return parse_initial_ids(initial);
+    }
+    Vec::new()
+}
+
+fn flatten_selected(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .flat_map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn build_choice_input(args: &ChooseManyArgs) -> io::Result<ChoiceInput<String>> {
     if let Some(csv) = args.options.as_deref() {
         return Ok(choose_many_from_csv("choice", "", csv));
     }
@@ -131,12 +172,13 @@ fn build_choice_input(args: &ChooseManyArgs) -> io::Result<tui_chrome::ChoiceInp
         // flip selection mode.
         let input = choose_one_from_dictionary("choice", "", &body)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        return Ok(input.with_selection_mode(tui_chrome::SelectionMode::Multiple));
+        return Ok(input.with_selection_mode(SelectionMode::Multiple));
     }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidInput,
-        "one of --options, --options-from-file, or --options-from-dictionary is required",
-    ))
+    let resolved = resolve_option_strings(false, args.positional.clone())?
+        .expect("resolve_option_strings returns Some when no legacy source is set");
+    Ok(ChoiceInput::new("choice", "")
+        .with_selection_mode(SelectionMode::Multiple)
+        .with_options(build_options(resolved, args.chrome.delimiter)))
 }
 
 fn parse_initial_ids(raw: &str) -> Vec<String> {
@@ -153,15 +195,18 @@ mod tests {
 
     fn default_args() -> ChooseManyArgs {
         ChooseManyArgs {
+            positional: Vec::new(),
             options: None,
             options_from_file: None,
             options_from_dictionary: None,
             label: None,
             label_position: LabelPositionArg::Above,
+            selected: Vec::new(),
             initial: None,
             required: false,
             min_selections: None,
             max_selections: None,
+            chrome: ChooseChromeArgs::default(),
         }
     }
 
@@ -173,13 +218,78 @@ mod tests {
         };
         let input = build_choice_input(&args).unwrap();
         assert_eq!(input.options.len(), 3);
-        assert_eq!(input.selection_mode, tui_chrome::SelectionMode::Multiple);
+        assert_eq!(input.selection_mode, SelectionMode::Multiple);
+    }
+
+    #[test]
+    fn build_choice_input_from_positional_uses_multiple_mode() {
+        let args = ChooseManyArgs {
+            positional: vec!["a".into(), "b".into()],
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.selection_mode, SelectionMode::Multiple);
+    }
+
+    #[test]
+    fn build_choice_input_from_positional_with_delimiter_splits_label_value() {
+        let args = ChooseManyArgs {
+            positional: vec!["Apple:1".into(), "Berry:2".into()],
+            chrome: ChooseChromeArgs {
+                delimiter: Some(':'),
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].label, "Apple");
+        assert_eq!(input.options[0].value, "1");
+        assert_eq!(input.options[0].id, "1");
     }
 
     #[test]
     fn parse_initial_ids_trims_and_drops_empty() {
         let ids = parse_initial_ids("a, b , ,c");
         assert_eq!(ids, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn flatten_selected_splits_on_commas_and_joins_repetitions() {
+        let values = vec!["a,b".to_string(), "c".to_string(), "d, e".to_string()];
+        assert_eq!(
+            flatten_selected(&values),
+            vec!["a", "b", "c", "d", "e"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn effective_selected_prefers_selected_over_initial() {
+        let args = ChooseManyArgs {
+            selected: vec!["new1".into(), "new2".into()],
+            initial: None,
+            ..default_args()
+        };
+        assert_eq!(effective_selected(&args), vec!["new1", "new2"]);
+    }
+
+    #[test]
+    fn effective_selected_falls_back_to_initial_when_only_initial_set() {
+        let args = ChooseManyArgs {
+            selected: Vec::new(),
+            initial: Some("legacy1, legacy2".into()),
+            ..default_args()
+        };
+        assert_eq!(effective_selected(&args), vec!["legacy1", "legacy2"]);
+    }
+
+    #[test]
+    fn effective_selected_empty_when_neither_set() {
+        let args = default_args();
+        assert!(effective_selected(&args).is_empty());
     }
 
     #[test]
@@ -193,7 +303,7 @@ mod tests {
     fn run_writes_nul_separated_selected_values_from_initial_ids() {
         let args = ChooseManyArgs {
             options: Some("Pepperoni,Mushrooms,Olives".into()),
-            initial: Some("Pepperoni,Olives".into()),
+            selected: vec!["Pepperoni".into(), "Olives".into()],
             required: true,
             min_selections: Some(1),
             ..default_args()
@@ -221,7 +331,7 @@ mod tests {
     fn run_writes_raw_newline_separated_values() {
         let args = ChooseManyArgs {
             options: Some("Red,Green,Blue".into()),
-            initial: Some("Red,Blue".into()),
+            selected: vec!["Red,Blue".into()],
             ..default_args()
         };
         let mut output = Vec::new();
@@ -243,7 +353,7 @@ mod tests {
     fn run_writes_json_array_of_selected_values() {
         let args = ChooseManyArgs {
             options: Some("A,B,C".into()),
-            initial: Some("A,C".into()),
+            selected: vec!["A".into(), "C".into()],
             ..default_args()
         };
         let mut output = Vec::new();

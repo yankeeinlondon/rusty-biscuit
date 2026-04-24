@@ -13,15 +13,21 @@ use tui_chrome::helpers::choice_builders::{
     choose_one_from_csv, choose_one_from_dictionary, choose_one_from_markdown_list,
 };
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, ChooseOne, ChooseOneState, Label, run_standalone,
+    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseOne, ChooseOneState, Label, run_standalone,
 };
 
+use crate::commands::common_choose::{ChooseChromeArgs, build_options, resolve_option_strings};
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_scalar};
 
 /// Arguments accepted by the `choose-one` subcommand.
 #[derive(Debug, Args)]
 pub struct ChooseOneArgs {
+    /// Option strings. Trailing positional arguments become the list
+    /// of options when no legacy `--options*` flag is set.
+    #[arg(value_name = "OPTIONS")]
+    pub positional: Vec<String>,
+
     /// Comma-separated list of option values.
     #[arg(long, conflicts_with_all = ["options_from_file", "options_from_dictionary"])]
     pub options: Option<String>,
@@ -43,13 +49,22 @@ pub struct ChooseOneArgs {
     #[arg(long, value_enum, default_value_t = LabelPositionArg::Above)]
     pub label_position: LabelPositionArg,
 
-    /// Pre-selected option id.
-    #[arg(long)]
+    /// Pre-selected option value. Matches by the option's `value`
+    /// field (equal to the label when no `--delimiter` is set).
+    #[arg(long, conflicts_with = "initial")]
+    pub selected: Option<String>,
+
+    /// Deprecated alias for `--selected`. Will be removed in a future
+    /// release.
+    #[arg(long, hide = true)]
     pub initial: Option<String>,
 
     /// Submit fails validation when no selection is made.
     #[arg(long)]
     pub required: bool,
+
+    #[command(flatten)]
+    pub chrome: ChooseChromeArgs,
 }
 
 /// Runs the `choose-one` subcommand.
@@ -82,11 +97,12 @@ where
         input = input.required();
     }
 
+    let selected = effective_selected(&args).map(str::to_string);
     let mut state = ChooseOneState::new(input);
     if let Some(text) = args.label {
         state = state.with_label(Label::new(text, args.label_position.into()));
     }
-    if let Some(id) = args.initial.as_deref() {
+    if let Some(id) = selected.as_deref() {
         state = state.with_initial_selection(id);
     }
 
@@ -102,7 +118,18 @@ where
     }
 }
 
-fn build_choice_input(args: &ChooseOneArgs) -> io::Result<tui_chrome::ChoiceInput<String>> {
+fn effective_selected(args: &ChooseOneArgs) -> Option<&str> {
+    if let Some(selected) = args.selected.as_deref() {
+        return Some(selected);
+    }
+    if let Some(initial) = args.initial.as_deref() {
+        eprintln!("question: warning: --initial is deprecated; use --selected instead");
+        return Some(initial);
+    }
+    None
+}
+
+fn build_choice_input(args: &ChooseOneArgs) -> io::Result<ChoiceInput<String>> {
     if let Some(csv) = args.options.as_deref() {
         return Ok(choose_one_from_csv("choice", "", csv));
     }
@@ -115,10 +142,9 @@ fn build_choice_input(args: &ChooseOneArgs) -> io::Result<tui_chrome::ChoiceInpu
         return choose_one_from_dictionary("choice", "", &body)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
     }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidInput,
-        "one of --options, --options-from-file, or --options-from-dictionary is required",
-    ))
+    let resolved = resolve_option_strings(false, args.positional.clone())?
+        .expect("resolve_option_strings returns Some when no legacy source is set");
+    Ok(ChoiceInput::new("choice", "").with_options(build_options(resolved, args.chrome.delimiter)))
 }
 
 #[cfg(test)]
@@ -127,13 +153,16 @@ mod tests {
 
     fn default_args() -> ChooseOneArgs {
         ChooseOneArgs {
+            positional: Vec::new(),
             options: None,
             options_from_file: None,
             options_from_dictionary: None,
             label: None,
             label_position: LabelPositionArg::Above,
+            selected: None,
             initial: None,
             required: false,
+            chrome: ChooseChromeArgs::default(),
         }
     }
 
@@ -148,6 +177,34 @@ mod tests {
     }
 
     #[test]
+    fn build_choice_input_from_positional_args() {
+        let args = ChooseOneArgs {
+            positional: vec!["alpha".into(), "beta".into(), "gamma".into()],
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 3);
+        assert_eq!(input.options[0].label, "alpha");
+        assert_eq!(input.options[0].value, "alpha");
+    }
+
+    #[test]
+    fn build_choice_input_from_positional_with_delimiter_splits_label_value() {
+        let args = ChooseOneArgs {
+            positional: vec!["Apple:1".into(), "Berry:2".into()],
+            chrome: ChooseChromeArgs {
+                delimiter: Some(':'),
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].label, "Apple");
+        assert_eq!(input.options[0].value, "1");
+        assert_eq!(input.options[0].id, "1");
+    }
+
+    #[test]
     fn build_choice_input_without_source_errors() {
         let args = default_args();
         let err = build_choice_input(&args).unwrap_err();
@@ -155,10 +212,36 @@ mod tests {
     }
 
     #[test]
+    fn effective_selected_prefers_selected_over_initial() {
+        let args = ChooseOneArgs {
+            selected: Some("new".into()),
+            initial: None,
+            ..default_args()
+        };
+        assert_eq!(effective_selected(&args), Some("new"));
+    }
+
+    #[test]
+    fn effective_selected_falls_back_to_initial_when_only_initial_set() {
+        let args = ChooseOneArgs {
+            selected: None,
+            initial: Some("legacy".into()),
+            ..default_args()
+        };
+        assert_eq!(effective_selected(&args), Some("legacy"));
+    }
+
+    #[test]
+    fn effective_selected_is_none_when_neither_set() {
+        let args = default_args();
+        assert!(effective_selected(&args).is_none());
+    }
+
+    #[test]
     fn run_writes_json_selected_value_from_initial_option() {
         let args = ChooseOneArgs {
             options: Some("Red,Green,Blue".into()),
-            initial: Some("Green".into()),
+            selected: Some("Green".into()),
             required: true,
             ..default_args()
         };
@@ -185,7 +268,7 @@ mod tests {
     fn run_writes_raw_selected_value_with_newline() {
         let args = ChooseOneArgs {
             options: Some("Alpha,Beta,Gamma".into()),
-            initial: Some("Beta".into()),
+            selected: Some("Beta".into()),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -207,7 +290,7 @@ mod tests {
     fn run_writes_null_output_with_nul_terminator() {
         let args = ChooseOneArgs {
             options: Some("X,Y,Z".into()),
-            initial: Some("Z".into()),
+            selected: Some("Z".into()),
             ..default_args()
         };
         let mut output = Vec::new();
