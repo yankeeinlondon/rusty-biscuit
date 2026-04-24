@@ -2,12 +2,12 @@
 mod tests {
     use darkmatter::markdown::{
         Markdown,
-        output::{TerminalOptions, as_html, for_terminal},
+        output::{ColorDepth, TerminalOptions, as_html, for_terminal},
     };
 
     #[test]
     fn test_markdown_to_terminal_horizontal_rule() {
-        let markdown = "--- { style: waves, placement: centered, weight: thick }";
+        let markdown = "--- { style: waves, alignment: centered, weight: thick }";
         let md: Markdown = markdown.into();
         let result = for_terminal(&md, TerminalOptions::default()).unwrap();
 
@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_markdown_with_multiple_horizontal_rules() {
-        let markdown = "# Header\n\n--- { style: dashes }\n\nSome content\n\n*** { style: waves, placement: centered }\n\nMore content\n\n___ { style: dots, weight: thick, width: \"75%\" }\n";
+        let markdown = "# Header\n\n--- { style: dashes }\n\nSome content\n\n*** { style: waves, alignment: centered }\n\nMore content\n\n___ { style: dots, weight: thick, width: \"75%\" }\n";
         let md: Markdown = markdown.into();
         let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();
         let html_result = as_html(&md, Default::default()).unwrap();
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_horizontal_rule_in_complex_document() {
-        let markdown = "# Complex Document\n\n## Section 1\n\nRegular paragraph with some text.\n\n--- { style: curtain-rod, placement: full }\n\n## Section 2\n\nAnother paragraph.\n\n*** { style: line-circle, placement: left, color: \"#00ff00\" }\n\n### Subsection\n\nFinal content.\n\n___ { style: inset-line, weight: medium, width: \"60%\" }\n";
+        let markdown = "# Complex Document\n\n## Section 1\n\nRegular paragraph with some text.\n\n--- { style: curtain-rod, alignment: full }\n\n## Section 2\n\nAnother paragraph.\n\n*** { style: line-circle, alignment: left, color: \"#00ff00\" }\n\n### Subsection\n\nFinal content.\n\n___ { style: inset-line, weight: medium, width: \"60%\" }\n";
         let md: Markdown = markdown.into();
         let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();
         let html_result = as_html(&md, Default::default()).unwrap();
@@ -110,6 +110,46 @@ mod tests {
         // The CSS custom properties are declared on the root <svg>.
         assert!(html_result.contains("--hr-color: currentColor"));
         assert!(html_result.contains("--hr-weight: 4"));
+    }
+
+    #[test]
+    fn test_bare_rules_use_frontmatter_defaults_in_html() {
+        for marker in ["---", "___", "***"] {
+            let markdown = format!(
+                "---\nhr:\n  style: waves\n  alignment: centered\n  weight: thick\n  width: \"50%\"\n  color: red\n---\n\n{marker}\n"
+            );
+            let md: Markdown = markdown.into();
+            let html = as_html(&md, Default::default()).unwrap();
+
+            assert!(html.contains(r#"width="50%""#), "{html}");
+            assert!(html.contains("--hr-color: red"), "{html}");
+            assert!(html.contains("--hr-weight: 8"), "{html}");
+            assert!(html.contains("<path"), "{html}");
+        }
+    }
+
+    #[test]
+    fn test_rule_attributes_override_frontmatter_partially() {
+        let markdown = "---\nhr:\n  style: waves\n  alignment: centered\n  weight: thick\n  width: \"80%\"\n  color: red\n---\n\n--- { color: blue, width: \"25%\" }\n";
+        let md: Markdown = markdown.into();
+        let html = as_html(&md, Default::default()).unwrap();
+
+        assert!(html.contains(r#"width="25%""#), "{html}");
+        assert!(html.contains("--hr-color: blue"), "{html}");
+        assert!(html.contains("--hr-weight: 8"), "{html}");
+        assert!(html.contains("<path"), "{html}");
+    }
+
+    #[test]
+    fn test_bare_rule_uses_frontmatter_defaults_in_terminal() {
+        let markdown = "---\nhr:\n  style: dots\n  alignment: centered\n  weight: thick\n  width: \"20\"\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::Colors16);
+        options.max_width = Some(40);
+
+        let output = for_terminal(&md, options).unwrap();
+        assert!(output.contains('•') || output.contains('.'), "{output:?}");
     }
 
     // ================================================================
@@ -224,7 +264,7 @@ mod tests {
         // must reach the HR renderer instead of the old `Terminal::new()`
         // that re-detects capabilities. We assert by forcing a narrow width
         // and confirming the rendered rule body does not exceed it.
-        let markdown = "--- { style: dashes, placement: full }\n";
+        let markdown = "--- { style: dashes, alignment: full }\n";
         let md: Markdown = markdown.into();
         let mut options = TerminalOptions::default();
         options.max_width = Some(20);
@@ -295,7 +335,7 @@ mod tests {
     #[test]
     fn test_invalid_attribute_values_render_defaults_in_html() {
         // B1 (HTML): unknown enum values must still produce a valid SVG.
-        let markdown = "--- { style: bogus, weight: zzz, placement: diagonal }\n";
+        let markdown = "--- { style: bogus, weight: zzz, alignment: diagonal }\n";
         let md: Markdown = markdown.into();
         let html = as_html(&md, Default::default()).unwrap();
         assert!(html.contains("<svg "), "expected an <svg>: {html}");
@@ -467,7 +507,7 @@ mod tests {
         // Test with various edge cases
         let test_cases = vec![
             "--- { style: dashes }",
-            "*** { placement: centered }",
+            "*** { alignment: centered }",
             "___ { weight: thin }",
             "--- { width: \"100%\" }",
             "*** { color: \"blue\" }",

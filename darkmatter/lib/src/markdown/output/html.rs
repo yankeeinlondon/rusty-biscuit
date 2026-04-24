@@ -24,7 +24,9 @@
 //! assert!(html.contains("<code"));
 //! ```
 
-use crate::markdown::block::{RuleProcessor, build_rule};
+use crate::markdown::block::{
+    RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter,
+};
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
@@ -123,6 +125,7 @@ impl Default for HtmlOptions {
 /// Returns an error if theme loading fails or highlighting encounters issues.
 pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut output = String::new();
+    let hr_defaults = hr_defaults_from_frontmatter(md);
 
     // Create highlighter for code blocks
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
@@ -161,7 +164,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             InlineEvent::HorizontalRule(attrs) => {
                 // Create HorizontalRule from attributes via the shared builder
                 // so terminal and HTML renderers stay consistent (Phase 5).
-                let rule = build_rule(&attrs);
+                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
                 output.push_str(&render_rule_browser(
                     &rule,
                     options.hr_css_variables.as_ref(),
@@ -173,7 +176,10 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             // browser output gets a default SVG instead of falling through
             // the catch-all arm.
             InlineEvent::Standard(Event::Rule) => {
-                let rule = HorizontalRule::new();
+                let rule = build_rule_with_defaults(
+                    hr_defaults.as_ref(),
+                    &crate::markdown::inline::HorizontalRuleAttrs::default(),
+                );
                 output.push_str(&render_rule_browser(
                     &rule,
                     options.hr_css_variables.as_ref(),

@@ -32,10 +32,10 @@ pub enum InlineTag {
 }
 
 /// Attributes for horizontal rule with custom styling.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize)]
 pub struct HorizontalRuleAttrs {
     pub style: Option<String>,
-    pub placement: Option<String>,
+    pub alignment: Option<String>,
     pub weight: Option<String>,
     pub width: Option<String>,
     pub color: Option<String>,

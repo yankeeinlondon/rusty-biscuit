@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 ///
 /// The pattern matches:
 /// - `--- { style: waves }`
-/// - `*** { placement: centered, weight: thick }`
+/// - `*** { alignment: centered, weight: thick }`
 /// - `___ { width: "50%", color: "red" }`
 ///
 /// ## Important
@@ -189,7 +189,7 @@ where
 
             match key.as_str() {
                 "style" => attrs.style = Some(value),
-                "placement" => attrs.placement = Some(value),
+                "alignment" => attrs.alignment = Some(value),
                 "weight" => attrs.weight = Some(value),
                 "width" => attrs.width = Some(value),
                 "color" => attrs.color = Some(value),
@@ -253,7 +253,7 @@ where
 
             match key {
                 "style" => attrs.style = Some(clean_value),
-                "placement" => attrs.placement = Some(clean_value),
+                "alignment" => attrs.alignment = Some(clean_value),
                 "weight" => attrs.weight = Some(clean_value),
                 "width" => attrs.width = Some(clean_value),
                 "color" => attrs.color = Some(clean_value),
@@ -364,7 +364,7 @@ mod tests {
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             assert_eq!(attrs.style, Some("waves".to_string()));
-            assert_eq!(attrs.placement, None);
+            assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);
             assert_eq!(attrs.color, None);
@@ -373,13 +373,13 @@ mod tests {
 
     #[test]
     fn test_horizontal_rule_with_multiple_attributes() {
-        let events = process_text("--- { style: dots, placement: centered, weight: thick }");
+        let events = process_text("--- { style: dots, alignment: centered, weight: thick }");
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             assert_eq!(attrs.style, Some("dots".to_string()));
-            assert_eq!(attrs.placement, Some("centered".to_string()));
+            assert_eq!(attrs.alignment, Some("centered".to_string()));
             assert_eq!(attrs.weight, Some("thick".to_string()));
             assert_eq!(attrs.width, None);
             assert_eq!(attrs.color, None);
@@ -492,13 +492,13 @@ mod tests {
 
     #[test]
     fn test_attributes_with_spaces() {
-        let events = process_text("--- { style: line star, placement: left }");
+        let events = process_text("--- { style: line star, alignment: left }");
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], InlineEvent::HorizontalRule(_)));
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             assert_eq!(attrs.style, Some("line star".to_string()));
-            assert_eq!(attrs.placement, Some("left".to_string()));
+            assert_eq!(attrs.alignment, Some("left".to_string()));
         }
     }
 
@@ -510,7 +510,7 @@ mod tests {
 
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             assert_eq!(attrs.style, None);
-            assert_eq!(attrs.placement, None);
+            assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);
             assert_eq!(attrs.color, None);
@@ -551,7 +551,7 @@ mod tests {
     fn test_horizontal_rule_attrs_default() {
         let attrs = HorizontalRuleAttrs::default();
         assert_eq!(attrs.style, None);
-        assert_eq!(attrs.placement, None);
+        assert_eq!(attrs.alignment, None);
         assert_eq!(attrs.weight, None);
         assert_eq!(attrs.width, None);
         assert_eq!(attrs.color, None);
@@ -561,14 +561,14 @@ mod tests {
     fn test_horizontal_rule_attrs_clone() {
         let attrs1 = HorizontalRuleAttrs {
             style: Some("test".to_string()),
-            placement: Some("centered".to_string()),
+            alignment: Some("centered".to_string()),
             weight: Some("medium".to_string()),
             width: Some("50%".to_string()),
             color: Some("red".to_string()),
         };
         let attrs2 = attrs1.clone();
         assert_eq!(attrs1.style, attrs2.style);
-        assert_eq!(attrs1.placement, attrs2.placement);
+        assert_eq!(attrs1.alignment, attrs2.alignment);
         assert_eq!(attrs1.weight, attrs2.weight);
         assert_eq!(attrs1.width, attrs2.width);
         assert_eq!(attrs1.color, attrs2.color);
@@ -578,13 +578,13 @@ mod tests {
     fn test_horizontal_rule_attrs_partial() {
         let attrs = HorizontalRuleAttrs {
             style: Some("waves".to_string()),
-            placement: None,
+            alignment: None,
             weight: Some("thick".to_string()),
             width: None,
             color: Some("blue".to_string()),
         };
         assert_eq!(attrs.style, Some("waves".to_string()));
-        assert_eq!(attrs.placement, None);
+        assert_eq!(attrs.alignment, None);
         assert_eq!(attrs.weight, Some("thick".to_string()));
         assert_eq!(attrs.width, None);
         assert_eq!(attrs.color, Some("blue".to_string()));
@@ -608,11 +608,11 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_attributes_unknown_placement_is_captured_raw() {
-        let events = process_text("--- { placement: diagonal }");
+    fn test_parse_attributes_unknown_alignment_is_captured_raw() {
+        let events = process_text("--- { alignment: diagonal }");
         assert_eq!(events.len(), 1);
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
-            assert_eq!(attrs.placement, Some("diagonal".to_string()));
+            assert_eq!(attrs.alignment, Some("diagonal".to_string()));
         } else {
             panic!("expected HorizontalRule event");
         }
@@ -637,7 +637,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             assert_eq!(attrs.style, None);
-            assert_eq!(attrs.placement, None);
+            assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);
             assert_eq!(attrs.color, None);
@@ -700,7 +700,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         if let InlineEvent::HorizontalRule(attrs) = &events[0] {
             assert_eq!(attrs.style, None);
-            assert_eq!(attrs.placement, None);
+            assert_eq!(attrs.alignment, None);
             assert_eq!(attrs.weight, None);
             assert_eq!(attrs.width, None);
             assert_eq!(attrs.color, None);

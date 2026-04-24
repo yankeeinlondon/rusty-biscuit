@@ -29,7 +29,7 @@
 
 use crate::markdown::{
     Markdown, MarkdownError,
-    block::{RuleProcessor, build_rule},
+    block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
     dsl::parse_code_info,
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
@@ -788,6 +788,7 @@ pub fn write_terminal<W: std::io::Write>(
     tracing::debug!(terminal_width, "Terminal width for rendering");
 
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    let hr_defaults = hr_defaults_from_frontmatter(md);
 
     // Load prose theme for ProseHighlighter
     let prose_syntect_theme =
@@ -893,7 +894,7 @@ pub fn write_terminal<W: std::io::Write>(
             InlineEvent::HorizontalRule(attrs) => {
                 // Build the rule from attributes via the shared helper so the
                 // terminal and HTML code paths stay consistent (Phase 5).
-                let rule = build_rule(&attrs);
+                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
                 write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
             }
             // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
@@ -901,7 +902,10 @@ pub fn write_terminal<W: std::io::Write>(
             // terminal output gets a default dashed rule instead of falling
             // through the catch-all arm.
             InlineEvent::Standard(Event::Rule) => {
-                let rule = HorizontalRule::new();
+                let rule = build_rule_with_defaults(
+                    hr_defaults.as_ref(),
+                    &crate::markdown::inline::HorizontalRuleAttrs::default(),
+                );
                 write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
             }
 

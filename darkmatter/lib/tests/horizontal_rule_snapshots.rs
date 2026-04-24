@@ -18,17 +18,17 @@ mod tests {
             ("simple_curtain_rod", "--- { style: curtain-rod }"),
             (
                 "centered_waves",
-                "--- { style: waves, placement: centered }",
+                "--- { style: waves, alignment: centered }",
             ),
-            ("left_dots", "--- { style: dots, placement: left }"),
-            ("right_dashes", "--- { style: dashes, placement: right }"),
+            ("left_dots", "--- { style: dots, alignment: left }"),
+            ("right_dashes", "--- { style: dashes, alignment: right }"),
             ("thick_waves", "--- { style: waves, weight: thick }"),
             ("thin_dots", "--- { style: dots, weight: thin }"),
             ("custom_width", "--- { style: waves, width: \"50%\" }"),
             ("custom_color", "--- { style: dots, color: \"red\" }"),
             (
                 "all_attributes",
-                "--- { style: waves, placement: centered, weight: thick, width: \"75%\", color: \"blue\" }",
+                "--- { style: waves, alignment: centered, weight: thick, width: \"75%\", color: \"blue\" }",
             ),
         ];
 
@@ -47,14 +47,14 @@ mod tests {
             ("simple_waves", "--- { style: waves }"),
             (
                 "centered_waves",
-                "--- { style: waves, placement: centered }",
+                "--- { style: waves, alignment: centered }",
             ),
             ("thick_waves", "--- { style: waves, weight: thick }"),
             ("custom_width", "--- { style: waves, width: \"50%\" }"),
             ("custom_color", "--- { style: dots, color: \"red\" }"),
             (
                 "all_attributes",
-                "--- { style: waves, placement: centered, weight: thick, width: \"75%\", color: \"blue\" }",
+                "--- { style: waves, alignment: centered, weight: thick, width: \"75%\", color: \"blue\" }",
             ),
         ];
 
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_complex_document() {
-        let markdown = "# Horizontal Rule Examples\n\n## Basic Styles\n\n--- { style: dashes }\n\n*** { style: dots }\n\n___ { style: waves }\n\n## Placement Options\n\n--- { style: waves, placement: centered }\n\n*** { style: dots, placement: left }\n\n___ { style: dashes, placement: right }\n\n## Weight Variations\n\n--- { style: waves, weight: thin }\n\n*** { style: dots, weight: medium }\n\n___ { style: dashes, weight: thick }\n\n## Custom Attributes\n\n--- { style: waves, width: \"60%\", color: \"#ff0000\" }\n\n*** { style: dots, placement: centered, weight: thick, width: \"80%\", color: \"green\" }\n";
+        let markdown = "# Horizontal Rule Examples\n\n## Basic Styles\n\n--- { style: dashes }\n\n*** { style: dots }\n\n___ { style: waves }\n\n## Alignment Options\n\n--- { style: waves, alignment: centered }\n\n*** { style: dots, alignment: left }\n\n___ { style: dashes, alignment: right }\n\n## Weight Variations\n\n--- { style: waves, weight: thin }\n\n*** { style: dots, weight: medium }\n\n___ { style: dashes, weight: thick }\n\n## Custom Attributes\n\n--- { style: waves, width: \"60%\", color: \"#ff0000\" }\n\n*** { style: dots, alignment: centered, weight: thick, width: \"80%\", color: \"green\" }\n";
 
         let md: Markdown = markdown.into();
         let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();

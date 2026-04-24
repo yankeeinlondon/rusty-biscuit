@@ -15,7 +15,7 @@
 
 use crate::markdown::inline::HorizontalRuleAttrs;
 use biscuit_terminal::components::horizontal_rule::{
-    HorizontalRule, RulePlacement, RuleStyle, RuleWeight,
+    HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
 };
 
 /// Allowed values for the `style` attribute.
@@ -29,8 +29,8 @@ pub(crate) const ALLOWED_STYLES: &[&str] = &[
     "curtain-rod",
 ];
 
-/// Allowed values for the `placement` attribute.
-pub(crate) const ALLOWED_PLACEMENTS: &[&str] = &["full", "centered", "left", "right"];
+/// Allowed values for the `alignment` attribute.
+pub(crate) const ALLOWED_ALIGNMENTS: &[&str] = &["full", "centered", "left", "right"];
 
 /// Allowed values for the `weight` attribute.
 pub(crate) const ALLOWED_WEIGHTS: &[&str] = &["thin", "medium", "thick"];
@@ -38,7 +38,7 @@ pub(crate) const ALLOWED_WEIGHTS: &[&str] = &["thin", "medium", "thick"];
 /// Builds a [`HorizontalRule`] from a parsed [`HorizontalRuleAttrs`], applying
 /// each attribute through the appropriate builder method.
 ///
-/// Unknown enum values for `style`, `placement`, or `weight` keep the rule's
+/// Unknown enum values for `style`, `alignment`, or `weight` keep the rule's
 /// default and emit a `tracing::warn!` with the raw string. Unknown attribute
 /// keys are never seen here — they are dropped (with a warning) by
 /// [`RuleProcessor::parse_attributes`](crate::markdown::block::RuleProcessor)
@@ -52,21 +52,30 @@ pub(crate) const ALLOWED_WEIGHTS: &[&str] = &["thin", "medium", "thick"];
 ///
 /// let attrs = HorizontalRuleAttrs {
 ///     style: Some("waves".into()),
-///     placement: Some("centered".into()),
+///     alignment: Some("centered".into()),
 ///     weight: Some("thick".into()),
 ///     width: Some("50%".into()),
 ///     color: Some("red".into()),
 /// };
 /// let _rule = build_rule(&attrs);
 /// ```
+#[cfg(test)]
 pub(crate) fn build_rule(attrs: &HorizontalRuleAttrs) -> HorizontalRule {
+    build_rule_with_defaults(None, attrs)
+}
+
+pub(crate) fn build_rule_with_defaults(
+    defaults: Option<&HorizontalRuleAttrs>,
+    attrs: &HorizontalRuleAttrs,
+) -> HorizontalRule {
+    let attrs = merge_attrs(defaults, attrs);
     let mut rule = HorizontalRule::new();
 
     if let Some(raw) = attrs.style.as_deref() {
         rule = map_style(rule, raw);
     }
-    if let Some(raw) = attrs.placement.as_deref() {
-        rule = map_placement(rule, raw);
+    if let Some(raw) = attrs.alignment.as_deref() {
+        rule = map_alignment(rule, raw);
     }
     if let Some(raw) = attrs.weight.as_deref() {
         rule = map_weight(rule, raw);
@@ -79,6 +88,44 @@ pub(crate) fn build_rule(attrs: &HorizontalRuleAttrs) -> HorizontalRule {
     }
 
     rule
+}
+
+pub(crate) fn hr_defaults_from_frontmatter(
+    md: &crate::markdown::Markdown,
+) -> Option<HorizontalRuleAttrs> {
+    match md.frontmatter().get::<HorizontalRuleAttrs>("hr") {
+        Ok(defaults) => defaults,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "invalid hr frontmatter; using horizontal rule component defaults"
+            );
+            None
+        }
+    }
+}
+
+fn merge_attrs(
+    defaults: Option<&HorizontalRuleAttrs>,
+    attrs: &HorizontalRuleAttrs,
+) -> HorizontalRuleAttrs {
+    let mut merged = defaults.cloned().unwrap_or_default();
+    if attrs.style.is_some() {
+        merged.style = attrs.style.clone();
+    }
+    if attrs.alignment.is_some() {
+        merged.alignment = attrs.alignment.clone();
+    }
+    if attrs.weight.is_some() {
+        merged.weight = attrs.weight.clone();
+    }
+    if attrs.width.is_some() {
+        merged.width = attrs.width.clone();
+    }
+    if attrs.color.is_some() {
+        merged.color = attrs.color.clone();
+    }
+    merged
 }
 
 fn map_style(rule: HorizontalRule, raw: &str) -> HorizontalRule {
@@ -102,18 +149,18 @@ fn map_style(rule: HorizontalRule, raw: &str) -> HorizontalRule {
     }
 }
 
-fn map_placement(rule: HorizontalRule, raw: &str) -> HorizontalRule {
+fn map_alignment(rule: HorizontalRule, raw: &str) -> HorizontalRule {
     match raw {
-        "full" => rule.placement(RulePlacement::Full),
-        "centered" => rule.placement(RulePlacement::Centered),
-        "left" => rule.placement(RulePlacement::Left),
-        "right" => rule.placement(RulePlacement::Right),
+        "full" => rule.alignment(RuleAlignment::Full),
+        "centered" => rule.alignment(RuleAlignment::Centered),
+        "left" => rule.alignment(RuleAlignment::Left),
+        "right" => rule.alignment(RuleAlignment::Right),
         other => {
             tracing::warn!(
-                attribute = "placement",
+                attribute = "alignment",
                 value = %other,
-                allowed = ?ALLOWED_PLACEMENTS,
-                "unknown horizontal rule placement; falling back to default"
+                allowed = ?ALLOWED_ALIGNMENTS,
+                "unknown horizontal rule alignment; falling back to default"
             );
             rule
         }
@@ -147,7 +194,7 @@ mod tests {
     fn build_rule_with_all_attrs_applies_them() {
         let attrs = HorizontalRuleAttrs {
             style: Some("waves".into()),
-            placement: Some("centered".into()),
+            alignment: Some("centered".into()),
             weight: Some("thick".into()),
             width: Some("50%".into()),
             color: Some("red".into()),
@@ -167,7 +214,7 @@ mod tests {
         // SVG for any given attr set.
         let attrs = HorizontalRuleAttrs {
             style: Some("dashes".into()),
-            placement: None,
+            alignment: None,
             weight: Some("thin".into()),
             width: Some("33%".into()),
             color: Some("blue".into()),
@@ -194,9 +241,9 @@ mod tests {
     }
 
     #[test]
-    fn build_rule_unknown_placement_and_weight_fall_back() {
+    fn build_rule_unknown_alignment_and_weight_fall_back() {
         let attrs = HorizontalRuleAttrs {
-            placement: Some("diagonal".into()),
+            alignment: Some("diagonal".into()),
             weight: Some("ultra".into()),
             ..Default::default()
         };
