@@ -66,6 +66,15 @@ source_files_during_phase_7:
 docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
 skills_files_updated_during_phase7: []
+source_files_during_phase_8:
+  - biscuit-tui/lib/src/components/choose.rs
+  - biscuit-tui/lib/src/components/choose_one.rs
+  - biscuit-tui/lib/src/components/choose_many.rs
+  - biscuit-tui/lib/src/core/fuzzy.rs
+  - biscuit-tui/lib/src/core/theme.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase8: []
 packages:
   - tui-chrome
   - tui-chrome-cli
