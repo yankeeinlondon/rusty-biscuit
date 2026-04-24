@@ -85,6 +85,9 @@ pub struct App {
     pub messenger_focus: usize,
     /// Cached provider discovery results (computed once in `App::new()`).
     pub cached_agents: Vec<claudine::config::AgentInfo>,
+    /// Pending webhook test connection result receiver.
+    /// When Some, the TUI event loop polls this channel for async test results.
+    pub pending_test: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -228,6 +231,7 @@ impl App {
             cached_voices: Vec::new(),
             messenger_focus: 0,
             cached_agents,
+            pending_test: None,
         }
     }
 
