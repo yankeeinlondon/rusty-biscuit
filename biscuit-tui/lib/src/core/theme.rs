@@ -69,6 +69,26 @@ pub struct ComponentTheme {
     /// component (e.g. `"Enter=Submit  Esc=Cancel"`). Set to empty
     /// to suppress the footer.
     pub help_hint: String,
+
+    /// Prefix glyph rendered at the start of the inline fuzzy search
+    /// prompt row, immediately before the live pattern buffer.
+    pub search_indicator: String,
+
+    /// Style applied to the search prompt row as a whole (indicator
+    /// plus live pattern buffer).
+    pub search_style: Style,
+
+    /// Style applied to per-character matches within option labels
+    /// when the fuzzy filter is active.
+    pub search_match_style: Style,
+
+    /// Text rendered inside the list area when the active fuzzy
+    /// filter matches no options.
+    pub no_matches_text: String,
+
+    /// Style applied to the [`no_matches_text`](Self::no_matches_text)
+    /// row.
+    pub no_matches_style: Style,
 }
 
 impl Default for ComponentTheme {
@@ -96,6 +116,13 @@ impl Default for ComponentTheme {
             overflow_up_indicator: "▲".into(),
             overflow_down_indicator: "▼".into(),
             help_hint: "Enter=Submit  Esc=Cancel".into(),
+            search_indicator: "/ ".into(),
+            search_style: Style::default(),
+            search_match_style: Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            no_matches_text: "(no matches)".into(),
+            no_matches_style: Style::default().add_modifier(Modifier::DIM),
         }
     }
 }
@@ -160,5 +187,24 @@ mod tests {
     fn default_help_hint_is_non_empty() {
         let theme = ComponentTheme::default();
         assert!(!theme.help_hint.is_empty());
+    }
+
+    #[test]
+    fn default_search_indicator_and_no_matches_are_non_empty() {
+        let theme = ComponentTheme::default();
+        assert!(!theme.search_indicator.is_empty());
+        assert!(!theme.no_matches_text.is_empty());
+    }
+
+    #[test]
+    fn default_search_match_style_is_bold_cyan() {
+        let theme = ComponentTheme::default();
+        assert_eq!(theme.search_match_style.fg, Some(Color::Cyan));
+        assert!(
+            theme
+                .search_match_style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
     }
 }

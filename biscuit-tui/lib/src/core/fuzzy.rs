@@ -60,6 +60,7 @@ use nucleo_matcher::{
 /// ## Examples
 ///
 /// See the [module-level example](crate::core::fuzzy).
+#[derive(Clone)]
 pub struct FuzzyFilter {
     matcher: Matcher,
     pattern: Pattern,
@@ -192,11 +193,8 @@ impl FuzzyFilter {
     }
 
     fn reparse(&mut self) {
-        self.pattern.reparse(
-            &self.raw_pattern,
-            CaseMatching::Smart,
-            Normalization::Smart,
-        );
+        self.pattern
+            .reparse(&self.raw_pattern, CaseMatching::Smart, Normalization::Smart);
     }
 
     fn recompute(&mut self, labels: &[String]) {
