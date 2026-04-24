@@ -34,8 +34,12 @@ feature feat:
         if just _file_has_content "${file}" 2>/dev/null; then
             if [[ "$(just _confirm "Would you like to {{ bold }}{{ italic }}clarify{{ reset }} the requirements in this spec file?")" == y ]]; then
                 clarify_agent="$(just _choose_agent)"
+                clarify_model=""
+                if [[ "${clarify_agent}" == "opencode" ]];then
+                    clarify_model="--model $(just _choose_model)"
+                fi
                 abs_spec="$(just _abs_path "${file}")"
-                claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+                claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}" ${clarify_model}
             fi
             if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == y ]]; then
                 just design "${dasherized}"
@@ -49,8 +53,12 @@ feature feat:
                     echo
                     if [[ "$(just _confirm "Do you want to run a {{ bold }}{{ italic }}clarifying{{ reset }} agent to make the specification clearer?")" == y ]]; then
                         clarify_agent="$(just _choose_agent)"
+                        clarify_model=""
+                        if [[ "${clarify_agent}" == "opencode" ]];then
+                            clarify_model="--model $(just _choose_model)"
+                        fi
                         abs_spec="$(just _abs_path "${file}")"
-                        claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+                        claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}" ${clarify_model}
                     fi
                     if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == y ]]; then
                         just design "${dasherized}"
@@ -75,8 +83,12 @@ feature feat:
 
         if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
             clarify_agent="$(just _choose_agent)"
+            clarify_model=""
+            if [[ "${clarify_agent}" == "opencode" ]];then
+                clarify_model="--model $(just _choose_model)"
+            fi
             abs_spec="$(just _abs_path "${file}")"
-            claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+            claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}" ${clarify_model}
         fi
         if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == "y" ]]; then
             just design "${dasherized}"
@@ -153,8 +165,12 @@ fix name="":
         if md edit "${spec}"; then
             if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
                 clarify_agent="$(just _choose_agent)"
+                clarify_model=""
+                if [[ "${clarify_agent}" == "opencode" ]];then
+                    clarify_model="--model $(just _choose_model)"
+                fi
                 abs_spec="$(just _abs_path "${spec}")"
-                claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+                claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}" ${clarify_model}
             fi
             if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
                 echo "Ok. Bye."
@@ -192,15 +208,23 @@ fix name="":
         echo
         if [[ "$(just _confirm "Do you want to run a clarify session on the spec?")" == "y" ]]; then
             clarify_agent="$(just _choose_agent)"
+            clarify_model=""
+            if [[ "${clarify_agent}" == "opencode" ]];then
+                clarify_model="--model $(just _choose_model)"
+            fi
             abs_spec="$(just _abs_path "${spec}")"
-            claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}"
+            claudine compose @prompts/clarify.md --${clarify_agent} -y -i doc="${abs_spec}" ${clarify_model}
         fi
         if [[ "$(just _confirm "Fix now?")" == "n" ]]; then
             echo "Ok. Bye."
             exit 0
         fi
         agent="$(just _choose_agent)"
-        claudine compose @prompts/fix.md dir="$(just _abs_path "${relative_dir}")" spec="spec.md" -y --${agent} && (
+        model=""
+        if [[ "${agent}" == "opencode" ]];then
+            model="--model $(just _choose_model)"
+        fi
+        claudine compose @prompts/fix.md dir="$(just _abs_path "${relative_dir}")" spec="spec.md" -y --${agent} ${model} && (
             just complete "${dasherized}"
             link="$(just _link "spec.md" "$(just _abs_path "fixes/_completed/${dir}/spec.md")" )"
             echo
@@ -266,7 +290,6 @@ clarify filter="" agent="":
     fi
     doc_path="$(sniff repo package-area)/${file}"
     link="$(just _link "${file}")"
-    claudine compose "@prompts/clarify.md" --${use_agent} -y -i doc="${doc_path}" ${model} || (
     claudine compose "@prompts/clarify.md" --${use_agent} -y -i doc="${doc_path}" ${model} || (
         echo
         echo -e "Failed to complete the {{ yellow }}Clarify{{ reset }} prompt for ${link}"
