@@ -17,15 +17,19 @@
 //!   dedicated terminal.
 
 pub mod event;
+pub mod frame;
 pub mod keybindings;
 pub mod label;
+pub mod sort;
 pub mod standalone;
 pub mod theme;
 pub mod validation;
 
 pub use event::EventOutcome;
+pub use frame::{BorderStyle, FrameChrome, FrameChromeConfig, HeightSpec, Margin};
 pub use keybindings::KeyBindings;
 pub use label::{Label, LabelPosition, render_with_label};
+pub use sort::SortOrder;
 pub use standalone::{
     CANCELLED_KIND, HandleEvent, StandaloneState, drive_event_loop, run_standalone,
 };
