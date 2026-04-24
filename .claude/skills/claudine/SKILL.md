@@ -105,6 +105,20 @@ System prompt handling is shared across wrapped provider subcommands and the Mar
 
 `claudine config` exposes a TUI for managing messenger routes. The provider list includes bot-token routes (Discord, Slack, Signal, WhatsApp) and webhook routes (Discord Webhook, Slack Webhook). Webhook URL fields use masked input (`●` characters) at render time while preserving the real buffer in state. Inline webhook URLs are validated with conservative regex before advancing to the next field; env-only routes (blank URL + non-empty env var) are allowed. The configuration list never displays raw webhook URLs — inline URLs show as `webhook: ********`. Webhook routes support a **Test Connection** workflow (press `T` during webhook input) that sends a short test message through the messenger library without saving the route; success and failure statuses are modal-local and never mark config dirty. Desktop notifications are intentionally absent from the config TUI; they are zero-config and triggered via lifecycle `notify` frontmatter only.
 
+**Messenger Webhook Redaction Invariants**
+
+- Inline webhook URLs are never rendered raw in the TUI. They appear as `webhook: ********`.
+- Secret input buffers are masked (bullets/asterisks) during modal entry.
+- All error messages from webhook sends run through `redact_webhook_urls` before display.
+- The test-connection failure status also redacts URLs.
+
+**Messenger Webhook Redaction Invariants**
+
+- Inline webhook URLs are never rendered raw in the TUI. They appear as `webhook: ********`.
+- Secret input buffers are masked (bullets/asterisks) during modal entry.
+- All error messages from webhook sends run through `redact_webhook_urls` before display.
+- The test-connection failure status also redacts URLs.
+
 ## MCP Support
 
 Claudine stores normalized MCP data in `~/.claudine/mcp/catalog.json`, `~/.claudine/mcp/defaults.json`, and `~/.claudine/mcp/provider-state.json`, with optional repo defaults in `<repo>/.claudine/mcp.json`. Repo defaults replace user defaults.
