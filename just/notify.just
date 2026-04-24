@@ -10,6 +10,7 @@ _play effect:
 _play_background effect:
     @playa effect "{{effect}}" --background >/dev/null 2>&1 || exit 0
 
+
 _notify message title:
     #!/usr/bin/env bash
     if command -v osascript &> /dev/null; then
