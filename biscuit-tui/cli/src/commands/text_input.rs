@@ -7,7 +7,10 @@
 use std::io::{self, Write};
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{CANCELLED_KIND, Label, LabelPosition, TextInput, TextInputState, run_standalone};
+use tui_chrome::{
+    ABORTED_KIND, CANCELLED_KIND, HeightSpec, Label, LabelPosition, TextInput, TextInputState,
+    run_standalone,
+};
 
 use crate::output::{OutputMode, write_scalar};
 
@@ -62,7 +65,11 @@ impl From<LabelPositionArg> for LabelPosition {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error.
-pub fn run(args: TextInputArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+pub fn run(
+    args: TextInputArgs,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
     run_with_writer(args, output, height, &mut lock, |state, height| {
@@ -73,12 +80,12 @@ pub fn run(args: TextInputArgs, output: OutputMode, height: Option<u16>) -> io::
 fn run_with_writer<F, W>(
     args: TextInputArgs,
     output: OutputMode,
-    height: Option<u16>,
+    height: Option<HeightSpec>,
     writer: &mut W,
     run_prompt: F,
 ) -> io::Result<i32>
 where
-    F: FnOnce(TextInputState, Option<u16>) -> io::Result<String>,
+    F: FnOnce(TextInputState, Option<HeightSpec>) -> io::Result<String>,
     W: Write,
 {
     let mut state = TextInputState::new();
@@ -100,6 +107,7 @@ where
             Ok(0)
         }
         Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == ABORTED_KIND => Ok(1),
         Err(e) => Err(e),
     }
 }
@@ -141,10 +149,10 @@ mod tests {
         let status = run_with_writer(
             args,
             OutputMode::Json,
-            Some(4),
+            Some(HeightSpec::Cells(4)),
             &mut output,
             |state, height| {
-                assert_eq!(height, Some(4));
+                assert_eq!(height, Some(HeightSpec::Cells(4)));
                 assert_eq!(state.value(), "Ada");
                 assert_eq!(state.label().map(|label| label.text.as_str()), Some("Name"));
                 Ok(state.value().to_string())
@@ -203,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn run_returns_130_without_output_on_cancel() {
+    fn run_returns_130_without_output_on_ctrl_c() {
         let args = TextInputArgs {
             label: None,
             label_position: LabelPositionArg::Above,
@@ -217,11 +225,34 @@ mod tests {
             OutputMode::Raw,
             None,
             &mut output,
-            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "cancelled")),
+            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "interrupted")),
         )
         .unwrap();
 
         assert_eq!(status, 130);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn run_returns_1_without_output_on_esc() {
+        let args = TextInputArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            max_length: None,
+            initial: Some("ignored".into()),
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |_state, _height| Err(io::Error::new(ABORTED_KIND, "cancelled")),
+        )
+        .unwrap();
+
+        assert_eq!(status, 1);
         assert!(output.is_empty());
     }
 }

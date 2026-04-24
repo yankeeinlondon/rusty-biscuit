@@ -195,7 +195,7 @@ implement-feature-review filter="" spec="" design="" agent="":
     if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" ${model}; then
 
         ready="$(md get "${review}" "ready")"
-        if [[ ready == "false" ]]; then
+        if [[ "$ready" == "false" ]]; then
             echo
             echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
             echo -e "👎 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is {{red}}not{{reset}} production ready!"

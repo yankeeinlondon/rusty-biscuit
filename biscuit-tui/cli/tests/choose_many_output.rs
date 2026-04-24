@@ -38,7 +38,15 @@ fn choose_many_fails_when_no_option_source_provided() {
 #[test]
 fn choose_many_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
     cargo_bin_cmd!("question")
-        .args(["choose-many", "--options", "A,B,C", "--initial", "A,C", "--output", "raw"])
+        .args([
+            "choose-many",
+            "--options",
+            "A,B,C",
+            "--initial",
+            "A,C",
+            "--output",
+            "raw",
+        ])
         .assert()
         .failure()
         .code(1)

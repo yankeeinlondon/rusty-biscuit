@@ -36,12 +36,46 @@ fn input_table_exits_nonzero_with_malformed_columns() {
 #[test]
 fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
     let test_cases = [
-        ("text-input", vec!["text-input", "--initial", "Ada", "--max-length", "10"]),
-        ("text-area-input", vec!["text-area-input", "--initial", "hello\nworld", "--width", "20"]),
-        ("boolean-switch", vec!["boolean-switch", "--initial", "true"]),
-        ("choose-one", vec!["choose-one", "--options", "Red,Green,Blue", "--initial", "Red"]),
-        ("choose-many", vec!["choose-many", "--options", "A,B,C", "--initial", "A,C"]),
-        ("input-table", vec!["input-table", "--columns", r#"[{"type":"text-input","id":"name"}]"#]),
+        (
+            "text-input",
+            vec!["text-input", "--initial", "Ada", "--max-length", "10"],
+        ),
+        (
+            "text-area-input",
+            vec![
+                "text-area-input",
+                "--initial",
+                "hello\nworld",
+                "--width",
+                "20",
+            ],
+        ),
+        (
+            "boolean-switch",
+            vec!["boolean-switch", "--initial", "true"],
+        ),
+        (
+            "choose-one",
+            vec![
+                "choose-one",
+                "--options",
+                "Red,Green,Blue",
+                "--initial",
+                "Red",
+            ],
+        ),
+        (
+            "choose-many",
+            vec!["choose-many", "--options", "A,B,C", "--initial", "A,C"],
+        ),
+        (
+            "input-table",
+            vec![
+                "input-table",
+                "--columns",
+                r#"[{"type":"text-input","id":"name"}]"#,
+            ],
+        ),
     ];
 
     for (_name, args) in test_cases {
@@ -55,8 +89,10 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
 }
 
 #[test]
-fn text_input_exits_with_code_130_on_escape_in_real_tty() {
-    let output = common::run_question_in_pty(&["text-input", "--initial", "Ada"], r"\033", 130);
+fn text_input_exits_with_code_1_on_escape_in_real_tty() {
+    // Phase 12 split: Esc now maps to exit code 1 (ABORTED), distinct
+    // from Ctrl+C which continues to map to 130 (CANCELLED).
+    let output = common::run_question_in_pty(&["text-input", "--initial", "Ada"], r"\033", 1);
     let stdout = common::clean_terminal_text(&output.stdout);
 
     assert!(

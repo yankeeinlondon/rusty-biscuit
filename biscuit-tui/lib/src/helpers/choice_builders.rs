@@ -103,6 +103,20 @@ pub fn choose_one_from_dictionary(
     Ok(ChoiceInput::new(id, prompt).with_options(options_from_dictionary(yaml_or_json)?))
 }
 
+/// Builds a multi-select input from a YAML or JSON mapping.
+///
+/// Semantics match [`choose_one_from_dictionary`] except that the
+/// selection mode is [`SelectionMode::Multiple`].
+pub fn choose_many_from_dictionary(
+    id: impl Into<String>,
+    prompt: impl Into<String>,
+    yaml_or_json: &str,
+) -> Result<ChoiceInput<String>, ChoiceBuilderError> {
+    Ok(ChoiceInput::new(id, prompt)
+        .with_selection_mode(SelectionMode::Multiple)
+        .with_options(options_from_dictionary(yaml_or_json)?))
+}
+
 fn options_from_csv(csv: &str) -> Vec<ChoiceOption<String>> {
     csv.split(',')
         .map(str::trim)
@@ -312,6 +326,45 @@ mod tests {
     fn dictionary_surfaces_parse_errors() {
         let garbage = "{unterminated: mapping";
         let err = choose_one_from_dictionary("c", "P", garbage).unwrap_err();
+        assert!(matches!(err, ChoiceBuilderError::Parse(_)));
+    }
+
+    #[test]
+    fn many_dictionary_parses_yaml_mapping() {
+        let yaml = "red: R\ngreen: G\nblue: B\n";
+        let input = choose_many_from_dictionary("c", "P", yaml).unwrap();
+        assert_eq!(input.selection_mode, SelectionMode::Multiple);
+        assert_eq!(input.options.len(), 3);
+        assert_eq!(input.options[0].id, "red");
+        assert_eq!(input.options[0].label, "red");
+        assert_eq!(input.options[0].value, "R");
+        assert_eq!(input.options[1].value, "G");
+        assert_eq!(input.options[2].value, "B");
+    }
+
+    #[test]
+    fn many_dictionary_parses_json_object() {
+        let json = "{\"red\": \"R\", \"green\": \"G\"}";
+        let input = choose_many_from_dictionary("c", "P", json).unwrap();
+        assert_eq!(input.selection_mode, SelectionMode::Multiple);
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].id, "red");
+        assert_eq!(input.options[0].value, "R");
+        assert_eq!(input.options[1].id, "green");
+        assert_eq!(input.options[1].value, "G");
+    }
+
+    #[test]
+    fn many_dictionary_rejects_non_mapping() {
+        let yaml = "- just\n- a list\n";
+        let err = choose_many_from_dictionary("c", "P", yaml).unwrap_err();
+        assert!(matches!(err, ChoiceBuilderError::NotAMapping));
+    }
+
+    #[test]
+    fn many_dictionary_surfaces_parse_errors() {
+        let garbage = "{unterminated: mapping";
+        let err = choose_many_from_dictionary("c", "P", garbage).unwrap_err();
         assert!(matches!(err, ChoiceBuilderError::Parse(_)));
     }
 }

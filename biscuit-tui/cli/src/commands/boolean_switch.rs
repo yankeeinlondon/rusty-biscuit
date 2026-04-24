@@ -7,7 +7,10 @@
 use std::io::{self, Write};
 
 use clap::Args;
-use tui_chrome::{BooleanSwitch, BooleanSwitchState, CANCELLED_KIND, Label, run_standalone};
+use tui_chrome::{
+    ABORTED_KIND, BooleanSwitch, BooleanSwitchState, CANCELLED_KIND, HeightSpec, Label,
+    run_standalone,
+};
 
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_bool};
@@ -38,7 +41,11 @@ pub struct BooleanSwitchArgs {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error.
-pub fn run(args: BooleanSwitchArgs, output: OutputMode, height: Option<u16>) -> io::Result<i32> {
+pub fn run(
+    args: BooleanSwitchArgs,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
     run_with_writer(args, output, height, &mut lock, |state, height| {
@@ -49,12 +56,12 @@ pub fn run(args: BooleanSwitchArgs, output: OutputMode, height: Option<u16>) -> 
 fn run_with_writer<F, W>(
     args: BooleanSwitchArgs,
     output: OutputMode,
-    height: Option<u16>,
+    height: Option<HeightSpec>,
     writer: &mut W,
     run_prompt: F,
 ) -> io::Result<i32>
 where
-    F: FnOnce(BooleanSwitchState, Option<u16>) -> io::Result<bool>,
+    F: FnOnce(BooleanSwitchState, Option<HeightSpec>) -> io::Result<bool>,
     W: Write,
 {
     let mut state = BooleanSwitchState::new().with_value(args.initial.unwrap_or(false));
@@ -74,6 +81,7 @@ where
             Ok(0)
         }
         Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == ABORTED_KIND => Ok(1),
         Err(e) => Err(e),
     }
 }
@@ -143,10 +151,10 @@ mod tests {
         let status = run_with_writer(
             args,
             OutputMode::Json,
-            Some(3),
+            Some(HeightSpec::Cells(3)),
             &mut output,
             |state, height| {
-                assert_eq!(height, Some(3));
+                assert_eq!(height, Some(HeightSpec::Cells(3)));
                 assert!(state.checked());
                 assert_eq!(
                     state.label().map(|label| label.text.as_str()),
@@ -231,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn run_returns_130_without_output_on_cancel() {
+    fn run_returns_130_without_output_on_ctrl_c() {
         let args = BooleanSwitchArgs {
             label: None,
             label_position: LabelPositionArg::Above,
@@ -245,11 +253,34 @@ mod tests {
             OutputMode::Raw,
             None,
             &mut output,
-            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "cancelled")),
+            |_state, _height| Err(io::Error::new(CANCELLED_KIND, "interrupted")),
         )
         .unwrap();
 
         assert_eq!(status, 130);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn run_returns_1_without_output_on_esc() {
+        let args = BooleanSwitchArgs {
+            label: None,
+            label_position: LabelPositionArg::Above,
+            initial: Some(false),
+            labels: None,
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |_state, _height| Err(io::Error::new(ABORTED_KIND, "cancelled")),
+        )
+        .unwrap();
+
+        assert_eq!(status, 1);
         assert!(output.is_empty());
     }
 }

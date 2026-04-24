@@ -24,7 +24,15 @@ fn text_input_rejects_unknown_flag() {
 #[test]
 fn text_input_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
     cargo_bin_cmd!("question")
-        .args(["text-input", "--initial", "Ada", "--max-length", "10", "--output", "raw"])
+        .args([
+            "text-input",
+            "--initial",
+            "Ada",
+            "--max-length",
+            "10",
+            "--output",
+            "raw",
+        ])
         .assert()
         .failure()
         .code(1)

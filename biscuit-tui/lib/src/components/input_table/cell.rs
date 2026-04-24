@@ -47,7 +47,7 @@ pub struct Row {
 /// A single cell within a [`Row`], pairing a column id with its typed value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowCell {
-    /// The column identifier from the corresponding [`InputTableColumn`](super::InputTableColumn).
+    /// The column identifier from the corresponding [`InputTableColumn`].
     pub column_id: String,
     /// The captured, typed value.
     pub value: CellValue,
@@ -131,11 +131,11 @@ use crate::core::{EventOutcome, HandleEvent, ValidationState};
 
 use super::column::{BooleanSwitchConfig, InputTableColumn, TextAreaInputConfig, TextInputConfig};
 
-/// Runtime state for a single cell of an [`InputTable`].
+/// Runtime state for a single cell of an [`InputTableState`](super::InputTableState).
 ///
 /// Each variant holds the corresponding component's state. Event
 /// handling and rendering are delegated to the wrapped state via the
-/// primitive widget (e.g. [`TextInput`](crate::components::TextInput)).
+/// primitive widget (e.g. [`TextInput`]).
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum CellState {
@@ -188,16 +188,20 @@ impl CellState {
 
     /// Returns the cell's preferred minimum render height in rows.
     ///
-    /// Single-line cells ([`TextInput`](crate::components::TextInput),
-    /// [`BooleanSwitch`](crate::components::BooleanSwitch), and
+    /// Single-line cells ([`TextInput`],
+    /// [`BooleanSwitch`], and
     /// [`StaticText`](Self::StaticText)) return `1`. Multi-line cells
     /// return their own natural extent.
     pub fn min_height(&self) -> u16 {
         match self {
             CellState::StaticText(_) | CellState::BooleanSwitch(_) | CellState::TextInput(_) => 1,
             CellState::TextAreaInput(state) => state.preferred_height().max(1),
-            CellState::ChooseOne(state) => (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT),
-            CellState::ChooseMany(state) => (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT),
+            CellState::ChooseOne(state) => {
+                (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT)
+            }
+            CellState::ChooseMany(state) => {
+                (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT)
+            }
         }
     }
 
@@ -479,8 +483,11 @@ mod tests {
 
     #[test]
     fn required_choose_one_reports_validation_error_on_submit() {
+        // Fallback-submit-on-active promotes the hovered option on Enter
+        // when nothing is selected. To exercise the required-validation
+        // path we have to prevent fallback by disabling every option.
         let input = ChoiceInput::new("c", "p")
-            .with_options(vec![ChoiceOption::new("a", "A", "alpha")])
+            .with_options(vec![ChoiceOption::new("a", "A", "alpha").disabled()])
             .required();
         let column = InputTableColumn::ChooseOne(input);
         let mut cell = CellState::from_column(&column);

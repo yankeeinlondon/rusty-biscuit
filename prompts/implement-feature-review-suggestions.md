@@ -2,8 +2,8 @@
 dir: ""
 spec: ""
 design: ""
-area: "$(sniff repo package-area)"
 iteration: 1
+area: {{ctx.current_package_area}}
 ---
 ## Context
 

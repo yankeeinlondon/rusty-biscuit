@@ -14,6 +14,8 @@ pub use crate::components::{
     RowCell, SelectionMode, TextAreaInput, TextAreaInputState, TextInput, TextInputState,
 };
 pub use crate::core::{
-    CANCELLED_KIND, ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, LabelPosition,
-    StandaloneState, ValidationState, drive_event_loop, render_with_label, run_standalone,
+    ABORTED_KIND, BorderStyle, CANCELLED_KIND, ComponentTheme, EventOutcome, FrameChrome,
+    FrameChromeConfig, FuzzyFilter, HandleEvent, HeightSpec, KeyBindings, Label, LabelPosition,
+    LoopExit, Margin, SortOrder, StandaloneState, ValidationState, drive_event_loop,
+    drive_event_loop_with_chrome, render_with_label, run_standalone, run_standalone_with_chrome,
 };

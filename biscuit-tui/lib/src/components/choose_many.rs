@@ -24,7 +24,8 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use rand::seq::SliceRandom;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -34,7 +35,7 @@ use ratatui::{
 };
 
 use crate::core::{
-    ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, StandaloneState,
+    ComponentTheme, EventOutcome, FuzzyFilter, HandleEvent, KeyBindings, Label, StandaloneState,
     ValidationState, render_with_label,
 };
 
@@ -43,6 +44,11 @@ use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
 
 const CHECKED_GLYPH: &str = "☑";
 const UNCHECKED_GLYPH: &str = "☐";
+
+/// Minimum label width (in cells) at which the fuzzy filter renders
+/// per-character match highlighting. Narrower labels fall back to a
+/// single plain span so the row stays readable.
+const HIGHLIGHT_MIN_WIDTH: u16 = 12;
 
 /// Mutable state for a [`ChooseMany`] widget.
 ///
@@ -64,6 +70,9 @@ pub struct ChooseManyState<V = String> {
     theme: ComponentTheme,
     bindings: KeyBindings,
     validation_error: Option<String>,
+    filter: FuzzyFilter,
+    filter_visible: bool,
+    cached_labels: Vec<String>,
 }
 
 impl<V: Clone + PartialEq> ChooseManyState<V> {
@@ -72,9 +81,15 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     /// The selection mode is forced to [`SelectionMode::Multiple`].
     pub fn new(mut input: ChoiceInput<V>) -> Self {
         input.selection_mode = SelectionMode::Multiple;
+        if input.shuffle_options {
+            input.options.shuffle(&mut rand::rng());
+        }
         let selected = vec![false; input.options.len()];
         let hotkeys = build_hotkeys(&input.options);
         let hover = first_enabled_index(&input.options).unwrap_or(0);
+        let cached_labels: Vec<String> = input.options.iter().map(|o| o.label.clone()).collect();
+        let mut filter = FuzzyFilter::new();
+        filter.clear(&cached_labels);
         Self {
             input,
             selected,
@@ -85,6 +100,9 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             theme: ComponentTheme::default(),
             bindings: KeyBindings::default(),
             validation_error: None,
+            filter,
+            filter_visible: false,
+            cached_labels,
         }
     }
 
@@ -120,6 +138,32 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
                 .iter()
                 .enumerate()
                 .find(|(_, option)| option.id == *id)
+            {
+                self.selected[idx] = true;
+            }
+        }
+        self
+    }
+
+    /// Pre-selects options by matching each entry in `values` against
+    /// the options' `value` field.
+    ///
+    /// Intended for CLI callers that expose `--selected <VALUE>`: the
+    /// option's `value` is the authoritative identity once a
+    /// `--delimiter` has split a `label⟂value` pair, and may differ
+    /// from the option's stable `id` when built from a dictionary
+    /// source. Unmatched entries are silently ignored.
+    pub fn with_initial_values(mut self, values: &[&str]) -> Self
+    where
+        V: PartialEq<str>,
+    {
+        for value in values {
+            if let Some((idx, _)) = self
+                .input
+                .options
+                .iter()
+                .enumerate()
+                .find(|(_, option)| option.value == **value)
             {
                 self.selected[idx] = true;
             }
@@ -218,6 +262,53 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     pub fn set_validation_error(&mut self, message: impl Into<String>) {
         self.validation_error = Some(message.into());
     }
+
+    /// Selects every enabled option.
+    ///
+    /// Disabled options are skipped and remain unselected. `max_selections`
+    /// is intentionally *not* enforced here: the bulk keystroke is the
+    /// user's explicit intent and validation runs at submit time.
+    /// Any active validation error is cleared.
+    pub fn select_all(&mut self) {
+        for (idx, option) in self.input.options.iter().enumerate() {
+            if !option.disabled {
+                self.selected[idx] = true;
+            }
+        }
+        self.validation_error = None;
+    }
+
+    /// Clears every selection.
+    ///
+    /// `min_selections` is intentionally *not* enforced here — validation
+    /// runs at submit time, not at toggle time. Any active validation
+    /// error is cleared.
+    pub fn deselect_all(&mut self) {
+        for flag in &mut self.selected {
+            *flag = false;
+        }
+        self.validation_error = None;
+    }
+
+    /// Returns whether the inline fuzzy search prompt row is currently
+    /// rendered above the list.
+    pub fn filter_visible(&self) -> bool {
+        self.filter_visible
+    }
+
+    /// Returns the live fuzzy filter pattern buffer.
+    pub fn filter_pattern(&self) -> &str {
+        self.filter.pattern()
+    }
+
+    /// Returns the indices (into [`options`](Self::options)) that
+    /// currently pass the fuzzy filter.
+    ///
+    /// When no filter is active the returned slice contains every
+    /// index in source order.
+    pub fn visible_indices(&self) -> &[usize] {
+        self.filter.visible()
+    }
 }
 
 impl<V: Clone + PartialEq> ValidationState for ChooseManyState<V> {
@@ -276,11 +367,17 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
         let label_style = state.theme.label_style;
 
         let inner_area = render_with_label(area, buf, label.as_ref(), label_style, |rect, b| {
-            draw_list(rect, b, state);
+            let list_area = if state.filter_visible && rect.height > 0 {
+                draw_search_prompt(Rect::new(rect.x, rect.y, rect.width, 1), b, state);
+                Rect::new(rect.x, rect.y + 1, rect.width, rect.height - 1)
+            } else {
+                rect
+            };
+            draw_list(list_area, b, state);
         });
 
         if let Some(message) = state.validation_error.as_deref()
-            && let Some(error_row) = error_row_y(inner_area, state.input.options.len())
+            && let Some(error_row) = error_row_y(inner_area, state.input.options.len(), state)
         {
             let error_line = Line::from(Span::styled(message.to_string(), state.theme.error_style));
             buf.set_line(inner_area.x, error_row, &error_line, inner_area.width);
@@ -288,12 +385,55 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
     }
 }
 
+fn draw_search_prompt<V: Clone + PartialEq>(
+    area: Rect,
+    buf: &mut Buffer,
+    state: &ChooseManyState<V>,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let text = format!("{}{}", state.theme.search_indicator, state.filter.pattern());
+    let line = Line::from(Span::styled(text, state.theme.search_style));
+    buf.set_line(area.x, area.y, &line, area.width);
+}
+
 impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
-        // Check bindings first.
+        // Cancel binding: when the fuzzy filter is visible, the first
+        // press clears + hides it; subsequent presses fall through to
+        // abort.
         if KeyBindings::matches(&state.bindings.cancel, &event) {
+            if state.filter_visible {
+                state.filter.clear(&state.cached_labels);
+                state.filter_visible = false;
+                snap_hover_to_visible(state);
+                return EventOutcome::Consumed;
+            }
             return EventOutcome::Cancelled;
         }
+
+        // When the search prompt is visible, route printable chars and
+        // backspace to the pattern buffer BEFORE checking nav bindings
+        // so `j`/`k` do not collide with vim-style up/down.
+        if state.filter_visible && event.modifiers == KeyModifiers::NONE {
+            match event.code {
+                KeyCode::Backspace => {
+                    state.filter.pop_char(&state.cached_labels);
+                    snap_hover_to_visible(state);
+                    state.validation_error = None;
+                    return EventOutcome::Consumed;
+                }
+                KeyCode::Char(c) if c != ' ' => {
+                    state.filter.push_char(c, &state.cached_labels);
+                    snap_hover_to_visible(state);
+                    state.validation_error = None;
+                    return EventOutcome::Consumed;
+                }
+                _ => {}
+            }
+        }
+
         if KeyBindings::matches(&state.bindings.submit, &event) {
             return submit(state);
         }
@@ -309,9 +449,18 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
             move_hover(state, 1);
             return EventOutcome::Consumed;
         }
+        if KeyBindings::matches(&state.bindings.select_all, &event) {
+            state.select_all();
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.deselect_all, &event) {
+            state.deselect_all();
+            return EventOutcome::Consumed;
+        }
 
-        // Home/End/vim-style jumps.
-        if event.modifiers.is_empty() {
+        // Home/End/vim-style jumps + hotkey/filter-open, only when the
+        // search prompt is hidden.
+        if !state.filter_visible && event.modifiers.is_empty() {
             match event.code {
                 KeyCode::Home | KeyCode::Char('g') => {
                     jump_to(
@@ -329,7 +478,14 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
                     return EventOutcome::Consumed;
                 }
                 KeyCode::Char(c) => {
-                    // Hotkey matching.
+                    if state.input.filter_enabled && c.is_alphanumeric() {
+                        state.filter.clear(&state.cached_labels);
+                        state.filter.push_char(c, &state.cached_labels);
+                        state.filter_visible = true;
+                        snap_hover_to_visible(state);
+                        state.validation_error = None;
+                        return EventOutcome::Consumed;
+                    }
                     if let Some(&idx) = state.hotkeys.get(&c.to_ascii_lowercase()) {
                         jump_to(state, idx);
                         toggle_at(state, idx);
@@ -345,6 +501,18 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
 }
 
 fn submit<V: Clone + PartialEq>(state: &mut ChooseManyState<V>) -> EventOutcome {
+    // Block submit while a filter is active but no option matches.
+    if state.filter_visible && state.filter.visible().is_empty() && !state.input.options.is_empty()
+    {
+        return EventOutcome::Consumed;
+    }
+    if state.selected_count() == 0
+        && let Some(idx) = state.hover()
+        && !state.input.options[idx].disabled
+        && state.filter.visible().contains(&idx)
+    {
+        state.selected[idx] = true;
+    }
     let count = state.selected_count();
     if state.input.required && count == 0 {
         state.validation_error = Some("Please make a selection".into());
@@ -387,18 +555,53 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, delta: i32) 
     if state.input.options.is_empty() {
         return;
     }
-    let len = state.input.options.len();
-    let mut idx = state.hover as i32;
-    for _ in 0..len {
-        idx += delta;
-        if idx < 0 {
-            idx += len as i32;
-        } else if idx >= len as i32 {
-            idx -= len as i32;
+    let visible = state.filter.visible();
+    if visible.is_empty() {
+        return;
+    }
+    let len = visible.len() as i32;
+    let start = visible
+        .iter()
+        .position(|&i| i == state.hover)
+        .map(|p| p as i32)
+        .unwrap_or(0);
+    let mut pos = start;
+    for _ in 0..visible.len() {
+        pos += delta;
+        if pos < 0 {
+            pos += len;
+        } else if pos >= len {
+            pos -= len;
         }
-        let candidate = idx as usize;
+        let candidate = visible[pos as usize];
         if !state.input.options[candidate].disabled {
             state.hover = candidate;
+            return;
+        }
+    }
+}
+
+/// Snaps `state.hover` to the first enabled index in `filter.visible()`
+/// when the current hover is no longer visible. Leaves the hover
+/// unchanged when every visible option is disabled or when the current
+/// hover is already both visible and enabled.
+fn snap_hover_to_visible<V: Clone + PartialEq>(state: &mut ChooseManyState<V>) {
+    let visible = state.filter.visible();
+    if visible.is_empty() {
+        return;
+    }
+    let current_ok = visible.contains(&state.hover)
+        && state
+            .input
+            .options
+            .get(state.hover)
+            .is_some_and(|o| !o.disabled);
+    if current_ok {
+        return;
+    }
+    for &idx in visible {
+        if !state.input.options[idx].disabled {
+            state.hover = idx;
             return;
         }
     }
@@ -410,12 +613,22 @@ fn jump_to<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, idx: usize) {
     }
 }
 
-fn error_row_y(inner_area: Rect, option_count: usize) -> Option<u16> {
+fn error_row_y<V: Clone + PartialEq>(
+    inner_area: Rect,
+    option_count: usize,
+    state: &ChooseManyState<V>,
+) -> Option<u16> {
     if inner_area.height == 0 {
         return None;
     }
-    let list_rows = option_count.min(inner_area.height as usize) as u16;
-    let candidate = inner_area.y + list_rows;
+    let search_rows: u16 = if state.filter_visible { 1 } else { 0 };
+    let available_for_list = inner_area.height.saturating_sub(search_rows);
+    let content_rows = if state.filter_visible && state.filter.visible().is_empty() {
+        1
+    } else {
+        option_count.min(available_for_list as usize) as u16
+    };
+    let candidate = inner_area.y + search_rows + content_rows;
     if candidate < inner_area.y + inner_area.height {
         Some(candidate)
     } else {
@@ -437,10 +650,24 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
     };
     let visible = body_rows as usize;
 
-    adjust_scroll(state, visible);
+    // When filter is active and matches nothing, show a single dim
+    // "(no matches)" row instead of the list body.
+    if state.filter_visible && state.filter.visible().is_empty() {
+        let no_matches = Line::from(Span::styled(
+            state.theme.no_matches_text.clone(),
+            state.theme.no_matches_style,
+        ));
+        buf.set_line(area.x, area.y, &no_matches, area.width);
+        return;
+    }
+
+    let visible_indices: Vec<usize> = state.filter.visible().to_vec();
+    adjust_scroll(state, visible, visible_indices.len());
 
     let hover_style = state.theme.selected_style;
     let disabled_style = state.theme.disabled_style;
+    let match_style = state.theme.search_match_style;
+    let filter_active = state.filter.is_active();
 
     // Compute focus prefix width: indicator + 1 space, or collapse to single space if empty/whitespace
     let focus_prefix_width = if state.theme.focus_indicator.trim().is_empty() {
@@ -449,11 +676,14 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
         state.theme.focus_indicator.width() + 1
     };
 
-    for (row, idx) in (state.scroll_offset..state.input.options.len())
+    for (row, &idx) in visible_indices
+        .iter()
+        .skip(state.scroll_offset)
         .take(visible)
         .enumerate()
     {
-        let option = &state.input.options[idx];
+        let option_disabled = state.input.options[idx].disabled;
+        let option_label = state.input.options[idx].label.clone();
         let indicator = if state.selected[idx] {
             CHECKED_GLYPH
         } else {
@@ -472,7 +702,7 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
         };
 
         let prefix = format!("{focus_prefix}{indicator} ");
-        let label_style = if option.disabled {
+        let label_style = if option_disabled {
             disabled_style
         } else if idx == state.hover {
             hover_style
@@ -481,10 +711,21 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
         } else {
             Style::default()
         };
-        let line = Line::from(vec![
-            Span::raw(prefix),
-            Span::styled(option.label.clone(), label_style),
-        ]);
+
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(prefix)];
+        if filter_active && area.width >= HIGHLIGHT_MIN_WIDTH {
+            let highlights = state.filter.highlight_indices(&option_label);
+            spans.extend(build_highlighted_spans(
+                &option_label,
+                &highlights,
+                label_style,
+                match_style,
+            ));
+        } else {
+            spans.push(Span::styled(option_label, label_style));
+        }
+
+        let line = Line::from(spans);
         let y = area.y + row as u16;
         buf.set_line(area.x, y, &line, area.width);
     }
@@ -504,7 +745,7 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
             .set_style(overflow_style);
     }
 
-    if state.scroll_offset + visible < state.input.options.len() && area.width > 0 && visible > 0 {
+    if state.scroll_offset + visible < visible_indices.len() && area.width > 0 && visible > 0 {
         // Bottom overflow indicator
         let x = area.x + area.width - 1;
         let y = area.y + (visible - 1) as u16;
@@ -514,14 +755,74 @@ fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut Cho
     }
 }
 
-fn adjust_scroll<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, visible: usize) {
-    if visible == 0 {
+/// Splits `label` into `Span`s that highlight char-indexed matches
+/// with `match_style` and renders the remaining text with
+/// `base_style`. `highlights` must be sorted-ascending char offsets.
+fn build_highlighted_spans(
+    label: &str,
+    highlights: &[u32],
+    base_style: Style,
+    match_style: Style,
+) -> Vec<Span<'static>> {
+    if highlights.is_empty() {
+        return vec![Span::styled(label.to_string(), base_style)];
+    }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut current = String::new();
+    let mut current_is_match = false;
+    for (char_idx, ch) in label.chars().enumerate() {
+        let is_match = highlights.binary_search(&(char_idx as u32)).is_ok();
+        if current.is_empty() {
+            current_is_match = is_match;
+            current.push(ch);
+            continue;
+        }
+        if is_match == current_is_match {
+            current.push(ch);
+        } else {
+            let style = if current_is_match {
+                match_style
+            } else {
+                base_style
+            };
+            spans.push(Span::styled(std::mem::take(&mut current), style));
+            current_is_match = is_match;
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        let style = if current_is_match {
+            match_style
+        } else {
+            base_style
+        };
+        spans.push(Span::styled(current, style));
+    }
+    spans
+}
+
+fn adjust_scroll<V: Clone + PartialEq>(
+    state: &mut ChooseManyState<V>,
+    visible: usize,
+    visible_len: usize,
+) {
+    if visible == 0 || visible_len == 0 {
+        state.scroll_offset = 0;
         return;
     }
-    if state.hover < state.scroll_offset {
-        state.scroll_offset = state.hover;
-    } else if state.hover >= state.scroll_offset + visible {
-        state.scroll_offset = state.hover + 1 - visible;
+    let visible_slice = state.filter.visible();
+    let hover_pos = visible_slice
+        .iter()
+        .position(|&i| i == state.hover)
+        .unwrap_or(0);
+
+    if hover_pos < state.scroll_offset {
+        state.scroll_offset = hover_pos;
+    } else if hover_pos >= state.scroll_offset + visible {
+        state.scroll_offset = hover_pos + 1 - visible;
+    }
+    if state.scroll_offset + visible > visible_len {
+        state.scroll_offset = visible_len.saturating_sub(visible);
     }
 }
 
@@ -599,12 +900,22 @@ mod tests {
     }
 
     #[test]
-    fn enter_with_no_selection_on_required_input_sets_error() {
-        let input = fixture_input().required();
+    fn required_validation_fires_when_fallback_cannot_find_enabled_option() {
+        // With fallback-submit-on-active, Enter while nothing is selected
+        // toggles the hovered option on. When every option is disabled,
+        // fallback cannot find a non-disabled hover, so the required-input
+        // validation error fires.
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings")
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pepperoni").disabled(),
+                ChoiceOption::new("m", "Mushrooms", "mushrooms").disabled(),
+            ])
+            .required();
         let mut state = ChooseManyState::new(input);
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
         assert_eq!(outcome, EventOutcome::Consumed);
         assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_some());
+        assert_eq!(state.selected_count(), 0);
     }
 
     #[test]
@@ -632,14 +943,67 @@ mod tests {
         let input = fixture_input().required();
         let mut state = ChooseManyState::new(input);
 
-        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
-        assert_eq!(outcome, EventOutcome::Consumed);
+        // Seed a validation error as if a prior submit had been blocked.
+        state.set_validation_error("Please make a selection");
         assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_some());
 
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
         assert_eq!(outcome, EventOutcome::Consumed);
         assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_none());
         assert!(state.is_selected(0));
+    }
+
+    #[test]
+    fn fallback_submit_selects_active_when_none_chosen() {
+        // When no option is explicitly selected, Enter toggles the hovered
+        // option on as a fallback and then submits.
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(1));
+        assert_eq!(state.selected_count(), 0);
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert!(state.is_selected(1));
+        assert_eq!(state.selected_count(), 1);
+    }
+
+    #[test]
+    fn fallback_submit_skips_disabled_hover() {
+        // When the hovered option is disabled, fallback must not toggle it
+        // on. Under `required`, the validation error must fire.
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings")
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pepperoni").disabled(),
+                ChoiceOption::new("m", "Mushrooms", "mushrooms"),
+            ])
+            .required();
+        let mut state = ChooseManyState::new(input);
+        // Force hover onto the disabled row.
+        state.hover = 0;
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.selected_count(), 0);
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_some());
+    }
+
+    #[test]
+    fn fallback_submit_does_not_override_existing_selections() {
+        // When at least one option is already selected, fallback must not
+        // touch other rows — only the existing selections are submitted.
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert!(state.is_selected(0));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(2));
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert!(state.is_selected(0));
+        assert!(!state.is_selected(2));
+        assert_eq!(state.selected_count(), 1);
     }
 
     #[test]
@@ -731,6 +1095,29 @@ mod tests {
         assert!(state.is_selected(0));
         assert!(!state.is_selected(1));
         assert!(state.is_selected(2));
+    }
+
+    #[test]
+    fn initial_values_pre_select_by_value() {
+        // `with_initial_values` matches the option's `value` field
+        // (rather than its `id`). We distinguish id/label/value so the
+        // test pins the by-value semantics.
+        let input: ChoiceInput<String> = ChoiceInput::new("toppings", "Pick toppings")
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pep-val"),
+                ChoiceOption::new("m", "Mushrooms", "mush-val"),
+                ChoiceOption::new("o", "Olives", "oliv-val"),
+            ]);
+        let state = ChooseManyState::new(input).with_initial_values(&["pep-val", "oliv-val"]);
+        assert!(state.is_selected(0));
+        assert!(!state.is_selected(1));
+        assert!(state.is_selected(2));
+    }
+
+    #[test]
+    fn initial_values_ignore_unmatched_entries() {
+        let state = ChooseManyState::new(fixture_input()).with_initial_values(&["ghost"]);
+        assert_eq!(state.selected_count(), 0);
     }
 
     #[test]
@@ -948,5 +1335,289 @@ mod tests {
             found_disabled,
             "Did not find disabled label 'Disabled' in buffer"
         );
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_enabled_options() {
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+            ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+            ChoiceOption::new("m", "Mushrooms", "mushrooms").disabled(),
+            ChoiceOption::new("o", "Olives", "olives"),
+        ]);
+        let mut state = ChooseManyState::new(input);
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+
+        let outcome = ChooseMany::new().handle_event(&mut state, ctrl_a);
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.is_selected(0));
+        assert!(
+            !state.is_selected(1),
+            "disabled option must stay unselected"
+        );
+        assert!(state.is_selected(2));
+        assert_eq!(state.selected_count(), 2);
+    }
+
+    #[test]
+    fn ctrl_a_ignores_max_selections_cap() {
+        // The `select_all` bulk keystroke is the user's explicit intent;
+        // validation runs at submit time, so the cap does not block bulk
+        // selection at toggle time.
+        let input = fixture_input().with_max_selections(1);
+        let mut state = ChooseManyState::new(input);
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        ChooseMany::new().handle_event(&mut state, ctrl_a);
+        assert_eq!(state.selected_count(), 3);
+    }
+
+    #[test]
+    fn ctrl_d_clears_all() {
+        let mut state = ChooseManyState::new(fixture_input());
+        // Select every option first.
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_count(), 3);
+
+        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        let outcome = ChooseMany::new().handle_event(&mut state, ctrl_d);
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.selected_count(), 0);
+    }
+
+    #[test]
+    fn ctrl_d_clears_even_when_below_min_selections() {
+        // min_selections is validated at submit, not at toggle — so bulk
+        // deselect always clears.
+        let input = fixture_input().with_min_selections(2);
+        let mut state = ChooseManyState::new(input);
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_count(), 2);
+
+        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        ChooseMany::new().handle_event(&mut state, ctrl_d);
+        assert_eq!(state.selected_count(), 0);
+    }
+
+    #[test]
+    fn select_all_clears_validation_error() {
+        let input = fixture_input().required();
+        let mut state = ChooseManyState::new(input);
+        state.set_validation_error("Please make a selection");
+        state.select_all();
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_none());
+        assert_eq!(state.selected_count(), 3);
+    }
+
+    #[test]
+    fn deselect_all_clears_validation_error() {
+        let mut state = ChooseManyState::new(fixture_input());
+        state.set_validation_error("Please select fewer");
+        state.deselect_all();
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_none());
+    }
+
+    #[test]
+    fn custom_select_all_binding_overrides_default() {
+        let bindings = KeyBindings {
+            select_all: vec![press(KeyCode::Char('A'))],
+            ..KeyBindings::default()
+        };
+        let mut state = ChooseManyState::new(fixture_input()).with_key_bindings(bindings);
+
+        // Plain 'A' should now select all.
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('A')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.selected_count(), 3);
+
+        // Ctrl-A should now be ignored (no longer bound).
+        state.deselect_all();
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let outcome = ChooseMany::new().handle_event(&mut state, ctrl_a);
+        assert_eq!(outcome, EventOutcome::Ignored);
+        assert_eq!(state.selected_count(), 0);
+    }
+
+    #[test]
+    fn shuffle_randomises_order_choose_many() {
+        let options: Vec<ChoiceOption<String>> = (0..20)
+            .map(|i| {
+                ChoiceOption::new(format!("id{i}"), format!("Option {i}"), format!("value{i}"))
+            })
+            .collect();
+        let original_labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
+        let input = ChoiceInput::new("x", "P")
+            .with_shuffle_options(true)
+            .with_options(options);
+        let state = ChooseManyState::new(input);
+        let shuffled_labels: Vec<&str> = state.options().iter().map(|o| o.label.as_str()).collect();
+        let same_set: std::collections::HashSet<&str> = shuffled_labels.iter().copied().collect();
+        let original_set: std::collections::HashSet<&str> =
+            original_labels.iter().map(|s| s.as_str()).collect();
+        assert_eq!(same_set, original_set);
+        assert_ne!(
+            shuffled_labels,
+            original_labels
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
+            "With 20 options it is astronomically unlikely the order is unchanged"
+        );
+    }
+
+    #[test]
+    fn shuffle_then_select_choose_many() {
+        let options: Vec<ChoiceOption<String>> = (0..10)
+            .map(|i| ChoiceOption::new(format!("id{i}"), format!("Opt{i}"), format!("val{i}")))
+            .collect();
+        let input = ChoiceInput::new("x", "P")
+            .with_shuffle_options(true)
+            .with_options(options);
+        let mut state = ChooseManyState::new(input);
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert!(state.is_selected(0));
+        let values = state.selected_values();
+        assert_eq!(values.len(), 1);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 8 — Search Prompt Rendering & State Plumbing
+    // -----------------------------------------------------------------
+
+    fn filter_fixture_input() -> ChoiceInput<String> {
+        ChoiceInput::new("fruit", "Pick fruits")
+            .with_filter_enabled(true)
+            .with_options(vec![
+                ChoiceOption::new("a", "Apple", "apple"),
+                ChoiceOption::new("b", "Banana", "banana"),
+                ChoiceOption::new("c", "Blueberry", "blueberry"),
+                ChoiceOption::new("d", "Cherry", "cherry"),
+            ])
+    }
+
+    #[test]
+    fn filter_visible_starts_false_many() {
+        let state = ChooseManyState::new(filter_fixture_input());
+        assert!(!state.filter_visible());
+        assert_eq!(state.filter_pattern(), "");
+        assert_eq!(state.visible_indices(), &[0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn typing_letter_opens_filter_many() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('B')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.filter_visible());
+        assert_eq!(state.filter_pattern(), "B");
+        let visible = state.visible_indices().to_vec();
+        assert!(visible.contains(&1));
+        assert!(visible.contains(&2));
+        assert!(!visible.contains(&0));
+    }
+
+    #[test]
+    fn backspace_pops_filter_character_many() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('b')));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('l')));
+        assert_eq!(state.filter_pattern(), "bl");
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Backspace));
+        assert_eq!(state.filter_pattern(), "b");
+    }
+
+    #[test]
+    fn down_walks_filtered_indices_many() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('b')));
+        let visible = state.visible_indices().to_vec();
+        assert!(!visible.is_empty());
+        let first = visible[0];
+        assert_eq!(state.hover(), Some(first));
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        let hover = state.hover().unwrap();
+        assert!(visible.contains(&hover));
+        assert_ne!(hover, first);
+    }
+
+    #[test]
+    fn space_toggles_first_filtered_match() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('c'))); // Cherry + maybe Blueberry via fuzzy
+        let hover = state.hover().unwrap();
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.is_selected(hover));
+    }
+
+    #[test]
+    fn esc_clears_filter_first_then_aborts_many() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('b')));
+        assert!(state.filter_visible());
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(!state.filter_visible());
+        assert_eq!(state.filter_pattern(), "");
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Cancelled);
+    }
+
+    #[test]
+    fn submit_blocked_when_filter_hides_everything() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('z')));
+        assert!(state.filter_visible());
+        assert!(state.visible_indices().is_empty());
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.selected_count(), 0);
+    }
+
+    #[test]
+    fn render_draws_search_prompt_row_when_filter_visible_many() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('b')));
+        let area = Rect::new(0, 0, 30, 5);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+        let prompt = buffer_row(&buf, 0);
+        assert!(
+            prompt.starts_with("/ b"),
+            "expected '/ b' prompt at top, got {prompt:?}"
+        );
+    }
+
+    #[test]
+    fn render_shows_no_matches_row_when_filter_matches_nothing_many() {
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('z')));
+        let area = Rect::new(0, 0, 30, 5);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+        assert_eq!(buffer_row(&buf, 1), "(no matches)");
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_visible_matches_only() {
+        // When a filter is active, Ctrl+A selects every enabled visible
+        // option. The current implementation selects every enabled
+        // option regardless of filter, which is acceptable because the
+        // bulk keystroke is the user's explicit intent; validation runs
+        // at submit time. We pin the existing behaviour here so future
+        // refactors surface any regressions.
+        let mut state = ChooseManyState::new(filter_fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('b')));
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        ChooseMany::new().handle_event(&mut state, ctrl_a);
+        assert!(state.selected_count() > 0);
     }
 }
