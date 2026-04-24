@@ -30,7 +30,7 @@ System Prompt(appended):
   ▌ 
   ▌ ## Best Practices
   ▌ 
-  ▌ - when rendering to the terminal ALWAYS use the `biscuit-terminal` and
+  ▌ - when rendering to the terminal use the `biscuit-terminal` and
   ▌ `darkmatter` skills!
   ▌ 
   ▌     - leverage the [`Prose`](biscuit-terminal/docs/components/prose.md)

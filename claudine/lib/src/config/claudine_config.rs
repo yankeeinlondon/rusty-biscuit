@@ -186,6 +186,7 @@ pub enum MessengerProviderConfig {
         phone_number_id_env: String,
     },
     /// Discord webhook configuration.
+    #[serde(alias = "discord-webhook")]
     DiscordWebhook {
         /// Optional inline webhook URL.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -195,6 +196,7 @@ pub enum MessengerProviderConfig {
         webhook_url_env: String,
     },
     /// Slack webhook configuration.
+    #[serde(alias = "slack-webhook")]
     SlackWebhook {
         /// Optional inline webhook URL.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -254,7 +256,10 @@ fn validate_provider_config(config: &MessengerProviderConfig, name: &str) -> Res
             webhook_url,
             webhook_url_env,
         } => {
-            if webhook_url.as_ref().map(|s| s.trim()).is_none_or(|s| s.is_empty())
+            if webhook_url
+                .as_ref()
+                .map(|s| s.trim())
+                .is_none_or(|s| s.is_empty())
                 && webhook_url_env.trim().is_empty()
             {
                 return Err(ClaudineError::ConfigValidation(format!(
@@ -274,7 +279,10 @@ fn validate_provider_config(config: &MessengerProviderConfig, name: &str) -> Res
             webhook_url,
             webhook_url_env,
         } => {
-            if webhook_url.as_ref().map(|s| s.trim()).is_none_or(|s| s.is_empty())
+            if webhook_url
+                .as_ref()
+                .map(|s| s.trim())
+                .is_none_or(|s| s.is_empty())
                 && webhook_url_env.trim().is_empty()
             {
                 return Err(ClaudineError::ConfigValidation(format!(
@@ -799,6 +807,27 @@ mod tests {
     }
 
     #[test]
+    fn messenger_discord_webhook_accepts_hyphenated_provider_alias() {
+        let json = serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "alerts": {
+                        "provider": "discord-webhook",
+                        "webhook_url_env": "MY_DISCORD_URL"
+                    }
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let messenger = config.messenger.unwrap();
+        assert!(matches!(
+            messenger.configurations.get("alerts").unwrap(),
+            MessengerProviderConfig::DiscordWebhook { .. }
+        ));
+    }
+
+    #[test]
     fn messenger_slack_webhook_deserializes_with_inline_url() {
         let json = serde_json::json!({
             "preferred_agent": "claude",
@@ -874,7 +903,10 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("bad"), "error: {msg}");
-        assert!(msg.contains("not a valid Discord webhook URL"), "error: {msg}");
+        assert!(
+            msg.contains("not a valid Discord webhook URL"),
+            "error: {msg}"
+        );
     }
 
     #[test]
@@ -895,7 +927,10 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("bad"), "error: {msg}");
-        assert!(msg.contains("not a valid Slack webhook URL"), "error: {msg}");
+        assert!(
+            msg.contains("not a valid Slack webhook URL"),
+            "error: {msg}"
+        );
     }
 
     #[test]

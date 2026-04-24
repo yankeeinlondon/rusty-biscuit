@@ -941,14 +941,8 @@ mod tests {
             LifecycleSignal::Success.status_state(),
             StatusState::Success
         );
-        assert_eq!(
-            LifecycleSignal::Blocked.status_state(),
-            StatusState::Error
-        );
-        assert_eq!(
-            LifecycleSignal::Failure.status_state(),
-            StatusState::Error
-        );
+        assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Error);
+        assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Error);
     }
 
     #[test]
@@ -1075,9 +1069,12 @@ mod tests {
         }
 
         fn emit_notification(&self, title: &str) {
-            self.actions.lock().unwrap().push(EmittedAction::Notification {
-                title: title.to_string(),
-            });
+            self.actions
+                .lock()
+                .unwrap()
+                .push(EmittedAction::Notification {
+                    title: title.to_string(),
+                });
         }
     }
 
@@ -1410,10 +1407,22 @@ mod tests {
         });
         let config = parse_lifecycle_config(&fm).unwrap();
 
-        assert_eq!(config.start.as_ref().unwrap().notify.as_deref(), Some("Starting"));
-        assert_eq!(config.success.as_ref().unwrap().notify.as_deref(), Some("Done"));
-        assert_eq!(config.blocked.as_ref().unwrap().notify.as_deref(), Some("Blocked"));
-        assert_eq!(config.failure.as_ref().unwrap().notify.as_deref(), Some("Failed"));
+        assert_eq!(
+            config.start.as_ref().unwrap().notify.as_deref(),
+            Some("Starting")
+        );
+        assert_eq!(
+            config.success.as_ref().unwrap().notify.as_deref(),
+            Some("Done")
+        );
+        assert_eq!(
+            config.blocked.as_ref().unwrap().notify.as_deref(),
+            Some("Blocked")
+        );
+        assert_eq!(
+            config.failure.as_ref().unwrap().notify.as_deref(),
+            Some("Failed")
+        );
     }
 
     #[test]
@@ -1464,7 +1473,9 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert_eq!(
             actions[0],
-            EmittedAction::Notification { title: "Hello desktop".to_string() }
+            EmittedAction::Notification {
+                title: "Hello desktop".to_string()
+            }
         );
     }
 
@@ -1520,7 +1531,18 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert_eq!(
             actions[0],
-            EmittedAction::Notification { title: "Only notify".to_string() }
+            EmittedAction::Notification {
+                title: "Only notify".to_string()
+            }
         );
+    }
+
+    #[tokio::test]
+    async fn default_lifecycle_emitter_emit_notification_does_not_panic() {
+        let emitter = DefaultLifecycleEmitter;
+        // Fire-and-forget: should return immediately without panic
+        emitter.emit_notification("test notification title");
+        // Give the spawned task a moment to start
+        tokio::task::yield_now().await;
     }
 }

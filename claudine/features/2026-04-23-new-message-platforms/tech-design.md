@@ -244,7 +244,12 @@ Because ratatui controls are currently modal-driven rather than button widgets, 
 
 ### Config Validation
 
-Update `ClaudineMessengerConfig::validate()` and runtime `ScopedMessagingSettings::validate()`:
+> **Implementation Note:** The validation function was implemented as
+> `validate_provider_config` (free function) rather than
+> `ClaudineMessengerConfig::validate` (method). The behavior is identical;
+> this naming drift is recorded here for future consolidation.
+
+Update `validate_provider_config` and runtime `ScopedMessagingSettings::validate()`:
 
 - Active-route validation remains unchanged.
 - Existing bot routes continue to require channel IDs and env var names.

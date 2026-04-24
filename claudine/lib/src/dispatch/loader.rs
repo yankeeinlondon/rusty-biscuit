@@ -553,6 +553,36 @@ mod tests {
     }
 
     #[test]
+    fn load_claudine_config_accepts_hyphenated_discord_webhook_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let json5_content = r#"{
+            preferred_agent: "claude",
+            messenger: {
+                active_config: "alerts",
+                configurations: {
+                    alerts: {
+                        provider: "discord-webhook",
+                        webhook_url_env: "MY_DISCORD_URL",
+                    },
+                },
+            },
+        }"#;
+        let path = config_dir.join("config.json");
+        std::fs::write(&path, json5_content).unwrap();
+
+        let config = load_claudine_config(Some(&path), None).unwrap();
+        let messenger = config.messenger.unwrap();
+        assert_eq!(messenger.active_config.as_deref(), Some("alerts"));
+        assert!(matches!(
+            messenger.configurations.get("alerts").unwrap(),
+            MessengerProviderConfig::DiscordWebhook { .. }
+        ));
+    }
+
+    #[test]
     fn load_claudine_config_detects_old_format() {
         let dir = tempfile::tempdir().unwrap();
         let config_dir = dir.path().join(".claudine");

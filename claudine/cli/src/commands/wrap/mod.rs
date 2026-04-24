@@ -2067,7 +2067,10 @@ fn execute_harness_attempt(
     term: &Terminal,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
-) -> Result<(claudine::harness::AttemptOutcome, Option<crate::perf::AgentExecutionPerf>)> {
+) -> Result<(
+    claudine::harness::AttemptOutcome,
+    Option<crate::perf::AgentExecutionPerf>,
+)> {
     let _attempt_span = info_span!(
         "harness_attempt",
         provider = %provider,
@@ -2099,7 +2102,8 @@ fn execute_harness_attempt(
         launch.clone()
     };
     let launch = &launch;
-    let (exit_code, termination, session_id, final_response, stderr_text, perf) = if use_structured {
+    let (exit_code, termination, session_id, final_response, stderr_text, perf) = if use_structured
+    {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
         let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(

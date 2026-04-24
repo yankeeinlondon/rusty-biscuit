@@ -4,6 +4,7 @@ pub mod tabs;
 pub mod widgets;
 
 use std::io::stdout;
+use std::time::Duration;
 
 use clap::Args;
 use crossterm::{
@@ -64,8 +65,42 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, &app))?;
 
-        if let Event::Key(key) = event::read()? {
+        // Use a short poll timeout so we can check for pending async test
+        // results without blocking the event loop indefinitely.
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
             app.handle_key(key);
+        }
+
+        // Poll for pending webhook test-connection results
+        if let Some(ref rx) = app.pending_test {
+            match rx.try_recv() {
+                Ok(result) => {
+                    app.pending_test = None;
+                    if let Some(
+                        app::ModalState::MessengerInput {
+                            test_status,
+                            error,
+                            ..
+                        },
+                    ) = &mut app.modal
+                    {
+                        *test_status = Some(match result {
+                            Ok(()) => "✓ Test connection successful".to_string(),
+                            Err(e) => format!("✗ {}", e),
+                        });
+                        *error = None;
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // Test still running; leave status as "Testing…"
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Sender dropped without sending; clean up
+                    app.pending_test = None;
+                }
+            }
         }
 
         if app.should_quit {
@@ -280,7 +315,15 @@ fn build_hotkey_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
             }
         }
         app::Tab::Messenger => {
-            pairs.extend([("Tab", "Focus"), ("Enter", "Activate"), ("S", "Select")]);
+            // T: Test is intentionally omitted from the outer strip because
+            // it is only meaningful inside the webhook input modal. The modal
+            // itself surfaces the T hotkey when appropriate.
+            pairs.extend([
+                ("Tab", "Focus"),
+                ("Enter", "Activate"),
+                ("S", "Select"),
+                ("A", "Add"),
+            ]);
         }
     }
 

@@ -386,11 +386,7 @@ mod tests {
     #[test]
     fn direct_composition_perf_disabled_yields_none() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("title", json!("Test"))],
-            "Simple content.",
-        );
+        let source = make_source(&dir, &[("title", json!("Test"))], "Simple content.");
 
         let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert!(prepared.compose_perf.is_none());
@@ -399,11 +395,7 @@ mod tests {
     #[test]
     fn direct_composition_perf_enabled_yields_some() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("title", json!("Test"))],
-            "Simple content.",
-        );
+        let source = make_source(&dir, &[("title", json!("Test"))], "Simple content.");
 
         let options = PrepareOptions {
             perf_enabled: true,

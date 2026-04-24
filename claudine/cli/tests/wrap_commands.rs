@@ -1002,10 +1002,22 @@ exit 0
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
-    assert!(plain.contains("Performance"), "stderr should contain Performance section; got: {plain}");
-    assert!(plain.contains("CLI Overhead"), "stderr should contain CLI Overhead section; got: {plain}");
-    assert!(plain.contains("Agent Execution"), "stderr should contain Agent Execution section; got: {plain}");
-    assert!(plain.contains("launches:"), "stderr should show launch count; got: {plain}");
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
+    assert!(
+        plain.contains("Agent Execution"),
+        "stderr should contain Agent Execution section; got: {plain}"
+    );
+    assert!(
+        plain.contains("launches:"),
+        "stderr should show launch count; got: {plain}"
+    );
 }
 
 #[cfg(unix)]
@@ -1033,8 +1045,14 @@ exit 1
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
-    assert!(plain.contains("Performance"), "stderr should contain Performance section; got: {plain}");
-    assert!(plain.contains("CLI Overhead"), "stderr should contain CLI Overhead section; got: {plain}");
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
     assert!(
         plain.contains("dry run") || plain.contains("skipped"),
         "stderr should mention dry run; got: {plain}"
@@ -4296,7 +4314,12 @@ fn inline_compose_perf_emits_report_to_stderr() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args(["inline-compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .args([
+            "inline-compose",
+            "--goose",
+            "--perf",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 
@@ -4339,7 +4362,12 @@ fn inline_compose_perf_stdout_matches_non_perf() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args(["inline-compose", "--goose", "--perf", md_file_perf.to_str().unwrap()])
+        .args([
+            "inline-compose",
+            "--goose",
+            "--perf",
+            md_file_perf.to_str().unwrap(),
+        ])
         .assert()
         .success();
 

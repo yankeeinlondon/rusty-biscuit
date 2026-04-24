@@ -42,12 +42,21 @@ fn default_slack_webhook_url() -> String {
     "SLACK_WEBHOOK_URL".to_string()
 }
 
-// Webhook URL validation regexes — intentionally conservative early validation.
-// The messenger provider constructors remain the production source of truth.
+/// Conservative validator regex for Discord webhook URLs.
+///
+/// This regex is intentionally stricter than the actual Discord token charset
+/// (e.g., it does not include `/`). The authoritative validation happens in
+/// `messenger::provider::DiscordWebhookProvider::try_new` at send time.
 static DISCORD_WEBHOOK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^https://(discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9._-]+$").unwrap()
+    Regex::new(r"^https://(discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9._-]+$")
+        .unwrap()
 });
 
+/// Conservative validator regex for Slack webhook URLs.
+///
+/// Slack may introduce new token formats in the future. This regex is early
+/// TUI feedback only; the authoritative check is in
+/// `messenger::provider::SlackWebhookProvider::try_new`.
 static SLACK_WEBHOOK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^https://hooks\.slack\.com/services/[A-Z0-9]+/[A-Z0-9]+/[A-Za-z0-9]+$").unwrap()
 });
@@ -127,6 +136,7 @@ pub enum MessagingRouteConfig {
     },
     /// Discord webhook configuration.
     #[serde(rename = "discord_webhook")]
+    #[serde(alias = "discord-webhook")]
     DiscordWebhook {
         /// Optional inline webhook URL.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -137,6 +147,7 @@ pub enum MessagingRouteConfig {
     },
     /// Slack webhook configuration.
     #[serde(rename = "slack_webhook")]
+    #[serde(alias = "slack-webhook")]
     SlackWebhook {
         /// Optional inline webhook URL.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -303,7 +314,10 @@ fn validate_route_config(
             webhook_url,
             webhook_url_env,
         } => {
-            if webhook_url.as_ref().map(|s| s.trim()).is_none_or(|s| s.is_empty())
+            if webhook_url
+                .as_ref()
+                .map(|s| s.trim())
+                .is_none_or(|s| s.is_empty())
                 && webhook_url_env.trim().is_empty()
             {
                 return Err(ClaudineError::ConfigValidation(format!(
@@ -325,7 +339,10 @@ fn validate_route_config(
             webhook_url,
             webhook_url_env,
         } => {
-            if webhook_url.as_ref().map(|s| s.trim()).is_none_or(|s| s.is_empty())
+            if webhook_url
+                .as_ref()
+                .map(|s| s.trim())
+                .is_none_or(|s| s.is_empty())
                 && webhook_url_env.trim().is_empty()
             {
                 return Err(ClaudineError::ConfigValidation(format!(
@@ -666,6 +683,21 @@ mod tests {
     }
 
     #[test]
+    fn discord_webhook_config_accepts_hyphenated_provider_alias() {
+        let json = r#"{
+            "provider": "discord-webhook",
+            "webhook_url_env": "MY_DISCORD_URL"
+        }"#;
+
+        let config: MessagingRouteConfig = serde_json::from_str(json).unwrap();
+
+        assert!(matches!(
+            config,
+            MessagingRouteConfig::DiscordWebhook { .. }
+        ));
+    }
+
+    #[test]
     fn slack_webhook_config_deserializes_with_inline_url() {
         let json = r#"{
             "provider": "slack_webhook",
@@ -867,8 +899,12 @@ mod tests {
     #[test]
     fn validate_discord_webhook_url_rejects_malformed() {
         assert!(!validate_discord_webhook_url("not-a-url"));
-        assert!(!validate_discord_webhook_url("http://discord.com/api/webhooks/123/abc"));
-        assert!(!validate_discord_webhook_url("https://example.com/api/webhooks/123/abc"));
+        assert!(!validate_discord_webhook_url(
+            "http://discord.com/api/webhooks/123/abc"
+        ));
+        assert!(!validate_discord_webhook_url(
+            "https://example.com/api/webhooks/123/abc"
+        ));
         assert!(!validate_discord_webhook_url(""));
     }
 
@@ -885,8 +921,12 @@ mod tests {
     #[test]
     fn validate_slack_webhook_url_rejects_malformed() {
         assert!(!validate_slack_webhook_url("not-a-url"));
-        assert!(!validate_slack_webhook_url("http://hooks.slack.com/services/T000/B000/XXXX"));
-        assert!(!validate_slack_webhook_url("https://example.com/services/T000/B000/XXXX"));
+        assert!(!validate_slack_webhook_url(
+            "http://hooks.slack.com/services/T000/B000/XXXX"
+        ));
+        assert!(!validate_slack_webhook_url(
+            "https://example.com/services/T000/B000/XXXX"
+        ));
         assert!(!validate_slack_webhook_url(""));
     }
 }
