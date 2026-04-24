@@ -275,9 +275,9 @@ clarify filter="" agent="":
     set -euo pipefail
 
     if [[ -z "{{ filter }}" ]]; then
-        file="$(fd -g '*{spec,design}*.md' | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
+        file="$(fd -g '*{spec,design}*.md' --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     else
-        file="$(fd -g '*{spec,design}*.md' | rg "{{ filter }}" | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
+        file="$(fd -g '*{spec,design}*.md' --exclude '_completed' | rg "{{ filter }}" | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     fi
 
     use_agent="{{agent}}"
