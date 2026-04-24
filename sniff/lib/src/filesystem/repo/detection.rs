@@ -2100,6 +2100,21 @@ mod tests {
     }
 
     #[test]
+    fn make_package_area_returns_root_for_top_level_package() {
+        assert_eq!(make_package_area("model_id"), "root");
+    }
+
+    #[test]
+    fn make_package_area_uses_top_level_parent_for_lib_cli_split() {
+        assert_eq!(make_package_area("sniff/lib"), "sniff");
+    }
+
+    #[test]
+    fn make_package_area_preserves_nested_area_parent() {
+        assert_eq!(make_package_area("apps/browser/my_package"), "apps/browser");
+    }
+
+    #[test]
     fn resolve_internal_deps_populates_depends_on() {
         let mut packages = vec![
             make_test_package("pkg-a", vec![dep("pkg-b"), dep("pkg-c")]),

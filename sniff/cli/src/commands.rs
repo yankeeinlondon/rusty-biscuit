@@ -1202,7 +1202,7 @@ fn handle_repo_packages(
     if json {
         let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
         println!("{}", serde_json::to_string(&names)?);
-        perf.emit_stdout(None);
+        perf.emit_stderr(None);
         return Ok(());
     }
 
@@ -1261,10 +1261,9 @@ fn handle_repo_package_areas(
     };
 
     if json {
-        let names: Vec<&str> =
-            output::collect_repo_package_area_names(&info, filter, package_area);
+        let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
         println!("{}", serde_json::to_string(&names)?);
-        perf.emit_stdout(None);
+        perf.emit_stderr(None);
         return Ok(());
     }
 

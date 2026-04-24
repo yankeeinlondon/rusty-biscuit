@@ -1406,34 +1406,9 @@ fn select_repo_package_areas<'a>(
     repo_filter: &[String],
     package_area: Option<&str>,
 ) -> Vec<&'a str> {
-    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-    for pkg in packages {
-        seen.insert(pkg.package_area.as_str());
-    }
-
-    let scope = package_area.map(str::to_lowercase);
-    let filters: Vec<RepoFilter> = if repo_filter.is_empty() {
-        Vec::new()
-    } else {
-        repo_filter.iter().map(|f| RepoFilter::parse(f)).collect()
-    };
-
-    seen.into_iter()
-        .filter(|area| {
-            if let Some(needle) = scope.as_deref()
-                && area.to_lowercase() != needle
-            {
-                return false;
-            }
-            if filters.is_empty() {
-                return true;
-            }
-            let lower = area.to_lowercase();
-            filters.iter().any(|f| {
-                let hit = lower.contains(&f.query.to_lowercase());
-                if f.negate { !hit } else { hit }
-            })
-        })
+    select_repo_package_areas_with_roots(packages, repo_filter, package_area)
+        .into_iter()
+        .map(|(area, _)| area)
         .collect()
 }
 
@@ -3716,6 +3691,42 @@ mod tests {
 
             assert_eq!(top, vec!["apps/browser".to_string()]);
             assert!(children.is_empty());
+        }
+    }
+
+    mod package_area_root {
+        use super::*;
+
+        #[test]
+        fn root_sentinel_returns_repo_root() {
+            let mut pkg = make_package("model_id", "root", &[]);
+            pkg.relative = "model_id".to_string();
+            pkg.path = PathBuf::from("/repo/model_id");
+
+            assert_eq!(super::super::package_area_root(&pkg), ".");
+        }
+
+        #[test]
+        fn normal_area_returns_package_area() {
+            let pkg = make_package("cli", "sniff", &[]);
+
+            assert_eq!(super::super::package_area_root(&pkg), "sniff");
+        }
+
+        #[test]
+        fn multi_segment_area_returns_full_package_area() {
+            let pkg = make_package("my_package", "apps/browser", &[]);
+
+            assert_eq!(super::super::package_area_root(&pkg), "apps/browser");
+        }
+
+        #[test]
+        fn mismatched_area_falls_back_to_relative_first_component() {
+            let mut pkg = make_package("pkg", "weird", &[]);
+            pkg.relative = "actual/path".to_string();
+            pkg.path = PathBuf::from("/repo/actual/path");
+
+            assert_eq!(super::super::package_area_root(&pkg), "actual");
         }
     }
 
