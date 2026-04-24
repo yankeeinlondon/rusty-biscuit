@@ -1,17 +1,28 @@
 //! Integration tests for the `choose-one` and `choose-many`
-//! subcommands that exercise Phase 3 CLI-level behaviours: STDIN
-//! sourcing, positional arguments, and the `--delimiter` split.
+//! subcommands.
 //!
-//! Tests here verify that the CLI's parsing and source-resolution
-//! layer reaches the event loop without tripping an arg-validation
-//! error. The event loop itself fails with exit code 1 because the
-//! assert_cmd harness does not attach a real TTY — we lean on that
-//! "reached the event loop" signal as a proxy for "parsing worked".
+//! The **authoritative green-path coverage** for the CLI lives in the
+//! `run_with_writer` unit tests inside
+//! `biscuit-tui/cli/src/commands/choose_one.rs` and
+//! `biscuit-tui/cli/src/commands/choose_many.rs`. Those tests drive the
+//! subcommand through its `Writer`-seam entry point with synthetic
+//! state so they can assert the complete happy path (parsed args →
+//! resolved options → prompt state → serialized output) without
+//! spawning a process or attaching a TTY.
 //!
-//! The interactive-keystroke flows (Esc, Ctrl+C, Ctrl+A + submit)
-//! spawn the binary under a real PTY via `expectrl` and are gated
-//! behind `QUESTION_INTERACTIVE_PTY=1` so CI runs without a
-//! controlling terminal skip them by default.
+//! This file complements the in-crate unit tests with three layers:
+//!
+//! 1. **Clap-level parsing regressions** — the `question ... --help`
+//!    output, flag-conflict diagnostics, and value-parser rejections.
+//! 2. **Source-resolution smoke tests** — the process-level stdin and
+//!    positional-argv entry points. The event loop itself exits with
+//!    code `1` because `assert_cmd` does not attach a real TTY; we
+//!    lean on that "reached the event loop" signal as a proxy for
+//!    "parsing and source resolution worked".
+//! 3. **PTY flows** — the interactive keystroke tests under `mod pty`
+//!    spawn the binary under a real PTY via `expectrl` and are gated
+//!    behind `QUESTION_INTERACTIVE_PTY=1` so CI runs without a
+//!    controlling terminal skip them by default.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -507,5 +518,33 @@ mod pty {
                 "expected {value:?} in stdout, got {output:?}",
             );
         }
+    }
+
+    #[test]
+    fn choose_one_height_100_percent_runs_end_to_end() {
+        if !interactive_enabled() {
+            eprintln!("skipping: set QUESTION_INTERACTIVE_PTY=1 to enable");
+            return;
+        }
+        // Covers the inline `--height 100%` geometry path end-to-end.
+        // The math-layer test `height_spec_percent_100_resolves_to_term_rows`
+        // only exercises the resolver; this smoke test proves the full
+        // CLI wiring composes a runnable prompt at the terminal's row
+        // count and accepts a fallback-submit-on-active Enter.
+        let mut p = spawn_question(&[
+            "choose-one",
+            "alpha",
+            "beta",
+            "gamma",
+            "--height",
+            "100%",
+        ]);
+        std::thread::sleep(Duration::from_millis(200));
+        p.write_all(b"\r").expect("send Enter");
+        assert_eq!(
+            wait_exit_code(&p),
+            0,
+            "--height 100% must submit the active option with code 0",
+        );
     }
 }

@@ -16,7 +16,7 @@ The binary is named `question`.
   - `raw`: plain text, one value per line (default for scalars and multi-selects)
   - `json`: JSON encoding (strings are quoted, arrays for multi-value outputs)
   - `null`: NUL-byte separated (useful when values may contain newlines; pairs with `xargs -0`)
-- `--height <N>` — render inline in `N` rows below the cursor instead of fullscreen
+- `--height <N|PCT%>` — render inline in the given number of rows below the cursor instead of fullscreen. Accepts either an absolute cell count (e.g. `12`) or a percentage (e.g. `50%`); percentages are resolved against the current terminal rows at render time and clamped to a floor of 3 rows.
 
 ## Subcommands
 
@@ -107,6 +107,8 @@ Up/Down to move the active row, Space to select, and Enter to submit.
 If Enter is pressed before an explicit Space selection, the active row
 is submitted.
 
+`--height` accepts a percentage suffix — see **Global Flags**.
+
 ### choose-many
 
 Multi-selection list.
@@ -119,7 +121,7 @@ printf "%s\n" "Red" "Green" "Blue" | question choose-many
 **Options:**
 
 - Same as `choose-one`, plus:
-- `--selected <VALUE>` — pre-select values; repeat the flag or pass comma-separated values
+- `--selected <VALUE>` — pre-select values; repeat the flag to pre-select multiple (`--selected foo --selected bar`). Comma-splitting is **not** applied — if you need CSV semantics, use the deprecated `--initial` flag.
 - `--min-selections <N>` — minimum number of selections required (submit-time validation)
 - `--max-selections <N>` — maximum number of selections allowed (keystroke-time cap)
 
@@ -133,6 +135,8 @@ Use Up/Down to move the active row, Space to toggle it, Enter to
 submit, `Ctrl+A` to select all enabled options, and `Ctrl+D` to clear
 the selection. Like `choose-one`, the active row is submitted if Enter
 is pressed before any explicit selection.
+
+`--height` accepts a percentage suffix — see **Global Flags**.
 
 ### input-table
 
