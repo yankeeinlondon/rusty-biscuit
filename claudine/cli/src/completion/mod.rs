@@ -1,28 +1,39 @@
-//! Dynamic shell completion for Claudine's composition commands.
+//! Dynamic shell completion for Claudine's CLI surface.
 //!
-//! This module owns the early `CompleteEnv` hook that intercepts completion
-//! subprocesses before any of the normal CLI startup paths run. It is wired
-//! into [`crate::main`] immediately after `color_eyre::install()` and before
-//! argv normalization, so completion requests never touch config loading,
-//! telemetry initialization, or the wrapper launch pipeline.
+//! This module serves two distinct completion paths:
 //!
-//! The completion surface targets the shared `args: Vec<String>` positional
-//! on `compose`, `inline-compose`, and `sequence`. Token classification,
-//! candidate discovery, and validation land in sibling modules during
-//! Phases 2 and 3 of the `2026-04-17-file-completion` feature. Phase 1 only
-//! scaffolds the entry path: wiring up `CompleteEnv`, attaching mode-tagged
-//! `ArgValueCompleter`s, and preserving the existing lenient wrapper parse
-//! semantics for completion.
+//! 1. **`claudine __complete`** (bash / zsh / fish) — the hidden subcommand
+//!    that generated completion scripts shell out to on every `<TAB>`.
+//!    Routing flows through [`engine::run`], which classifies the cursor
+//!    slot and dispatches to a slot-specific completer. Phase 1 of the
+//!    `2026-04-24-improved-shell-completions` feature implements the root
+//!    menu here ([`root_menu::render`]); later phases replace the
+//!    composition positional and setter-value slots.
+//!
+//! 2. **`CompleteEnv`** (powershell / elvish) — the legacy
+//!    `COMPLETE=<shell> claudine` bootstrap that activates at process
+//!    startup via [`maybe_complete`]. This path is retained unchanged for
+//!    shells the new engine does not target; it builds a clap-derived
+//!    command tree through [`command_factory::completion_command`].
+//!
+//! The old (`supplement`, `command_factory`, `file_reference`,
+//! `validate`) modules remain in-tree during the transition. The legacy
+//! `CompleteEnv` factory still depends on `command_factory`, and
+//! `engine::run` bridges non-root slots to [`supplement::run`] until the
+//! dedicated composition/setter completers land in later phases. All four
+//! are scheduled for removal in Phase 5.
 
 pub(crate) mod bootstrap;
 pub(crate) mod command_factory;
+pub(crate) mod engine;
 pub(crate) mod file_reference;
+pub(crate) mod root_menu;
 pub(crate) mod supplement;
 pub(crate) mod validate;
 
 use clap_complete::CompleteEnv;
 
-/// Intercept completion subprocesses and exit before normal CLI startup.
+/// Intercept `COMPLETE=<shell> claudine` startup and exit.
 ///
 /// When `COMPLETE` is set in the environment, `clap_complete` emits either
 /// a shell registration snippet or a completion reply and then exits via
@@ -35,6 +46,9 @@ use clap_complete::CompleteEnv;
 ///   `COMPLETE` guard is never exercised on the happy completion path.
 /// - Must be called before any stdout output — clap_complete reserves the
 ///   completion stdout channel.
+/// - Only PowerShell and Elvish still rely on this path; bash / zsh / fish
+///   scripts shell out to `claudine __complete`, which is dispatched
+///   through [`engine::run`] instead.
 pub(crate) fn maybe_complete() {
     CompleteEnv::with_factory(command_factory::completion_command).complete();
 }

@@ -84,16 +84,21 @@ pub struct CompleteArgs {
     pub argv: Vec<String>,
 }
 
-/// Run the supplement completion engine.
+/// Run the dynamic completion engine.
 ///
 /// Emits one candidate per line on stdout. Never returns a non-zero exit
 /// status for "no candidates" — completion scripts treat an empty stdout as
 /// "fall back to static clap completion". The only error paths are I/O
 /// failures while writing to stdout.
+///
+/// Routing flows through [`crate::completion::engine::run`], which
+/// classifies the cursor slot and dispatches to a slot-specific completer
+/// (root menu today; composition-positional and setter-value completers in
+/// subsequent phases).
 pub fn run_complete(args: CompleteArgs) -> Result<()> {
     use std::io::Write;
 
-    let candidates = crate::completion::supplement::run(&args.argv, args.current);
+    let candidates = crate::completion::engine::run(&args.argv, args.current);
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     for candidate in candidates {
