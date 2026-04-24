@@ -22,7 +22,8 @@ Each lifecycle property is an object containing any of these fields:
 | `say` | string | Text to speak via TTS. Mutually exclusive with `say_first`. |
 | `say_first` | string | Text to speak via TTS, but **before** sound effects. Mutually exclusive with `say`. |
 | `effect` | string | Sound effect to play (kebab-case name; see [Sound Effects](#sound-effects)). |
-| `message` | string | Message dispatched via the configured messaging route (Discord, Slack, Signal, WhatsApp). |
+| `message` | string | Message dispatched via the configured messaging route (Discord, Slack, Signal, WhatsApp, or webhooks). |
+| `notify` | string | Local desktop notification title. Zero-config; does not require a messaging route. |
 | `stderr` | string | Styled status line written to stderr. |
 
 ### Audio Ordering
@@ -88,6 +89,21 @@ failure:
 ```
 
 The `message` field dispatches through the messaging system configured in `claudine.toml` (see [Configuring Actions](configuring-actions.md)).
+
+### Concurrent message and desktop notification
+
+```yaml
+---
+success:
+  message: "Production deployment finished"
+  notify: "Deployment Successful"
+failure:
+  message: "Production deployment failed"
+  notify: "Deployment Failed"
+---
+```
+
+The `message` field sends a remote message through the active messaging route, while `notify` emits a local desktop notification. Both are independent and non-fatal. Desktop notifications are zero-config and do not appear in `claudine config`.
 
 ## Sound Effects
 
@@ -205,6 +221,7 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 
 - **TTS**: Uses the global TTS configuration from `claudine.toml` (voice, rate, provider). If no TTS settings are configured, uses system defaults.
 - **Messaging**: Requires a configured messaging route. See [Configuring Actions](configuring-actions.md).
+- **Desktop notifications**: Zero-config. Emitted via `notify` independently of messaging routes. Failures are non-fatal.
 - **stderr**: Rendered as a styled status badge using the terminal's capability detection (circular theme with color-coded state).
 - **Audio playback**: Blocking. Sound effects and TTS play sequentially, not in parallel, to avoid overlapping audio.
 
