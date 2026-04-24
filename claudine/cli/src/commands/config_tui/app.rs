@@ -162,6 +162,8 @@ pub enum ModalState {
         is_secret: bool,
         /// Optional validation error to display for the current field.
         error: Option<String>,
+        /// Optional test-connection status for webhook providers.
+        test_status: Option<String>,
     },
     /// Multi-field editor for an individual action's properties.
     ActionFieldList {
