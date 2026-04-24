@@ -248,6 +248,33 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     pub fn set_validation_error(&mut self, message: impl Into<String>) {
         self.validation_error = Some(message.into());
     }
+
+    /// Selects every enabled option.
+    ///
+    /// Disabled options are skipped and remain unselected. `max_selections`
+    /// is intentionally *not* enforced here: the bulk keystroke is the
+    /// user's explicit intent and validation runs at submit time.
+    /// Any active validation error is cleared.
+    pub fn select_all(&mut self) {
+        for (idx, option) in self.input.options.iter().enumerate() {
+            if !option.disabled {
+                self.selected[idx] = true;
+            }
+        }
+        self.validation_error = None;
+    }
+
+    /// Clears every selection.
+    ///
+    /// `min_selections` is intentionally *not* enforced here — validation
+    /// runs at submit time, not at toggle time. Any active validation
+    /// error is cleared.
+    pub fn deselect_all(&mut self) {
+        for flag in &mut self.selected {
+            *flag = false;
+        }
+        self.validation_error = None;
+    }
 }
 
 impl<V: Clone + PartialEq> ValidationState for ChooseManyState<V> {
@@ -337,6 +364,14 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
         }
         if KeyBindings::matches(&state.bindings.down, &event) {
             move_hover(state, 1);
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.select_all, &event) {
+            state.select_all();
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.deselect_all, &event) {
+            state.deselect_all();
             return EventOutcome::Consumed;
         }
 
@@ -1071,6 +1106,108 @@ mod tests {
             found_disabled,
             "Did not find disabled label 'Disabled' in buffer"
         );
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_enabled_options() {
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+            ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+            ChoiceOption::new("m", "Mushrooms", "mushrooms").disabled(),
+            ChoiceOption::new("o", "Olives", "olives"),
+        ]);
+        let mut state = ChooseManyState::new(input);
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+
+        let outcome = ChooseMany::new().handle_event(&mut state, ctrl_a);
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.is_selected(0));
+        assert!(!state.is_selected(1), "disabled option must stay unselected");
+        assert!(state.is_selected(2));
+        assert_eq!(state.selected_count(), 2);
+    }
+
+    #[test]
+    fn ctrl_a_ignores_max_selections_cap() {
+        // The `select_all` bulk keystroke is the user's explicit intent;
+        // validation runs at submit time, so the cap does not block bulk
+        // selection at toggle time.
+        let input = fixture_input().with_max_selections(1);
+        let mut state = ChooseManyState::new(input);
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        ChooseMany::new().handle_event(&mut state, ctrl_a);
+        assert_eq!(state.selected_count(), 3);
+    }
+
+    #[test]
+    fn ctrl_d_clears_all() {
+        let mut state = ChooseManyState::new(fixture_input());
+        // Select every option first.
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_count(), 3);
+
+        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        let outcome = ChooseMany::new().handle_event(&mut state, ctrl_d);
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.selected_count(), 0);
+    }
+
+    #[test]
+    fn ctrl_d_clears_even_when_below_min_selections() {
+        // min_selections is validated at submit, not at toggle — so bulk
+        // deselect always clears.
+        let input = fixture_input().with_min_selections(2);
+        let mut state = ChooseManyState::new(input);
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_count(), 2);
+
+        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        ChooseMany::new().handle_event(&mut state, ctrl_d);
+        assert_eq!(state.selected_count(), 0);
+    }
+
+    #[test]
+    fn select_all_clears_validation_error() {
+        let input = fixture_input().required();
+        let mut state = ChooseManyState::new(input);
+        state.set_validation_error("Please make a selection");
+        state.select_all();
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_none());
+        assert_eq!(state.selected_count(), 3);
+    }
+
+    #[test]
+    fn deselect_all_clears_validation_error() {
+        let mut state = ChooseManyState::new(fixture_input());
+        state.set_validation_error("Please select fewer");
+        state.deselect_all();
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_none());
+    }
+
+    #[test]
+    fn custom_select_all_binding_overrides_default() {
+        let bindings = KeyBindings {
+            select_all: vec![press(KeyCode::Char('A'))],
+            ..KeyBindings::default()
+        };
+        let mut state = ChooseManyState::new(fixture_input()).with_key_bindings(bindings);
+
+        // Plain 'A' should now select all.
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('A')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.selected_count(), 3);
+
+        // Ctrl-A should now be ignored (no longer bound).
+        state.deselect_all();
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let outcome = ChooseMany::new().handle_event(&mut state, ctrl_a);
+        assert_eq!(outcome, EventOutcome::Ignored);
+        assert_eq!(state.selected_count(), 0);
     }
 
     #[test]

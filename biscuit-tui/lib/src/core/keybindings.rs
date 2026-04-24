@@ -38,6 +38,12 @@ pub struct KeyBindings {
 
     /// Cancels the current interaction.
     pub cancel: Vec<KeyEvent>,
+
+    /// Selects every enabled option (multi-select only).
+    pub select_all: Vec<KeyEvent>,
+
+    /// Clears every selection (multi-select only).
+    pub deselect_all: Vec<KeyEvent>,
 }
 
 impl KeyBindings {
@@ -65,6 +71,8 @@ impl Default for KeyBindings {
             toggle: vec![plain(KeyCode::Char(' '))],
             submit: vec![plain(KeyCode::Enter)],
             cancel: vec![plain(KeyCode::Esc)],
+            select_all: vec![ctrl(KeyCode::Char('a'))],
+            deselect_all: vec![ctrl(KeyCode::Char('d'))],
         }
     }
 }
@@ -72,6 +80,11 @@ impl Default for KeyBindings {
 /// A `KeyEvent` with no modifiers — a convenience for default bindings.
 const fn plain(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+/// A `KeyEvent` with `Ctrl` held — a convenience for default bindings.
+const fn ctrl(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
 #[cfg(test)]
@@ -113,6 +126,24 @@ mod tests {
         ));
         assert!(KeyBindings::matches(&bindings.submit, &key(KeyCode::Enter)));
         assert!(KeyBindings::matches(&bindings.cancel, &key(KeyCode::Esc)));
+    }
+
+    #[test]
+    fn defaults_bind_select_all_and_deselect_all_to_ctrl_a_and_ctrl_d() {
+        let bindings = KeyBindings::default();
+        let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        assert!(KeyBindings::matches(&bindings.select_all, &ctrl_a));
+        assert!(KeyBindings::matches(&bindings.deselect_all, &ctrl_d));
+        // Plain 'a' or 'd' must not match (they are filter/search input).
+        assert!(!KeyBindings::matches(
+            &bindings.select_all,
+            &key(KeyCode::Char('a'))
+        ));
+        assert!(!KeyBindings::matches(
+            &bindings.deselect_all,
+            &key(KeyCode::Char('d'))
+        ));
     }
 
     #[test]
