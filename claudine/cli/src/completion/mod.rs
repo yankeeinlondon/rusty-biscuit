@@ -32,6 +32,7 @@ pub(crate) mod frontmatter;
 pub(crate) mod fuzzy;
 pub(crate) mod root_menu;
 pub(crate) mod scopes;
+pub(crate) mod setter_value;
 pub(crate) mod supplement;
 pub(crate) mod validate;
 pub(crate) mod walker;

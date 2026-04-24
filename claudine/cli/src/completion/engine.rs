@@ -14,14 +14,14 @@
 //!   `claudine inline-compose <TAB>` / `claudine sequence <TAB>`) —
 //!   rendered by [`super::composition::run`] with per-mode scope sets,
 //!   fuzzy matching, and frontmatter gating.
-//!
-//! Future phases introduce slot-specific completers:
-//!
-//! - **Setter value** (`claudine compose foo.md spec=@<TAB>`) — Phase 4.
+//! - **Setter value** (`claudine compose foo.md spec=@<TAB>`) — rendered
+//!   by [`super::setter_value::run`] with `@`-gated file completion
+//!   against `docs/`, `features/`, `fixes/`, and `reviews/` at repo,
+//!   package-area, and package levels.
 //!
 //! Remaining slots (wrapper flag values, etc.) fall through to the legacy
 //! [`super::supplement`] engine so existing behavior is preserved. The
-//! bridge is removed in Phase 4/5 as each slot is rewritten.
+//! bridge is removed in Phase 5 as each slot is rewritten.
 //!
 //! The classifier never invokes clap — wrapper subcommands use
 //! `ignore_errors(true)` in the lenient parse path so clap's view of argv is
@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use crate::completion::composition;
 use crate::completion::root_menu;
 use crate::completion::scopes::{ComposeMode, ScopeContext};
+use crate::completion::setter_value;
 
 /// Top-level classification of the cursor position in argv.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,9 +45,16 @@ pub(crate) enum CompletionTarget {
     /// subcommand (`compose`, `inline-compose`, or `sequence`). Phase 3
     /// routes this to [`super::composition::run`].
     CompositionPositional { mode: ComposeMode, partial: String },
-    /// Cursor is anywhere else — a setter value, a wrapper flag value,
-    /// etc. Falls through to the legacy supplement engine until later
-    /// phases rewrite each slot.
+    /// Cursor is on a setter-shaped token (`name=value`) inside a
+    /// composition subcommand. Phase 4 routes this to
+    /// [`super::setter_value::run`], which `@`-gates file completion
+    /// against a curated set of documentation-style subdirectories.
+    /// The full `name=...` token is carried so the completer can split
+    /// name from value and emit a whole-token replacement.
+    SetterValue { token: String },
+    /// Cursor is anywhere else — a wrapper flag value, etc. Falls
+    /// through to the legacy supplement engine until later phases
+    /// rewrite each slot.
     Other,
 }
 
@@ -120,9 +128,13 @@ pub(crate) fn run_with_context(
             let scope_ctx = ScopeContext::discover();
             composition::run(mode, &scope_ctx, &partial)
         }
+        CompletionTarget::SetterValue { token } => {
+            let scope_ctx = ScopeContext::discover();
+            setter_value::run(&token, &scope_ctx)
+        }
         CompletionTarget::Other => {
-            // Bridge — remaining slots keep the legacy supplement behavior
-            // until Phase 4 rewrites the setter-value completer.
+            // Bridge — remaining slots keep the legacy supplement
+            // behavior until Phase 5 removes the fallback path.
             super::supplement::run(argv, current_index)
         }
     }
@@ -194,9 +206,16 @@ fn compose_mode_for(sub: &str) -> Option<ComposeMode> {
 }
 
 /// Classify the cursor position given that a subcommand token sits at
-/// `sub_idx`. Returns [`CompletionTarget::CompositionPositional`] when the
-/// cursor is at the first (file) positional of a composition subcommand;
-/// everything else falls through to `Other`.
+/// `sub_idx`. Returns [`CompletionTarget::CompositionPositional`] when
+/// the cursor is at the first (file) positional of a composition
+/// subcommand, [`CompletionTarget::SetterValue`] when it is on a
+/// `name=value` token, and `Other` otherwise.
+///
+/// The setter-shape check runs **before** the positional walk so a
+/// setter at the cursor wins regardless of how many positionals the
+/// user has already committed: `claudine compose foo.md spec=@<TAB>`
+/// still routes to the setter-value completer even though `foo.md`
+/// already occupies the file slot.
 fn classify_post_subcommand(
     argv: &[String],
     current_index: usize,
@@ -209,9 +228,19 @@ fn classify_post_subcommand(
         return CompletionTarget::Other;
     };
 
-    // Walk tokens between the subcommand and the cursor. If we have not yet
-    // seen a positional (ignoring flags, flag values, and key=value
-    // setters), the cursor slot IS the first positional.
+    let current = argv.get(current_index).map(String::as_str).unwrap_or("");
+    // A setter-shaped cursor routes to the setter-value completer
+    // regardless of the positional state — the `name=` prefix
+    // disambiguates against the file slot.
+    if is_setter_shaped(current) {
+        return CompletionTarget::SetterValue {
+            token: current.to_string(),
+        };
+    }
+
+    // Walk tokens between the subcommand and the cursor. If we have not
+    // yet seen a positional (ignoring flags, flag values, and
+    // key=value setters), the cursor slot IS the first positional.
     let mut cursor = sub_idx + 1;
     let mut seen_positional = false;
     while cursor < current_index {
@@ -236,13 +265,6 @@ fn classify_post_subcommand(
         cursor += 1;
     }
     if seen_positional {
-        return CompletionTarget::Other;
-    }
-
-    let current = argv.get(current_index).map(String::as_str).unwrap_or("");
-    // Setter-shaped tokens at the cursor go to the setter-value completer
-    // (Phase 4); the composition completer only handles the file slot.
-    if is_setter_shaped(current) {
         return CompletionTarget::Other;
     }
 
@@ -476,8 +498,57 @@ mod tests {
     }
 
     #[test]
-    fn classifier_other_on_setter_shaped_cursor() {
+    fn classifier_setter_value_when_cursor_is_setter_shaped() {
         let a = argv(&["claudine", "compose", "key=val"]);
+        assert_eq!(
+            classify_completion_target(&a, 2),
+            CompletionTarget::SetterValue {
+                token: "key=val".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_setter_value_after_committed_positional() {
+        // Phase 4 contract: a setter-shaped cursor wins even when the
+        // file slot has already been filled. The classifier must not
+        // return `Other` just because a positional was observed earlier.
+        let a = argv(&["claudine", "compose", "foo.md", "spec=@s"]);
+        assert_eq!(
+            classify_completion_target(&a, 3),
+            CompletionTarget::SetterValue {
+                token: "spec=@s".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_setter_value_on_inline_compose() {
+        let a = argv(&["claudine", "inline-compose", "foo.md", "ref=@d"]);
+        assert_eq!(
+            classify_completion_target(&a, 3),
+            CompletionTarget::SetterValue {
+                token: "ref=@d".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_setter_value_on_sequence() {
+        let a = argv(&["claudine", "sequence", "foo.md", "plan=@p"]);
+        assert_eq!(
+            classify_completion_target(&a, 3),
+            CompletionTarget::SetterValue {
+                token: "plan=@p".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_other_on_setter_shaped_cursor_for_non_composition_sub() {
+        // Wrappers and admin subcommands never route through the setter
+        // classifier — they fall through to the legacy supplement.
+        let a = argv(&["claudine", "claude", "spec=@s"]);
         assert_eq!(classify_completion_target(&a, 2), CompletionTarget::Other);
     }
 
