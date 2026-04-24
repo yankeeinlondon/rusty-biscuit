@@ -1,6 +1,6 @@
 ---
 phases: 6
-start_phase: 4
+start_phase: 5
 source_files_during_phase_1: [sniff/cli/src/output/hardware.rs]
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -17,6 +17,10 @@ source_files_during_phase_4: [sniff/cli/src/output/hardware.rs]
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5: [sniff/cli/src/output/hardware.rs, sniff/cli/src/output/mod.rs]
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages: [sniff-cli]
 ---
 # Audio Devices Output Redesign — Implementation Plan
