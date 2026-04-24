@@ -139,20 +139,21 @@ Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
 
 ### Horizontal Rules
 
-Darkmatter extends CommonMark `---` / `___` / `***` horizontal rules with an optional attribute block (YAML flow-mapping syntax) and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
+Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
 
 - **Markdown syntax**: `--- { style: waves, width: "50%" }`
 - **Supported attributes** (all optional):
   - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
-  - `placement`: `full` (default), `centered`, `left`, `right`
+  - `alignment`: `full` (default), `centered`, `left`, `right`
   - `weight`: `thin`, `medium` (default), `thick`
   - `width`: CSS-like string (`"75%"`, `"200px"`)
   - `color`: CSS color name or `#rrggbb`
+- **Preferred page defaults:** put these fields under frontmatter `hr:`; per-rule attributes override only specified keys.
 - **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
-- **Bare `---`:** produces a default dashed rule in both terminal and HTML output.
+- **Bare `---`:** produces a configured rule when `hr:` frontmatter is present, otherwise the default dashed rule.
 - **Terminal rendering tiers:**
-  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`): deferred** — not yet implemented.
-  2. **Tier 2 (Unicode):** primary path when the locale signals UTF-8.
+  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals.
+  2. **Tier 2 (Unicode):** fallback when image rendering is unavailable and the locale signals UTF-8.
   3. **Tier 3 (ASCII):** fallback otherwise.
 - **Browser rendering:** SVG with `--hr-weight`, `--hr-color`, `--hr-width` CSS variables; per-instance overrides via `render_to_browser_with_inline_variables`.
 
