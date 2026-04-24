@@ -365,7 +365,11 @@ impl StatefulWidget for InputTable {
             })
             .collect();
 
-        let reserve_error: u16 = if state.validation_error.is_some() { 1 } else { 0 };
+        let reserve_error: u16 = if state.validation_error.is_some() {
+            1
+        } else {
+            0
+        };
         let available = area.height.saturating_sub(reserve_error);
 
         adjust_table_scroll(state, &row_heights, available);
@@ -831,8 +835,8 @@ fn compute_column_widths(columns: &[InputTableColumn], total_width: u16) -> Vec<
                 if matches!(columns[i], InputTableColumn::StaticText { .. }) {
                     p
                 } else {
-                    let extra = per_focusable as u16
-                        + if focusable_idx < remainder { 1 } else { 0 };
+                    let extra =
+                        per_focusable as u16 + if focusable_idx < remainder { 1 } else { 0 };
                     focusable_idx += 1;
                     p + extra
                 }
@@ -1447,7 +1451,10 @@ mod tests {
         let outcome = InputTable.handle_event(&mut state, ctrl(KeyCode::Char('s')));
         assert_eq!(outcome, EventOutcome::Consumed);
         assert_eq!(state.focus(), (0, 1));
-        assert_eq!(state.table_validation_error(), Some("One or more cells need your attention"));
+        assert_eq!(
+            state.table_validation_error(),
+            Some("One or more cells need your attention")
+        );
         assert!(
             state.rows()[0][1].validation_error().is_some(),
             "expected first failing cell to retain its validation error"

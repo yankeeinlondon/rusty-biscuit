@@ -196,8 +196,12 @@ impl CellState {
         match self {
             CellState::StaticText(_) | CellState::BooleanSwitch(_) | CellState::TextInput(_) => 1,
             CellState::TextAreaInput(state) => state.preferred_height().max(1),
-            CellState::ChooseOne(state) => (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT),
-            CellState::ChooseMany(state) => (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT),
+            CellState::ChooseOne(state) => {
+                (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT)
+            }
+            CellState::ChooseMany(state) => {
+                (state.options().len() as u16).clamp(1, CHOICE_CELL_MAX_HEIGHT)
+            }
         }
     }
 
