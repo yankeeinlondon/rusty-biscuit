@@ -340,6 +340,12 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
 }
 
 fn submit<V: Clone + PartialEq>(state: &mut ChooseOneState<V>) -> EventOutcome {
+    if state.selected.is_none()
+        && let Some(idx) = state.hover()
+        && !state.input.options[idx].disabled
+    {
+        state.selected = Some(idx);
+    }
     if state.selected.is_none() && state.input.required {
         state.validation_error = Some("Please make a selection".into());
         return EventOutcome::Consumed;
@@ -634,8 +640,17 @@ mod tests {
     }
 
     #[test]
-    fn enter_without_selection_on_required_input_sets_validation_error() {
-        let input = fixture_input().required();
+    fn required_validation_fires_when_fallback_cannot_find_enabled_option() {
+        // With fallback-submit-on-active, Enter without an explicit selection
+        // promotes the hovered option to selected. When every option is
+        // disabled, fallback cannot find a non-disabled hover, so the
+        // required-input validation error fires.
+        let input = ChoiceInput::<String>::new("colour", "Pick a colour")
+            .with_options(vec![
+                ChoiceOption::new("r", "Red", "red").disabled(),
+                ChoiceOption::new("g", "Green", "green").disabled(),
+            ])
+            .required();
         let mut state = ChooseOneState::new(input);
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
         assert_eq!(outcome, EventOutcome::Consumed);
@@ -644,6 +659,7 @@ mod tests {
                 .unwrap()
                 .contains("selection"),
         );
+        assert!(state.selected_index().is_none());
     }
 
     #[test]
@@ -660,8 +676,8 @@ mod tests {
         let input = fixture_input().required();
         let mut state = ChooseOneState::new(input);
 
-        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
-        assert_eq!(outcome, EventOutcome::Consumed);
+        // Seed a validation error as if a prior submit had been blocked.
+        state.set_validation_error("Please make a selection");
         assert!(<ChooseOneState as ValidationState>::validation_error(&state).is_some());
 
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
@@ -675,6 +691,53 @@ mod tests {
         let mut state = ChooseOneState::new(fixture_input());
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
         assert_eq!(outcome, EventOutcome::Submitted);
+    }
+
+    #[test]
+    fn fallback_submit_promotes_hover() {
+        // Enter with no explicit selection should promote the currently
+        // hovered option to `selected` and submit.
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(1));
+        assert!(state.selected_index().is_none());
+
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(1));
+        assert_eq!(state.selected_value(), Some(&"green".to_string()));
+    }
+
+    #[test]
+    fn fallback_submit_skips_disabled_hover() {
+        // If the hovered option is disabled, fallback must not promote it.
+        // Under `required`, the validation error must fire.
+        let input = ChoiceInput::<String>::new("colour", "Pick a colour")
+            .with_options(vec![
+                ChoiceOption::new("r", "Red", "red").disabled(),
+                ChoiceOption::new("g", "Green", "green"),
+            ])
+            .required();
+        let mut state = ChooseOneState::new(input);
+        // Force hover onto the disabled row (bypassing the navigation
+        // filter that normally skips disabled options).
+        state.hover = 0;
+
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.selected_index().is_none());
+        assert!(<ChooseOneState as ValidationState>::validation_error(&state).is_some());
+    }
+
+    #[test]
+    fn fallback_submit_promotes_hover_even_when_not_required() {
+        // When not required, fallback still promotes the hovered option so
+        // the caller receives a value rather than `None`.
+        let mut state = ChooseOneState::new(fixture_input());
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(0));
+        assert_eq!(state.selected_value(), Some(&"red".to_string()));
     }
 
     #[test]

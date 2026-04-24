@@ -375,6 +375,12 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
 }
 
 fn submit<V: Clone + PartialEq>(state: &mut ChooseManyState<V>) -> EventOutcome {
+    if state.selected_count() == 0
+        && let Some(idx) = state.hover()
+        && !state.input.options[idx].disabled
+    {
+        state.selected[idx] = true;
+    }
     let count = state.selected_count();
     if state.input.required && count == 0 {
         state.validation_error = Some("Please make a selection".into());
@@ -629,12 +635,22 @@ mod tests {
     }
 
     #[test]
-    fn enter_with_no_selection_on_required_input_sets_error() {
-        let input = fixture_input().required();
+    fn required_validation_fires_when_fallback_cannot_find_enabled_option() {
+        // With fallback-submit-on-active, Enter while nothing is selected
+        // toggles the hovered option on. When every option is disabled,
+        // fallback cannot find a non-disabled hover, so the required-input
+        // validation error fires.
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings")
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pepperoni").disabled(),
+                ChoiceOption::new("m", "Mushrooms", "mushrooms").disabled(),
+            ])
+            .required();
         let mut state = ChooseManyState::new(input);
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
         assert_eq!(outcome, EventOutcome::Consumed);
         assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_some());
+        assert_eq!(state.selected_count(), 0);
     }
 
     #[test]
@@ -662,14 +678,67 @@ mod tests {
         let input = fixture_input().required();
         let mut state = ChooseManyState::new(input);
 
-        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
-        assert_eq!(outcome, EventOutcome::Consumed);
+        // Seed a validation error as if a prior submit had been blocked.
+        state.set_validation_error("Please make a selection");
         assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_some());
 
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
         assert_eq!(outcome, EventOutcome::Consumed);
         assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_none());
         assert!(state.is_selected(0));
+    }
+
+    #[test]
+    fn fallback_submit_selects_active_when_none_chosen() {
+        // When no option is explicitly selected, Enter toggles the hovered
+        // option on as a fallback and then submits.
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(1));
+        assert_eq!(state.selected_count(), 0);
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert!(state.is_selected(1));
+        assert_eq!(state.selected_count(), 1);
+    }
+
+    #[test]
+    fn fallback_submit_skips_disabled_hover() {
+        // When the hovered option is disabled, fallback must not toggle it
+        // on. Under `required`, the validation error must fire.
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings")
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pepperoni").disabled(),
+                ChoiceOption::new("m", "Mushrooms", "mushrooms"),
+            ])
+            .required();
+        let mut state = ChooseManyState::new(input);
+        // Force hover onto the disabled row.
+        state.hover = 0;
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.selected_count(), 0);
+        assert!(<ChooseManyState as ValidationState>::validation_error(&state).is_some());
+    }
+
+    #[test]
+    fn fallback_submit_does_not_override_existing_selections() {
+        // When at least one option is already selected, fallback must not
+        // touch other rows — only the existing selections are submitted.
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert!(state.is_selected(0));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(2));
+
+        let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert!(state.is_selected(0));
+        assert!(!state.is_selected(2));
+        assert_eq!(state.selected_count(), 1);
     }
 
     #[test]

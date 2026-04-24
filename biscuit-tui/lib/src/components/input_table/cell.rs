@@ -479,8 +479,11 @@ mod tests {
 
     #[test]
     fn required_choose_one_reports_validation_error_on_submit() {
+        // Fallback-submit-on-active promotes the hovered option on Enter
+        // when nothing is selected. To exercise the required-validation
+        // path we have to prevent fallback by disabling every option.
         let input = ChoiceInput::new("c", "p")
-            .with_options(vec![ChoiceOption::new("a", "A", "alpha")])
+            .with_options(vec![ChoiceOption::new("a", "A", "alpha").disabled()])
             .required();
         let column = InputTableColumn::ChooseOne(input);
         let mut cell = CellState::from_column(&column);
