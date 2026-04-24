@@ -75,18 +75,19 @@ pub struct HtmlOptions {
     /// - `Image`: Render as interactive mermaid diagrams (includes mermaid.js)
     /// - `Text`: Show as fenced code blocks (fallback format)
     pub mermaid_mode: MermaidMode,
-    /// Optional overrides for horizontal-rule CSS custom properties.
+    /// Overrides for horizontal-rule CSS custom properties.
     ///
-    /// When `Some`, each emitted `<svg>` for a [`HorizontalRule`] is run
+    /// When non-empty, each emitted `<svg>` for a [`HorizontalRule`] is run
     /// through
     /// [`BrowserRenderable::render_to_browser_with_inline_variables`],
     /// which substitutes `var(--hr-*)` tokens with concrete values. Keys
     /// match the CSS variable names *without* the `--` prefix (e.g.,
     /// `hr-weight`, `hr-color`, `hr-width`).
     ///
-    /// When `None` (default), the generated SVG keeps its `var(--hr-*, …)`
-    /// expressions so page-level CSS or downstream code can override them.
-    pub hr_css_variables: Option<std::collections::HashMap<String, String>>,
+    /// An empty map (the default) means "no overrides" — the generated SVG
+    /// keeps its `var(--hr-*, …)` expressions so page-level CSS or
+    /// downstream code can override them.
+    pub hr_css_variables: std::collections::HashMap<String, String>,
 }
 
 impl Default for HtmlOptions {
@@ -98,7 +99,7 @@ impl Default for HtmlOptions {
             include_line_numbers: false,
             include_styles: true,
             mermaid_mode: MermaidMode::default(),
-            hr_css_variables: None,
+            hr_css_variables: std::collections::HashMap::new(),
         }
     }
 }
@@ -165,10 +166,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 // Create HorizontalRule from attributes via the shared builder
                 // so terminal and HTML renderers stay consistent (Phase 5).
                 let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
-                output.push_str(&render_rule_browser(
-                    &rule,
-                    options.hr_css_variables.as_ref(),
-                ));
+                output.push_str(&render_rule_browser(&rule, &options.hr_css_variables));
                 output.push('\n');
             }
             // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
@@ -180,10 +178,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     hr_defaults.as_ref(),
                     &crate::markdown::inline::HorizontalRuleAttrs::default(),
                 );
-                output.push_str(&render_rule_browser(
-                    &rule,
-                    options.hr_css_variables.as_ref(),
-                ));
+                output.push_str(&render_rule_browser(&rule, &options.hr_css_variables));
                 output.push('\n');
             }
             // Handle standard pulldown-cmark events
@@ -459,11 +454,12 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
 /// CSS (or downstream post-processing) can control the appearance.
 fn render_rule_browser(
     rule: &HorizontalRule,
-    vars: Option<&std::collections::HashMap<String, String>>,
+    vars: &std::collections::HashMap<String, String>,
 ) -> String {
-    match vars {
-        Some(map) if !map.is_empty() => rule.render_to_browser_with_inline_variables(map),
-        _ => rule.render_to_browser(),
+    if vars.is_empty() {
+        rule.render_to_browser()
+    } else {
+        rule.render_to_browser_with_inline_variables(vars)
     }
 }
 

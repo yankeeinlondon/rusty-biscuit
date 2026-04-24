@@ -753,17 +753,19 @@ mod tests {
     }
 
     #[test]
-    fn test_horizontal_rule_inside_blockquote_is_currently_transformed() {
-        // `> --- { style: waves }` puts a single-paragraph HR-like token
-        // inside a BlockQuote. pulldown-cmark emits a Paragraph *inside*
-        // the BlockQuote, so the RuleProcessor — which intercepts any
-        // simple single-text paragraph — currently transforms it into a
-        // `HorizontalRule` event. This test pins that behavior explicitly:
-        // the HR sits between the BlockQuote start/end tags.
+    fn test_horizontal_rule_inside_blockquote_is_transformed_per_spec() {
+        // `> --- { style: waves }` places a single-paragraph HR-like token
+        // inside a BlockQuote. pulldown-cmark emits a Paragraph *inside* the
+        // BlockQuote; RuleProcessor intercepts that simple single-text
+        // paragraph and transforms it into a `HorizontalRule` event, which
+        // stays wrapped by the surrounding BlockQuote start/end tags (the
+        // HR is not promoted to document level).
         //
-        // If a future iteration decides HR-inside-blockquote should be
-        // treated as literal text, this test is the canary that will
-        // force an update to `RuleProcessor` and to the darkmatter skill.
+        // This behavior is codified in
+        // `darkmatter/features/2026-04-18-hr/spec.md` §"Parsing Requirements"
+        // — bare `---`/`___`/`***` inside a blockquote remains a
+        // horizontal-rule block, and page-level `hr` frontmatter defaults
+        // apply exactly as they do at the top level.
         let events = process_text("> --- { style: waves }");
 
         let hr_count = events
@@ -772,7 +774,7 @@ mod tests {
             .count();
         assert_eq!(
             hr_count, 1,
-            "current behavior: HR-like text inside a blockquote IS transformed (see test doc): {events:?}"
+            "spec: HR-like text inside a blockquote IS transformed into a HorizontalRule event (see spec.md §Parsing Requirements): {events:?}"
         );
 
         // Confirm the HR is wrapped by BlockQuote start/end.

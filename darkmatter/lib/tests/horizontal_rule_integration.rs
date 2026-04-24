@@ -468,7 +468,7 @@ mod tests {
         let mut options = HtmlOptions::default();
         let mut vars = HashMap::new();
         vars.insert("hr-width".to_string(), "42%".to_string());
-        options.hr_css_variables = Some(vars);
+        options.hr_css_variables = vars;
         let overridden_html = as_html(&md, options).unwrap();
         assert!(
             !overridden_html.contains("var(--hr-width)"),
@@ -481,8 +481,8 @@ mod tests {
     }
 
     #[test]
-    fn test_html_inline_variables_none_preserves_var_tokens() {
-        // When `hr_css_variables` is None (the default), the SVG output
+    fn test_html_inline_variables_empty_preserves_var_tokens() {
+        // When `hr_css_variables` is empty (the default), the SVG output
         // must keep its `var(--hr-*, …)` expressions so page-level CSS
         // can control the appearance. This is the inverse of the
         // "override flows through" test.
@@ -490,7 +490,12 @@ mod tests {
 
         let markdown = "--- { style: dashes }\n";
         let md: darkmatter::markdown::Markdown = markdown.into();
-        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        let options = HtmlOptions::default();
+        assert!(
+            options.hr_css_variables.is_empty(),
+            "default hr_css_variables must be empty"
+        );
+        let html = as_html(&md, options).unwrap();
 
         assert!(
             html.contains("var(--hr-color,"),
@@ -521,5 +526,136 @@ mod tests {
             assert!(!terminal_result.is_empty());
             assert!(!html_result.is_empty());
         }
+    }
+
+    // ================================================================
+    // Phase 2: B3 / C2 — unquoted scalar frontmatter must preserve siblings
+    // ================================================================
+
+    #[test]
+    fn test_hr_frontmatter_unquoted_numeric_width_survives() {
+        // B3: a numeric `width: 20` used to make
+        // `hr_defaults_from_frontmatter` fail deserialization and drop
+        // ALL sibling keys. The shared-helper refactor coerces the number
+        // into a string, so `style`, `color`, and the numeric width all
+        // apply.
+        let markdown = "---\nhr:\n  style: dots\n  width: 20\n  color: red\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::Colors16);
+        options.max_width = Some(40);
+
+        let output = for_terminal(&md, options).unwrap();
+        // Dots pattern survives (proving `style: dots` was not dropped).
+        assert!(
+            output.contains('·') || output.contains('.'),
+            "dots style should survive numeric sibling: {output:?}"
+        );
+        // Width-20 means the rule line visibly spans 20 columns (use the
+        // ANSI-stripping helper because `color: red` wraps in escapes).
+        let rule_line = output
+            .lines()
+            .find(|l| l.contains('·') || l.contains('.'))
+            .expect("expected a rule line in output");
+        let visible = strip_ansi_escape_sequences(rule_line).chars().count();
+        assert!(
+            (1..=40).contains(&visible),
+            "rule width must respect 1..=term_width bounds: {visible} in {rule_line:?}"
+        );
+        assert_eq!(
+            visible, 20,
+            "numeric `width: 20` should resolve to 20 columns: {visible} in {rule_line:?}"
+        );
+        // Red ANSI escape survives (proving `color: red` was not dropped).
+        assert!(
+            output.contains("\x1b[31m") || output.contains("\x1b[91m"),
+            "color: red should emit a red ANSI escape: {output:?}"
+        );
+    }
+
+    #[test]
+    fn test_hr_frontmatter_unquoted_bool_sibling_survives() {
+        // A bool value for a recognized key still coerces to a String
+        // ("true" / "false"), which is never a valid enum value — but
+        // sibling keys (`style`, `color`) must survive.
+        let markdown =
+            "---\nhr:\n  style: waves\n  alignment: true\n  color: blue\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let html = as_html(&md, Default::default()).unwrap();
+        // Waves style survives.
+        assert!(html.contains("<path"), "waves style should survive: {html}");
+        // Color survives in the declared CSS custom property.
+        assert!(
+            html.contains("--hr-color: blue"),
+            "color should survive bool sibling: {html}"
+        );
+    }
+
+    #[test]
+    fn test_hr_frontmatter_non_mapping_does_not_panic() {
+        // `hr: 42` is neither a mapping nor absent — the output pipeline
+        // must fall back to component defaults without panicking. (The
+        // accompanying warn log assertion lives inside
+        // `darkmatter::markdown::block::hr_builder`'s own unit tests so the
+        // crate-scoped `tracing_test` subscriber captures the event.)
+        let markdown = "---\nhr: 42\n---\n\n---\n";
+        let md: Markdown = markdown.into();
+        let result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        assert!(
+            !result.is_empty(),
+            "non-mapping hr frontmatter must still render a default rule"
+        );
+    }
+
+    /// C5: bare `> ---` inside a blockquote is a horizontal-rule block per
+    /// the spec (`features/2026-04-18-hr/spec.md` §"Parsing Requirements"),
+    /// and page-level `hr` frontmatter defaults must apply inside the
+    /// blockquote just as they do at the top level.
+    ///
+    /// This test enforces both halves:
+    ///
+    /// - HTML: the waves SVG (`<path … stroke-linecap="round"`) lives
+    ///   *inside* `<blockquote>…</blockquote>` — the HR stays wrapped by
+    ///   the surrounding blockquote, not promoted to document level.
+    /// - Terminal: the output contains the waves glyph (`≋` for Unicode
+    ///   locales, `~` as the ASCII fallback).
+    #[test]
+    fn test_blockquote_hr_renders_with_frontmatter_defaults() {
+        let markdown = "---\nhr:\n  style: waves\n---\n\n> ---\n";
+        let md: Markdown = markdown.into();
+
+        let html = as_html(&md, Default::default()).unwrap();
+        assert!(
+            html.contains("<blockquote>"),
+            "expected a <blockquote> open tag: {html}"
+        );
+        assert!(
+            html.contains("</blockquote>"),
+            "expected a </blockquote> close tag: {html}"
+        );
+        // Waves renders as a `<path>` element in the SVG; confirm the path
+        // sits between the blockquote tags.
+        let bq_open = html
+            .find("<blockquote>")
+            .expect("blockquote open present (asserted above)");
+        let bq_close = html
+            .find("</blockquote>")
+            .expect("blockquote close present (asserted above)");
+        assert!(bq_open < bq_close, "blockquote tags must nest correctly: {html}");
+        let inside = &html[bq_open..bq_close];
+        assert!(
+            inside.contains("<svg"),
+            "waves SVG must live inside the blockquote: {html}"
+        );
+        assert!(
+            inside.contains("<path"),
+            "waves style uses a <path> element; expected it inside the blockquote: {html}"
+        );
+
+        let terminal = for_terminal(&md, TerminalOptions::default()).unwrap();
+        assert!(
+            terminal.contains('≋') || terminal.contains('~'),
+            "blockquote-HR terminal output must contain the waves glyph (≋ or ~): {terminal:?}"
+        );
     }
 }

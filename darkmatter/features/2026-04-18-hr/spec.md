@@ -191,6 +191,12 @@ Darkmatter must preserve standard Markdown behavior:
 - Attribute-block HR syntax is non-standard but supported as a Darkmatter extension.
 - `alignment` is the canonical key.
 - Unknown HR keys should be treated like any other unknown key.
+- Bare `---`, `___`, or `***` inside a blockquote (`> ---`) remains a
+  horizontal-rule block. Page-level `hr` frontmatter defaults apply inside
+  blockquotes just as they do at the top level. The attribute-block form
+  (`> --- { style: waves }`) is also honored. The resulting
+  `HorizontalRule` event stays wrapped by the surrounding blockquote
+  start/end tags — it is not promoted to the document level.
 
 ## Validation Requirements
 

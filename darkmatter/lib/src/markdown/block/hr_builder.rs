@@ -90,18 +90,83 @@ pub(crate) fn build_rule_with_defaults(
     rule
 }
 
+/// Resolves the `hr:` block from the document's frontmatter into a
+/// [`HorizontalRuleAttrs`] suitable for feeding
+/// [`build_rule_with_defaults`].
+///
+/// The frontmatter backing store is `serde_json::Value`, so a direct
+/// `frontmatter.get::<HorizontalRuleAttrs>("hr")` call fails fast on any
+/// non-string scalar (e.g., `hr: { width: 50 }`), dropping every sibling
+/// key. To keep authoring ergonomic and to match the attribute-block
+/// path's coercion (see `RuleProcessor::yaml_value_as_string`), this
+/// helper walks the `hr` mapping entry-by-entry and coerces numbers and
+/// bools to strings via [`json_scalar_as_string`].
+///
+/// ## Notes
+///
+/// - Non-mapping `hr` values (e.g., `hr: 42`, `hr: "foo"`) emit a
+///   `tracing::warn!` and return `None`.
+/// - Unknown keys emit a `tracing::warn!` mirroring the attribute-block
+///   path's message and are dropped from the result.
+/// - Non-scalar values (arrays, objects, `null`) for recognized keys emit
+///   a `tracing::warn!` and are skipped — remaining sibling keys still
+///   apply.
 pub(crate) fn hr_defaults_from_frontmatter(
     md: &crate::markdown::Markdown,
 ) -> Option<HorizontalRuleAttrs> {
-    match md.frontmatter().get::<HorizontalRuleAttrs>("hr") {
-        Ok(defaults) => defaults,
-        Err(err) => {
+    let value = md.frontmatter().as_map().get("hr")?;
+    let map = match value {
+        serde_json::Value::Object(map) => map,
+        other => {
             tracing::warn!(
-                error = %err,
-                "invalid hr frontmatter; using horizontal rule component defaults"
+                value = ?other,
+                "non-mapping `hr` frontmatter; using horizontal rule component defaults"
             );
-            None
+            return None;
         }
+    };
+
+    let mut attrs = HorizontalRuleAttrs::default();
+    for (key, entry) in map {
+        let Some(value) = json_scalar_as_string(entry) else {
+            tracing::warn!(
+                key = %key,
+                value = ?entry,
+                "non-scalar value in `hr` frontmatter; ignoring"
+            );
+            continue;
+        };
+
+        match key.as_str() {
+            "style" => attrs.style = Some(value),
+            "alignment" => attrs.alignment = Some(value),
+            "weight" => attrs.weight = Some(value),
+            "width" => attrs.width = Some(value),
+            "color" => attrs.color = Some(value),
+            other => {
+                tracing::warn!(
+                    key = %other,
+                    value = %value,
+                    "unknown horizontal rule attribute; ignoring"
+                );
+            }
+        }
+    }
+
+    Some(attrs)
+}
+
+/// Coerces a JSON scalar to a Rust `String`, returning `None` for
+/// non-scalar shapes (arrays, objects, null). Mirrors
+/// [`RuleProcessor::yaml_value_as_string`](crate::markdown::block::RuleProcessor)
+/// on the attribute-block path so both sites agree on which values are
+/// considered string-coercible.
+fn json_scalar_as_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
     }
 }
 
@@ -189,6 +254,87 @@ mod tests {
     use super::*;
     use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
     use biscuit_terminal::terminal::Terminal;
+
+    // --------------------------------------------------------------
+    // B3 / C2 — `hr_defaults_from_frontmatter` must coerce non-string
+    // scalars and preserve siblings; non-mapping `hr` values warn and
+    // return `None`.
+    // --------------------------------------------------------------
+
+    fn make_md_with_hr_frontmatter(value: serde_json::Value) -> crate::markdown::Markdown {
+        let mut fm = crate::markdown::Frontmatter::new();
+        fm.as_map_mut().insert("hr".to_string(), value);
+        crate::markdown::Markdown::with_frontmatter(fm, "---\n".to_string())
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_numeric_width_preserves_siblings() {
+        let md = make_md_with_hr_frontmatter(serde_json::json!({
+            "style": "dots",
+            "width": 20,
+            "color": "red",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        assert_eq!(attrs.style.as_deref(), Some("dots"));
+        assert_eq!(
+            attrs.width.as_deref(),
+            Some("20"),
+            "numeric width must be coerced to string"
+        );
+        assert_eq!(attrs.color.as_deref(), Some("red"));
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_bool_value_preserves_siblings() {
+        let md = make_md_with_hr_frontmatter(serde_json::json!({
+            "style": "waves",
+            "alignment": true,
+            "color": "blue",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        // `true` coerces to the string "true" (which is not a recognized
+        // alignment value), but siblings still apply.
+        assert_eq!(attrs.style.as_deref(), Some("waves"));
+        assert_eq!(attrs.alignment.as_deref(), Some("true"));
+        assert_eq!(attrs.color.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn hr_defaults_from_frontmatter_non_mapping_warns_and_returns_none() {
+        let md = make_md_with_hr_frontmatter(serde_json::json!(42));
+        let attrs = hr_defaults_from_frontmatter(&md);
+        assert!(attrs.is_none(), "non-mapping hr value must yield None");
+        assert!(
+            logs_contain("non-mapping"),
+            "expected a warn log mentioning non-mapping hr frontmatter"
+        );
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn hr_defaults_from_frontmatter_unknown_key_warns_and_drops_it() {
+        let md = make_md_with_hr_frontmatter(serde_json::json!({
+            "style": "dashes",
+            "bogus": "value",
+        }));
+        let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
+        assert_eq!(attrs.style.as_deref(), Some("dashes"));
+        assert!(
+            logs_contain("unknown horizontal rule attribute"),
+            "expected a warn log for unknown `bogus` key"
+        );
+    }
+
+    #[test]
+    fn hr_defaults_from_frontmatter_missing_key_returns_none() {
+        // No `hr` at all — `None` without a warn.
+        let md = crate::markdown::Markdown::with_frontmatter(
+            crate::markdown::Frontmatter::new(),
+            "---\n".to_string(),
+        );
+        assert!(hr_defaults_from_frontmatter(&md).is_none());
+    }
 
     #[test]
     fn build_rule_with_all_attrs_applies_them() {
