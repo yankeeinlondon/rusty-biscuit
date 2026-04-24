@@ -13,6 +13,36 @@ blue := '\033[34m'
 magenta := '\033[35m'
 cyan := '\033[36m'
 
+ImplementPhasePrompt := "../prompts/implement-phase.md"
+
+
+implement-spec filter="" agent="" model="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "Preparing to {{italic}}implement{{reset}} a {{bold}}feature specification{{reset}}. If the specification"
+    echo -e "has a {{bold}}{{italic}}plan{{reset}} file then you will be allowed to choose the plan file"
+    echo -e "to execute off of a proper plan using the {{blue}}$(just _link "{{ImplementPhasePrompt}}"){{reset}}"
+    echo -e "prompt. However if that's what you wanted to do then you should probably "
+    echo -e "just use {{yellow}}just implement-plan{{reset}}."
+    echo
+    echo -e "This {{yellow}}recipe{{reset}} is more for simple fixes or features which you don't believe"
+    echo -e "a formal plan file is not strictly required to complete successfully."
+    echo
+    choice="$(just _choose_spec_doc_plan)"
+    if [[ -z "${choice}" == "None" ]]; then
+        echo "Ok bye."
+        echo
+    elif [[ "${choice}" =~ ^.*plan.*\.md ]]; then
+        just implement-plan "${choice}"
+    else
+
+    fi
+    use_agent="{{agent}}"
+    use_model="{{model}}"
+
+
 
 
 # implements a plan, phase by phase
@@ -32,6 +62,8 @@ implement-plan filter="":
         exit 1
     fi
 
+    total="$(md get "${plan}" phases)"
+    memory="$(md get "${plan}" memory)"
     current="$(md get "${plan}" start_phase 2>/dev/null || echo 1)"
     if [[ ! "${current}" =~ ^[0-9]+$ ]]; then
         current=1
@@ -59,13 +91,14 @@ implement-plan filter="":
 
     echo
     while true; do
-        claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y ${model} || (
+        claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} total_phases=${total} memory="${memory}" --${agent} -y ${model} || (
             echo
             echo -e "{{red}}{{bold}}ERROR:{{reset}} the implementation of the plan {{blue}}$(just _link "${plan}") was unable to complete phase {{yellow}}${current}{{reset}}" || echo "failed at phase ${current}"
             md set "${plan}" "start_phase" ${current} || true
             echo
             exit 5
         )
+        just _message "Phase ${current} (_of ${total}_) of the plan '${plan}' was implemented"
         echo
         git add . || (
             echo -e "- phase ${current} of the ${plan} plan appears to have had no changes to the $(sniff repo package-area) package area"
@@ -88,11 +121,11 @@ implement-plan filter="":
         ((current++))
     done
     echo
-    echo -e "The {{blue}}${link}{{reset}} plan has completed ({{dim}}{{italic}}${phases} phases{{reset}})"
+    echo -e "The {{blue}}${link}{{reset}} plan has implemented all ({{dim}}{{italic}}${phases} phases (of ${total}){{reset}})"
     echo
 
 
-
+# create a plan from a feature spec (and optionally design document)
 plan-feature spec="" design="":
     #!/usr/bin/env bash
     set -euo pipefail
