@@ -86,13 +86,12 @@ fn run_sequence_inner(
     )
     .entered();
 
-    let plan = composition::resolve_sequence_plan(&source)?
-        .ok_or_else(|| {
-            eyre!(
-                "file '{}' does not define a `sequence` frontmatter property",
-                file
-            )
-        })?;
+    let plan = composition::resolve_sequence_plan(&source)?.ok_or_else(|| {
+        eyre!(
+            "file '{}' does not define a `sequence` frontmatter property",
+            file
+        )
+    })?;
 
     let set_overrides =
         super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
