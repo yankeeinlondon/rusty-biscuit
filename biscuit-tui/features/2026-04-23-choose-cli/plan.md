@@ -58,6 +58,14 @@ source_files_during_phase_6:
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase6: []
+source_files_during_phase_7:
+  - biscuit-tui/lib/src/core/fuzzy.rs
+  - biscuit-tui/lib/src/core/mod.rs
+  - biscuit-tui/lib/src/lib.rs
+  - biscuit-tui/lib/src/prelude.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase7: []
 packages:
   - tui-chrome
   - tui-chrome-cli
