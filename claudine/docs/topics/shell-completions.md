@@ -1,27 +1,35 @@
 # Shell Completions
 
 Claudine ships dynamic shell completions for `bash`, `zsh`, and `fish`.
-Typing `<TAB>` on `claudine compose`, `claudine inline-compose`,
-`claudine sequence`, or a `--append-system-prompt` / `--replace-system-prompt`
-value slot surfaces markdown files from a small set of **curated
-locations** — prompts and sequences that live where Claudine expects
-them. Every other argument position falls through to the shell's default
-behavior (filenames, flag names, etc.).
+On every `<TAB>` the generated script invokes a hidden subcommand,
+`claudine __complete`, which classifies the cursor position, dispatches
+to a slot-specific completer, and prints one candidate per line on
+stdout. Non-targeted slots produce no candidates, which lets each shell
+fall back to its native file / flag completion.
 
-This document introduces how completion is wired up today, which
-positions actually fire, which directories are searched, and where the
-system is most naturally extended.
+This document is the user-facing reference for the completion surface:
+how to install it, what the root menu offers, how composition-command
+completion behaves (per mode), how `@`-gated setter values work, why
+the legacy shells (`powershell`, `elvish`) behave differently, and how
+the engine hits its sub-100 ms target without an on-disk cache.
 
-- Engine: [`claudine/cli/src/completion/supplement.rs`](../../cli/src/completion/supplement.rs)
-- Shell scripts: [`claudine/cli/src/completion/bootstrap.rs`](../../cli/src/completion/bootstrap.rs)
-- `__complete` entry: [`claudine/cli/src/commands/completions.rs`](../../cli/src/commands/completions.rs)
-- Source-of-truth partial-completion API: [`biscuit-file/lib/src/file_reference/resolve.rs`](../../../biscuit-file/lib/src/file_reference/resolve.rs)
-- Curated-scope walker: [`sniff/lib/src/filesystem/docs.rs`](../../../sniff/lib/src/filesystem/docs.rs)
+Key code:
+
+- Engine entry point — [`claudine/cli/src/completion/engine.rs`](../../cli/src/completion/engine.rs)
+- Root menu — [`claudine/cli/src/completion/root_menu.rs`](../../cli/src/completion/root_menu.rs)
+- Composition pipeline — [`claudine/cli/src/completion/composition.rs`](../../cli/src/completion/composition.rs)
+- Setter-value completer — [`claudine/cli/src/completion/setter_value.rs`](../../cli/src/completion/setter_value.rs)
+- Scope resolution — [`claudine/cli/src/completion/scopes.rs`](../../cli/src/completion/scopes.rs)
+- Walker — [`claudine/cli/src/completion/walker.rs`](../../cli/src/completion/walker.rs)
+- Frontmatter gates — [`claudine/cli/src/completion/frontmatter.rs`](../../cli/src/completion/frontmatter.rs)
+- Fuzzy matcher — [`claudine/cli/src/completion/fuzzy.rs`](../../cli/src/completion/fuzzy.rs)
+- Shell scripts — [`claudine/cli/src/completion/bootstrap.rs`](../../cli/src/completion/bootstrap.rs)
+- `__complete` CLI contract — [`claudine/cli/src/commands/completions.rs`](../../cli/src/commands/completions.rs)
 
 ## Installation
 
-`claudine completions <shell>` prints the registration script for a
-given shell. Redirect it into the shell's completion file once:
+`claudine completions <shell>` prints the registration script for the
+requested shell. Redirect it into the shell's completion file once:
 
 ```sh
 # Bash
@@ -33,315 +41,472 @@ claudine completions zsh > "${fpath[1]}/_claudine"
 # Fish
 claudine completions fish > ~/.config/fish/completions/claudine.fish
 
-# PowerShell / Elvish (legacy one-line bootstrap; see below)
+# PowerShell / Elvish (legacy one-line bootstrap — see "Legacy shells")
 claudine completions powershell >> $PROFILE
 claudine completions elvish    >> ~/.elvish/rc.elv
 ```
 
-Open a new shell (or re-source the rc file) and completion is live.
+Open a new shell (or re-source the rc file) and completion is live. The
+zsh script autoloads and runs `compinit` on demand so `source <(claudine
+completions zsh)` early in `.zshrc` still works.
 
-The zsh script is self-healing against rc ordering: if sourced before
-`compinit` has initialized, it autoloads and runs `compinit` on demand
-so the `compdef _claudine claudine` registration always succeeds — that
-guard is why `source <(claudine completions zsh)` early in a `.zshrc`
-still works.
+**Why the scripts shell out to `__complete` on every `<TAB>`.** The
+candidate set depends on filesystem state — which markdown files exist,
+which ones have the right frontmatter, which scopes apply from the
+user's cwd — so a statically generated completion script cannot
+produce it. The generated script is static; the candidates are fresh on
+every press.
 
-> **Backwards compatibility.** The previous one-liner
-> `source <(COMPLETE=<shell> claudine)` activates a legacy
-> `clap_complete`-driven path that still compiles but does not carry any
-> of the rules below. Users stay on the legacy path until they run
-> `claudine completions <shell>` again and replace the installed script.
+## Root-level menu
 
-## How dynamic completion works
+When the cursor sits at the subcommand slot (argv position 1, or after
+a run of global flags), the engine emits a curated, spec-ordered
+subcommand list. The order is:
 
-On every `<TAB>`, the generated script collects the full command line
-the user has typed plus the cursor index, then shells out to:
+1. **Composition** — `compose`, `inline-compose`, `sequence`.
+2. **Wrapped execution** — `claude`, `codex`, `gemini`, `goose`, `kimi`,
+   `opencode`, `qwen`.
+3. **Shared resources** — `skills`, `commands`, `agents`, `mcp`.
+4. **Hooks & actions** — `hooks`, `actions`.
+5. **Administration** — `sync`, `uninstall`, `providers`, `logs`,
+   `completions`, `config`.
+6. **`init`** — conditional; see below.
+
+**Why this order.** Composition is the most-used subcommand surface in
+daily Claudine use, followed by the provider wrappers. Shared resources
+and hook machinery come next because users reach for them repeatedly
+during setup. Administration is last because those commands are
+typically run once per project.
+
+### `init` visibility rule
+
+`init` is elided from the root menu when **either**:
+
+- a user-scope Claudine config exists at `~/.claudine/config.json`
+  (also accepted: `config.json5`), **or**
+- a repo-scope Claudine config exists at `<repo>/.claudine/config.json`
+  when cwd is inside a detected git repo.
+
+**Why.** `init` is a one-time wizard. Surfacing it in the root menu
+after Claudine is already configured crowds the menu with a command the
+user will essentially never run again. Presence-only checks (`fs::metadata`)
+keep the rule fast — the configs are never parsed.
+
+### `--help` rule
+
+The **only** flag offered at the root level is `--help`. Typing `-`,
+`--`, `-h`, or any `--h…` prefix resolves to `--help` as the sole
+candidate. Any other flag-shaped partial returns zero candidates so the
+shell stays silent rather than firing its generic flag completion.
+
+**Why.** Global flags (`--verbose`, `--debug`, `--plain`) are fully
+documented in `claudine --help`; offering them at every `<TAB>`
+adds noise without improving discovery. `--help` is the one flag that
+*is* useful from a cold start, so we keep it in the menu.
+
+## Composition commands
+
+`compose`, `inline-compose`, and `sequence` share one completion
+pipeline, parameterised by a `ComposeMode`. Mode determines:
+
+- which scopes are walked;
+- which frontmatter gate files must pass;
+- which additional directories (`docs/`, `skills/`) extend the scope
+  set.
+
+All three also share the partial-length progression, fuzzy matching
+rules, magic-path resolution, `.gitignore` semantics, and the
+`MAX_CANDIDATES = 500` budget.
+
+### Scopes
+
+The engine resolves a `ScopeSet` in priority order (earlier scopes win
+on dedup):
+
+1. **Repo root** — `<repo>/prompts/` when cwd is inside a detected
+   git repo.
+2. **Package-area root** — `<repo>/<area>/prompts/` when `<area>` is
+   the enclosing monorepo area from `sniff` and is not the virtual
+   `"root"` package.
+3. **Package root** — `<pkg>/prompts/` when cwd is inside a discrete
+   package.
+4. **Repo Claudine scope** — `<repo>/.claudine/prompts/`.
+5. **User Claudine scope** — `~/.claudine/prompts/`.
+6. **Extras** — mode-specific (see below).
+
+**Why a single scope resolution per invocation.** `sniff::detect_repo_structure`
+can shell out to `cargo metadata` on first call. Threading a single
+`ScopeContext` through the pipeline keeps that cost bounded at one
+shell-out per `<TAB>`, not one per scope.
+
+### Prefix-length progression
+
+| Partial length | Behaviour |
+|---|---|
+| 0 chars (empty, `@`, committed directory) | Enumerate files only |
+| 1–2 chars | Fuzzy file matching; no directory suggestions |
+| 3+ chars | Fuzzy file + directory matching |
+
+**Why.** Directory names generate lots of candidates; surfacing them at
+one or two characters drowns the file hits the user is after. By three
+characters the user has narrowed the search enough that directory
+candidates become useful rather than noisy.
+
+### Fuzzy vs. prefix matching
+
+Matching is **subsequence fuzzy** on the filename stem (case-insensitive)
+with directory components considered once the partial reaches three
+characters. Empty partial and committed-directory forms skip matching
+entirely and emit everything in the walked scope.
+
+**Why subsequence.** Users routinely type prompts by abbreviation
+(`@omp` → `prompts/omnipotent.md`). Strict prefix matching would
+force them to remember the exact leading characters of every file.
+
+### Magic `@` resolution
+
+A partial beginning with `@` is a magic path. It selects the same
+walker roots as a plain partial, but the emitted candidate is the
+resolved path relative to the repo root (or cwd when outside a repo).
+The `@` sigil is **stripped** on selection.
 
 ```text
-claudine __complete --current <INDEX> -- <argv...>
+claudine compose @plan<TAB>
+→ prompts/plan.md
 ```
 
-`<argv...>` starts with the binary name at position 0 (`claudine`) and
-includes every token through the one at the cursor. `__complete` is a
-hidden subcommand that intentionally skips the main CLI's startup path
-— it does not load config, telemetry, or the wrapper pipeline. It
-classifies the cursor position, applies the rules below, and prints one
-candidate per line on stdout. Each shell then either presents those
-candidates to the user or — if stdout is empty — falls back to its
-native file completion (`_files` for zsh, `-o bashdefault -o default`
-for bash, fish's own filename fallback via `-a` on zero output).
+**Why strip the sigil.** The runtime composition pipeline treats `@` as
+a marker for "resolve from the scope tree." Once completion has resolved
+the file, the marker has done its job; leaving it in would force the
+shell to re-resolve on every subsequent edit.
 
-### Why dynamic (and not static `clap_complete` output)
+### Committed directory
 
-`clap_complete` can generate a static completion script from the clap
-command tree, but it cannot see into subcommand-specific semantics like
-"only markdown files inside `prompts/`" or "filenames that pass a
-frontmatter validator." Every `<TAB>` must re-query the filesystem, so
-we run the engine in-process via a subprocess on each invocation. The
-shell script is static; the candidates are fresh.
+A partial ending in `/` (or preceded by any path segment) is a committed
+directory — the user has narrowed to a specific subtree. The walker
+stays inside that subtree and enumerates everything the mode contract
+accepts.
 
-## What positions trigger completion
+```text
+claudine compose prompts/<TAB>
+→ prompts/plain.md
+→ prompts/plan.md
+→ prompts/sequence.md
+```
 
-The classifier in `supplement.rs` only fires for these exact
-argument positions. Everywhere else the shell's default behavior
-applies.
+**Why.** Committed directories are intentional scope narrowing. Walking
+outside them would surprise the user by mixing files from scopes they
+did not ask for.
 
-| Position | Subcommands |
-|---|---|
-| Positional `<FILE>` (the first non-flag argument) | `compose`, `inline-compose`, `sequence` |
-| `--append-system-prompt <FILE>` / `--asp <FILE>` | `compose`, `inline-compose`, `sequence`, plus every wrapper: `claude`, `codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen` |
-| `--replace-system-prompt <FILE>` / `--rsp <FILE>` | same 10 subcommands |
+### Per-mode contracts
 
-Other positions — subcommand names, flag names, global flags, setter
-syntax (`key=value`), arbitrary trailing tokens — return zero custom
-candidates so the shell's default completion takes over.
+#### `compose`
 
-## What token shapes are recognized
+- **Scope extras:** none.
+- **Frontmatter gate:** extension only (`.md`). No `prompt` or
+  `sequence` key required.
+- **Files with a `prompt` key are excluded** so the composition pipeline
+  does not accidentally run them as an inline-compose.
 
-The two entry forms supported by
-`biscuit_file::FileReference::complete_partial` both fire:
+**Why exclude `prompt`-bearing files.** `compose` runs the body as-is,
+but a file whose frontmatter has `prompt` is an inline-compose source
+document — running it through `compose` would emit the unrendered body
+instead of the generated content. Dropping them from completion steers
+the user to `inline-compose` for those files.
 
-| Partial | Form | Meaning |
-|---|---|---|
-| `@…` | Magic | `@`-prefixed file reference |
-| `prompts/…`, `sequences/…`, bare names | Implicit-relative | File reference resolved relative to a known scope |
+#### `inline-compose`
 
-Anything else — `!pkg`, `vault:x`, `./local`, `../parent`, `/abs/path`,
-`%VAR`, `{{VAR}}` — returns zero candidates and the shell falls back to
-default behavior. `./` / `../` traversal UI is deliberately **not** a
-supplement form; the legacy `CompleteEnv` path offered it and the
-current engine does not.
+- **Scope extras:** `<repo>/docs/`; agent-skill peer directories
+  (`.claude/skills/`, `.codex/skills/`, …) with `follow_links = false`.
+- **Frontmatter gate:** the file must have a non-empty string `prompt`
+  key.
 
-## Current scope — what gets searched
+**Why the extras.** Inline-compose sources often live under `docs/` as
+spec drafts or design documents, and agent-skill files are prime inputs
+for inline generation. Skipping symlinks in agent-skill scopes avoids
+duplicates from Claudine's own cross-provider linker.
 
-Only three directory roots are walked, in order:
+#### `sequence`
 
-1. **Repo scope** — `<repo>/prompts/` and `<repo>/sequences/` when cwd
-   is inside a git repository.
-2. **Package-area scope** — `<repo>/<area>/prompts/` and
-   `<repo>/<area>/sequences/` where `<area>` is the enclosing package
-   area reported by `sniff::package_area_for_dir`. This is skipped when
-   the area is the virtual `"root"` package.
-3. **User scope** — `~/.claudine/prompts/` and `~/.claudine/sequences/`.
+- **Scope extras:** same as `inline-compose` (`docs/` + agent-skill
+  peers, `follow_links = false`).
+- **Frontmatter gate:** the file must have a `sequence` key that
+  resolves to an inline list or an external `.yaml` / `.yml` file.
 
-There is **no broad repo scan** — earlier revisions walked the entire
-repo once the typed partial reached 3+ meaningful characters, and that
-behavior was removed on 2026-04-18 because it flooded candidate lists
-with every `.md` file in the workspace. Today the engine is strictly
-scope-bounded.
+**Why resolve external references at completion time.** A dangling
+external reference would render a file that never actually runs; the
+user would lose trust in the candidate list the first time a
+suggestion failed. The validator resolves inline or external sequence
+specs so every offered candidate is runnable.
 
-If cwd is not inside a git repository, the repo and area scopes drop
-out and only the user scope applies. `~/.claudine/` is intentionally
-the only home-level directory — the raw `$HOME/prompts/` is **not**
-searched.
+### `.gitignore` honored
 
-Per-path refinements:
+The walker uses `ignore::WalkBuilder` (same crate `ripgrep` builds on),
+which honors `.gitignore` / `.git/info/exclude` / global git ignore
+rules at every depth. Ignored markdown never surfaces.
 
-- Walking uses `sniff::collect_markdown_paths`, which is backed by
-  `ignore::WalkBuilder`. That means `.gitignore` / `.git/info/exclude`
-  / global git ignore rules are honored inside the curated scopes —
-  gitignored markdown never surfaces.
-- When the user has already committed to a subdirectory via `/`
-  (e.g. `prompts/<cursor>` or `@prompts/<cursor>`), the curated subdir
-  list collapses to just that subdirectory under each scope base.
-- Candidates are deduplicated by canonical path, so single-crate areas
-  where the area root coincides with the repo root (e.g. `tabby`,
-  `tui`) don't produce duplicates.
+**Why.** `.gitignore` is the project's own declaration of "this file
+is noise." Overriding it in completion would second-guess the
+project's own author.
 
-## Matching semantics
+### `_`-prefixed files and directories are elided
 
-- **Case-insensitive substring** on the filename with the trailing
-  `.md` stripped **for matching only**. Directory components are never
-  considered.
-- Returned candidates keep their full `.md` extension so the shell
-  inserts a valid file reference.
-- Every candidate is a `*.md` file. Directories, non-markdown files,
-  and setter-shaped tokens (`KEY=`) never appear.
+Filenames and directories that begin with an underscore (`_completed/`,
+`_draft.md`) are dropped from completion even if `.gitignore` does not
+cover them.
 
-Examples (from a repo whose `<repo>/prompts/` contains `plan.md`,
-`plain.md`, `suppress.md`):
+**Why.** The `_` prefix is the repo convention for archived/in-progress
+artefacts (see `features/_completed/`); listing them in completion
+would cause the user to open stale documents more often than fresh
+ones.
 
-| Typed | Result |
-|---|---|
-| `@` | every `.md` under the three scopes (landing menu) |
-| `@plan` | `@prompts/plan.md` |
-| `plan` | `prompts/plan.md` |
-| `@omp` | `@prompts/prompt.md` (mid-filename substring) |
-| `@prompts/` | every `.md` under `<repo>/prompts/` (path-reset) |
-| `./local` | zero candidates (unsupported form) |
+### Symlinks
 
-## Shell-specific notes
+Generic scopes follow symlinks (`follow_links = true`). Agent-skill
+peer scopes do not.
 
-### Zsh — substring completion and `compadd -U`
+**Why the split.** Claudine's linker symlinks a shared skill body into
+every provider's skill directory (`.claude/skills/`, `.codex/skills/`,
+etc.). Following those symlinks would make the same file appear 7×
+under 7 different paths. Suppressing symlink follow in the agent-skill
+scopes keeps each skill single-entry.
 
-The supplement engine returns **substring** matches, which means a
-candidate may not start with what the user typed. Zsh's default
-`compadd` behavior would silently drop those candidates and — worse —
-collapse them into an empty "unambiguous common prefix" that erases
-the typed text. The generated `_claudine` function therefore:
+### Candidate budget
 
-- Sets `compstate[insert]=menu` to force menu-completion instead of
-  common-prefix insertion.
-- Passes `-U` to `compadd` so the engine's matches survive unmolested.
-- Passes `-Q` to skip double-quoting path specials and `-S ''` to
-  suppress the trailing space after a unique match.
+The walker stops at `MAX_CANDIDATES = 500` entries per invocation.
 
-These flags together are what make `claudine compose plan<TAB>`
-surface `prompts/plan.md` instead of replacing `plan` with nothing.
+**Why.** Beyond ~500 candidates no shell UI is usable anyway. Stopping
+early caps the wall-clock cost of pathological inputs (a user typing
+`<TAB>` in a repo with 10 000 markdown files).
 
-### Fish — no native fallback
+## Setter values
 
-The fish script registers `complete -c claudine -f -a …` with `-f`,
-which means fish does **not** fall back to file completion when the
-supplement returns nothing. This is a known gap; non-targeted
-positions on fish see no completion at all. A future fix would either
-drop `-f` or add an explicit filename-completion fallback from the
-callback.
+Inside a composition subcommand, a token of shape `name=value` is a
+frontmatter setter override. The completer triggers on the value slot
+when the value begins with `@` (or a quote followed by `@`). Any other
+leading character returns zero candidates.
 
-### PowerShell and Elvish
+### Trigger shape
 
-Both retain the legacy `source <(COMPLETE=<shell> claudine)` bootstrap.
-The supplement contract and every rule in this document apply to
-bash/zsh/fish only. Adding PowerShell coverage would require
-rewriting the registration to match the `__complete` protocol.
+```text
+claudine compose file.md spec=@d<TAB>
+→ spec='docs/plan.md'
+→ spec='docs/spec.md'
+```
 
-## Architecture at a glance
+The completer walks `docs/`, `features/`, `fixes/`, and `reviews/` at
+three scope levels:
+
+1. Repo root.
+2. Package-area root.
+3. Package root.
+
+**Why only four subdirs.** These are the directories a composition
+frontmatter setter realistically points at: documentation, planning
+artefacts, fix drafts, review outputs. Offering the entire repo would
+drown the candidate list.
+
+### Quote normalisation
+
+A leading `"` or `'` on the typed value is stripped for classification.
+The emitted candidate always wraps the resolved value in single quotes.
+
+```text
+claudine compose file.md spec="@d<TAB>
+→ spec='docs/plan.md'
+```
+
+**Why normalise to single quotes.** The shell word-splits on double
+quotes but preserves single quotes literally, so a single-quoted
+candidate is safe regardless of how the user started the value. That
+also matches the repo convention for YAML-like setter values in
+Markdown frontmatter overrides.
+
+### Non-`@` values emit nothing
+
+A setter whose value does not start with `@` is treated as a literal
+and produces zero candidates.
+
+**Why.** Setter values are often small strings (booleans, numbers,
+short identifiers) that completion cannot meaningfully suggest. Leaving
+that slot to the shell's default lets the user type freely without
+spurious popups.
+
+## Other commands
+
+Every non-composition subcommand — `skills`, `commands`, `hooks`,
+`mcp`, `logs`, wrappers, everything — falls through to the shell's
+default completion. The engine emits zero candidates so each shell
+renders whatever its native completion produces (file names on
+bash/zsh/fish).
+
+Value slots on `--append-system-prompt` / `--replace-system-prompt`
+are **not** covered by the new engine. They resolve to the shell's
+native file completion.
+
+**Why.** The spec intentionally scopes the curated completion surface
+to composition commands. Extending it to every wrapper flag would grow
+the maintenance cost without a proportional discovery win — wrappers
+already document their flag sets, and a curated candidate list here
+would frequently mismatch what the user actually wants to type.
+
+## Performance optimization
+
+The engine targets **≤100 ms wall-clock** from `__complete` entry to
+last byte of stdout. The default path does not use an on-disk cache;
+every press is a fresh scan.
+
+### Lazy scope resolution
+
+Scopes are discovered in priority order. `sniff::detect_repo_structure`
+runs exactly once per `__complete` invocation and its result is
+threaded through `ScopeContext`, so repeated scope queries do not
+re-shell to `cargo metadata`.
+
+### Extension gate first
+
+Every file is checked by extension (`.md` / `.markdown` /
+`.yaml` / `.yml`) before any frontmatter parse. The bulk of files the
+walker sees never get opened.
+
+### 1 MiB frontmatter cap
+
+Files larger than `MAX_FRONTMATTER_BYTES = 1 MiB` skip frontmatter
+parsing. This protects against pathological inputs (a 50 MB generated
+document under `docs/`) without penalising legitimate markdown sources.
+
+### Candidate budget
+
+`MAX_CANDIDATES = 500` bounds the walker's work regardless of repo
+size.
+
+### Profiling
+
+Set `RUST_LOG=claudine::completion=trace` and
+`CLAUDINE_COMPLETION_PROFILE=1` to capture per-phase timing spans.
+Tracing writes to a log file because shells swallow stderr on
+completion and stdout is reserved for candidates.
+
+### No cache today
+
+The engine does not persist candidates between invocations. The current
+performance budget is met by the scope / frontmatter / budget gates
+above. A stale-while-revalidate cache is reserved for future
+activation if profiling ever shows a p95 > 150 ms on representative
+hardware.
+
+## Legacy shells
+
+PowerShell and Elvish retain the legacy one-line bootstrap:
+
+```sh
+claudine completions powershell >> $PROFILE
+# →  & { $env:COMPLETE="powershell"; claudine } | Out-String | Invoke-Expression
+```
+
+That bootstrap activates `clap_complete::CompleteEnv`, which derives
+candidates directly from the clap command tree — subcommand names and
+flag names only. None of the curated composition / setter / magic-path
+rules apply on these shells.
+
+**Why the gap is intentional.** `clap_complete`'s dynamic path on
+PowerShell / Elvish requires a different callback contract than the
+one the new engine exposes. Porting it would double the surface
+without doubling the user base. The gap is documented here so users
+on those shells know what to expect.
+
+## Examples
+
+### Root menu from cold
+
+```text
+$ claudine <TAB>
+compose        inline-compose  sequence
+claude         codex           gemini          goose
+kimi           opencode        qwen
+skills         commands        agents          mcp
+hooks          actions
+sync           uninstall       providers       logs
+completions    config
+```
+
+### Root menu when no configs exist
+
+Add `init` to the end of the list above.
+
+### Partial `com` at the root
+
+```text
+$ claudine com<TAB>
+compose        commands        completions
+```
+
+### Composition with a magic path
+
+```text
+$ claudine compose @plan<TAB>
+→ prompts/plan.md
+```
+
+### Inline-compose pulling from `docs/`
+
+```text
+$ claudine inline-compose @spec<TAB>
+→ docs/spec.md
+→ docs/feature-spec.md
+```
+
+### Sequence against an external YAML
+
+```text
+$ claudine sequence @re<TAB>
+→ prompts/release.md        # has `sequence: steps.yaml`
+```
+
+### Setter override with a quote
+
+```text
+$ claudine compose file.md spec="@p<TAB>
+→ spec='docs/plan.md'
+→ spec='features/plan.md'
+```
+
+### Wrapper passthrough
+
+```text
+$ claudine claude --<TAB>
+# → shell native completion (filenames, clap-exported flags)
+```
+
+## Architecture
 
 ```mermaid
-flowchart LR
-    A["<TAB>"] --> B["Generated shell script<br/>(bash/zsh/fish)"]
-    B --> C["claudine __complete<br/>--current N -- argv..."]
-    C --> D["classify_completion_target"]
-    D -- "no target" --> E["empty stdout<br/>→ shell fallback"]
-    D -- "Positional or FileFlag" --> F["emit_candidates"]
-    F --> G["biscuit_file::<br/>FileReference::complete_partial"]
-    G --> H["curated_roots<br/>(repo / area / ~/.claudine)"]
-    H --> I["sniff::collect_markdown_paths<br/>(.gitignore-aware)"]
-    I --> J["substring match +<br/>canonical-path dedup"]
-    J --> K["stdout: one candidate per line"]
+flowchart TD
+    A["<TAB>"] --> B["Generated shell script"]
+    B --> C["claudine __complete --current N -- argv..."]
+    C --> D["engine::classify_completion_target"]
+    D -->|Root| E["root_menu::render"]
+    D -->|CompositionPositional| F["composition::run"]
+    D -->|SetterValue| G["setter_value::run"]
+    D -->|Other| H["emit nothing → shell fallback"]
+    F --> I["scopes::resolve_compose_scopes"]
+    G --> I
+    I --> J["walker::walk (.gitignore-aware)"]
+    J --> K["frontmatter gate (mode-specific)"]
+    K --> L["fuzzy matcher"]
+    L --> M["stdout: one candidate per line"]
+    E --> M
 ```
 
-| File | Role |
+| Module | Role |
 |---|---|
-| [`supplement.rs`](../../cli/src/completion/supplement.rs) | The engine. Classifier, scope computation, walker, matcher, deduplicator. |
-| [`bootstrap.rs`](../../cli/src/completion/bootstrap.rs) | Shell-script text for bash/zsh/fish (plus legacy PowerShell/Elvish one-liners). |
-| [`commands/completions.rs`](../../cli/src/commands/completions.rs) | `claudine completions <shell>` and the hidden `__complete` subcommand. |
-| [`completion/mod.rs`](../../cli/src/completion/mod.rs) | Legacy `CompleteEnv` hook, kept compilable for users still on the old bootstrap. |
-| [`biscuit-file` `complete_partial`](../../../biscuit-file/lib/src/file_reference/resolve.rs) | Token-shape classifier the engine consumes (form, active segment, rendered prefix). |
-| [`sniff` `collect_markdown_paths`](../../../sniff/lib/src/filesystem/docs.rs) | Gitignore-aware markdown walker. |
-
-## Dimensions we can modify going forward
-
-The current engine uses **one** candidate pipeline for every targeted
-position: positional `<FILE>` on the three composition subcommands and
-`--asp`/`--rsp` values on those plus the seven provider wrappers all
-land in the same `emit_candidates` call. Several axes are straight-
-forward to vary from here.
-
-### 1. Per-target scope (largest pending change)
-
-`CompletionTarget` already distinguishes `Positional` from `FileFlag`
-but does not yet propagate downstream. The natural next step is:
-
-```text
-CompletionTarget {
-  ComposePositional        → {repo,area,~/.claudine}/prompts/
-  InlineComposePositional  → {repo,area,~/.claudine}/prompts/
-                             (with a `prompt:` frontmatter validator)
-  SequencePositional       → {repo,area,~/.claudine}/sequences/
-                             (with a `sequence:` frontmatter validator)
-  SystemPromptFlag         → system-prompt.md discovery
-                             (via the existing LaunchContext logic)
-}
-```
-
-This would fix the current quirk where `claudine compose @<TAB>`
-offers `sequences/*.md` and `claudine sequence @<TAB>` offers
-`prompts/*.md`. It would also give `--replace-system-prompt` a
-meaningful completion set — today it returns the same prompts/sequences
-union, which is rarely what the user wants for a `system-prompt.md`.
-
-### 2. Matching rules
-
-Today every target uses case-insensitive substring. Other options are
-cheap to add per-target:
-
-- **Fuzzy** (subsequence) matching — like fzf.
-- **Prefix only** for contexts where pasted paths are common.
-- **Filename stem vs. full relative path** — currently only the
-  filename stem is matched; allowing directory-component matches would
-  let `claudine compose plan/review<TAB>` narrow to files whose
-  relative path contains both segments.
-
-### 3. Validators
-
-The `validate` module (`validate.rs`) already has `is_valid_prompt`,
-`is_valid_sequence`, etc. — but the supplement engine does not
-currently invoke them. Plugging validators in per-target would let us
-surface only files that actually parse for a given subcommand (e.g.
-`sequence @<TAB>` would drop sequence files whose YAML fails
-`resolve_sequence_plan`).
-
-### 4. Scope dimensions
-
-The scope list is a fixed array of bases × subdirs. The easy knobs:
-
-- **Adding a scope** — e.g. a project-local `.claudine/prompts/` —
-  is a one-line change in `curated_roots`.
-- **Conditional scopes** — e.g. only include the area scope when the
-  area has markdown — requires threading an existence check into
-  `push_scope`.
-- **Subcommand-specific subdirs** — tied to the per-target split in
-  §1.
-
-### 5. Ordering and ranking
-
-Candidates come out of `emit_candidates` in alphabetical order (backed
-by a `BTreeSet`). Future work could:
-
-- Rank curated-scope hits above user-scope hits.
-- Apply last-used / last-modified ordering (requires a cache).
-- Use match-quality scoring (exact filename match first, substring
-  anywhere second).
-
-### 6. Caching
-
-Every `<TAB>` re-runs `sniff::detect_repo_structure` (which shells out
-to `cargo metadata`) and re-walks each scope directory. In a 48-crate
-workspace that is perceptibly slow. An in-process cache keyed on
-`(cwd, repo_root)` or a file-mtime-based cache would cut re-runs to
-a near-zero cost, at the cost of occasional staleness.
-
-### 7. Observability
-
-The `__complete` subcommand currently emits no tracing output; shell
-completion pipelines swallow stderr, and noisy logs would corrupt
-stdout. Future work could:
-
-- Add `--debug` that writes to `~/.claudine/logs/completion.log`.
-- Honor `RUST_LOG=trace` on `__complete` specifically and redirect to
-  a log file.
-- Surface the engine's decision tree (form, scope, chosen roots) in a
-  structured log for diagnosing "completion isn't working."
-
-### 8. Shell surface
-
-PowerShell and Elvish are still on the legacy `CompleteEnv` path.
-Fish's no-fallback quirk is known. Rewriting those registrations
-against the `__complete` protocol (and documenting that contract in
-`bootstrap.rs`) brings the whole surface under one set of rules.
-
-## Historical context
-
-- The legacy `source <(COMPLETE=<shell> claudine)` bootstrap predates
-  the supplement engine. It drove completion through `clap_complete`'s
-  `CompleteEnv` runtime path, which does not understand the curated-
-  scope semantics documented here. Stale installations still reach
-  that path via `claudine/cli/src/completion/mod.rs`.
-- The supplement engine shipped as feature `2026-04-18-file-completion-
-  supplement`, replacing feature `2026-04-17-file-completion` which
-  had used `ArgValueCompleter` attached to clap args.
-- The 3+-character broad repo scan (walking the entire repo and
-  substring-matching every `.md` file) was part of the original
-  supplement design and was removed on 2026-04-18; the scope list now
-  terminates at the three curated roots above.
+| [`engine.rs`](../../cli/src/completion/engine.rs) | Entry point; classifies the cursor slot and dispatches. |
+| [`root_menu.rs`](../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `init` visibility. |
+| [`composition.rs`](../../cli/src/completion/composition.rs) | Shared compose/inline-compose/sequence pipeline. |
+| [`setter_value.rs`](../../cli/src/completion/setter_value.rs) | `@`-gated file completion inside `name=value` setters. |
+| [`scopes.rs`](../../cli/src/completion/scopes.rs) | Monorepo-aware scope resolution (one `sniff` call per run). |
+| [`walker.rs`](../../cli/src/completion/walker.rs) | Bounded, `.gitignore`-aware walker over a scope set. |
+| [`frontmatter.rs`](../../cli/src/completion/frontmatter.rs) | Mode-specific frontmatter gates (`prompt`, `sequence`). |
+| [`fuzzy.rs`](../../cli/src/completion/fuzzy.rs) | Subsequence matching with prefix-length progression. |
+| [`bootstrap.rs`](../../cli/src/completion/bootstrap.rs) | Shell scripts (bash/zsh/fish) + legacy PowerShell/Elvish. |
+| [`commands/completions.rs`](../../cli/src/commands/completions.rs) | `claudine completions` and the hidden `__complete`. |

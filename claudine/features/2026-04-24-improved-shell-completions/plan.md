@@ -40,6 +40,18 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/engine.rs
+  - claudine/cli/src/completion/bootstrap.rs
+  - claudine/cli/src/commands/completions.rs
+  - claudine/cli/src/commands/help.rs
+  - claudine/cli/tests/completion_cli.rs
+  - claudine/cli/tests/snapshots/wrap_commands__help_lists_wrapper_subcommands.snap
+docs_updated_during_phase_5:
+  - claudine/docs/topics/shell-completions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - claudine-cli
 ---
