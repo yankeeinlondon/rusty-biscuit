@@ -113,3 +113,77 @@ fn choose_many_initial_flag_is_hidden_from_help() {
         .stdout(predicate::str::contains("--selected"))
         .stdout(predicate::str::contains("--initial").not());
 }
+
+#[test]
+fn choose_one_help_lists_border_flags() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--border"))
+        .stdout(predicate::str::contains("--border-label"))
+        .stdout(predicate::str::contains("--border-style"));
+}
+
+#[test]
+fn choose_many_help_lists_border_flags() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--border"))
+        .stdout(predicate::str::contains("--border-label"))
+        .stdout(predicate::str::contains("--border-style"));
+}
+
+#[test]
+fn choose_one_border_style_rejects_unknown_value() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--border-style", "wonky"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
+}
+
+#[test]
+fn choose_one_border_flag_reaches_event_loop() {
+    // Without a TTY the event loop bails out — we only assert the
+    // CLI parsed and accepted `--border`. The exit code is 1 (Esc /
+    // ABORTED) because `event::read` fails immediately.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "c", "--border"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_one_border_label_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "c", "--border-label", "Pick"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_one_border_style_double_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "c", "--border-style", "double"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn choose_many_border_flag_reaches_event_loop() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "a", "b", "c", "--border"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
