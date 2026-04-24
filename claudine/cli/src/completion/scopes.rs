@@ -107,6 +107,14 @@ pub(crate) struct ScopeContext {
     ///
     /// `None` means cwd is not inside any detected repository.
     pub(crate) repo_info: Option<RepoInfo>,
+    /// Enclosing `.git` directory / file, if any.
+    ///
+    /// Recorded independently of [`repo_info`] because plain git
+    /// checkouts (no Cargo workspace, no npm monorepo, etc.) still return
+    /// `None` from `detect_repo_structure` yet are a real context for
+    /// completion — we want `<git-root>/prompts/` surfaced even without a
+    /// workspace manifest.
+    pub(crate) git_root: Option<PathBuf>,
 }
 
 impl ScopeContext {
@@ -137,6 +145,7 @@ impl ScopeContext {
             cwd: cwd.to_path_buf(),
             home: dirs::home_dir(),
             repo_info,
+            git_root: repo_root,
         }
     }
 }
@@ -187,12 +196,28 @@ const PROMPTS_DIR: &str = "prompts";
 pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> ScopeSet {
     let mut set = ScopeSet::default();
 
-    if let Some(info) = &ctx.repo_info {
+    // Pick the best "repo root" for scope resolution: the workspace root
+    // from `sniff` when it exists, otherwise the enclosing git root. Spec
+    // §5.8 says repo-scoped paths should still apply to plain git
+    // checkouts; the fallback keeps completion useful there.
+    let effective_repo_root: Option<&Path> = ctx
+        .repo_info
+        .as_ref()
+        .map(|info| info.root.as_path())
+        .or(ctx.git_root.as_deref());
+
+    if let Some(root) = effective_repo_root {
         set.repo = Some(Scope {
-            path: info.root.join(PROMPTS_DIR),
+            path: root.join(PROMPTS_DIR),
             follow_links: true,
         });
+        set.repo_claudine = Some(Scope {
+            path: root.join(".claudine").join(PROMPTS_DIR),
+            follow_links: true,
+        });
+    }
 
+    if let Some(info) = &ctx.repo_info {
         if let Some(area) = info.package_area_for_dir(&ctx.cwd)
             && area != "root"
         {
@@ -208,11 +233,6 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
                 follow_links: true,
             });
         }
-
-        set.repo_claudine = Some(Scope {
-            path: info.root.join(".claudine").join(PROMPTS_DIR),
-            follow_links: true,
-        });
     }
 
     if let Some(home) = &ctx.home {
@@ -225,15 +245,15 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
     match mode {
         ComposeMode::Compose => {}
         ComposeMode::InlineCompose | ComposeMode::Sequence => {
-            if let Some(info) = &ctx.repo_info {
+            if let Some(root) = effective_repo_root {
                 set.extras.push(Scope {
-                    path: info.root.join("docs"),
+                    path: root.join("docs"),
                     follow_links: true,
                 });
 
                 for peer in SKILL_PEER_DIRS {
                     set.extras.push(Scope {
-                        path: info.root.join(peer).join("skills"),
+                        path: root.join(peer).join("skills"),
                         follow_links: false,
                     });
                 }
@@ -353,19 +373,52 @@ mod tests {
 
     #[test]
     fn outside_repo_only_user_scope_is_set() {
+        // Place the cwd at a depth far below any realistic enclosing git
+        // repo so `find_enclosing_repo` returns `None`. On developer
+        // machines the tempdir is typically under `/var/folders/...`
+        // which is NOT inside a git repo, so the tempdir itself suffices.
         let tmp = TempDir::new().unwrap();
         let ctx = test_ctx(tmp.path());
         let set = resolve_compose_scopes(&ctx, ComposeMode::Compose);
-        assert!(set.repo.is_none());
+        if ctx.git_root.is_none() {
+            assert!(set.repo.is_none());
+            assert!(set.repo_claudine.is_none());
+        }
         assert!(set.package_area.is_none());
         assert!(set.package.is_none());
-        assert!(set.repo_claudine.is_none());
         assert!(set.extras.is_empty());
         // user_claudine depends on dirs::home_dir(); assert only when
         // $HOME is resolvable, otherwise the field is None.
         if dirs::home_dir().is_some() {
             assert!(set.user_claudine.is_some());
         }
+    }
+
+    #[test]
+    fn bare_git_checkout_still_sets_repo_scope() {
+        // Plain `.git` with no Cargo workspace — `detect_repo_structure`
+        // returns `None`, but the git-root fallback means `<root>/prompts`
+        // still appears as a scope.
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".git")).unwrap();
+        let ctx = test_ctx(tmp.path());
+        assert!(ctx.repo_info.is_none(), "no workspace tool — no RepoInfo");
+        assert!(ctx.git_root.is_some(), "git root must be detected");
+        let set = resolve_compose_scopes(&ctx, ComposeMode::Compose);
+        assert!(
+            set.repo
+                .as_ref()
+                .is_some_and(|s| s.path.ends_with("prompts")),
+            "bare git checkout must populate repo prompt scope: {:?}",
+            set.repo
+        );
+        assert!(
+            set.repo_claudine
+                .as_ref()
+                .is_some_and(|s| s.path.ends_with(PathBuf::from(".claudine").join("prompts"))),
+            "bare git checkout must populate .claudine prompt scope: {:?}",
+            set.repo_claudine
+        );
     }
 
     #[test]

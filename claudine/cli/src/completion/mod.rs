@@ -25,8 +25,11 @@
 
 pub(crate) mod bootstrap;
 pub(crate) mod command_factory;
+pub(crate) mod composition;
 pub(crate) mod engine;
 pub(crate) mod file_reference;
+pub(crate) mod frontmatter;
+pub(crate) mod fuzzy;
 pub(crate) mod root_menu;
 pub(crate) mod scopes;
 pub(crate) mod supplement;

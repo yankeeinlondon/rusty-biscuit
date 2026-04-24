@@ -10,15 +10,18 @@
 //! - **Root menu** (`claudine <TAB>`) — rendered by
 //!   [`root_menu::render`] from a curated, spec-ordered subcommand list.
 //!   The sole flag surfaced here is `--help`.
+//! - **Composition positional** (`claudine compose <TAB>` /
+//!   `claudine inline-compose <TAB>` / `claudine sequence <TAB>`) —
+//!   rendered by [`super::composition::run`] with per-mode scope sets,
+//!   fuzzy matching, and frontmatter gating.
 //!
 //! Future phases introduce slot-specific completers:
 //!
-//! - **Composition positional** (`claudine compose <TAB>`) — Phase 3.
 //! - **Setter value** (`claudine compose foo.md spec=@<TAB>`) — Phase 4.
 //!
-//! Until those slots are re-implemented, non-root slots fall through to the
-//! legacy [`super::supplement`] engine so existing behavior is preserved.
-//! The bridge is removed in Phase 3/4 as each slot is rewritten.
+//! Remaining slots (wrapper flag values, etc.) fall through to the legacy
+//! [`super::supplement`] engine so existing behavior is preserved. The
+//! bridge is removed in Phase 4/5 as each slot is rewritten.
 //!
 //! The classifier never invokes clap — wrapper subcommands use
 //! `ignore_errors(true)` in the lenient parse path so clap's view of argv is
@@ -27,7 +30,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::completion::composition;
 use crate::completion::root_menu;
+use crate::completion::scopes::{ComposeMode, ScopeContext};
 
 /// Top-level classification of the cursor position in argv.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,9 +40,13 @@ pub(crate) enum CompletionTarget {
     /// Cursor is at the root subcommand slot (argv position 1, or after
     /// a run of global flags). Phase 1 renders a curated menu here.
     Root(RootPartial),
-    /// Cursor is anywhere else — a composition positional, a setter value,
-    /// a wrapper flag value, etc. Phase 1 defers these to the legacy
-    /// supplement engine.
+    /// Cursor is at the positional `<FILE>` slot of a composition
+    /// subcommand (`compose`, `inline-compose`, or `sequence`). Phase 3
+    /// routes this to [`super::composition::run`].
+    CompositionPositional { mode: ComposeMode, partial: String },
+    /// Cursor is anywhere else — a setter value, a wrapper flag value,
+    /// etc. Falls through to the legacy supplement engine until later
+    /// phases rewrite each slot.
     Other,
 }
 
@@ -107,9 +116,13 @@ pub(crate) fn run_with_context(
 ) -> Vec<String> {
     match classify_completion_target(argv, current_index) {
         CompletionTarget::Root(partial) => root_menu::render(&partial, ctx),
+        CompletionTarget::CompositionPositional { mode, partial } => {
+            let scope_ctx = ScopeContext::discover();
+            composition::run(mode, &scope_ctx, &partial)
+        }
         CompletionTarget::Other => {
-            // Phase 1 bridge — non-root slots keep the legacy supplement
-            // behavior until Phases 3 and 4 rewrite them.
+            // Bridge — remaining slots keep the legacy supplement behavior
+            // until Phase 4 rewrites the setter-value completer.
             super::supplement::run(argv, current_index)
         }
     }
@@ -119,10 +132,10 @@ pub(crate) fn run_with_context(
 ///
 /// The rule is syntactic: walk argv from position 1 up to `current_index`,
 /// skipping global flags and their values. If the walk completes without
-/// consuming a non-flag token, the cursor is at the root slot. Any non-flag
-/// token before `current_index` means a subcommand has been committed and
-/// the slot is delegated to the (Phase 1 legacy, later phases dedicated)
-/// post-subcommand completer.
+/// consuming a non-flag token, the cursor is at the root slot. Otherwise
+/// the first non-global token is the subcommand, and the cursor slot is
+/// classified per-subcommand — composition positional for `compose` /
+/// `inline-compose` / `sequence`; Other for anything else.
 pub(crate) fn classify_completion_target(
     argv: &[String],
     current_index: usize,
@@ -162,12 +175,131 @@ pub(crate) fn classify_completion_target(
             continue;
         }
         // A non-global, non-flag token at i means a subcommand has been
-        // committed — we are past the root slot.
-        return CompletionTarget::Other;
+        // committed. Delegate to the per-subcommand classifier.
+        return classify_post_subcommand(argv, current_index, i);
     }
 
     let partial = argv.get(current_index).map(String::as_str).unwrap_or("");
     CompletionTarget::Root(classify_root_partial(partial))
+}
+
+/// Composition subcommand → [`ComposeMode`] mapping.
+fn compose_mode_for(sub: &str) -> Option<ComposeMode> {
+    match sub {
+        "compose" => Some(ComposeMode::Compose),
+        "inline-compose" => Some(ComposeMode::InlineCompose),
+        "sequence" => Some(ComposeMode::Sequence),
+        _ => None,
+    }
+}
+
+/// Classify the cursor position given that a subcommand token sits at
+/// `sub_idx`. Returns [`CompletionTarget::CompositionPositional`] when the
+/// cursor is at the first (file) positional of a composition subcommand;
+/// everything else falls through to `Other`.
+fn classify_post_subcommand(
+    argv: &[String],
+    current_index: usize,
+    sub_idx: usize,
+) -> CompletionTarget {
+    let Some(sub) = argv.get(sub_idx).map(String::as_str) else {
+        return CompletionTarget::Other;
+    };
+    let Some(mode) = compose_mode_for(sub) else {
+        return CompletionTarget::Other;
+    };
+
+    // Walk tokens between the subcommand and the cursor. If we have not yet
+    // seen a positional (ignoring flags, flag values, and key=value
+    // setters), the cursor slot IS the first positional.
+    let mut cursor = sub_idx + 1;
+    let mut seen_positional = false;
+    while cursor < current_index {
+        let token = argv[cursor].as_str();
+        if token == "--" {
+            cursor += 1;
+            continue;
+        }
+        if is_flag_token(token) {
+            if is_value_bearing_flag(token) && !token.contains('=') {
+                cursor += 2;
+            } else {
+                cursor += 1;
+            }
+            continue;
+        }
+        if is_setter_shaped(token) {
+            cursor += 1;
+            continue;
+        }
+        seen_positional = true;
+        cursor += 1;
+    }
+    if seen_positional {
+        return CompletionTarget::Other;
+    }
+
+    let current = argv.get(current_index).map(String::as_str).unwrap_or("");
+    // Setter-shaped tokens at the cursor go to the setter-value completer
+    // (Phase 4); the composition completer only handles the file slot.
+    if is_setter_shaped(current) {
+        return CompletionTarget::Other;
+    }
+
+    CompletionTarget::CompositionPositional {
+        mode,
+        partial: current.to_string(),
+    }
+}
+
+fn is_flag_token(token: &str) -> bool {
+    token.starts_with('-') && token != "-" && token != "--"
+}
+
+/// Value-bearing flag surface for composition subcommands. Mirrors
+/// [`crate::argv::COMPOSITION_FLAGS_WITH_VALUE`] but is duplicated here so
+/// the classifier stays self-contained.
+fn is_value_bearing_flag(token: &str) -> bool {
+    matches!(
+        token,
+        "--provider"
+            | "--exclude"
+            | "--include"
+            | "--model"
+            | "-m"
+            | "--output"
+            | "-o"
+            | "--append-system-prompt"
+            | "--asp"
+            | "--replace-system-prompt"
+            | "--rsp"
+            | "--timeout"
+            | "-t"
+            | "--operation"
+            | "--op"
+            | "--set"
+            | "--use"
+            | "--fail-fast"
+    )
+}
+
+/// `^[A-Za-z_][A-Za-z0-9_-]*=` — same shape as
+/// [`crate::argv::looks_like_setter`]. Duplicated here so the engine stays
+/// self-contained.
+fn is_setter_shaped(token: &str) -> bool {
+    let Some(eq_pos) = token.find('=') else {
+        return false;
+    };
+    if eq_pos == 0 {
+        return false;
+    }
+    let bytes = token.as_bytes();
+    if !(bytes[0].is_ascii_alphabetic() || bytes[0] == b'_') {
+        return false;
+    }
+    bytes[1..eq_pos]
+        .iter()
+        .all(|&c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 
 fn classify_root_partial(token: &str) -> RootPartial {
@@ -302,12 +434,89 @@ mod tests {
     }
 
     #[test]
-    fn classifier_other_when_subcommand_committed() {
+    fn classifier_composition_positional_on_compose() {
         let a = argv(&["claudine", "compose", ""]);
         assert_eq!(
             classify_completion_target(&a, 2),
-            CompletionTarget::Other,
+            CompletionTarget::CompositionPositional {
+                mode: ComposeMode::Compose,
+                partial: String::new(),
+            },
         );
+    }
+
+    #[test]
+    fn classifier_composition_positional_on_inline_compose_with_partial() {
+        let a = argv(&["claudine", "inline-compose", "pl"]);
+        assert_eq!(
+            classify_completion_target(&a, 2),
+            CompletionTarget::CompositionPositional {
+                mode: ComposeMode::InlineCompose,
+                partial: "pl".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_composition_positional_on_sequence() {
+        let a = argv(&["claudine", "sequence", "@s"]);
+        assert_eq!(
+            classify_completion_target(&a, 2),
+            CompletionTarget::CompositionPositional {
+                mode: ComposeMode::Sequence,
+                partial: "@s".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_other_after_first_positional_is_committed() {
+        let a = argv(&["claudine", "compose", "plan.md", "more"]);
+        assert_eq!(classify_completion_target(&a, 3), CompletionTarget::Other);
+    }
+
+    #[test]
+    fn classifier_other_on_setter_shaped_cursor() {
+        let a = argv(&["claudine", "compose", "key=val"]);
+        assert_eq!(classify_completion_target(&a, 2), CompletionTarget::Other);
+    }
+
+    #[test]
+    fn classifier_skips_setter_earlier_still_reaches_positional() {
+        // Earlier setter isn't a positional; cursor is still the first
+        // positional for the composition completer.
+        let a = argv(&["claudine", "compose", "key=val", "@plan"]);
+        assert_eq!(
+            classify_completion_target(&a, 3),
+            CompletionTarget::CompositionPositional {
+                mode: ComposeMode::Compose,
+                partial: "@plan".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_skips_value_of_preceding_value_bearing_flag() {
+        let a = argv(&["claudine", "compose", "--model", "gpt-4", ""]);
+        assert_eq!(
+            classify_completion_target(&a, 4),
+            CompletionTarget::CompositionPositional {
+                mode: ComposeMode::Compose,
+                partial: String::new(),
+            },
+        );
+    }
+
+    #[test]
+    fn classifier_other_on_wrapper_subcommand() {
+        let a = argv(&["claudine", "claude", ""]);
+        assert_eq!(classify_completion_target(&a, 2), CompletionTarget::Other);
+    }
+
+    #[test]
+    fn classifier_other_on_non_composition_subcommand() {
+        let a = argv(&["claudine", "hooks", ""]);
+        assert_eq!(classify_completion_target(&a, 2), CompletionTarget::Other);
     }
 
     #[test]
