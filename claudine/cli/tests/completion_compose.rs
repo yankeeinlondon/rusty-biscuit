@@ -191,21 +191,34 @@ fn compose_does_not_surface_docs_or_skills() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn compose_short_prefix_matches_filenames_no_dirs() {
+fn compose_short_prefix_matches_filenames_and_dirs_with_prefix() {
+    // Spec §5.3 (review-1 finding #3): short (1–2 char) prefixes must
+    // surface BOTH file matches in high-profile scopes AND directory
+    // matches across the repo (or CWD fallback). Directory matching at
+    // short prefixes is starting-substring (case-insensitive), not
+    // fuzzy — so `pl` matches `planning/` but not, say, `models/`.
     let ws = TestWorkspace::named("complete-compose-short");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
     write_file(&prompts.join("plan.md"), "# p\n");
-    fs::create_dir_all(prompts.join("planning")).unwrap();
+    // Directory at the repo root, NOT under prompts/, so it can only
+    // surface via the repo-wide directory walk.
+    fs::create_dir_all(ws.path().join("planning")).unwrap();
+    // Non-matching directory must NOT appear (prefix gate).
+    fs::create_dir_all(ws.path().join("models")).unwrap();
 
     let got = run_complete(ws.path(), &["compose", "pl"]);
     assert!(
         got.iter().any(|c| c == "prompts/plan.md"),
-        "short prefix must match plan.md: {got:?}"
+        "short prefix must match plan.md (high-profile scope): {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c.ends_with("planning/")),
-        "short prefix must NOT include directories: {got:?}"
+        got.iter().any(|c| c == "planning/"),
+        "short prefix must surface matching repo-wide directory `planning/`: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "models/"),
+        "short prefix is starting-substring; non-matching `models/` must NOT appear: {got:?}"
     );
 }
 
@@ -312,5 +325,181 @@ fn compose_honors_gitignore_at_nested_depth() {
     assert!(
         !got.iter().any(|c| c.contains("bad.md")),
         "gitignored file must not surface: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// compose size-gate contract (finding #6)
+// ---------------------------------------------------------------------
+
+#[test]
+fn compose_rejects_oversized_markdown() {
+    // Finding #6: oversized Markdown files must be rejected (not
+    // silently accepted). The size-guard cap is MAX_FRONTMATTER_BYTES
+    // (1 MiB); write a file larger than that.
+    let ws = TestWorkspace::named("complete-compose-oversized");
+    seed_cargo_workspace(ws.path());
+    let prompts = ws.path().join("prompts");
+    // 1 MiB + 1 byte of padding — larger than MAX_FRONTMATTER_BYTES.
+    let padding = "a".repeat((1024 * 1024) + 1);
+    write_file(&prompts.join("huge.md"), &padding);
+    write_file(&prompts.join("small.md"), "# small\n");
+
+    let got = run_complete(ws.path(), &["compose", ""]);
+    assert!(
+        got.iter().any(|c| c == "prompts/small.md"),
+        "small.md must surface: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains("huge.md")),
+        "oversized markdown must NOT surface: {got:?}"
+    );
+}
+
+#[test]
+fn compose_rejects_non_utf8_markdown() {
+    // Finding #6: non-UTF-8 Markdown must be rejected uniformly. Write
+    // raw invalid UTF-8 bytes so `fs::read_to_string` fails.
+    let ws = TestWorkspace::named("complete-compose-non-utf8");
+    seed_cargo_workspace(ws.path());
+    let prompts = ws.path().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    // Byte slice with invalid UTF-8 sequences.
+    fs::write(prompts.join("bad.md"), [0xFF, 0xFE, 0x00, 0x00, 0xC0, 0xAF]).unwrap();
+    write_file(&prompts.join("good.md"), "# good\n");
+
+    let got = run_complete(ws.path(), &["compose", ""]);
+    assert!(
+        got.iter().any(|c| c == "prompts/good.md"),
+        "good.md must surface: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains("bad.md")),
+        "non-UTF-8 markdown must NOT surface: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// compose @ magic-path shaped forms (finding #4)
+// ---------------------------------------------------------------------
+
+#[test]
+fn compose_magic_path_shaped_prompts_slash_plan_resolves() {
+    // Finding #4: `@prompts/plan` must resolve against the repo-scope
+    // `prompts/` root and emit `prompts/plan.md`. The `prompts` portion
+    // is peeled off so the join does not double up.
+    let ws = TestWorkspace::named("complete-compose-magic-path-shaped");
+    seed_cargo_workspace(ws.path());
+    let prompts = ws.path().join("prompts");
+    write_file(&prompts.join("plan.md"), "# p\n");
+
+    let got = run_complete(ws.path(), &["compose", "@prompts/plan"]);
+    assert!(
+        got.iter().any(|c| c == "prompts/plan.md"),
+        "path-shaped magic `@prompts/plan` must resolve to `prompts/plan.md`: {got:?}"
+    );
+}
+
+#[test]
+fn compose_magic_path_shaped_claudine_prompts_resolves() {
+    // Finding #4: `@.claudine/prompts/plan` must resolve against the
+    // repo-scope `.claudine/prompts/` root and emit
+    // `.claudine/prompts/plan.md`. Scope leaf is `prompts`, so `dir`
+    // `.claudine/prompts` peels the `prompts` segment; the remaining
+    // `.claudine` join is not a directory under the scope, so the repo
+    // `.claudine/prompts` scope itself is the only hit (via raw join
+    // fallback on non-matching leaf elsewhere — see walk-root
+    // resolution).
+    let ws = TestWorkspace::named("complete-compose-magic-claudine");
+    seed_cargo_workspace(ws.path());
+    let claudine = ws.path().join(".claudine").join("prompts");
+    write_file(&claudine.join("plan.md"), "# p\n");
+
+    let got = run_complete(ws.path(), &["compose", "@.claudine/prompts/plan"]);
+    assert!(
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "path-shaped magic `@.claudine/prompts/plan` must resolve: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// repo-wide directory walk (review-1 findings #2 and #3)
+// ---------------------------------------------------------------------
+
+#[test]
+fn compose_one_char_prefix_surfaces_repo_directories() {
+    // Finding #2 and #3: 1-char prefix surfaces directories from the
+    // repo-wide walk (case-insensitive starting-substring match), not
+    // just from high-profile scopes. `docs/` and `features/` at the
+    // repo root must surface even though they are NOT compose scopes.
+    let ws = TestWorkspace::named("complete-compose-one-char-dirs");
+    seed_cargo_workspace(ws.path());
+    fs::create_dir_all(ws.path().join("docs")).unwrap();
+    fs::create_dir_all(ws.path().join("features")).unwrap();
+
+    let got = run_complete(ws.path(), &["compose", "d"]);
+    assert!(
+        got.iter().any(|c| c == "docs/"),
+        "1-char prefix `d` must surface `docs/`: {got:?}"
+    );
+    // `f` would match `features/` but we asked for `d`; verify a
+    // non-matching directory is excluded.
+    assert!(
+        !got.iter().any(|c| c == "features/"),
+        "1-char prefix `d` must NOT surface `features/`: {got:?}"
+    );
+}
+
+#[test]
+fn compose_two_char_prefix_surfaces_repo_directories() {
+    // Finding #3: 2-char prefix uses starting-substring matching, NOT
+    // fuzzy. `cl` matches `claudine/` but NOT `biscuit-speaks/`
+    // (which is a fuzzy subsequence hit on `cl` via the 'c'-'l' in
+    // "biscui*-speaks" — but starting-substring excludes it).
+    let ws = TestWorkspace::named("complete-compose-two-char-dirs");
+    seed_cargo_workspace(ws.path());
+    fs::create_dir_all(ws.path().join("claudine")).unwrap();
+    fs::create_dir_all(ws.path().join("biscuit-speaks")).unwrap();
+
+    let got = run_complete(ws.path(), &["compose", "cl"]);
+    assert!(
+        got.iter().any(|c| c == "claudine/"),
+        "2-char prefix `cl` must surface `claudine/`: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "biscuit-speaks/"),
+        "2-char prefix is starting-substring; `biscuit-speaks/` must NOT appear: {got:?}"
+    );
+}
+
+#[test]
+fn compose_three_char_prefix_fuzzy_matches_directory_names() {
+    // Finding #3: 3+ char prefix uses fuzzy subsequence matching for
+    // directories. `dcm` is a subsequence of `documentation`.
+    let ws = TestWorkspace::named("complete-compose-three-char-fuzzy-dir");
+    seed_cargo_workspace(ws.path());
+    fs::create_dir_all(ws.path().join("documentation")).unwrap();
+
+    let got = run_complete(ws.path(), &["compose", "dcm"]);
+    assert!(
+        got.iter().any(|c| c == "documentation/"),
+        "3-char prefix `dcm` must fuzzy-match `documentation/`: {got:?}"
+    );
+}
+
+#[test]
+fn compose_empty_partial_still_does_not_surface_repo_dirs() {
+    // Regression guard: Empty prefix → no directory candidates at all,
+    // even from the repo-wide walk. The repo-wide pass returns
+    // immediately when DirMatchMode::None.
+    let ws = TestWorkspace::named("complete-compose-empty-no-dirs");
+    seed_cargo_workspace(ws.path());
+    fs::create_dir_all(ws.path().join("docs")).unwrap();
+    fs::create_dir_all(ws.path().join("features")).unwrap();
+
+    let got = run_complete(ws.path(), &["compose", ""]);
+    assert!(
+        !got.iter().any(|c| c.ends_with('/')),
+        "empty prefix must surface no directories at all: {got:?}"
     );
 }

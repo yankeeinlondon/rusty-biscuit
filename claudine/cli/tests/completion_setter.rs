@@ -327,6 +327,63 @@ fn setter_scope_excludes_underscore_prefixed() {
     );
 }
 
+// ---------------------------------------------------------------------
+// Markdown extension gate (finding #1)
+// ---------------------------------------------------------------------
+
+#[test]
+fn setter_excludes_non_markdown_files() {
+    // Finding #1: setter-value completion must reject non-Markdown files
+    // regardless of basename match. Seed a mix of extensions and verify
+    // only `.md` surfaces.
+    let ws = TestWorkspace::named("complete-setter-non-markdown");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    let docs = ws.path().join("docs");
+    write_file(&docs.join("spec.md"), "# s\n");
+    write_file(&docs.join("plan.txt"), "plain text\n");
+    write_file(&docs.join("notes.yaml"), "key: value\n");
+    write_file(&docs.join("extless"), "no extension\n");
+
+    let got = run_complete(ws.path(), &["compose", "foo.md", "spec=@"]);
+    assert!(
+        got.iter().any(|c| c == "spec='docs/spec.md'"),
+        ".md must surface: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains(".txt")),
+        ".txt must NOT surface: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains(".yaml")),
+        ".yaml must NOT surface: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains("'docs/extless'")),
+        "extensionless files must NOT surface: {got:?}"
+    );
+}
+
+#[test]
+fn setter_accepts_uppercase_md_and_markdown() {
+    // Finding #1: extension gate is case-insensitive, so uppercase
+    // `.MD` and `.MARKDOWN` must still surface.
+    let ws = TestWorkspace::named("complete-setter-uppercase-md");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    let docs = ws.path().join("docs");
+    write_file(&docs.join("PLAN.MD"), "# p\n");
+    write_file(&docs.join("README.MARKDOWN"), "# r\n");
+
+    let got = run_complete(ws.path(), &["compose", "foo.md", "ref=@"]);
+    assert!(
+        got.iter().any(|c| c == "ref='docs/PLAN.MD'"),
+        "uppercase .MD must surface: {got:?}"
+    );
+    assert!(
+        got.iter().any(|c| c == "ref='docs/README.MARKDOWN'"),
+        "uppercase .MARKDOWN must surface: {got:?}"
+    );
+}
+
 #[test]
 fn setter_scope_honors_gitignore() {
     let ws = TestWorkspace::named("complete-setter-gitignore");

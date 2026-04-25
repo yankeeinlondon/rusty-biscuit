@@ -58,12 +58,16 @@ fn fake_home(cwd: &Path) -> PathBuf {
 
 fn run_complete(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
     let home = fake_home(cwd);
+    run_complete_with_home(cwd, &home, argv_tail)
+}
+
+fn run_complete_with_home(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Vec<String> {
     let current = argv_tail.len();
     let reference = cargo_bin_cmd!("claudine");
     let program = reference.get_program().to_os_string();
     let mut cmd = Command::new(program);
     cmd.current_dir(cwd)
-        .env("HOME", &home)
+        .env("HOME", home)
         .env("NO_COLOR", "1")
         .env_remove("COMPLETE")
         .env_remove("_CLAP_COMPLETE_INDEX")
@@ -199,5 +203,72 @@ fn sequence_long_prefix_includes_directories() {
     assert!(
         got.iter().any(|c| c == "prompts/rollouts/"),
         "3+ char partial must surface directories: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// sequence magic priority (finding #5): repo extras (docs/) outrank
+// user-global prompts in the magic-scope ordering.
+// ---------------------------------------------------------------------
+
+#[test]
+fn sequence_magic_prefers_repo_docs_over_user_global() {
+    // Finding #5: the magic-scope iterator orders repo-local extras
+    // (`docs/`, skills) before `user_claudine`, so a match in repo
+    // `docs/` sorts before a match in `~/.claudine/prompts/`.
+    let ws = TestWorkspace::named("complete-sequence-magic-priority");
+    seed_cargo_workspace(ws.path());
+
+    // Repo-local match under docs/.
+    write_file(
+        &ws.path().join("docs").join("deploy.md"),
+        "---\nsequence:\n  - repo\n---\n",
+    );
+
+    // User-global match under ~/.claudine/prompts/.
+    let home = fake_home(ws.path());
+    let user_prompts = home.join(".claudine").join("prompts");
+    write_file(
+        &user_prompts.join("deploy.md"),
+        "---\nsequence:\n  - user\n---\n",
+    );
+
+    let got = run_complete_with_home(ws.path(), &home, &["sequence", "@deploy"]);
+
+    let repo_pos = got.iter().position(|c| c.ends_with("docs/deploy.md"));
+    let user_pos = got
+        .iter()
+        .position(|c| c.contains(".claudine/prompts/deploy.md"));
+    assert!(
+        repo_pos.is_some(),
+        "repo-local docs/deploy.md must appear: {got:?}"
+    );
+    assert!(
+        user_pos.is_some(),
+        "user-global deploy.md must appear: {got:?}"
+    );
+    assert!(
+        repo_pos < user_pos,
+        "repo-local docs/deploy.md ({repo_pos:?}) must sort before user-global ({user_pos:?}): {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// repo-wide directory walk (review-1 findings #2 and #3)
+// ---------------------------------------------------------------------
+
+#[test]
+fn sequence_one_char_prefix_surfaces_repo_dirs() {
+    // Finding #2 and #3: 1-char prefix surfaces directories via the
+    // repo-wide walk for `sequence` mode too. The repo-wide walk is
+    // mode-agnostic.
+    let ws = TestWorkspace::named("complete-sequence-one-char-dirs");
+    seed_cargo_workspace(ws.path());
+    fs::create_dir_all(ws.path().join("claudine")).unwrap();
+
+    let got = run_complete(ws.path(), &["sequence", "c"]);
+    assert!(
+        got.iter().any(|c| c == "claudine/"),
+        "sequence 1-char prefix must surface `claudine/`: {got:?}"
     );
 }
