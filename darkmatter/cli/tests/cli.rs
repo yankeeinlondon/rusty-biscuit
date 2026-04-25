@@ -1534,6 +1534,28 @@ fn test_get_no_frontmatter_returns_empty_string() {
         .stdout(predicate::str::contains("\"\""));
 }
 
+/// Regression: malformed frontmatter (a quoted scalar followed by trailing
+/// unquoted text) used to be silently treated as "no frontmatter", so
+/// `md get phases` returned `""` even when the file clearly defined `phases`.
+/// The fix surfaces a `MarkdownError::FrontmatterParse` with the offending
+/// YAML line in the rendered StatusBlock.
+#[test]
+fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
+
+    md_cmd()
+        .args(["get", "-", "phases"])
+        .write_stdin(yaml)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("MarkdownError"))
+        .stderr(predicate::str::contains("frontmatter parse failed"))
+        .stderr(predicate::str::contains("Position:"))
+        .stderr(predicate::str::contains(
+            "'@' magic lookup emits results",
+        ));
+}
+
 #[test]
 fn test_get_tab_indented_frontmatter_property_is_populated() {
     md_cmd()

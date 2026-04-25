@@ -1267,7 +1267,7 @@ fn read_from_stdin() -> Result<Markdown> {
     io::stdin()
         .read_to_string(&mut buffer)
         .wrap_err("Failed to read from stdin")?;
-    Ok(buffer.into())
+    Markdown::try_from_content(buffer).map_err(Into::into)
 }
 
 #[instrument(skip_all, fields(command = "validate"))]
