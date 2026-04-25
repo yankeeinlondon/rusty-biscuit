@@ -1004,7 +1004,7 @@ mod tests {
         #[test]
         fn roundtrip_fallback() {
             let expr = parse(r#"foo || "default""#).unwrap();
-            assert_eq!(expr.to_string(), "foo | \"default\"");
+            assert_eq!(expr.to_string(), "foo || \"default\"");
         }
 
         #[test]

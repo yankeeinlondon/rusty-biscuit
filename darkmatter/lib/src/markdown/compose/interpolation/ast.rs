@@ -54,7 +54,7 @@ pub enum Expr {
     /// Unary not expression: `!expr`.
     UnaryNot(Box<Expr>),
 
-    /// Fallback expression: `expr | fallback`.
+    /// Fallback expression: `expr || fallback`.
     ///
     /// Returns the primary if truthy, otherwise the fallback.
     Fallback {
@@ -109,7 +109,7 @@ impl fmt::Display for Expr {
             }
             Expr::UnaryNot(expr) => write!(f, "!{}", expr),
             Expr::Fallback { primary, fallback } => {
-                write!(f, "{} | {}", primary, fallback)
+                write!(f, "{} || {}", primary, fallback)
             }
             Expr::Ternary {
                 condition,
@@ -169,7 +169,7 @@ mod tests {
             primary: Box::new(Expr::Variable("foo".to_string())),
             fallback: Box::new(Expr::StringLiteral("default".to_string())),
         };
-        assert_eq!(expr.to_string(), "foo | \"default\"");
+        assert_eq!(expr.to_string(), "foo || \"default\"");
     }
 
     #[test]
