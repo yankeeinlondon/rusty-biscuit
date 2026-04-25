@@ -3,7 +3,9 @@ dir: ""
 spec: ""
 design: ""
 iteration: 1
-area: {{ctx.current_package_area}}
+area: "{{ctx.current_package_area}}"
+success:
+    message: "🖥️ Implementation for the _suggestions_ in review `{{area}}/{{dir}}/review-{{iteration}}.md` have completed successfully."
 ---
 ## Context
 
