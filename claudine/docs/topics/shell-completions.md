@@ -5,7 +5,9 @@ On every `<TAB>` the generated script invokes a hidden subcommand,
 `claudine __complete`, which classifies the cursor position, dispatches
 to a slot-specific completer, and prints one candidate per line on
 stdout. Non-targeted slots produce no candidates, which lets each shell
-fall back to its native file / flag completion.
+fall back to its native file / flag completion. Fish uses an explicit
+`__fish_complete_path` call inside the generated function so empty
+engine output still surfaces path candidates.
 
 This document is the user-facing reference for the completion surface:
 how to install it, what the root menu offers, how composition-command
@@ -641,6 +643,34 @@ $ claudine compose @prompts/plan<TAB>
 
 $ claudine compose @.claudine/prompts/plan<TAB>
 → .claudine/prompts/plan.md
+
+# Nested directories work too — drills into <repo>/prompts/drafts/
+$ claudine compose @prompts/drafts/plan<TAB>
+→ prompts/drafts/plan.md
+```
+
+### Non-magic repo `.claudine` scope
+
+```text
+# Given <repo>/.claudine/prompts/plan.md exists
+$ claudine compose .claudine/prompts/plan<TAB>
+→ .claudine/prompts/plan.md
+```
+
+### Non-magic package scope
+
+```text
+# Given <repo>/<pkg>/prompts/plan.md exists and cwd is inside <pkg>/
+$ claudine compose plan<TAB>
+→ prompts/plan.md
+```
+
+### Non-magic user-global scope
+
+```text
+# Given ~/.claudine/prompts/plan.md exists and no repo-local match
+$ claudine compose plan<TAB>
+→ ~/.claudine/prompts/plan.md
 ```
 
 ### One-character partial surfaces repo directories
