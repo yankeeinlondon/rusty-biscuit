@@ -292,11 +292,13 @@ mod tests {
 
     #[test]
     fn custom_pattern_blocks() {
-        let mut config = ProtectConfig::default();
-        config.custom_patterns = vec![CustomPattern {
-            name: "no_deploy".to_string(),
-            pattern: "deploy.*production".to_string(),
-        }];
+        let config = ProtectConfig {
+            custom_patterns: vec![CustomPattern {
+                name: "no_deploy".to_string(),
+                pattern: "deploy.*production".to_string(),
+            }],
+            ..Default::default()
+        };
         let catalog = CompiledCatalog::new(&config, ProtectPlatform::current()).unwrap();
         let result = catalog.evaluate_command("deploy to production");
         assert!(result.is_some());

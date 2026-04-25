@@ -608,18 +608,10 @@ mod tests {
         assert_eq!(guard.events.len(), 2);
     }
 
+    #[derive(Default)]
     struct PanicOnceSink {
         events: Vec<SemanticEvent>,
         has_panicked: bool,
-    }
-
-    impl Default for PanicOnceSink {
-        fn default() -> Self {
-            Self {
-                events: Vec::new(),
-                has_panicked: false,
-            }
-        }
     }
 
     impl SemanticEventSink for PanicOnceSink {

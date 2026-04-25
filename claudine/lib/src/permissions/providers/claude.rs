@@ -1126,9 +1126,9 @@ mod tests {
             },
         );
         let change = PolicyChange {
-            operations: vec![PolicyChangeOp::GrantWrite(PathBuf::from(
+            operations: vec![PolicyChangeOp::GrantWrite(
                 ctx.repo_root.as_ref().unwrap().join("src"),
-            ))],
+            )],
             target: crate::permissions::PolicyChangeTarget::LocalOverride,
             persistence: crate::permissions::PolicyPersistence::Persistent,
         };

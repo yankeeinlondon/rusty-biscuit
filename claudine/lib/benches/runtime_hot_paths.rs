@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use claudine::config::claudine_config::{ClaudineConfig, DefaultSounds, TtsValue};
 use claudine::dispatch::loader::{compile_canonical_runtime, load_claudine_config};
 use claudine::events::Provider;
 use claudine::services::protect::catalog::{ProtectPlatform, RuleGroup};
