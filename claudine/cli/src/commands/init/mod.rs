@@ -1,4 +1,10 @@
 //! Interactive init wizard for claudine configuration.
+//!
+//! This module is compiled only for tests (`#[cfg(test)] pub mod init;`
+//! in `commands/mod.rs`). The production wizard lives in
+//! `init_wizard`. Helpers below are retained alongside the tests for
+//! reference / documentation purposes, so `dead_code` is allowed here.
+#![allow(dead_code)]
 
 mod prompts;
 

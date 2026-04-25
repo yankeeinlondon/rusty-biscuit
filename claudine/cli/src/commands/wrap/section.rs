@@ -158,13 +158,15 @@ impl SectionStream {
 mod tests {
     use super::*;
 
-    fn recorder_pair() -> (SectionStream, Arc<Mutex<Vec<(bool, String)>>>) {
-        let buf: Arc<Mutex<Vec<(bool, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    use super::super::stream_io::TestRecorder;
+
+    fn recorder_pair() -> (SectionStream, TestRecorder) {
+        let buf: TestRecorder = Arc::new(Mutex::new(Vec::new()));
         let inner = StreamOutput::test_recorder(buf.clone());
         (SectionStream::new(inner), buf)
     }
 
-    fn lines(buf: &Arc<Mutex<Vec<(bool, String)>>>) -> Vec<String> {
+    fn lines(buf: &TestRecorder) -> Vec<String> {
         buf.lock().unwrap().iter().map(|(_, l)| l.clone()).collect()
     }
 
