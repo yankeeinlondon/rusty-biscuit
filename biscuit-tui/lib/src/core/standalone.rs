@@ -325,11 +325,7 @@ where
 /// Returns [`CANCELLED_KIND`] when the user pressed `Ctrl-C`, and
 /// [`ABORTED_KIND`] when the user pressed `Esc`. Propagates any other
 /// terminal I/O error.
-pub fn run_standalone<C, S, V>(
-    component: C,
-    state: S,
-    height: Option<HeightSpec>,
-) -> io::Result<V>
+pub fn run_standalone<C, S, V>(component: C, state: S, height: Option<HeightSpec>) -> io::Result<V>
 where
     C: Clone + StatefulWidget<State = S> + HandleEvent,
     S: StandaloneState<Value = V>,

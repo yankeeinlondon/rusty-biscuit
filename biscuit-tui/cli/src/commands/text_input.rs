@@ -65,11 +65,7 @@ impl From<LabelPositionArg> for LabelPosition {
 ///
 /// `Ok(0)` on submission, `Ok(130)` on cancellation, `Err` on a
 /// terminal I/O error.
-pub fn run(
-    args: TextInputArgs,
-    output: OutputMode,
-    height: Option<HeightSpec>,
-) -> io::Result<i32> {
+pub fn run(args: TextInputArgs, output: OutputMode, height: Option<HeightSpec>) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
     run_with_writer(args, output, height, &mut lock, |state, height| {

@@ -377,12 +377,8 @@ impl HorizontalRule {
             RuleWeight::Thick => 3,
         };
         let cell = term.cell_size();
-        let cell_width = cell
-            .map(|c| c.width.max(1))
-            .unwrap_or(DEFAULT_CELL_WIDTH);
-        let cell_height = cell
-            .map(|c| c.height.max(1))
-            .unwrap_or(DEFAULT_CELL_HEIGHT);
+        let cell_width = cell.map(|c| c.width.max(1)).unwrap_or(DEFAULT_CELL_WIDTH);
+        let cell_height = cell.map(|c| c.height.max(1)).unwrap_or(DEFAULT_CELL_HEIGHT);
         let pixel_width = (rule_width as u32).saturating_mul(cell_width).max(1);
         let pixel_height = height_cells * cell_height;
 
