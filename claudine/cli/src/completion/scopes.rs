@@ -305,9 +305,8 @@ mod tests {
             .map(|m| format!("    \"{m}\""))
             .collect::<Vec<_>>()
             .join(",\n");
-        let root_manifest = format!(
-            "[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n"
-        );
+        let root_manifest =
+            format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
         fs::write(root.join("Cargo.toml"), root_manifest).unwrap();
 
         for member in members {
@@ -316,9 +315,7 @@ mod tests {
             let name = member.replace('/', "-");
             fs::write(
                 member_dir.join("Cargo.toml"),
-                format!(
-                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-                ),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
             )
             .unwrap();
             fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();
@@ -501,9 +498,9 @@ mod tests {
             set.package_area
         );
         assert!(
-            set.package.as_ref().is_some_and(|s| s.path.ends_with(
-                PathBuf::from("claudine").join("cli").join("prompts")
-            )),
+            set.package.as_ref().is_some_and(|s| s
+                .path
+                .ends_with(PathBuf::from("claudine").join("cli").join("prompts"))),
             "expected claudine/cli/prompts as the package scope; got {:?}",
             set.package
         );
@@ -529,9 +526,7 @@ mod tests {
         for peer in SKILL_PEER_DIRS {
             let expected_tail = PathBuf::from(peer).join("skills");
             assert!(
-                set.extras
-                    .iter()
-                    .any(|s| s.path.ends_with(&expected_tail)),
+                set.extras.iter().any(|s| s.path.ends_with(&expected_tail)),
                 "skill peer {peer}/skills missing from inline-compose extras: {:?}",
                 set.extras
             );
@@ -602,10 +597,7 @@ mod tests {
             .iter()
             .find(|s| s.path.ends_with("docs"))
             .expect("docs extra missing");
-        assert!(
-            docs.follow_links,
-            "docs/ must follow symlinks: {docs:?}"
-        );
+        assert!(docs.follow_links, "docs/ must follow symlinks: {docs:?}");
     }
 
     #[test]

@@ -10,7 +10,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::dispatch::{NotificationAction, NotificationIcon, NotificationProgress, NotificationUrgency};
+use crate::dispatch::{
+    NotificationAction, NotificationIcon, NotificationProgress, NotificationUrgency,
+};
 use crate::receipt::DesktopPlatform;
 
 /// Normalized desktop notification request ready for backend delivery.

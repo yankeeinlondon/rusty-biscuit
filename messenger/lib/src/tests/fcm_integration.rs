@@ -43,7 +43,9 @@ async fn sends_text_message_with_expected_payload() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/v1/projects/{PROJECT_ID}/messages:send$")))
+        .and(path_regex(format!(
+            r"^/v1/projects/{PROJECT_ID}/messages:send$"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "name": "projects/test-project-12345/messages/0:1234567890"
         })))
@@ -56,10 +58,19 @@ async fn sends_text_message_with_expected_payload() {
 
     let receipt = provider.send(&dispatch, &message).await.unwrap();
     assert_eq!(receipt.provider, ProviderKind::Fcm);
-    assert_eq!(receipt.raw_id, "projects/test-project-12345/messages/0:1234567890");
+    assert_eq!(
+        receipt.raw_id,
+        "projects/test-project-12345/messages/0:1234567890"
+    );
     match receipt.message_ref {
-        MessageRef::Fcm { message_id, project_id } => {
-            assert_eq!(message_id, "projects/test-project-12345/messages/0:1234567890");
+        MessageRef::Fcm {
+            message_id,
+            project_id,
+        } => {
+            assert_eq!(
+                message_id,
+                "projects/test-project-12345/messages/0:1234567890"
+            );
             assert_eq!(project_id, PROJECT_ID);
         }
         other => panic!("expected Fcm message ref, got {other:?}"),
@@ -71,7 +82,9 @@ async fn sends_title_and_body() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/v1/projects/{PROJECT_ID}/messages.*")))
+        .and(path_regex(format!(
+            r"^/v1/projects/{PROJECT_ID}/messages.*"
+        )))
         .and(body_json(serde_json::json!({
             "message": {
                 "token": DEVICE_TOKEN,
@@ -96,7 +109,10 @@ async fn sends_title_and_body() {
     let message = Message::text("hello").title("Alert");
 
     let receipt = provider.send(&dispatch, &message).await.unwrap();
-    assert_eq!(receipt.raw_id, "projects/test-project-12345/messages/0:1234567891");
+    assert_eq!(
+        receipt.raw_id,
+        "projects/test-project-12345/messages/0:1234567891"
+    );
 }
 
 #[tokio::test]
@@ -104,7 +120,9 @@ async fn silent_delivery_sets_normal_priority() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/v1/projects/{PROJECT_ID}/messages.*")))
+        .and(path_regex(format!(
+            r"^/v1/projects/{PROJECT_ID}/messages.*"
+        )))
         .and(body_json(serde_json::json!({
             "message": {
                 "token": DEVICE_TOKEN,
@@ -128,7 +146,10 @@ async fn silent_delivery_sets_normal_priority() {
     let message = Message::text("hello");
 
     let receipt = provider.send(&dispatch, &message).await.unwrap();
-    assert_eq!(receipt.raw_id, "projects/test-project-12345/messages/0:1234567892");
+    assert_eq!(
+        receipt.raw_id,
+        "projects/test-project-12345/messages/0:1234567892"
+    );
 }
 
 #[tokio::test]
@@ -136,16 +157,16 @@ async fn invalid_registration_maps_to_invalid_message() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/v1/projects/{PROJECT_ID}/messages.*")))
-        .respond_with(
-            ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                "error": {
-                    "code": 404,
-                    "message": "Requested entity was not found. registration-token-not-registered",
-                    "status": "NOT_FOUND"
-                }
-            })),
-        )
+        .and(path_regex(format!(
+            r"^/v1/projects/{PROJECT_ID}/messages.*"
+        )))
+        .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+            "error": {
+                "code": 404,
+                "message": "Requested entity was not found. registration-token-not-registered",
+                "status": "NOT_FOUND"
+            }
+        })))
         .mount(&server)
         .await;
 
@@ -165,16 +186,16 @@ async fn auth_error_maps_to_authentication() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/v1/projects/{PROJECT_ID}/messages.*")))
-        .respond_with(
-            ResponseTemplate::new(401).set_body_json(serde_json::json!({
-                "error": {
-                    "code": 401,
-                    "message": "Request had invalid authentication credentials.",
-                    "status": "UNAUTHENTICATED"
-                }
-            })),
-        )
+        .and(path_regex(format!(
+            r"^/v1/projects/{PROJECT_ID}/messages.*"
+        )))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "error": {
+                "code": 401,
+                "message": "Request had invalid authentication credentials.",
+                "status": "UNAUTHENTICATED"
+            }
+        })))
         .mount(&server)
         .await;
 
@@ -194,16 +215,16 @@ async fn generic_error_maps_to_provider() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/v1/projects/{PROJECT_ID}/messages.*")))
-        .respond_with(
-            ResponseTemplate::new(400).set_body_json(serde_json::json!({
-                "error": {
-                    "code": 400,
-                    "message": "Invalid JSON payload received.",
-                    "status": "INVALID_ARGUMENT"
-                }
-            })),
-        )
+        .and(path_regex(format!(
+            r"^/v1/projects/{PROJECT_ID}/messages.*"
+        )))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": {
+                "code": 400,
+                "message": "Invalid JSON payload received.",
+                "status": "INVALID_ARGUMENT"
+            }
+        })))
         .mount(&server)
         .await;
 
@@ -223,7 +244,9 @@ async fn messenger_routes_to_fcm_provider() {
     let server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path_regex(format!(r"^/v1/projects/{PROJECT_ID}/messages.*")))
+        .and(path_regex(format!(
+            r"^/v1/projects/{PROJECT_ID}/messages.*"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "name": "projects/test-project-12345/messages/0:1234567893"
         })))
@@ -238,5 +261,8 @@ async fn messenger_routes_to_fcm_provider() {
 
     let receipt = messenger.send(dispatch, &message).await.unwrap();
     assert_eq!(receipt.provider, ProviderKind::Fcm);
-    assert_eq!(receipt.raw_id, "projects/test-project-12345/messages/0:1234567893");
+    assert_eq!(
+        receipt.raw_id,
+        "projects/test-project-12345/messages/0:1234567893"
+    );
 }

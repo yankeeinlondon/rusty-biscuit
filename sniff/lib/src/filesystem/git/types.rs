@@ -490,7 +490,9 @@ impl std::fmt::Debug for GitRepo {
 
 impl GitRepo {
     /// Returns cached ref decorations, computing them once on first access.
-    pub(crate) fn ref_decorations(&self) -> std::cell::Ref<'_, HashMap<git2::Oid, Vec<RefDecoration>>> {
+    pub(crate) fn ref_decorations(
+        &self,
+    ) -> std::cell::Ref<'_, HashMap<git2::Oid, Vec<RefDecoration>>> {
         // If not yet computed, compute and cache
         if self.ref_decorations.borrow().is_none() {
             let decorations = super::detection::collect_ref_decorations(&self.repo);
@@ -581,7 +583,11 @@ impl GitRepo {
     /// Recent commits from HEAD.
     pub fn recent_commits(&self, count: usize) -> Vec<CommitInfo> {
         let decorations = self.ref_decorations();
-        super::detection::get_recent_commits_with_decorations(&self.repo, count, Some(&*decorations))
+        super::detection::get_recent_commits_with_decorations(
+            &self.repo,
+            count,
+            Some(&*decorations),
+        )
     }
 
     /// Configured remotes.

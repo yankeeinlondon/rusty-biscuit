@@ -62,7 +62,10 @@ pub fn scan_file_inventory_with_exclusions(
 }
 
 #[cfg(not(test))]
-fn scan_inventory_parallel(root: &Path, exclude_roots: &[PathBuf]) -> (Vec<FileClassification>, usize) {
+fn scan_inventory_parallel(
+    root: &Path,
+    exclude_roots: &[PathBuf],
+) -> (Vec<FileClassification>, usize) {
     use ignore::WalkState;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -89,10 +92,7 @@ fn scan_inventory_parallel(root: &Path, exclude_roots: &[PathBuf]) -> (Vec<FileC
                 let Ok(entry) = result else {
                     return WalkState::Continue;
                 };
-                if !entry
-                    .file_type()
-                    .is_some_and(|ft| ft.is_file())
-                {
+                if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                     return WalkState::Continue;
                 }
                 let idx = scanned.fetch_add(1, Ordering::Relaxed);
@@ -103,8 +103,7 @@ fn scan_inventory_parallel(root: &Path, exclude_roots: &[PathBuf]) -> (Vec<FileC
                 // to reduce atomic overhead in the hot path.
                 #[cfg(feature = "metrics")]
                 performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
-                local.push(classify_file(
-                    &scan_root, entry.path()));
+                local.push(classify_file(&scan_root, entry.path()));
                 WalkState::Continue
             })
         });
@@ -119,7 +118,10 @@ fn scan_inventory_parallel(root: &Path, exclude_roots: &[PathBuf]) -> (Vec<FileC
 }
 
 #[cfg(test)]
-fn scan_inventory_sequential(root: &Path, exclude_roots: &[PathBuf]) -> (Vec<FileClassification>, usize) {
+fn scan_inventory_sequential(
+    root: &Path,
+    exclude_roots: &[PathBuf],
+) -> (Vec<FileClassification>, usize) {
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -171,11 +173,36 @@ fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
 pub(crate) fn should_skip_directory_name(name: &str) -> bool {
     matches!(
         name,
-        ".git" | ".turbo" | "node_modules" | "target" | "vendor" | "dist" | "build"
-            | "__pycache__" | ".venv" | "venv" | ".env" | ".pytest_cache" | ".mypy_cache"
-            | ".tox" | ".ruff_cache" | ".next" | ".nuxt" | ".output" | ".vercel"
-            | ".parcel-cache" | ".cache" | "out" | "bin" | "obj" | ".idea" | ".vscode"
-            | "coverage" | "htmlcov" | ".svelte-kit" | ".astro"
+        ".git"
+            | ".turbo"
+            | "node_modules"
+            | "target"
+            | "vendor"
+            | "dist"
+            | "build"
+            | "__pycache__"
+            | ".venv"
+            | "venv"
+            | ".env"
+            | ".pytest_cache"
+            | ".mypy_cache"
+            | ".tox"
+            | ".ruff_cache"
+            | ".next"
+            | ".nuxt"
+            | ".output"
+            | ".vercel"
+            | ".parcel-cache"
+            | ".cache"
+            | "out"
+            | "bin"
+            | "obj"
+            | ".idea"
+            | ".vscode"
+            | "coverage"
+            | "htmlcov"
+            | ".svelte-kit"
+            | ".astro"
     )
 }
 
@@ -518,10 +545,29 @@ fn is_probably_text(bytes: &[u8]) -> bool {
 fn is_hyperpolyglot_worthwhile(ext: &str) -> bool {
     !matches!(
         ext.to_ascii_lowercase().as_str(),
-        "txt" | "log" | "tmp" | "bak" | "out" | "cache" | "md" | "rst"
-            | "csv" | "tsv" | "json" | "yaml" | "yml" | "xml" | "ini"
-            | "cfg" | "conf" | "properties" | "env" | "gitignore"
-            | "dockerignore" | "eslintignore" | "prettierignore"
+        "txt"
+            | "log"
+            | "tmp"
+            | "bak"
+            | "out"
+            | "cache"
+            | "md"
+            | "rst"
+            | "csv"
+            | "tsv"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "xml"
+            | "ini"
+            | "cfg"
+            | "conf"
+            | "properties"
+            | "env"
+            | "gitignore"
+            | "dockerignore"
+            | "eslintignore"
+            | "prettierignore"
     )
 }
 

@@ -99,7 +99,10 @@ fn sequence_surfaces_markdown_with_sequence_key() {
     let ws = TestWorkspace::named("complete-sequence-md");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
-    write_file(&prompts.join("steps.md"), "---\nsequence:\n  - a\n  - b\n---\n");
+    write_file(
+        &prompts.join("steps.md"),
+        "---\nsequence:\n  - a\n  - b\n---\n",
+    );
     write_file(&prompts.join("other.md"), "---\ntitle: X\n---\nBody\n");
 
     let got = run_complete(ws.path(), &["sequence", ""]);

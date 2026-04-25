@@ -109,9 +109,7 @@ impl DesktopBackend for MacOsBackend {
                     feature: "notification dismissal",
                 })
             }
-            MacOsNotificationStrategy::NativeUserNotifications => {
-                dismiss_native(id)
-            }
+            MacOsNotificationStrategy::NativeUserNotifications => dismiss_native(id),
         }
     }
 }

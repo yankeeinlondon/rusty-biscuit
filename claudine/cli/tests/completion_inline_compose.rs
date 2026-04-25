@@ -102,7 +102,10 @@ fn inline_compose_surfaces_files_with_prompt_key() {
     let ws = TestWorkspace::named("complete-inline-has-prompt");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
-    write_file(&prompts.join("inline.md"), "---\nprompt: Write a poem\n---\nBody\n");
+    write_file(
+        &prompts.join("inline.md"),
+        "---\nprompt: Write a poem\n---\nBody\n",
+    );
     write_file(&prompts.join("plain.md"), "---\ntitle: X\n---\nBody\n");
 
     let got = run_complete(ws.path(), &["inline-compose", ""]);
@@ -164,7 +167,10 @@ fn inline_compose_magic_resolves_relative() {
     let ws = TestWorkspace::named("complete-inline-magic");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
-    write_file(&prompts.join("writer.md"), "---\nprompt: Write stuff\n---\n");
+    write_file(
+        &prompts.join("writer.md"),
+        "---\nprompt: Write stuff\n---\n",
+    );
 
     let got = run_complete(ws.path(), &["inline-compose", "@writ"]);
     assert!(

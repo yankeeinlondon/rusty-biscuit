@@ -153,7 +153,9 @@ mod tests {
         let menu = full_menu(&ctx(true, true, true));
         assert_eq!(
             &menu[3..10],
-            &["claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen"],
+            &[
+                "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen"
+            ],
         );
     }
 
@@ -238,7 +240,10 @@ mod tests {
 
     #[test]
     fn render_flag_dash_offers_help() {
-        let got = render(&RootPartial::FlagLike("-".to_string()), &ctx(true, true, true));
+        let got = render(
+            &RootPartial::FlagLike("-".to_string()),
+            &ctx(true, true, true),
+        );
         assert_eq!(got, vec!["--help"]);
     }
 
@@ -277,7 +282,10 @@ mod tests {
             &RootPartial::FlagLike("--version".to_string()),
             &ctx(true, true, true),
         );
-        assert!(got.is_empty(), "unrelated flag must not surface --help: {got:?}");
+        assert!(
+            got.is_empty(),
+            "unrelated flag must not surface --help: {got:?}"
+        );
     }
 
     #[test]

@@ -133,7 +133,10 @@ fn compose_empty_partial_skips_prompt_frontmatter_files() {
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
     write_file(&prompts.join("plain.md"), "# plain\n");
-    write_file(&prompts.join("inline.md"), "---\nprompt: Say hi\n---\nBody\n");
+    write_file(
+        &prompts.join("inline.md"),
+        "---\nprompt: Say hi\n---\nBody\n",
+    );
 
     let got = run_complete(ws.path(), &["compose", ""]);
     assert!(
@@ -301,7 +304,10 @@ fn compose_honors_gitignore_at_nested_depth() {
     let ws = TestWorkspace::named("complete-compose-gitignore");
     seed_cargo_workspace(ws.path());
     write_file(&ws.path().join(".gitignore"), "prompts/hidden/\n");
-    write_file(&ws.path().join("prompts").join("hidden").join("bad.md"), "# b\n");
+    write_file(
+        &ws.path().join("prompts").join("hidden").join("bad.md"),
+        "# b\n",
+    );
     write_file(&ws.path().join("prompts").join("good.md"), "# g\n");
 
     let got = run_complete(ws.path(), &["compose", ""]);
