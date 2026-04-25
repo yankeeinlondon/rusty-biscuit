@@ -44,10 +44,10 @@ pub use crate::receipt::TelegramChatRef;
 pub use crate::receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
 #[cfg(feature = "signal")]
 pub use crate::receipt::{SignalAuthor, SignalThreadKey};
-#[cfg(feature = "desktop")]
-pub use crate::target::DesktopTarget;
 #[cfg(feature = "apns")]
 pub use crate::target::ApnsTarget;
+#[cfg(feature = "desktop")]
+pub use crate::target::DesktopTarget;
 #[cfg(feature = "fcm")]
 pub use crate::target::FcmTarget;
 pub use crate::target::Target;
@@ -59,6 +59,8 @@ pub use crate::validate::{
     CompatibilityWarning, normalize_dispatch, validate_dispatch, validate_message,
 };
 
+#[cfg(feature = "apns")]
+pub use crate::provider::apns::{ApnsConfig, ApnsProvider};
 #[cfg(feature = "desktop")]
 pub use crate::provider::desktop::{
     DesktopConfig, DesktopNotificationProvider, LinuxDesktopConfig, MacOsDesktopConfig,
@@ -66,6 +68,8 @@ pub use crate::provider::desktop::{
 };
 #[cfg(feature = "discord")]
 pub use crate::provider::discord::{DiscordConfig, DiscordProvider};
+#[cfg(feature = "fcm")]
+pub use crate::provider::fcm::{FcmConfig, FcmProvider};
 #[cfg(feature = "signal")]
 pub use crate::provider::signal::{SignalConfig, SignalProvider};
 #[cfg(feature = "slack")]
@@ -74,7 +78,3 @@ pub use crate::provider::slack::{SlackConfig, SlackProvider};
 pub use crate::provider::telegram::{TelegramConfig, TelegramProvider};
 #[cfg(feature = "whatsapp")]
 pub use crate::provider::whatsapp::{WhatsAppConfig, WhatsAppProvider};
-#[cfg(feature = "apns")]
-pub use crate::provider::apns::{ApnsConfig, ApnsProvider};
-#[cfg(feature = "fcm")]
-pub use crate::provider::fcm::{FcmConfig, FcmProvider};
