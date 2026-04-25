@@ -83,7 +83,7 @@ let options = ComposeOptions::new()
 | Nested | `{{ user.email }}` | Nested object access |
 | Context | `{{ ctx.today }}` | Runtime context (today, year, etc.) |
 | Environment | `{{ env.HOME }}` | Environment variable |
-| Fallback | `{{ color \| "unknown" }}` | Default if missing |
+| Fallback | `{{ color || "unknown" }}` | Default if missing |
 | Ternary | `{{ x ? "yes" : "no" }}` | Conditional |
 | Comparison | `{{ count > 0 ? "has" : "empty" }}` | Numeric comparison |
 | Functions | `{{ length(items) }}` | Helper functions |
