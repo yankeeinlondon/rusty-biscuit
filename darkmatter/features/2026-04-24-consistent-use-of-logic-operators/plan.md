@@ -25,6 +25,15 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/compose/interpolation/lexer.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/parser.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
 packages:
   - darkmatter
 ---

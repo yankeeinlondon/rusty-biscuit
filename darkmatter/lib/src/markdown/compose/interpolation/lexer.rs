@@ -855,12 +855,12 @@ After code {{ end }}."#;
 
         #[test]
         fn finds_complex_expression() {
-            let content = r#"{{ color | "unknown" }}"#;
+            let content = r#"{{ color || "unknown" }}"#;
             let finder = ExpressionFinder::new(content);
             let exprs = finder.find_all();
 
             assert_eq!(exprs.len(), 1);
-            assert_eq!(exprs[0].expression, r#"color | "unknown""#);
+            assert_eq!(exprs[0].expression, r#"color || "unknown""#);
         }
     }
 

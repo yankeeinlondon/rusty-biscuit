@@ -901,6 +901,22 @@ mod tests {
         }
 
         #[test]
+        fn error_bare_pipe_in_interpolation() {
+            let result = parse(r#"foo | "default""#);
+            assert!(result.is_err(), "bare '|' should be rejected in interpolation mode");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("Unexpected '|'"), "error should mention '|', got: {}", err.message);
+        }
+
+        #[test]
+        fn error_bare_pipe_in_condition() {
+            let result = parse_condition("a | b");
+            assert!(result.is_err(), "bare '|' should be rejected in condition mode");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("Unexpected '|'"), "error should mention '|', got: {}", err.message);
+        }
+
+        #[test]
         fn error_unclosed_paren() {
             let result = parse("(foo");
             assert!(result.is_err());

@@ -2267,6 +2267,19 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolation_fallback_missing_variable_renders_default() {
+        let content = "---\ntitle: Test\n---\nValue: {{ missing || \"default\" }}";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content(), "Value: default");
+        assert_eq!(report.interpolations_applied, 1);
+    }
+
+    #[test]
     fn test_interpolation_fallback_uses_primary() {
         let content = "---\ncolor: blue\n---\nColor: {{ color || \"unknown\" }}";
         let md: Markdown = content.into();
@@ -4086,6 +4099,50 @@ Rounded: {{ round(pi) }}"#;
             assert!(
                 err.to_string()
                     .contains("Frontmatter shell executable may not come from interpolation")
+            );
+        }
+
+        #[test]
+        fn frontmatter_shell_rejects_pipe_in_command() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(echo a | cat)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterShellExpansion])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
+                "Expected shell pipe rejection, got: {}",
+                err
+            );
+        }
+
+        #[test]
+        fn frontmatter_shell_rejects_double_pipe_in_command() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(false || echo fallback)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterShellExpansion])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
+                "Expected shell pipe rejection for '||', got: {}",
+                err
             );
         }
     }
