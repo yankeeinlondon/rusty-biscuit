@@ -2,6 +2,13 @@
 phases: 3
 created: 2026-04-24
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/frontmatter.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # UTF-8-Safe Byte Scanning in Frontmatter Fallback Helpers — Implementation Plan

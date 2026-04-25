@@ -121,7 +121,11 @@ rules, magic-path resolution, `.gitignore` semantics, and the
 ### Scopes
 
 The engine resolves a `ScopeSet` in priority order (earlier scopes win
-on dedup):
+on dedup). Two iteration orders are exposed: the **default** order used
+by the empty / committed-directory pipelines, and the **magic-path**
+order used when the typed partial begins with `@`.
+
+Default iteration order (`ScopeSet::iter_scopes`):
 
 1. **Repo root** — `<repo>/prompts/` when cwd is inside a detected
    git repo.
@@ -134,6 +138,25 @@ on dedup):
 5. **User Claudine scope** — `~/.claudine/prompts/`.
 6. **Extras** — mode-specific (see below).
 
+Magic-path iteration order (`ScopeSet::iter_magic_scopes`):
+
+1. **Repo root** — `<repo>/prompts/`.
+2. **Package-area root** — `<repo>/<area>/prompts/`.
+3. **Package root** — `<pkg>/prompts/`.
+4. **Repo Claudine scope** — `<repo>/.claudine/prompts/`.
+5. **Extras** — repo-local mode-specific scopes (`docs/`, agent-skill
+   peers).
+6. **User Claudine scope** — `~/.claudine/prompts/` (last).
+
+**Why a separate magic order.** Project-specific prompts should win
+over global prompts because the user's intent on `<TAB>` is nearly
+always "the thing in my current project." For inline-compose and
+sequence the repo-local extras (`docs/`, skill peers) similarly
+outrank `~/.claudine/prompts/` so a project's design docs and skill
+files surface ahead of any user-global prompt that happens to share a
+name. The default (non-magic) pipeline preserves its original ordering
+to avoid disrupting existing committed-directory behavior.
+
 **Why a single scope resolution per invocation.** `sniff::detect_repo_structure`
 can shell out to `cargo metadata` on first call. Threading a single
 `ScopeContext` through the pipeline keeps that cost bounded at one
@@ -141,39 +164,118 @@ shell-out per `<TAB>`, not one per scope.
 
 ### Prefix-length progression
 
-| Partial length | Behaviour |
-|---|---|
-| 0 chars (empty, `@`, committed directory) | Enumerate files only |
-| 1–2 chars | Fuzzy file matching; no directory suggestions |
-| 3+ chars | Fuzzy file + directory matching |
+| Partial length | File matching (high-profile scopes) | Directory matching (repo / CWD walk) |
+|---|---|---|
+| 0 chars (empty, `@`, committed directory) | Enumerate files only — no fuzzy matching | No directory suggestions |
+| 1–2 chars | Fuzzy subsequence match on filenames in high-profile scopes | Case-insensitive **starting-substring (prefix)** match on directory names across the repo (or CWD if not in a repo) |
+| 3+ chars | Fuzzy subsequence match on filenames in high-profile scopes | Case-insensitive **fuzzy subsequence** match on directory names across the repo (or CWD if not in a repo) |
 
-**Why.** Directory names generate lots of candidates; surfacing them at
-one or two characters drowns the file hits the user is after. By three
-characters the user has narrowed the search enough that directory
-candidates become useful rather than noisy.
+The directory walk is repo-wide: it scans the repo root (or CWD when
+not inside a git repo) regardless of the high-profile scope set. Files
+continue to come from high-profile scopes only — directories come from
+anywhere in the project.
+
+**Why a repo-wide directory walk.** Restricting directories to
+high-profile scopes (`prompts/`, `.claudine/prompts/`, etc.) makes
+short partials nearly useless for anything other than the canonical
+prompts roots. Letting users drill into any directory before switching
+to committed-directory mode keeps `<TAB>` useful as a navigational
+tool across a monorepo, not just inside curated prompt folders.
+
+**Why prefix at 1–2 chars and fuzzy at 3+.** With only one or two
+characters typed, fuzzy subsequence matching on directories produces
+too many incidental hits (every name containing those letters in
+order). Prefix matching at short lengths keeps the candidate list
+tight; once the user has typed three characters they have committed
+enough that fuzzy matching becomes useful again.
 
 ### Fuzzy vs. prefix matching
 
-Matching is **subsequence fuzzy** on the filename stem (case-insensitive)
-with directory components considered once the partial reaches three
-characters. Empty partial and committed-directory forms skip matching
-entirely and emit everything in the walked scope.
+File matching against high-profile scopes is always **subsequence
+fuzzy** on the filename stem (case-insensitive), at every non-empty
+partial length. Directory matching against the repo-wide walk uses
+prefix matching at 1–2 characters and fuzzy matching at 3+ characters
+(see the table above). Empty partial and committed-directory forms
+skip matching entirely and emit everything in the walked scope.
 
-**Why subsequence.** Users routinely type prompts by abbreviation
-(`@omp` → `prompts/omnipotent.md`). Strict prefix matching would
-force them to remember the exact leading characters of every file.
+**Why subsequence for files.** Users routinely type prompts by
+abbreviation (`@omp` → `prompts/omnipotent.md`). Strict prefix matching
+would force them to remember the exact leading characters of every
+file.
 
 ### Magic `@` resolution
 
-A partial beginning with `@` is a magic path. It selects the same
-walker roots as a plain partial, but the emitted candidate is the
-resolved path relative to the repo root (or cwd when outside a repo).
-The `@` sigil is **stripped** on selection.
+A partial beginning with `@` is a magic path. It walks the scope set
+in the **magic-path priority order** (see "Scopes" above) and emits
+candidates as paths relative to the repo root (or cwd when outside a
+repo). The `@` sigil is **stripped** on selection.
+
+Two magic-path forms are supported:
+
+#### Bare abbreviation form: `@plan`
+
+Treats the entire body after `@` as the fuzzy-match segment against
+each scope's basenames. The walker enumerates each scope root and the
+matcher fires on the filename stem.
 
 ```text
 claudine compose @plan<TAB>
 → prompts/plan.md
 ```
+
+#### Path-shaped form: `@prompts/plan`
+
+The portion before the last `/` selects a scope-relative subdirectory;
+the portion after is the fuzzy-match segment. The walker descends into
+`<scope>/<dir>` and matches basenames against the trailing segment.
+Multi-segment paths are supported (`@a/b/c`).
+
+```text
+# Resolves against <repo>/prompts/
+claudine compose @prompts/plan<TAB>
+→ prompts/plan.md
+
+# Resolves against <repo>/.claudine/prompts/
+claudine compose @.claudine/prompts/plan<TAB>
+→ .claudine/prompts/plan.md
+
+# Nested directories work too — drills into <repo>/prompts/drafts/
+claudine compose @prompts/drafts/plan<TAB>
+→ prompts/drafts/plan.md
+```
+
+When the path-shaped `dir` does not exist under a particular scope,
+that scope is silently skipped — only scopes whose joined walk root
+resolves to a real directory contribute candidates.
+
+**Why support path-shaped magic paths.** Users naturally type
+`@prompts/plan` when they have already partially recalled the path.
+Without path-shape support, the engine treated the slash as just
+another character to fuzzy-match, which never hits a real basename
+(no file is literally named `prompts/plan.md`). The path-shape rule
+makes the typed form match the on-disk shape.
+
+#### Magic-path priority for inline-compose / sequence extras
+
+Magic resolution searches scopes in this order:
+
+1. Repo root (`<repo>/prompts/`)
+2. Package-area root
+3. Package root
+4. Repo Claudine scope (`<repo>/.claudine/prompts/`)
+5. Mode-specific extras — `docs/` plus repo-local agent-skill peers
+6. User Claudine scope (`~/.claudine/prompts/`)
+
+The user-global scope is **last**. A `docs/plan.md` in the project
+will outrank a `~/.claudine/prompts/plan.md` of the same basename in
+the candidate list.
+
+**Why repo-local extras win over user-global.** Project-specific
+prompts and design docs should beat user-global prompts because the
+user's intent on `<TAB>` is nearly always "the thing in my current
+project." If the user wants the global file they can either narrow
+their query enough that the local match drops out or explicitly type
+the user-scope path.
 
 **Why strip the sigil.** The runtime composition pipeline treats `@` as
 a marker for "resolve from the scope tree." Once completion has resolved
@@ -203,16 +305,31 @@ did not ask for.
 #### `compose`
 
 - **Scope extras:** none.
-- **Frontmatter gate:** extension only (`.md`). No `prompt` or
-  `sequence` key required.
+- **Frontmatter gate:** extension is `.md` / `.markdown`
+  (case-insensitive); the file must be readable, valid UTF-8, and at
+  most `MAX_FRONTMATTER_BYTES` (1 MiB). No `prompt` or `sequence`
+  key required.
 - **Files with a `prompt` key are excluded** so the composition pipeline
   does not accidentally run them as an inline-compose.
+- **Oversized, unreadable, and non-UTF-8 files are rejected** —
+  identical to the contract enforced by `inline-compose` and
+  `sequence`. This is a uniform read/size gate across all three
+  modes.
 
 **Why exclude `prompt`-bearing files.** `compose` runs the body as-is,
 but a file whose frontmatter has `prompt` is an inline-compose source
 document — running it through `compose` would emit the unrendered body
 instead of the generated content. Dropping them from completion steers
 the user to `inline-compose` for those files.
+
+**Why uniform size/read rejection.** Earlier behavior accepted
+oversized or unreadable files for `compose` (on the theory that the
+extension gate had already passed) but rejected them for
+`inline-compose` and `sequence`. That asymmetry surfaced expensive or
+noisy candidates that the runtime would never accept. A single
+uniform contract — every size or read failure is a rejection —
+prevents `<TAB>` from suggesting files that the composition runtime
+itself would refuse.
 
 #### `inline-compose`
 
@@ -306,6 +423,35 @@ frontmatter setter realistically points at: documentation, planning
 artefacts, fix drafts, review outputs. Offering the entire repo would
 drown the candidate list.
 
+### Markdown-extension gate
+
+Only files with a `.md` or `.markdown` extension (case-insensitive)
+are surfaced as setter-value candidates. The case-insensitive gate
+accepts both `docs/PLAN.MD` and `docs/README.MARKDOWN`. Files with
+any other extension — `.txt`, `.yaml`, `.yml`, `.json`, etc. — are
+rejected, as are extensionless files, regardless of basename match.
+
+```text
+# Given:
+#   docs/spec.md       ← surfaced
+#   docs/spec.txt      ← rejected
+#   docs/notes.yaml    ← rejected
+#   docs/extless       ← rejected
+#   docs/PLAN.MD       ← surfaced (uppercase ok)
+
+claudine compose file.md spec=@<TAB>
+→ spec='docs/PLAN.MD'
+→ spec='docs/spec.md'
+```
+
+**Why Markdown only.** The setter-value slot is contractually a
+Markdown-document reference — composition frontmatter overrides treat
+the resolved path as a Markdown source for body inlining. Surfacing
+non-Markdown files would suggest documents the runtime cannot use,
+which makes the candidate list misleading. Restricting the gate to
+the same extension list that the composition file slot already uses
+keeps the two surfaces consistent.
+
 ### Quote normalisation
 
 A leading `"` or `'` on the typed value is stripped for classification.
@@ -374,6 +520,16 @@ walker sees never get opened.
 Files larger than `MAX_FRONTMATTER_BYTES = 1 MiB` skip frontmatter
 parsing. This protects against pathological inputs (a 50 MB generated
 document under `docs/`) without penalising legitimate markdown sources.
+
+### Uniform size/read rejection across modes
+
+Oversized, unreadable, and non-UTF-8 Markdown files are rejected
+uniformly across `compose`, `inline-compose`, and `sequence`. No mode
+is permissive on read failures. This avoids a class of silent bugs
+where `compose` would surface candidates that the runtime later
+refused to parse, and keeps the per-`<TAB>` cost bounded — a 50 MB
+generated Markdown document never blocks the walker on size, never
+gets parsed for frontmatter, and never appears in the candidate list.
 
 ### Candidate budget
 
@@ -473,12 +629,51 @@ $ claudine compose @plan<TAB>
 → prompts/plan.md
 ```
 
+### Composition with a path-shaped magic prefix
+
+```text
+$ claudine compose @prompts/plan<TAB>
+→ prompts/plan.md
+
+$ claudine compose @.claudine/prompts/plan<TAB>
+→ .claudine/prompts/plan.md
+```
+
+### One-character partial surfaces repo directories
+
+```text
+# Given repo layout: claudine/, biscuit-speaks/, prompts/plan.md
+$ claudine compose c<TAB>
+→ claudine/                  # prefix dir match (repo-wide walk)
+→ prompts/plan.md            # fuzzy file match (high-profile scope)
+```
+
+### Three-character partial allows fuzzy directory matching
+
+```text
+# Given repo layout: documentation/
+$ claudine compose dcm<TAB>
+→ documentation/             # fuzzy dir match — d-o-c-u-m has subseq d-c-m
+```
+
 ### Inline-compose pulling from `docs/`
 
 ```text
 $ claudine inline-compose @spec<TAB>
 → docs/spec.md
 → docs/feature-spec.md
+```
+
+### Inline-compose prefers repo-local docs over user-global prompts
+
+```text
+# Given:
+#   <repo>/docs/plan.md           ← has `prompt:` frontmatter
+#   ~/.claudine/prompts/plan.md   ← has `prompt:` frontmatter
+
+$ claudine inline-compose @plan<TAB>
+→ docs/plan.md                          # repo-local wins
+→ /home/user/.claudine/prompts/plan.md  # user-global second
 ```
 
 ### Sequence against an external YAML
@@ -494,6 +689,19 @@ $ claudine sequence @re<TAB>
 $ claudine compose file.md spec="@p<TAB>
 → spec='docs/plan.md'
 → spec='features/plan.md'
+```
+
+### Setter override only surfaces Markdown
+
+```text
+# Given:
+#   docs/spec.md       ← surfaced
+#   docs/spec.txt      ← rejected (non-Markdown)
+#   docs/notes.yaml    ← rejected (non-Markdown)
+#   docs/extless       ← rejected (no extension)
+
+$ claudine compose file.md spec=@<TAB>
+→ spec='docs/spec.md'
 ```
 
 ### Wrapper passthrough
