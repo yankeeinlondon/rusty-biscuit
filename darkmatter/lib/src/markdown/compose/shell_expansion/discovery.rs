@@ -11,6 +11,7 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOperation;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::EffectiveStateBuilder;
 use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter;
 use crate::markdown::compose::frontmatter_shell_expansion::scan_frontmatter;
 use crate::markdown::compose::prepare_frontmatter_for_compose;
@@ -18,6 +19,8 @@ use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellCommandOrigin};
+use crate::markdown::compose::state;
+use crate::markdown::compose::transclusion;
 use crate::markdown::compose::types::SourceRange;
 use crate::markdown::types::MarkdownResult;
 
@@ -92,44 +95,17 @@ pub fn collect_shell_commands(
     let mut entries = Vec::new();
 
     // ── Phase 1: Discover frontmatter shell commands ───────────────
-    {
-        let mut fm_clone = markdown.clone();
-        let pre_interpolation_snapshot =
-            prepare_frontmatter_for_compose(&mut fm_clone, options, true);
-        if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-            let _ = interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false);
-        }
-
-        let candidates =
-            scan_frontmatter(fm_clone.frontmatter(), pre_interpolation_snapshot.as_ref())?;
-
-        for candidate in candidates {
-            let (executable, args) = if which::which(&candidate.executable).is_ok() {
-                (candidate.executable.clone(), candidate.args.clone())
-            } else if let Some(resolved) = resolve_alias(&candidate.executable) {
-                let mut merged_args = resolved.args;
-                merged_args.extend_from_slice(&candidate.args);
-                (resolved.executable, merged_args)
-            } else {
-                (candidate.executable.clone(), candidate.args.clone())
-            };
-
-            let normalized = normalize_command(&executable, &args);
-
-            if seen.insert(normalized.clone()) {
-                entries.push(ShellCommandEntry {
-                    raw_command: candidate.raw_command,
-                    executable,
-                    args,
-                    normalized,
-                    source_file: default_source.clone(),
-                    origin: ShellCommandOrigin::Frontmatter {
-                        key: candidate.key.clone(),
-                    },
-                });
-            }
-        }
-    }
+    // Frontmatter commands execute before each document's body is
+    // transcluded, so walk markdown transclusions recursively and scan each
+    // child's frontmatter without enabling FrontmatterShellExpansion.
+    let mut visited_frontmatter = HashSet::new();
+    collect_frontmatter_commands_recursive(
+        markdown,
+        options,
+        &mut seen,
+        &mut entries,
+        &mut visited_frontmatter,
+    )?;
 
     // ── Phase 2: Discover body shell commands ──────────────────────
     // Run compose with only interpolation + transclusion (no shell execution).
@@ -189,6 +165,182 @@ pub fn collect_shell_commands(
     }
 
     Ok(entries)
+}
+
+fn collect_frontmatter_commands_recursive(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    seen: &mut HashSet<String>,
+    entries: &mut Vec<ShellCommandEntry>,
+    visited: &mut HashSet<PathBuf>,
+) -> MarkdownResult<()> {
+    let source_file = match &options.source {
+        ComposeSource::File(p) => p.clone(),
+        _ => PathBuf::from("<unknown>"),
+    };
+
+    if let ComposeSource::File(path) = &options.source {
+        let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+        if !visited.insert(key) {
+            return Ok(());
+        }
+    }
+
+    scan_one_frontmatter(markdown, options, &source_file, seen, entries)?;
+
+    let inline_ops: Vec<_> = [
+        ComposeOperation::FrontmatterInterpolation,
+        ComposeOperation::TextReplacement,
+        ComposeOperation::PageBlocks,
+        ComposeOperation::Interpolation,
+    ]
+    .into_iter()
+    .filter(|op| options.is_enabled(*op))
+    .collect();
+
+    let (prepared, _) = markdown.compose_with(options.clone().only(&inline_ops))?;
+    let transclusion_opts = options.transclusion_options();
+    let state = EffectiveStateBuilder::new()
+        .with_frontmatter(
+            prepared
+                .frontmatter()
+                .as_map()
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        )
+        .with_external_state(
+            options
+                .external_state
+                .clone()
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+        )
+        .with_merge_strategy(crate::markdown::MergeStrategy::PreferDocument)
+        .with_replace_parent_wins(options.replace_parent_wins)
+        .with_context(options.context().clone())
+        .with_allow_ctx_override(options.allow_ctx_override)
+        .build()?;
+
+    for directive in transclusion::parse_directives(prepared.content())? {
+        if directive.kind != transclusion::DirectiveKind::File {
+            continue;
+        }
+
+        if let Some(expr) = &directive.options.when_expr
+            && !transclusion::evaluate_condition(expr, &state, directive.line)?
+        {
+            continue;
+        }
+
+        let target = transclusion::normalize_reference_token(&directive.raw_target);
+        let transclusion::ResolvedTarget::File { path, .. } = transclusion::resolve_target(
+            directive.kind,
+            &target,
+            &transclusion_opts,
+            &options.source,
+            directive.line,
+        )?
+        else {
+            continue;
+        };
+
+        let mut child = Markdown::try_from(path.as_path())?;
+        if directive.options.set_object.is_some() || !directive.options.set_properties.is_empty() {
+            let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
+            let base_map: serde_json::Map<String, serde_json::Value> =
+                base_indexmap.into_iter().collect();
+            let overlaid = state::apply_set_overrides(
+                &base_map,
+                directive.options.set_object.as_ref(),
+                &directive.options.set_properties,
+            );
+            *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
+        }
+
+        collect_frontmatter_commands_recursive(
+            &child,
+            &options.clone().with_source_file(path),
+            seen,
+            entries,
+            visited,
+        )?;
+    }
+
+    let refs = transclusion::parse_frontmatter_refs(prepared.frontmatter().as_map())?;
+    for reference in refs.prologue.iter().chain(refs.epilogue.iter()) {
+        if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference)
+        {
+            continue;
+        }
+
+        let kind = if transclusion::is_url_like(reference) {
+            transclusion::DirectiveKind::Url
+        } else {
+            transclusion::DirectiveKind::File
+        };
+
+        let transclusion::ResolvedTarget::File { path, .. } =
+            transclusion::resolve_target(kind, reference, &transclusion_opts, &options.source, 0)?
+        else {
+            continue;
+        };
+
+        let child = Markdown::try_from(path.as_path())?;
+        collect_frontmatter_commands_recursive(
+            &child,
+            &options.clone().with_source_file(path),
+            seen,
+            entries,
+            visited,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn scan_one_frontmatter(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    source_file: &std::path::Path,
+    seen: &mut HashSet<String>,
+    entries: &mut Vec<ShellCommandEntry>,
+) -> MarkdownResult<()> {
+    let mut fm_clone = markdown.clone();
+    let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
+    if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
+        let _ = interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false);
+    }
+
+    let candidates = scan_frontmatter(fm_clone.frontmatter(), pre_interpolation_snapshot.as_ref())?;
+
+    for candidate in candidates {
+        let (executable, args) = if which::which(&candidate.executable).is_ok() {
+            (candidate.executable.clone(), candidate.args.clone())
+        } else if let Some(resolved) = resolve_alias(&candidate.executable) {
+            let mut merged_args = resolved.args;
+            merged_args.extend_from_slice(&candidate.args);
+            (resolved.executable, merged_args)
+        } else {
+            (candidate.executable.clone(), candidate.args.clone())
+        };
+
+        let normalized = normalize_command(&executable, &args);
+
+        if seen.insert(normalized.clone()) {
+            entries.push(ShellCommandEntry {
+                raw_command: candidate.raw_command,
+                executable,
+                args,
+                normalized,
+                source_file: source_file.to_path_buf(),
+                origin: ShellCommandOrigin::Frontmatter {
+                    key: candidate.key.clone(),
+                },
+            });
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -397,6 +549,61 @@ replace:
             "Missing echo: {:?}",
             executables
         );
+    }
+
+    #[test]
+    fn discovers_frontmatter_shell_commands_in_transcluded_files() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let child_path = temp_dir.path().join("child.md");
+        std::fs::write(
+            &child_path,
+            "---\nchild_cmd: \"$(echo child-frontmatter)\"\n---\n# Child\n",
+        )
+        .unwrap();
+
+        let root_path = temp_dir.path().join("root.md");
+        std::fs::write(&root_path, "::file ./child.md\n").unwrap();
+
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(&root_path);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo child-frontmatter");
+        assert_eq!(
+            entries[0].source_file.canonicalize().unwrap(),
+            child_path.canonicalize().unwrap()
+        );
+        assert_eq!(
+            entries[0].origin,
+            ShellCommandOrigin::Frontmatter {
+                key: "child_cmd".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn skips_frontmatter_shell_commands_in_false_transclusions() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let child_path = temp_dir.path().join("child.md");
+        std::fs::write(&child_path, "---\ncmd: \"$(echo hidden)\"\n---\n# Child\n").unwrap();
+
+        let root_path = temp_dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\ninclude_child: false\n---\n::file ./child.md when=\"include_child\"\n",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(&root_path);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert!(entries.is_empty(), "entries: {:?}", entries);
     }
 
     #[test]

@@ -826,7 +826,7 @@ pub fn write_terminal<W: std::io::Write>(
     // inside this pipeline (tables, horizontal rules, ...). Built once from
     // the resolved options so every consumer honors `max_width`, `color_depth`,
     // and `emit_hyperlinks` without re-running capability detection (B2).
-    let render_terminal = Terminal::builder()
+    let mut render_terminal = Terminal::builder()
         .width(terminal_width as u32)
         .osc_link_support(emit_hyperlinks)
         .color_depth(match color_depth {
@@ -836,6 +836,19 @@ pub fn write_terminal<W: std::io::Write>(
             ColorDepth::None => TerminalColorDepth::None,
         })
         .build();
+    match options.image_mode {
+        TerminalImageMode::Never => {
+            render_terminal.is_tty = false;
+            render_terminal.image_support = ImageSupport::None;
+        }
+        TerminalImageMode::Force => {
+            render_terminal.is_tty = true;
+            if matches!(render_terminal.image_support, ImageSupport::None) {
+                render_terminal.image_support = ImageSupport::Kitty;
+            }
+        }
+        TerminalImageMode::Auto => {}
+    }
 
     // Image tracking and rendering
     let mut in_image = false;

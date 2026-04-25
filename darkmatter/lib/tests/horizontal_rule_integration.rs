@@ -2,14 +2,20 @@
 mod tests {
     use darkmatter::markdown::{
         Markdown,
-        output::{ColorDepth, TerminalOptions, as_html, for_terminal},
+        output::{ColorDepth, TerminalImageMode, TerminalOptions, as_html, for_terminal},
     };
+
+    fn terminal_text_options() -> TerminalOptions {
+        let mut options = TerminalOptions::default();
+        options.image_mode = TerminalImageMode::Never;
+        options
+    }
 
     #[test]
     fn test_markdown_to_terminal_horizontal_rule() {
         let markdown = "--- { style: waves, alignment: centered, weight: thick }";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let result = for_terminal(&md, terminal_text_options()).unwrap();
 
         // Should contain the rendered horizontal rule
         assert!(!result.is_empty());
@@ -46,7 +52,7 @@ mod tests {
     fn test_markdown_with_multiple_horizontal_rules() {
         let markdown = "# Header\n\n--- { style: dashes }\n\nSome content\n\n*** { style: waves, alignment: centered }\n\nMore content\n\n___ { style: dots, weight: thick, width: \"75%\" }\n";
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
         let html_result = as_html(&md, Default::default()).unwrap();
 
         // Should contain multiple horizontal rules
@@ -67,7 +73,7 @@ mod tests {
     fn test_horizontal_rule_in_complex_document() {
         let markdown = "# Complex Document\n\n## Section 1\n\nRegular paragraph with some text.\n\n--- { style: curtain-rod, alignment: full }\n\n## Section 2\n\nAnother paragraph.\n\n*** { style: line-circle, alignment: left, color: \"#00ff00\" }\n\n### Subsection\n\nFinal content.\n\n___ { style: inset-line, weight: medium, width: \"60%\" }\n";
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
         let html_result = as_html(&md, Default::default()).unwrap();
 
         // Should render without errors
@@ -90,7 +96,7 @@ mod tests {
     fn test_horizontal_rule_with_default_attributes() {
         let markdown = "--- { }";
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
         let html_result = as_html(&md, Default::default()).unwrap();
 
         // Should render with default attributes
@@ -144,7 +150,7 @@ mod tests {
     fn test_bare_rule_uses_frontmatter_defaults_in_terminal() {
         let markdown = "---\nhr:\n  style: dots\n  alignment: centered\n  weight: thick\n  width: \"20\"\n---\n\n---\n";
         let md: Markdown = markdown.into();
-        let mut options = TerminalOptions::default();
+        let mut options = terminal_text_options();
         options.color_depth = Some(ColorDepth::Colors16);
         options.max_width = Some(40);
 
@@ -217,7 +223,7 @@ mod tests {
         // silently dropping the event through the catch-all arm.
         let markdown = "---\n";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let result = for_terminal(&md, terminal_text_options()).unwrap();
         assert!(!result.is_empty());
         // Default style is dashes; Unicode mode uses ╌, ASCII fallback uses -.
         assert!(
@@ -266,7 +272,7 @@ mod tests {
         // and confirming the rendered rule body does not exceed it.
         let markdown = "--- { style: dashes, alignment: full }\n";
         let md: Markdown = markdown.into();
-        let mut options = TerminalOptions::default();
+        let mut options = terminal_text_options();
         options.max_width = Some(20);
         let result = for_terminal(&md, options).unwrap();
 
@@ -309,8 +315,8 @@ mod tests {
         // in terminal output now that weight is honored.
         let thin: Markdown = "--- { style: dashes, weight: thin }\n".into();
         let thick: Markdown = "--- { style: dashes, weight: thick }\n".into();
-        let thin_out = for_terminal(&thin, TerminalOptions::default()).unwrap();
-        let thick_out = for_terminal(&thick, TerminalOptions::default()).unwrap();
+        let thin_out = for_terminal(&thin, terminal_text_options()).unwrap();
+        let thick_out = for_terminal(&thick, terminal_text_options()).unwrap();
         assert_ne!(
             thin_out, thick_out,
             "thick rule must differ from thin rule in terminal output"
@@ -324,7 +330,7 @@ mod tests {
         // renderer continues.
         let markdown = "--- { style: bogus }\n";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let result = for_terminal(&md, terminal_text_options()).unwrap();
         assert!(!result.is_empty());
         assert!(
             result.contains('╌') || result.contains('-'),
@@ -355,7 +361,7 @@ mod tests {
         // hardcoded "\n\n"). There must NOT be two blank lines.
         let markdown = "--- { style: dashes }\n\nAfter\n";
         let md: Markdown = markdown.into();
-        let result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let result = for_terminal(&md, terminal_text_options()).unwrap();
 
         // Find the rule line and assert the following two lines are "blank
         // then content" (one blank line), not "blank then blank then content".
@@ -520,7 +526,7 @@ mod tests {
 
         for markdown in test_cases {
             let md: Markdown = markdown.into();
-            let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();
+            let terminal_result = for_terminal(&md, terminal_text_options()).unwrap();
             let html_result = as_html(&md, Default::default()).unwrap();
 
             assert!(!terminal_result.is_empty());
@@ -541,7 +547,7 @@ mod tests {
         // apply.
         let markdown = "---\nhr:\n  style: dots\n  width: 20\n  color: red\n---\n\n---\n";
         let md: Markdown = markdown.into();
-        let mut options = TerminalOptions::default();
+        let mut options = terminal_text_options();
         options.color_depth = Some(ColorDepth::Colors16);
         options.max_width = Some(40);
 
@@ -654,10 +660,35 @@ mod tests {
             "waves style uses a <path> element; expected it inside the blockquote: {html}"
         );
 
-        let terminal = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let terminal = for_terminal(&md, terminal_text_options()).unwrap();
         assert!(
             terminal.contains('≋') || terminal.contains('~'),
             "blockquote-HR terminal output must contain the waves glyph (≋ or ~): {terminal:?}"
+        );
+    }
+
+    #[test]
+    fn test_terminal_image_mode_never_disables_hr_image_tier() {
+        let markdown = "--- { style: waves, alignment: centered, color: \"red\" }";
+        let md: Markdown = markdown.into();
+        let mut options = TerminalOptions::default();
+        options.image_mode = TerminalImageMode::Never;
+        options.max_width = Some(40);
+        options.color_depth = Some(ColorDepth::TrueColor);
+
+        let output = for_terminal(&md, options).unwrap();
+
+        assert!(
+            !output.contains("\x1b_G"),
+            "TerminalImageMode::Never must not emit Kitty image escapes: {output:?}"
+        );
+        assert!(
+            !output.contains("\x1b]1337;File="),
+            "TerminalImageMode::Never must not emit iTerm image escapes: {output:?}"
+        );
+        assert!(
+            output.contains('≋') || output.contains('~'),
+            "TerminalImageMode::Never should fall back to text HR output: {output:?}"
         );
     }
 }
