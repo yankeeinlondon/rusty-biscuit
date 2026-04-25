@@ -1,5 +1,6 @@
 ---
 phases: 5
+start_phase: 4
 created: 2026-04-25
 source_feature: 2026-04-24-improved-shell-completions
 review_source: ./review-2.md
