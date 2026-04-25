@@ -1,7 +1,7 @@
 ---
 phases: 7
 created: 2026-04-24
-start_phase: 3
+start_phase: 4
 memory: implement-new-message-platforms
 packages:
   - claudine

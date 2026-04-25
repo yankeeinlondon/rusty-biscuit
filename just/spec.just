@@ -237,14 +237,23 @@ fix name="":
     fi
 
 # adds a complimentary tech design to the specification file
-design filter="":
+design filter="" spec="" dir="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -z "{{ filter }}" ]]; then
-        file="$(just _choose_spec)"
-    else
-        file="$(just _choose_spec "{{ filter }}")"
+    file="{{spec}}"
+    use_dir="{{dir}}"
+
+    if [[ -z "${file}" ]]; then
+        if [[ -z "{{ filter }}" ]]; then
+            file="$(just _choose_spec)"
+        else
+            file="$(just _choose_spec "{{ filter }}")"
+        fi
+    fi
+
+    if [[ -z "${use_dir}" ]]; then
+        use_dir="$(dirname ${file})"
     fi
 
     use_agent="$(just _choose_agent)"
@@ -253,10 +262,9 @@ design filter="":
         model="--model $(just _choose_model)"
     fi
 
-    dir="$(dirname ${file})"
     echo
     echo -e "Creating a technical design from the spec file: {{ blue }}${file}{{ reset }}. Using {{ bold }}${use_agent}{{ reset }} agent."
-    claudine compose @prompts/design.md --${use_agent} -y spec="$(basename "${file}")" dir="${dir}" ${model} || (
+    claudine compose @prompts/design.md --${use_agent} -y spec="$(basename "${file}")" dir="${use_dir}" ${model} || (
         echo
         echo -e "Failed to complete the design for {{ blue }}$(just _link "${file}"){{ reset }} using the {{ yellow }}${use_agent}{{ reset }} agent"
         echo
@@ -264,10 +272,10 @@ design filter="":
         exit 1
     )
     echo
-    link="$(just _link "${dir}/tech-design.md")"
+    link="$(just _link "${use_dir}/tech-design.md")"
     echo -e "We now have a {{ bold }}technical design{{ reset }} document for {{ blue }}${link}{{ reset }}"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
-        just plan-feature "${file}" "${dir}/tech-design.md"
+        just plan-feature "${file}" "${use_dir}/tech-design.md"
     fi
 
 clarify filter="" agent="":
@@ -298,6 +306,12 @@ clarify filter="" agent="":
         exit 1
     )
     echo -e "The {{ blue }}${link}{{ reset }} file has been {{ italic }}clarified{{ reset }}"
+    if [[ "${file}" == *spec* ]]; then
+        spec_dir="$(dirname "${file}")"
+        if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} for this spec?")" == "y" ]]; then
+            just design spec="${file}" dir="${spec_dir}"
+        fi
+    fi
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 
