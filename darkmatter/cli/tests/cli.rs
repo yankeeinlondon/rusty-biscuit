@@ -2076,6 +2076,40 @@ fn test_compose_allow_shell_timeout_emits_warning() {
         .stderr(predicate::str::contains("replaced with an empty"));
 }
 
+#[test]
+fn test_compose_shell_reports_discovered_commands_without_executing() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let root_path = temp_dir.path().join("root.md");
+    let child_path = temp_dir.path().join("child.md");
+
+    std::fs::write(
+        &root_path,
+        "---\nroot_cmd: \"$(echo root-frontmatter)\"\n---\n# Root\n::shell echo root-body\n::file ./child.md\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &child_path,
+        "---\nchild_cmd: \"$(echo child-frontmatter)\"\n---\n# Child\n::shell echo child-body\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&root_path)
+        .arg("--shell")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Shell commands discovered: 4"))
+        .stdout(predicate::str::contains("echo root-frontmatter"))
+        .stdout(predicate::str::contains("frontmatter.root_cmd"))
+        .stdout(predicate::str::contains("echo root-body"))
+        .stdout(predicate::str::contains("echo child-frontmatter"))
+        .stdout(predicate::str::contains("frontmatter.child_cmd"))
+        .stdout(predicate::str::contains("echo child-body"))
+        .stdout(predicate::str::contains("root-frontmatter\n").not())
+        .stdout(predicate::str::contains("child-frontmatter\n").not());
+}
+
 // =============================================================================
 //                     VALIDATE REFS CLI TESTS (rec #15)
 // =============================================================================

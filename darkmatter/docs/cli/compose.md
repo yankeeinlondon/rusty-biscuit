@@ -43,6 +43,9 @@ md compose doc.md --output json
 
 # Show output via temp artifact
 md compose doc.md --show
+
+# Report shell commands that compose could execute, without running them
+md compose doc.md --shell
 ```
 
 ### Shorthand Setter Syntax
@@ -78,6 +81,7 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--allow-missing-transclusions`: allow missing transclusion targets; the directive is removed from the output and issues are reported on stderr with exit code 0.
 - `--allow-any-missing-reference`: combines all `--allow-missing-*` flags.
 - `--allow-ctx-override`: allow non-object `ctx` frontmatter. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error. This flag downgrades the error to a warning, and the runtime context is used instead.
+- `--shell`: report shell commands discovered in the compose tree and exit without executing them. The report includes body `::shell` directives and top-level frontmatter `$(...)` shell expressions, including commands discovered through markdown transclusions.
 - `--perf`: emit a structured performance report to stderr after compose completes. The report includes both command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. The report is printed after any compose warnings and deferred validation issues.
 
 ### Compose Warnings

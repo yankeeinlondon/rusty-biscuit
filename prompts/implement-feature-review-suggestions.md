@@ -3,7 +3,9 @@ dir: ""
 spec: ""
 design: ""
 iteration: 1
-area: {{ctx.current_package_area}}
+area: "{{ctx.current_package_area}}"
+success:
+    message: "🎉 all of the suggestions from `{{dir}}/review-{iteration}.md` -- _in the {{area}} package area -- were implemented!"
 ---
 ## Context
 

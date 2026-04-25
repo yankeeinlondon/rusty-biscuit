@@ -1,3 +1,5 @@
+#[cfg(feature = "apns")]
+pub mod apns;
 #[cfg(feature = "discord")]
 pub(crate) mod attachment_helpers;
 #[cfg(feature = "desktop")]
@@ -6,6 +8,8 @@ pub mod desktop;
 pub mod discord;
 #[cfg(feature = "discord")]
 pub mod discord_webhook;
+#[cfg(feature = "fcm")]
+pub mod fcm;
 #[cfg(feature = "signal")]
 pub mod signal;
 #[cfg(feature = "slack")]
@@ -16,10 +20,6 @@ pub mod slack_webhook;
 pub mod telegram;
 #[cfg(feature = "whatsapp")]
 pub mod whatsapp;
-#[cfg(feature = "apns")]
-pub mod apns;
-#[cfg(feature = "fcm")]
-pub mod fcm;
 
 use std::collections::HashMap;
 
