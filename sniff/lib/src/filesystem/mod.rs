@@ -395,7 +395,10 @@ mod tests {
             || request.include_formatting
             || request.repo.is_some();
 
-        assert!(need_shared_view, "include_formatting should trigger shared view");
+        assert!(
+            need_shared_view,
+            "include_formatting should trigger shared view"
+        );
     }
 
     #[test]
@@ -411,7 +414,10 @@ mod tests {
             || request.include_formatting
             || request.repo.is_some();
 
-        assert!(need_shared_view, "repo detection should trigger shared view");
+        assert!(
+            need_shared_view,
+            "repo detection should trigger shared view"
+        );
     }
 
     #[test]
@@ -428,7 +434,10 @@ mod tests {
             || request.include_formatting
             || request.repo.is_some();
 
-        assert!(need_shared_view, "file inventory should trigger shared view");
+        assert!(
+            need_shared_view,
+            "file inventory should trigger shared view"
+        );
     }
 
     #[test]
@@ -449,7 +458,10 @@ mod tests {
             || request.include_formatting
             || request.repo.is_some();
 
-        assert!(!need_shared_view, "request with all features disabled should not trigger shared view");
+        assert!(
+            !need_shared_view,
+            "request with all features disabled should not trigger shared view"
+        );
     }
 
     // ============================================================================

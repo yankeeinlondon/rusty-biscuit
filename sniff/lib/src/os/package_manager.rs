@@ -391,8 +391,6 @@ fn compute_path_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-
-
 /// Checks if a command exists in the given PATH directories.
 ///
 /// Searches through the provided directories for an executable with the
@@ -1376,7 +1374,10 @@ pub fn detect_windows_package_managers(index: Option<&ExecutableIndex>) -> Syste
 /// - The caller is responsible for platform checking
 /// - For non-BSD `OsType` values, returns an empty `SystemPackageManagers`
 #[must_use]
-pub fn detect_bsd_package_managers(os_type: OsType, index: Option<&ExecutableIndex>) -> SystemPackageManagers {
+pub fn detect_bsd_package_managers(
+    os_type: OsType,
+    index: Option<&ExecutableIndex>,
+) -> SystemPackageManagers {
     let index = index.map_or_else(ExecutableIndex::build_path_only, |idx| idx.clone());
     let mut managers: Vec<DetectedPackageManager> = Vec::new();
     let mut primary: Option<SystemPackageManager> = None;

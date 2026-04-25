@@ -443,7 +443,11 @@ fn build_dirty_files(
 ///
 /// `head_tree` should be pre-resolved from `repo.head().and_then(|h| h.peel_to_tree())`
 /// to avoid repeated tree resolution when this function is called in a loop.
-fn get_file_diff_stats(repo: &Repository, filepath: &Path, head_tree: Option<&git2::Tree>) -> (usize, usize) {
+fn get_file_diff_stats(
+    repo: &Repository,
+    filepath: &Path,
+    head_tree: Option<&git2::Tree>,
+) -> (usize, usize) {
     let mut added: usize = 0;
     let mut removed: usize = 0;
 
@@ -1238,7 +1242,9 @@ pub(crate) fn get_commit_by_sha_with_decorations(
         })
         .ok()?;
 
-    let decorations = ref_decorations.cloned().unwrap_or_else(|| collect_ref_decorations(repo));
+    let decorations = ref_decorations
+        .cloned()
+        .unwrap_or_else(|| collect_ref_decorations(repo));
     let oid = commit.id();
     let refs = decorations.get(&oid).cloned().unwrap_or_default();
 
@@ -1461,15 +1467,8 @@ mod tests {
         let tree_id = index.write_tree().unwrap();
         {
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                "Initial commit",
-                &tree,
-                &[],
-            )
-            .unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+                .unwrap();
         }
 
         (dir, repo)
@@ -1506,8 +1505,7 @@ mod tests {
         std::fs::write(&file_path, "unstaged content\nmore lines\n").unwrap();
 
         let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
-        let (added, removed) =
-            get_file_diff_stats(&repo, Path::new("test.txt"), Some(&head_tree));
+        let (added, removed) = get_file_diff_stats(&repo, Path::new("test.txt"), Some(&head_tree));
 
         // Should count both staged (1 add, 1 remove) and unstaged (2 add, 1 remove)
         assert_eq!(added, 3);
