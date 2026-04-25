@@ -13,6 +13,10 @@ findings_addressed:
   - finding-2: "'@' magic lookup emits lower-priority tiers instead of first-hit-wins results"
   - finding-3: Fish completions do not fall back to native file completion on non-targeted slots
   - finding-4: Plain git checkouts are only partially handled because committed paths and magic rendering ignore git_root
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 ---
 
 # Review-Plan 2: Improved Shell Completions
