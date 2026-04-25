@@ -367,8 +367,7 @@ fn gather_committed(
             continue;
         }
 
-        let canonical =
-            std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
+        let canonical = std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
         if !seen.insert(canonical) {
             continue;
         }
@@ -379,7 +378,11 @@ fn gather_committed(
         else {
             continue;
         };
-        let match_target = if is_dir { name.as_str() } else { name_stem(&name) };
+        let match_target = if is_dir {
+            name.as_str()
+        } else {
+            name_stem(&name)
+        };
         if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
             continue;
         }
@@ -387,7 +390,9 @@ fn gather_committed(
             Ok(r) => r,
             Err(_) => continue,
         };
-        let Some(rel_str) = rel.to_str() else { continue };
+        let Some(rel_str) = rel.to_str() else {
+            continue;
+        };
         let insert = if dir.is_empty() {
             rel_str.to_string()
         } else {
@@ -464,9 +469,8 @@ mod tests {
             .map(|m| format!("    \"{m}\""))
             .collect::<Vec<_>>()
             .join(",\n");
-        let root_manifest = format!(
-            "[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n"
-        );
+        let root_manifest =
+            format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
         fs::write(root.join("Cargo.toml"), root_manifest).unwrap();
         for member in members {
             let member_dir = root.join(member);
@@ -474,9 +478,7 @@ mod tests {
             let name = member.replace('/', "-");
             fs::write(
                 member_dir.join("Cargo.toml"),
-                format!(
-                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-                ),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
             )
             .unwrap();
             fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();
@@ -540,14 +542,8 @@ mod tests {
             PartialKind::CommittedDir("x/".to_string()).active_segment(),
             ""
         );
-        assert_eq!(
-            PartialKind::Magic("pl".to_string()).active_segment(),
-            "pl"
-        );
-        assert_eq!(
-            PartialKind::Word("pl".to_string()).active_segment(),
-            "pl"
-        );
+        assert_eq!(PartialKind::Magic("pl".to_string()).active_segment(), "pl");
+        assert_eq!(PartialKind::Word("pl".to_string()).active_segment(), "pl");
         assert_eq!(
             PartialKind::PartialPath {
                 dir: "prompts".to_string(),
@@ -582,7 +578,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("plan.md"), "---\ntitle: X\n---\nBody\n");
-        write(&prompts.join("inline.md"), "---\nprompt: Write\n---\nBody\n");
+        write(
+            &prompts.join("inline.md"),
+            "---\nprompt: Write\n---\nBody\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "");
@@ -659,7 +658,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("outer.md"), "---\ntitle: O\n---\n");
-        write(&prompts.join("planning").join("deep.md"), "---\ntitle: D\n---\n");
+        write(
+            &prompts.join("planning").join("deep.md"),
+            "---\ntitle: D\n---\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "prompts/planning/");
@@ -696,7 +698,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("plain.md"), "---\ntitle: X\n---\n");
-        write(&prompts.join("inline.md"), "---\nprompt: Write\n---\nBody\n");
+        write(
+            &prompts.join("inline.md"),
+            "---\nprompt: Write\n---\nBody\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::InlineCompose, &ctx, "");
@@ -773,7 +778,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         fs::create_dir_all(prompts.join("planning")).unwrap();
-        write(&prompts.join("planning").join("a.md"), "---\ntitle: A\n---\n");
+        write(
+            &prompts.join("planning").join("a.md"),
+            "---\ntitle: A\n---\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "");

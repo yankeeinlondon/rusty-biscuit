@@ -783,9 +783,7 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
 
             // Show "Testing…" immediately so the user knows something happened
             if let Some(ModalState::MessengerInput {
-                test_status,
-                error,
-                ..
+                test_status, error, ..
             }) = &mut app.modal
             {
                 *test_status = Some("Testing…".to_string());
@@ -1605,9 +1603,7 @@ mod tests {
                 Ok(result) => {
                     app.pending_test = None;
                     if let Some(ModalState::MessengerInput {
-                        test_status,
-                        error,
-                        ..
+                        test_status, error, ..
                     }) = &mut app.modal
                     {
                         *test_status = Some(match result {

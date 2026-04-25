@@ -186,8 +186,14 @@ mod tests {
             .iter()
             .filter_map(|p| p.file_name().and_then(|s| s.to_str()).map(String::from))
             .collect();
-        assert!(names.contains(&"a.md".to_string()), "missing a.md: {names:?}");
-        assert!(names.contains(&"b.md".to_string()), "missing b.md: {names:?}");
+        assert!(
+            names.contains(&"a.md".to_string()),
+            "missing a.md: {names:?}"
+        );
+        assert!(
+            names.contains(&"b.md".to_string()),
+            "missing b.md: {names:?}"
+        );
     }
 
     #[test]
@@ -203,7 +209,10 @@ mod tests {
             .iter()
             .filter_map(|p| p.file_name().and_then(|s| s.to_str()).map(String::from))
             .collect();
-        assert!(!names.contains(&"_draft.md".to_string()), "underscore file leaked: {names:?}");
+        assert!(
+            !names.contains(&"_draft.md".to_string()),
+            "underscore file leaked: {names:?}"
+        );
         assert!(names.contains(&"public.md".to_string()));
     }
 
@@ -216,10 +225,7 @@ mod tests {
         write_file(&root.join("ok").join("kept.md"), "# k");
 
         let got = walk_scope(&scope(root, true));
-        let rendered: Vec<String> = got
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
         assert!(
             !rendered.iter().any(|p| p.contains("_wip")),
             "underscore dir descendant leaked: {rendered:?}"
@@ -236,14 +242,14 @@ mod tests {
         init_git(tmp.path());
         let root = tmp.path().join("prompts");
         write_file(&root.join("target").join("debris.md"), "# d");
-        write_file(&root.join("inner").join("node_modules").join("pkg.md"), "# p");
+        write_file(
+            &root.join("inner").join("node_modules").join("pkg.md"),
+            "# p",
+        );
         write_file(&root.join("real.md"), "# r");
 
         let got = walk_scope(&scope(root, true));
-        let rendered: Vec<String> = got
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
         assert!(
             !rendered.iter().any(|p| p.contains("target")),
             "target/ leaked: {rendered:?}"
@@ -267,15 +273,15 @@ mod tests {
         // nested scopes — the walker inherits the git repo's ignore
         // context because `.git` lives at `tmp.path()`.
         write_file(&root.join(".gitignore"), "prompts/ignored/\nskip.md\n");
-        write_file(&root.join("prompts").join("ignored").join("secret.md"), "# s");
+        write_file(
+            &root.join("prompts").join("ignored").join("secret.md"),
+            "# s",
+        );
         write_file(&root.join("prompts").join("kept.md"), "# k");
         write_file(&root.join("prompts").join("skip.md"), "# s");
 
         let got = walk_scope(&scope(root.join("prompts"), true));
-        let rendered: Vec<String> = got
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
         assert!(
             rendered.iter().any(|p| p.ends_with("kept.md")),
             "kept.md missing: {rendered:?}"
@@ -328,16 +334,15 @@ mod tests {
         symlink(&real_dir, scope_root.join("link-to-real")).unwrap();
 
         let got = walk_scope(&scope(scope_root, false));
-        let rendered: Vec<String> = got
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
         assert!(
             rendered.iter().any(|p| p.ends_with("direct.md")),
             "direct file missing: {rendered:?}"
         );
         assert!(
-            !rendered.iter().any(|p| p.ends_with("hidden-behind-link.md")),
+            !rendered
+                .iter()
+                .any(|p| p.ends_with("hidden-behind-link.md")),
             "symlink followed despite follow_links=false: {rendered:?}"
         );
     }
@@ -357,10 +362,7 @@ mod tests {
         symlink(&real_dir, scope_root.join("link-to-real")).unwrap();
 
         let got = walk_scope(&scope(scope_root, true));
-        let rendered: Vec<String> = got
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
         assert!(
             rendered.iter().any(|p| p.ends_with("behind-link.md")),
             "symlink not followed despite follow_links=true: {rendered:?}"
@@ -376,10 +378,7 @@ mod tests {
         write_file(&root.join("real.md"), "# r");
 
         let got = walk_scope(&scope(root.to_path_buf(), true));
-        let rendered: Vec<String> = got
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
         assert!(
             !rendered.iter().any(|p| p.contains(".git")),
             ".git/ leaked: {rendered:?}"
@@ -399,10 +398,7 @@ mod tests {
         let root = tmp.path().join("target");
         write_file(&root.join("ok.md"), "# o");
         let got = walk_scope(&scope(root, true));
-        let rendered: Vec<String> = got
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        let rendered: Vec<String> = got.iter().map(|p| p.display().to_string()).collect();
         assert!(
             rendered.iter().any(|p| p.ends_with("ok.md")),
             "root directory named `target` must not self-prune: {rendered:?}"

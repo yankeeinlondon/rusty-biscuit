@@ -342,9 +342,7 @@ fn failure_hint(error: &str) -> Option<&'static str> {
         Some("Re-check the configured webhook URL format.")
     } else if lower.contains("no_service") {
         Some("The Slack webhook was disabled or deleted — recreate it in Slack.")
-    } else if lower.contains("429")
-        || lower.contains("rate limit")
-        || lower.contains("retry_after")
+    } else if lower.contains("429") || lower.contains("rate limit") || lower.contains("retry_after")
     {
         Some(
             "Discord rate limit hit. Wait a few seconds before retrying, \
@@ -809,8 +807,16 @@ mod tests {
         assert!(hint.is_some());
         assert!(hint.unwrap().contains("rate limit"));
 
-        assert!(failure_hint("429 Too Many Requests").unwrap().contains("rate limit"));
-        assert!(failure_hint("Hit retry_after").unwrap().contains("rate limit"));
+        assert!(
+            failure_hint("429 Too Many Requests")
+                .unwrap()
+                .contains("rate limit")
+        );
+        assert!(
+            failure_hint("Hit retry_after")
+                .unwrap()
+                .contains("rate limit")
+        );
     }
 
     #[test]
