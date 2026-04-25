@@ -2491,6 +2491,37 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolation_bare_pipe_produces_parse_error() {
+        // Bare `|` in interpolation should produce a clear lexer error
+        let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_fail_fast(false);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Invalid expression left unchanged
+        assert_eq!(composed.content(), "Hello {{ name | \"default\" }}!");
+        assert_eq!(report.interpolations_applied, 0);
+    }
+
+    #[test]
+    fn test_interpolation_bare_pipe_fail_fast_error_message() {
+        let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_fail_fast(true);
+
+        let err = md.compose_with(options).unwrap_err();
+        let err_string = format!("{}", err);
+        assert!(err_string.contains("Unexpected '|'") || err_string.contains("parse"), "Expected bare pipe error, got: {}", err_string);
+    }
+
+    #[test]
     fn test_full_compose_with_interpolation() {
         // Integration test: frontmatter + interpolation + cleanup
         let content = "---\nname: Alice\ncount: 3\n---\n# Welcome {{ name }}\nYou have {{ count > 0 ? \"items\" : \"nothing\" }}";
@@ -4173,6 +4204,23 @@ Rounded: {{ round(pi) }}"#;
                 .compose_with(options)
                 .unwrap();
             assert!(!composed.content().contains("child body"));
+        }
+
+        #[test]
+        fn page_block_with_bare_pipe_fails_parse() {
+            // Bare `|` in condition expressions should produce a parse error
+            let content =
+                "---\na: true\n---\n::block when=\"a | b\"\ninside\n::end-block\n";
+            let md: Markdown = content.into();
+            let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
+            let err = md.compose_with(options).unwrap_err();
+
+            let err_string = format!("{}", err);
+            assert!(
+                err_string.contains("Unexpected '|'") || err_string.contains("logical OR"),
+                "Expected bare pipe error in condition, got: {}",
+                err_string
+            );
         }
     }
 }
