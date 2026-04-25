@@ -15,6 +15,17 @@ All notable changes to this project will be documented in this file.
   subcommands (`text-input`, `text-area-input`, `boolean-switch`,
   `input-table`) adopt the same split for consistency.
 
+### Changed
+
+- `question choose-many --selected` no longer splits comma-separated
+  values. Each occurrence of the flag is now passed through verbatim
+  (empty strings are still filtered), so values that contain literal
+  commas — e.g. `--selected "one,two"` — are preserved as a single
+  pre-selection. To pre-select multiple values, repeat the flag
+  (`--selected a --selected b`). Callers that relied on the old CSV
+  expansion can still use the deprecated `--initial` flag, which
+  continues to split on commas for backward compatibility.
+
 ### Added
 
 - `choose-one` / `choose-many`: read option strings from STDIN,

@@ -159,6 +159,10 @@ pub enum Command {
         #[arg(long)]
         allow_shell_timeout: bool,
 
+        /// Report shell commands discovered in the compose tree without executing them
+        #[arg(long)]
+        shell: bool,
+
         /// Emit a compose performance report to stderr after completion
         #[arg(long)]
         perf: bool,

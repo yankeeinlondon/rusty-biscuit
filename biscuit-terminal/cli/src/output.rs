@@ -601,13 +601,13 @@ mod tests {
         let analysis = analyze_content(text);
         assert_eq!(analysis.total_length, 11);
         assert_eq!(analysis.line_count, 1);
-        assert_eq!(analysis.contains_color_escape_codes, true);
+        assert!(analysis.contains_color_escape_codes);
 
         let clean_text = "Just plain text\nwith two lines";
         let analysis_clean = analyze_content(clean_text);
         assert_eq!(analysis_clean.total_length, 29);
         assert_eq!(analysis_clean.line_count, 2);
-        assert_eq!(analysis_clean.contains_color_escape_codes, false);
+        assert!(!analysis_clean.contains_color_escape_codes);
     }
 
     #[test]

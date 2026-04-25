@@ -1333,9 +1333,7 @@ fn resolve_internal_deps(packages: &mut [Package]) {
     }
 
     for pkg in packages.iter_mut() {
-        let mut used_by = used_by_map
-            .remove(&pkg.name)
-            .unwrap_or_default();
+        let mut used_by = used_by_map.remove(&pkg.name).unwrap_or_default();
         used_by.sort();
         pkg.used_by = used_by;
     }

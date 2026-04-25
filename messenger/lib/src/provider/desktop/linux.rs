@@ -106,7 +106,10 @@ impl DesktopBackend for LinuxBackend {
             ));
             notification.hint(Hint::Custom(
                 "progress-value".to_string(),
-                format!("{:.2}", progress.current as f64 / progress.total.max(1) as f64),
+                format!(
+                    "{:.2}",
+                    progress.current as f64 / progress.total.max(1) as f64
+                ),
             ));
         }
 
@@ -192,7 +195,10 @@ impl DesktopBackend for LinuxBackend {
             ));
             notification.hint(Hint::Custom(
                 "progress-value".to_string(),
-                format!("{:.2}", progress.current as f64 / progress.total.max(1) as f64),
+                format!(
+                    "{:.2}",
+                    progress.current as f64 / progress.total.max(1) as f64
+                ),
             ));
         }
 
@@ -208,7 +214,8 @@ impl DesktopBackend for LinuxBackend {
         }
 
         let handle = notification.show_async().await.map_err(|error| {
-            ProviderKind::Desktop.transport_error(format!("D-Bus notification replace failed: {error}"))
+            ProviderKind::Desktop
+                .transport_error(format!("D-Bus notification replace failed: {error}"))
         })?;
 
         Ok(DesktopNotificationReceipt::new(handle.id().to_string()).with_metadata("replaced", id))

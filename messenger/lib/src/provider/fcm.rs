@@ -117,9 +117,7 @@ impl super::Provider for FcmProvider {
         let device_token = match &dispatch.target {
             Target::Fcm(t) => &t.device_token,
             _ => {
-                return Err(MessengerError::InvalidMessage(
-                    "expected FCM target".into(),
-                ));
+                return Err(MessengerError::InvalidMessage("expected FCM target".into()));
             }
         };
         tracing::Span::current().record("device", tracing::field::display(device_token));
@@ -213,7 +211,10 @@ impl super::Provider for FcmProvider {
         );
 
         if error_body.error.message.contains("invalid registration")
-            || error_body.error.message.contains("registration-token-not-registered")
+            || error_body
+                .error
+                .message
+                .contains("registration-token-not-registered")
         {
             return Err(MessengerError::InvalidMessage(format!(
                 "FCM device token error: {}",

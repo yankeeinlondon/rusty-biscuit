@@ -123,9 +123,12 @@ md compose README.md --timeout 3
 
 # Convert timed out shell commands into empty strings and warnings
 md compose README.md --timeout 3 --allow-shell-timeout
+
+# Report compose-tree shell commands without executing them
+md compose README.md --shell
 ```
 
-During `compose`, Darkmatter supports both body `::shell ...` directives and top-level frontmatter `$(...)` expressions. Both use the same whitelist/blacklist and approval flow. Frontmatter shell expansion stores trimmed `stdout` only; body shell expansion stores combined `stdout` + `stderr`.
+During `compose`, Darkmatter supports both body `::shell ...` directives and top-level frontmatter `$(...)` expressions. Both use the same whitelist/blacklist and approval flow. Frontmatter shell expansion stores trimmed `stdout` only; body shell expansion stores combined `stdout` + `stderr`. Use `--shell` to inspect the shell commands discovered across the compose tree before approving or executing them.
 
 ### Frontmatter Set
 

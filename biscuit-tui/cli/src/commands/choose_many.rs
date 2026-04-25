@@ -52,9 +52,12 @@ pub struct ChooseManyArgs {
     #[arg(long, value_enum, default_value_t = LabelPositionArg::Above)]
     pub label_position: LabelPositionArg,
 
-    /// Pre-selected option values. Repeatable and/or comma-separated;
-    /// each repetition is split on `,` so `--selected a,b --selected c`
-    /// yields `[a, b, c]`.
+    /// Pre-selected option values.
+    ///
+    /// Repeatable; pass `--selected foo --selected bar` to pre-select
+    /// multiple values. Comma-splitting is **not** applied — each
+    /// repetition is treated as a single literal value so option
+    /// values containing `,` round-trip intact.
     #[arg(long, conflicts_with = "initial")]
     pub selected: Vec<String>,
 
@@ -145,26 +148,22 @@ where
 
 fn effective_selected(args: &ChooseManyArgs) -> Vec<String> {
     if !args.selected.is_empty() {
-        return flatten_selected(&args.selected);
+        // `--selected` is repeatable at the clap layer; we preserve each
+        // repetition verbatim so option values containing literal `,`
+        // characters are not silently split apart. Callers that want
+        // CSV semantics must use the deprecated `--initial` flag.
+        return args
+            .selected
+            .iter()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .collect();
     }
     if let Some(initial) = args.initial.as_deref() {
         eprintln!("question: warning: --initial is deprecated; use --selected instead");
         return parse_initial_ids(initial);
     }
     Vec::new()
-}
-
-fn flatten_selected(values: &[String]) -> Vec<String> {
-    values
-        .iter()
-        .flat_map(|raw| {
-            raw.split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .collect()
 }
 
 fn build_choice_input(args: &ChooseManyArgs) -> io::Result<ChoiceInput<String>> {
@@ -303,18 +302,6 @@ mod tests {
     }
 
     #[test]
-    fn flatten_selected_splits_on_commas_and_joins_repetitions() {
-        let values = vec!["a,b".to_string(), "c".to_string(), "d, e".to_string()];
-        assert_eq!(
-            flatten_selected(&values),
-            vec!["a", "b", "c", "d", "e"]
-                .into_iter()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
     fn effective_selected_prefers_selected_over_initial() {
         let args = ChooseManyArgs {
             selected: vec!["new1".into(), "new2".into()],
@@ -322,6 +309,93 @@ mod tests {
             ..default_args()
         };
         assert_eq!(effective_selected(&args), vec!["new1", "new2"]);
+    }
+
+    #[test]
+    fn selected_value_containing_comma_is_preserved() {
+        // Regression test for review-2 finding #1: `--selected` must
+        // NOT split on commas, so a literal `one,two` value passes
+        // through unchanged and matches the option whose value is
+        // `one,two`.
+        let args = ChooseManyArgs {
+            positional: vec!["A|one,two".into(), "B|three".into()],
+            selected: vec!["one,two".into()],
+            chrome: ChooseChromeArgs {
+                delimiter: Some('|'),
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.options()[0].label, "A");
+                assert_eq!(state.options()[0].value, "one,two");
+                assert_eq!(state.options()[0].id, "one,two");
+                assert_eq!(state.selected_ids(), vec!["one,two"]);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"one,two\n");
+    }
+
+    #[test]
+    fn selected_repeated_flag_collects_all_values() {
+        let args = ChooseManyArgs {
+            positional: vec!["one".into(), "two".into(), "three".into()],
+            selected: vec!["one".into(), "two".into(), "three".into()],
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.selected_ids(), vec!["one", "two", "three"]);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn initial_still_splits_on_commas_for_backward_compat() {
+        let args = ChooseManyArgs {
+            positional: vec!["one".into(), "two".into()],
+            selected: Vec::new(),
+            initial: Some("one,two".into()),
+            ..default_args()
+        };
+        let mut output = Vec::new();
+
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.selected_ids(), vec!["one", "two"]);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(output, b"one\ntwo\n");
     }
 
     #[test]
@@ -413,13 +487,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(status, 0);
+        assert_eq!(output, b"A\n");
     }
 
     #[test]
     fn run_writes_raw_newline_separated_values() {
         let args = ChooseManyArgs {
             options: Some("Red,Green,Blue".into()),
-            selected: vec!["Red,Blue".into()],
+            selected: vec!["Red".into(), "Blue".into()],
             ..default_args()
         };
         let mut output = Vec::new();
@@ -441,7 +516,7 @@ mod tests {
     fn run_writes_selected_values_from_positional_args() {
         let args = ChooseManyArgs {
             positional: vec!["alpha".into(), "beta".into(), "gamma".into()],
-            selected: vec!["alpha,gamma".into()],
+            selected: vec!["alpha".into(), "gamma".into()],
             ..default_args()
         };
         let mut output = Vec::new();
@@ -468,7 +543,7 @@ mod tests {
     fn run_writes_delimited_positional_values() {
         let args = ChooseManyArgs {
             positional: vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()],
-            selected: vec!["1,3".into()],
+            selected: vec!["1".into(), "3".into()],
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
                 ..ChooseChromeArgs::default()
@@ -585,7 +660,7 @@ mod tests {
     fn run_deselect_all_outputs_no_values() {
         let args = ChooseManyArgs {
             options: Some("Red,Green,Blue".into()),
-            selected: vec!["Red,Green,Blue".into()],
+            selected: vec!["Red".into(), "Green".into(), "Blue".into()],
             ..default_args()
         };
         let mut output = Vec::new();

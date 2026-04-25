@@ -98,6 +98,31 @@ review feat="" agent="" spec="" design="":
                 design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
                 [[ "${design}" == "NONE" ]] && design=""
             fi
+    doc="$(just _choose_feature {{spec}}'')"
+    dir="$(dirname "${doc}")"
+    spec_file="{{spec}}"
+    design_file="{{design}}"
+    if [[ "${doc}" == *"design"* ]]; then
+        design_file="${doc}"
+        mapfile -t files < <(fd -g '*spec*.md' "${dir}")
+        if [[ ${#files[@]} -eq 1 ]]; then
+            spec_file="${files[0]}"
+        elif [[ ${#files[@]} -eq 0 ]]; then
+            spec_file=""
+        else
+            spec_file="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
+            [[ "${spec}" == "NONE" ]] && spec=""
+        fi
+    else
+        spec_file="${doc}"
+        mapfile -t files < <(fd -g '*design*.md' "${dir}")
+        if [[ ${#files[@]} -eq 1 ]]; then
+            design_file="${files[0]}"
+        elif [[ ${#files[@]} -eq 0 ]]; then
+            design_file=""
+        else
+            design_file="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
+            [[ "${design}" == "NONE" ]] && design=""
         fi
     fi
     feature="$(basename "${dir}")"
@@ -114,14 +139,15 @@ review feat="" agent="" spec="" design="":
     fi
 
     iteration=1
+    # iterate until we find no pre-existing review file
     while [[ -f "${dir}/review-${iteration}.md" ]]; do
         (( iteration++ ))
     done
 
     echo -e "Review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
-    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename "${spec}"){{reset}}"
-    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename "${design}"){{reset}}"
+    [[ -n "${spec_file}" ]] && echo -e "    - Specification File: {{dim}}$(basename "${spec_file}"){{reset}}"
+    [[ -n "${design_file}" ]] && echo -e "    - Design File: {{dim}}$(basename "${design_file}"){{reset}}"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
     echo -e "    - Review Iteration:  {{dim}}${iteration}{{reset}}"
     echo
@@ -138,26 +164,45 @@ review feat="" agent="" spec="" design="":
     fi
 
     spec_name=""
-    [[ -n "${spec}" ]] && spec_name="$(basename "${spec}")"
+    [[ -n "${spec_file}" ]] && spec_name="$(basename "${spec_file}")"
     design_name=""
-    [[ -n "${design}" ]] && design_name="$(basename "${design}")"
+    [[ -n "${design_file}" ]] && design_name="$(basename "${design_file}")"
 
     claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" --${use_agent} ${use_model} || (
         just _play two-tone
         echo -e "{{red}}ERROR:{{reset}} There was a problem trying to create the review for ${feature}"
+        exit 1
     )
+    review="${dir}/review-${iteration}.md"
+    ready="$(md get "${review}" "ready")"
 
     echo
-    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: $(just _link "$(sniff repo package-area)/${dir}/review-${iteration}.md" "${dir}/review-${iteration}.md")"
-    echo
+    if [[ "$ready" == "false" ]]; then
+        echo
+        echo -e "🎁 The {{italic}}feature{{reset}} review for $(just _link "${review}") has completed."
+        echo -e "👎 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is {{red}}not{{reset}} production ready!"
+        echo
 
-    # Offer to implement the review suggestions immediately
-    echo
-    if [[ "$(just _confirm "Would you like to implement the review suggestions now?")" == "y" ]]; then
-        just implement-feature-review filter="$(basename "${dir}")" spec="${spec}" design="${design}" agent="${use_agent}" || (
-            echo -e "{{red}}ERROR:{{reset}} Failed to implement review suggestions for ${feature}" >&2
-        )
+    elif [[ "$ready" == "true" ]]; then
+        echo
+        echo -e "🎁 The {{italic}}feature{{reset}} review for $(just _link "${review}") has completed."
+        echo -e "👍 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is production ready!"
+        echo
+    else
+        echo
+        echo -e "🎁 The {{italic}}feature{{reset}} review for $(just _link "${review}") has completed."
+        echo -e "🤨 the 'ready' frontmatter property was not set!"
+        echo
     fi
+
+    if [[ "$(just _confirm "Ready to implement the suggestions from the review?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        echo
+        exit 0
+    fi
+    just implement-feature-review spec="${spec}" design="${design}"
+
 
 # implement a review that was conducted (not a feature review)
 implement-review filter="":
@@ -256,26 +301,17 @@ implement-feature-review filter="" spec="" design="" agent="":
 
     echo -e "🏃‍♂️ Starting the {{bold}}implementation{{reset}} of the review suggestions (#${iteration})"
     if claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" ${model}; then
+        echo
+        echo -e "🎉 Implemented all the suggestions found in the $(just _link "${review}") review!"
+        echo
 
-        ready="$(md get "${review}" "ready")"
-        if [[ "$ready" == "false" ]]; then
+        if [[ "$(just _confirm "Run another review to validate this work?")" == "n" ]]; then
             echo
-            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
-            echo -e "👎 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is {{red}}not{{reset}} production ready!"
-            echo
-
-        elif [[ "$ready" == "true" ]]; then
-            echo
-            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
-            echo -e "🎉 the reviewing agent ({{dim}}${use_agent}{{reset}}) believes this feature is production ready!"
-            echo
-        else
-            echo
-            echo -e "🎁 Implemented all the suggestions found in the $(just _link "${review}") review!"
-            echo -e "🤨 the 'ready' frontmatter property was not set!"
-            echo
+            echo -e "Ok bye"
+            exit 0
         fi
-        just _speak "The implementation of review suggestions in "$(sniff repo package-area)" package area has completed"
+        just review
+
     else
         echo
         echo -e "❌ Failed to complete the implementation of review suggestions in $(just _link "${review}")"

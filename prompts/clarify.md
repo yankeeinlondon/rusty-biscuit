@@ -4,7 +4,8 @@ start:
     stderr: "We are starting the clarification process and will need human involvement."
     say: "Please stand by while we prepare a set of clarification questions"
 success:
-    say: "Specification clarification process is now complete in {{ env.current_package_area || env.current_package || env.repo }}"
+    say: "Specification clarification process is now complete in {{ ctx.current_package_area || env.PACKAGE || ctx.repo || env.REPO }}"
+    message: "The specification file `{{doc}}` has been completed. Now ready for a technical design specification or jumping directly to a plan."
 ---
 
 You are acting as a senior technical analyst and design reviewer.

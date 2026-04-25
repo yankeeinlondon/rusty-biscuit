@@ -15,13 +15,13 @@ fn apns_provider(base_uri: &str) -> ApnsProvider {
     ApnsProvider::new(ApnsConfig {
         team_id: "TEAMID1234".into(),
         key_id: "KEYID12345".into(),
-        private_key: SecretString::from(
-            String::from("-----BEGIN PRIVATE KEY-----\n\
+        private_key: SecretString::from(String::from(
+            "-----BEGIN PRIVATE KEY-----\n\
             MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJvdhN9y/wiI1IisY\n\
             noI7KUl13N3Vf4nLVLNMfUOxEV6hRANCAASeEY5EAmpiF510WOl1lzUaG9Ugcp/D\n\
             z9whuA6MsoXjFY188mVmNRT5KZvq6BkCGN6Z6wFymXDDwMfY7qx6fByf\n\
-            -----END PRIVATE KEY-----")
-        ),
+            -----END PRIVATE KEY-----",
+        )),
         bundle_id: "com.example.app".into(),
         use_sandbox: true,
         api_base_url: Some(base_uri.into()),
@@ -129,11 +129,9 @@ async fn bad_device_token_maps_to_invalid_message() {
 
     Mock::given(method("POST"))
         .and(path(format!("/3/device/{DEVICE_TOKEN}")))
-        .respond_with(
-            ResponseTemplate::new(410).set_body_json(serde_json::json!({
-                "reason": "Unregistered"
-            })),
-        )
+        .respond_with(ResponseTemplate::new(410).set_body_json(serde_json::json!({
+            "reason": "Unregistered"
+        })))
         .mount(&server)
         .await;
 
@@ -154,11 +152,9 @@ async fn invalid_auth_token_maps_to_authentication() {
 
     Mock::given(method("POST"))
         .and(path(format!("/3/device/{DEVICE_TOKEN}")))
-        .respond_with(
-            ResponseTemplate::new(403).set_body_json(serde_json::json!({
-                "reason": "InvalidProviderToken"
-            })),
-        )
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "reason": "InvalidProviderToken"
+        })))
         .mount(&server)
         .await;
 
@@ -179,11 +175,9 @@ async fn generic_error_maps_to_provider() {
 
     Mock::given(method("POST"))
         .and(path(format!("/3/device/{DEVICE_TOKEN}")))
-        .respond_with(
-            ResponseTemplate::new(400).set_body_json(serde_json::json!({
-                "reason": "BadCollapseId"
-            })),
-        )
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "reason": "BadCollapseId"
+        })))
         .mount(&server)
         .await;
 

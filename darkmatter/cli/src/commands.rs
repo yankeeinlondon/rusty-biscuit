@@ -209,6 +209,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_reassigned_frontmatter_property,
             timeout,
             allow_shell_timeout,
+            shell,
             perf,
         } => {
             let parsed = parse_compose_positionals(&args)?;
@@ -234,6 +235,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 allow_reassigned_frontmatter_property,
                 timeout,
                 allow_shell_timeout,
+                shell,
                 perf,
                 cli,
             )?;
@@ -438,6 +440,7 @@ pub fn run_compose(
     allow_reassigned_frontmatter_property: bool,
     timeout_secs: Option<u64>,
     allow_shell_timeout: bool,
+    shell_report: bool,
     perf: bool,
     cli: &Cli,
 ) -> Result<()> {
@@ -617,6 +620,15 @@ pub fn run_compose(
     }
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
+    if shell_report {
+        use darkmatter::markdown::compose::shell_expansion::collect_shell_commands;
+
+        let commands = collect_shell_commands(&md, &options)?;
+        print_shell_command_report(&commands);
+        drop(options_ctx_ref);
+        return Ok(());
+    }
+
     let compose_start = perf.then(Instant::now);
     let (composed, report) = md.compose_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
@@ -787,6 +799,36 @@ pub fn run_compose(
     drop(options_ctx_ref);
 
     Ok(())
+}
+
+fn print_shell_command_report(
+    commands: &[darkmatter::markdown::compose::shell_expansion::ShellCommandEntry],
+) {
+    if commands.is_empty() {
+        println!("No shell commands discovered.");
+        return;
+    }
+
+    println!("Shell commands discovered: {}", commands.len());
+    println!();
+    println!("| Command | Source | Origin |");
+    println!("| --- | --- | --- |");
+
+    for command in commands {
+        println!(
+            "| {} | {} | {} |",
+            escape_table_cell(&command.normalized),
+            escape_table_cell(&command.source_file.display().to_string()),
+            escape_table_cell(&command.origin.to_string()),
+        );
+    }
+}
+
+fn escape_table_cell(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace('\n', " ")
 }
 
 /// Get frontmatter properties from a markdown document.

@@ -135,7 +135,8 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
                         // Extract device identifier like "disk0s1"
                         if let Some(id) = trimmed.split(':').nth(1) {
                             let id = id.trim();
-                            current_device = device_names.iter().find(|n| *n == id).map(|s| s.as_str());
+                            current_device =
+                                device_names.iter().find(|n| *n == id).map(|s| s.as_str());
                         }
                     }
                     if trimmed.starts_with("Solid State:") {

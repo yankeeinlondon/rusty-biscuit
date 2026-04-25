@@ -428,4 +428,30 @@ mod tests {
         assert!(visible.contains(&0), "'Alpha' should match lowercase 'a'");
         assert!(visible.contains(&2), "'GAMMA' should match lowercase 'a'");
     }
+
+    #[test]
+    fn highlight_indices_handles_multibyte_labels() {
+        // "Café" has a 2-byte 'é' at byte offset 3. Char offsets for
+        // 'C' and 'a' are 0 and 1 respectively — byte offsets would be
+        // 0 and 1 too, but the 'é' at char offset 3 / byte offset 3 is
+        // where char- vs byte-indexing diverges on later chars. The
+        // contract is char offsets, so 'C' and 'a' must be 0 and 1.
+        let labels = labels(&["Café", "Grünes Tee"]);
+        let mut filter = FuzzyFilter::new();
+        filter.set_pattern("ca", &labels);
+        let highlights = filter.highlight_indices("Café");
+        assert_eq!(
+            highlights.len(),
+            2,
+            "expected two highlight positions for pattern 'ca' against 'Café'"
+        );
+        assert!(
+            highlights.contains(&0),
+            "expected char index 0 (the 'C') in {highlights:?}"
+        );
+        assert!(
+            highlights.contains(&1),
+            "expected char index 1 (the 'a') in {highlights:?}"
+        );
+    }
 }

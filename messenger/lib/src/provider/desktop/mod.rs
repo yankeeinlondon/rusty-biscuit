@@ -352,16 +352,18 @@ pub(crate) fn build_request(
     let group_id = overrides.and_then(|o| o.group_id.clone());
 
     let actions = overrides
-        .and_then(|o| if o.actions.is_empty() { None } else { Some(o.actions.clone()) })
+        .and_then(|o| {
+            if o.actions.is_empty() {
+                None
+            } else {
+                Some(o.actions.clone())
+            }
+        })
         .unwrap_or_else(|| config.actions.clone());
 
-    let progress = overrides
-        .and_then(|o| o.progress)
-        .or(config.progress);
+    let progress = overrides.and_then(|o| o.progress).or(config.progress);
 
-    let badge_count = overrides
-        .and_then(|o| o.badge_count)
-        .or(config.badge_count);
+    let badge_count = overrides.and_then(|o| o.badge_count).or(config.badge_count);
 
     Ok(DesktopNotificationRequest {
         title,
@@ -819,7 +821,8 @@ mod tests {
         let prepared = PreparedMessage::new(&message);
         let dispatch = Dispatch::to(Target::desktop());
 
-        let receipt = provider.replace(&original_receipt, &dispatch, &prepared)
+        let receipt = provider
+            .replace(&original_receipt, &dispatch, &prepared)
             .await
             .unwrap();
 
@@ -964,10 +967,13 @@ mod tests {
         });
 
         let request = build_request(&default_config(), &dispatch, &prepared).unwrap();
-        assert_eq!(request.progress, Some(crate::dispatch::NotificationProgress {
-            current: 42,
-            total: 100,
-        }));
+        assert_eq!(
+            request.progress,
+            Some(crate::dispatch::NotificationProgress {
+                current: 42,
+                total: 100,
+            })
+        );
     }
 
     #[test]
@@ -1015,10 +1021,13 @@ mod tests {
 
         let dispatch = Dispatch::to(Target::desktop());
         let request = build_request(&config, &dispatch, &prepared).unwrap();
-        assert_eq!(request.progress, Some(crate::dispatch::NotificationProgress {
-            current: 10,
-            total: 50,
-        }));
+        assert_eq!(
+            request.progress,
+            Some(crate::dispatch::NotificationProgress {
+                current: 10,
+                total: 50,
+            })
+        );
     }
 
     #[test]
