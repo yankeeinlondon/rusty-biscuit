@@ -185,7 +185,7 @@ review feat="" agent="" spec="" design="":
         echo
         exit 0
     fi
-    just implement-feature-review "$(basename "${dir}")" "${spec_file}" "${design_file}"
+    just implement-feature-review spec="${spec_file}" design="${design_file}"
 
 
 # implement a review that was conducted (not a feature review)

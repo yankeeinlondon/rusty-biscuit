@@ -1,13 +1,12 @@
 ---
 dir: "$(pwd)"
-spec: ""
-design: ""
 iteration: 1
 area: "{{ctx.current_package_area}}"
-start: "🏃‍♂️ starting the feature review of `{{dir}}` -- in the **{{ctx.current_package_area}}** _package area_ -- _at_ {{ctx.now}}"
+start:
+    message: "🏃‍♂️ starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
-    message: "✅ feature review {{iteration}} in the **{{ctx.current_package_area}}** package area has completed:\nSpecification: "{{dir}}/{{spec}}\nDesign: {{dir}}/{{design}}\n\nThe review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
+    message: "✅ feature review {{iteration}} in the **{{ctx.current_package_area}}** package area has completed:\nSpecification: '{{dir}}/{{spec}}\nDesign: {{dir}}/{{design}}\n\nThe review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
 failure:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
     message: "❌ feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
