@@ -1,6 +1,11 @@
 # Boolean Conditional Logic
 
-Darkmatter uses a shared condition evaluator for `when="..."` expressions. That evaluator powers:
+Darkmatter relies on boolean logic expressions in various parts of Darkmatter:
+
+- the `when="..."` clause of [page blocks](../inline/page-blocks.md), [transclusion](../transclusion/block-transclusion.md), and in all other directives which provide a _conditional_ feature.
+- beyond directives with a `when` parameter, we can also use 
+
+uses a shared condition evaluator for `when="..."` expressions. That evaluator powers:
 
 - page blocks via `::block when="..."`
 - block transclusion via `::file`, `::code`, and `::url` directives with `when="..."`
@@ -35,10 +40,13 @@ Supported variable forms:
 
 - simple keys: `draft`
 - nested keys: `user.role`
-- context keys: `ctx.today`, `ctx.repo`, `ctx.current_package`
+- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package`
+    - see [context variables](./context-variables.md) for more details
 - environment keys: `env.AGENT`, `env.HOME`
 
-One important detail: when an unprefixed key is not found in frontmatter or inherited state, Darkmatter falls back to `ctx.<key>`. That means `repo` can resolve to `ctx.repo`.
+One important detail: 
+
+- when an unprefixed key is not found in frontmatter or inherited state, Darkmatter falls back to `ctx.<key>`. That means `repo` can resolve to `ctx.repo`.
 
 ## Truthiness Rules
 
