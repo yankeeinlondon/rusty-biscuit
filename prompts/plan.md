@@ -5,7 +5,7 @@ design: ""
 plan: "plan.md"
 success:
     stderr: "The [{{dir}}/{{plan}}]({{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}) _plan_ has been completed"
-    message: "The [{{dir}}/{{plan}}]({{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}) _plan_ has been completed"
+    message: "✅ the [{{dir}}/{{plan}}]({{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}) _plan_ has been completed _at_ {{ctx.time}}"
 ---
 You are a planning agent. Convert the following documents into a high confidence execution plan:
 
@@ -31,3 +31,4 @@ You are a planning agent. Convert the following documents into a high confidence
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
+

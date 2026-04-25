@@ -2,6 +2,7 @@
 lessons_learned: "@docs/knowledge/commits.md"
 timeout: 10m
 step_timeout: 7m
+show_system_prompt: false
 ---
 # Commit Staged Files
 

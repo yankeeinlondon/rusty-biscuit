@@ -4,10 +4,10 @@ total_phases: ""
 plan: ""
 success: 
     say: "Phase {{phase}} of the plan was implemented"
-    message: "🎉 Phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{plan}}` successfully completed  in the **{{ctx.current_package_area}}** _package area_."
+    message: "✅ phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{plan}}` successfully completed  in the **{{ctx.current_package_area}}** _package area_."
 failure: 
     say: "Ran into problems implementing phase {{phase}} of the plan!"
-    message: "🐞 The plan `{{plan}}` failed to complete the implementation of phase **{{phase}}** in the **{{ctx.current_package_area}}** _package area_."
+    message: "❌ the plan `{{plan}}` failed to complete the implementation of phase **{{phase}}** in the **{{ctx.current_package_area}}** _package area_."
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
