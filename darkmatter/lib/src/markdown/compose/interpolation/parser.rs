@@ -266,7 +266,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_comparison()?;
 
         while matches!(self.current, Token::Pipe) {
-            self.advance()?; // consume |
+            self.advance()?; // consume ||
             let fallback = self.parse_comparison()?;
             expr = Expr::Fallback {
                 primary: Box::new(expr),
