@@ -242,16 +242,16 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses a logical AND expression (condition mode only):
-    /// `fallback ("&&" fallback)*`.
+    /// `comparison ("&&" comparison)*`.
     ///
     /// Infix `a && b` is lowered into the existing function-call AST as
     /// `And(a, b)`.
     fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_fallback()?;
+        let mut expr = self.parse_comparison()?;
 
         while matches!(self.current, Token::AndAnd) {
             self.advance()?; // consume &&
-            let rhs = self.parse_fallback()?;
+            let rhs = self.parse_comparison()?;
             expr = Expr::FunctionCall {
                 name: "And".to_string(),
                 args: vec![expr, rhs],
