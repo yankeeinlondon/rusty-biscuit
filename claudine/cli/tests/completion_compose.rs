@@ -17,112 +17,13 @@
 //!   surface in compose mode.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 use common::TestWorkspace;
-
-/// Seed a minimal Cargo workspace so `sniff::detect_repo_structure`
-/// recognizes the tempdir as a monorepo. A plain `.git` is not enough for
-/// the composition completer because the scope resolver uses `sniff` for
-/// monorepo shape; the git-root fallback only covers non-workspace scopes.
-fn seed_cargo_workspace(root: &Path) {
-    seed_cargo_workspace_members(root, &["pkg"]);
-}
-
-fn seed_plain_git_repo(root: &Path) {
-    fs::create_dir_all(root.join(".git")).unwrap();
-}
-
-fn seed_cargo_workspace_members(root: &Path, members: &[&str]) {
-    fs::create_dir_all(root.join(".git")).unwrap();
-    let members_list = members
-        .iter()
-        .map(|member| format!("\"{member}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    fs::write(
-        root.join("Cargo.toml"),
-        format!("[workspace]\nresolver = \"2\"\nmembers = [{members_list}]\n"),
-    )
-    .unwrap();
-    for member in members {
-        let pkg = root.join(member);
-        fs::create_dir_all(pkg.join("src")).unwrap();
-        let name = member.replace('/', "-");
-        fs::write(
-            pkg.join("Cargo.toml"),
-            format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n"),
-        )
-        .unwrap();
-        fs::write(pkg.join("src").join("lib.rs"), "").unwrap();
-    }
-}
-
-fn write_file(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-fn fake_home(cwd: &Path) -> PathBuf {
-    let parent = cwd.parent().unwrap_or(cwd);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let leaf = cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("claudine-home");
-    let home = parent.join(format!("{leaf}-home-{nonce}-{}", std::process::id()));
-    fs::create_dir_all(&home).expect("create fake home");
-    home
-}
-
-fn run_complete(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
-    let home = fake_home(cwd);
-    run_complete_with_home(cwd, &home, argv_tail)
-}
-
-fn run_complete_with_home(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Vec<String> {
-    let current = argv_tail.len();
-    let reference = cargo_bin_cmd!("claudine");
-    let program = reference.get_program().to_os_string();
-    let mut cmd = Command::new(program);
-    cmd.current_dir(cwd)
-        .env("HOME", home)
-        .env("NO_COLOR", "1")
-        .env_remove("COMPLETE")
-        .env_remove("_CLAP_COMPLETE_INDEX")
-        .env_remove("_CLAP_IFS")
-        .arg("__complete")
-        .arg("--current")
-        .arg(current.to_string())
-        .arg("--")
-        .arg("claudine");
-    for arg in argv_tail {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("completion subprocess to run");
-    assert!(
-        output.status.success(),
-        "completion subprocess failed: status={:?}, stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr),
-    );
-    String::from_utf8(output.stdout)
-        .expect("utf-8")
-        .split('\n')
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
+use common::completion::{
+    fake_home, run_complete, run_complete_with_home, seed_cargo_workspace,
+    seed_cargo_workspace_members, seed_plain_git_repo, write_file,
+};
 
 // ---------------------------------------------------------------------
 // compose empty partial — files only, no prompt-keyed files
@@ -770,5 +671,78 @@ fn compose_empty_partial_still_does_not_surface_repo_dirs() {
     assert!(
         !got.iter().any(|c| c.ends_with('/')),
         "empty prefix must surface no directories at all: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// magic-mode directory parity (review-3 finding 4)
+// ---------------------------------------------------------------------
+
+#[test]
+fn compose_magic_short_prefix_surfaces_repo_dirs() {
+    // Review-3 finding 4: `@d<TAB>` mirrors Word-mode dir behavior. Both
+    // `docs/` and `features/` (matching the prefix `d`) must surface
+    // alongside any user-global file-tier hit. The directory walk runs
+    // regardless of which file tier won the shadow check.
+    let ws = TestWorkspace::named("complete-compose-magic-short-dirs");
+    seed_cargo_workspace(ws.path());
+    let home = fake_home(ws.path());
+    write_file(
+        &home.join(".claudine").join("prompts").join("daily.md"),
+        "# d\n",
+    );
+    fs::create_dir_all(ws.path().join("docs")).unwrap();
+    fs::create_dir_all(ws.path().join("features")).unwrap();
+
+    let got = run_complete_with_home(ws.path(), &home, &["compose", "@d"]);
+    assert!(
+        got.iter().any(|c| c == "docs/"),
+        "magic short prefix must surface `docs/`: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "features/"),
+        "starting-substring `d` must NOT surface `features/`: {got:?}"
+    );
+}
+
+#[test]
+fn compose_magic_dirs_independent_of_file_tier_shadow() {
+    // Review-3 finding 4 (key invariant): the file-tier shadowing rule
+    // (review-plan-2 Phase 2) only applies to file candidates. The
+    // repo-wide directory walk runs independently — so even when a
+    // higher-priority scope wins the file tier and shadows lower tiers,
+    // matching directories still surface.
+    let ws = TestWorkspace::named("complete-compose-magic-dirs-independent");
+    seed_cargo_workspace(ws.path());
+    let home = fake_home(ws.path());
+
+    // Repo prompts file tier wins (highest priority).
+    write_file(&ws.path().join("prompts").join("plan.md"), "# repo plan\n");
+    // User-global file is shadowed by the repo file-tier win.
+    write_file(
+        &home
+            .join(".claudine")
+            .join("prompts")
+            .join("planning")
+            .join("something.md"),
+        "# something\n",
+    );
+    // Real `planning/` directory at repo root — must surface
+    // independently of the file shadow.
+    fs::create_dir_all(ws.path().join("planning")).unwrap();
+
+    let got = run_complete_with_home(ws.path(), &home, &["compose", "@pl"]);
+    assert!(
+        got.iter().any(|c| c == "prompts/plan.md"),
+        "repo file tier must win: {got:?}"
+    );
+    assert!(
+        !got.iter()
+            .any(|c| c.contains("something") || c.starts_with("~/")),
+        "user-global file must be shadowed: {got:?}"
+    );
+    assert!(
+        got.iter().any(|c| c == "planning/"),
+        "directory walk runs unconditionally: {got:?}"
     );
 }
