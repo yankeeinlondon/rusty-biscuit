@@ -32,8 +32,6 @@
 //! path typed into a frontmatter override: it should resolve the same
 //! way whether the user typed it by hand or selected it from completion.
 
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 

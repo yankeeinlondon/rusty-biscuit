@@ -23,8 +23,6 @@
 //! inserted value. A committed directory token (ending in `/`) shortcuts
 //! the pipeline to walk only inside that directory.
 
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -102,6 +100,11 @@ impl PartialKind {
     /// directory visibility gating. Empty for `Empty` / `CommittedDir`.
     /// For `Magic`, returns the segment after the last `/` (or the whole
     /// token if there is no `/`).
+    ///
+    /// Production callers extract the active segment inline at the
+    /// pipeline branch point; this method exists for the variant
+    /// classification regression test.
+    #[cfg(test)]
     pub(crate) fn active_segment(&self) -> &str {
         match self {
             Self::Empty | Self::CommittedDir(_) => "",
@@ -182,17 +185,27 @@ fn gather_empty_or_word(
         }
     }
 
-    gather_repo_dirs(ctx, active, partial_len, &mut seen, &mut out);
+    let walk_scope = scopes::resolve_repo_dir_walk_root(ctx);
+    let render_base = walk_scope.path.clone();
+    gather_repo_dirs(
+        &walk_scope,
+        &render_base,
+        active,
+        partial_len,
+        &mut seen,
+        &mut out,
+    );
 
     out
 }
 
 /// Second-pass repo-wide directory walk.
 ///
-/// Independent of the high-profile scope set: walks
-/// [`scopes::resolve_repo_dir_walk_root`] once and emits **directory**
-/// candidates only. Files are intentionally skipped — the file pipeline
-/// is owned by the high-profile-scope pass that runs first.
+/// Walks the supplied scope once and emits **directory** candidates only.
+/// Files are intentionally skipped — the file pipeline is owned by the
+/// caller's first pass. Used by both Word mode (`gather_empty_or_word`,
+/// walking the repo / cwd root) and Magic mode (`gather_magic`, walking
+/// either the repo / cwd root or the magic-resolved subdirectory).
 ///
 /// Match strategy varies by typed-prefix length (see
 /// [`PartialLen::dir_match_mode`]):
@@ -202,13 +215,21 @@ fn gather_empty_or_word(
 ///   against the directory's leaf name.
 /// - `DirMatchMode::Fuzzy` — case-insensitive fuzzy subsequence match.
 ///
-/// Dedup is shared with the first pass via the canonical-path `seen` set
+/// Rendering is `render_base`-relative so callers can choose the base
+/// segment that should appear in the inserted token. Word mode passes
+/// the walk root as the render base (so the rendered token is
+/// repo-relative); Magic mode with a path-shaped `dir` passes the repo
+/// root so `<repo>/prompts/planning/` renders as `prompts/planning/`
+/// rather than just `planning/`.
+///
+/// Dedup is shared with the file pass via the canonical-path `seen` set
 /// so a directory that already surfaced under a high-profile scope (e.g.
 /// `prompts/` at the repo root) does not appear twice. Candidates are
 /// emitted with [`REPO_DIR_WALK_RANK`] so they sort after every
 /// high-profile-rooted candidate.
 fn gather_repo_dirs(
-    ctx: &ScopeContext,
+    walk_scope: &Scope,
+    render_base: &Path,
     active: &str,
     partial_len: PartialLen,
     seen: &mut HashSet<PathBuf>,
@@ -218,12 +239,10 @@ fn gather_repo_dirs(
     if dir_mode == DirMatchMode::None {
         return;
     }
-    let walk_scope = scopes::resolve_repo_dir_walk_root(ctx);
     if !walk_scope.path.is_dir() {
         return;
     }
-    let walk_root = walk_scope.path.clone();
-    let entries = walker::walk_scope(&walk_scope);
+    let entries = walker::walk_scope(walk_scope);
     for entry_path in entries {
         if !entry_path.is_dir() {
             continue;
@@ -231,7 +250,7 @@ fn gather_repo_dirs(
         // Skip the walk root itself (the walker already strips depth-0
         // entries, but a defensive guard keeps the empty-relative case
         // out of the rendered output).
-        let Ok(rel) = entry_path.strip_prefix(&walk_root) else {
+        let Ok(rel) = entry_path.strip_prefix(render_base) else {
             continue;
         };
         let Some(rel_str) = rel.to_str() else {
@@ -393,8 +412,11 @@ fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<Strin
 
 /// Magic (`@...`): resolve against the magic scope priority order (see
 /// [`ScopeSet::iter_magic_scopes`]). The first scope whose walked tree
-/// yields a matching file wins, and the rendered token is the
-/// scope-relative path (stripping the `@`). Spec §5.5 table:
+/// yields a matching file wins the **file tier**; subsequent file tiers
+/// are shadowed. Directories surface independently from the repo-wide
+/// directory walk (see [`gather_repo_dirs`]) — they mirror Word-mode
+/// directory behaviour and are not affected by the file-tier shadowing
+/// rule. Spec §5.5 file table:
 ///
 /// | Source tier | Inserted token |
 /// |---|---|
@@ -405,7 +427,9 @@ fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<Strin
 /// partial (e.g. `@prompts/plan` → `dir = "prompts"`). When non-empty, the
 /// walk root is constrained via [`resolve_magic_walk_root`] so the typed
 /// path prefix narrows the search before fuzzy matching the final
-/// segment.
+/// segment. The same constraint is applied to the directory walk so
+/// `@prompts/pl` surfaces `prompts/planning/` rather than every
+/// `pl*`-named directory at the repo root.
 fn gather_magic(
     mode: ComposeMode,
     ctx: &ScopeContext,
@@ -415,6 +439,27 @@ fn gather_magic(
 ) -> Vec<Candidate> {
     let partial_len = PartialLen::classify(active.chars().count());
 
+    let (mut out, mut seen) = gather_magic_files(mode, ctx, set, dir, active, partial_len);
+    gather_magic_dirs(ctx, set, dir, active, partial_len, &mut seen, &mut out);
+    out
+}
+
+/// First-tier file gathering for magic resolution.
+///
+/// Implements the spec §5.5 first-hit-wins shadow rule: walks each scope
+/// in magic priority order and returns the first scope's matching files.
+/// Lower-priority scopes never contribute file candidates once a higher-
+/// priority scope has produced a hit. The returned `seen` set carries the
+/// canonical paths of every emitted candidate so the directory pass can
+/// dedup against them without re-emitting the same path twice.
+fn gather_magic_files(
+    mode: ComposeMode,
+    ctx: &ScopeContext,
+    set: &ScopeSet,
+    dir: &str,
+    active: &str,
+    partial_len: PartialLen,
+) -> (Vec<Candidate>, HashSet<PathBuf>) {
     for (rank, scope) in set.iter_magic_scopes().enumerate() {
         let Some(walk_root) = resolve_magic_walk_root(&scope.path, dir) else {
             continue;
@@ -432,11 +477,13 @@ fn gather_magic(
         let mut scope_candidates: Vec<Candidate> = Vec::new();
         let mut seen: HashSet<PathBuf> = HashSet::new();
         for entry_path in entries {
-            let is_dir = entry_path.is_dir();
-            if is_dir && !partial_len.directories_allowed() {
+            // Directories are owned by the repo-wide walk (see
+            // `gather_magic_dirs`) — skip here to keep the file tier free
+            // of directory candidates and avoid double-emission.
+            if entry_path.is_dir() {
                 continue;
             }
-            if !is_dir && !frontmatter::valid_for_mode(&entry_path, mode) {
+            if !frontmatter::valid_for_mode(&entry_path, mode) {
                 continue;
             }
 
@@ -452,21 +499,12 @@ fn gather_magic(
             else {
                 continue;
             };
-            let match_target = if is_dir {
-                target.as_str()
-            } else {
-                name_stem(&target)
-            };
+            let match_target = name_stem(&target);
             if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
                 continue;
             }
             let Some(insert) = render_magic_insert(scope, &entry_path, ctx) else {
                 continue;
-            };
-            let insert = if is_dir {
-                format!("{}/", insert.trim_end_matches('/'))
-            } else {
-                insert
             };
             seen.insert(canonical);
             scope_candidates.push(Candidate {
@@ -475,10 +513,75 @@ fn gather_magic(
             });
         }
         if !scope_candidates.is_empty() {
-            return scope_candidates;
+            return (scope_candidates, seen);
         }
     }
-    Vec::new()
+    (Vec::new(), HashSet::new())
+}
+
+/// Magic-mode directory parity walk (review-3 finding 4).
+///
+/// Mirrors the Word-mode directory-walk surface into Magic mode so
+/// `@pl<TAB>` and `pl<TAB>` agree on directory candidates at Short and
+/// Long prefix lengths. Empty (`@<TAB>`) remains directory-free.
+///
+/// Walk root selection:
+///
+/// - When `dir` is empty, walks [`scopes::resolve_repo_dir_walk_root`]
+///   exactly as Word mode does — surfacing `planning/`, `docs/`, etc.
+///   at the repo root.
+/// - When `dir` is non-empty, walks the magic-resolved subdirectory of
+///   the highest-priority scope whose joined walk root resolves on
+///   disk. Match target is the leaf segment (`active`), rendered as
+///   repo-relative so `<repo>/prompts/planning/` becomes
+///   `prompts/planning/`.
+///
+/// Independent of the file-tier shadowing rule from
+/// [`gather_magic_files`]: directories surface even when the winning
+/// file tier was the user-global scope (or no scope produced files at
+/// all). The file tier's `seen` set is threaded in so a directory that
+/// already surfaced as a file candidate is not double-emitted.
+fn gather_magic_dirs(
+    ctx: &ScopeContext,
+    set: &ScopeSet,
+    dir: &str,
+    active: &str,
+    partial_len: PartialLen,
+    seen: &mut HashSet<PathBuf>,
+    out: &mut Vec<Candidate>,
+) {
+    if partial_len.dir_match_mode() == DirMatchMode::None {
+        return;
+    }
+    let render_base = scopes::effective_repo_root(ctx)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ctx.cwd.clone());
+
+    if dir.is_empty() {
+        let walk_scope = scopes::resolve_repo_dir_walk_root(ctx);
+        gather_repo_dirs(&walk_scope, &render_base, active, partial_len, seen, out);
+        return;
+    }
+
+    // Path-shaped magic: walk the magic-resolved subdirectory of the
+    // highest-priority scope whose joined walk root exists on disk. Render
+    // base is the repo / cwd root so the inserted token retains the typed
+    // prefix (e.g. `prompts/planning/` rather than `planning/`).
+    for scope in set.iter_magic_scopes() {
+        let Some(walk_root) = resolve_magic_walk_root(&scope.path, dir) else {
+            continue;
+        };
+        if !walk_root.is_dir() {
+            continue;
+        }
+        let scoped = Scope {
+            kind: scope.kind,
+            path: walk_root,
+            follow_links: scope.follow_links,
+        };
+        gather_repo_dirs(&scoped, &render_base, active, partial_len, seen, out);
+        return;
+    }
 }
 
 /// Resolve the walk root for a magic-path partial against a single scope.
@@ -1277,6 +1380,88 @@ mod tests {
         assert_eq!(
             count, 1,
             "`prompts/planning/` must dedup across both passes: {got:?}"
+        );
+    }
+
+    // -- magic-mode directory parity (review-3 finding 4) -----------------
+
+    #[test]
+    fn compose_magic_short_prefix_surfaces_repo_dir() {
+        // Review-3 finding 4: `@pl<TAB>` must mirror Word-mode behavior
+        // and surface `planning/` at the repo root alongside file matches
+        // from the magic priority tier.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let prompts = tmp.path().join("prompts");
+        write(&prompts.join("plan.md"), "---\ntitle: P\n---\n");
+        fs::create_dir_all(tmp.path().join("planning")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "@pl");
+        assert!(
+            got.iter().any(|c| c == "prompts/plan.md"),
+            "magic short prefix must still surface file: {got:?}"
+        );
+        assert!(
+            got.iter().any(|c| c == "planning/"),
+            "magic short prefix must surface repo-wide dir: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_magic_long_prefix_fuzzy_matches_repo_dir() {
+        // Review-3 finding 4: at Long prefix lengths magic-mode dir
+        // matching uses fuzzy subsequence semantics, same as Word mode.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        fs::create_dir_all(tmp.path().join("documentation")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "@dcm");
+        assert!(
+            got.iter().any(|c| c == "documentation/"),
+            "magic long prefix must fuzzy-match dirs: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_magic_empty_partial_does_not_surface_repo_dirs() {
+        // Review-3 finding 4 (regression guard): Empty stays directory-
+        // free even for magic mode. `@<TAB>` must not emit any directory
+        // candidates.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        fs::create_dir_all(tmp.path().join("planning")).unwrap();
+        fs::create_dir_all(tmp.path().join("docs")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "@");
+        assert!(
+            !got.iter().any(|c| c.ends_with('/')),
+            "empty magic partial must not surface dirs: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_magic_path_shaped_short_prefix_surfaces_subdir() {
+        // Review-3 finding 4: path-shaped magic constrains the dir walk
+        // root the same way it constrains the file walk. `@prompts/pl`
+        // must surface both `prompts/plan.md` and `prompts/planning/`.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let prompts = tmp.path().join("prompts");
+        write(&prompts.join("plan.md"), "---\ntitle: P\n---\n");
+        fs::create_dir_all(prompts.join("planning")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "@prompts/pl");
+        assert!(
+            got.iter().any(|c| c == "prompts/plan.md"),
+            "path-shaped magic must still surface file: {got:?}"
+        );
+        assert!(
+            got.iter().any(|c| c == "prompts/planning/"),
+            "path-shaped magic must surface scoped dir: {got:?}"
         );
     }
 
