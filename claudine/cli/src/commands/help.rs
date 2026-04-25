@@ -82,6 +82,10 @@ fn groups() -> Vec<CommandGroup> {
                     "inline-compose",
                     "Inline composition: generate and replace body",
                 ),
+                cmd(
+                    "sequence",
+                    "Run a serial sequence of composition steps from a single document",
+                ),
             ],
         },
         CommandGroup {
@@ -183,4 +187,50 @@ pub fn run() -> Result<()> {
     log::output(&output);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn group_by_name<'a>(groups: &'a [CommandGroup], name: &str) -> &'a CommandGroup {
+        groups
+            .iter()
+            .find(|g| g.name == name)
+            .unwrap_or_else(|| panic!("expected group `{name}` in help output"))
+    }
+
+    #[test]
+    fn composition_group_lists_compose_inline_compose_and_sequence_in_order() {
+        // The Composition group must surface every composition subcommand
+        // the CLI exposes (`compose`, `inline-compose`, `sequence`) in the
+        // same spec-defined order so `claudine help` never hides a
+        // command from discovery.
+        let groups = groups();
+        let composition = group_by_name(&groups, "Composition");
+        let names: Vec<&str> = composition.commands.iter().map(|e| e.name).collect();
+        assert_eq!(
+            names,
+            vec!["compose", "inline-compose", "sequence"],
+            "Composition group must list compose, inline-compose, sequence in that order",
+        );
+    }
+
+    #[test]
+    fn sequence_entry_description_matches_clap_doc_comment() {
+        // The help text and the clap doc comment for `Sequence` must
+        // agree; drift between them causes the grouped help display to
+        // diverge from `claudine sequence --help`.
+        let groups = groups();
+        let composition = group_by_name(&groups, "Composition");
+        let sequence = composition
+            .commands
+            .iter()
+            .find(|c| c.name == "sequence")
+            .expect("sequence entry present");
+        assert_eq!(
+            sequence.description,
+            "Run a serial sequence of composition steps from a single document",
+        );
+    }
 }

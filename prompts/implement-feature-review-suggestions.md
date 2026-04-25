@@ -5,7 +5,7 @@ design: ""
 iteration: 1
 area: "{{ctx.current_package_area}}"
 success:
-    message: "🎉 all of the suggestions from `{{dir}}/review-{iteration}.md` -- _in the {{area}} package area -- were implemented!"
+    message: "🖥️ Implementation for the _suggestions_ in review `{{area}}/{{dir}}/review-{{iteration}}.md` have completed successfully."
 ---
 ## Context
 

@@ -1,4 +1,4 @@
-//! End-to-end integration tests for the supplement completion engine.
+//! End-to-end integration tests for the Claudine completion engine.
 //!
 //! These tests spawn the compiled `claudine` binary with the hidden
 //! `__complete` subcommand that generated bash/zsh/fish scripts shell out
@@ -14,20 +14,14 @@
 //! on stdout, or nothing when the cursor is not at a targeted argument
 //! position.
 //!
-//! The suite covers the supplement spec's numbered acceptance criteria:
+//! Coverage focus:
 //!
-//! 1. Empty input with a curated-scope fixture → only curated matches.
-//! 2. `@pr` — 2-char match → case-insensitive filename substring.
-//! 3. `@pro` — 3-char match → curated scope + `.gitignore`-aware broad scan.
-//! 4. `@prompts/` — path-separator reset → cross-root enumeration.
-//! 5. `prompts/` — implicit-relative path → repo-only scope.
-//! 6. Wrapper `--asp` / `--rsp` → same candidate set as the positional.
-//! 8. Non-markdown files are never offered.
-//! 9. Gitignored files are excluded from the broad scan.
-//! 10. Mid-filename substring match (`@omp` → `prompt.md`).
-//!
-//! Criteria 7 (no-repo fallback) and 11 (multi-crate dedup) are covered
-//! at the unit level in `src/completion/supplement.rs`.
+//! - Composition positional (`compose`) — curated scope matching, path
+//!   resets, substring/subsequence hits, non-markdown exclusion,
+//!   `.gitignore` honored.
+//! - Unsupported slots — wrapper subcommands, setter-shaped tokens, and
+//!   unsupported prefix forms must all emit zero candidates so the
+//!   shell's native completion takes over.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -112,7 +106,7 @@ fn run_complete(cwd: &Path, home: &Path, argv_tail: &[&str], current: usize) -> 
     cmd.current_dir(cwd)
         .env("HOME", home)
         .env("NO_COLOR", "1")
-        // Defensive: clear any outer COMPLETE so the legacy CompleteEnv
+        // Defensive: clear any outer COMPLETE so the legacy `CompleteEnv`
         // path never gets a chance to hijack this subprocess.
         .env_remove("COMPLETE")
         .env_remove("_CLAP_COMPLETE_INDEX")
@@ -310,30 +304,32 @@ fn implicit_relative_prompts_stays_repo_only() {
 }
 
 // ---------------------------------------------------------------------
-// Acceptance criterion 6 — wrapper `--asp` / `--rsp` file-flag target
+// Wrapper / composition --asp & --rsp — the current engine explicitly
+// leaves these slots to the shell's native file completion. We assert
+// empty stdout so a future accidental re-introduction of a curated
+// completer here would fail loud.
 // ---------------------------------------------------------------------
 
 #[test]
-fn wrapper_asp_flag_value_slot_emits_curated_candidates() {
-    let workspace = TestWorkspace::named("supp-wrapper-asp");
+fn wrapper_asp_flag_value_slot_emits_no_candidates() {
+    let workspace = TestWorkspace::named("comp-wrapper-asp");
     let root = workspace.path();
     seed_repo_with_package(root);
     let prompts = root.join("prompts");
     fs::create_dir_all(&prompts).unwrap();
     fs::write(prompts.join("plain.md"), "# p\n").unwrap();
 
-    // Cursor sits on the empty value slot right after `--asp`.
     let got = run_complete_trailing(root, &["claude", "--asp", ""]);
-
     assert!(
-        got.iter().any(|c| c == "prompts/plain.md"),
-        "wrapper --asp flag value slot should get curated candidates: {got:?}",
+        got.is_empty(),
+        "wrapper --asp flag value slot must defer to clap/shell default \
+         file completion: {got:?}",
     );
 }
 
 #[test]
-fn wrapper_replace_system_prompt_flag_value_slot_also_fires() {
-    let workspace = TestWorkspace::named("supp-wrapper-rsp");
+fn wrapper_replace_system_prompt_flag_value_slot_emits_no_candidates() {
+    let workspace = TestWorkspace::named("comp-wrapper-rsp");
     let root = workspace.path();
     seed_repo_with_package(root);
     let prompts = root.join("prompts");
@@ -341,17 +337,16 @@ fn wrapper_replace_system_prompt_flag_value_slot_also_fires() {
     fs::write(prompts.join("plain.md"), "# p\n").unwrap();
 
     let got = run_complete_trailing(root, &["codex", "--replace-system-prompt", "@"]);
-
     assert!(
-        got.iter().any(|c| c == "@prompts/plain.md"),
-        "wrapper --replace-system-prompt value slot should emit @-prefixed \
-         curated candidates: {got:?}",
+        got.is_empty(),
+        "wrapper --replace-system-prompt value slot must defer to the \
+         shell's default file completion: {got:?}",
     );
 }
 
 #[test]
-fn compose_asp_flag_value_slot_emits_curated_candidates() {
-    let workspace = TestWorkspace::named("supp-compose-asp");
+fn compose_asp_flag_value_slot_emits_no_candidates() {
+    let workspace = TestWorkspace::named("comp-compose-asp");
     let root = workspace.path();
     seed_repo_with_package(root);
     let prompts = root.join("prompts");
@@ -359,10 +354,10 @@ fn compose_asp_flag_value_slot_emits_curated_candidates() {
     fs::write(prompts.join("plain.md"), "# p\n").unwrap();
 
     let got = run_complete_trailing(root, &["compose", "file.md", "--asp", ""]);
-
     assert!(
-        got.iter().any(|c| c == "prompts/plain.md"),
-        "compose --asp flag value slot should get curated candidates: {got:?}",
+        got.is_empty(),
+        "compose --asp value slot must defer to the shell's default file \
+         completion: {got:?}",
     );
 }
 
