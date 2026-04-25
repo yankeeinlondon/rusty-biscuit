@@ -8,11 +8,13 @@ use darkmatter::markdown::compose::TransclusionError;
 
 use crate::helpers::{assert_contains_all, render};
 
-// NOTE: `MarkdownError::FrontmatterParse` wraps `biscuit_file::YamlParseError`
-// (an alias for `serde_yaml_ng::Error`). The leaf-block renderer
-// `frontmatter_parse_block` is unit-tested directly in
-// `darkmatter::markdown::errors::blocks::tests::frontmatter_parse_block_renders_yaml_error`
-// so we do not duplicate that coverage here.
+// NOTE: `MarkdownError::FrontmatterParse` is a struct variant carrying
+// `source: YamlParseError` (alias for `serde_yaml_ng::Error`) plus the
+// original `yaml: String` body so renderers can include the offending line.
+// The leaf-block renderer `frontmatter_parse_block` is unit-tested directly
+// in `darkmatter::markdown::errors::blocks::tests` (both the generic
+// rendering smoke test and the offending-line snippet regression test) so
+// we do not duplicate that coverage here.
 
 #[test]
 fn frontmatter_merge_renders_leaf_block() {

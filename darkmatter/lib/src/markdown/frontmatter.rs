@@ -1,5 +1,7 @@
 //! Frontmatter parsing and manipulation utilities.
 
+use biscuit_file::YamlParseError;
+
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
 use serde::Serialize;
@@ -206,7 +208,12 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
         FrontmatterMap::new()
     } else {
-        parse_yaml_with_fallbacks(&yaml_content)?
+        parse_yaml_with_fallbacks(&yaml_content).map_err(|source| {
+            MarkdownError::FrontmatterParse {
+                source,
+                yaml: yaml_content.clone(),
+            }
+        })?
     };
 
     // Extract remaining content
@@ -228,7 +235,7 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
 ///    substitutions and `{{ }}` interpolation expressions with safe
 ///    placeholders so YAML-significant characters inside them (e.g., nested
 ///    double quotes in `"$(dirname "{{path}}")"`) don't break the YAML parser.
-fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
+fn parse_yaml_with_fallbacks(yaml: &str) -> Result<FrontmatterMap, YamlParseError> {
     // Strategy 1: direct parse
     match serde_yaml_ng::from_str(yaml) {
         Ok(map) => Ok(map),
@@ -258,7 +265,7 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
                 protect_interpolation_expressions(&shell_protected);
 
             if shell_replacements.is_empty() && expr_replacements.is_empty() {
-                return Err(original_err.into());
+                return Err(original_err);
             }
 
             match serde_yaml_ng::from_str::<FrontmatterMap>(&fully_protected) {
@@ -267,7 +274,7 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
                     let map = restore_expressions_in_map(map, &shell_replacements);
                     Ok(map)
                 }
-                Err(_) => Err(original_err.into()),
+                Err(_) => Err(original_err),
             }
         }
     }
