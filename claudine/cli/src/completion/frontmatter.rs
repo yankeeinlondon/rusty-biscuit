@@ -56,19 +56,18 @@ pub(crate) fn valid_for_mode(path: &Path, mode: ComposeMode) -> bool {
 /// `prompt` key. A frontmatter-less file passes — the composition runtime
 /// treats a missing `prompt` the same as an absent one.
 ///
-/// An unreadable file is treated as "no frontmatter" and accepted. Any
-/// parse-shaped failure surfaces as acceptance because we cannot
-/// confidently prove the file is ineligible; the runtime will enforce its
-/// own contract when the user actually runs the command.
+/// Every size/read/UTF-8 failure is a rejection so expensive or noisy
+/// candidates never surface in compose output. This mirrors the behavior
+/// of [`is_valid_inline_compose`] and [`is_valid_sequence`] for a single
+/// uniform size/read contract (review-1 finding 6).
 fn is_valid_compose(path: &Path) -> bool {
     if !has_markdown_extension(path) {
         return false;
     }
     let Some(text) = read_text_within_size_cap(path) else {
-        // Oversized or unreadable files are accepted for compose because
-        // the extension gate already passed and the runtime handles
-        // frontmatter-less files uniformly.
-        return true;
+        // Oversized, unreadable, or non-UTF-8 files are rejected so
+        // expensive or noisy candidates never surface in compose output.
+        return false;
     };
     let markdown: Markdown = text.into();
     // Reject only when `prompt` is definitively present. A missing key is
@@ -218,6 +217,29 @@ mod tests {
     fn compose_accepts_markdown_extension_case_insensitive() {
         assert!(has_markdown_extension(&PathBuf::from("a.MD")));
         assert!(has_markdown_extension(&PathBuf::from("a.Markdown")));
+    }
+
+    #[test]
+    fn compose_rejects_oversized_markdown() {
+        // Finding #6: oversized Markdown files must be rejected uniformly
+        // across compose/inline-compose/sequence (size-guard contract).
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("huge.md");
+        let padding = "a".repeat((MAX_FRONTMATTER_BYTES + 1) as usize);
+        write(&path, &padding);
+        assert!(!valid_for_mode(&path, ComposeMode::Compose));
+    }
+
+    #[test]
+    fn compose_rejects_non_utf8_markdown() {
+        // Finding #6: non-UTF-8 markdown fails `read_to_string` inside
+        // `read_text_within_size_cap`, which must now reject rather than
+        // accept. Write raw bytes so the test is portable.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("bad.md");
+        // Invalid UTF-8 byte sequence.
+        fs::write(&path, [0xFF, 0xFE, 0x00, 0x00, 0xC0, 0xAF]).unwrap();
+        assert!(!valid_for_mode(&path, ComposeMode::Compose));
     }
 
     #[test]

@@ -148,6 +148,13 @@ fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
                 // override slot anyway.
                 continue;
             }
+            // Gate on Markdown extension before any other work. The setter-
+            // value slot is contractually a Markdown-document reference
+            // (spec §5.4, review-1 finding 1); non-Markdown files must
+            // never surface regardless of partial_len classification.
+            if !has_markdown_extension(&entry) {
+                continue;
+            }
             let canonical =
                 std::fs::canonicalize(&entry).unwrap_or_else(|_| entry.clone());
             if !seen_entries.insert(canonical) {
@@ -272,6 +279,19 @@ fn strip_file_extension(name: &str) -> &str {
         Some(idx) if idx > 0 => &name[..idx],
         _ => name,
     }
+}
+
+/// Accept `.md` and `.markdown` extensions case-insensitively.
+///
+/// Mirrors [`super::frontmatter::has_markdown_extension`] but is
+/// duplicated here so `setter_value` does not need to depend on
+/// `frontmatter` for a single small predicate. The canonical list is
+/// `md` and `markdown` (spec §5.4).
+fn has_markdown_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -569,6 +589,98 @@ mod tests {
             !got.iter().any(|c| c.contains("planning") && c.ends_with("/'")),
             "directory should not appear in setter-value output: {got:?}"
         );
+    }
+
+    // -- run: Markdown extension gate (finding #1) ------------------------
+
+    #[test]
+    fn setter_value_skips_txt_files() {
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let docs = tmp.path().join("docs");
+        write(&docs.join("spec.md"), "# s\n");
+        write(&docs.join("spec.txt"), "not markdown\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run("spec=@s", &ctx);
+        assert!(
+            got.iter().any(|c| c == "spec='docs/spec.md'"),
+            "expected .md to surface: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c.contains("spec.txt")),
+            ".txt must be rejected by the extension gate: {got:?}"
+        );
+    }
+
+    #[test]
+    fn setter_value_skips_yaml_files() {
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let docs = tmp.path().join("docs");
+        write(&docs.join("plan.yaml"), "key: value\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run("plan=@p", &ctx);
+        assert!(
+            !got.iter().any(|c| c.contains("plan.yaml")),
+            ".yaml must be rejected by the extension gate: {got:?}"
+        );
+    }
+
+    #[test]
+    fn setter_value_skips_extensionless_files() {
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let docs = tmp.path().join("docs");
+        write(&docs.join("notes"), "just a text file\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run("notes=@n", &ctx);
+        assert!(
+            !got.iter().any(|c| c.contains("'docs/notes'")),
+            "extensionless files must be rejected: {got:?}"
+        );
+    }
+
+    #[test]
+    fn setter_value_accepts_uppercase_md() {
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let docs = tmp.path().join("docs");
+        write(&docs.join("PLAN.MD"), "# P\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run("ref=@P", &ctx);
+        assert!(
+            got.iter().any(|c| c == "ref='docs/PLAN.MD'"),
+            "uppercase .MD must be accepted (case-insensitive): {got:?}"
+        );
+    }
+
+    #[test]
+    fn setter_value_accepts_uppercase_markdown() {
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let docs = tmp.path().join("docs");
+        write(&docs.join("README.MARKDOWN"), "# R\n");
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run("ref=@R", &ctx);
+        assert!(
+            got.iter().any(|c| c == "ref='docs/README.MARKDOWN'"),
+            "uppercase .MARKDOWN must be accepted (case-insensitive): {got:?}"
+        );
+    }
+
+    // -- has_markdown_extension unit tests --------------------------------
+
+    #[test]
+    fn has_markdown_extension_accepts_md_and_markdown_case_insensitive() {
+        assert!(has_markdown_extension(Path::new("a.md")));
+        assert!(has_markdown_extension(Path::new("a.MD")));
+        assert!(has_markdown_extension(Path::new("a.markdown")));
+        assert!(has_markdown_extension(Path::new("a.Markdown")));
+        assert!(has_markdown_extension(Path::new("a.MARKDOWN")));
+        assert!(!has_markdown_extension(Path::new("a.txt")));
+        assert!(!has_markdown_extension(Path::new("a.yaml")));
+        assert!(!has_markdown_extension(Path::new("a")));
+        assert!(!has_markdown_extension(Path::new("no-extension")));
     }
 
     #[test]

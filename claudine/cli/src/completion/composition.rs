@@ -29,9 +29,18 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::frontmatter;
-use super::fuzzy::{self, PartialLen};
+use super::fuzzy::{self, DirMatchMode, PartialLen};
 use super::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeSet};
 use super::walker;
+
+/// Source rank for candidates emitted by the repo-wide directory walk.
+///
+/// Set well above the highest scope-iteration rank so high-profile-rooted
+/// candidates always sort first. Phase 3 of review-plan-1 introduces the
+/// repo-wide walk to surface directories outside the curated scope set
+/// (spec §5.3); these candidates are still useful but are intentionally
+/// de-prioritized so the existing prompt scopes win on dedup ties.
+const REPO_DIR_WALK_RANK: u8 = 10;
 
 /// Classification of the token under the cursor in a composition positional
 /// slot.
@@ -41,7 +50,12 @@ pub(crate) enum PartialKind {
     Empty,
     /// `@...` magic path — search sigil; resolved to a relative inserted
     /// token on selection.
-    Magic(String),
+    ///
+    /// `dir` is the path portion before the last `/` (scope-relative);
+    /// `active` is the fuzzy-match segment after the last `/`. For a bare
+    /// `@plan`, `dir` is empty and `active` is `"plan"`; for
+    /// `@prompts/plan`, `dir` is `"prompts"` and `active` is `"plan"`.
+    Magic { dir: String, active: String },
     /// A committed directory token — ends in `/`. Walking is confined to
     /// that directory relative to cwd (or repo root).
     CommittedDir(String),
@@ -61,7 +75,16 @@ impl PartialKind {
             return Self::Empty;
         }
         if let Some(rest) = token.strip_prefix('@') {
-            return Self::Magic(rest.to_string());
+            if let Some((dir, active)) = rest.rsplit_once('/') {
+                return Self::Magic {
+                    dir: dir.to_string(),
+                    active: active.to_string(),
+                };
+            }
+            return Self::Magic {
+                dir: String::new(),
+                active: rest.to_string(),
+            };
         }
         if token.ends_with('/') {
             return Self::CommittedDir(token.to_string());
@@ -76,12 +99,13 @@ impl PartialKind {
     }
 
     /// The "active segment" — the piece that drives fuzzy matching and
-    /// directory visibility gating. Empty for `Empty` / `CommittedDir` /
-    /// `Magic` (magic paths have their own scope-walk strategy).
+    /// directory visibility gating. Empty for `Empty` / `CommittedDir`.
+    /// For `Magic`, returns the segment after the last `/` (or the whole
+    /// token if there is no `/`).
     pub(crate) fn active_segment(&self) -> &str {
         match self {
             Self::Empty | Self::CommittedDir(_) => "",
-            Self::Magic(s) => s,
+            Self::Magic { active, .. } => active,
             Self::Word(s) => s,
             Self::PartialPath { active, .. } => active,
         }
@@ -111,7 +135,7 @@ pub(crate) fn run(mode: ComposeMode, ctx: &ScopeContext, partial_token: &str) ->
     let candidates = match &kind {
         PartialKind::Empty => gather_empty_or_word(mode, ctx, &scope_set, ""),
         PartialKind::Word(active) => gather_empty_or_word(mode, ctx, &scope_set, active),
-        PartialKind::Magic(active) => gather_magic(mode, ctx, &scope_set, active),
+        PartialKind::Magic { dir, active } => gather_magic(mode, ctx, &scope_set, dir, active),
         PartialKind::CommittedDir(dir) => gather_committed(mode, ctx, dir, ""),
         PartialKind::PartialPath { dir, active } => gather_committed(mode, ctx, dir, active),
     };
@@ -122,9 +146,15 @@ pub(crate) fn run(mode: ComposeMode, ctx: &ScopeContext, partial_token: &str) ->
 /// Empty / Word path: walk every configured scope, apply fuzzy matching to
 /// the active segment, and consult [`PartialLen`] to decide whether
 /// directories are in play.
+///
+/// After the high-profile scope pass completes, a second pass walks the
+/// repo (or CWD when no repo is detected) to emit directory candidates
+/// independent of the high-profile file scope set. This is what makes
+/// `compose c` surface directories like `claudine/` even when they are
+/// not under `prompts/`. See [`gather_repo_dirs`] for details.
 fn gather_empty_or_word(
     mode: ComposeMode,
-    _ctx: &ScopeContext,
+    ctx: &ScopeContext,
     set: &ScopeSet,
     active: &str,
 ) -> Vec<Candidate> {
@@ -139,7 +169,7 @@ fn gather_empty_or_word(
         }
         let entries = walker::walk_scope(scope);
         for entry_path in entries {
-            let ctx = WordRenderCtx {
+            let render_ctx = WordRenderCtx {
                 mode,
                 scope_root: &scope.path,
                 entry_path: &entry_path,
@@ -147,10 +177,91 @@ fn gather_empty_or_word(
                 partial_len,
                 rank,
             };
-            render_entry_word(&ctx, &mut seen, &mut out);
+            render_entry_word(&render_ctx, &mut seen, &mut out);
         }
     }
+
+    gather_repo_dirs(ctx, active, partial_len, &mut seen, &mut out);
+
     out
+}
+
+/// Second-pass repo-wide directory walk.
+///
+/// Independent of the high-profile scope set: walks
+/// [`scopes::resolve_repo_dir_walk_root`] once and emits **directory**
+/// candidates only. Files are intentionally skipped — the file pipeline
+/// is owned by the high-profile-scope pass that runs first.
+///
+/// Match strategy varies by typed-prefix length (see
+/// [`PartialLen::dir_match_mode`]):
+///
+/// - `DirMatchMode::None` — empty partial, function returns immediately.
+/// - `DirMatchMode::Prefix` — case-insensitive starting-substring match
+///   against the directory's leaf name.
+/// - `DirMatchMode::Fuzzy` — case-insensitive fuzzy subsequence match.
+///
+/// Dedup is shared with the first pass via the canonical-path `seen` set
+/// so a directory that already surfaced under a high-profile scope (e.g.
+/// `prompts/` at the repo root) does not appear twice. Candidates are
+/// emitted with [`REPO_DIR_WALK_RANK`] so they sort after every
+/// high-profile-rooted candidate.
+fn gather_repo_dirs(
+    ctx: &ScopeContext,
+    active: &str,
+    partial_len: PartialLen,
+    seen: &mut HashSet<PathBuf>,
+    out: &mut Vec<Candidate>,
+) {
+    let dir_mode = partial_len.dir_match_mode();
+    if dir_mode == DirMatchMode::None {
+        return;
+    }
+    let walk_scope = scopes::resolve_repo_dir_walk_root(ctx);
+    if !walk_scope.path.is_dir() {
+        return;
+    }
+    let walk_root = walk_scope.path.clone();
+    let entries = walker::walk_scope(&walk_scope);
+    for entry_path in entries {
+        if !entry_path.is_dir() {
+            continue;
+        }
+        // Skip the walk root itself (the walker already strips depth-0
+        // entries, but a defensive guard keeps the empty-relative case
+        // out of the rendered output).
+        let Ok(rel) = entry_path.strip_prefix(&walk_root) else {
+            continue;
+        };
+        let Some(rel_str) = rel.to_str() else {
+            continue;
+        };
+        if rel_str.is_empty() {
+            continue;
+        }
+
+        let Some(leaf) = entry_path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let dir_match = match dir_mode {
+            DirMatchMode::None => false,
+            DirMatchMode::Prefix => fuzzy::prefix_match(leaf, active),
+            DirMatchMode::Fuzzy => fuzzy::fuzzy_match(leaf, active),
+        };
+        if !dir_match {
+            continue;
+        }
+
+        let canonical = std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
+        if !seen.insert(canonical) {
+            continue;
+        }
+        let insert = format!("{}/", rel_str.trim_end_matches('/'));
+        out.push(Candidate {
+            insert,
+            source_rank: REPO_DIR_WALK_RANK,
+        });
+    }
 }
 
 /// Bundled inputs to [`render_entry_word`]. Grouping the per-entry knobs
@@ -237,30 +348,45 @@ fn format_relative_insert(scope_root: &Path, entry: &Path) -> Option<String> {
     Some(format!("{leaf}/{rel_str}"))
 }
 
-/// Magic (`@...`): resolve against the scope priority order. The first
-/// scope whose walked tree yields a matching file wins, and the rendered
-/// token is the scope-relative path (stripping the `@`). Spec §5.5 table:
+/// Magic (`@...`): resolve against the magic scope priority order (see
+/// [`ScopeSet::iter_magic_scopes`]). The first scope whose walked tree
+/// yields a matching file wins, and the rendered token is the
+/// scope-relative path (stripping the `@`). Spec §5.5 table:
 ///
 /// | Source tier | Inserted token |
 /// |---|---|
-/// | Repo / pkg-area / pkg / repo.claudine | `prompts/plan.md` (or `.claudine/prompts/plan.md`) |
+/// | Repo / pkg-area / pkg / repo.claudine / extras | `prompts/plan.md` (or `docs/plan.md`, `.claudine/prompts/plan.md`) |
 /// | User global | `~/.claudine/prompts/plan.md` |
+///
+/// The `dir` argument carries the path portion of a path-shaped magic
+/// partial (e.g. `@prompts/plan` → `dir = "prompts"`). When non-empty, the
+/// walk root is constrained via [`resolve_magic_walk_root`] so the typed
+/// path prefix narrows the search before fuzzy matching the final
+/// segment.
 fn gather_magic(
     mode: ComposeMode,
     ctx: &ScopeContext,
     set: &ScopeSet,
+    dir: &str,
     active: &str,
 ) -> Vec<Candidate> {
     let partial_len = PartialLen::classify(active.chars().count());
     let mut out: Vec<Candidate> = Vec::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
 
-    for (rank, scope) in set.iter_scopes().enumerate() {
-        if !scope.path.is_dir() {
+    for (rank, scope) in set.iter_magic_scopes().enumerate() {
+        let Some(walk_root) = resolve_magic_walk_root(&scope.path, dir) else {
+            continue;
+        };
+        if !walk_root.is_dir() {
             continue;
         }
         let rank = rank.min(u8::MAX as usize) as u8;
-        let entries = walker::walk_scope(scope);
+        let scoped = Scope {
+            path: walk_root,
+            follow_links: scope.follow_links,
+        };
+        let entries = walker::walk_scope(&scoped);
         for entry_path in entries {
             let is_dir = entry_path.is_dir();
             if is_dir && !partial_len.directories_allowed() {
@@ -306,6 +432,56 @@ fn gather_magic(
         }
     }
     out
+}
+
+/// Resolve the walk root for a magic-path partial against a single scope.
+///
+/// When `dir` is empty, the walk root is the scope root itself. When `dir`
+/// is non-empty, it joins to the scope root — but with a crucial special
+/// case: if `dir` starts with the scope's leaf name (e.g. `dir = "prompts"`
+/// against `scope = /repo/prompts`), peel the leaf off before joining so
+/// `@prompts/plan` resolves against `/repo/prompts/` rather than
+/// `/repo/prompts/prompts/`.
+///
+/// ## Returns
+///
+/// `Some(path)` with the resolved walk root path (which may or may not
+/// exist on disk — the caller must `is_dir()` check). `None` only when the
+/// scope root has no final component to extract (defensive — Claudine
+/// never emits such scopes in practice).
+fn resolve_magic_walk_root(scope_root: &Path, dir: &str) -> Option<PathBuf> {
+    if dir.is_empty() {
+        return Some(scope_root.to_path_buf());
+    }
+    // Peel off a matching scope-suffix so `@prompts/plan` resolves
+    // against `<scope>/plan/` rather than `<scope>/prompts/plan/` when
+    // the scope already ends in `/prompts`. Handles multi-segment
+    // suffixes too (e.g. `@.claudine/prompts/plan` against a scope
+    // ending in `.claudine/prompts`).
+    let dir_segments: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    if dir_segments.is_empty() {
+        return Some(scope_root.to_path_buf());
+    }
+    // Find the longest prefix of `dir` that matches a trailing suffix of
+    // `scope_root`. For each candidate length k (from the longest down),
+    // compare the last k components of `scope_root` against the first k
+    // components of `dir_segments`. The first match wins; peel that many
+    // segments off and join the rest.
+    let scope_components: Vec<&str> = scope_root
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+    for k in (1..=dir_segments.len().min(scope_components.len())).rev() {
+        let scope_tail = &scope_components[scope_components.len() - k..];
+        if scope_tail == &dir_segments[..k] {
+            let remainder = dir_segments[k..].join("/");
+            if remainder.is_empty() {
+                return Some(scope_root.to_path_buf());
+            }
+            return Some(scope_root.join(remainder));
+        }
+    }
+    Some(scope_root.join(dir))
 }
 
 /// Render the inserted token for a magic-path match.
@@ -494,11 +670,49 @@ mod tests {
     fn classify_magic_strips_at_sigil() {
         assert_eq!(
             PartialKind::classify("@plan"),
-            PartialKind::Magic("plan".to_string())
+            PartialKind::Magic {
+                dir: String::new(),
+                active: "plan".to_string(),
+            }
         );
         assert_eq!(
             PartialKind::classify("@"),
-            PartialKind::Magic(String::new())
+            PartialKind::Magic {
+                dir: String::new(),
+                active: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn classify_magic_path_shaped() {
+        assert_eq!(
+            PartialKind::classify("@prompts/plan"),
+            PartialKind::Magic {
+                dir: "prompts".to_string(),
+                active: "plan".to_string(),
+            }
+        );
+        assert_eq!(
+            PartialKind::classify("@a/b/c"),
+            PartialKind::Magic {
+                dir: "a/b".to_string(),
+                active: "c".to_string(),
+            }
+        );
+        assert_eq!(
+            PartialKind::classify("@/x"),
+            PartialKind::Magic {
+                dir: String::new(),
+                active: "x".to_string(),
+            }
+        );
+        assert_eq!(
+            PartialKind::classify("@plan"),
+            PartialKind::Magic {
+                dir: String::new(),
+                active: "plan".to_string(),
+            }
         );
     }
 
@@ -541,7 +755,19 @@ mod tests {
             ""
         );
         assert_eq!(
-            PartialKind::Magic("pl".to_string()).active_segment(),
+            PartialKind::Magic {
+                dir: String::new(),
+                active: "pl".to_string(),
+            }
+            .active_segment(),
+            "pl"
+        );
+        assert_eq!(
+            PartialKind::Magic {
+                dir: "prompts".to_string(),
+                active: "pl".to_string(),
+            }
+            .active_segment(),
             "pl"
         );
         assert_eq!(
@@ -614,12 +840,17 @@ mod tests {
     }
 
     #[test]
-    fn compose_short_prefix_fuzzy_matches_filenames_only() {
+    fn compose_short_prefix_fuzzy_matches_filenames_and_dirs() {
+        // Spec §5.3 (review-1 finding #3): short (1–2 char) prefixes
+        // surface files via fuzzy matching in high-profile scopes AND
+        // directories via prefix matching from the repo-wide walk.
         let tmp = TempDir::new().unwrap();
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("plan.md"), "---\ntitle: X\n---\n");
         write(&prompts.join("notes.md"), "---\ntitle: Y\n---\n");
+        // Directory at the repo root surfaces via the repo-wide walk.
+        fs::create_dir_all(tmp.path().join("planning")).unwrap();
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "pl");
@@ -630,6 +861,10 @@ mod tests {
         assert!(
             !got.iter().any(|c| c.ends_with("notes.md")),
             "short prefix `pl` must not match notes.md: {got:?}"
+        );
+        assert!(
+            got.iter().any(|c| c == "planning/"),
+            "short prefix `pl` must surface matching repo-wide dir: {got:?}"
         );
     }
 
@@ -685,6 +920,119 @@ mod tests {
         assert!(
             got.iter().any(|c| c == "prompts/plan.md"),
             "magic path must render without @: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_magic_path_shaped_resolves_scope_relative() {
+        // `@prompts/plan` must resolve against the repo-scope `prompts/`
+        // root and emit `prompts/plan.md`.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let prompts = tmp.path().join("prompts");
+        write(&prompts.join("plan.md"), "---\ntitle: X\n---\n");
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "@prompts/plan");
+        assert!(
+            got.iter().any(|c| c == "prompts/plan.md"),
+            "path-shaped magic must resolve scope-relative: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_magic_nested_path_shaped_resolves() {
+        // `@prompts/drafts/plan` must resolve against
+        // `<repo>/prompts/drafts/` and emit `prompts/drafts/plan.md`.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let prompts = tmp.path().join("prompts");
+        write(
+            &prompts.join("drafts").join("plan.md"),
+            "---\ntitle: X\n---\n",
+        );
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "@prompts/drafts/plan");
+        assert!(
+            got.iter().any(|c| c == "prompts/drafts/plan.md"),
+            "nested path-shaped magic must resolve: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_magic_path_shaped_misses_when_dir_absent() {
+        // Seed only `prompts/plan.md`; query `@prompts/drafts/plan`.
+        // `<repo>/prompts/drafts/` does not exist, so the walk-root
+        // `is_dir()` check fails and zero candidates are emitted.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let prompts = tmp.path().join("prompts");
+        write(&prompts.join("plan.md"), "---\ntitle: X\n---\n");
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "@prompts/drafts/plan");
+        assert!(
+            !got.iter().any(|c| c.ends_with("plan.md")),
+            "missing dir join must yield no candidates: {got:?}"
+        );
+    }
+
+    // -- resolve_magic_walk_root ------------------------------------------
+
+    #[test]
+    fn magic_walk_root_empty_dir_is_scope_root() {
+        let scope = Path::new("/r/prompts");
+        assert_eq!(
+            resolve_magic_walk_root(scope, ""),
+            Some(PathBuf::from("/r/prompts"))
+        );
+    }
+
+    #[test]
+    fn magic_walk_root_dir_matches_scope_leaf_exactly() {
+        // `@prompts/plan` against `scope = /r/prompts` with
+        // `dir = "prompts"` should resolve to `/r/prompts`, not
+        // `/r/prompts/prompts`.
+        let scope = Path::new("/r/prompts");
+        assert_eq!(
+            resolve_magic_walk_root(scope, "prompts"),
+            Some(PathBuf::from("/r/prompts"))
+        );
+    }
+
+    #[test]
+    fn magic_walk_root_dir_extends_past_scope_leaf() {
+        // `dir = "prompts/drafts"` peels `prompts` off so the join
+        // becomes `/r/prompts/drafts`, not `/r/prompts/prompts/drafts`.
+        let scope = Path::new("/r/prompts");
+        assert_eq!(
+            resolve_magic_walk_root(scope, "prompts/drafts"),
+            Some(PathBuf::from("/r/prompts/drafts"))
+        );
+    }
+
+    #[test]
+    fn magic_walk_root_dir_without_leaf_match_joins_raw() {
+        // `dir = "drafts"` does not start with the scope leaf; join
+        // raw → `/r/prompts/drafts`.
+        let scope = Path::new("/r/prompts");
+        assert_eq!(
+            resolve_magic_walk_root(scope, "drafts"),
+            Some(PathBuf::from("/r/prompts/drafts"))
+        );
+    }
+
+    #[test]
+    fn magic_walk_root_dir_against_non_matching_scope() {
+        // `dir = "prompts/plan"` against a scope whose leaf is `docs`
+        // joins raw because `"prompts/plan"` does not start with
+        // `"docs"`. The caller's `is_dir()` check will then reject an
+        // unlikely path.
+        let scope = Path::new("/r/docs");
+        assert_eq!(
+            resolve_magic_walk_root(scope, "prompts/plan"),
+            Some(PathBuf::from("/r/docs/prompts/plan"))
         );
     }
 
@@ -795,6 +1143,95 @@ mod tests {
         assert!(
             got.iter().any(|c| c.ends_with('/')),
             "3+ char prefix must include directories: {got:?}"
+        );
+    }
+
+    // -- repo-wide directory walk (review-1 finding #2 + #3) --------------
+
+    #[test]
+    fn compose_one_char_prefix_surfaces_matching_repo_dir() {
+        // Spec §5.3: 1-char prefix must surface matching directories
+        // from the repo-wide walk (case-insensitive prefix match).
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        fs::create_dir_all(tmp.path().join("claudine")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "c");
+        assert!(
+            got.iter().any(|c| c == "claudine/"),
+            "1-char prefix must surface `claudine/` from repo root: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_two_char_prefix_surfaces_matching_repo_dir() {
+        // Spec §5.3: 2-char prefix surfaces matching directories.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        fs::create_dir_all(tmp.path().join("docs")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "do");
+        assert!(
+            got.iter().any(|c| c == "docs/"),
+            "2-char prefix must surface `docs/` from repo root: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_short_prefix_directory_match_is_starting_substring() {
+        // Spec §5.3: short prefixes use prefix matching, not fuzzy. So
+        // `do` matches `docs/` but NOT `widgets/` (no 'd' at start).
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        fs::create_dir_all(tmp.path().join("widgets")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "do");
+        assert!(
+            got.iter().any(|c| c == "docs/"),
+            "starting-substring prefix must hit `docs/`: {got:?}"
+        );
+        assert!(
+            !got.iter().any(|c| c == "widgets/"),
+            "starting-substring prefix must miss `widgets/`: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_long_prefix_directory_match_is_fuzzy() {
+        // Spec §5.3: 3+ char prefixes use fuzzy subsequence matching.
+        // `fbb` is a subsequence of `foo-bar-baz` but not a prefix.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        fs::create_dir_all(tmp.path().join("foo-bar-baz")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "fbb");
+        assert!(
+            got.iter().any(|c| c == "foo-bar-baz/"),
+            "long prefix must fuzzy-match `foo-bar-baz/` against `fbb`: {got:?}"
+        );
+    }
+
+    #[test]
+    fn compose_repo_dir_walk_skips_high_profile_roots_once() {
+        // A directory that the high-profile scope walker also surfaces
+        // (e.g. `prompts/planning/` at Long prefix) must dedup across
+        // both passes — appearing exactly once in output.
+        let tmp = TempDir::new().unwrap();
+        seed_cargo_workspace(tmp.path(), &["a/lib"]);
+        let prompts = tmp.path().join("prompts");
+        fs::create_dir_all(prompts.join("planning")).unwrap();
+
+        let ctx = ScopeContext::discover_from(tmp.path());
+        let got = run(ComposeMode::Compose, &ctx, "pla");
+        let count = got.iter().filter(|c| c.contains("planning")).count();
+        assert_eq!(
+            count, 1,
+            "`prompts/planning/` must dedup across both passes: {got:?}"
         );
     }
 

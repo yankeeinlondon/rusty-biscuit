@@ -91,6 +91,24 @@ impl ScopeSet {
             .chain(self.user_claudine.iter())
             .chain(self.extras.iter())
     }
+
+    /// Iteration order for magic-path resolution (spec §5.5).
+    ///
+    /// Repo-local scopes — including mode-specific `docs/` and skill
+    /// extras — precede `user_claudine`. This is stricter than
+    /// [`iter_scopes`](Self::iter_scopes) so project-specific prompts win
+    /// over global prompts in the `@` search priority. Used exclusively
+    /// by the magic-path pipeline; the non-magic pipeline still uses
+    /// [`iter_scopes`](Self::iter_scopes) to preserve its existing contract.
+    pub(crate) fn iter_magic_scopes(&self) -> impl Iterator<Item = &Scope> {
+        self.repo
+            .iter()
+            .chain(self.package_area.iter())
+            .chain(self.package.iter())
+            .chain(self.repo_claudine.iter())
+            .chain(self.extras.iter())
+            .chain(self.user_claudine.iter())
+    }
 }
 
 /// Context required to resolve scopes for one `__complete` invocation.
@@ -265,6 +283,30 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
     set
 }
 
+/// Single-scope resolver for the repo / CWD directory walk.
+///
+/// Separate from [`resolve_compose_scopes`] because the repo-wide
+/// directory walk added in review-1 finding #2 is independent of the
+/// high-profile file scope set (spec §5.3). The walk root is, in order
+/// of preference: the workspace root from `sniff`, the enclosing git
+/// root, and finally the cwd itself when no repository is detected.
+///
+/// Symlinks are followed by default — directory candidates are
+/// rendered by name only and dedup by canonical path on the consumer
+/// side, so following a generic project-root symlink is safe.
+pub(crate) fn resolve_repo_dir_walk_root(ctx: &ScopeContext) -> Scope {
+    let root = ctx
+        .repo_info
+        .as_ref()
+        .map(|info| info.root.clone())
+        .or_else(|| ctx.git_root.clone())
+        .unwrap_or_else(|| ctx.cwd.clone());
+    Scope {
+        path: root,
+        follow_links: true,
+    }
+}
+
 /// Collapse duplicate scope paths that can arise when cwd is at the repo
 /// root and the area/package resolve to the same directory as the repo
 /// entry.
@@ -367,6 +409,57 @@ mod tests {
                 &PathBuf::from("/repo/.claudine"),
                 &PathBuf::from("/user/.claudine"),
                 &PathBuf::from("/repo/docs"),
+            ]
+        );
+    }
+
+    #[test]
+    fn magic_scope_iter_orders_extras_before_user_claudine() {
+        // Spec §5.5: magic-path resolution gives repo-local extras
+        // (docs, skills) priority over user-global prompts.
+        let set = ScopeSet {
+            repo: Some(Scope {
+                path: PathBuf::from("/repo"),
+                follow_links: true,
+            }),
+            package_area: Some(Scope {
+                path: PathBuf::from("/area"),
+                follow_links: true,
+            }),
+            package: Some(Scope {
+                path: PathBuf::from("/pkg"),
+                follow_links: true,
+            }),
+            repo_claudine: Some(Scope {
+                path: PathBuf::from("/repo/.claudine"),
+                follow_links: true,
+            }),
+            user_claudine: Some(Scope {
+                path: PathBuf::from("/user/.claudine"),
+                follow_links: true,
+            }),
+            extras: vec![
+                Scope {
+                    path: PathBuf::from("/repo/docs"),
+                    follow_links: true,
+                },
+                Scope {
+                    path: PathBuf::from("/repo/.claude/skills"),
+                    follow_links: false,
+                },
+            ],
+        };
+        let paths: Vec<&PathBuf> = set.iter_magic_scopes().map(|s| &s.path).collect();
+        assert_eq!(
+            paths,
+            vec![
+                &PathBuf::from("/repo"),
+                &PathBuf::from("/area"),
+                &PathBuf::from("/pkg"),
+                &PathBuf::from("/repo/.claudine"),
+                &PathBuf::from("/repo/docs"),
+                &PathBuf::from("/repo/.claude/skills"),
+                &PathBuf::from("/user/.claudine"),
             ]
         );
     }

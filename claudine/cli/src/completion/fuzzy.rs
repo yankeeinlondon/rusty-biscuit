@@ -121,6 +121,24 @@ pub(crate) enum PartialLen {
     Long,
 }
 
+/// Directory matching regime for the repo-wide directory walk.
+///
+/// The composition pipeline performs a second walk over the repo / CWD
+/// root (independent of the high-profile file scopes) to surface
+/// directory candidates. The matching strategy varies by typed-prefix
+/// length: short prefixes use case-insensitive starting-substring
+/// matches so 1–2 character partials are useful; longer prefixes use
+/// fuzzy subsequence matching to align with the file-matching contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirMatchMode {
+    /// No directory matching — empty partial.
+    None,
+    /// Case-insensitive starting-substring match (1–2 character partials).
+    Prefix,
+    /// Case-insensitive fuzzy subsequence match (3+ character partials).
+    Fuzzy,
+}
+
 impl PartialLen {
     /// Classify by the character count of the active segment.
     pub(crate) fn classify(active_chars: usize) -> Self {
@@ -131,9 +149,41 @@ impl PartialLen {
         }
     }
 
-    /// Whether directories should be emitted at this prefix length.
+    /// Whether directories should be emitted at this prefix length under
+    /// the **legacy high-profile** scope set.
+    ///
+    /// Kept for the magic-path and committed-directory pipelines, which
+    /// retain the original "directories only at Long" contract. The
+    /// repo-wide directory walk added by the review-plan uses
+    /// [`Self::repo_directories_allowed`] / [`Self::dir_match_mode`]
+    /// instead so 1–2 character prefixes still surface directories.
     pub(crate) fn directories_allowed(self) -> bool {
         matches!(self, Self::Long)
+    }
+
+    /// Whether the repo-wide directory walk should emit candidates at
+    /// this prefix length.
+    ///
+    /// The walk runs at every non-empty prefix length. Differs from
+    /// [`Self::directories_allowed`] which only fires at `Long` — the
+    /// repo-wide walk is the surface that lets users drill into any
+    /// project directory after typing one or two characters.
+    pub(crate) fn repo_directories_allowed(self) -> bool {
+        matches!(self, Self::Short | Self::Long)
+    }
+
+    /// Directory match mode for the repo-wide walk.
+    ///
+    /// `Empty` partials emit no directory candidates at all; `Short`
+    /// prefixes use prefix matching so the user does not have to type
+    /// every character of a deeply-named directory; `Long` prefixes
+    /// switch to fuzzy matching to align with file-matching behavior.
+    pub(crate) fn dir_match_mode(self) -> DirMatchMode {
+        match self {
+            Self::Empty => DirMatchMode::None,
+            Self::Short => DirMatchMode::Prefix,
+            Self::Long => DirMatchMode::Fuzzy,
+        }
     }
 
     /// Whether matching should apply at all (vs. accepting every entry).
@@ -242,5 +292,22 @@ mod tests {
         assert!(!PartialLen::Empty.matching_enabled());
         assert!(PartialLen::Short.matching_enabled());
         assert!(PartialLen::Long.matching_enabled());
+    }
+
+    #[test]
+    fn partial_len_repo_directories_allowed_at_short_and_long() {
+        // The repo-wide directory walk fires at every non-empty prefix
+        // length so 1–2 character partials are useful.
+        assert!(!PartialLen::Empty.repo_directories_allowed());
+        assert!(PartialLen::Short.repo_directories_allowed());
+        assert!(PartialLen::Long.repo_directories_allowed());
+    }
+
+    #[test]
+    fn partial_len_dir_match_mode_progression() {
+        // Empty → no matching, Short → prefix, Long → fuzzy.
+        assert_eq!(PartialLen::Empty.dir_match_mode(), DirMatchMode::None);
+        assert_eq!(PartialLen::Short.dir_match_mode(), DirMatchMode::Prefix);
+        assert_eq!(PartialLen::Long.dir_match_mode(), DirMatchMode::Fuzzy);
     }
 }
