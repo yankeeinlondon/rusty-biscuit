@@ -56,8 +56,8 @@ implement-plan filter="":
         exit 1
     fi
 
-    phases_raw="$(md get "${plan}" phases 2>/dev/null || echo "")"
-    phases="$(printf '%s' "${phases_raw}" | tr -cd '0-9')"
+    echo "plan is: ${plan}"
+    phases="$(md get "${plan}" phases)"
     if [[ -z "${phases}" ]] || (( phases < 1 )); then
         echo -e "{{red}}Plan is missing a numeric 'phases' field — aborting.{{reset}}" >&2
         exit 1
@@ -65,11 +65,10 @@ implement-plan filter="":
 
     total="${phases}"
     memory="$(md get "${plan}" memory)"
-    current_raw="$(md get "${plan}" start_phase 2>/dev/null || echo "")"
-    current="$(printf '%s' "${current_raw}" | tr -cd '0-9')"
+    current="$(md get "${plan}" start_phase)"
     [[ -z "${current}" ]] && current=1
     if (( current > phases )); then
-        echo -e "{{red}}start_phase (${current}) exceeds total phases (${phases}) — aborting.{{reset}}" >&2
+        echo -e "{{red}}start_phase (${current}) exceeds total phases (${phases}) — aborting.{{reset}}"
         exit 1
     fi
 

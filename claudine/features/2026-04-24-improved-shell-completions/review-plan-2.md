@@ -10,7 +10,7 @@ packages:
   - claudine-cli
 findings_addressed:
   - finding-1: Non-magic prompt completions render wrong paths for repo .claudine, user-global, package, and package-area scopes
-  - finding-2: '@' magic lookup emits lower-priority tiers instead of first-hit-wins results
+  - finding-2: "'@' magic lookup emits lower-priority tiers instead of first-hit-wins results"
   - finding-3: Fish completions do not fall back to native file completion on non-targeted slots
   - finding-4: Plain git checkouts are only partially handled because committed paths and magic rendering ignore git_root
 ---
