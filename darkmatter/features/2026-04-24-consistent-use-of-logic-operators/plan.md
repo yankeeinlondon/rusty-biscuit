@@ -34,6 +34,15 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/darkmatter/SKILL.md
   - .claude/skills/darkmatter/compose.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - darkmatter/docs/inline/interpolation.md
+  - darkmatter/docs/inline/fm-interpolation.md
+  - darkmatter/docs/topics/boolean-conditional-logic.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
 packages:
   - darkmatter
 ---
