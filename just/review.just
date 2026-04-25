@@ -18,7 +18,6 @@ cyan := '\033[36m'
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
 review feat="" agent="" spec="" design="":
-review spec="" design="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
 
