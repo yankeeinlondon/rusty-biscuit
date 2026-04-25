@@ -42,6 +42,7 @@ For deeper topic references in the repo (not duplicated here), see:
 - [Protect Service](../../../claudine/docs/topics/protect-service.md) — standalone deny catalog, scan surfaces, rule groups, merge semantics, dispatch integration
 - [Traces and Logging](../../../claudine/docs/topics/traces-and-logging.md), [Log Reporting](../../../claudine/docs/topics/log-reporting.md)
 - [CLI Pre-Parsing and Clap Parsing](../../../claudine/docs/topics/cli-pre-parsing.md) — pre-clap argv normalization pipeline, strict vs. lenient clap passes, why the pre-parser exists, and best practices for maintaining the layer. Rule-by-rule reference: [argv-normalization.md](../../../claudine/docs/topics/argv-normalization.md).
+- [Shell Completions](../../../claudine/docs/topics/shell-completions.md) — dynamic completion engine, root-menu rules, per-mode composition pipelines (`compose` / `inline-compose` / `sequence`), magic `@` resolution, setter-value file references, and performance strategy
 
 
 ## Claudine CLI
