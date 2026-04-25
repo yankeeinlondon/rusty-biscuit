@@ -17,28 +17,29 @@ pub use capabilities::CapabilitySet;
 pub use dispatch::{CompatibilityMode, DeliveryOptions, Dispatch, ProviderOverrides};
 #[cfg(feature = "desktop")]
 pub use dispatch::{
-    DesktopOverrides, NotificationAction, NotificationIcon, NotificationProgress, NotificationUrgency,
+    DesktopOverrides, NotificationAction, NotificationIcon, NotificationProgress,
+    NotificationUrgency,
 };
 pub use error::MessengerError;
 pub use message::{Location, Message, MessageBody};
 #[doc(hidden)]
 pub use prepared::PreparedMessage;
+#[cfg(feature = "apns")]
+pub use provider::apns::{ApnsConfig, ApnsProvider};
 #[cfg(feature = "desktop")]
 pub use provider::desktop::{
     DesktopConfig, DesktopNotificationProvider, DesktopNotificationReceipt,
     DesktopNotificationRequest, LinuxDesktopConfig, MacOsDesktopConfig, MacOsNotificationStrategy,
     WindowsDesktopConfig,
 };
-#[cfg(feature = "apns")]
-pub use provider::apns::{ApnsConfig, ApnsProvider};
 #[cfg(feature = "fcm")]
 pub use provider::fcm::{FcmConfig, FcmProvider};
 pub use provider::{Messenger, Provider, SendPlan};
 pub use receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
-#[cfg(feature = "desktop")]
-pub use target::DesktopTarget;
 #[cfg(feature = "apns")]
 pub use target::ApnsTarget;
+#[cfg(feature = "desktop")]
+pub use target::DesktopTarget;
 #[cfg(feature = "fcm")]
 pub use target::FcmTarget;
 pub use target::Target;

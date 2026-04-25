@@ -47,16 +47,13 @@ impl ApnsProvider {
     }
 
     fn base_url(&self) -> String {
-        self.config
-            .api_base_url
-            .clone()
-            .unwrap_or_else(|| {
-                if self.config.use_sandbox {
-                    "https://api.sandbox.push.apple.com".into()
-                } else {
-                    "https://api.push.apple.com".into()
-                }
-            })
+        self.config.api_base_url.clone().unwrap_or_else(|| {
+            if self.config.use_sandbox {
+                "https://api.sandbox.push.apple.com".into()
+            } else {
+                "https://api.push.apple.com".into()
+            }
+        })
     }
 
     fn generate_jwt(&self) -> Result<String, MessengerError> {
@@ -74,18 +71,14 @@ impl ApnsProvider {
         header.kid = Some(self.config.key_id.clone());
 
         let key = EncodingKey::from_ec_pem(self.config.private_key.expose_secret().as_bytes())
-            .map_err(|e| {
-                MessengerError::Authentication {
-                    provider: ProviderKind::Apns,
-                    message: format!("invalid APNS private key: {e}"),
-                }
+            .map_err(|e| MessengerError::Authentication {
+                provider: ProviderKind::Apns,
+                message: format!("invalid APNS private key: {e}"),
             })?;
 
-        jsonwebtoken::encode(&header, &claims, &key).map_err(|e| {
-            MessengerError::Authentication {
-                provider: ProviderKind::Apns,
-                message: format!("failed to sign APNS JWT: {e}"),
-            }
+        jsonwebtoken::encode(&header, &claims, &key).map_err(|e| MessengerError::Authentication {
+            provider: ProviderKind::Apns,
+            message: format!("failed to sign APNS JWT: {e}"),
         })
     }
 }
@@ -171,10 +164,7 @@ impl super::Provider for ApnsProvider {
         };
 
         let alert = if title.is_some() || body.is_some() {
-            Some(ApnsAlert {
-                title,
-                body,
-            })
+            Some(ApnsAlert { title, body })
         } else {
             None
         };
@@ -183,7 +173,11 @@ impl super::Provider for ApnsProvider {
             aps: ApnsAps {
                 alert,
                 badge: None,
-                sound: if dispatch.options.silent { None } else { Some("default") },
+                sound: if dispatch.options.silent {
+                    None
+                } else {
+                    Some("default")
+                },
             },
         };
 

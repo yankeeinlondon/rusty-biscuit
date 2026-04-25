@@ -377,12 +377,8 @@ impl HorizontalRule {
             RuleWeight::Thick => 3,
         };
         let cell = term.cell_size();
-        let cell_width = cell
-            .map(|c| c.width.max(1))
-            .unwrap_or(DEFAULT_CELL_WIDTH);
-        let cell_height = cell
-            .map(|c| c.height.max(1))
-            .unwrap_or(DEFAULT_CELL_HEIGHT);
+        let cell_width = cell.map(|c| c.width.max(1)).unwrap_or(DEFAULT_CELL_WIDTH);
+        let cell_height = cell.map(|c| c.height.max(1)).unwrap_or(DEFAULT_CELL_HEIGHT);
         let pixel_width = (rule_width as u32).saturating_mul(cell_width).max(1);
         let pixel_height = height_cells * cell_height;
 
@@ -1215,15 +1211,36 @@ mod tests {
     fn test_image_tier_unavailable_falls_back_to_unicode() {
         let _guard = ScopedLcAll::force_utf8();
         let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("red");
-        let term = Terminal::builder()
-            .width(20)
-            .is_tty(true)
-            .image_support(ImageSupport::None)
-            .build();
+        let term = text_terminal_with_width(20);
 
         let result = hr.render(&term);
         assert!(!result.contains("\x1b_G"), "{result:?}");
-        assert!(result.contains('╌') || result.contains('-'), "{result:?}");
+        assert!(result.contains('╌'), "{result:?}");
+    }
+
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn test_text_terminal_helper_disables_image_tier() {
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Waves)
+            .alignment(RuleAlignment::Centered)
+            .width("50%");
+        let term = text_terminal();
+
+        let result = hr.render(&term);
+        assert!(
+            !result.contains("\x1b_G"),
+            "text helper must disable Kitty image output: {result:?}"
+        );
+        assert!(
+            !result.contains("\x1b]1337;File="),
+            "text helper must disable iTerm image output: {result:?}"
+        );
+        assert!(
+            result.contains('≋'),
+            "text helper should force the Unicode fallback baseline: {result:?}"
+        );
     }
 
     #[test]

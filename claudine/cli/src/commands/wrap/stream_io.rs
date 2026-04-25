@@ -14,6 +14,12 @@
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
+/// Shared test-only buffer of `(is_stdout, line)` tuples captured by
+/// `StreamOutput`. Wrapped in `Arc<Mutex<…>>` so the writer and the test
+/// observer can share a single recording surface across threads.
+#[cfg(test)]
+pub(crate) type TestRecorder = Arc<Mutex<Vec<(bool, String)>>>;
+
 pub(crate) struct StreamOutput {
     inner: Mutex<StreamOutputInner>,
     /// Test-only recording buffer. When `Some`, `emit_stdout_line` and
@@ -22,7 +28,7 @@ pub(crate) struct StreamOutput {
     /// for higher-level writers (e.g. `SectionStream`) observe emitted
     /// lines without touching the process's real streams.
     #[cfg(test)]
-    test_recorder: Option<Arc<Mutex<Vec<(bool, String)>>>>,
+    test_recorder: Option<TestRecorder>,
 }
 
 struct StreamOutputInner {
@@ -46,7 +52,7 @@ impl StreamOutput {
     /// Construct a test-only coordinator that captures emissions into the
     /// provided buffer instead of writing to real stdout/stderr.
     #[cfg(test)]
-    pub(crate) fn test_recorder(buf: Arc<Mutex<Vec<(bool, String)>>>) -> Arc<Self> {
+    pub(crate) fn test_recorder(buf: TestRecorder) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(StreamOutputInner {
                 last_stdout_newline: true,

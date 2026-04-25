@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn round_trip_json() {
         let event = AgenticEvent::BeforeTool;
-        let json = serde_json::to_value(&event).unwrap();
+        let json = serde_json::to_value(event).unwrap();
         assert_eq!(json, serde_json::json!("before_tool"));
         let back: AgenticEvent = serde_json::from_value(json).unwrap();
         assert_eq!(back, AgenticEvent::BeforeTool);
@@ -352,7 +352,7 @@ mod tests {
             (AgenticEvent::Notification, "notification"),
         ];
         for (variant, expected) in cases {
-            let json = serde_json::to_value(&variant).unwrap();
+            let json = serde_json::to_value(variant).unwrap();
             assert_eq!(json.as_str().unwrap(), expected, "Failed for {variant:?}");
         }
     }
@@ -409,7 +409,7 @@ mod tests {
             let abbr = event.abbrev();
             let char_count = abbr.chars().count();
             assert!(
-                char_count >= 1 && char_count <= 6,
+                (1..=6).contains(&char_count),
                 "Event {:?} abbreviation '{}' should be 1-6 chars (got {})",
                 event,
                 abbr,

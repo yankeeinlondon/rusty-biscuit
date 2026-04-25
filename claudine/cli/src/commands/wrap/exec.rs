@@ -2286,7 +2286,7 @@ mod tests {
             "- Hash: `f525870d`\n- Package: `claudine`\n- Operation: `feat`\n",
         );
         let flushed =
-            biscuit_terminal::prelude::strip_escape_codes(&String::from_utf8(out).expect("utf8"));
+            biscuit_terminal::prelude::strip_escape_codes(String::from_utf8(out).expect("utf8"));
 
         assert!(
             !flushed.contains("\n\n"),

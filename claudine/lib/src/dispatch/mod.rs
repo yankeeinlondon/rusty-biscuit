@@ -1039,10 +1039,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect should block rm -rf / even without a BeforeTool binding"
         );
     }
@@ -1069,10 +1066,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect_pre should block rm -rf /"
         );
         assert!(
@@ -1113,10 +1107,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect_pre should block dangerous MCP response on AfterTool"
         );
         assert!(
@@ -1305,10 +1296,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect should block rm -rf / in canonical dispatch"
         );
         assert!(

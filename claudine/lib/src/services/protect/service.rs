@@ -318,11 +318,13 @@ mod tests {
 
     #[test]
     fn custom_pattern_blocks_command() {
-        let mut config = ProtectConfig::default();
-        config.custom_patterns = vec![CustomPattern {
-            name: "no_terraform_destroy".to_string(),
-            pattern: r"terraform\s+destroy".to_string(),
-        }];
+        let config = ProtectConfig {
+            custom_patterns: vec![CustomPattern {
+                name: "no_terraform_destroy".to_string(),
+                pattern: r"terraform\s+destroy".to_string(),
+            }],
+            ..Default::default()
+        };
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand {
             command: "terraform destroy -auto-approve",

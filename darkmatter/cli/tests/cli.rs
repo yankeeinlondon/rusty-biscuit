@@ -1534,6 +1534,28 @@ fn test_get_no_frontmatter_returns_empty_string() {
         .stdout(predicate::str::contains("\"\""));
 }
 
+/// Regression: malformed frontmatter (a quoted scalar followed by trailing
+/// unquoted text) used to be silently treated as "no frontmatter", so
+/// `md get phases` returned `""` even when the file clearly defined `phases`.
+/// The fix surfaces a `MarkdownError::FrontmatterParse` with the offending
+/// YAML line in the rendered StatusBlock.
+#[test]
+fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
+
+    md_cmd()
+        .args(["get", "-", "phases"])
+        .write_stdin(yaml)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("MarkdownError"))
+        .stderr(predicate::str::contains("frontmatter parse failed"))
+        .stderr(predicate::str::contains("Position:"))
+        .stderr(predicate::str::contains(
+            "'@' magic lookup emits results",
+        ));
+}
+
 #[test]
 fn test_get_tab_indented_frontmatter_property_is_populated() {
     md_cmd()
@@ -2074,6 +2096,40 @@ fn test_compose_allow_shell_timeout_emits_warning() {
         .stdout(predicate::str::contains("After"))
         .stderr(predicate::str::contains("timed out"))
         .stderr(predicate::str::contains("replaced with an empty"));
+}
+
+#[test]
+fn test_compose_shell_reports_discovered_commands_without_executing() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let root_path = temp_dir.path().join("root.md");
+    let child_path = temp_dir.path().join("child.md");
+
+    std::fs::write(
+        &root_path,
+        "---\nroot_cmd: \"$(echo root-frontmatter)\"\n---\n# Root\n::shell echo root-body\n::file ./child.md\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &child_path,
+        "---\nchild_cmd: \"$(echo child-frontmatter)\"\n---\n# Child\n::shell echo child-body\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&root_path)
+        .arg("--shell")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Shell commands discovered: 4"))
+        .stdout(predicate::str::contains("echo root-frontmatter"))
+        .stdout(predicate::str::contains("frontmatter.root_cmd"))
+        .stdout(predicate::str::contains("echo root-body"))
+        .stdout(predicate::str::contains("echo child-frontmatter"))
+        .stdout(predicate::str::contains("frontmatter.child_cmd"))
+        .stdout(predicate::str::contains("echo child-body"))
+        .stdout(predicate::str::contains("root-frontmatter\n").not())
+        .stdout(predicate::str::contains("child-frontmatter\n").not());
 }
 
 // =============================================================================

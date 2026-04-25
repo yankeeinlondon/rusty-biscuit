@@ -121,8 +121,10 @@ async fn dispatch_empty_actions_returns_non_blocking_ack() {
 /// Protect decisions are absent for all events.
 #[tokio::test]
 async fn dispatch_with_default_config_returns_no_protect_decisions() {
-    let mut config = ClaudineConfig::default();
-    config.logging = false;
+    let config = ClaudineConfig {
+        logging: false,
+        ..Default::default()
+    };
     let runtime = compile_canonical_runtime(config, None).unwrap();
 
     for event in [
@@ -182,10 +184,7 @@ async fn dispatch_protect_post_evaluates_without_binding() {
     // The important property being validated is that the protect scan ran at
     // all — meaning the pipeline did NOT return early due to the absent binding.
     assert!(
-        outcome
-            .protect_pre
-            .as_ref()
-            .map_or(false, |d| d.is_blocked()),
+        outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
         "protect should evaluate and block dangerous MCP response on AfterTool even without an action binding"
     );
     assert!(

@@ -656,28 +656,30 @@ mod tests {
     fn merge_repo_override_applies_active_messenger() {
         use crate::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
 
-        let mut user = ClaudineConfig::default();
-        user.messenger = Some(ClaudineMessengerConfig {
-            active_config: Some("personal".to_string()),
-            configurations: {
-                let mut m = std::collections::HashMap::new();
-                m.insert(
-                    "personal".to_string(),
-                    MessengerProviderConfig::Discord {
-                        channel_id: "123".to_string(),
-                        bot_token_env: "TOKEN".to_string(),
-                    },
-                );
-                m.insert(
-                    "work".to_string(),
-                    MessengerProviderConfig::Slack {
-                        channel_id: "C456".to_string(),
-                        bot_token_env: "SLACK_URL".to_string(),
-                    },
-                );
-                m
-            },
-        });
+        let mut user = ClaudineConfig {
+            messenger: Some(ClaudineMessengerConfig {
+                active_config: Some("personal".to_string()),
+                configurations: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert(
+                        "personal".to_string(),
+                        MessengerProviderConfig::Discord {
+                            channel_id: "123".to_string(),
+                            bot_token_env: "TOKEN".to_string(),
+                        },
+                    );
+                    m.insert(
+                        "work".to_string(),
+                        MessengerProviderConfig::Slack {
+                            channel_id: "C456".to_string(),
+                            bot_token_env: "SLACK_URL".to_string(),
+                        },
+                    );
+                    m
+                },
+            }),
+            ..Default::default()
+        };
 
         let repo = RepoOverrideConfig {
             active_messenger: Some(Some("work".to_string())),
@@ -696,11 +698,13 @@ mod tests {
     fn merge_repo_override_disables_messenger_with_null() {
         use crate::config::claudine_config::ClaudineMessengerConfig;
 
-        let mut user = ClaudineConfig::default();
-        user.messenger = Some(ClaudineMessengerConfig {
-            active_config: Some("personal".to_string()),
-            configurations: std::collections::HashMap::new(),
-        });
+        let mut user = ClaudineConfig {
+            messenger: Some(ClaudineMessengerConfig {
+                active_config: Some("personal".to_string()),
+                configurations: std::collections::HashMap::new(),
+            }),
+            ..Default::default()
+        };
 
         let repo = RepoOverrideConfig {
             active_messenger: Some(None),

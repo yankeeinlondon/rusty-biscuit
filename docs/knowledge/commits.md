@@ -14,6 +14,7 @@
 
 - Use `git status --short` first to see what is staged, unstaged, untracked, or renamed.
 - Use `git diff --staged --name-status` to confirm the exact staged file set before committing.
+- Use `git diff --staged --stat` to see the change size for each file before organizing groups. When diff output is truncated, it is easy to miss that certain files have actual changes.
 - Review staged source changes with `git diff --staged` before committing. Git will happily commit unresolved conflict markers if they are present in the staged content.
 - For new files, `git diff --staged` shows the file as a diff against `/dev/null`. That is normal; confirm the staging state with `git status --short`.
 - A file may appear in the staged list but have no actual content changes (e.g., auto-formatting that matched existing formatting). If `git diff --staged` shows no diff for a file, it has no actual changes and committing it is harmless but unnecessary.

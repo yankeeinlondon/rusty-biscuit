@@ -1327,7 +1327,7 @@ mod tests {
         let captured = events.lock().unwrap().clone();
         let ks = kinds(&captured);
         assert!(
-            !ks.iter().any(|k| *k == "provider_extension"),
+            !ks.contains(&"provider_extension"),
             "agent_message must not leak to ProviderExtension; got {ks:?}"
         );
     }

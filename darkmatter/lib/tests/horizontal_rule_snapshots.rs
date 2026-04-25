@@ -2,9 +2,17 @@
 mod tests {
     use darkmatter::markdown::{
         Markdown,
-        output::{TerminalOptions, as_html, for_terminal},
+        output::{ColorDepth, TerminalImageMode, TerminalOptions, as_html, for_terminal},
     };
     use insta::assert_snapshot;
+
+    fn terminal_snapshot_options() -> TerminalOptions {
+        let mut options = TerminalOptions::default();
+        options.image_mode = TerminalImageMode::Never;
+        options.max_width = Some(80);
+        options.color_depth = Some(ColorDepth::TrueColor);
+        options
+    }
 
     #[test]
     fn test_snapshot_markdown_to_terminal() {
@@ -34,7 +42,7 @@ mod tests {
 
         for (name, markdown) in test_cases {
             let md: Markdown = markdown.into();
-            let result = for_terminal(&md, TerminalOptions::default()).unwrap();
+            let result = for_terminal(&md, terminal_snapshot_options()).unwrap();
             assert_snapshot!(format!("terminal_{}", name), result);
         }
     }
@@ -70,7 +78,7 @@ mod tests {
         let markdown = "# Horizontal Rule Examples\n\n## Basic Styles\n\n--- { style: dashes }\n\n*** { style: dots }\n\n___ { style: waves }\n\n## Alignment Options\n\n--- { style: waves, alignment: centered }\n\n*** { style: dots, alignment: left }\n\n___ { style: dashes, alignment: right }\n\n## Weight Variations\n\n--- { style: waves, weight: thin }\n\n*** { style: dots, weight: medium }\n\n___ { style: dashes, weight: thick }\n\n## Custom Attributes\n\n--- { style: waves, width: \"60%\", color: \"#ff0000\" }\n\n*** { style: dots, alignment: centered, weight: thick, width: \"80%\", color: \"green\" }\n";
 
         let md: Markdown = markdown.into();
-        let terminal_result = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let terminal_result = for_terminal(&md, terminal_snapshot_options()).unwrap();
         let html_result = as_html(&md, Default::default()).unwrap();
 
         assert_snapshot!("terminal_complex_document", terminal_result);

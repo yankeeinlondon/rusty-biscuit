@@ -808,7 +808,7 @@ mod tests {
             .map(|e| e.kind_str())
             .collect();
         assert!(
-            kinds.iter().any(|k| *k == "output_text"),
+            kinds.contains(&"output_text"),
             "non-delta message must emit output_text immediately; got {kinds:?}"
         );
     }
