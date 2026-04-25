@@ -153,8 +153,8 @@ over global prompts because the user's intent on `<TAB>` is nearly
 always "the thing in my current project." For inline-compose and
 sequence the repo-local extras (`docs/`, skill peers) similarly
 outrank `~/.claudine/prompts/` so a project's design docs and skill
-files surface ahead of any user-global prompt that happens to share a
-name. The default (non-magic) pipeline preserves its original ordering
+files shadow any user-global prompt that happens to share a name. The
+default (non-magic) pipeline preserves its original ordering
 to avoid disrupting existing committed-directory behavior.
 
 **Why a single scope resolution per invocation.** `sniff::detect_repo_structure`
@@ -209,6 +209,10 @@ A partial beginning with `@` is a magic path. It walks the scope set
 in the **magic-path priority order** (see "Scopes" above) and emits
 candidates as paths relative to the repo root (or cwd when outside a
 repo). The `@` sigil is **stripped** on selection.
+
+The first scope that produces one or more matching candidates wins.
+Lower-priority scopes are not emitted for that query, though multiple
+matching files inside the winning scope are preserved.
 
 Two magic-path forms are supported:
 
@@ -267,15 +271,15 @@ Magic resolution searches scopes in this order:
 6. User Claudine scope (`~/.claudine/prompts/`)
 
 The user-global scope is **last**. A `docs/plan.md` in the project
-will outrank a `~/.claudine/prompts/plan.md` of the same basename in
-the candidate list.
+will suppress a `~/.claudine/prompts/plan.md` of the same basename for
+that `@plan` query.
 
 **Why repo-local extras win over user-global.** Project-specific
 prompts and design docs should beat user-global prompts because the
 user's intent on `<TAB>` is nearly always "the thing in my current
 project." If the user wants the global file they can either narrow
-their query enough that the local match drops out or explicitly type
-the user-scope path.
+their query enough that the local match drops out or type the
+user-scope path directly.
 
 **Why strip the sigil.** The runtime composition pipeline treats `@` as
 a marker for "resolve from the scope tree." Once completion has resolved
@@ -672,8 +676,7 @@ $ claudine inline-compose @spec<TAB>
 #   ~/.claudine/prompts/plan.md   ← has `prompt:` frontmatter
 
 $ claudine inline-compose @plan<TAB>
-→ docs/plan.md                          # repo-local wins
-→ /home/user/.claudine/prompts/plan.md  # user-global second
+→ docs/plan.md                          # repo-local wins; global is suppressed
 ```
 
 ### Sequence against an external YAML
