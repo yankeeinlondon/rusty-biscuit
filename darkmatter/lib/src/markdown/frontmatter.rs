@@ -216,6 +216,10 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     Ok((Frontmatter::from_map(frontmatter_map), remaining_content))
 }
 
+// UTF-8-boundary audit (2026-04-24): the byte-indexed scanners in this file
+// were the only `markdown/*` sites that copied `yaml[pos..pos + 1]` into a
+// String. Sibling scanners under `markdown/` walk `as_bytes()` only for
+// ASCII sentinel checks and never slice the source by an arbitrary `pos`.
 /// Attempts to parse YAML with progressive fallback strategies.
 ///
 /// 1. Direct parse
@@ -284,6 +288,10 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
 /// parentheses regardless of inner quoting. Backtick substitutions and process
 /// substitutions (`<(...)`, `>(...)`) are not protected — add them when a
 /// real case emerges.
+///
+/// Non-matched content advances by full UTF-8 scalar boundaries (via
+/// `yaml[pos..].chars().next()` + `char.len_utf8()`) so `pos` never lands
+/// inside a multi-byte scalar.
 fn protect_shell_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
     let mut result = String::with_capacity(yaml.len());
     let mut replacements = Vec::new();
@@ -324,9 +332,14 @@ fn protect_shell_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
             let placeholder = format!("__DM_SHELL_{}__", replacements.len());
             replacements.push((placeholder.clone(), original.to_string()));
             result.push_str(&placeholder);
+        } else if let Some(ch) = yaml[pos..].chars().next() {
+            // Non-matching byte: advance by a full UTF-8 scalar so `pos`
+            // always lands on a char boundary. Slicing `yaml[pos..pos + 1]`
+            // here would panic when `pos` falls inside a multi-byte scalar.
+            result.push(ch);
+            pos += ch.len_utf8();
         } else {
-            result.push(yaml[pos..pos + 1].chars().next().unwrap_or('?'));
-            pos += 1;
+            break;
         }
     }
 
@@ -336,6 +349,10 @@ fn protect_shell_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
 /// Replaces `{{ }}` expression bodies with safe placeholders.
 ///
 /// Returns the modified string and a map of placeholder → original expression.
+///
+/// Non-matched content advances by full UTF-8 scalar boundaries (via
+/// `yaml[pos..].chars().next()` + `char.len_utf8()`) so `pos` never lands
+/// inside a multi-byte scalar.
 fn protect_interpolation_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
     let mut result = String::with_capacity(yaml.len());
     let mut replacements = Vec::new();
@@ -367,9 +384,14 @@ fn protect_interpolation_expressions(yaml: &str) -> (String, Vec<(String, String
             let placeholder = format!("__DM_EXPR_{}__", replacements.len());
             replacements.push((placeholder.clone(), original.to_string()));
             result.push_str(&placeholder);
+        } else if let Some(ch) = yaml[pos..].chars().next() {
+            // Non-matching byte: advance by a full UTF-8 scalar so `pos`
+            // always lands on a char boundary. Slicing `yaml[pos..pos + 1]`
+            // here would panic when `pos` falls inside a multi-byte scalar.
+            result.push(ch);
+            pos += ch.len_utf8();
         } else {
-            result.push(yaml[pos..pos + 1].chars().next().unwrap_or('?'));
-            pos += 1;
+            break;
         }
     }
 
@@ -654,6 +676,29 @@ This is content."#;
     }
 
     #[test]
+    fn test_protect_interpolation_expressions_unicode_outside_sentinel_preserved() {
+        // Pre-fix: this panics with "byte index N is not a char boundary"
+        // because the non-matching branch sliced `yaml[pos..pos + 1]` while
+        // `pos` was inside the multi-byte scalar for the emoji.
+        let yaml = "key: \"\u{1F5A5}\u{FE0F} prefix {{var}} suffix\"";
+        let (protected, replacements) = protect_interpolation_expressions(yaml);
+
+        // Sentinel still detected and replaced.
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].1, "{{var}}");
+        assert!(protected.contains("__DM_EXPR_0__"));
+
+        // Non-ASCII characters outside the sentinel are preserved byte-identically.
+        assert!(protected.contains('\u{1F5A5}'));
+        assert!(protected.contains('\u{FE0F}'));
+        assert!(protected.contains("prefix"));
+        assert!(protected.contains("suffix"));
+
+        // No lossy `'?'` substitution survives in the output.
+        assert!(!protected.contains('?'));
+    }
+
+    #[test]
     fn test_restore_expressions_in_value() {
         let replacements = vec![
             ("__DM_EXPR_0__".to_string(), "{{foo}}".to_string()),
@@ -757,6 +802,29 @@ b: "$(echo b)""#;
     }
 
     #[test]
+    fn test_protect_shell_expressions_unicode_outside_sentinel_preserved() {
+        // Pre-fix: this panics with "byte index N is not a char boundary"
+        // because the non-matching branch sliced `yaml[pos..pos + 1]` while
+        // `pos` was inside the multi-byte scalar for the emoji.
+        let yaml = "key: \"\u{1F5A5}\u{FE0F} prefix $(echo hi) suffix\"";
+        let (protected, replacements) = protect_shell_expressions(yaml);
+
+        // Sentinel still detected and replaced.
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].1, "$(echo hi)");
+        assert!(protected.contains("__DM_SHELL_0__"));
+
+        // Non-ASCII characters outside the sentinel are preserved byte-identically.
+        assert!(protected.contains('\u{1F5A5}'));
+        assert!(protected.contains('\u{FE0F}'));
+        assert!(protected.contains("prefix"));
+        assert!(protected.contains("suffix"));
+
+        // No lossy `'?'` substitution survives in the output.
+        assert!(!protected.contains('?'));
+    }
+
+    #[test]
     fn test_markdown_from_str_with_shell_in_frontmatter_strips_frontmatter() {
         use crate::markdown::Markdown;
 
@@ -781,5 +849,28 @@ b: "$(echo b)""#;
             md.content()
         );
         assert!(md.content().starts_with("# Body"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_emoji_value_and_unquoted_interpolation() {
+        // Reproduction from the spec: an unquoted `{{...}}` value forces
+        // parse_yaml_with_fallbacks() into the byte-scanning fallback, and
+        // the multi-byte emoji in a quoted value used to panic the scanner.
+        // Both must round-trip verbatim through the fallback path.
+        let content = concat!(
+            "---\n",
+            "area: {{ctx.current_package_area}}\n",
+            "success_message: \"\u{1F5A5}\u{FE0F} Build succeeded\"\n",
+            "---\n",
+            "# Body\n",
+        );
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+        let area: Option<String> = fm.get("area").unwrap();
+        let message: Option<String> = fm.get("success_message").unwrap();
+
+        assert_eq!(area, Some("{{ctx.current_package_area}}".to_string()));
+        assert_eq!(message, Some("\u{1F5A5}\u{FE0F} Build succeeded".to_string()));
+        assert!(remaining.starts_with("# Body"));
     }
 }
