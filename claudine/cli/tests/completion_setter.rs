@@ -39,8 +39,7 @@ fn seed_cargo_workspace(root: &Path, members: &[&str]) {
         .map(|m| format!("    \"{m}\""))
         .collect::<Vec<_>>()
         .join(",\n");
-    let root_manifest =
-        format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
+    let root_manifest = format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
     fs::write(root.join("Cargo.toml"), root_manifest).unwrap();
     for member in members {
         let member_dir = root.join(member);
@@ -48,9 +47,7 @@ fn seed_cargo_workspace(root: &Path, members: &[&str]) {
         let name = member.replace('/', "-");
         fs::write(
             member_dir.join("Cargo.toml"),
-            format!(
-                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-            ),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
         )
         .unwrap();
         fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();

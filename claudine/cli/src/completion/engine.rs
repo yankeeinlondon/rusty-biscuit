@@ -630,19 +630,13 @@ mod tests {
     #[test]
     fn classifier_other_when_cursor_crosses_double_dash_separator() {
         let a = argv(&["claudine", "claude", "--", "--model"]);
-        assert_eq!(
-            classify_completion_target(&a, 3),
-            CompletionTarget::Other,
-        );
+        assert_eq!(classify_completion_target(&a, 3), CompletionTarget::Other,);
     }
 
     #[test]
     fn classifier_other_when_current_index_is_zero() {
         let a = argv(&["claudine", ""]);
-        assert_eq!(
-            classify_completion_target(&a, 0),
-            CompletionTarget::Other,
-        );
+        assert_eq!(classify_completion_target(&a, 0), CompletionTarget::Other,);
     }
 
     #[test]
@@ -651,10 +645,7 @@ mod tests {
         // `--debug`, not on the root subcommand slot. We treat this as
         // Other so the (currently no-op) value-slot completer handles it.
         let a = argv(&["claudine", "--debug", ""]);
-        assert_eq!(
-            classify_completion_target(&a, 2),
-            CompletionTarget::Other,
-        );
+        assert_eq!(classify_completion_target(&a, 2), CompletionTarget::Other,);
     }
 
     #[test]

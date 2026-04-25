@@ -42,9 +42,34 @@ pub(crate) enum ComposeMode {
     Sequence,
 }
 
-/// A single scope root paired with its symlink policy.
+/// Semantic category for a completion scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScopeKind {
+    /// `<repo>/prompts/`.
+    RepoPrompts,
+    /// `<package-area>/prompts/`.
+    PackageAreaPrompts,
+    /// `<package>/prompts/`.
+    PackagePrompts,
+    /// `<repo>/.claudine/prompts/`.
+    RepoClaudinePrompts,
+    /// `~/.claudine/prompts/`.
+    UserClaudinePrompts,
+    /// Repo-local document-style scope such as `<repo>/docs/`.
+    RepoDocs,
+    /// Repo-local agent skill scope.
+    AgentSkills,
+    /// Repo-wide directory walk scope.
+    RepoDirWalk,
+    /// Committed directory selected by the user.
+    CommittedDir,
+}
+
+/// A single scope root paired with explicit rendering semantics and symlink policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Scope {
+    /// Semantic category used by renderers.
+    pub(crate) kind: ScopeKind,
     /// Directory root the walker will descend into.
     pub(crate) path: PathBuf,
     /// Whether symlinks encountered while walking this scope are followed.
@@ -52,6 +77,14 @@ pub(crate) struct Scope {
     /// Set to `false` for agent-skill peer directories so Claudine-linked
     /// skills do not surface multiple times (one per provider CLI dir).
     pub(crate) follow_links: bool,
+}
+
+/// Return the repo root that completion should treat as authoritative.
+pub(crate) fn effective_repo_root(ctx: &ScopeContext) -> Option<&Path> {
+    ctx.repo_info
+        .as_ref()
+        .map(|info| info.root.as_path())
+        .or(ctx.git_root.as_deref())
 }
 
 /// Ordered scope set for a composition command.
@@ -218,18 +251,14 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
     // from `sniff` when it exists, otherwise the enclosing git root. Spec
     // §5.8 says repo-scoped paths should still apply to plain git
     // checkouts; the fallback keeps completion useful there.
-    let effective_repo_root: Option<&Path> = ctx
-        .repo_info
-        .as_ref()
-        .map(|info| info.root.as_path())
-        .or(ctx.git_root.as_deref());
-
-    if let Some(root) = effective_repo_root {
+    if let Some(root) = effective_repo_root(ctx) {
         set.repo = Some(Scope {
+            kind: ScopeKind::RepoPrompts,
             path: root.join(PROMPTS_DIR),
             follow_links: true,
         });
         set.repo_claudine = Some(Scope {
+            kind: ScopeKind::RepoClaudinePrompts,
             path: root.join(".claudine").join(PROMPTS_DIR),
             follow_links: true,
         });
@@ -240,6 +269,7 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
             && area != "root"
         {
             set.package_area = Some(Scope {
+                kind: ScopeKind::PackageAreaPrompts,
                 path: info.root.join(area).join(PROMPTS_DIR),
                 follow_links: true,
             });
@@ -247,6 +277,7 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
 
         if let Some(pkg) = info.package_for_dir(&ctx.cwd) {
             set.package = Some(Scope {
+                kind: ScopeKind::PackagePrompts,
                 path: pkg.path.join(PROMPTS_DIR),
                 follow_links: true,
             });
@@ -255,6 +286,7 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
 
     if let Some(home) = &ctx.home {
         set.user_claudine = Some(Scope {
+            kind: ScopeKind::UserClaudinePrompts,
             path: home.join(".claudine").join(PROMPTS_DIR),
             follow_links: true,
         });
@@ -263,14 +295,16 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
     match mode {
         ComposeMode::Compose => {}
         ComposeMode::InlineCompose | ComposeMode::Sequence => {
-            if let Some(root) = effective_repo_root {
+            if let Some(root) = effective_repo_root(ctx) {
                 set.extras.push(Scope {
+                    kind: ScopeKind::RepoDocs,
                     path: root.join("docs"),
                     follow_links: true,
                 });
 
                 for peer in SKILL_PEER_DIRS {
                     set.extras.push(Scope {
+                        kind: ScopeKind::AgentSkills,
                         path: root.join(peer).join("skills"),
                         follow_links: false,
                     });
@@ -302,6 +336,7 @@ pub(crate) fn resolve_repo_dir_walk_root(ctx: &ScopeContext) -> Scope {
         .or_else(|| ctx.git_root.clone())
         .unwrap_or_else(|| ctx.cwd.clone());
     Scope {
+        kind: ScopeKind::RepoDirWalk,
         path: root,
         follow_links: true,
     }
@@ -347,9 +382,8 @@ mod tests {
             .map(|m| format!("    \"{m}\""))
             .collect::<Vec<_>>()
             .join(",\n");
-        let root_manifest = format!(
-            "[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n"
-        );
+        let root_manifest =
+            format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
         fs::write(root.join("Cargo.toml"), root_manifest).unwrap();
 
         for member in members {
@@ -358,9 +392,7 @@ mod tests {
             let name = member.replace('/', "-");
             fs::write(
                 member_dir.join("Cargo.toml"),
-                format!(
-                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-                ),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
             )
             .unwrap();
             fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();
@@ -375,26 +407,32 @@ mod tests {
     fn scope_set_iter_preserves_priority_order() {
         let set = ScopeSet {
             repo: Some(Scope {
+                kind: ScopeKind::RepoPrompts,
                 path: PathBuf::from("/repo"),
                 follow_links: true,
             }),
             package_area: Some(Scope {
+                kind: ScopeKind::PackageAreaPrompts,
                 path: PathBuf::from("/area"),
                 follow_links: true,
             }),
             package: Some(Scope {
+                kind: ScopeKind::PackagePrompts,
                 path: PathBuf::from("/pkg"),
                 follow_links: true,
             }),
             repo_claudine: Some(Scope {
+                kind: ScopeKind::RepoClaudinePrompts,
                 path: PathBuf::from("/repo/.claudine"),
                 follow_links: true,
             }),
             user_claudine: Some(Scope {
+                kind: ScopeKind::UserClaudinePrompts,
                 path: PathBuf::from("/user/.claudine"),
                 follow_links: true,
             }),
             extras: vec![Scope {
+                kind: ScopeKind::RepoDocs,
                 path: PathBuf::from("/repo/docs"),
                 follow_links: true,
             }],
@@ -419,31 +457,38 @@ mod tests {
         // (docs, skills) priority over user-global prompts.
         let set = ScopeSet {
             repo: Some(Scope {
+                kind: ScopeKind::RepoPrompts,
                 path: PathBuf::from("/repo"),
                 follow_links: true,
             }),
             package_area: Some(Scope {
+                kind: ScopeKind::PackageAreaPrompts,
                 path: PathBuf::from("/area"),
                 follow_links: true,
             }),
             package: Some(Scope {
+                kind: ScopeKind::PackagePrompts,
                 path: PathBuf::from("/pkg"),
                 follow_links: true,
             }),
             repo_claudine: Some(Scope {
+                kind: ScopeKind::RepoClaudinePrompts,
                 path: PathBuf::from("/repo/.claudine"),
                 follow_links: true,
             }),
             user_claudine: Some(Scope {
+                kind: ScopeKind::UserClaudinePrompts,
                 path: PathBuf::from("/user/.claudine"),
                 follow_links: true,
             }),
             extras: vec![
                 Scope {
+                    kind: ScopeKind::RepoDocs,
                     path: PathBuf::from("/repo/docs"),
                     follow_links: true,
                 },
                 Scope {
+                    kind: ScopeKind::AgentSkills,
                     path: PathBuf::from("/repo/.claude/skills"),
                     follow_links: false,
                 },
@@ -594,9 +639,9 @@ mod tests {
             set.package_area
         );
         assert!(
-            set.package.as_ref().is_some_and(|s| s.path.ends_with(
-                PathBuf::from("claudine").join("cli").join("prompts")
-            )),
+            set.package.as_ref().is_some_and(|s| s
+                .path
+                .ends_with(PathBuf::from("claudine").join("cli").join("prompts"))),
             "expected claudine/cli/prompts as the package scope; got {:?}",
             set.package
         );
@@ -622,9 +667,7 @@ mod tests {
         for peer in SKILL_PEER_DIRS {
             let expected_tail = PathBuf::from(peer).join("skills");
             assert!(
-                set.extras
-                    .iter()
-                    .any(|s| s.path.ends_with(&expected_tail)),
+                set.extras.iter().any(|s| s.path.ends_with(&expected_tail)),
                 "skill peer {peer}/skills missing from inline-compose extras: {:?}",
                 set.extras
             );
@@ -695,10 +738,7 @@ mod tests {
             .iter()
             .find(|s| s.path.ends_with("docs"))
             .expect("docs extra missing");
-        assert!(
-            docs.follow_links,
-            "docs/ must follow symlinks: {docs:?}"
-        );
+        assert!(docs.follow_links, "docs/ must follow symlinks: {docs:?}");
     }
 
     #[test]
@@ -715,10 +755,12 @@ mod tests {
         // Synthetic ScopeSet with coinciding repo and area paths.
         let mut set = ScopeSet {
             repo: Some(Scope {
+                kind: ScopeKind::RepoPrompts,
                 path: PathBuf::from("/r/prompts"),
                 follow_links: true,
             }),
             package_area: Some(Scope {
+                kind: ScopeKind::PackageAreaPrompts,
                 path: PathBuf::from("/r/prompts"),
                 follow_links: true,
             }),

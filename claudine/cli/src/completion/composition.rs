@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 
 use super::frontmatter;
 use super::fuzzy::{self, DirMatchMode, PartialLen};
-use super::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeSet};
+use super::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind, ScopeSet};
 use super::walker;
 
 /// Source rank for candidates emitted by the repo-wide directory walk.
@@ -171,11 +171,12 @@ fn gather_empty_or_word(
         for entry_path in entries {
             let render_ctx = WordRenderCtx {
                 mode,
-                scope_root: &scope.path,
+                scope,
                 entry_path: &entry_path,
                 active,
                 partial_len,
                 rank,
+                scope_ctx: ctx,
             };
             render_entry_word(&render_ctx, &mut seen, &mut out);
         }
@@ -269,11 +270,12 @@ fn gather_repo_dirs(
 /// spot to plug in future rendering policies (score, highlight, etc.).
 struct WordRenderCtx<'a> {
     mode: ComposeMode,
-    scope_root: &'a Path,
+    scope: &'a Scope,
     entry_path: &'a Path,
     active: &'a str,
     partial_len: PartialLen,
     rank: u8,
+    scope_ctx: &'a ScopeContext,
 }
 
 /// Decide whether a walked entry should become a candidate in Word mode.
@@ -319,7 +321,7 @@ fn render_entry_word(
         }
     }
 
-    let Some(insert) = format_relative_insert(ctx.scope_root, ctx.entry_path) else {
+    let Some(insert) = format_relative_insert(ctx.scope, ctx.entry_path, ctx.scope_ctx) else {
         return;
     };
     let insert = if is_dir {
@@ -333,19 +335,60 @@ fn render_entry_word(
     });
 }
 
-/// Render the path relative to the scope root. Scope roots already carry
-/// the `prompts/` suffix, so we rejoin with that leaf to keep the rendered
-/// candidate anchored at a recognizable root (`prompts/plan.md`, not
-/// `plan.md`). For scopes whose leaf is not `prompts` (e.g. extras like
-/// `docs/`), we use the leaf of the scope root directly.
-fn format_relative_insert(scope_root: &Path, entry: &Path) -> Option<String> {
-    let leaf = scope_root.file_name()?.to_str()?;
-    let rel = entry.strip_prefix(scope_root).ok()?;
+/// Render the path relative to the scope root.
+///
+/// Prioritises repository-relative rendering (via [`ScopeContext::repo_info`]
+/// or [`ScopeContext::git_root`]) so that candidates from every scope tier
+/// emit runnable paths:
+///
+/// - Repo `prompts/` → `prompts/plan.md`
+/// - Repo `.claudine/prompts/` → `.claudine/prompts/plan.md`
+/// - Package-area / package prompts → `claudine/prompts/plan.md`
+/// - User-global `~/.claudine/prompts/` → `~/.claudine/prompts/plan.md`
+/// - Extras (`docs/`) → `docs/plan.md`
+///
+/// Falls back to scope-leaf-relative rendering only when no anchor root
+/// is available.
+fn format_relative_insert(scope: &Scope, entry: &Path, ctx: &ScopeContext) -> Option<String> {
+    if scope.kind == ScopeKind::UserClaudinePrompts
+        && let Some(insert) = format_home_relative_insert(entry, ctx)
+    {
+        return Some(insert);
+    }
+
+    // 1. Repo-relative rendering (Cargo workspace, monorepo, or plain git).
+    if let Some(root) = scopes::effective_repo_root(ctx)
+        && let Ok(rel) = entry.strip_prefix(root)
+    {
+        let rel_str = rel.to_str()?;
+        if !rel_str.is_empty() {
+            return Some(rel_str.to_string());
+        }
+    }
+    // 2. Home-relative rendering (user-global `~/.claudine/...`).
+    if let Some(insert) = format_home_relative_insert(entry, ctx) {
+        return Some(insert);
+    }
+    // 3. Fallback: scope-leaf-relative rendering.
+    let leaf = scope.path.file_name()?.to_str()?;
+    let rel = entry.strip_prefix(&scope.path).ok()?;
     let rel_str = rel.to_str()?;
     if rel_str.is_empty() {
         return None;
     }
     Some(format!("{leaf}/{rel_str}"))
+}
+
+fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<String> {
+    let home = ctx.home.as_ref()?;
+    if !entry.starts_with(home) {
+        return None;
+    }
+    let rel = entry.strip_prefix(home).ok()?.to_str()?;
+    if rel.is_empty() {
+        return None;
+    }
+    Some(format!("~/{rel}"))
 }
 
 /// Magic (`@...`): resolve against the magic scope priority order (see
@@ -371,8 +414,6 @@ fn gather_magic(
     active: &str,
 ) -> Vec<Candidate> {
     let partial_len = PartialLen::classify(active.chars().count());
-    let mut out: Vec<Candidate> = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
 
     for (rank, scope) in set.iter_magic_scopes().enumerate() {
         let Some(walk_root) = resolve_magic_walk_root(&scope.path, dir) else {
@@ -383,10 +424,13 @@ fn gather_magic(
         }
         let rank = rank.min(u8::MAX as usize) as u8;
         let scoped = Scope {
+            kind: scope.kind,
             path: walk_root,
             follow_links: scope.follow_links,
         };
         let entries = walker::walk_scope(&scoped);
+        let mut scope_candidates: Vec<Candidate> = Vec::new();
+        let mut seen: HashSet<PathBuf> = HashSet::new();
         for entry_path in entries {
             let is_dir = entry_path.is_dir();
             if is_dir && !partial_len.directories_allowed() {
@@ -416,7 +460,7 @@ fn gather_magic(
             if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
                 continue;
             }
-            let Some(insert) = render_magic_insert(&scope.path, &entry_path, ctx) else {
+            let Some(insert) = render_magic_insert(scope, &entry_path, ctx) else {
                 continue;
             };
             let insert = if is_dir {
@@ -425,13 +469,16 @@ fn gather_magic(
                 insert
             };
             seen.insert(canonical);
-            out.push(Candidate {
+            scope_candidates.push(Candidate {
                 insert,
                 source_rank: rank,
             });
         }
+        if !scope_candidates.is_empty() {
+            return scope_candidates;
+        }
     }
-    out
+    Vec::new()
 }
 
 /// Resolve the walk root for a magic-path partial against a single scope.
@@ -486,23 +533,11 @@ fn resolve_magic_walk_root(scope_root: &Path, dir: &str) -> Option<PathBuf> {
 
 /// Render the inserted token for a magic-path match.
 ///
-/// - Entries under a repo-scoped prompt root emit `prompts/<rest>` (repo
-///   root) or `.claudine/prompts/<rest>` (repo `.claudine` root).
-/// - Entries under the user-global scope emit `~/.claudine/prompts/<rest>`.
-/// - Extras (e.g. `docs/`) emit `<leaf>/<rest>`.
-fn render_magic_insert(scope_root: &Path, entry: &Path, ctx: &ScopeContext) -> Option<String> {
-    if let Some(home) = ctx.home.as_ref()
-        && entry.starts_with(home)
-    {
-        let rel = entry.strip_prefix(home).ok()?.to_str()?;
-        return Some(format!("~/{rel}"));
-    }
-    if let Some(info) = ctx.repo_info.as_ref() {
-        let rel = entry.strip_prefix(&info.root).ok()?.to_str()?;
-        return Some(rel.to_string());
-    }
-    // Fallback: scope-relative rendering.
-    format_relative_insert(scope_root, entry)
+/// Delegates to [`format_relative_insert`] since both magic and non-magic
+/// paths now share the same repo-relative / git-root-relative /
+/// home-relative rendering logic.
+fn render_magic_insert(scope: &Scope, entry: &Path, ctx: &ScopeContext) -> Option<String> {
+    format_relative_insert(scope, entry, ctx)
 }
 
 /// CommittedDir / PartialPath: walk only inside the committed directory
@@ -517,16 +552,15 @@ fn gather_committed(
 ) -> Vec<Candidate> {
     let partial_len = PartialLen::classify(active.chars().count());
 
-    let base = ctx
-        .repo_info
-        .as_ref()
-        .map(|info| info.root.clone())
+    let base = scopes::effective_repo_root(ctx)
+        .map(Path::to_path_buf)
         .unwrap_or_else(|| ctx.cwd.clone());
     let walk_root = base.join(dir);
     if !walk_root.is_dir() {
         return Vec::new();
     }
     let scope = Scope {
+        kind: ScopeKind::CommittedDir,
         path: walk_root.clone(),
         follow_links: true,
     };
@@ -543,8 +577,7 @@ fn gather_committed(
             continue;
         }
 
-        let canonical =
-            std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
+        let canonical = std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
         if !seen.insert(canonical) {
             continue;
         }
@@ -555,7 +588,11 @@ fn gather_committed(
         else {
             continue;
         };
-        let match_target = if is_dir { name.as_str() } else { name_stem(&name) };
+        let match_target = if is_dir {
+            name.as_str()
+        } else {
+            name_stem(&name)
+        };
         if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
             continue;
         }
@@ -563,7 +600,9 @@ fn gather_committed(
             Ok(r) => r,
             Err(_) => continue,
         };
-        let Some(rel_str) = rel.to_str() else { continue };
+        let Some(rel_str) = rel.to_str() else {
+            continue;
+        };
         let insert = if dir.is_empty() {
             rel_str.to_string()
         } else {
@@ -640,9 +679,8 @@ mod tests {
             .map(|m| format!("    \"{m}\""))
             .collect::<Vec<_>>()
             .join(",\n");
-        let root_manifest = format!(
-            "[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n"
-        );
+        let root_manifest =
+            format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
         fs::write(root.join("Cargo.toml"), root_manifest).unwrap();
         for member in members {
             let member_dir = root.join(member);
@@ -650,9 +688,7 @@ mod tests {
             let name = member.replace('/', "-");
             fs::write(
                 member_dir.join("Cargo.toml"),
-                format!(
-                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-                ),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
             )
             .unwrap();
             fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();
@@ -770,10 +806,7 @@ mod tests {
             .active_segment(),
             "pl"
         );
-        assert_eq!(
-            PartialKind::Word("pl".to_string()).active_segment(),
-            "pl"
-        );
+        assert_eq!(PartialKind::Word("pl".to_string()).active_segment(), "pl");
         assert_eq!(
             PartialKind::PartialPath {
                 dir: "prompts".to_string(),
@@ -808,7 +841,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("plan.md"), "---\ntitle: X\n---\nBody\n");
-        write(&prompts.join("inline.md"), "---\nprompt: Write\n---\nBody\n");
+        write(
+            &prompts.join("inline.md"),
+            "---\nprompt: Write\n---\nBody\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "");
@@ -894,7 +930,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("outer.md"), "---\ntitle: O\n---\n");
-        write(&prompts.join("planning").join("deep.md"), "---\ntitle: D\n---\n");
+        write(
+            &prompts.join("planning").join("deep.md"),
+            "---\ntitle: D\n---\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "prompts/planning/");
@@ -1044,7 +1083,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         write(&prompts.join("plain.md"), "---\ntitle: X\n---\n");
-        write(&prompts.join("inline.md"), "---\nprompt: Write\n---\nBody\n");
+        write(
+            &prompts.join("inline.md"),
+            "---\nprompt: Write\n---\nBody\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::InlineCompose, &ctx, "");
@@ -1121,7 +1163,10 @@ mod tests {
         seed_cargo_workspace(tmp.path(), &["a/lib"]);
         let prompts = tmp.path().join("prompts");
         fs::create_dir_all(prompts.join("planning")).unwrap();
-        write(&prompts.join("planning").join("a.md"), "---\ntitle: A\n---\n");
+        write(
+            &prompts.join("planning").join("a.md"),
+            "---\ntitle: A\n---\n",
+        );
 
         let ctx = ScopeContext::discover_from(tmp.path());
         let got = run(ComposeMode::Compose, &ctx, "");

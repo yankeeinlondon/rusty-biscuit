@@ -2,7 +2,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 
-use common::{TestWorkspace, strip_ansi, write};
+use common::{strip_ansi, write, TestWorkspace};
 
 fn seed_user_config(home: &std::path::Path) {
     let config = serde_json::json!({
@@ -183,7 +183,10 @@ fn completions_emit_supplement_aware_bash_zsh_fish_scripts() {
                 "claudine __complete --current",
                 "commandline -opc",
                 "commandline -ct",
+                "set -l candidates",
+                "__fish_complete_path",
                 "complete -c claudine",
+                "-f",
                 "-a '(__claudine_complete)'",
             ],
         ),

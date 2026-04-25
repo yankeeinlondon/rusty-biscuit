@@ -31,20 +31,32 @@ use common::TestWorkspace;
 /// the composition completer because the scope resolver uses `sniff` for
 /// monorepo shape; the git-root fallback only covers non-workspace scopes.
 fn seed_cargo_workspace(root: &Path) {
+    seed_cargo_workspace_members(root, &["pkg"]);
+}
+
+fn seed_cargo_workspace_members(root: &Path, members: &[&str]) {
     fs::create_dir_all(root.join(".git")).unwrap();
+    let members_list = members
+        .iter()
+        .map(|member| format!("\"{member}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
     fs::write(
         root.join("Cargo.toml"),
-        "[workspace]\nresolver = \"2\"\nmembers = [\"pkg\"]\n",
+        format!("[workspace]\nresolver = \"2\"\nmembers = [{members_list}]\n"),
     )
     .unwrap();
-    let pkg = root.join("pkg");
-    fs::create_dir_all(pkg.join("src")).unwrap();
-    fs::write(
-        pkg.join("Cargo.toml"),
-        "[package]\nname = \"pkg\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
-    )
-    .unwrap();
-    fs::write(pkg.join("src").join("lib.rs"), "").unwrap();
+    for member in members {
+        let pkg = root.join(member);
+        fs::create_dir_all(pkg.join("src")).unwrap();
+        let name = member.replace('/', "-");
+        fs::write(
+            pkg.join("Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n"),
+        )
+        .unwrap();
+        fs::write(pkg.join("src").join("lib.rs"), "").unwrap();
+    }
 }
 
 fn write_file(path: &Path, content: &str) {
@@ -71,12 +83,16 @@ fn fake_home(cwd: &Path) -> PathBuf {
 
 fn run_complete(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
     let home = fake_home(cwd);
+    run_complete_with_home(cwd, &home, argv_tail)
+}
+
+fn run_complete_with_home(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Vec<String> {
     let current = argv_tail.len();
     let reference = cargo_bin_cmd!("claudine");
     let program = reference.get_program().to_os_string();
     let mut cmd = Command::new(program);
     cmd.current_dir(cwd)
-        .env("HOME", &home)
+        .env("HOME", home)
         .env("NO_COLOR", "1")
         .env_remove("COMPLETE")
         .env_remove("_CLAP_COMPLETE_INDEX")
@@ -128,12 +144,133 @@ fn compose_empty_partial_surfaces_plain_markdown() {
 }
 
 #[test]
+fn compose_empty_partial_renders_repo_claudine_scope() {
+    let ws = TestWorkspace::named("complete-compose-repo-claudine-empty");
+    seed_cargo_workspace(ws.path());
+    write_file(
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# plan\n",
+    );
+
+    let got = run_complete(ws.path(), &["compose", ""]);
+    assert!(
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "repo .claudine prompt must render with .claudine prefix: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "prompts/plan.md"),
+        "repo .claudine prompt must not collapse to prompts/: {got:?}"
+    );
+}
+
+#[test]
+fn compose_word_partial_renders_repo_claudine_scope() {
+    let ws = TestWorkspace::named("complete-compose-repo-claudine-word");
+    seed_cargo_workspace(ws.path());
+    write_file(
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# plan\n",
+    );
+
+    let got = run_complete(ws.path(), &["compose", "plan"]);
+    assert!(
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "repo .claudine word match must render with .claudine prefix: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "prompts/plan.md"),
+        "repo .claudine word match must not collapse to prompts/: {got:?}"
+    );
+}
+
+#[test]
+fn compose_empty_partial_renders_user_global_scope() {
+    let ws = TestWorkspace::named("complete-compose-user-global-empty");
+    seed_cargo_workspace(ws.path());
+    let home = fake_home(ws.path());
+    write_file(
+        &home.join(".claudine").join("prompts").join("plan.md"),
+        "# plan\n",
+    );
+
+    let got = run_complete_with_home(ws.path(), &home, &["compose", ""]);
+    assert!(
+        got.iter().any(|c| c == "~/.claudine/prompts/plan.md"),
+        "user-global prompt must render home-relative: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "prompts/plan.md"),
+        "user-global prompt must not collapse to prompts/: {got:?}"
+    );
+}
+
+#[test]
+fn compose_word_partial_renders_user_global_scope() {
+    let ws = TestWorkspace::named("complete-compose-user-global-word");
+    seed_cargo_workspace(ws.path());
+    let home = fake_home(ws.path());
+    write_file(
+        &home.join(".claudine").join("prompts").join("plan.md"),
+        "# plan\n",
+    );
+
+    let got = run_complete_with_home(ws.path(), &home, &["compose", "plan"]);
+    assert!(
+        got.iter().any(|c| c == "~/.claudine/prompts/plan.md"),
+        "user-global word match must render home-relative: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "prompts/plan.md"),
+        "user-global word match must not collapse to prompts/: {got:?}"
+    );
+}
+
+#[test]
+fn compose_package_prompt_renders_repo_relative_path() {
+    let ws = TestWorkspace::named("complete-compose-package-render");
+    seed_cargo_workspace(ws.path());
+    let pkg = ws.path().join("pkg");
+    write_file(&pkg.join("prompts").join("plan.md"), "# plan\n");
+
+    let got = run_complete(&pkg, &["compose", ""]);
+    assert!(
+        got.iter().any(|c| c == "pkg/prompts/plan.md"),
+        "package prompt must render repo-relative package path: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "prompts/plan.md"),
+        "package prompt must not collapse to prompts/: {got:?}"
+    );
+}
+
+#[test]
+fn compose_package_area_prompt_renders_repo_relative_path() {
+    let ws = TestWorkspace::named("complete-compose-package-area-render");
+    seed_cargo_workspace_members(ws.path(), &["claudine/lib", "claudine/cli"]);
+    let area = ws.path().join("claudine");
+    write_file(&area.join("prompts").join("plan.md"), "# plan\n");
+
+    let got = run_complete(&area, &["compose", ""]);
+    assert!(
+        got.iter().any(|c| c == "claudine/prompts/plan.md"),
+        "package-area prompt must render repo-relative area path: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "prompts/plan.md"),
+        "package-area prompt must not collapse to prompts/: {got:?}"
+    );
+}
+
+#[test]
 fn compose_empty_partial_skips_prompt_frontmatter_files() {
     let ws = TestWorkspace::named("complete-compose-skip-prompt");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
     write_file(&prompts.join("plain.md"), "# plain\n");
-    write_file(&prompts.join("inline.md"), "---\nprompt: Say hi\n---\nBody\n");
+    write_file(
+        &prompts.join("inline.md"),
+        "---\nprompt: Say hi\n---\nBody\n",
+    );
 
     let got = run_complete(ws.path(), &["compose", ""]);
     assert!(
@@ -286,6 +423,72 @@ fn compose_magic_path_strips_sigil_and_renders_relative() {
     );
 }
 
+#[test]
+fn compose_magic_repo_prompts_shadows_repo_claudine_and_user() {
+    let ws = TestWorkspace::named("complete-compose-magic-repo-first");
+    seed_cargo_workspace(ws.path());
+    let home = fake_home(ws.path());
+
+    write_file(&ws.path().join("prompts").join("plan.md"), "# repo\n");
+    write_file(
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# repo claudine\n",
+    );
+    write_file(
+        &home.join(".claudine").join("prompts").join("plan.md"),
+        "# user\n",
+    );
+
+    let got = run_complete_with_home(ws.path(), &home, &["compose", "@plan"]);
+    assert_eq!(
+        got,
+        vec!["prompts/plan.md".to_string()],
+        "repo prompts hit must suppress lower-priority tiers"
+    );
+}
+
+#[test]
+fn compose_magic_repo_claudine_shadows_user_when_repo_prompts_absent() {
+    let ws = TestWorkspace::named("complete-compose-magic-claudine-first");
+    seed_cargo_workspace(ws.path());
+    let home = fake_home(ws.path());
+
+    write_file(
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# repo claudine\n",
+    );
+    write_file(
+        &home.join(".claudine").join("prompts").join("plan.md"),
+        "# user\n",
+    );
+
+    let got = run_complete_with_home(ws.path(), &home, &["compose", "@plan"]);
+    assert_eq!(
+        got,
+        vec![".claudine/prompts/plan.md".to_string()],
+        "repo .claudine hit must suppress user-global tier"
+    );
+}
+
+#[test]
+fn compose_magic_user_global_emits_when_no_repo_tier_matches() {
+    let ws = TestWorkspace::named("complete-compose-magic-user-only");
+    seed_cargo_workspace(ws.path());
+    let home = fake_home(ws.path());
+
+    write_file(
+        &home.join(".claudine").join("prompts").join("plan.md"),
+        "# user\n",
+    );
+
+    let got = run_complete_with_home(ws.path(), &home, &["compose", "@plan"]);
+    assert_eq!(
+        got,
+        vec!["~/.claudine/prompts/plan.md".to_string()],
+        "user-global hit should emit only when no repo tier matches"
+    );
+}
+
 // ---------------------------------------------------------------------
 // compose underscore and gitignore filters
 // ---------------------------------------------------------------------
@@ -314,7 +517,10 @@ fn compose_honors_gitignore_at_nested_depth() {
     let ws = TestWorkspace::named("complete-compose-gitignore");
     seed_cargo_workspace(ws.path());
     write_file(&ws.path().join(".gitignore"), "prompts/hidden/\n");
-    write_file(&ws.path().join("prompts").join("hidden").join("bad.md"), "# b\n");
+    write_file(
+        &ws.path().join("prompts").join("hidden").join("bad.md"),
+        "# b\n",
+    );
     write_file(&ws.path().join("prompts").join("good.md"), "# g\n");
 
     let got = run_complete(ws.path(), &["compose", ""]);

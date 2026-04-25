@@ -92,9 +92,7 @@ fn seed_workspace(root: &Path) {
         fs::create_dir_all(pkg_dir.join("src")).unwrap();
         write(
             &pkg_dir.join("Cargo.toml"),
-            &format!(
-                "[package]\nname = \"pkg{i:02}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"
-            ),
+            &format!("[package]\nname = \"pkg{i:02}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"),
         );
         write(&pkg_dir.join("src").join("lib.rs"), "");
 
@@ -123,10 +121,7 @@ fn seed_workspace(root: &Path) {
     }
 
     for j in 0..REPO_DOCS {
-        write(
-            &root.join("docs").join(format!("doc-{j:02}.md")),
-            "# doc\n",
-        );
+        write(&root.join("docs").join(format!("doc-{j:02}.md")), "# doc\n");
     }
 
     let skill_dirs = [
@@ -141,7 +136,10 @@ fn seed_workspace(root: &Path) {
     for dir in skill_dirs {
         for j in 0..(SKILL_FILES / skill_dirs.len()) {
             write(
-                &root.join(dir).join(format!("skill-{j:02}")).join("SKILL.md"),
+                &root
+                    .join(dir)
+                    .join(format!("skill-{j:02}"))
+                    .join("SKILL.md"),
                 "---\nprompt: Use this skill.\n---\nBody.\n",
             );
         }
@@ -160,9 +158,7 @@ fn seed_workspace(root: &Path) {
 fn fake_home(root: &Path) -> std::path::PathBuf {
     let home = root.parent().unwrap_or(root).join(format!(
         "{}-home-{}",
-        root.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("perf"),
+        root.file_name().and_then(|n| n.to_str()).unwrap_or("perf"),
         std::process::id(),
     ));
     fs::create_dir_all(&home).unwrap();
@@ -257,12 +253,7 @@ fn perf_compose_empty_partial_meets_target() {
     seed_workspace(ws.path());
     let home = fake_home(ws.path());
 
-    let stats = measure(
-        "compose empty partial",
-        ws.path(),
-        &home,
-        &["compose", ""],
-    );
+    let stats = measure("compose empty partial", ws.path(), &home, &["compose", ""]);
     assert_perf_target("compose empty partial", stats);
 }
 
@@ -310,7 +301,10 @@ fn perf_inline_compose_empty_partial_meets_target() {
 ///   forces the team to land the fallback cache from spec §8.3.
 fn assert_perf_target(label: &str, stats: Stats) {
     if stats.p95 <= TARGET_P95_MS {
-        println!("[perf] {label}: PASS (p95 {} ms ≤ {} ms)", stats.p95, TARGET_P95_MS);
+        println!(
+            "[perf] {label}: PASS (p95 {} ms ≤ {} ms)",
+            stats.p95, TARGET_P95_MS
+        );
         return;
     }
     if stats.p95 <= CACHE_TRIGGER_MS {

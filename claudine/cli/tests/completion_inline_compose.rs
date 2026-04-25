@@ -106,7 +106,10 @@ fn inline_compose_surfaces_files_with_prompt_key() {
     let ws = TestWorkspace::named("complete-inline-has-prompt");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
-    write_file(&prompts.join("inline.md"), "---\nprompt: Write a poem\n---\nBody\n");
+    write_file(
+        &prompts.join("inline.md"),
+        "---\nprompt: Write a poem\n---\nBody\n",
+    );
     write_file(&prompts.join("plain.md"), "---\ntitle: X\n---\nBody\n");
 
     let got = run_complete(ws.path(), &["inline-compose", ""]);
@@ -168,7 +171,10 @@ fn inline_compose_magic_resolves_relative() {
     let ws = TestWorkspace::named("complete-inline-magic");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
-    write_file(&prompts.join("writer.md"), "---\nprompt: Write stuff\n---\n");
+    write_file(
+        &prompts.join("writer.md"),
+        "---\nprompt: Write stuff\n---\n",
+    );
 
     let got = run_complete(ws.path(), &["inline-compose", "@writ"]);
     assert!(
@@ -202,10 +208,10 @@ fn inline_compose_long_prefix_surfaces_directories() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn inline_compose_magic_prefers_repo_docs_over_user_global() {
-    // Finding #5: the magic-scope iterator orders repo-local extras
-    // (`docs/`, skills) before `user_claudine`, so a match in repo
-    // `docs/` sorts before a match in `~/.claudine/prompts/`.
+fn inline_compose_magic_first_hit_wins_shadows_user_global() {
+    // First-hit-wins: once a higher-priority scope produces candidate(s),
+    // lower-priority scopes are not consulted. repo `docs/` outranks
+    // `user_claudine`, so the user-global match must not appear.
     let ws = TestWorkspace::named("complete-inline-magic-priority");
     seed_cargo_workspace(ws.path());
 
@@ -225,21 +231,13 @@ fn inline_compose_magic_prefers_repo_docs_over_user_global() {
 
     let got = run_complete_with_home(ws.path(), &home, &["inline-compose", "@plan"]);
 
-    let repo_pos = got.iter().position(|c| c.ends_with("docs/plan.md"));
-    let user_pos = got
-        .iter()
-        .position(|c| c.contains(".claudine/prompts/plan.md"));
     assert!(
-        repo_pos.is_some(),
+        got.iter().any(|c| c.ends_with("docs/plan.md")),
         "repo-local docs/plan.md must appear: {got:?}"
     );
     assert!(
-        user_pos.is_some(),
-        "user-global plan.md must appear: {got:?}"
-    );
-    assert!(
-        repo_pos < user_pos,
-        "repo-local docs/plan.md ({repo_pos:?}) must sort before user-global ({user_pos:?}): {got:?}"
+        !got.iter().any(|c| c.contains(".claudine/prompts/plan.md")),
+        "user-global plan.md must NOT appear due to first-hit-wins: {got:?}"
     );
 }
 

@@ -38,7 +38,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::fuzzy::{self, PartialLen};
-use super::scopes::{Scope, ScopeContext};
+use super::scopes::{self, Scope, ScopeContext, ScopeKind};
 use super::walker;
 
 /// Subdirectories resolved for setter-value `@` completion.
@@ -155,8 +155,7 @@ fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
             if !has_markdown_extension(&entry) {
                 continue;
             }
-            let canonical =
-                std::fs::canonicalize(&entry).unwrap_or_else(|_| entry.clone());
+            let canonical = std::fs::canonicalize(&entry).unwrap_or_else(|_| entry.clone());
             if !seen_entries.insert(canonical) {
                 continue;
             }
@@ -199,11 +198,7 @@ fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
 fn resolve_setter_scopes(ctx: &ScopeContext) -> Vec<Scope> {
     let mut scopes: Vec<Scope> = Vec::new();
 
-    let repo_root: Option<&Path> = ctx
-        .repo_info
-        .as_ref()
-        .map(|info| info.root.as_path())
-        .or(ctx.git_root.as_deref());
+    let repo_root = scopes::effective_repo_root(ctx);
 
     let area_root: Option<PathBuf> = ctx.repo_info.as_ref().and_then(|info| {
         let area = info.package_area_for_dir(&ctx.cwd)?;
@@ -221,6 +216,7 @@ fn resolve_setter_scopes(ctx: &ScopeContext) -> Vec<Scope> {
     let push_scopes = |scopes: &mut Vec<Scope>, base: &Path| {
         for sub in SETTER_VALUE_SUBDIRS {
             scopes.push(Scope {
+                kind: ScopeKind::RepoDocs,
                 path: base.join(sub),
                 follow_links: true,
             });
@@ -252,13 +248,9 @@ fn resolve_setter_scopes(ctx: &ScopeContext) -> Vec<Scope> {
 /// still useful in a standalone directory, the rendered paths just
 /// reflect the cwd's view of the filesystem.
 fn repo_or_cwd(ctx: &ScopeContext) -> PathBuf {
-    if let Some(info) = ctx.repo_info.as_ref() {
-        return info.root.clone();
-    }
-    if let Some(git) = ctx.git_root.as_deref() {
-        return git.to_path_buf();
-    }
-    ctx.cwd.clone()
+    scopes::effective_repo_root(ctx)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ctx.cwd.clone())
 }
 
 /// Render `entry` as a path relative to `base`. Returns `None` when
@@ -554,8 +546,7 @@ mod tests {
         write(&pkg_docs.join("pkg.md"), "# x\n");
 
         // cwd is the package directory.
-        let ctx =
-            ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
+        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
         let got = run("ref=@pk", &ctx);
         assert!(
             got.iter().any(|c| c == "ref='claudine/lib/docs/pkg.md'"),
@@ -586,7 +577,8 @@ mod tests {
         // Even with a 3+ char prefix we never emit directories — setter
         // values target files only.
         assert!(
-            !got.iter().any(|c| c.contains("planning") && c.ends_with("/'")),
+            !got.iter()
+                .any(|c| c.contains("planning") && c.ends_with("/'")),
             "directory should not appear in setter-value output: {got:?}"
         );
     }
@@ -712,8 +704,7 @@ mod tests {
             "# p2\n",
         );
 
-        let ctx =
-            ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
+        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
         let got = run("spec=@p", &ctx);
         // Both files should appear; repo-scope first (rank 0), package-
         // area and package-scope after.
