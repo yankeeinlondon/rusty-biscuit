@@ -83,6 +83,15 @@ pub(crate) fn walk_scope(scope: &Scope) -> Vec<PathBuf> {
 /// Used by tests that need to exercise budget-exhaustion behavior without
 /// having to fabricate 500+ files on disk.
 pub(crate) fn walk_scope_limited(scope: &Scope, budget: usize) -> Vec<PathBuf> {
+    let _span = tracing::trace_span!(
+        target: "claudine::completion",
+        "completion::walk_scope",
+        path = %scope.path.display(),
+        follow_links = scope.follow_links,
+        budget = budget,
+    )
+    .entered();
+
     if !scope.path.is_dir() {
         return Vec::new();
     }

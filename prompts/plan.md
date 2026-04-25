@@ -3,6 +3,9 @@ dir: "$(dirname "{{ spec | design }}")"
 spec: ""
 design: ""
 plan: "plan.md"
+success:
+    stderr: "The [{{dir}}/{{plan}}]({{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}) _plan_ has been completed"
+    message: "The [{{dir}}/{{plan}}]({{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}) _plan_ has been completed"
 ---
 You are a planning agent. Convert the following documents into a high confidence execution plan:
 

@@ -5,4 +5,5 @@ prompt: |-
     Your task is to do research on DuckDB and describe:
 
     - describe its functional footprint 
+    - 
 ---

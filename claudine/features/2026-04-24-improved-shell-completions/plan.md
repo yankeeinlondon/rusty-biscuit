@@ -1,7 +1,7 @@
 ---
 phases: 6
 created: 2026-04-24
-start_phase: 1
+start_phase: 4
 source_files_during_phase_1:
   - claudine/cli/src/completion/engine.rs
   - claudine/cli/src/completion/root_menu.rs
@@ -32,6 +32,34 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/engine.rs
+  - claudine/cli/src/completion/setter_value.rs
+  - claudine/cli/tests/completion_setter.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/engine.rs
+  - claudine/cli/src/completion/bootstrap.rs
+  - claudine/cli/src/commands/completions.rs
+  - claudine/cli/src/commands/help.rs
+  - claudine/cli/tests/completion_cli.rs
+  - claudine/cli/tests/snapshots/wrap_commands__help_lists_wrapper_subcommands.snap
+docs_updated_during_phase_5:
+  - claudine/docs/topics/shell-completions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
+source_files_during_phase_6:
+  - claudine/cli/src/completion/engine.rs
+  - claudine/cli/src/completion/walker.rs
+  - claudine/cli/tests/completion_perf.rs
+docs_updated_during_phase_6:
+  - claudine/docs/topics/shell-completions.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - claudine-cli
 ---

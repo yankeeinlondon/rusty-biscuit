@@ -27,9 +27,9 @@ use color_eyre::eyre::Result;
     the currently installed binary.
 
     PowerShell and Elvish retain the legacy one-line `COMPLETE=<shell>`
-    bootstrap because the supplement acceptance matrix covers
-    bash/zsh/fish only. Stale installed scripts on any shell continue
-    to reach the legacy completion path until regenerated.
+    bootstrap. Those shells fall back to whatever `clap_complete`
+    derives from the command tree — subcommand names and flag names —
+    with no composition-specific completion behavior.
 "#)]
 pub struct CompletionsArgs {
     /// Shell to generate completions for (bash, zsh, fish, powershell, elvish).
@@ -41,14 +41,13 @@ pub struct CompletionsArgs {
 ///
 /// For `bash`, `zsh`, and `fish` this is a full completion script that
 /// registers a callback shelling out to `claudine __complete` at every
-/// `<TAB>`. The callback runs the supplement engine in
-/// [`crate::completion::supplement`] against the full argv the shell
-/// passes in.
+/// `<TAB>`. The callback routes through [`crate::completion::engine::run`]
+/// against the full argv the shell passes in.
 ///
 /// For `powershell` and `elvish` this remains a one-line `COMPLETE=<shell>`
 /// bootstrap that activates the legacy `CompleteEnv` runtime path in
-/// [`crate::completion::maybe_complete`]. Those two shells are outside the
-/// supplement spec's bash/zsh/fish acceptance matrix.
+/// [`crate::completion::maybe_complete`]. Those two shells defer to
+/// clap-derived completion only (subcommand and flag names).
 pub fn run(args: CompletionsArgs) -> Result<()> {
     use std::io::Write;
 
@@ -61,12 +60,13 @@ pub fn run(args: CompletionsArgs) -> Result<()> {
 
 /// Arguments for the hidden `__complete` subcommand.
 ///
-/// Invoked by generated bash/zsh/fish completion scripts at the argument
-/// positions listed in the supplement spec (the positional file slot on
-/// `compose` / `inline-compose` / `sequence`, plus `--append-system-prompt` /
-/// `--replace-system-prompt` values on those three and every wrapper
-/// subcommand). The CLI surface is intentionally terse and must stay stable
-/// so generated scripts keep working:
+/// Invoked by generated bash/zsh/fish completion scripts on every `<TAB>`.
+/// The engine classifies which slot the cursor is in (root menu,
+/// composition positional, `@`-gated setter value, or "other") and emits
+/// one candidate per line on stdout. Any slot the engine does not
+/// recognize produces zero candidates so the shell's native file / flag
+/// completion takes over. The CLI surface is intentionally terse and must
+/// stay stable so generated scripts keep working:
 ///
 /// - `--current <INDEX>` identifies the argv element being completed.
 /// - Trailing positional args after `--` are the full original argv the user

@@ -90,6 +90,12 @@ implement-plan filter="":
     fi
 
     echo
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
+    echo
     while true; do
         claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} total_phases=${total} memory="${memory}" --${agent} -y ${model} || (
             echo
@@ -104,14 +110,14 @@ implement-plan filter="":
             echo -e "- phase ${current} of the ${plan} plan appears to have had no changes to the $(sniff repo package-area) package area"
             echo -e "- that might be ok and because we're in a long running process we will continue"
             echo -e "- below you'll find the current git status:"
-            just repo git-status --compact
+            sniff repo git-status --compact || true
             just _play_background two-tone
         ) && just commit || (
             echo
             echo -e "- During phase {{yellow}}${current}{{reset}} of the ${plan} plan there was a failure running {{green}}just commit{{reset}}."
             echo -e "- because this is a long running process we will continue with the plan."
             echo -e "- below is the current git status:"
-            just repo git-status --compact
+            sniff repo git-status --compact || true
             echo
             just _play two-tone
             just _speak "During phase ${current} of a plan implementation in the $(sniff repo package-area) package area there was a problem committing files but we will continue with the plan's implementation and commit during the next phase."
@@ -144,10 +150,10 @@ plan spec="" design="":
         doc_dir="$(dirname "${doc}")"
         if [[ "$(basename "${doc}")" == *design* ]]; then
             design_file="${doc}"
-            spec_file="$(sniff repo package-area)/$(just _get_spec_doc "${doc_dir}")"
+            spec_file="$(just _get_spec_doc "${doc_dir}")"
         else
             spec_file="${doc}"
-            design_file="$(sniff repo package-area)/$(just _get_design_doc "${doc_dir}")"
+            design_file="$(just _get_design_doc "${doc_dir}")"
         fi
     else
         # Validate provided paths — resolve partial matches via filter
@@ -157,9 +163,9 @@ plan spec="" design="":
                 echo -e "{{red}}No spec files matching '${spec_file}' found{{reset}}" >&2
                 exit 1
             elif [[ ${#matches[@]} -eq 1 ]]; then
-                spec_file="$(sniff repo package-area)/${matches[0]}"
+                spec_file="${matches[0]}"
             else
-                spec_file="$(sniff repo package-area)/$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
+                spec_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
             fi
         fi
 
@@ -169,19 +175,19 @@ plan spec="" design="":
                 echo -e "{{red}}No design files matching '${design_file}' found{{reset}}" >&2
                 exit 1
             elif [[ ${#matches[@]} -eq 1 ]]; then
-                design_file="$(sniff repo package-area)/${matches[0]}"
+                design_file="${matches[0]}"
             else
-                design_file="$(sniff repo package-area)/$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
+                design_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
             fi
         fi
 
         # Auto-find complementary doc from the same directory
         if [[ -n "${spec_file}" && -z "${design_file}" ]]; then
-            doc_dir="$(sniff repo package-area)/$(dirname "${spec_file}")"
-            design_file="$(sniff repo package-area)/$(just _get_design_doc "${doc_dir}")"
+            doc_dir="$(dirname "${spec_file}")"
+            design_file="$(just _get_design_doc "${doc_dir}")"
         elif [[ -n "${design_file}" && -z "${spec_file}" ]]; then
             doc_dir="$(dirname "${design_file}")"
-            spec_file="$(sniff repo package-area)/$(just _get_spec_doc "${doc_dir}")"
+            spec_file="$(just _get_spec_doc "${doc_dir}")"
         fi
     fi
 
@@ -222,10 +228,10 @@ plan-feature spec="" design="":
         doc_dir="$(dirname "${doc}")"
         if [[ "$(basename "${doc}")" == *design* ]]; then
             design_file="${doc}"
-            spec_file="$(sniff repo package-area)/$(just _get_spec_doc "${doc_dir}")"
+            spec_file="$(just _get_spec_doc "${doc_dir}")"
         else
             spec_file="${doc}"
-            design_file="$(sniff repo package-area)/$(just _get_design_doc "${doc_dir}")"
+            design_file="$(just _get_design_doc "${doc_dir}")"
         fi
     else
         # Validate provided paths — resolve partial matches via filter
@@ -235,9 +241,9 @@ plan-feature spec="" design="":
                 echo -e "{{red}}No spec files matching '${spec_file}' found{{reset}}" >&2
                 exit 1
             elif [[ ${#matches[@]} -eq 1 ]]; then
-                spec_file="$(sniff repo package-area)/${matches[0]}"
+                spec_file="${matches[0]}"
             else
-                spec_file="$(sniff repo package-area)/$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
+                spec_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
             fi
         fi
 
@@ -247,19 +253,19 @@ plan-feature spec="" design="":
                 echo -e "{{red}}No design files matching '${design_file}' found{{reset}}" >&2
                 exit 1
             elif [[ ${#matches[@]} -eq 1 ]]; then
-                design_file="$(sniff repo package-area)/${matches[0]}"
+                design_file="${matches[0]}"
             else
-                design_file="$(sniff repo package-area)/$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
+                design_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
             fi
         fi
 
         # Auto-find complementary doc from the same directory
         if [[ -n "${spec_file}" && -z "${design_file}" ]]; then
-            doc_dir="$(sniff repo package-area)/$(dirname "${spec_file}")"
-            design_file="$(sniff repo package-area)/$(just _get_design_doc "${doc_dir}")"
+            doc_dir="$(dirname "${spec_file}")"
+            design_file="$(just _get_design_doc "${doc_dir}")"
         elif [[ -n "${design_file}" && -z "${spec_file}" ]]; then
             doc_dir="$(dirname "${design_file}")"
-            spec_file="$(sniff repo package-area)/$(just _get_spec_doc "${doc_dir}")"
+            spec_file="$(just _get_spec_doc "${doc_dir}")"
         fi
     fi
 
