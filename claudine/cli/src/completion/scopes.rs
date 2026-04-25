@@ -329,11 +329,8 @@ pub(crate) fn resolve_compose_scopes(ctx: &ScopeContext, mode: ComposeMode) -> S
 /// rendered by name only and dedup by canonical path on the consumer
 /// side, so following a generic project-root symlink is safe.
 pub(crate) fn resolve_repo_dir_walk_root(ctx: &ScopeContext) -> Scope {
-    let root = ctx
-        .repo_info
-        .as_ref()
-        .map(|info| info.root.clone())
-        .or_else(|| ctx.git_root.clone())
+    let root = effective_repo_root(ctx)
+        .map(Path::to_path_buf)
         .unwrap_or_else(|| ctx.cwd.clone());
     Scope {
         kind: ScopeKind::RepoDirWalk,

@@ -34,6 +34,10 @@ fn seed_cargo_workspace(root: &Path) {
     seed_cargo_workspace_members(root, &["pkg"]);
 }
 
+fn seed_plain_git_repo(root: &Path) {
+    fs::create_dir_all(root.join(".git")).unwrap();
+}
+
 fn seed_cargo_workspace_members(root: &Path, members: &[&str]) {
     fs::create_dir_all(root.join(".git")).unwrap();
     let members_list = members
@@ -401,6 +405,24 @@ fn compose_committed_dir_walks_inside_only() {
     );
 }
 
+#[test]
+fn compose_plain_git_committed_dir_uses_git_root() {
+    let ws = TestWorkspace::named("complete-compose-plain-git-committed");
+    seed_plain_git_repo(ws.path());
+    let nested = ws.path().join("nested").join("child");
+    fs::create_dir_all(&nested).unwrap();
+    write_file(
+        &ws.path().join("prompts").join("planning").join("deep.md"),
+        "# deep\n",
+    );
+
+    let got = run_complete(&nested, &["compose", "prompts/planning/"]);
+    assert!(
+        got.iter().any(|c| c == "prompts/planning/deep.md"),
+        "plain git committed dir must resolve from git root, not nested cwd: {got:?}"
+    );
+}
+
 // ---------------------------------------------------------------------
 // compose @ magic-path resolution
 // ---------------------------------------------------------------------
@@ -625,6 +647,47 @@ fn compose_magic_path_shaped_claudine_prompts_resolves() {
     assert!(
         got.iter().any(|c| c == ".claudine/prompts/plan.md"),
         "path-shaped magic `@.claudine/prompts/plan` must resolve: {got:?}"
+    );
+}
+
+#[test]
+fn compose_plain_git_magic_renders_repo_claudine_relative() {
+    let ws = TestWorkspace::named("complete-compose-plain-git-magic-claudine");
+    seed_plain_git_repo(ws.path());
+    let nested = ws.path().join("nested").join("child");
+    fs::create_dir_all(&nested).unwrap();
+    write_file(
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# plan\n",
+    );
+
+    let got = run_complete(&nested, &["compose", "@.claudine/prompts/plan"]);
+    assert_eq!(
+        got,
+        vec![".claudine/prompts/plan.md".to_string()],
+        "plain git magic should render repo .claudine path relative to git root"
+    );
+}
+
+#[test]
+fn compose_plain_git_non_magic_renders_repo_claudine_relative() {
+    let ws = TestWorkspace::named("complete-compose-plain-git-word-claudine");
+    seed_plain_git_repo(ws.path());
+    let nested = ws.path().join("nested").join("child");
+    fs::create_dir_all(&nested).unwrap();
+    write_file(
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# plan\n",
+    );
+
+    let got = run_complete(&nested, &["compose", "plan"]);
+    assert!(
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "plain git non-magic should render repo .claudine path relative to git root: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "prompts/plan.md"),
+        "plain git repo .claudine prompt must not collapse to prompts/: {got:?}"
     );
 }
 
