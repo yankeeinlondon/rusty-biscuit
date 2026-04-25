@@ -10,7 +10,7 @@
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
 //! 2. **Unary NOT** - `!x`
 //! 3. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 4. **Fallback** - `|`
+//! 4. **Fallback** - `||`
 //! 5. **Ternary** - `? :`
 //!
 //! ## Examples
@@ -22,7 +22,7 @@
 //!
 //! Fallback:
 //! ```text
-//! {{ foo | "default" }} -> Fallback { primary: Variable("foo"), fallback: StringLiteral("default") }
+//! {{ foo || "default" }} -> Fallback { primary: Variable("foo"), fallback: StringLiteral("default") }
 //! ```
 //!
 //! Ternary with comparison:

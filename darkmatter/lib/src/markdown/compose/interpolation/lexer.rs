@@ -22,7 +22,7 @@
 //! assert_eq!(expressions[0].expression, "name");
 //!
 //! // Tokenize an expression
-//! let mut lexer = Lexer::new("name | \"unknown\"");
+//! let mut lexer = Lexer::new("name || \"unknown\"");
 //! let tokens = lexer.tokenize_all().unwrap();
 //!
 //! assert!(matches!(&tokens[0], Token::Variable(v) if v == "name"));
@@ -209,7 +209,7 @@ pub enum Token {
     /// Dotted paths are kept as single tokens for simpler AST representation.
     Variable(String),
 
-    /// The pipe operator `|` for fallback values.
+    /// The `||` fallback operator in interpolation mode.
     Pipe,
 
     /// The question mark `?` for ternary condition.
@@ -249,20 +249,21 @@ pub enum Token {
     Eof,
 }
 
-/// Parse mode controlling how `|`, `||`, and `&&` are tokenized.
+/// Parse mode controlling how `||` and `&&` are tokenized.
 ///
-/// Interpolation mode preserves legacy fallback semantics where both `|` and
-/// `||` map to [`Token::Pipe`] and `&&` is rejected. Condition mode enables
-/// infix logical operators for `when="..."` expressions: `||` becomes
-/// [`Token::OrOr`] and `&&` becomes [`Token::AndAnd`] while single `|` stays as
-/// the fallback operator.
+/// Interpolation mode: `||` maps to [`Token::Pipe`] (fallback operator);
+/// bare `|` and `&&` are invalid.
+///
+/// Condition mode enables infix logical operators for `when="..."` expressions:
+/// `||` maps to [`Token::OrOr`] (logical OR), `&&` maps to [`Token::AndAnd`]
+/// (logical AND), and bare `|` is invalid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ParseMode {
-    /// Interpolation parsing (default). `||` collapses to fallback, `&&` is invalid.
+    /// Interpolation parsing (default). `||` is fallback; bare `|` and `&&` are invalid.
     #[default]
     Interpolation,
 
-    /// Condition parsing. `||` is logical OR, `&&` is logical AND.
+    /// Condition parsing. `||` is logical OR, `&&` is logical AND; bare `|` is invalid.
     Condition,
 }
 
@@ -418,14 +419,22 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 if self.current_char() == Some('|') {
                     self.advance();
-                    // In condition mode, `||` is logical OR. In interpolation
-                    // mode, `||` collapses to fallback for backward compatibility.
                     match self.mode {
-                        ParseMode::Condition => Ok(Token::OrOr),
                         ParseMode::Interpolation => Ok(Token::Pipe),
+                        ParseMode::Condition => Ok(Token::OrOr),
                     }
                 } else {
-                    Ok(Token::Pipe)
+                    Err(LexerError::new(
+                        match self.mode {
+                            ParseMode::Interpolation => {
+                                "Unexpected '|'. Use '||' for fallback."
+                            }
+                            ParseMode::Condition => {
+                                "Unexpected '|'. Use '||' for logical OR."
+                            }
+                        },
+                        start_pos,
+                    ))
                 }
             }
             '&' => {
@@ -887,8 +896,8 @@ After code {{ end }}."#;
         }
 
         #[test]
-        fn tokenizes_pipe_operator() {
-            let mut lexer = Lexer::new("foo | bar");
+        fn tokenizes_fallback_operator() {
+            let mut lexer = Lexer::new("foo || bar");
             let tokens = lexer.tokenize_all().unwrap();
 
             assert_eq!(tokens.len(), 4);
@@ -1068,7 +1077,7 @@ After code {{ end }}."#;
 
         #[test]
         fn tokenizes_fallback_with_string() {
-            let mut lexer = Lexer::new(r#"color | "unknown""#);
+            let mut lexer = Lexer::new(r#"color || "unknown""#);
             let tokens = lexer.tokenize_all().unwrap();
 
             assert_eq!(tokens.len(), 4);
@@ -1079,8 +1088,7 @@ After code {{ end }}."#;
         }
 
         #[test]
-        fn tokenizes_double_pipe_as_single_fallback() {
-            // || is treated as equivalent to | (fallback operator)
+        fn tokenizes_double_pipe_as_fallback() {
             let mut lexer = Lexer::new(r#"plan || "plan.md""#);
             let tokens = lexer.tokenize_all().unwrap();
 
@@ -1168,11 +1176,14 @@ After code {{ end }}."#;
 
         #[test]
         fn tokenizes_env_with_fallback() {
-            let mut lexer = Lexer::new(r#"env.FAVORITE_COLOR | "unknown""#);
+            let mut lexer = Lexer::new(r#"env.FAVORITE_COLOR || "unknown""#);
             let tokens = lexer.tokenize_all().unwrap();
 
             assert_eq!(tokens.len(), 4);
-            assert!(matches!(&tokens[0], Token::Variable(v) if v == "env.FAVORITE_COLOR"));
+            assert!(matches!(
+                &tokens[0],
+                Token::Variable(v) if v == "env.FAVORITE_COLOR"
+            ));
             assert!(matches!(&tokens[1], Token::Pipe));
             assert!(matches!(&tokens[2], Token::StringLiteral(s) if s == "unknown"));
         }
@@ -1221,6 +1232,51 @@ After code {{ end }}."#;
             assert!(matches!(&tokens[0], Token::Bang));
             assert!(matches!(&tokens[1], Token::Variable(v) if v == "foo"));
         }
+
+        #[test]
+        fn error_bare_pipe_in_interpolation() {
+            let mut lexer = Lexer::new("foo | bar");
+            let result = lexer.tokenize_all();
+
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(err.message.contains("Unexpected '|'"));
+            assert!(err.message.contains("fallback"));
+        }
+
+        #[test]
+        fn error_bare_pipe_in_condition() {
+            let mut lexer = Lexer::with_mode("foo | bar", ParseMode::Condition);
+            let result = lexer.tokenize_all();
+
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(err.message.contains("Unexpected '|'"));
+            assert!(err.message.contains("logical OR"));
+        }
+
+        #[test]
+        fn string_literal_with_pipe_is_ok() {
+            let mut lexer = Lexer::new(r#""a | b""#);
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 2);
+            assert!(matches!(&tokens[0],
+                Token::StringLiteral(s) if s == "a | b"
+            ));
+        }
+
+        #[test]
+        fn string_literal_with_double_pipe_is_ok() {
+            let mut lexer = Lexer::new(r#""a || b""#);
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 2);
+            assert!(matches!(
+                &tokens[0],
+                Token::StringLiteral(s) if s == "a || b"
+            ));
+        }
     }
 
     mod lexer_whitespace {
@@ -1246,7 +1302,7 @@ After code {{ end }}."#;
 
         #[test]
         fn handles_no_whitespace() {
-            let mut lexer = Lexer::new("a|b?c:d");
+            let mut lexer = Lexer::new("a||b?c:d");
             let tokens = lexer.tokenize_all().unwrap();
 
             assert_eq!(tokens.len(), 8);
@@ -1261,7 +1317,7 @@ After code {{ end }}."#;
 
         #[test]
         fn handles_mixed_whitespace() {
-            let mut lexer = Lexer::new("  foo  |  bar  ");
+            let mut lexer = Lexer::new("  foo  ||  bar  ");
             let tokens = lexer.tokenize_all().unwrap();
 
             assert_eq!(tokens.len(), 4);
@@ -1341,10 +1397,13 @@ After code {{ end }}."#;
         }
 
         #[test]
-        fn condition_mode_single_pipe_stays_fallback() {
+        fn condition_mode_single_pipe_is_error() {
             let mut lexer = Lexer::with_mode("a | b", ParseMode::Condition);
-            let tokens = lexer.tokenize_all().unwrap();
-            assert!(matches!(&tokens[1], Token::Pipe));
+            let result = lexer.tokenize_all();
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(err.message.contains("Unexpected '|'"));
+            assert!(err.message.contains("logical OR"));
         }
 
         #[test]

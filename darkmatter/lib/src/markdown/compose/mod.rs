@@ -2255,7 +2255,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_fallback_uses_default() {
-        let content = "---\ntitle: Test\n---\nColor: {{ color | \"unknown\" }}";
+        let content = "---\ntitle: Test\n---\nColor: {{ color || \"unknown\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2268,7 +2268,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_fallback_uses_primary() {
-        let content = "---\ncolor: blue\n---\nColor: {{ color | \"unknown\" }}";
+        let content = "---\ncolor: blue\n---\nColor: {{ color || \"unknown\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2449,7 +2449,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_chained_fallback() {
-        let content = "---\nbackup: second\n---\nValue: {{ missing | backup | \"default\" }}";
+        let content = "---\nbackup: second\n---\nValue: {{ missing || backup || \"default\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -4119,11 +4119,9 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
-        fn page_block_fallback_mixed_with_infix() {
-            // Fallback `|` binds tighter than `||`. When `missing_var` is unset,
-            // the fallback yields "go" which matches the literal, and `|| b`
-            // short-circuits to true.
-            let content = "---\nb: false\n---\n::block when=\"(missing_var | \\\"go\\\") == \\\"go\\\" || b\"\ninside\n::end-block\n";
+        fn page_block_with_chained_or() {
+            // Chained `||` in condition mode evaluates as logical OR
+            let content = "---\na: false\nb: false\nc: true\n---\n::block when=\"a || b || c\"\ninside\n::end-block\n";
             let (output, _report) = compose_with_page_blocks(content);
             assert!(output.contains("inside"));
         }
