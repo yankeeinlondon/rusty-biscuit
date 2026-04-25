@@ -17,32 +17,87 @@ cyan := '\033[36m'
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
-review feat="" agent="":
+review feat="" agent="" spec="" design="":
     #!/usr/bin/env bash
     set -euo pipefail
-    doc="$(just _choose_feature {{feat}}'')"
-    dir="$(dirname "${doc}")"
-    if [[ "${doc}" == *"design"* ]]; then
-        design="${doc}"
-        mapfile -t files < <(fd -g '*spec*.md' "${dir}")
-        if [[ ${#files[@]} -eq 1 ]]; then
-            spec="${files[0]}"
-        elif [[ ${#files[@]} -eq 0 ]]; then
-            spec=""
-        else
-            spec="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
-            [[ "${spec}" == "NONE" ]] && spec=""
+
+    provided_spec="{{spec}}"
+    provided_design="{{design}}"
+
+    if [[ -n "${provided_spec}" || -n "${provided_design}" ]]; then
+        # Files provided directly — derive directory and skip feature chooser
+        dir=""
+        spec=""
+        design=""
+
+        if [[ -n "${provided_spec}" ]]; then
+            if [[ ! -f "${provided_spec}" ]]; then
+                echo -e "{{red}}ERROR:{{reset}} Spec file not found: ${provided_spec}" >&2
+                exit 1
+            fi
+            spec="${provided_spec}"
+            dir="$(dirname "${provided_spec}")"
+        fi
+
+        if [[ -n "${provided_design}" ]]; then
+            if [[ ! -f "${provided_design}" ]]; then
+                echo -e "{{red}}ERROR:{{reset}} Design file not found: ${provided_design}" >&2
+                exit 1
+            fi
+            design="${provided_design}"
+            [[ -z "${dir}" ]] && dir="$(dirname "${provided_design}")"
+        fi
+
+        # Resolve missing companion file(s)
+        if [[ -z "${design}" ]]; then
+            mapfile -t files < <(fd -g '*design*.md' "${dir}")
+            if [[ ${#files[@]} -eq 1 ]]; then
+                design="${files[0]}"
+            elif [[ ${#files[@]} -eq 0 ]]; then
+                design=""
+            else
+                design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
+                [[ "${design}" == "NONE" ]] && design=""
+            fi
+        fi
+
+        if [[ -z "${spec}" ]]; then
+            mapfile -t files < <(fd -g '*spec*.md' "${dir}")
+            if [[ ${#files[@]} -eq 1 ]]; then
+                spec="${files[0]}"
+            elif [[ ${#files[@]} -eq 0 ]]; then
+                spec=""
+            else
+                spec="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
+                [[ "${spec}" == "NONE" ]] && spec=""
+            fi
         fi
     else
-        spec="${doc}"
-        mapfile -t files < <(fd -g '*design*.md' "${dir}")
-        if [[ ${#files[@]} -eq 1 ]]; then
-            design="${files[0]}"
-        elif [[ ${#files[@]} -eq 0 ]]; then
-            design=""
+        # Interactive feature chooser path
+        doc="$(just _choose_feature {{feat}}'')"
+        dir="$(dirname "${doc}")"
+        if [[ "${doc}" == *"design"* ]]; then
+            design="${doc}"
+            mapfile -t files < <(fd -g '*spec*.md' "${dir}")
+            if [[ ${#files[@]} -eq 1 ]]; then
+                spec="${files[0]}"
+            elif [[ ${#files[@]} -eq 0 ]]; then
+                spec=""
+            else
+                spec="$( ( echo "NONE"; fd -g '*spec*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
+                [[ "${spec}" == "NONE" ]] && spec=""
+            fi
         else
-            design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
-            [[ "${design}" == "NONE" ]] && design=""
+            spec="${doc}"
+            mapfile -t files < <(fd -g '*design*.md' "${dir}")
+            if [[ ${#files[@]} -eq 1 ]]; then
+                design="${files[0]}"
+            elif [[ ${#files[@]} -eq 0 ]]; then
+                design=""
+            else
+                design="$( ( echo "NONE"; fd -g '*design*.md' "${dir}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
+                [[ "${design}" == "NONE" ]] && design=""
+            fi
         fi
     fi
     feature="$(basename "${dir}")"
@@ -95,6 +150,14 @@ review feat="" agent="":
     echo
     echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: $(just _link "$(sniff repo package-area)/${dir}/review-${iteration}.md" "${dir}/review-${iteration}.md")"
     echo
+
+    # Offer to implement the review suggestions immediately
+    echo
+    if [[ "$(just _confirm "Would you like to implement the review suggestions now?")" == "y" ]]; then
+        just implement-feature-review filter="$(basename "${dir}")" spec="${spec}" design="${design}" agent="${use_agent}" || (
+            echo -e "{{red}}ERROR:{{reset}} Failed to implement review suggestions for ${feature}" >&2
+        )
+    fi
 
 # implement a review that was conducted (not a feature review)
 implement-review filter="":

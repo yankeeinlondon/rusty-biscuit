@@ -296,7 +296,7 @@ clarify filter="" agent="":
     if [[ "${use_agent}" == "opencode" ]];then
         model="--model $(just _choose_model)"
     fi
-    doc_path="$(sniff repo package-area)/${file}"
+    doc_path="${file}"
     link="$(just _link "${file}")"
     claudine compose "@prompts/clarify.md" --${use_agent} -y -i doc="${doc_path}" ${model} || (
         echo
