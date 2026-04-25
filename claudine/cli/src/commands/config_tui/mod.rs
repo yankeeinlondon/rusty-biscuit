@@ -78,13 +78,9 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
             match rx.try_recv() {
                 Ok(result) => {
                     app.pending_test = None;
-                    if let Some(
-                        app::ModalState::MessengerInput {
-                            test_status,
-                            error,
-                            ..
-                        },
-                    ) = &mut app.modal
+                    if let Some(app::ModalState::MessengerInput {
+                        test_status, error, ..
+                    }) = &mut app.modal
                     {
                         *test_status = Some(match result {
                             Ok(()) => "✓ Test connection successful".to_string(),

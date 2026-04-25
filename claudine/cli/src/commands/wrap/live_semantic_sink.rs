@@ -3855,9 +3855,11 @@ mod tests {
 
             let stderr_only: Vec<String> = combined
                 .iter()
-                .filter_map(|(is_stdout, line)| {
-                    if *is_stdout { None } else { Some(line.clone()) }
-                })
+                .filter_map(
+                    |(is_stdout, line)| {
+                        if *is_stdout { None } else { Some(line.clone()) }
+                    },
+                )
                 .collect();
             let stderr_joined = stderr_only.join("\n");
 
