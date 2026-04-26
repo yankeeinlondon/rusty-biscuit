@@ -510,7 +510,7 @@ pub fn print_remote_json(report: &RemoteReport) -> serde_json::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sniff::remote::{GitProvider, KeyUrls, RepoMetadata, TagsAndReleases};
+    use sniff::remote::{GitProvider, KeyUrls, PullRequestState, RepoMetadata, TagsAndReleases};
 
     fn make_test_report() -> RemoteReport {
         RemoteReport {
@@ -558,10 +558,179 @@ mod tests {
         }
     }
 
+    fn make_test_pr(number: u64, state: &str, draft: bool, merged_at: Option<String>) -> PullRequestInfo {
+        PullRequestInfo {
+            number,
+            title: format!("PR #{number}"),
+            state: state.to_string(),
+            author: "testuser".to_string(),
+            draft,
+            source_branch: Some("feature-branch".to_string()),
+            target_branch: Some("main".to_string()),
+            labels: vec![],
+            body: None,
+            created_at: "2024-01-15T10:00:00Z".to_string(),
+            updated_at: None,
+            merged_at,
+            html_url: format!("https://github.com/owner/repo/pull/{number}"),
+        }
+    }
+
+    fn make_test_pr_with_labels_and_body(number: u64) -> PullRequestInfo {
+        PullRequestInfo {
+            number,
+            title: format!("PR #{number}"),
+            state: "open".to_string(),
+            author: "testuser".to_string(),
+            draft: false,
+            source_branch: Some("feature-branch".to_string()),
+            target_branch: Some("main".to_string()),
+            labels: vec!["bug".to_string(), "urgent".to_string()],
+            body: Some("This is the PR description.\nIt has multiple lines.".to_string()),
+            created_at: "2024-01-15T10:00:00Z".to_string(),
+            updated_at: None,
+            merged_at: None,
+            html_url: format!("https://github.com/owner/repo/pull/{number}"),
+        }
+    }
+
     #[test]
     fn test_print_remote_json_succeeds() {
         let report = make_test_report();
         let result = print_remote_json(&report);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_empty() {
+        let prs: Vec<PullRequestInfo> = vec![];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.is_empty());
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_basic() {
+        let prs = vec![
+            make_test_pr(1, "open", false, None),
+            make_test_pr(2, "closed", false, None),
+        ];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("Pull Requests"));
+        assert!(rendered.contains("#1"));
+        assert!(rendered.contains("PR #1"));
+        assert!(rendered.contains("open"));
+        assert!(rendered.contains("testuser"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_draft_marker() {
+        let prs = vec![make_test_pr(1, "open", true, None)];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("[draft]"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_merged_state() {
+        let prs = vec![make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()))];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("merged"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_closed_state() {
+        let prs = vec![make_test_pr(1, "closed", false, None)];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("closed"));
+        assert!(!rendered.contains("merged"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_empty() {
+        let prs: Vec<PullRequestInfo> = vec![];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.is_empty());
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_basic() {
+        let prs = vec![make_test_pr(1, "open", false, None)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("Pull Requests"));
+        assert!(rendered.contains("#1"));
+        assert!(rendered.contains("PR #1"));
+        assert!(rendered.contains("testuser"));
+        assert!(rendered.contains("open"));
+        assert!(rendered.contains("feature-branch"));
+        assert!(rendered.contains("main"));
+        assert!(rendered.contains("2024-01-15"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_with_labels_and_body() {
+        let prs = vec![make_test_pr_with_labels_and_body(42)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("#42"));
+        assert!(rendered.contains("bug"));
+        assert!(rendered.contains("urgent"));
+        // Body is rendered through markdown terminal renderer which wraps words
+        // in ANSI escape codes, so we check for individual words rather than phrases.
+        assert!(rendered.contains("description"));
+        assert!(rendered.contains("multiple"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_draft_marker() {
+        let prs = vec![make_test_pr(1, "open", true, None)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("[draft]"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_merged_state() {
+        let prs = vec![make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()))];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("merged"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_empty_message_open() {
+        let rendered = render_pull_requests_empty(PullRequestState::Open);
+        assert!(rendered.contains("No open pull requests found"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_empty_message_merged() {
+        let rendered = render_pull_requests_empty(PullRequestState::Merged);
+        assert!(rendered.contains("No merged pull requests found"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_empty_message_all() {
+        let rendered = render_pull_requests_empty(PullRequestState::All);
+        assert!(rendered.contains("No all pull requests found"));
+    }
+
+    #[test]
+    fn test_pr_state_display_open() {
+        let pr = make_test_pr(1, "open", false, None);
+        assert_eq!(pr_state_display(&pr), "open");
+    }
+
+    #[test]
+    fn test_pr_state_display_closed() {
+        let pr = make_test_pr(1, "closed", false, None);
+        assert_eq!(pr_state_display(&pr), "closed");
+    }
+
+    #[test]
+    fn test_pr_state_display_merged() {
+        let pr = make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()));
+        assert_eq!(pr_state_display(&pr), "merged");
+    }
+
+    #[test]
+    fn test_pr_state_display_unknown() {
+        let pr = make_test_pr(1, "unknown", false, None);
+        assert_eq!(pr_state_display(&pr), "unknown");
     }
 }
