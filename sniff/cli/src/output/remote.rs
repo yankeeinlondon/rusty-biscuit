@@ -373,6 +373,134 @@ fn pr_state_display(pr: &PullRequestInfo) -> String {
     }
 }
 
+/// Render a list of pull requests as a compact table for `sniff repo pr`.
+///
+/// Columns: ID, Title, Author, State.
+pub fn render_pull_requests_table(prs: &[PullRequestInfo]) -> String {
+    if prs.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let mut out = String::new();
+
+    let heading = format!("<b><u>Pull Requests</u></b> <dim>({})</dim>", prs.len());
+    write!(out, "{}", Prose::new(&heading).display(&term)).unwrap();
+
+    let columns = vec![
+        TableColumn::new("#").with_min_width(4),
+        TableColumn::new("Title"),
+        TableColumn::new("State").with_min_width(6),
+        TableColumn::new("Author").with_min_width(8),
+    ];
+
+    let mut table = Table::new().with_columns(columns);
+
+    for pr in prs.iter().take(50) {
+        let state_display = pr_state_display(pr);
+        let title = if pr.draft {
+            format!("{} <dim>[draft]</dim>", pr.title)
+        } else {
+            pr.title.clone()
+        };
+
+        table.add_row(vec![
+            format!("#{}", pr.number).into(),
+            title.into(),
+            state_display.into(),
+            pr.author.clone().into(),
+        ]);
+    }
+
+    write!(out, "{}", table.display(&term)).unwrap();
+    out
+}
+
+/// Render a list of pull requests as verbose blocks for `sniff repo pr -v`.
+///
+/// Each PR is rendered as a block with number/title, author, normalized status
+/// with draft marker, source and target branches, labels, created date, URL,
+/// and description body when present.
+pub fn render_pull_requests_verbose(prs: &[PullRequestInfo]) -> String {
+    if prs.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let mut out = String::new();
+
+    let heading = format!("<b><u>Pull Requests</u></b> <dim>({})</dim>", prs.len());
+    write!(out, "{}", Prose::new(&heading).display(&term)).unwrap();
+
+    for pr in prs.iter().take(50) {
+        writeln!(out).unwrap();
+
+        // Title line
+        let draft_marker = if pr.draft { " <dim>[draft]</dim>" } else { "" };
+        let title_line = format!("<b>#{}</b> {}{}", pr.number, pr.title, draft_marker);
+        write!(out, "{}", Prose::new(&title_line).display(&term)).unwrap();
+
+        // Meta line
+        let state_display = pr_state_display(pr);
+        let mut meta_parts = vec![
+            format!("<dim>by</dim> <b>{}</b>", pr.author),
+            format!("<dim>{}</dim>", state_display),
+        ];
+
+        if let Some(ref src) = pr.source_branch
+            && let Some(ref tgt) = pr.target_branch
+        {
+            meta_parts.push(format!("<dim>{} → {}</dim>", src, tgt));
+        }
+
+        meta_parts.push(format!("<dim>{}</dim>", pr.created_at));
+        write!(out, "{}", Prose::new(meta_parts.join("  ")).display(&term)).unwrap();
+
+        // Labels
+        if !pr.labels.is_empty() {
+            let labels_str = pr
+                .labels
+                .iter()
+                .map(|l| format!("<cyan>{l}</cyan>"))
+                .collect::<Vec<_>>()
+                .join("  ");
+            write!(out, "{}", Prose::new(&labels_str).display(&term)).unwrap();
+        }
+
+        // URL
+        write!(
+            out,
+            "{}",
+            Prose::new(format!("<a href=\"{}\">{}</a>", pr.html_url, pr.html_url)).display(&term)
+        )
+        .unwrap();
+
+        // Body
+        if let Some(ref body) = pr.body
+            && !body.trim().is_empty()
+        {
+            let preview: String = body
+                .lines()
+                .take(10)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let md: Markdown = preview.into();
+            let mut buffer = Vec::new();
+            let _ = write_terminal(&mut buffer, &md, TerminalOptions::default());
+            out.push_str(&String::from_utf8_lossy(&buffer));
+        }
+    }
+
+    out
+}
+
+/// Render a clear message when no pull requests match the filter.
+pub fn render_pull_requests_empty(state: sniff::remote::PullRequestState) -> String {
+    let term = Terminal::default();
+    let msg = format!("No {} pull requests found", state.as_str());
+    Prose::new(&msg).render(&term)
+}
+
 /// Print remote report as JSON.
 pub fn print_remote_json(report: &RemoteReport) -> serde_json::Result<()> {
     println!("{}", serde_json::to_string_pretty(report)?);
