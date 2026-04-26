@@ -311,4 +311,166 @@ mod tests {
         let any_ref = BrowserRenderable::as_any(&block);
         assert!(any_ref.downcast_ref::<YamlBlock>().is_some());
     }
+
+    #[test]
+    fn test_terminal_render_contains_ansi_and_content() {
+        let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        let term = Terminal::new();
+        let output = Renderable::render(&block, &term);
+
+        // Should contain ANSI escape codes for syntax highlighting
+        assert!(output.contains("\x1b["), "Terminal output should contain ANSI codes");
+
+        // Should contain the YAML content when ANSI is stripped
+        let plain = crate::testing::strip_ansi_codes(&output);
+        assert!(plain.contains("foo: 1"), "Terminal output should contain YAML content");
+        assert!(plain.contains("bar: 2"), "Terminal output should contain YAML content");
+    }
+
+    #[test]
+    fn test_terminal_render_parity_with_markdown_yaml_fence() {
+        let yaml_content = "foo: 1\nbar: 2";
+
+        // Render via YamlBlock
+        let block = YamlBlock::new(yaml_content).unwrap();
+        let term = Terminal::new();
+        let block_output = Renderable::render(&block, &term);
+
+        // Render via Markdown YAML fence
+        let md_content = format!("```yaml\n{}\n```", yaml_content);
+        let md: Markdown = md_content.into();
+        let md_output = md.as_terminal(TerminalOptions::default()).unwrap();
+
+        // Both should contain ANSI codes
+        assert!(block_output.contains("\x1b["), "YamlBlock should produce ANSI output");
+        assert!(md_output.contains("\x1b["), "Markdown YAML fence should produce ANSI output");
+
+        // Both should contain the YAML content
+        let block_plain = crate::testing::strip_ansi_codes(&block_output);
+        let md_plain = crate::testing::strip_ansi_codes(&md_output);
+        assert!(block_plain.contains("foo: 1"));
+        assert!(md_plain.contains("foo: 1"));
+    }
+
+    #[test]
+    fn test_browser_render_contains_language_yaml() {
+        let block = YamlBlock::new("foo: 1").unwrap();
+        let html = BrowserRenderable::render_to_browser(&block);
+
+        // Should contain language-yaml class
+        assert!(
+            html.contains("language-yaml"),
+            "Browser output should contain language-yaml class. Got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_browser_render_escapes_html_in_yaml() {
+        let block = YamlBlock::new("script: \"<script>alert('xss')</script>\"").unwrap();
+        let html = BrowserRenderable::render_to_browser(&block);
+
+        // Should escape HTML special characters
+        assert!(
+            html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
+            "Browser output should escape <script> tags. Got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_browser_render_parity_with_markdown_yaml_fence() {
+        let yaml_content = "foo: 1\nbar: 2";
+
+        // Render via YamlBlock
+        let block = YamlBlock::new(yaml_content).unwrap();
+        let block_html = BrowserRenderable::render_to_browser(&block);
+
+        // Render via Markdown YAML fence
+        let md_content = format!("```yaml\n{}\n```", yaml_content);
+        let md: Markdown = md_content.into();
+        let md_html = md.as_html(HtmlOptions::default()).unwrap();
+
+        // Both should contain language-yaml
+        assert!(block_html.contains("language-yaml"), "YamlBlock should produce language-yaml");
+        assert!(md_html.contains("language-yaml"), "Markdown fence should produce language-yaml");
+
+        // Both should contain the YAML content (individual words, since syntax highlighting may split them across spans)
+        assert!(block_html.contains("foo"), "YamlBlock should contain YAML content");
+        assert!(md_html.contains("foo"), "Markdown fence should contain YAML content");
+        assert!(block_html.contains("bar"), "YamlBlock should contain YAML content");
+        assert!(md_html.contains("bar"), "Markdown fence should contain YAML content");
+    }
+
+    #[test]
+    fn test_terminal_render_with_light_color_mode() {
+        let block = YamlBlock::new("key: value").unwrap();
+        let term = Terminal::new();
+        let output = Renderable::render(&block, &term);
+
+        // Should produce ANSI output regardless of detected color mode
+        assert!(output.contains("\x1b["), "Terminal output should contain ANSI codes");
+
+        // Content should be present
+        let plain = crate::testing::strip_ansi_codes(&output);
+        assert!(plain.contains("key: value"));
+    }
+
+    #[test]
+    fn test_terminal_render_with_dark_color_mode() {
+        let block = YamlBlock::new("key: value").unwrap();
+        let term = Terminal::new();
+        let output = Renderable::render(&block, &term);
+
+        // Should produce ANSI output
+        assert!(output.contains("\x1b["), "Terminal output should contain ANSI codes");
+
+        // Content should be present
+        let plain = crate::testing::strip_ansi_codes(&output);
+        assert!(plain.contains("key: value"));
+    }
+
+    #[test]
+    fn test_browser_render_structure() {
+        let block = YamlBlock::new("nested:\n  key: value").unwrap();
+        let html = BrowserRenderable::render_to_browser(&block);
+
+        // Should contain pre and code tags
+        assert!(html.contains("<pre>"), "Browser output should contain <pre> tag");
+        assert!(html.contains("<code"), "Browser output should contain <code> tag");
+        assert!(html.contains("</code>"), "Browser output should contain </code> tag");
+        assert!(html.contains("</pre>"), "Browser output should contain </pre> tag");
+
+        // Should contain the YAML content (may be inside syntax-highlighting spans)
+        assert!(html.contains("nested"), "HTML should contain 'nested'. Full HTML: {}", html);
+        assert!(html.contains("key"), "HTML should contain 'key'. Full HTML: {}", html);
+        assert!(html.contains("value"), "HTML should contain 'value'. Full HTML: {}", html);
+    }
+
+    #[test]
+    fn test_yaml_block_render_is_block_level() {
+        let block = YamlBlock::new("foo: 1").unwrap();
+        assert!(Renderable::is_block_level(&block), "YamlBlock should be block-level");
+    }
+
+    #[test]
+    fn test_terminal_render_empty_yaml() {
+        let block = YamlBlock::new("").unwrap();
+        let term = Terminal::new();
+        let output = Renderable::render(&block, &term);
+
+        // Should still produce valid output (padding rows at minimum)
+        assert!(output.contains("\x1b["), "Empty YAML should still produce ANSI output");
+    }
+
+    #[test]
+    fn test_browser_render_empty_yaml() {
+        let block = YamlBlock::new("").unwrap();
+        let html = BrowserRenderable::render_to_browser(&block);
+
+        // Should contain the code block structure even for empty YAML
+        assert!(html.contains("language-yaml"), "Empty YAML should still have language class");
+        assert!(html.contains("<pre>"), "Empty YAML should still have <pre> tag");
+        assert!(html.contains("<code"), "Empty YAML should still have <code> tag");
+    }
 }

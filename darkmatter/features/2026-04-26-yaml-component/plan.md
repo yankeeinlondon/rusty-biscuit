@@ -22,6 +22,11 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .opencode/skill/darkmatter/SKILL.md
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/yaml_block.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages: [darkmatter]
 ---
 
