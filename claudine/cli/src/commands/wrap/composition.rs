@@ -1763,7 +1763,7 @@ fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
 
 // -- Config loading -------------------------------------------------------
 
-fn load_config_favorite(cwd: &Path) -> Option<Provider> {
+pub(crate) fn load_config_favorite(cwd: &Path) -> Option<Provider> {
     let repo_root = sniff::filesystem::git::detect_git(cwd, false, 1)
         .ok()
         .flatten()

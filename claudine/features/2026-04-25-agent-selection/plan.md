@@ -59,6 +59,14 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase5:
     - .opencode/skill/claudine/SKILL.md
+source_files_during_phase_6:
+    - claudine/cli/src/commands/wrap/sequence.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/commands/wrap/composition.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase6:
+    - .claude/skills/claudine/SKILL.md
 packages:
     - claudine
     - claudine-cli
