@@ -1,14 +1,20 @@
 ---
-spec: ""
-design: ""
-review: ""
 $schema:
-    spec: "string | undefined"
-    design: "string | undefined"
-    review: "string | undefined"
-$schema_descriptor: 
-    - "provide a 'spec' _and/or_ 'design' file to perform a review of a **feature** _or_ **fix**"
-    - ""
+    kind: "enum(performance, comprehensive, dry, feature)"
+interactive:
+    kind: 
+        input: select
+        choices:
+            - performance
+            - comprehensive
+            - dry
+            - feature
+        label: "Choose the type of review you want to conduct"
+    foobar: boolean
+    multi: 
+        min: 0
+        max: 2
+
 ---
 
 
