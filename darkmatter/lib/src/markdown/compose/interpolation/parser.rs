@@ -6,7 +6,7 @@
 //! ```text
 //! expression     = ternary
 //! ternary        = fallback ("?" fallback ":" fallback)?
-//! fallback       = comparison ("|" comparison)*
+//! fallback       = comparison ("||" comparison)*
 //! comparison     = unary (comp_op unary)?
 //! unary          = "!" unary | primary
 //! primary        = literal | variable | function_call | "(" expression ")"
@@ -21,7 +21,7 @@
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
 //! 2. **Unary NOT** - `!x`
 //! 3. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 4. **Fallback** - `|`
+//! 4. **Fallback** - `||`
 //! 5. **Ternary** - `? :`
 //!
 //! ## Examples
@@ -34,7 +34,7 @@
 //! assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
 //!
 //! // Fallback
-//! let expr = parse(r#"foo | "default""#).unwrap();
+//! let expr = parse(r#"foo || "default""#).unwrap();
 //! assert!(matches!(expr, Expr::Fallback { .. }));
 //!
 //! // Ternary
@@ -242,16 +242,16 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses a logical AND expression (condition mode only):
-    /// `fallback ("&&" fallback)*`.
+    /// `comparison ("&&" comparison)*`.
     ///
     /// Infix `a && b` is lowered into the existing function-call AST as
     /// `And(a, b)`.
     fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_fallback()?;
+        let mut expr = self.parse_comparison()?;
 
         while matches!(self.current, Token::AndAnd) {
             self.advance()?; // consume &&
-            let rhs = self.parse_fallback()?;
+            let rhs = self.parse_comparison()?;
             expr = Expr::FunctionCall {
                 name: "And".to_string(),
                 args: vec![expr, rhs],
@@ -261,12 +261,12 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a fallback expression: `comparison ("|" comparison)*`
+    /// Parses a fallback expression: `comparison ("||" comparison)*`
     fn parse_fallback(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_comparison()?;
 
         while matches!(self.current, Token::Pipe) {
-            self.advance()?; // consume |
+            self.advance()?; // consume ||
             let fallback = self.parse_comparison()?;
             expr = Expr::Fallback {
                 primary: Box::new(expr),
@@ -372,7 +372,7 @@ impl<'a> Parser<'a> {
 /// ```
 /// use darkmatter::markdown::compose::interpolation::{parse, Expr};
 ///
-/// let expr = parse("foo | \"default\"").unwrap();
+/// let expr = parse("foo || \"default\"").unwrap();
 /// assert!(matches!(expr, Expr::Fallback { .. }));
 /// ```
 ///
@@ -386,9 +386,9 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 /// Parses an expression string using condition-mode grammar.
 ///
 /// In condition mode, `&&` and `||` are recognized as infix logical operators
-/// and lowered into `And(...)` / `Or(...)` function-call nodes. Single `|`
-/// still parses as the fallback operator. Use this entrypoint for every
-/// `when="..."` expression so interpolation parsing elsewhere is unaffected.
+/// and lowered into `And(...)` / `Or(...)` function-call nodes. Use this
+/// entrypoint for every `when="..."` expression so interpolation parsing
+/// elsewhere is unaffected.
 ///
 /// ## Examples
 ///
@@ -488,7 +488,7 @@ mod tests {
 
         #[test]
         fn parses_fallback() {
-            let expr = parse(r#"foo | "default""#).unwrap();
+            let expr = parse(r#"foo || "default""#).unwrap();
             match expr {
                 Expr::Fallback { primary, fallback } => {
                     assert!(matches!(*primary, Expr::Variable(ref n) if n == "foo"));
@@ -500,7 +500,7 @@ mod tests {
 
         #[test]
         fn parses_fallback_with_variable() {
-            let expr = parse("foo | bar").unwrap();
+            let expr = parse("foo || bar").unwrap();
             match expr {
                 Expr::Fallback { primary, fallback } => {
                     assert!(matches!(*primary, Expr::Variable(ref n) if n == "foo"));
@@ -512,13 +512,13 @@ mod tests {
 
         #[test]
         fn parses_chained_fallback() {
-            // foo | bar | baz parses as ((foo | bar) | baz)
-            let expr = parse("foo | bar | baz").unwrap();
+            // foo || bar || baz parses as ((foo || bar) || baz)
+            let expr = parse("foo || bar || baz").unwrap();
             match expr {
                 Expr::Fallback { primary, fallback } => {
                     // The fallback is baz
                     assert!(matches!(*fallback, Expr::Variable(ref n) if n == "baz"));
-                    // The primary is (foo | bar)
+                    // The primary is (foo || bar)
                     match *primary {
                         Expr::Fallback {
                             primary: p2,
@@ -536,7 +536,7 @@ mod tests {
 
         #[test]
         fn parses_env_fallback() {
-            let expr = parse(r#"env.FAVORITE_COLOR | "unknown""#).unwrap();
+            let expr = parse(r#"env.FAVORITE_COLOR || "unknown""#).unwrap();
             match expr {
                 Expr::Fallback { primary, fallback } => {
                     assert!(matches!(*primary, Expr::Variable(ref n) if n == "env.FAVORITE_COLOR"));
@@ -548,7 +548,7 @@ mod tests {
 
         #[test]
         fn parses_double_pipe_as_fallback() {
-            // || is treated as equivalent to | (fallback operator)
+            // || is the fallback operator in interpolation mode
             let expr = parse(r#"plan || "plan.md""#).unwrap();
             match expr {
                 Expr::Fallback { primary, fallback } => {
@@ -605,8 +605,8 @@ mod tests {
 
         #[test]
         fn parses_ternary_with_fallback_in_branches() {
-            // x ? (a | b) : (c | d)
-            let expr = parse(r#"x ? a | b : c | d"#).unwrap();
+            // x ? (a || b) : (c || d)
+            let expr = parse(r#"x ? a || b : c || d"#).unwrap();
             match expr {
                 Expr::Ternary {
                     condition,
@@ -744,20 +744,20 @@ mod tests {
 
         #[test]
         fn parses_complex_nested() {
-            // Test: foo | bar ? "truthy" : "falsy"
-            // This should parse as: (foo | bar) ? "truthy" : "falsy"
-            // But actually per precedence: foo | (bar ? "truthy" : "falsy")
+            // Test: foo || bar ? "truthy" : "falsy"
+            // This should parse as: (foo || bar) ? "truthy" : "falsy"
+            // But actually per precedence: foo || (bar ? "truthy" : "falsy")
             // Wait, ternary has lowest precedence, so:
-            // ternary parses fallback first, which consumes foo | bar
-            // then sees ?, so the condition is (foo | bar)
-            let expr = parse(r#"foo | bar ? "truthy" : "falsy""#).unwrap();
+            // ternary parses fallback first, which consumes foo || bar
+            // then sees ?, so the condition is (foo || bar)
+            let expr = parse(r#"foo || bar ? "truthy" : "falsy""#).unwrap();
             match expr {
                 Expr::Ternary {
                     condition,
                     then_branch,
                     else_branch,
                 } => {
-                    // Condition should be foo | bar
+                    // Condition should be foo || bar
                     assert!(matches!(*condition, Expr::Fallback { .. }));
                     assert!(matches!(*then_branch, Expr::StringLiteral(ref s) if s == "truthy"));
                     assert!(matches!(*else_branch, Expr::StringLiteral(ref s) if s == "falsy"));
@@ -844,8 +844,8 @@ mod tests {
 
         #[test]
         fn parses_function_with_expression_arg() {
-            // length(items | defaults)
-            let expr = parse("length(items | defaults)").unwrap();
+            // length(items || defaults)
+            let expr = parse("length(items || defaults)").unwrap();
             match expr {
                 Expr::FunctionCall { name, args } => {
                     assert_eq!(name, "length");
@@ -874,14 +874,14 @@ mod tests {
 
         #[test]
         fn parses_parenthesized_fallback() {
-            let expr = parse("(foo | bar)").unwrap();
+            let expr = parse("(foo || bar)").unwrap();
             assert!(matches!(expr, Expr::Fallback { .. }));
         }
 
         #[test]
         fn parses_parentheses_in_ternary() {
-            // (a | b) ? c : d
-            let expr = parse("(a | b) ? c : d").unwrap();
+            // (a || b) ? c : d
+            let expr = parse("(a || b) ? c : d").unwrap();
             match expr {
                 Expr::Ternary { condition, .. } => {
                     assert!(matches!(*condition, Expr::Fallback { .. }));
@@ -898,6 +898,22 @@ mod tests {
         fn error_empty_input() {
             let result = parse("");
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn error_bare_pipe_in_interpolation() {
+            let result = parse(r#"foo | "default""#);
+            assert!(result.is_err(), "bare '|' should be rejected in interpolation mode");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("Unexpected '|'"), "error should mention '|', got: {}", err.message);
+        }
+
+        #[test]
+        fn error_bare_pipe_in_condition() {
+            let result = parse_condition("a | b");
+            assert!(result.is_err(), "bare '|' should be rejected in condition mode");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("Unexpected '|'"), "error should mention '|', got: {}", err.message);
         }
 
         #[test]
@@ -930,13 +946,13 @@ mod tests {
 
         #[test]
         fn error_trailing_pipe() {
-            let result = parse("foo |");
+            let result = parse("foo ||");
             assert!(result.is_err());
         }
 
         #[test]
         fn error_leading_pipe() {
-            let result = parse("| foo");
+            let result = parse("|| foo");
             assert!(result.is_err());
         }
 
@@ -1003,8 +1019,8 @@ mod tests {
 
         #[test]
         fn roundtrip_fallback() {
-            let expr = parse(r#"foo | "default""#).unwrap();
-            assert_eq!(expr.to_string(), "foo | \"default\"");
+            let expr = parse(r#"foo || "default""#).unwrap();
+            assert_eq!(expr.to_string(), "foo || \"default\"");
         }
 
         #[test]
@@ -1099,26 +1115,17 @@ mod tests {
         }
 
         #[test]
-        fn condition_fallback_inside_or() {
-            // a || (b | c) — fallback parses tighter than ||, and parens
-            // preserve the fallback as the rhs of the Or.
-            let expr = parse_condition("a || (b | c)").unwrap();
+        fn condition_or_inside_or() {
+            // a || (b || c) — chained OR
+            let expr = parse_condition("a || (b || c)").unwrap();
             let (outer, args) = extract_call(&expr);
             assert_eq!(outer, "Or");
             assert_eq!(args.len(), 2);
             assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
-            assert!(matches!(&args[1], Expr::Fallback { .. }));
-        }
-
-        #[test]
-        fn condition_fallback_binds_tighter_than_and() {
-            // a | b && c parses as And(Fallback(a, b), c)
-            let expr = parse_condition("a | b && c").unwrap();
-            let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "And");
-            assert_eq!(args.len(), 2);
-            assert!(matches!(&args[0], Expr::Fallback { .. }));
-            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+            let (inner, inner_args) = extract_call(&args[1]);
+            assert_eq!(inner, "Or");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
         }
 
         #[test]

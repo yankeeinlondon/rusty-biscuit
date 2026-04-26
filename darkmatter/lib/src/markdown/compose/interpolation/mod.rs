@@ -16,7 +16,7 @@
 //! - `{{ env.HOME }}` - Environment variable
 //!
 //! Fallback values:
-//! - `{{ color | "unknown" }}` - Use "unknown" if color is falsy
+//! - `{{ color || "unknown" }}` - Use "unknown" if color is falsy
 //!
 //! Ternary expressions:
 //! - `{{ color ? "known" : "unknown" }}` - Boolean switch
@@ -33,7 +33,7 @@
 //! Precedence from highest to lowest:
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
 //! 2. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 3. **Fallback** - `|`
+//! 3. **Fallback** - `||`
 //! 4. **Ternary** - `? :`
 //!
 //! ## Code Exclusion
@@ -52,7 +52,7 @@
 //! assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
 //!
 //! // Parse a fallback expression
-//! let expr = parse(r#"color | "unknown""#).unwrap();
+//! let expr = parse(r#"color || "unknown""#).unwrap();
 //! assert!(matches!(expr, Expr::Fallback { .. }));
 //!
 //! // Parse a ternary with comparison

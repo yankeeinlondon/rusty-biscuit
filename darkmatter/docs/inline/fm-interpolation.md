@@ -198,7 +198,7 @@ Frontmatter interpolation uses the same expression grammar and evaluator as body
 That means:
 
 - missing variables resolve to the empty string
-- fallbacks work: `{{ color | "unknown" }}`
+- fallbacks work: `{{ color || "unknown" }}`
 - ternaries work: `{{ enabled ? "yes" : "no" }}`
 - helper functions work: `{{ length(items) }}`
 

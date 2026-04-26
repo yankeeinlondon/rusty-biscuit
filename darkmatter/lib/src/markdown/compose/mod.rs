@@ -2255,7 +2255,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_fallback_uses_default() {
-        let content = "---\ntitle: Test\n---\nColor: {{ color | \"unknown\" }}";
+        let content = "---\ntitle: Test\n---\nColor: {{ color || \"unknown\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2267,8 +2267,21 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolation_fallback_missing_variable_renders_default() {
+        let content = "---\ntitle: Test\n---\nValue: {{ missing || \"default\" }}";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content(), "Value: default");
+        assert_eq!(report.interpolations_applied, 1);
+    }
+
+    #[test]
     fn test_interpolation_fallback_uses_primary() {
-        let content = "---\ncolor: blue\n---\nColor: {{ color | \"unknown\" }}";
+        let content = "---\ncolor: blue\n---\nColor: {{ color || \"unknown\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2449,7 +2462,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_chained_fallback() {
-        let content = "---\nbackup: second\n---\nValue: {{ missing | backup | \"default\" }}";
+        let content = "---\nbackup: second\n---\nValue: {{ missing || backup || \"default\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2488,6 +2501,37 @@ mod tests {
 
         let err = md.compose_with(options).unwrap_err();
         assert!(matches!(err, MarkdownError::Transform(_)));
+    }
+
+    #[test]
+    fn test_interpolation_bare_pipe_produces_parse_error() {
+        // Bare `|` in interpolation should produce a clear lexer error
+        let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_fail_fast(false);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Invalid expression left unchanged
+        assert_eq!(composed.content(), "Hello {{ name | \"default\" }}!");
+        assert_eq!(report.interpolations_applied, 0);
+    }
+
+    #[test]
+    fn test_interpolation_bare_pipe_fail_fast_error_message() {
+        let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_fail_fast(true);
+
+        let err = md.compose_with(options).unwrap_err();
+        let err_string = format!("{}", err);
+        assert!(err_string.contains("Unexpected '|'") || err_string.contains("parse"), "Expected bare pipe error, got: {}", err_string);
     }
 
     #[test]
@@ -4057,6 +4101,50 @@ Rounded: {{ round(pi) }}"#;
                     .contains("Frontmatter shell executable may not come from interpolation")
             );
         }
+
+        #[test]
+        fn frontmatter_shell_rejects_pipe_in_command() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(echo a | cat)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterShellExpansion])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
+                "Expected shell pipe rejection, got: {}",
+                err
+            );
+        }
+
+        #[test]
+        fn frontmatter_shell_rejects_double_pipe_in_command() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(false || echo fallback)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterShellExpansion])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
+                "Expected shell pipe rejection for '||', got: {}",
+                err
+            );
+        }
     }
 
     mod infix_logic_conditions {
@@ -4119,11 +4207,9 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
-        fn page_block_fallback_mixed_with_infix() {
-            // Fallback `|` binds tighter than `||`. When `missing_var` is unset,
-            // the fallback yields "go" which matches the literal, and `|| b`
-            // short-circuits to true.
-            let content = "---\nb: false\n---\n::block when=\"(missing_var | \\\"go\\\") == \\\"go\\\" || b\"\ninside\n::end-block\n";
+        fn page_block_with_chained_or() {
+            // Chained `||` in condition mode evaluates as logical OR
+            let content = "---\na: false\nb: false\nc: true\n---\n::block when=\"a || b || c\"\ninside\n::end-block\n";
             let (output, _report) = compose_with_page_blocks(content);
             assert!(output.contains("inside"));
         }
@@ -4175,6 +4261,23 @@ Rounded: {{ round(pi) }}"#;
                 .compose_with(options)
                 .unwrap();
             assert!(!composed.content().contains("child body"));
+        }
+
+        #[test]
+        fn page_block_with_bare_pipe_fails_parse() {
+            // Bare `|` in condition expressions should produce a parse error
+            let content =
+                "---\na: true\n---\n::block when=\"a | b\"\ninside\n::end-block\n";
+            let md: Markdown = content.into();
+            let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
+            let err = md.compose_with(options).unwrap_err();
+
+            let err_string = format!("{}", err);
+            assert!(
+                err_string.contains("Unexpected '|'") || err_string.contains("logical OR"),
+                "Expected bare pipe error in condition, got: {}",
+                err_string
+            );
         }
     }
 }

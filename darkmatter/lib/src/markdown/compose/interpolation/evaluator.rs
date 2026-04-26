@@ -18,8 +18,8 @@
 //!   - `{{ 42 }}` -> `"42"`
 //!
 //! - **Fallback**: Returns primary if truthy, otherwise fallback
-//!   - `{{ color | "unknown" }}` -> "unknown" if color is falsy
-//!   - Chained: `{{ a | b | c }}` -> first truthy wins
+//!   - `{{ color || "unknown" }}` -> "unknown" if color is falsy
+//!   - Chained: `{{ a || b || c }}` -> first truthy wins
 //!
 //! - **Ternary**: Boolean conditional
 //!   - `{{ active ? "yes" : "no" }}` -> "yes" if active is truthy
@@ -236,7 +236,7 @@ impl<'a, L: InterpolationLookup> Evaluator<'a, L> {
     ///
     /// - Variable resolution (simple and nested paths)
     /// - String and number literals
-    /// - Fallback expressions (`a | b`)
+    /// - Fallback expressions (`a || b`)
     /// - Ternary expressions (`a ? b : c`)
     /// - Comparison expressions (`a == b`, `a > b`, etc.)
     /// - Function calls (`length()`, `number()`, `round()`)
@@ -654,9 +654,9 @@ mod tests {
         fn unwrap_or_original_error() {
             let result = EvalResult::Error {
                 message: "test error".to_string(),
-                original: "foo | bar".to_string(),
+                original: "foo || bar".to_string(),
             };
-            assert_eq!(result.unwrap_or_original(), "{{ foo | bar }}");
+            assert_eq!(result.unwrap_or_original(), "{{ foo || bar }}");
         }
 
         #[test]
@@ -1135,7 +1135,7 @@ mod tests {
         fn uses_primary_if_truthy() {
             let state = create_test_state(json!({"color": "blue"}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"color | "unknown""#).unwrap();
+            let expr = parse(r#"color || "unknown""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "blue"),
@@ -1147,7 +1147,7 @@ mod tests {
         fn uses_fallback_if_falsy() {
             let state = create_test_state(json!({}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"missing | "default""#).unwrap();
+            let expr = parse(r#"missing || "default""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "default"),
@@ -1159,7 +1159,7 @@ mod tests {
         fn uses_fallback_for_empty_string() {
             let state = create_test_state(json!({"empty": ""}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"empty | "fallback""#).unwrap();
+            let expr = parse(r#"empty || "fallback""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "fallback"),
@@ -1171,7 +1171,7 @@ mod tests {
         fn uses_fallback_for_null() {
             let state = create_test_state(json!({"nothing": null}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"nothing | "fallback""#).unwrap();
+            let expr = parse(r#"nothing || "fallback""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "fallback"),
@@ -1183,7 +1183,7 @@ mod tests {
         fn uses_fallback_for_false() {
             let state = create_test_state(json!({"flag": false}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"flag | "fallback""#).unwrap();
+            let expr = parse(r#"flag || "fallback""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "fallback"),
@@ -1195,7 +1195,7 @@ mod tests {
         fn uses_fallback_for_zero() {
             let state = create_test_state(json!({"count": 0}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"count | "fallback""#).unwrap();
+            let expr = parse(r#"count || "fallback""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "fallback"),
@@ -1207,8 +1207,8 @@ mod tests {
         fn chained_fallback_uses_first_truthy() {
             let state = create_test_state(json!({"b": "second"}));
             let evaluator = Evaluator::new(&state);
-            // a | b | c parses as Fallback(Fallback(a, b), c)
-            let expr = parse(r#"a | b | "third""#).unwrap();
+            // a || b || c parses as Fallback(Fallback(a, b), c)
+            let expr = parse(r#"a || b || "third""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "second"),
@@ -1220,7 +1220,7 @@ mod tests {
         fn chained_fallback_uses_last_if_all_falsy() {
             let state = create_test_state(json!({}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"a | b | "default""#).unwrap();
+            let expr = parse(r#"a || b || "default""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "default"),
@@ -1232,7 +1232,7 @@ mod tests {
         fn fallback_to_variable() {
             let state = create_test_state(json!({"backup": "backup_value"}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse("missing | backup").unwrap();
+            let expr = parse("missing || backup").unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "backup_value"),
@@ -1479,7 +1479,7 @@ mod tests {
         fn fallback_preserves_type() {
             let state = create_test_state(json!({"count": 42}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse("count | 0").unwrap();
+            let expr = parse("count || 0").unwrap();
 
             match evaluator.eval_value(&expr) {
                 EvalValue::Number(n) => assert_eq!(n, 42.0),
@@ -1491,7 +1491,7 @@ mod tests {
         fn fallback_returns_fallback_type() {
             let state = create_test_state(json!({}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"missing | "default""#).unwrap();
+            let expr = parse(r#"missing || "default""#).unwrap();
 
             match evaluator.eval_value(&expr) {
                 EvalValue::String(s) => assert_eq!(s, "default"),
@@ -2008,7 +2008,7 @@ mod tests {
             let state = create_test_state(json!({"items": []}));
             let evaluator = Evaluator::new(&state);
             // length(items) is 0 which is falsy, so fallback is used
-            let expr = parse(r#"length(items) | "no items""#).unwrap();
+            let expr = parse(r#"length(items) || "no items""#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "no items"),
