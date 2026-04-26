@@ -34,6 +34,7 @@ struct StepContext {
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
 #[allow(deprecated)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_sequence(
     source: &ResolvedCompositionSource,
     plan: SequencePlan,
@@ -41,8 +42,23 @@ pub(crate) fn execute_sequence(
     user_set_overrides: Option<serde_json::Value>,
     execution_options: SequenceExecutionOptions,
     verbose: u8,
+    perf_enabled: bool,
+    startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let sequence_start = std::time::Instant::now();
     let silent = shared.silent;
+
+    let mut perf_accumulator = if perf_enabled {
+        startup_timings.map(|timings| {
+            let mut acc = crate::perf::SequencePerfAccumulator::new(timings);
+            if shared.dry_run {
+                acc.set_dry_run();
+            }
+            acc
+        })
+    } else {
+        None
+    };
 
     let effective_fail_fast = execution_options
         .fail_fast_override
@@ -131,6 +147,13 @@ pub(crate) fn execute_sequence(
     let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
         if interrupted.load(Ordering::SeqCst) {
+            if let Some(mut acc) = perf_accumulator {
+                acc.mark_env_setup_complete();
+                acc.set_partial();
+                let total = sequence_start.elapsed();
+                let report = acc.into_report(total);
+                eprint!("{}", crate::perf::render_perf_report(&report));
+            }
             return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
         }
         let overlay = build_step_overlay(&plan, step_index);
@@ -207,6 +230,10 @@ pub(crate) fn execute_sequence(
         });
     }
 
+    if let Some(ref mut acc) = perf_accumulator {
+        acc.mark_env_setup_complete();
+    }
+
     if !silent {
         let status = Status::from_prose(format!(
             "<b>Preflight:</b> shell commands approved for all \
@@ -224,6 +251,9 @@ pub(crate) fn execute_sequence(
     for (step_index, step_ctx) in step_contexts.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
             interrupt_observed = true;
+            if let Some(ref mut acc) = perf_accumulator {
+                acc.set_partial();
+            }
             break;
         }
         let step = &plan.steps[step_index];
@@ -285,14 +315,20 @@ pub(crate) fn execute_sequence(
         };
 
         let step_result =
-            super::composition::execute_composition_request_inner(request, verbose, None, false);
+            super::composition::execute_composition_request_inner(request, verbose, None, perf_enabled);
 
         let duration = start.elapsed();
 
         match step_result {
             Ok(outcome) if outcome.exit_code == 0 => {
-                // Phase 6 will aggregate agent_perf across sequence steps.
-                let _ = outcome.agent_perf;
+                if let Some(ref mut acc) = perf_accumulator {
+                    acc.add_step(crate::perf::SequenceStepPerf {
+                        step_index,
+                        step_name: step.name.clone(),
+                        compose_perf: step_ctx.prepared.compose_perf.clone(),
+                        agent_perf: outcome.agent_perf,
+                    });
+                }
                 summary.succeeded += 1;
                 summary.steps.push(SequenceStepResult {
                     step: step_index + 1,
@@ -317,6 +353,15 @@ pub(crate) fn execute_sequence(
                 if outcome.exit_code == SEQUENCE_INTERRUPT_EXIT_CODE
                     || interrupted.load(Ordering::SeqCst) =>
             {
+                if let Some(ref mut acc) = perf_accumulator {
+                    acc.add_step(crate::perf::SequenceStepPerf {
+                        step_index,
+                        step_name: step.name.clone(),
+                        compose_perf: step_ctx.prepared.compose_perf.clone(),
+                        agent_perf: outcome.agent_perf,
+                    });
+                    acc.set_partial();
+                }
                 // Ctrl+C was observed either by the in-child signal handler
                 // (exit 130) or by our persistent process-level handler.
                 // Record the failure, stop the loop unconditionally, and
@@ -344,6 +389,14 @@ pub(crate) fn execute_sequence(
                 break;
             }
             Ok(outcome) => {
+                if let Some(ref mut acc) = perf_accumulator {
+                    acc.add_step(crate::perf::SequenceStepPerf {
+                        step_index,
+                        step_name: step.name.clone(),
+                        compose_perf: step_ctx.prepared.compose_perf.clone(),
+                        agent_perf: outcome.agent_perf,
+                    });
+                }
                 let error_msg = format!(
                     "provider {} exited with code {}",
                     outcome.provider, outcome.exit_code
@@ -368,6 +421,9 @@ pub(crate) fn execute_sequence(
                     log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
+                    if let Some(ref mut acc) = perf_accumulator {
+                        acc.set_partial();
+                    }
                     debug!(step_index = step_index + 1, step_name = %step.name, fail_fast = %effective_fail_fast, "sequence fail-fast triggered");
                     break;
                 }
@@ -394,6 +450,9 @@ pub(crate) fn execute_sequence(
                     log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
+                    if let Some(ref mut acc) = perf_accumulator {
+                        acc.set_partial();
+                    }
                     debug!(step_index = step_index + 1, step_name = %step.name, fail_fast = %effective_fail_fast, "sequence fail-fast triggered");
                     break;
                 }
@@ -419,6 +478,14 @@ pub(crate) fn execute_sequence(
             .state(StatusState::Failure);
             log::message(&status.render(&log::terminal()));
         }
+    }
+
+    // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+    // The perf report is always emitted to stderr when requested.
+    if let Some(acc) = perf_accumulator {
+        let total = sequence_start.elapsed();
+        let report = acc.into_report(total);
+        eprint!("{}", crate::perf::render_perf_report(&report));
     }
 
     if interrupt_observed || interrupted.load(Ordering::SeqCst) {
