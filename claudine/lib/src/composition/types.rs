@@ -187,6 +187,8 @@ pub struct SequenceStepDraft {
     pub provider_locked: bool,
     /// Whether the model is locked by an explicit CLI flag.
     pub model_locked: bool,
+    /// The resolved provider when locked (`provider_locked=true`), otherwise `None`.
+    pub resolved_provider: Option<Provider>,
 }
 
 /// A typed hint for which agent(s) to use, parsed from frontmatter `agent`.

@@ -547,11 +547,7 @@ mod tests {
     #[test]
     fn direct_composition_parses_agent_list() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("agent", json!(["gemini", "codex"]))],
-            "Content",
-        );
+        let source = make_source(&dir, &[("agent", json!(["gemini", "codex"]))], "Content");
 
         let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert_eq!(
@@ -563,11 +559,7 @@ mod tests {
     #[test]
     fn direct_composition_parses_model_single() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("model", json!("gpt-4o"))],
-            "Content",
-        );
+        let source = make_source(&dir, &[("model", json!("gpt-4o"))], "Content");
 
         let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert_eq!(
@@ -579,11 +571,7 @@ mod tests {
     #[test]
     fn direct_composition_parses_model_list() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("model", json!(["gpt-4o", "o3-mini"]))],
-            "Content",
-        );
+        let source = make_source(&dir, &[("model", json!(["gpt-4o", "o3-mini"]))], "Content");
 
         let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert_eq!(
@@ -598,11 +586,7 @@ mod tests {
     #[test]
     fn direct_composition_agent_unknown_provider_errors() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("agent", json!("unknown-provider"))],
-            "Content",
-        );
+        let source = make_source(&dir, &[("agent", json!("unknown-provider"))], "Content");
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::AgentHintInvalid(_)));
@@ -629,11 +613,7 @@ mod tests {
     #[test]
     fn direct_composition_agent_list_with_non_string_errors() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("agent", json!(["claude", 42]))],
-            "Content",
-        );
+        let source = make_source(&dir, &[("agent", json!(["claude", 42]))], "Content");
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::AgentHintWrongType(_)));
@@ -642,11 +622,7 @@ mod tests {
     #[test]
     fn direct_composition_model_list_with_non_string_errors() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("model", json!(["gpt-4o", 42]))],
-            "Content",
-        );
+        let source = make_source(&dir, &[("model", json!(["gpt-4o", 42]))], "Content");
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::ModelHintWrongType(_)));

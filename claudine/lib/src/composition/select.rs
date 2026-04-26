@@ -7,9 +7,9 @@ use crate::model_catalog::ModelCatalogService;
 
 use super::error::CompositionError;
 use super::types::{
-    AgentHint, InstalledProviderSnapshot, ModelHint, ModelResolutionReason,
-    ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
-    ResolvedExecutionTarget, SelectedProvider, SelectionReason,
+    AgentHint, InstalledProviderSnapshot, ModelHint, ModelResolutionReason, ProviderPickerOption,
+    ProviderPickerPlan, ProviderResolutionReason, ResolutionMode, ResolvedExecutionTarget,
+    SelectedProvider, SelectionReason,
 };
 
 /// Build a snapshot of installed providers from a pre-computed list.
@@ -120,9 +120,7 @@ where
     };
 
     // 3. Config favorite
-    let provider = provider.or_else(|| {
-        favorite.filter(|f| snapshot.runnable.contains(f))
-    });
+    let provider = provider.or_else(|| favorite.filter(|f| snapshot.runnable.contains(f)));
 
     let Some(provider) = provider else {
         return Err(CompositionError::SelectionUnavailable {
@@ -148,7 +146,9 @@ where
     let provider_reason = if let Some(ref hint) = prepared.selection_hints.agent {
         let resolved_from_hint = match hint {
             AgentHint::Single(p) => *p == provider,
-            AgentHint::List(list) => list.iter().any(|p| snapshot.runnable.contains(p) && *p == provider),
+            AgentHint::List(list) => list
+                .iter()
+                .any(|p| snapshot.runnable.contains(p) && *p == provider),
         };
         if resolved_from_hint {
             match hint {
@@ -229,8 +229,7 @@ pub fn build_picker_plan(
                 default_index = options
                     .iter()
                     .position(|o| {
-                        providers.contains(&o.provider)
-                            && snapshot.runnable.contains(&o.provider)
+                        providers.contains(&o.provider) && snapshot.runnable.contains(&o.provider)
                     })
                     .unwrap_or(0);
             }
@@ -268,7 +267,13 @@ pub fn resolve_model(
     prepared: &super::types::PreparedComposition,
     cli_model: Option<&str>,
 ) -> (Option<String>, ModelResolutionReason) {
-    resolve_model_with_env(provider, prepared, cli_model, |var| std::env::var(var).ok(), None)
+    resolve_model_with_env(
+        provider,
+        prepared,
+        cli_model,
+        |var| std::env::var(var).ok(),
+        None,
+    )
 }
 
 /// Resolve model with an optional catalog for frontmatter validation.
@@ -283,7 +288,13 @@ pub fn resolve_model_with_catalog(
     cli_model: Option<&str>,
     catalog: Option<&ModelCatalogService>,
 ) -> (Option<String>, ModelResolutionReason) {
-    resolve_model_with_env(provider, prepared, cli_model, |var| std::env::var(var).ok(), catalog)
+    resolve_model_with_env(
+        provider,
+        prepared,
+        cli_model,
+        |var| std::env::var(var).ok(),
+        catalog,
+    )
 }
 
 fn resolve_model_with_env<E>(
@@ -332,16 +343,10 @@ where
             ModelHint::List(models) => {
                 if let Some(catalog) = catalog {
                     if let Some(valid) = catalog.first_valid(provider, models) {
-                        return (
-                            Some(valid),
-                            ModelResolutionReason::FrontmatterList,
-                        );
+                        return (Some(valid), ModelResolutionReason::FrontmatterList);
                     }
                 } else if let Some(first) = models.first() {
-                    return (
-                        Some(first.clone()),
-                        ModelResolutionReason::FrontmatterList,
-                    );
+                    return (Some(first.clone()), ModelResolutionReason::FrontmatterList);
                 }
             }
         }
@@ -469,7 +474,10 @@ mod tests {
         }
     }
 
-    fn make_snapshot(installed: Vec<Provider>, excluded: BTreeSet<Provider>) -> InstalledProviderSnapshot {
+    fn make_snapshot(
+        installed: Vec<Provider>,
+        excluded: BTreeSet<Provider>,
+    ) -> InstalledProviderSnapshot {
         build_installed_snapshot(&installed, &excluded)
     }
 
@@ -478,16 +486,14 @@ mod tests {
         let prepared = make_prepared_composition(None, None);
         let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let target = resolve_target_non_tty(
-            Some(Provider::Claude),
-            &prepared,
-            &snapshot,
-            None,
-            None,
-        )
-        .unwrap();
+        let target =
+            resolve_target_non_tty(Some(Provider::Claude), &prepared, &snapshot, None, None)
+                .unwrap();
         assert_eq!(target.provider, Provider::Claude);
-        assert!(matches!(target.provider_reason, ProviderResolutionReason::ExplicitFlag));
+        assert!(matches!(
+            target.provider_reason,
+            ProviderResolutionReason::ExplicitFlag
+        ));
     }
 
     #[test]
@@ -495,14 +501,8 @@ mod tests {
         let prepared = make_prepared_composition(None, None);
         let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
 
-        let err = resolve_target_non_tty(
-            Some(Provider::Codex),
-            &prepared,
-            &snapshot,
-            None,
-            None,
-        )
-        .unwrap_err();
+        let err = resolve_target_non_tty(Some(Provider::Codex), &prepared, &snapshot, None, None)
+            .unwrap_err();
         assert!(matches!(err, CompositionError::NoRunnableProviders));
     }
 
@@ -514,14 +514,9 @@ mod tests {
             [Provider::Claude].into_iter().collect(),
         );
 
-        let target = resolve_target_non_tty(
-            Some(Provider::Claude),
-            &prepared,
-            &snapshot,
-            None,
-            None,
-        )
-        .unwrap();
+        let target =
+            resolve_target_non_tty(Some(Provider::Claude), &prepared, &snapshot, None, None)
+                .unwrap();
         assert_eq!(target.provider, Provider::Claude);
     }
 
@@ -543,7 +538,10 @@ mod tests {
 
         let target = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap();
         assert_eq!(target.provider, Provider::Codex);
-        assert!(matches!(target.provider_reason, ProviderResolutionReason::FrontmatterSingle));
+        assert!(matches!(
+            target.provider_reason,
+            ProviderResolutionReason::FrontmatterSingle
+        ));
     }
 
     #[test]
@@ -557,7 +555,10 @@ mod tests {
         let target = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap();
         // Gemini not installed, Codex is second in list
         assert_eq!(target.provider, Provider::Codex);
-        assert!(matches!(target.provider_reason, ProviderResolutionReason::FrontmatterList));
+        assert!(matches!(
+            target.provider_reason,
+            ProviderResolutionReason::FrontmatterList
+        ));
     }
 
     #[test]
@@ -568,16 +569,14 @@ mod tests {
             BTreeSet::new(),
         );
 
-        let target = resolve_target_non_tty(
-            None,
-            &prepared,
-            &snapshot,
-            Some(Provider::Gemini),
-            None,
-        )
-        .unwrap();
+        let target =
+            resolve_target_non_tty(None, &prepared, &snapshot, Some(Provider::Gemini), None)
+                .unwrap();
         assert_eq!(target.provider, Provider::Gemini);
-        assert!(matches!(target.provider_reason, ProviderResolutionReason::FavoriteAgent));
+        assert!(matches!(
+            target.provider_reason,
+            ProviderResolutionReason::FavoriteAgent
+        ));
     }
 
     #[test]
@@ -585,14 +584,8 @@ mod tests {
         let prepared = make_prepared_composition(None, None);
         let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let err = resolve_target_non_tty(
-            None,
-            &prepared,
-            &snapshot,
-            Some(Provider::Gemini),
-            None,
-        )
-        .unwrap_err();
+        let err = resolve_target_non_tty(None, &prepared, &snapshot, Some(Provider::Gemini), None)
+            .unwrap_err();
         assert!(matches!(err, CompositionError::SelectionUnavailable { .. }));
     }
 
@@ -623,16 +616,14 @@ mod tests {
         let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)), None);
         let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let target = resolve_target_non_tty(
-            None,
-            &prepared,
-            &snapshot,
-            Some(Provider::Claude),
-            None,
-        )
-        .unwrap();
+        let target =
+            resolve_target_non_tty(None, &prepared, &snapshot, Some(Provider::Claude), None)
+                .unwrap();
         assert_eq!(target.provider, Provider::Claude);
-        assert!(matches!(target.provider_reason, ProviderResolutionReason::FavoriteAgent));
+        assert!(matches!(
+            target.provider_reason,
+            ProviderResolutionReason::FavoriteAgent
+        ));
     }
 
     #[test]
@@ -833,10 +824,7 @@ mod tests {
     #[test]
     fn picker_plan_uninstalled_frontmatter_ignored() {
         let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Goose)), None);
-        let snapshot = make_snapshot(
-            vec![Provider::Codex, Provider::Claude],
-            BTreeSet::new(),
-        );
+        let snapshot = make_snapshot(vec![Provider::Codex, Provider::Claude], BTreeSet::new());
 
         let plan = build_picker_plan(&prepared, &snapshot, None).unwrap();
         // Goose not installed, so no reordering happens; default stays 0

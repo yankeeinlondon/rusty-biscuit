@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
-use crate::events::Provider;
 use super::types::ResolutionMode;
+use crate::events::Provider;
 use thiserror::Error;
 
 /// Errors that can occur during composition workflows.
@@ -100,13 +100,8 @@ pub enum CompositionError {
     },
 
     /// A model is required but none was resolved.
-    #[error(
-        "model selection failed for {provider}: {reason}"
-    )]
-    ModelSelectionFailed {
-        provider: Provider,
-        reason: String,
-    },
+    #[error("model selection failed for {provider}: {reason}")]
+    ModelSelectionFailed { provider: Provider, reason: String },
 
     /// Interactive selection is required but no TTY is available.
     #[error(

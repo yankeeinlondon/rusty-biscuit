@@ -40,7 +40,6 @@ pub use types::{
     ModelResolutionReason, OutputFormat, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
-    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource,
-    SequenceStep, SequenceStepDraft, SequenceStepOverlay, SequenceStepResult,
-    SharedApprovalCache,
+    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep,
+    SequenceStepDraft, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };
