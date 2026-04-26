@@ -6,6 +6,15 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/output/code_block.rs
+  - darkmatter/lib/src/markdown/output/mod.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/output/html.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .opencode/skill/darkmatter/SKILL.md
 packages: [darkmatter]
 ---
 
