@@ -44,7 +44,10 @@ pub enum CatalogFetchError {
     /// The provider CLI is not installed or not on PATH.
     CliNotFound(String),
     /// The CLI exited with a non-zero status.
-    CliFailed { exit_code: Option<i32>, stderr: String },
+    CliFailed {
+        exit_code: Option<i32>,
+        stderr: String,
+    },
     /// The CLI output could not be parsed.
     ParseFailed(String),
 }

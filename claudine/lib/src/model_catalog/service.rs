@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::config::claudine_config::ProviderModelOverride;
+use crate::config::claudine_config::{ClaudineConfig, ProviderModelOverride};
 use crate::events::Provider;
 
 use super::cache::{ModelCache, ModelCacheEntry};
@@ -65,11 +65,35 @@ impl ModelCatalogService {
         }
     }
 
+    /// Create a service loading overrides from the given config.
+    pub fn from_config(config: &ClaudineConfig) -> Self {
+        Self::with_overrides(config.models.clone())
+    }
+
+    /// Best-effort blocking refresh of all supported providers.
+    ///
+    /// Never panics; failures are silently ignored so that stale cache or
+    /// static fallback remains available. Runs in a dedicated thread so this
+    /// works even when called from within an existing Tokio runtime.
+    pub fn refresh_blocking(&self) {
+        let self_clone = self.clone();
+        let _ = std::thread::spawn(move || {
+            let Ok(rt) = tokio::runtime::Runtime::new() else {
+                return;
+            };
+            rt.block_on(async {
+                let _ = self_clone.refresh_all().await;
+            });
+        })
+        .join();
+    }
+
     /// Refresh the catalog for a single provider.
     ///
     /// Attempts to fetch the latest catalog. On failure, the existing cache
     /// is left untouched (stale-cache fallback).
-    pub async fn refresh(&self,
+    pub async fn refresh(
+        &self,
         provider: Provider,
     ) -> Result<Vec<String>, super::provider_sources::CatalogFetchError> {
         let fetched = fetch_provider_catalog(provider).await?;
@@ -84,8 +108,12 @@ impl ModelCatalogService {
     }
 
     /// Refresh all supported providers.
-    pub async fn refresh_all(&self,
-    ) -> Vec<(Provider, Result<Vec<String>, super::provider_sources::CatalogFetchError>)> {
+    pub async fn refresh_all(
+        &self,
+    ) -> Vec<(
+        Provider,
+        Result<Vec<String>, super::provider_sources::CatalogFetchError>,
+    )> {
         let providers = [
             Provider::Claude,
             Provider::Codex,
@@ -102,9 +130,7 @@ impl ModelCatalogService {
     /// Return the effective catalog for a provider.
     ///
     /// Merges cached data (or static source) with user overrides.
-    pub fn catalog_for(&self,
-        provider: Provider,
-    ) -> Vec<String> {
+    pub fn catalog_for(&self, provider: Provider) -> Vec<String> {
         let base = match self.cache.read(provider) {
             Some(entry) => entry.models,
             None => static_catalog_for_provider(provider),
@@ -114,10 +140,7 @@ impl ModelCatalogService {
     }
 
     /// Check whether a model ID is present in the effective catalog.
-    pub fn is_valid(&self,
-        provider: Provider,
-        model_id: &str,
-    ) -> bool {
+    pub fn is_valid(&self, provider: Provider, model_id: &str) -> bool {
         let catalog = self.catalog_for(provider);
         catalog.iter().any(|m| m.eq_ignore_ascii_case(model_id))
     }
@@ -128,22 +151,18 @@ impl ModelCatalogService {
     }
 
     /// Return the first valid model from a list, if any.
-    pub fn first_valid(&self,
-        provider: Provider,
-        candidates: &[String],
-    ) -> Option<String> {
+    pub fn first_valid(&self, provider: Provider, candidates: &[String]) -> Option<String> {
         let set = self.model_set(provider);
-        candidates
-            .iter()
-            .find(|c| set.contains(*c))
-            .cloned()
+        candidates.iter().find(|c| set.contains(*c)).cloned()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::claudine_config::{DetailedModelOverride, ModelOverrideMode, ProviderModelOverride};
+    use crate::config::claudine_config::{
+        DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+    };
 
     #[test]
     fn service_validates_static_model() {
@@ -198,11 +217,7 @@ mod tests {
     #[test]
     fn service_first_valid_finds_match() {
         let service = ModelCatalogService::new();
-        let candidates = vec![
-            "not-real".into(),
-            "o3-mini".into(),
-            "gpt-5.2".into(),
-        ];
+        let candidates = vec!["not-real".into(), "o3-mini".into(), "gpt-5.2".into()];
         assert_eq!(
             service.first_valid(Provider::Codex, &candidates),
             Some("o3-mini".into())
@@ -232,5 +247,11 @@ mod tests {
         );
         let service = ModelCatalogService::with_overrides(overrides);
         assert!(service.is_valid(Provider::Gemini, "gemini-2.5-pro"));
+    }
+
+    #[test]
+    fn refresh_blocking_does_not_panic() {
+        let service = ModelCatalogService::new();
+        service.refresh_blocking(); // should not panic even if network is down
     }
 }

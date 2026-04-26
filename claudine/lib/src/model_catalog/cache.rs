@@ -90,7 +90,6 @@ impl ModelCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
 
     #[test]
     fn cache_round_trip() {
