@@ -426,12 +426,8 @@ impl<'a> Lexer<'a> {
                 } else {
                     Err(LexerError::new(
                         match self.mode {
-                            ParseMode::Interpolation => {
-                                "Unexpected '|'. Use '||' for fallback."
-                            }
-                            ParseMode::Condition => {
-                                "Unexpected '|'. Use '||' for logical OR."
-                            }
+                            ParseMode::Interpolation => "Unexpected '|'. Use '||' for fallback.",
+                            ParseMode::Condition => "Unexpected '|'. Use '||' for logical OR.",
                         },
                         start_pos,
                     ))
