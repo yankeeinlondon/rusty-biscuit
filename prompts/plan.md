@@ -1,5 +1,5 @@
 ---
-dir: "$(dirname "{{ spec | design }}")"
+dir: "$(dirname "{{ spec || design }}")"
 spec: ""
 design: ""
 plan: "plan.md"
