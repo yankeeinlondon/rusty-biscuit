@@ -6,7 +6,7 @@ pub mod widgets;
 use std::io::stdout;
 use std::time::Duration;
 
-use clap::Args;
+use clap::{Args, Subcommand};
 use crossterm::{
     ExecutableCommand,
     event::{self, Event},
@@ -17,16 +17,98 @@ use ratatui::widgets::*;
 
 use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
 use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
-use claudine::events::PROVIDERS_DISPLAY_ORDER;
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::services::protect::catalog::RuleGroup;
 use claudine::services::protect::config::{ProtectRuleToggles, RuleGroupConfig};
 
 use crate::commands::config_tui::app::{ActionView, App};
+use crate::log;
 
+/// Arguments for `claudine config`.
+///
+/// With no subcommand, launches the interactive TUI. With a subcommand, runs a
+/// specific non-interactive setter.
 #[derive(Debug, Args)]
-pub struct ConfigArgs {}
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: Option<ConfigCommand>,
+}
 
-pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
+/// Non-interactive `claudine config <subcommand>` operations.
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Set a configuration value.
+    Set {
+        #[command(subcommand)]
+        target: ConfigSetTarget,
+    },
+}
+
+/// Setter operations for `claudine config set`.
+#[derive(Debug, Subcommand)]
+pub enum ConfigSetTarget {
+    /// Set the favorite agent for lazy composition.
+    ///
+    /// Pass a provider slug (e.g., `claude`, `codex`, `opencode`) to set the
+    /// favorite, or `none`/`clear`/`-` to clear the favorite.
+    #[command(name = "favorite-agent")]
+    FavoriteAgent {
+        /// The provider name (or `none`/`clear`/`-` to clear).
+        value: String,
+    },
+}
+
+pub async fn run(args: ConfigArgs) -> color_eyre::Result<()> {
+    if let Some(command) = args.command {
+        return run_setter(command).await;
+    }
+    run_tui().await
+}
+
+async fn run_setter(command: ConfigCommand) -> color_eyre::Result<()> {
+    match command {
+        ConfigCommand::Set { target } => match target {
+            ConfigSetTarget::FavoriteAgent { value } => run_set_favorite_agent(&value).await,
+        },
+    }
+}
+
+async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
+    let config_path = claudine::dispatch::loader::user_config_path();
+    let mut config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
+
+    let trimmed = value.trim();
+    let new_favorite = match trimmed.to_ascii_lowercase().as_str() {
+        "" | "none" | "clear" | "unset" | "-" => None,
+        _ => match Provider::fuzzy_match_cli_name(trimmed) {
+            Some(provider) => Some(provider),
+            None => {
+                return Err(color_eyre::eyre::eyre!(
+                    "unknown provider '{value}' — try one of: claude, codex, gemini, goose, kimi, opencode, qwen, roo (or pass `none` to clear)"
+                ));
+            }
+        },
+    };
+
+    if config.preferred_agent == new_favorite {
+        log::message(&match new_favorite {
+            Some(provider) => format!("Favorite agent already set to {provider}; no change."),
+            None => "Favorite agent already cleared; no change.".to_string(),
+        });
+        return Ok(());
+    }
+
+    config.preferred_agent = new_favorite;
+    claudine::dispatch::loader::save_claudine_config(&config, &config_path)?;
+    log::message(&match new_favorite {
+        Some(provider) => format!("Set favorite agent to {provider}."),
+        None => "Cleared favorite agent.".to_string(),
+    });
+    log::message(&format!("Updated {}.", config_path.display()));
+    Ok(())
+}
+
+async fn run_tui() -> color_eyre::Result<()> {
     let config_path = claudine::dispatch::loader::user_config_path();
     // Init check is now centralized in main.rs — config is guaranteed to exist here.
     let config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;

@@ -2999,19 +2999,18 @@ exit 99
 
 #[cfg(unix)]
 #[test]
-fn ambiguous_agent_hint_no_tty_returns_error() {
-    // Verifies that an ambiguous `agent` hint with no TTY returns an error
-    // instead of hanging on interactive selection.
+fn agent_hint_resolved_early_in_non_tty() {
+    // Verifies that an `agent` hint is resolved during preparation
+    // (not at launch), so prefix matches like "c" resolve to the
+    // first match (Claude) instead of being treated as ambiguous.
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
 
     let md_file = workspace.path().join("test.md");
-    // "agent: c" matches both claude and codex via prefix matching,
-    // producing an ambiguous hint that requires interactive selection.
     fs::write(&md_file, "---\ntitle: test\nagent: c\n---\nPrompt\n").unwrap();
 
-    // Install both claude and codex so "c" is ambiguous
+    // Install both claude and codex; "c" resolves to Claude (first prefix match)
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
     write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
 
@@ -3026,8 +3025,39 @@ fn ambiguous_agent_hint_no_tty_returns_error() {
         .unwrap()
         .args(["compose", md_file.to_str().unwrap()])
         .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn unknown_agent_hint_fails_early_in_non_tty() {
+    // Verifies that an unknown `agent` hint fails during preparation
+    // instead of hanging on interactive selection.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nagent: unknown-provider\n---\nPrompt\n",
+    )
+    .unwrap();
+
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .args(["compose", md_file.to_str().unwrap()])
+        .assert()
         .code(1)
-        .stderr(contains("ambiguous"));
+        .stderr(contains("does not match any known provider"));
 }
 
 #[cfg(unix)]

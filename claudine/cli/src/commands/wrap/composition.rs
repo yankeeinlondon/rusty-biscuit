@@ -1755,7 +1755,7 @@ fn load_config_favorite(cwd: &Path) -> Option<Provider> {
         .map(|info| info.repo_root);
     let config =
         claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
-    Some(config.preferred_agent)
+    config.preferred_agent
 }
 
 #[cfg(test)]
