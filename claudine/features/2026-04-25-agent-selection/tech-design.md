@@ -35,7 +35,7 @@ The design keeps the existing wrapper profiles as the launch mechanism. It adds 
 
 1. No change to the direct wrapper subcommands such as `claudine codex ...`; this design is for composition flows only.
 2. No sequence parallelism.
-3. No full-screen Ratatui table editor in v1. The MVP uses `inquire`-based review primitives and keeps the state model ready for a future richer editor.
+3. No bespoke full-screen Ratatui editor in v1; instead this feature reuses the **`InputTable`** component from `tui-chrome` (workspace crate, lives at `biscuit-tui/lib/`) for the sequence review screen, and **`ChooseOne`** for the one-shot picker. No custom widget code is introduced.
 4. No attempt to add new Roo wrapper support as part of this feature.
 
 ## Current Baseline
@@ -132,10 +132,10 @@ The resolution rules belong in library code. The actual picker and review UI bel
 Decision:
 
 - library code computes plans, rankings, and resolved targets
-- CLI code renders `inquire` prompts from those plans
+- CLI code renders the picker and review UI from those plans using `tui-chrome` components (`ChooseOne` for the one-shot picker, `InputTable` for the sequence review), driven via `tui_chrome::run_standalone`
 - sequence review state is CLI-owned, but backed by typed library structs
 
-This keeps TTY code out of `claudine/lib` and makes the resolver unit-testable without a terminal.
+This keeps TTY code out of `claudine/lib` and makes the resolver unit-testable without a terminal. It also avoids inventing custom widget code: rendering and event handling are inherited from `tui-chrome`.
 
 ## Proposed Architecture
 
@@ -199,8 +199,9 @@ Responsibilities:
   - show sequence review UI in TTY mode
   - keep existing two-phase "front-load prompts, then execute" structure
 - `wrap/selection_ui.rs`
-  - one-shot provider picker
-  - sequence review MVP
+  - one-shot provider picker built on `tui_chrome::ChooseOne`
+  - sequence review screen built on `tui_chrome::InputTable`
+  - both are driven by `tui_chrome::run_standalone`; this module owns the small glue that converts library-side `ProviderPickerPlan` / `SequenceStepDraft` values into `ChoiceInput` / `InputTableState` and translates `EventOutcome::Submitted` / `Cancelled` back into resolution decisions
 
 ## Data Model
 
@@ -566,24 +567,26 @@ model:
 
 The sequence resolver must therefore operate on prepared per-step frontmatter, not on the raw source document.
 
-### Interactive review MVP
+### Interactive review
 
-Target end state:
+The review screen is a `tui-chrome` `InputTable` constructed from the per-step `SequenceStepDraft` values. This delivers the spec's end-state UX (an in-place navigable/editable table) directly, with no `inquire`-based MVP step.
 
-- a real editable table where agent and model columns can be changed in place
+Column layout per row:
 
-v1 MVP:
+| Column | `InputTableColumn` variant | Source |
+| --- | --- | --- |
+| Step  | `StaticText` | `SequenceStepDraft.step_index` and `step_name`; not editable |
+| Agent | `ChooseOne` over installed providers | options ordered by `ProviderPickerPlan.options`; default cursor at `default_index`; locked when `provider_locked` is true |
+| Model | `ChooseOne` over the resolved model catalog | falls back to `TextInput` for providers whose catalog is `None` or empty (Gemini/Kimi/Goose in v1, plus any provider whose cache is unavailable); locked when `model_locked` is true |
 
-1. render a static table summary of all rows
-2. allow the user to select a row to edit
-3. edit provider via `inquire::Select`
-4. edit model via either:
-   - `Select` when a catalog exists and the list is reasonably small, or
-   - free-text input when catalog data is unavailable or too large
-5. show a final review summary
-6. require one confirmation before execution begins
+Behavior is inherited from `InputTable`:
 
-This satisfies the spec's "front-loaded sign-off" requirement without blocking on a full TUI editor.
+- arrow keys navigate cells; Tab/Shift+Tab wrap
+- entering a cell activates its inner widget for in-place editing
+- `Ctrl+S` validates and submits the entire table as the single sign-off; `Esc` cancels and aborts the sequence command
+- locked cells (from CLI flag locks, see "Locked fields") are rendered as `StaticText` rather than as an editable widget
+
+When `Ctrl+S` returns `EventOutcome::Submitted`, the CLI reads the typed `Vec<Row>` value back out of `InputTableState`, maps each row's `CellValue` back onto the corresponding `SequenceStepDraft`, and produces the final per-step `ResolvedExecutionTarget`.
 
 ### Locked fields
 
@@ -768,8 +771,8 @@ Recommended order:
 3. replace the current provider resolver with mode-aware agent resolution
 4. add the model resolver and OpenCode hard-error path
 5. add the model-catalog cache and user overrides
-6. wire one-shot TTY picker behavior
-7. wire sequence pre-resolution and review flow
+6. wire one-shot TTY picker behavior using `tui_chrome::ChooseOne` + `run_standalone`
+7. wire sequence pre-resolution and review flow using `tui_chrome::InputTable` + `run_standalone`
 8. expand tests and update docs
 
 This ordering keeps the feature shippable in coherent slices while preserving the current wrapper launch path until the new resolver is ready.

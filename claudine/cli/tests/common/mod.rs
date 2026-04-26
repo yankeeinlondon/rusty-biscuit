@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub(crate) mod completion;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};

@@ -141,6 +141,16 @@ The `sequence` command inherits all shared composition flags:
 - **Output Control**: `--output <FORMAT>`, `--quiet` (`-q`), `--silent`.
 - **Overrides**: `--set <JSON>`, `--model <MODEL>`.
 
+### Performance Reporting
+
+`claudine sequence --perf` emits a single aggregated performance report at the end of the run, after the sequence summary. The report includes:
+
+- **CLI Overhead** — startup timings captured at sequence entry.
+- **Composition Report** — merged across all steps that performed document composition.
+- **Agent Execution** — summed launches and total time, with first-response latency averaged across steps. The note line includes both average and minimum latency.
+
+If the sequence is interrupted or stops due to `fail_fast`, the report is still rendered and includes a `partial sequence metrics` note. `--perf` overrides `--silent` and `--quiet` because it is an explicit opt-in.
+
 ## Example: Multi-Provider Research
 
 ```markdown

@@ -37,7 +37,6 @@ pub(crate) struct ProcessTelemetry {
     pub first_response_latency: Option<Duration>,
 }
 
-#[allow(dead_code)]
 impl ProcessTelemetry {
     /// Convert telemetry into the shared [`AgentExecutionPerf`] model.
     pub(crate) fn into_agent_perf(
@@ -57,7 +56,6 @@ impl ProcessTelemetry {
 pub(crate) struct ProcessResult<T> {
     pub(crate) data: T,
     pub(crate) termination: claudine::harness::ProcessTermination,
-    #[allow(dead_code)]
     pub(crate) telemetry: ProcessTelemetry,
 }
 

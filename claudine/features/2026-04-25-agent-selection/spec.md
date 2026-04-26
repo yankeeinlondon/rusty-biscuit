@@ -11,11 +11,12 @@ use we want to resolve the agent through a layered resolver (see "Resolution Ord
 - In **TTY contexts**, a `--<provider>` CLI flag still wins unconditionally, but otherwise an interactive picker is _always_ shown so the user can confirm. Frontmatter `agent` and the configured `favorite_agent` do **not** resolve past the picker in TTY mode — they only influence the picker's highlighted default and its row ordering.
 - In **non-TTY contexts**, the picker is not an option, so frontmatter `agent` is promoted to a resolving signal along with the configured `favorite_agent`.
 
-The interactive selection box will:
+The interactive selection box is implemented with the **`ChooseOne`** component from the `tui-chrome` library (workspace crate `tui-chrome`, lives at `biscuit-tui/lib/`), driven by `tui_chrome::run_standalone` as an inline prompt. Behaviorally it:
 
-- show only those agents which the host computer has installed
-- the user's configured favorite agent (see "Favorite Agent" below) will be selected as the default in the select control, if one is set and installed
-- the user can change their selection by using the up/down arrow keys to move between the available options
+- shows only those agents which the host computer has installed (one `ChoiceOption` per installed provider)
+- pre-selects the user's configured favorite agent (see "Favorite Agent" below) as the highlighted default in the select control, if one is set and installed
+- accepts up/down arrow keys (and the standard `ChooseOne` vim `j`/`k`, hotkey, and fuzzy-filter affordances) for changing the selection
+- returns `EventOutcome::Submitted` on confirm; `EventOutcome::Cancelled` (Esc) aborts the command
 
 When an agent is selected, we will run the Agent using the "default model" for that provider's platform. The one exception is
 OpenCode because -- at least currently -- do not support a "default model" in non-interactive sessions.
@@ -168,15 +169,24 @@ For `claudine sequence`, front-loading is more involved because different steps 
 
 ### Consolidated Review Screen (interactive)
 
-Before any step executes, Claudine presents a **consolidated review screen** for the entire sequence:
+Before any step executes, Claudine presents a **consolidated review screen** implemented with the **`InputTable`** component from `tui-chrome` (see `biscuit-tui/lib/src/components/input_table/`). The table is driven via `tui_chrome::run_standalone` so it renders inline above the eventual execution output.
 
-- A **table/form** lists every step in the sequence as a row.
+Column layout (per row, one row per step):
+
+| Column   | `InputTableColumn` variant                | Notes                                                                                  |
+| -------- | ----------------------------------------- | -------------------------------------------------------------------------------------- |
+| Step     | `StaticText`                              | Step index/label, not editable.                                                        |
+| Agent    | `ChooseOne` over installed providers      | Options are the same installed-provider snapshot used by `compose`'s picker.           |
+| Model    | `ChooseOne` over the resolved model list  | Falls back to `TextInput` for providers whose catalog is not enumerable (see "Model Enumeration"). |
+
+Behavior:
+
 - Each row is **pre-populated** using the same signals that drive the TTY picker's defaults (frontmatter `agent`, configured `favorite_agent`, and env vars for the model side). This mirrors the TTY agent resolution chain in "Resolution Order": the signals _inform_ the row's default, they do not unilaterally resolve it.
 - **Every row is always presented for user sign-off**, even when frontmatter and favorite together would fully specify the row. Rows are not silently skipped on the basis of "already resolved" — the consolidated review screen _is_ the TTY picker, applied to each step.
-- The user can **edit any row** before confirming — changing the agent, changing the model, or both.
-- A **single sign-off** confirms the entire sequence configuration. Only after sign-off do steps begin executing.
+- Cell focus follows `InputTable` conventions: arrow keys navigate cells, Tab/Shift+Tab wrap, and entering a cell activates its inner widget (`ChooseOne` or `TextInput`) for in-place editing.
+- **`Ctrl+S` is the single sign-off** that submits the whole table; only after sign-off do steps begin executing. **`Esc` cancels** and aborts the sequence command before any step runs.
 
-An `inquire`-based MVP is acceptable for the first implementation, but the **end-state target UX is a true table editor** where rows can be navigated and edited in place. That target should be tracked as the eventual direction; the MVP is a stepping stone, not the final shape.
+Because `InputTable` already provides the navigable, in-place-editable table shape this feature wants, **no `inquire`-based MVP is required**. The first implementation can land directly on the end-state UX.
 
 This consolidated review honors all three originally-conflicting goals:
 

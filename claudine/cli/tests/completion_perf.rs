@@ -36,6 +36,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 use common::TestWorkspace;
+use common::completion::{fake_home, write_file as write};
 
 /// Number of timed iterations per scenario.
 ///
@@ -65,13 +66,6 @@ const DOCS_PER_PKG: usize = 12;
 const REPO_PROMPTS: usize = 60;
 const REPO_DOCS: usize = 60;
 const SKILL_FILES: usize = 80;
-
-fn write(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
 
 fn seed_workspace(root: &Path) {
     fs::create_dir_all(root.join(".git")).unwrap();
@@ -154,16 +148,6 @@ fn seed_workspace(root: &Path) {
 // ---------------------------------------------------------------------
 // Timed invocation helpers.
 // ---------------------------------------------------------------------
-
-fn fake_home(root: &Path) -> std::path::PathBuf {
-    let home = root.parent().unwrap_or(root).join(format!(
-        "{}-home-{}",
-        root.file_name().and_then(|n| n.to_str()).unwrap_or("perf"),
-        std::process::id(),
-    ));
-    fs::create_dir_all(&home).unwrap();
-    home
-}
 
 fn run_complete_once(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Duration {
     let current = argv_tail.len();

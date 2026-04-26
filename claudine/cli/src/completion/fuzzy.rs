@@ -14,18 +14,7 @@
 //! classic Skim / fzf behavior — every character of the query must appear
 //! in the target in order, but not necessarily adjacently. This is a
 //! deliberate choice over a Skim-crate dependency: the behavior we need is
-//! a boolean predicate plus a simple tiebreak score, both of which a
-//! hand-rolled 20-line matcher covers cleanly.
-//!
-//! The score returned by [`fuzzy_score`] is a tie-breaker only: lower is
-//! better, computed as the distance the query's characters had to span in
-//! the target (first match position + gap count). Callers that need a
-//! stable sort should break ties by candidate string before sorting by
-//! score.
-
-// Phase 3 scaffolding. Callers land in `composition.rs`; tests exercise
-// every public item today.
-#![allow(dead_code)]
+//! a boolean predicate, which a hand-rolled 20-line matcher covers cleanly.
 
 /// Boolean subsequence match.
 ///
@@ -52,49 +41,6 @@ pub(crate) fn fuzzy_match(target: &str, query: &str) -> bool {
         }
     }
     true
-}
-
-/// Subsequence match with a tiebreaker score.
-///
-/// Returns `Some(score)` when `query` is a subsequence of `target`, where
-/// lower scores mean a tighter match. `None` means no match.
-///
-/// The score is the span (0-indexed last-match position − first-match
-/// position). Contiguous matches score 0; widely spread matches score
-/// higher. A mismatch on a character immediately aborts.
-pub(crate) fn fuzzy_score(target: &str, query: &str) -> Option<u32> {
-    if query.is_empty() {
-        return Some(0);
-    }
-    let target_lower = target.to_ascii_lowercase();
-    let query_lower = query.to_ascii_lowercase();
-    let target_chars: Vec<char> = target_lower.chars().collect();
-
-    let mut first: Option<usize> = None;
-    let mut last: usize = 0;
-    let mut cursor = 0usize;
-    for q in query_lower.chars() {
-        let mut found: Option<usize> = None;
-        while cursor < target_chars.len() {
-            if target_chars[cursor] == q {
-                found = Some(cursor);
-                cursor += 1;
-                break;
-            }
-            cursor += 1;
-        }
-        match found {
-            Some(pos) => {
-                if first.is_none() {
-                    first = Some(pos);
-                }
-                last = pos;
-            }
-            None => return None,
-        }
-    }
-    let first = first.unwrap_or(0);
-    Some((last - first) as u32)
 }
 
 /// Case-insensitive prefix test.
@@ -155,21 +101,10 @@ impl PartialLen {
     /// Kept for the magic-path and committed-directory pipelines, which
     /// retain the original "directories only at Long" contract. The
     /// repo-wide directory walk added by the review-plan uses
-    /// [`Self::repo_directories_allowed`] / [`Self::dir_match_mode`]
-    /// instead so 1–2 character prefixes still surface directories.
+    /// [`Self::dir_match_mode`] instead so 1–2 character prefixes still
+    /// surface directories.
     pub(crate) fn directories_allowed(self) -> bool {
         matches!(self, Self::Long)
-    }
-
-    /// Whether the repo-wide directory walk should emit candidates at
-    /// this prefix length.
-    ///
-    /// The walk runs at every non-empty prefix length. Differs from
-    /// [`Self::directories_allowed`] which only fires at `Long` — the
-    /// repo-wide walk is the surface that lets users drill into any
-    /// project directory after typing one or two characters.
-    pub(crate) fn repo_directories_allowed(self) -> bool {
-        matches!(self, Self::Short | Self::Long)
     }
 
     /// Directory match mode for the repo-wide walk.
@@ -240,26 +175,6 @@ mod tests {
     }
 
     #[test]
-    fn fuzzy_score_empty_query_is_zero() {
-        assert_eq!(fuzzy_score("anything", ""), Some(0));
-    }
-
-    #[test]
-    fn fuzzy_score_contiguous_match_is_smaller_than_spread() {
-        let tight = fuzzy_score("plan", "pla").unwrap();
-        let loose = fuzzy_score("p.....a", "pa").unwrap();
-        assert!(
-            tight < loose,
-            "tight={tight} should be less than loose={loose}"
-        );
-    }
-
-    #[test]
-    fn fuzzy_score_returns_none_on_mismatch() {
-        assert_eq!(fuzzy_score("plan", "xyz"), None);
-    }
-
-    #[test]
     fn prefix_match_respects_case() {
         assert!(prefix_match("Plan.md", "pla"));
         assert!(prefix_match("plan.md", "PLA"));
@@ -292,15 +207,6 @@ mod tests {
         assert!(!PartialLen::Empty.matching_enabled());
         assert!(PartialLen::Short.matching_enabled());
         assert!(PartialLen::Long.matching_enabled());
-    }
-
-    #[test]
-    fn partial_len_repo_directories_allowed_at_short_and_long() {
-        // The repo-wide directory walk fires at every non-empty prefix
-        // length so 1–2 character partials are useful.
-        assert!(!PartialLen::Empty.repo_directories_allowed());
-        assert!(PartialLen::Short.repo_directories_allowed());
-        assert!(PartialLen::Long.repo_directories_allowed());
     }
 
     #[test]

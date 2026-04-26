@@ -11,91 +11,12 @@
 //!   etc.), with symlinks disabled for skills.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 use common::TestWorkspace;
-
-fn seed_cargo_workspace(root: &Path) {
-    fs::create_dir_all(root.join(".git")).unwrap();
-    fs::write(
-        root.join("Cargo.toml"),
-        "[workspace]\nresolver = \"2\"\nmembers = [\"pkg\"]\n",
-    )
-    .unwrap();
-    let pkg = root.join("pkg");
-    fs::create_dir_all(pkg.join("src")).unwrap();
-    fs::write(
-        pkg.join("Cargo.toml"),
-        "[package]\nname = \"pkg\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
-    )
-    .unwrap();
-    fs::write(pkg.join("src").join("lib.rs"), "").unwrap();
-}
-
-fn write_file(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-fn fake_home(cwd: &Path) -> PathBuf {
-    let parent = cwd.parent().unwrap_or(cwd);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let leaf = cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("claudine-home");
-    let home = parent.join(format!("{leaf}-home-{nonce}-{}", std::process::id()));
-    fs::create_dir_all(&home).expect("create fake home");
-    home
-}
-
-fn run_complete(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
-    let home = fake_home(cwd);
-    run_complete_with_home(cwd, &home, argv_tail)
-}
-
-fn run_complete_with_home(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Vec<String> {
-    let current = argv_tail.len();
-    let reference = cargo_bin_cmd!("claudine");
-    let program = reference.get_program().to_os_string();
-    let mut cmd = Command::new(program);
-    cmd.current_dir(cwd)
-        .env("HOME", home)
-        .env("NO_COLOR", "1")
-        .env_remove("COMPLETE")
-        .env_remove("_CLAP_COMPLETE_INDEX")
-        .env_remove("_CLAP_IFS")
-        .arg("__complete")
-        .arg("--current")
-        .arg(current.to_string())
-        .arg("--")
-        .arg("claudine");
-    for arg in argv_tail {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("completion subprocess to run");
-    assert!(
-        output.status.success(),
-        "completion subprocess failed: stderr={}",
-        String::from_utf8_lossy(&output.stderr),
-    );
-    String::from_utf8(output.stdout)
-        .expect("utf-8")
-        .split('\n')
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
+use common::completion::{
+    fake_home, run_complete, run_complete_with_home, seed_cargo_workspace, write_file,
+};
 
 // ---------------------------------------------------------------------
 // inline-compose requires non-empty prompt:
@@ -258,5 +179,21 @@ fn inline_compose_one_char_prefix_surfaces_repo_dirs() {
     assert!(
         got.iter().any(|c| c == "claudine/"),
         "inline-compose 1-char prefix must surface `claudine/`: {got:?}"
+    );
+}
+
+#[test]
+fn inline_compose_magic_short_prefix_surfaces_repo_dirs() {
+    // Review-3 finding 4: `@<short><TAB>` mirrors Word-mode dir behavior
+    // for `inline-compose` mode. The repo-wide directory walk runs at
+    // Short prefix length regardless of the magic file-tier outcome.
+    let ws = TestWorkspace::named("complete-inline-magic-short-dirs");
+    seed_cargo_workspace(ws.path());
+    fs::create_dir_all(ws.path().join("claudine")).unwrap();
+
+    let got = run_complete(ws.path(), &["inline-compose", "@cl"]);
+    assert!(
+        got.iter().any(|c| c == "claudine/"),
+        "inline-compose magic short prefix must surface `claudine/`: {got:?}"
     );
 }

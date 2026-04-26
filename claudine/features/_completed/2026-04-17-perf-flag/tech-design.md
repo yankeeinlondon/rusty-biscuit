@@ -637,6 +637,8 @@ This is deliberate. The spec asks for composition reporting when document compos
 
 Keeping perf data CLI-local avoids widening the reporting surface. If long-term session analytics need perf data later, that should be a follow-up feature with explicit schema design.
 
+> **Implementation note:** `provider_api_duration` is only populated for the structured-streaming path (Codex, Gemini, OpenCode). Legacy providers such as Goose do not provide this metric, and the line is omitted from the report in those cases.
+
 ## Recommended Implementation Order
 
 1. add CLI flag plumbing and perf bootstrap

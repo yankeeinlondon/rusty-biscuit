@@ -23,10 +23,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ])
         .split(area);
 
-    let agent_name = app.config.preferred_agent.to_string();
+    let agent_name = app
+        .config
+        .preferred_agent
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "(not set)".to_string());
     let agent_line = Line::from(vec![
         Span::styled(
-            "Preferred Agent",
+            "Favorite Agent",
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(": "),
@@ -144,11 +148,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     if let Some(ModalState::AgentSelector { highlighted }) = &app.modal {
         let agents = super::super::get_available_providers(app);
-        let items: Vec<String> = agents.iter().map(|p| p.to_string()).collect();
+        let mut items: Vec<String> = agents.iter().map(|p| p.to_string()).collect();
+        items.insert(0, "(clear)".to_string());
         super::super::widgets::modal::render_list_modal(
             frame,
             area,
-            "Select Preferred Agent",
+            "Select Favorite Agent",
             &items,
             *highlighted,
         );
@@ -208,13 +213,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('a') | KeyCode::Char('A') => {
             let agents = super::super::get_available_providers(app);
-            if !agents.is_empty() {
-                let highlighted = agents
-                    .iter()
-                    .position(|p| *p == app.config.preferred_agent)
-                    .unwrap_or(0);
-                app.modal = Some(ModalState::AgentSelector { highlighted });
-            }
+            // Open the picker even when no providers are installed so users
+            // can still clear the favorite via the "(clear)" entry.
+            let highlighted = app
+                .config
+                .preferred_agent
+                .and_then(|cp| agents.iter().position(|p| *p == cp))
+                .map(|i| i + 1) // +1 for "(clear)" at index 0
+                .unwrap_or(0);
+            app.modal = Some(ModalState::AgentSelector { highlighted });
         }
         KeyCode::Char('u') | KeyCode::Char('U') => {
             let providers = super::super::get_available_providers(app);
@@ -283,7 +290,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 
 pub fn handle_agent_selector_modal(app: &mut App, key: KeyEvent) {
     let providers = super::super::get_available_providers(app);
-    let count = providers.len();
+    let count = providers.len() + 1;
     match key.code {
         KeyCode::Up => {
             let idx = app.modal_highlighted();
@@ -299,10 +306,12 @@ pub fn handle_agent_selector_modal(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => {
             let idx = app.modal_highlighted();
-            if let Some(provider) = providers.get(idx) {
-                app.config.preferred_agent = *provider;
-                app.dirty = true;
+            if idx == 0 {
+                app.config.preferred_agent = None;
+            } else if let Some(provider) = providers.get(idx - 1) {
+                app.config.preferred_agent = Some(*provider);
             }
+            app.dirty = true;
             app.modal = None;
         }
         KeyCode::Esc => {

@@ -143,6 +143,7 @@ fn run() -> Result<()> {
     let raw_argv: Vec<OsString> = std::env::args_os().collect();
     let perf_bootstrap = perf::scan_perf_bootstrap(&raw_argv);
 
+    let arg_parse_start = std::time::Instant::now();
     let argv: Vec<OsString> = argv::normalize(raw_argv);
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
@@ -162,16 +163,16 @@ fn run() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(argv, perf_bootstrap))
+    runtime.block_on(async_main(argv, perf_bootstrap, arg_parse_start))
 }
 
-async fn async_main(argv: Vec<OsString>, perf_bootstrap: perf::PerfBootstrap) -> Result<()> {
-    let perf_arg_parsing = perf_bootstrap
-        .started_at
-        .map(|started| started.elapsed())
-        .unwrap_or_default();
-
+async fn async_main(
+    argv: Vec<OsString>,
+    perf_bootstrap: perf::PerfBootstrap,
+    arg_parse_start: std::time::Instant,
+) -> Result<()> {
     let cli = parse_cli_from(&argv);
+    let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
 
     let tracing_start = std::time::Instant::now();

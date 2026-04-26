@@ -6,7 +6,6 @@
 //! effective (composed) frontmatter, structured streaming, and inline
 //! closure.
 
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::Path;
@@ -20,9 +19,11 @@ use claudine::composition::lifecycle::{
 };
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
-    InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
+    InlineClosurePlan, ResolvedExecutionTarget, SelectionReason, build_installed_snapshot,
+    build_picker_plan, resolve_target_non_tty_with_catalog,
 };
-use claudine::events::Provider;
+use claudine::config::claudine_config::ProviderModelOverride;
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
@@ -86,72 +87,6 @@ enum CompositionExecutionMode<'a> {
     },
 }
 
-/// Collector for composition-level performance telemetry.
-///
-/// Only constructed when `--perf` is enabled. Measures environment setup
-/// duration and aggregates child-process telemetry into the shared perf
-/// report shape.
-#[derive(Debug)]
-struct CompositionPerfCollector {
-    startup: crate::perf::StartupTimings,
-    env_setup_started_at: Option<std::time::Instant>,
-    env_setup_elapsed: std::time::Duration,
-    agent_perf: Option<crate::perf::AgentExecutionPerf>,
-    composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
-    dry_run: bool,
-}
-
-impl CompositionPerfCollector {
-    fn new(
-        startup: crate::perf::StartupTimings,
-        composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
-    ) -> Self {
-        Self {
-            startup,
-            env_setup_started_at: Some(std::time::Instant::now()),
-            env_setup_elapsed: std::time::Duration::ZERO,
-            agent_perf: None,
-            composition_perf,
-            dry_run: false,
-        }
-    }
-
-    fn mark_env_setup_complete(&mut self) {
-        if let Some(started) = self.env_setup_started_at.take() {
-            self.env_setup_elapsed = started.elapsed();
-        }
-    }
-
-    fn set_agent_perf(&mut self, perf: crate::perf::AgentExecutionPerf) {
-        self.agent_perf = Some(perf);
-    }
-
-    fn set_dry_run(&mut self) {
-        self.dry_run = true;
-        self.mark_env_setup_complete();
-    }
-
-    fn into_report(self, total_elapsed: std::time::Duration) -> crate::perf::CommandPerfReport {
-        crate::perf::CommandPerfReport {
-            title: "Composition",
-            total_elapsed,
-            cli: crate::perf::CliOverheadReport {
-                arg_parsing: self.startup.arg_parsing,
-                config_loading: self.startup.config_loading,
-                tracing_init: self.startup.tracing_init,
-                environment_setup: self.env_setup_elapsed,
-            },
-            composition: self.composition_perf,
-            agent: if self.dry_run { None } else { self.agent_perf },
-            notes: if self.dry_run {
-                vec!["Agent execution skipped (dry run)".into()]
-            } else {
-                vec![]
-            },
-        }
-    }
-}
-
 /// Build a [`PromptTimingContext`] from a resolved prompt path, the
 /// effective repo root (when any), and the optional warn thresholds
 /// parsed from harness frontmatter.
@@ -198,7 +133,7 @@ fn resolve_prompt_display_path(
 
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
-    selection_reason: &SelectionReason,
+    target: &ResolvedExecutionTarget,
 ) -> HashMap<String, serde_json::Value> {
     let mut context = HashMap::new();
     context.insert(
@@ -218,7 +153,26 @@ fn composition_dispatch_context(
     );
     context.insert(
         "provider_selection_reason".into(),
-        serde_json::Value::String(format!("{selection_reason:?}")),
+        serde_json::Value::String(format!("{:?}", target.provider_reason)),
+    );
+    context.insert(
+        "resolved_model".into(),
+        serde_json::Value::String(target.model.clone().unwrap_or_default()),
+    );
+    context.insert(
+        "model_selection_reason".into(),
+        serde_json::Value::String(format!("{:?}", target.model_reason)),
+    );
+    context.insert(
+        "selection_mode".into(),
+        serde_json::Value::String(
+            if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+                "tty"
+            } else {
+                "non-tty"
+            }
+            .to_string(),
+        ),
     );
     context
 }
@@ -254,7 +208,11 @@ pub(crate) fn execute_composition_request_inner(
     let total_start = std::time::Instant::now();
     let mut perf_collector = if perf_enabled {
         startup_timings.map(|timings| {
-            CompositionPerfCollector::new(timings, request.prepared.compose_perf.clone())
+            crate::perf::CommandPerfCollector::new_with_composition(
+                "Composition",
+                timings,
+                request.prepared.compose_perf.clone(),
+            )
         })
     } else {
         None
@@ -275,46 +233,92 @@ pub(crate) fn execute_composition_request_inner(
     // -- Provider detection and selection ---------------------------------
 
     let clients = InstalledAiClients::new();
-    let installed: Vec<Provider> = [
-        Provider::Claude,
-        Provider::Codex,
-        Provider::Gemini,
-        Provider::Goose,
-        Provider::KimiCode,
-        Provider::OpenCode,
-        Provider::QwenCode,
-    ]
-    .into_iter()
-    .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-    .collect();
+    let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+        .collect();
 
-    let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
+    let snapshot = build_installed_snapshot(&installed, &request.excluded);
 
-    let selected = match select_provider(
-        request.explicit_provider,
-        &request.prepared,
-        &installed,
-        &request.excluded,
-        favorite,
-    ) {
-        Ok(s) => s,
-        Err(CompositionError::InteractiveSelectionRequired) => {
-            interactive_select(&installed, &request.excluded)?
-        }
-        Err(CompositionError::AgentHintAmbiguous { providers, .. }) => {
-            if is_tty() {
-                interactive_select_from(&providers)?
+    let selection_config = load_selection_config(source_repo_root.unwrap_or(&launch_cwd));
+    let catalog = match &selection_config {
+        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+            cfg.model_overrides.clone(),
+        ),
+        None => claudine::model_catalog::ModelCatalogService::new(),
+    };
+    catalog.refresh_blocking();
+    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+
+    // If a target was already resolved upstream (sequence review, non-TTY
+    // preflight, etc.), use it directly.
+    let target = if let Some(ref t) = request.resolved_target {
+        t.clone()
+    } else {
+        let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+        if is_tty {
+            // TTY mode: explicit flag wins unconditionally; otherwise show picker.
+            if let Some(provider) = request.explicit_provider {
+                let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                    Some(&catalog),
+                );
+                ResolvedExecutionTarget {
+                    provider,
+                    provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+                    model,
+                    model_reason,
+                }
             } else {
-                return Err(eyre!(
-                    "agent hint is ambiguous and no TTY available for interactive selection"
-                ));
+                let plan = build_picker_plan(&request.prepared, &snapshot, favorite)
+                    .map_err(|e| eyre!("{e}"))?;
+                let provider = super::selection_ui::prompt_one_shot_provider(plan)
+                    .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+                let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                    Some(&catalog),
+                );
+                ResolvedExecutionTarget {
+                    provider,
+                    provider_reason:
+                        claudine::composition::ProviderResolutionReason::InteractivePicker,
+                    model,
+                    model_reason,
+                }
             }
+        } else {
+            // Non-TTY mode: strict chain resolution, never prompt.
+            resolve_target_non_tty_with_catalog(
+                request.explicit_provider,
+                &request.prepared,
+                &snapshot,
+                favorite,
+                request.model.as_deref(),
+                Some(&catalog),
+            )
+            .map_err(|e| eyre!("{e}"))?
         }
-        Err(e) => return Err(eyre!("{e}")),
     };
 
-    let provider = selected.provider;
-    let selection_reason = selected.reason;
+    let provider = target.provider;
+    let _selection_reason = match target.provider_reason {
+        claudine::composition::ProviderResolutionReason::ExplicitFlag => {
+            SelectionReason::ExplicitProvider
+        }
+        claudine::composition::ProviderResolutionReason::FrontmatterSingle
+        | claudine::composition::ProviderResolutionReason::FrontmatterList => {
+            SelectionReason::FrontmatterHint
+        }
+        claudine::composition::ProviderResolutionReason::FavoriteAgent => {
+            SelectionReason::ConfigFavorite
+        }
+        _ => SelectionReason::InteractiveChoice,
+    };
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
 
     // -- Profile, binary, arguments, environment --------------------------
@@ -551,7 +555,7 @@ pub(crate) fn execute_composition_request_inner(
                     env_plan.env.insert(k.into(), v.into());
                 },
                 has_model,
-                request.model.as_deref(),
+                target.model.as_deref(),
                 effective_non_interactive,
                 &super::profile::OpenCodeEnvSnapshot::from_system(),
             )?
@@ -561,7 +565,7 @@ pub(crate) fn execute_composition_request_inner(
 
     // Universal --model flag (non-OpenCode providers, and OpenCode interactive).
     if provider != Provider::OpenCode {
-        if let Some(ref model) = request.model {
+        if let Some(ref model) = target.model {
             let mut env_overrides = Vec::new();
             if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
                 && !silent
@@ -573,7 +577,7 @@ pub(crate) fn execute_composition_request_inner(
                 env_plan.env.insert(key.into(), value.into());
             }
         }
-    } else if let Some(ref model) = request.model
+    } else if let Some(ref model) = target.model
         && !effective_non_interactive
     {
         let mut env_overrides = Vec::new();
@@ -761,6 +765,8 @@ pub(crate) fn execute_composition_request_inner(
             provider,
             agent_perf: None,
         };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
             let total = total_start.elapsed();
             let report = collector.into_report(total);
@@ -952,7 +958,7 @@ pub(crate) fn execute_composition_request_inner(
 
     // -- Execution --------------------------------------------------------
 
-    let dispatch_context = composition_dispatch_context(&request, &selection_reason);
+    let dispatch_context = composition_dispatch_context(&request, &target);
 
     if harness_enabled {
         let harness_mode = if is_inline {
@@ -1015,8 +1021,13 @@ pub(crate) fn execute_composition_request_inner(
         let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf),
+            agent_perf: perf_collector
+                .as_ref()
+                .and_then(|c| c.agent_perf())
+                .or(harness_perf),
         };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
             let total = total_start.elapsed();
             let report = collector.into_report(total);
@@ -1097,8 +1108,13 @@ pub(crate) fn execute_composition_request_inner(
         let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf),
+            agent_perf: perf_collector
+                .as_ref()
+                .and_then(|c| c.agent_perf())
+                .or(agent_perf),
         };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
             let total = total_start.elapsed();
             let report = collector.into_report(total);
@@ -1762,60 +1778,25 @@ fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
     ("", text)
 }
 
-// -- Interactive provider selection ---------------------------------------
-
-fn interactive_select(
-    installed: &[Provider],
-    excluded: &BTreeSet<Provider>,
-) -> Result<SelectedProvider> {
-    if !is_tty() {
-        return Err(eyre!(
-            "interactive provider selection required but no TTY available; \
-             use an explicit provider flag (--claude, --codex, etc.) or \
-             add an `agent` frontmatter property"
-        ));
-    }
-
-    let candidates = build_candidate_set(installed, excluded);
-    if candidates.is_empty() {
-        return Err(eyre!("no runnable providers available"));
-    }
-
-    interactive_select_from(&candidates)
-}
-
-fn interactive_select_from(candidates: &[Provider]) -> Result<SelectedProvider> {
-    let options: Vec<String> = candidates.iter().map(|p| p.to_string()).collect();
-    let selection = Select::new("Choose a provider:", options)
-        .prompt()
-        .map_err(|e| eyre!("selection cancelled: {e}"))?;
-
-    let provider = candidates
-        .iter()
-        .find(|p| p.to_string() == selection)
-        .copied()
-        .ok_or_else(|| eyre!("invalid selection"))?;
-
-    Ok(SelectedProvider {
-        provider,
-        reason: SelectionReason::InteractiveChoice,
-    })
-}
-
-fn is_tty() -> bool {
-    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
-}
-
 // -- Config loading -------------------------------------------------------
 
-fn load_config_favorite(cwd: &Path) -> Option<Provider> {
+pub(crate) struct SelectionConfig {
+    pub favorite: Option<Provider>,
+    #[allow(dead_code)]
+    pub model_overrides: HashMap<Provider, ProviderModelOverride>,
+}
+
+pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
     let repo_root = sniff::filesystem::git::detect_git(cwd, false, 1)
         .ok()
         .flatten()
         .map(|info| info.repo_root);
     let config =
         claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
-    Some(config.preferred_agent)
+    Some(SelectionConfig {
+        favorite: config.preferred_agent,
+        model_overrides: config.models,
+    })
 }
 
 #[cfg(test)]
@@ -1895,5 +1876,113 @@ mod tests {
 
         // The frontmatter portion must remain unchanged
         assert!(result.starts_with(frontmatter));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn load_selection_config_returns_both_favorite_and_overrides() {
+        use claudine::config::claudine_config::{
+            DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let claudine_dir = home.join(".claudine");
+        std::fs::create_dir_all(&claudine_dir).unwrap();
+
+        use claudine::config::claudine_config::ClaudineConfig;
+
+        let config = ClaudineConfig {
+            preferred_agent: Some(Provider::Codex),
+            models: {
+                let mut m = HashMap::new();
+                m.insert(
+                    Provider::Codex,
+                    ProviderModelOverride::Detailed(DetailedModelOverride {
+                        mode: ModelOverrideMode::Add,
+                        values: vec!["gpt-5".into()],
+                    }),
+                );
+                m
+            },
+            ..ClaudineConfig::default()
+        };
+        let config_path = claudine_dir.join("config.json");
+        claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
+
+        let old_home = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", home);
+        }
+
+        let result = load_selection_config(home);
+
+        unsafe {
+            if let Some(old) = old_home {
+                std::env::set_var("HOME", old);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+
+        let cfg = result.expect("should load config");
+        assert_eq!(cfg.favorite, Some(Provider::Codex));
+        assert!(cfg.model_overrides.contains_key(&Provider::Codex));
+        assert_eq!(cfg.model_overrides[&Provider::Codex].values(), &["gpt-5"]);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn load_selection_config_handles_missing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+
+        let old_home = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", home);
+        }
+
+        let result = load_selection_config(home);
+
+        unsafe {
+            if let Some(old) = old_home {
+                std::env::set_var("HOME", old);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn catalog_initialized_with_config_overrides() {
+        use claudine::config::claudine_config::{
+            DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+        };
+
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            Provider::Codex,
+            ProviderModelOverride::Detailed(DetailedModelOverride {
+                mode: ModelOverrideMode::Add,
+                values: vec!["gpt-5".into()],
+            }),
+        );
+
+        let config = SelectionConfig {
+            favorite: Some(Provider::Codex),
+            model_overrides: overrides,
+        };
+
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_overrides(config.model_overrides);
+
+        // Static catalog model should still be valid (additive mode)
+        assert!(catalog.is_valid(Provider::Codex, "o3-mini"));
+        // Override model should also be valid
+        assert!(catalog.is_valid(Provider::Codex, "gpt-5"));
+        // Non-overridden provider should use static catalog
+        assert!(catalog.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
     }
 }

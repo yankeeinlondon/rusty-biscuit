@@ -1199,8 +1199,9 @@ mod tests {
             logging: true,
             protect: Default::default(),
             actions: HashMap::new(),
-            preferred_agent: Provider::Claude,
+            preferred_agent: Some(Provider::Claude),
             canonical_provider: None,
+            models: HashMap::new(),
             default_sounds: Default::default(),
         }
     }
