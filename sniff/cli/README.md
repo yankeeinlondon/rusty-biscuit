@@ -131,6 +131,10 @@ sniff repo git-status --history 20   # Show more commits
 sniff repo git-status --compact      # Show only the Status section
 sniff repo hash HEAD                 # Show latest commit details
 sniff repo remote origin             # Inspect remote repository
+sniff repo pr                        # List open pull requests
+sniff repo pr --status merged        # List merged pull requests
+sniff repo pr --status draft --json  # Draft PRs as JSON
+sniff repo pr -v                     # Verbose PR block output
 sniff repo deps                      # Text dependency list
 sniff repo deps --ui                 # Mermaid dependency diagram
 sniff repo packages                  # List all package names (CSV)
@@ -663,6 +667,12 @@ sniff repo remote origin
 
 # Or specify a URL directly
 sniff repo remote https://github.com/rust-lang/cargo
+
+# List pull requests
+sniff repo pr
+sniff repo pr --status merged
+sniff repo pr --status draft --json
+sniff repo pr -v
 ```
 
 **Output includes:**
