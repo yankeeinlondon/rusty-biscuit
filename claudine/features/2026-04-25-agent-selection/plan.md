@@ -1,7 +1,32 @@
 ---
 phases: 7
 created: 2026-04-19
-start_phase: 1
+start_phase: 2
+packages:
+    - claudine
+    - claudine-cli
+source_files_during_phase_1:
+    - claudine/lib/src/config/claudine_config.rs
+    - claudine/lib/src/dispatch/loader.rs
+    - claudine/lib/src/dispatch/runner.rs
+    - claudine/cli/src/commands/init/mod.rs
+    - claudine/cli/src/commands/init_wizard.rs
+    - claudine/cli/src/commands/wrap/composition.rs
+    - claudine/cli/src/commands/config_tui/mod.rs
+    - claudine/cli/src/commands/config_tui/tabs/preferences.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/error.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/select.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/cli/tests/wrap_commands.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Agent Selection Execution Plan
@@ -48,12 +73,12 @@ Files:
 
 Steps:
 
-- [ ] Change `ClaudineConfig.preferred_agent` from `Provider` to `Option<Provider>`, add `#[serde(default, alias = "favorite_agent")]`, and add `models: HashMap<Provider, ProviderModelOverride>`.
-- [ ] Add `ProviderModelOverride` and `ModelOverrideMode` in the config layer with additive-list and explicit-replace forms.
-- [ ] Update `Default`, config validation, and dispatch-loader merge behavior so user config may omit `preferred_agent`, while repo config still rejects `preferred_agent`, `favorite_agent`, and `models`.
-- [ ] Update `init` and `init_wizard` so first-run setup can write an optional favorite agent and does not hard-fail when no providers are installed.
-- [ ] Update the config TUI preferences tab so favorite agent is optional and can be cleared.
-- [ ] Extend the `config` command surface to support `claudine config set favorite-agent <provider>` while preserving bare `claudine config` as the TUI entrypoint.
+- [x] Change `ClaudineConfig.preferred_agent` from `Provider` to `Option<Provider>`, add `#[serde(default, alias = "favorite_agent")]`, and add `models: HashMap<Provider, ProviderModelOverride>`.
+- [x] Add `ProviderModelOverride` and `ModelOverrideMode` in the config layer with additive-list and explicit-replace forms.
+- [x] Update `Default`, config validation, and dispatch-loader merge behavior so user config may omit `preferred_agent`, while repo config still rejects `preferred_agent`, `favorite_agent`, and `models`.
+- [x] Update `init` and `init_wizard` so first-run setup can write an optional favorite agent and does not hard-fail when no providers are installed.
+- [x] Update the config TUI preferences tab so favorite agent is optional and can be cleared.
+- [x] Extend the `config` command surface to support `claudine config set favorite-agent <provider>` while preserving bare `claudine config` as the TUI entrypoint.
 
 Parallelizable:
 
@@ -169,27 +194,29 @@ Validation checkpoint:
 
 ## Phase 5: Compose And Inline Wiring
 
-Outcome: `compose` and `inline-compose` resolve provider/model once, prompt correctly in TTY mode, never prompt in non-TTY mode, and launch wrappers with fully resolved targets.
+Outcome: `compose` and `inline-compose` resolve provider/model once, prompt correctly in TTY mode using `tui_chrome::ChooseOne`, never prompt in non-TTY mode, and launch wrappers with fully resolved targets.
 
 Files:
 
+- `claudine/cli/Cargo.toml` (add `tui-chrome` workspace dep)
 - `claudine/cli/src/commands/wrap/composition.rs`
-- `claudine/cli/src/commands/wrap/selection_ui.rs`
+- `claudine/cli/src/commands/wrap/selection_ui.rs` (new)
 - `claudine/cli/src/commands/compose.rs`
 - `claudine/lib/src/composition/types.rs`
 
 Steps:
 
-- [ ] Extract picker rendering from `wrap/composition.rs` into a new `selection_ui.rs` helper that accepts typed picker plans from the library.
+- [ ] Add `tui-chrome` (workspace path: `biscuit-tui/lib/`) as a dependency of `claudine-cli` and confirm crate is reachable from the workspace root.
+- [ ] Create `wrap/selection_ui.rs` and implement `prompt_one_shot_provider(plan: ProviderPickerPlan) -> Result<Provider, ...>` built on `tui_chrome::ChooseOne` + `tui_chrome::run_standalone`. Map each `ProviderPickerOption` to a `ChoiceOption`, set the initial selection from `plan.default_index`, and translate `EventOutcome::Submitted` / `Cancelled` into a resolved provider or an abort error.
 - [ ] Build the installed-provider snapshot once at command start using `InstalledAiClients::is_installed(provider.sniff_ai_cli())`.
-- [ ] Replace the current `select_provider(...)` plus fallback `interactive_select(...)` flow with the new mode-aware resolver and picker-plan flow.
+- [ ] Replace the current `select_provider(...)` plus fallback `interactive_select(...)` flow with the new mode-aware resolver and picker-plan flow, calling `selection_ui::prompt_one_shot_provider` only in TTY mode when no `--<provider>` flag was supplied.
 - [ ] Pass `ResolvedExecutionTarget` through `CompositionExecutionRequest` so launch no longer depends on wrapper-local provider/model guessing.
 - [ ] Extend `composition_dispatch_context(...)` with `provider_selection_reason`, `resolved_model`, `model_selection_reason`, and `selection_mode`.
 - [ ] Remove the current ad hoc `load_config_favorite(...) -> Some(config.preferred_agent)` assumption so missing favorites remain valid.
 
 Parallelizable:
 
-- UI extraction and dispatch-context/reporting changes can run in parallel once request/target types are finalized.
+- UI extraction (selection_ui.rs) and dispatch-context/reporting changes can run in parallel once request/target types are finalized.
 
 Validation checkpoint:
 
@@ -199,10 +226,11 @@ Validation checkpoint:
   - `inline-compose` non-TTY structured error text
   - explicit provider bypassing picker
   - exclusions only affecting automatic selection, not explicit flags
+  - `selection_ui::prompt_one_shot_provider` exercised via synthetic events through `drive_event_loop` (Submitted, Cancelled, default-index respected)
 
 ## Phase 6: Sequence Front-Loading And Review
 
-Outcome: `sequence` resolves every step's agent/model before shell preflight or execution, supports one interactive review/sign-off in TTY mode, and fails the whole run up front in non-TTY mode.
+Outcome: `sequence` resolves every step's agent/model before shell preflight or execution, presents a single `tui_chrome::InputTable` review screen in TTY mode (no `inquire` MVP), and fails the whole run up front in non-TTY mode.
 
 Files:
 
@@ -217,13 +245,14 @@ Steps:
 - [ ] Reorder sequence preparation into: build overlays, prepare each step, resolve provider/model for each step, review or validate, shell-preflight finalized steps, then execute.
 - [ ] Add `SequenceStepDraft` and `SequenceSelectionFailure` support so unresolved steps can be surfaced before execution starts.
 - [ ] Add a non-TTY aggregate failure path using `CompositionError::SequenceSelectionFailed { failures }`.
-- [ ] Build the TTY review MVP: static summary, row selection, provider edit via `inquire::Select`, model edit via `Select` or free-text input, and one final confirmation.
+- [ ] In `selection_ui.rs`, implement `review_sequence(drafts: Vec<SequenceStepDraft>) -> Result<Vec<ResolvedExecutionTarget>, ...>` built on `tui_chrome::InputTable` + `tui_chrome::run_standalone`. Per row construct columns: `StaticText` for step label; `ChooseOne` for the agent (options from `ProviderPickerPlan.options`, default at `default_index`); `ChooseOne` for the model when a catalog is available, falling back to `TextInput` when the catalog is empty/unavailable. Render locked cells (when `provider_locked` or `model_locked`) as `StaticText`.
+- [ ] On `EventOutcome::Submitted` (Ctrl+S), read the typed `Vec<Row>` value back from `InputTableState`, decode each row's `CellValue`, and produce one `ResolvedExecutionTarget` per step. On `EventOutcome::Cancelled` (Esc), abort the sequence command before any step runs.
 - [ ] Enforce locks when an explicit provider flag or explicit model flag was supplied on the CLI.
 - [ ] Carry the reviewed or resolved per-step target into `CompositionExecutionRequest.resolved_target` so execution reuses the front-loaded decision instead of resolving again mid-run.
 
 Parallelizable:
 
-- The aggregate failure type work and the interactive review UI can proceed in parallel once per-step draft types exist.
+- The aggregate failure type work and the `InputTable` review wiring can proceed in parallel once per-step draft types exist.
 
 Validation checkpoint:
 
@@ -231,7 +260,8 @@ Validation checkpoint:
 - Focused assertions for:
   - no step executes when any non-TTY step fails selection
   - per-step resolved target propagation
-  - provider/model lock behavior
+  - provider/model lock behavior renders as `StaticText` in the table
+  - `review_sequence` exercised via synthetic events through `drive_event_loop` (multi-row Submitted, Cancelled mid-edit, Tab/Shift+Tab navigation, ChooseOne→TextInput fallback for catalog-less providers)
 - Manual smoke check with a multi-step sequence in both TTY and non-TTY modes.
 
 ## Phase 7: Documentation And Regression Sweep
