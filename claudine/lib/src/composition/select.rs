@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+use crate::model_catalog::ModelCatalogService;
 
 use super::error::CompositionError;
 use super::types::{
@@ -52,6 +53,32 @@ pub fn resolve_target_non_tty(
         favorite,
         cli_model,
         |var| std::env::var(var).ok(),
+        None,
+    )
+}
+
+/// Resolve provider and model for a non-TTY session with an optional catalog.
+///
+/// When a [`ModelCatalogService`] is provided, frontmatter `model` hints are
+/// validated against the merged catalog. Invalid hints are skipped rather than
+/// treated as errors.
+#[expect(dead_code)]
+pub fn resolve_target_non_tty_with_catalog(
+    explicit_provider: Option<Provider>,
+    prepared: &super::types::PreparedComposition,
+    snapshot: &InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    cli_model: Option<&str>,
+    catalog: Option<&ModelCatalogService>,
+) -> Result<ResolvedExecutionTarget, CompositionError> {
+    resolve_target_non_tty_with_env(
+        explicit_provider,
+        prepared,
+        snapshot,
+        favorite,
+        cli_model,
+        |var| std::env::var(var).ok(),
+        catalog,
     )
 }
 
@@ -62,6 +89,7 @@ fn resolve_target_non_tty_with_env<E>(
     favorite: Option<Provider>,
     cli_model: Option<&str>,
     env_lookup: E,
+    catalog: Option<&ModelCatalogService>,
 ) -> Result<ResolvedExecutionTarget, CompositionError>
 where
     E: Fn(&str) -> Option<String>,
@@ -70,7 +98,7 @@ where
     if let Some(provider) = explicit_provider {
         if snapshot.all_installed.contains(&provider) {
             let (model, model_reason) =
-                resolve_model_with_env(provider, prepared, cli_model, &env_lookup);
+                resolve_model_with_env(provider, prepared, cli_model, &env_lookup, catalog);
             return Ok(ResolvedExecutionTarget {
                 provider,
                 provider_reason: ProviderResolutionReason::ExplicitFlag,
@@ -107,7 +135,7 @@ where
     };
 
     let (model, model_reason) =
-        resolve_model_with_env(provider, prepared, cli_model, &env_lookup);
+        resolve_model_with_env(provider, prepared, cli_model, &env_lookup, catalog);
 
     // OpenCode non-TTY hard error: model is required
     if provider == Provider::OpenCode && model.is_none() {
@@ -233,7 +261,7 @@ pub fn build_picker_plan(
 /// 1. CLI `--model`
 /// 2. Provider-specific env var(s)
 /// 3. Generic `MODEL` env var
-/// 4. Frontmatter `model`
+/// 4. Frontmatter `model` (validated against catalog when available)
 /// 5. Provider default (`None`)
 #[allow(dead_code)]
 pub fn resolve_model(
@@ -241,7 +269,23 @@ pub fn resolve_model(
     prepared: &super::types::PreparedComposition,
     cli_model: Option<&str>,
 ) -> (Option<String>, ModelResolutionReason) {
-    resolve_model_with_env(provider, prepared, cli_model, |var| std::env::var(var).ok())
+    resolve_model_with_env(provider, prepared, cli_model, |var| std::env::var(var).ok(), None)
+}
+
+/// Resolve model with an optional catalog for frontmatter validation.
+///
+/// When `catalog` is provided, frontmatter `model` hints are validated
+/// against the merged catalog. Invalid single hints fall through to the
+/// provider default; invalid list entries are skipped until a valid one
+/// is found or the list is exhausted.
+#[expect(dead_code)]
+pub fn resolve_model_with_catalog(
+    provider: Provider,
+    prepared: &super::types::PreparedComposition,
+    cli_model: Option<&str>,
+    catalog: Option<&ModelCatalogService>,
+) -> (Option<String>, ModelResolutionReason) {
+    resolve_model_with_env(provider, prepared, cli_model, |var| std::env::var(var).ok(), catalog)
 }
 
 fn resolve_model_with_env<E>(
@@ -249,6 +293,7 @@ fn resolve_model_with_env<E>(
     prepared: &super::types::PreparedComposition,
     cli_model: Option<&str>,
     env_lookup: E,
+    catalog: Option<&ModelCatalogService>,
 ) -> (Option<String>, ModelResolutionReason)
 where
     E: Fn(&str) -> Option<String>,
@@ -275,19 +320,26 @@ where
         return (Some(value), ModelResolutionReason::GenericEnv);
     }
 
-    // 4. Frontmatter model
+    // 4. Frontmatter model (validated against catalog when available)
     if let Some(ref hint) = prepared.selection_hints.model {
         match hint {
             ModelHint::Single(model) => {
-                return (
-                    Some(model.clone()),
-                    ModelResolutionReason::FrontmatterSingle,
-                );
+                if catalog.is_none() || catalog.unwrap().is_valid(provider, model) {
+                    return (
+                        Some(model.clone()),
+                        ModelResolutionReason::FrontmatterSingle,
+                    );
+                }
             }
             ModelHint::List(models) => {
-                // Without catalog validation (Phase 4), accept the first entry.
-                // When catalog validation lands, invalid entries will be skipped.
-                if let Some(first) = models.first() {
+                if let Some(catalog) = catalog {
+                    if let Some(valid) = catalog.first_valid(provider, models) {
+                        return (
+                            Some(valid),
+                            ModelResolutionReason::FrontmatterList,
+                        );
+                    }
+                } else if let Some(first) = models.first() {
                     return (
                         Some(first.clone()),
                         ModelResolutionReason::FrontmatterList,
@@ -619,7 +671,7 @@ mod tests {
         // Use the internal testable variant with an empty env lookup to verify
         // the fallback chain when no env vars are set:
         let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None);
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, None);
         assert_eq!(model, None);
         assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
     }
@@ -628,7 +680,7 @@ mod tests {
     fn model_frontmatter_single_used() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-4o".into())));
         let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None);
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, None);
         assert_eq!(model, Some("gpt-4o".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }
@@ -640,9 +692,58 @@ mod tests {
             Some(ModelHint::List(vec!["gpt-4o".into(), "o3-mini".into()])),
         );
         let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None);
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, None);
         assert_eq!(model, Some("gpt-4o".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
+    }
+
+    // -- Catalog-aware model resolution tests ----------------------------------
+
+    #[test]
+    fn model_catalog_rejects_invalid_single_hint() {
+        let prepared = make_prepared_composition(None, Some(ModelHint::Single("not-real".into())));
+        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let (model, reason) =
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        // Invalid single hint falls through to provider default
+        assert_eq!(model, None);
+        assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
+    }
+
+    #[test]
+    fn model_catalog_skips_invalid_list_entries() {
+        let prepared = make_prepared_composition(
+            None,
+            Some(ModelHint::List(vec!["not-real".into(), "o3-mini".into()])),
+        );
+        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let (model, reason) =
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        assert_eq!(model, Some("o3-mini".to_string()));
+        assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
+    }
+
+    #[test]
+    fn model_catalog_all_list_entries_invalid_falls_through() {
+        let prepared = make_prepared_composition(
+            None,
+            Some(ModelHint::List(vec!["not-real".into(), "also-fake".into()])),
+        );
+        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let (model, reason) =
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        assert_eq!(model, None);
+        assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
+    }
+
+    #[test]
+    fn model_catalog_valid_single_hint_accepted() {
+        let prepared = make_prepared_composition(None, Some(ModelHint::Single("o3-mini".into())));
+        let catalog = crate::model_catalog::ModelCatalogService::new();
+        let (model, reason) =
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        assert_eq!(model, Some("o3-mini".to_string()));
+        assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }
 
     // -- Picker plan tests -----------------------------------------------------
@@ -759,6 +860,7 @@ mod tests {
             Some(Provider::OpenCode),
             None,
             |_| None,
+            None,
         )
         .unwrap_err();
         assert!(matches!(err, CompositionError::ModelSelectionFailed { .. }));
@@ -776,6 +878,7 @@ mod tests {
             Some(Provider::OpenCode),
             None,
             |_| None,
+            None,
         )
         .unwrap();
         assert_eq!(target.provider, Provider::OpenCode);
