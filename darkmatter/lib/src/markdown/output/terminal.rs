@@ -1872,7 +1872,13 @@ fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
 /// ANSI-formatted string with title (if present) on the left and language right-aligned.
 /// Title is bold, language is not. For title-only headers (empty language with title),
 /// only the title is rendered.
-fn format_header_row(
+///
+/// ## Notes
+///
+/// This helper is also reused by [`crate::markdown::yaml_block::YamlBlock`] to keep
+/// the YAML-fence header row byte-identical between Markdown and YamlBlock outputs.
+/// Any signature change here must keep that consumer in sync.
+pub(crate) fn format_header_row(
     title: Option<&str>,
     language: &str,
     bg_color: Color,

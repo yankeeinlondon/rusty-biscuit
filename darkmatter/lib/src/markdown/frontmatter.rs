@@ -877,7 +877,10 @@ b: "$(echo b)""#;
         let message: Option<String> = fm.get("success_message").unwrap();
 
         assert_eq!(area, Some("{{ctx.current_package_area}}".to_string()));
-        assert_eq!(message, Some("\u{1F5A5}\u{FE0F} Build succeeded".to_string()));
+        assert_eq!(
+            message,
+            Some("\u{1F5A5}\u{FE0F} Build succeeded".to_string())
+        );
         assert!(remaining.starts_with("# Body"));
     }
 }

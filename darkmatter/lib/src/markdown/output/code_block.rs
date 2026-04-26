@@ -9,8 +9,8 @@ use crate::markdown::{
     MarkdownError, MarkdownResult,
     dsl::CodeBlockMeta,
     highlighting::{CodeHighlighter, ColorMode},
-    output::terminal::TerminalOptions,
     output::html::HtmlOptions,
+    output::terminal::TerminalOptions,
 };
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Color;
@@ -177,15 +177,9 @@ pub(crate) fn render_html_code_block(
     // Determine if we should show line numbers
     let show_line_numbers = meta.line_numbering || options.include_line_numbers;
 
-    // Find syntax definition
-    let syntax = if language.is_empty() {
-        highlighter.syntax_set().find_syntax_plain_text()
-    } else {
-        highlighter
-            .syntax_set()
-            .find_syntax_by_token(language)
-            .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text())
-    };
+    // Find syntax definition (mirrors the terminal path via the shared helper)
+    let syntax = find_syntax(language, highlighter.syntax_set())
+        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
 
     // Start code block container
     output.push_str(r#"<div class="code-block">"#);
@@ -355,7 +349,9 @@ pub(crate) fn emit_padding_row(bg_color: Color) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::output::terminal::{ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions};
+    use crate::markdown::output::terminal::{
+        ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions,
+    };
     use crate::testing::strip_ansi_codes;
 
     fn test_options() -> TerminalOptions {
@@ -376,12 +372,22 @@ mod tests {
 
     #[test]
     fn test_render_terminal_code_block_basic() {
-        let highlighter = CodeHighlighter::new(crate::markdown::highlighting::ThemePair::Github, ColorMode::Dark);
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
         let options = test_options();
         let meta = CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = render_terminal_code_block(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = render_terminal_code_block(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -392,12 +398,22 @@ mod tests {
 
     #[test]
     fn test_render_terminal_code_block_yaml() {
-        let highlighter = CodeHighlighter::new(crate::markdown::highlighting::ThemePair::Github, ColorMode::Dark);
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
         let options = test_options();
         let meta = CodeBlockMeta::default();
 
         let code = "foo: 1\nbar: 2";
-        let result = render_terminal_code_block(code, "yaml", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = render_terminal_code_block(
+            code,
+            "yaml",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -410,12 +426,22 @@ mod tests {
 
     #[test]
     fn test_render_terminal_code_block_light_mode() {
-        let highlighter = CodeHighlighter::new(crate::markdown::highlighting::ThemePair::Github, ColorMode::Light);
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Light,
+        );
         let options = test_options();
         let meta = CodeBlockMeta::default();
 
         let code = "test: value";
-        let result = render_terminal_code_block(code, "yaml", &highlighter, &options, &meta, ColorMode::Light);
+        let result = render_terminal_code_block(
+            code,
+            "yaml",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Light,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -424,12 +450,22 @@ mod tests {
 
     #[test]
     fn test_render_terminal_code_block_dark_mode() {
-        let highlighter = CodeHighlighter::new(crate::markdown::highlighting::ThemePair::Github, ColorMode::Dark);
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
         let options = test_options();
         let meta = CodeBlockMeta::default();
 
         let code = "test: value";
-        let result = render_terminal_code_block(code, "yaml", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = render_terminal_code_block(
+            code,
+            "yaml",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -438,7 +474,10 @@ mod tests {
 
     #[test]
     fn test_render_html_code_block_yaml() {
-        let highlighter = CodeHighlighter::new(crate::markdown::highlighting::ThemePair::Github, ColorMode::Dark);
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
         let options = HtmlOptions::default();
         let meta = CodeBlockMeta::default();
 
@@ -456,7 +495,10 @@ mod tests {
 
     #[test]
     fn test_find_syntax_rust() {
-        let highlighter = CodeHighlighter::new(crate::markdown::highlighting::ThemePair::Github, ColorMode::Dark);
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
         let syntax = find_syntax("rust", highlighter.syntax_set());
         assert!(syntax.is_some());
         assert_eq!(syntax.unwrap().name, "Rust");
@@ -464,14 +506,22 @@ mod tests {
 
     #[test]
     fn test_find_syntax_unknown() {
-        let highlighter = CodeHighlighter::new(crate::markdown::highlighting::ThemePair::Github, ColorMode::Dark);
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
         let syntax = find_syntax("unknown_language_xyz", highlighter.syntax_set());
         assert!(syntax.is_none());
     }
 
     #[test]
     fn test_compute_highlight_bg_dark() {
-        let theme_bg = Color { r: 40, g: 40, b: 40, a: 255 };
+        let theme_bg = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         let highlight_bg = compute_highlight_bg(theme_bg, ColorMode::Dark);
         assert_eq!(highlight_bg.r, 70); // 40 + 30
         assert_eq!(highlight_bg.g, 65); // 40 + 25
@@ -480,7 +530,12 @@ mod tests {
 
     #[test]
     fn test_compute_highlight_bg_light() {
-        let theme_bg = Color { r: 240, g: 240, b: 240, a: 255 };
+        let theme_bg = Color {
+            r: 240,
+            g: 240,
+            b: 240,
+            a: 255,
+        };
         let highlight_bg = compute_highlight_bg(theme_bg, ColorMode::Light);
         assert_eq!(highlight_bg.r, 220); // 240 - 20
         assert_eq!(highlight_bg.g, 225); // 240 - 15
@@ -489,7 +544,12 @@ mod tests {
 
     #[test]
     fn test_emit_padding_row() {
-        let bg = Color { r: 50, g: 60, b: 70, a: 255 };
+        let bg = Color {
+            r: 50,
+            g: 60,
+            b: 70,
+            a: 255,
+        };
         let row = emit_padding_row(bg);
         assert!(row.contains("\x1b[48;2;50;60;70m"));
         assert!(row.contains("\x1b[K"));

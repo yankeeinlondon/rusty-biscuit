@@ -607,14 +607,26 @@ let block = YamlBlock::from_markdown_content("---\ntitle: Hello\n---\n# Body")?;
 
 // From a Markdown file on disk
 let block = YamlBlock::from_markdown_file("README.md")?;
+```
 
-// Terminal rendering (via Renderable trait)
-let term = biscuit_terminal::terminal::Terminal::new();
-let ansi = block.render(&term);
+Once constructed, `YamlBlock` renders through both the terminal and browser pipelines via the [`biscuit-terminal`](../../biscuit-terminal/) traits:
 
-// Browser rendering (via BrowserRenderable trait)
-let html = block.render_to_browser();
-// html contains <pre><code class="language-yaml">...</code></pre>
+```rust
+use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::YamlBlock;
+
+let block = YamlBlock::new("foo: 1\nbar: 2")?;
+
+// Terminal rendering — ANSI-highlighted `yaml` code block, styled identically
+// to a Markdown ```yaml fence under the same theme/color-mode.
+let term = Terminal::default();
+print!("{}", Renderable::render(&block, &term));
+
+// Browser rendering — <pre><code class="language-yaml">…</code></pre>
+// inside the standard darkmatter <div class="code-block"> wrapper.
+let html = BrowserRenderable::render_to_browser(&block);
+assert!(html.contains("language-yaml"));
 ```
 
 `YamlBlock` stores the raw YAML text after validation. It does not retain the parsed `serde_yaml_ng::Value`, keeping the public API small.
