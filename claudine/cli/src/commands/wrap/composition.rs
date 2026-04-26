@@ -86,72 +86,6 @@ enum CompositionExecutionMode<'a> {
     },
 }
 
-/// Collector for composition-level performance telemetry.
-///
-/// Only constructed when `--perf` is enabled. Measures environment setup
-/// duration and aggregates child-process telemetry into the shared perf
-/// report shape.
-#[derive(Debug)]
-struct CompositionPerfCollector {
-    startup: crate::perf::StartupTimings,
-    env_setup_started_at: Option<std::time::Instant>,
-    env_setup_elapsed: std::time::Duration,
-    agent_perf: Option<crate::perf::AgentExecutionPerf>,
-    composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
-    dry_run: bool,
-}
-
-impl CompositionPerfCollector {
-    fn new(
-        startup: crate::perf::StartupTimings,
-        composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
-    ) -> Self {
-        Self {
-            startup,
-            env_setup_started_at: Some(std::time::Instant::now()),
-            env_setup_elapsed: std::time::Duration::ZERO,
-            agent_perf: None,
-            composition_perf,
-            dry_run: false,
-        }
-    }
-
-    fn mark_env_setup_complete(&mut self) {
-        if let Some(started) = self.env_setup_started_at.take() {
-            self.env_setup_elapsed = started.elapsed();
-        }
-    }
-
-    fn set_agent_perf(&mut self, perf: crate::perf::AgentExecutionPerf) {
-        self.agent_perf = Some(perf);
-    }
-
-    fn set_dry_run(&mut self) {
-        self.dry_run = true;
-        self.mark_env_setup_complete();
-    }
-
-    fn into_report(self, total_elapsed: std::time::Duration) -> crate::perf::CommandPerfReport {
-        crate::perf::CommandPerfReport {
-            title: "Composition",
-            total_elapsed,
-            cli: crate::perf::CliOverheadReport {
-                arg_parsing: self.startup.arg_parsing,
-                config_loading: self.startup.config_loading,
-                tracing_init: self.startup.tracing_init,
-                environment_setup: self.env_setup_elapsed,
-            },
-            composition: self.composition_perf,
-            agent: if self.dry_run { None } else { self.agent_perf },
-            notes: if self.dry_run {
-                vec!["Agent execution skipped (dry run)".into()]
-            } else {
-                vec![]
-            },
-        }
-    }
-}
-
 /// Build a [`PromptTimingContext`] from a resolved prompt path, the
 /// effective repo root (when any), and the optional warn thresholds
 /// parsed from harness frontmatter.
@@ -254,7 +188,7 @@ pub(crate) fn execute_composition_request_inner(
     let total_start = std::time::Instant::now();
     let mut perf_collector = if perf_enabled {
         startup_timings.map(|timings| {
-            CompositionPerfCollector::new(timings, request.prepared.compose_perf.clone())
+            crate::perf::CommandPerfCollector::new_with_composition("Composition", timings, request.prepared.compose_perf.clone())
         })
     } else {
         None
@@ -761,6 +695,8 @@ pub(crate) fn execute_composition_request_inner(
             provider,
             agent_perf: None,
         };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
             let total = total_start.elapsed();
             let report = collector.into_report(total);
@@ -1015,8 +951,10 @@ pub(crate) fn execute_composition_request_inner(
         let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf),
+            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf()).or(harness_perf),
         };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
             let total = total_start.elapsed();
             let report = collector.into_report(total);
@@ -1097,8 +1035,10 @@ pub(crate) fn execute_composition_request_inner(
         let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf),
+            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf()).or(agent_perf),
         };
+        // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+        // The perf report is always emitted to stderr when requested.
         if let Some(collector) = perf_collector {
             let total = total_start.elapsed();
             let report = collector.into_report(total);
