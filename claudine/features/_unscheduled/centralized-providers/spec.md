@@ -8,6 +8,14 @@ This split is intentional in spirit (concerns evolve independently) but accident
 
 This spec proposes a **centralized provider model** that becomes the single source of truth for every per-provider fact, and a **strongly typed surface** that replaces the descriptive `&'static str` collections with parsed, executable types. The goal is not to collapse all behavior into one struct (that would defeat the original separation of concerns) — it is to (a) make every provider variant carry a typed handle to every facet of its behavior, and (b) make it impossible to add a `Provider` variant that compiles without addressing every facet.
 
+### Decision Log
+
+Three decisions made during clarification review (resolving Open Questions 1, 2, 3, and 6):
+
+1. **Hybrid data + behavior split.** `provider_info(Provider) -> &'static ProviderInfo` returns a `Serialize`-derived data struct carrying every static field; a small `ProviderBehavior` trait, reached via `info.behavior`, holds the genuinely dynamic operations (`detect_from_payload`, `create_semantic_parser`). Load-bearing reason: structural serde round-trip + inspectability.
+2. **`AgentId` collapsed in phase 0.** `AgentId` merges into `Provider` as a standalone, mechanically-revertable PR before any trait scaffolding lands. `AgentId` survives one release cycle as a `#[deprecated]` re-export. Load-bearing reason: de-risks phase 1 by separating identifier unification from trait scaffolding.
+3. **`WrapperProfile` stays CLI-only.** The lib-side `ProviderInfo` carries no `wrapper_profile` accessor; the CLI keeps a parallel `wrapper_for(Provider)` registry. Load-bearing reason: forced by the lib/CLI crate-graph constraint — the original spec implicitly assumed a circular dependency that does not compile.
+
 ## Motivation
 
 The "Future Improvements to Metadata" section of [`building-an-agent-wrapper.md`](../../topics/building-an-agent-wrapper.md) enumerates ten concrete gaps. They cluster into four themes:
@@ -70,71 +78,99 @@ Twenty-one in-tree dispatch points, plus one external dependency. A `Provider` v
 
 ## Proposed Architecture
 
-### Central trait: `ProviderProfile`
+### Central type: `ProviderInfo` (data) + `ProviderBehavior` (trait)
 
-Introduce one new public trait in `claudine::events::provider` (or a new top-level `claudine::provider` module — see "Open Questions"):
+Introduce a new top-level `claudine::provider` module containing a partitioned design: a public **data struct** carrying every static fact about a provider, and a small **behavior trait** for the genuinely dynamic operations. The two are linked by a `&'static dyn ProviderBehavior` field on the struct, so a single registry lookup returns both halves.
+
+The partition exists for two load-bearing reasons:
+
+1. **Serde round-trip is structural.** `ProviderInfo` derives `Serialize`, so the success criterion that `claudine providers --describe --format json` round-trips through serde without information loss is satisfied trivially by the data shape — no manual `Serialize` impl required for a 17-method trait.
+2. **Inspectability.** All static fields are reachable as plain struct accesses (e.g. in tests, debuggers, snapshot output) without going through trait-object indirection.
+
+Trait-object v-table cost was a secondary consideration — these are config-time lookups and the cost is negligible either way.
 
 ```rust
-pub trait ProviderProfile: Send + Sync + std::fmt::Debug + 'static {
+/// All static, serializable facts about a provider.
+///
+/// Populated once per provider variant as a `&'static ProviderInfo`. The
+/// `behavior` field carries the small set of genuinely dynamic operations
+/// (parser construction, payload detection) so a single lookup returns
+/// both halves of the catalog.
+#[derive(Debug, Serialize)]
+pub struct ProviderInfo {
     // ----- Identity -----------------------------------------------------------
-    fn provider(&self) -> Provider;
-    fn agent_id(&self) -> AgentId;
-    fn sniff_binding(&self) -> AiCli;          // typed bridge — replaces sniff_ai_cli()
-    fn display_name(&self) -> &'static str;    // "Kimi Code"
-    fn slug(&self) -> &'static str;            // "kimi_code"
-    fn binary(&self) -> &'static str;          // "kimi"
-    fn agent_offset(&self) -> &'static str;    // ".kimi"
-    fn cli_aliases(&self) -> &'static [&'static str];
+    pub provider: Provider,
+    pub sniff_binding: AiCli,                     // typed bridge — replaces sniff_ai_cli()
+    pub display_name: &'static str,               // "Kimi Code"
+    pub slug: &'static str,                       // "kimi_code"
+    pub binary: &'static str,                     // "kimi"
+    pub agent_offset: &'static str,               // ".kimi"
+    pub cli_aliases: &'static [&'static str],
 
     // ----- Documentation links -----------------------------------------------
-    fn docs(&self) -> &'static ProviderDocs;
-    fn dashboards(&self) -> &'static ProviderDashboards;
+    pub docs: &'static ProviderDocs,
+    pub dashboards: &'static ProviderDashboards,
 
     // ----- Capability catalog (replaces today's AgentCapabilities) ------------
-    fn capabilities(&self) -> &'static ProviderCapabilities;
+    pub capabilities: &'static ProviderCapabilities,
 
-    // ----- Event mapping ------------------------------------------------------
-    fn event_mapping(&self) -> &'static EventMappingTable;
-    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool;
+    // ----- Event mapping (data half; detection lives on the behavior trait) ---
+    pub event_mapping: &'static EventMappingTable,
 
     // ----- Resource portability (today's linking::capabilities) ---------------
-    fn resource_support(&self) -> &'static ResourcePortability;
+    pub resource_support: &'static ResourcePortability,
 
-    // ----- Stream parsing -----------------------------------------------------
-    fn stream_protocol(&self) -> Option<StreamProtocol>;
+    // ----- Stream parsing (protocol selector is data; parser ctor is behavior) -
+    pub stream_protocol: Option<StreamProtocol>,
+
+    // ----- MCP support --------------------------------------------------------
+    pub mcp: &'static McpSupport,
+
+    // ----- Model catalog ------------------------------------------------------
+    pub model_catalog_source: ModelCatalogSource,
+
+    // ----- Behavior hook ------------------------------------------------------
+    /// Skipped during serialization; the behavior trait is not data.
+    #[serde(skip)]
+    pub behavior: &'static dyn ProviderBehavior,
+}
+
+/// Genuinely dynamic per-provider operations.
+///
+/// Anything that takes runtime arguments or returns owned values lives here.
+/// Everything else lives on `ProviderInfo` as a static field.
+pub trait ProviderBehavior: Send + Sync + std::fmt::Debug + 'static {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool;
+
     fn create_semantic_parser(
         &self,
         sink: Box<dyn SemanticEventSink>,
         config: ParserConfig,
     ) -> Option<Box<dyn SemanticStreamParser>>;
-
-    // ----- MCP support --------------------------------------------------------
-    fn mcp(&self) -> &'static McpSupport;
-
-    // ----- Model catalog ------------------------------------------------------
-    fn model_catalog_source(&self) -> ModelCatalogSource;
-
-    // ----- Wrapper bridge (CLI-only crate consumes this) ----------------------
-    fn wrapper_profile(&self) -> Option<&'static dyn WrapperProfile>;
 }
 ```
 
-Each provider gets exactly one `ProviderProfile` implementor (e.g. `ClaudeProvider`, `CodexProvider`). Today's `agents/<provider>.rs` files become `providers/<provider>.rs` and grow to absorb the responsibilities listed above. The trait acts as a typed funnel: every cross-cutting query routes through a single `&'static dyn ProviderProfile` lookup keyed on the `Provider` enum.
+Each provider gets exactly one `ProviderInfo` constant (e.g. `CLAUDE_INFO`, `CODEX_INFO`) and one zero-sized behavior implementor (e.g. `ClaudeBehavior`, `CodexBehavior`). Today's `agents/<provider>.rs` files become `provider/<provider>.rs` and grow to absorb the responsibilities listed above. The pair acts as a typed funnel: every cross-cutting query routes through a single `&'static ProviderInfo` lookup keyed on the `Provider` enum, with dynamic hooks reached via `info.behavior`.
 
-### Central registry: `provider_for(Provider) -> &'static dyn ProviderProfile`
+Note that `ProviderInfo` carries no `agent_id()` accessor: `Provider` is the only identifier post phase 0 (see Migration Plan).
+
+The lib-side `ProviderInfo` deliberately carries no `wrapper_profile` field. `WrapperProfile` is CLI-only (it depends on `tempfile`, `std::process::Command`, and `Path`-based filesystem fixtures) and the lib crate must not depend on the CLI crate. The CLI keeps a parallel `wrapper_for(Provider)` registry that consumes lib-side catalog data but is not reachable from lib. See "Migration of `WrapperProfile`" below.
+
+### Central registry: `provider_info(Provider) -> &'static ProviderInfo`
 
 Replaces (or absorbs) the existing:
 
-- `agents::registry::agent_for(AgentId)`
+- `agents::registry::agent_for(AgentId)` (after phase 0 collapses `AgentId` into `Provider`)
 - `linking::capabilities::capabilities_for(Provider)`
 - `stream::stream_protocol_for(Provider)`
 - `stream::create_semantic_parser`
-- `wrap::profile_for_provider(Provider)`
 - `model_catalog::provider_sources::*`
 
-Implementation uses `OnceLock` and an exhaustive `match` over `Provider`. The match is the **only** allowed `match` over `Provider` in the codebase post-migration; everything else dispatches via the trait.
+Implementation uses `OnceLock` and an exhaustive `match` over `Provider`. The match is the **only** allowed `match` over `Provider` in the lib crate post-migration; everything else dispatches via the struct's fields or the `behavior` trait object.
 
-A drift-detection test enumerates `PROVIDERS_DISPLAY_ORDER` and asserts `provider_for(p).provider() == p` for each — proving every variant is registered and self-consistent.
+A drift-detection test enumerates `PROVIDERS_DISPLAY_ORDER` and asserts `provider_info(p).provider == p` for each — proving every variant is registered and self-consistent.
+
+`wrap::profile_for_provider(Provider)` is **not** absorbed into `provider_info`. It remains in the CLI crate as `wrapper_for(Provider) -> &'static dyn WrapperProfile`, with the same exhaustiveness invariant (`for p in PROVIDERS_DISPLAY_ORDER { assert_eq!(wrapper_for(p).provider(), p); }`). This split is forced by the lib/CLI crate-graph constraint, not preference.
 
 ### Strong typing replacements
 
@@ -166,7 +202,7 @@ pub enum PathSegment {
 pub fn resolve(&self, ctx: &PathContext) -> PathBuf;
 ```
 
-The same type backs `agents::*::session_locations`, `agents::*::log_locations`, `mcp::*::config_paths`, and the new `ProviderProfile::dashboards()`. `ConfigCapabilities::user_files`, `project_files`, and `local_files` migrate from `Vec<PathBuf>` (already typed) to `Vec<PathTemplate>` so home expansion is consistent.
+The same type backs `agents::*::session_locations`, `agents::*::log_locations`, `mcp::*::config_paths`, and the new `ProviderInfo::dashboards` field. `ConfigCapabilities::user_files`, `project_files`, and `local_files` migrate from `Vec<PathBuf>` (already typed) to `Vec<PathTemplate>` so home expansion is consistent.
 
 #### 2. Output formats
 
@@ -390,16 +426,29 @@ Proposed: have clap emit the surface at build time via a `clap::CommandFactory`-
 
 ### Migration of `WrapperProfile`
 
-`WrapperProfile` stays as a CLI-only trait (it depends on `tempfile`, `std::process`, `Path`-based filesystem fixtures, etc.). Each implementor gets a typed handle to its own provider profile via `fn profile(&self) -> &'static dyn ProviderProfile`. Default trait implementations consume the catalog:
+`WrapperProfile` stays as a **CLI-only trait** with a **CLI-only registry**. It depends on `tempfile`, `std::process`, `Path`-based filesystem fixtures, etc., none of which the lib crate carries. Crucially, the lib-side `ProviderInfo` does **not** carry a `wrapper_profile()` accessor: doing so would require lib to depend on CLI types, a circular dependency.
 
-- `apply_yolo` derives from `provider.capabilities().permissions.yolo`.
-- `apply_output_format` derives from `provider.capabilities().non_interactive.output_formats`.
-- `apply_entrypoint` derives from `provider.capabilities().non_interactive.entrypoints`.
-- `apply_model` derives from `provider.capabilities().model.cli_flags`.
-- `prompt_arg_conventions` derives from `provider.capabilities().non_interactive`.
+Instead, the CLI crate maintains its own parallel registry:
+
+```rust
+// cli/src/commands/wrap/profile.rs
+pub fn wrapper_for(p: Provider) -> &'static dyn WrapperProfile {
+    match p { /* one arm per variant, OnceLock-backed */ }
+}
+```
+
+Each `WrapperProfile` implementor consumes the lib-side catalog by calling `provider_info(self.provider())` and reading the relevant fields. Default trait implementations consume the catalog:
+
+- `apply_yolo` derives from `provider_info(p).capabilities.permissions.yolo`.
+- `apply_output_format` derives from `provider_info(p).capabilities.non_interactive.output_formats`.
+- `apply_entrypoint` derives from `provider_info(p).capabilities.non_interactive.entrypoints`.
+- `apply_model` derives from `provider_info(p).capabilities.model.cli_flags`.
+- `prompt_arg_conventions` derives from `provider_info(p).capabilities.non_interactive`.
 - `stream_protocol`, `supports_structured_stream`, `supports_resume` all become catalog reads.
 
 Wrappers retain freedom to override for irreducible quirks (Kimi's `--agent-file`, OpenCode's mode-conditional YOLO, Codex's `model_instructions_file` config-merge). The override surface shrinks substantially from today's ~24 trait methods × 7 implementors.
+
+The CLI-side `wrapper_for` registry has its own exhaustiveness test; see "Exhaustiveness Tests" below.
 
 ### What stays per-provider
 
@@ -413,17 +462,19 @@ Some logic is genuinely irreducible and stays in per-provider files:
 - MCP runtime injection (`mcp/inject.rs`) — shadow `HOME` synthesis (Codex, Gemini) vs env-var content (OpenCode).
 - Wrapper overrides for genuine quirks (small subset of `WrapperProfile`).
 
-Each of these is reachable through `provider_for(Provider).<area>()` so callers never `match` over `Provider`; only the central registry does.
+Each of these is reachable through `provider_info(Provider).<field>` (or `provider_info(Provider).behavior.<method>(...)` for dynamic operations) so callers never `match` over `Provider`; only the central registry does. The CLI-side `wrapper_for(Provider)` registry is the one permitted parallel match.
 
 ### Exhaustiveness Tests
 
-Once the central registry is in place, three test invariants pin everything:
+Once the central registry is in place, four test invariants pin everything:
 
-1. **Registry exhaustiveness** — `for p in PROVIDERS_DISPLAY_ORDER { assert_eq!(provider_for(p).provider(), p); }`. Catches missing arms in the central match.
+1. **Registry exhaustiveness** — `for p in PROVIDERS_DISPLAY_ORDER { assert_eq!(provider_info(p).provider, p); }`. Catches missing arms in the central match.
 
-2. **Cross-module exhaustiveness** — `for p in PROVIDERS_DISPLAY_ORDER { let prof = provider_for(p); let _ = prof.event_mapping(); let _ = prof.capabilities(); let _ = prof.resource_support(); … }`. Calls every trait method to force a panic-or-stub if any provider hasn't been wired through a facet.
+2. **Cross-module exhaustiveness** — `for p in PROVIDERS_DISPLAY_ORDER { let info = provider_info(p); let _ = info.event_mapping; let _ = info.capabilities; let _ = info.resource_support; … }`. Touches every field (and exercises `info.behavior` via `detect_from_payload`/`create_semantic_parser` smoke calls) to force a panic-or-stub if any provider hasn't been wired through a facet.
 
-3. **Sniff binding round-trip** — `for p in PROVIDERS_DISPLAY_ORDER { let cli: AiCli = provider_for(p).sniff_binding(); assert_eq!(Provider::from_sniff(cli), Some(p)); }`. Catches drift with the external `sniff` crate.
+3. **Sniff binding round-trip** — `for p in PROVIDERS_DISPLAY_ORDER { let cli: AiCli = provider_info(p).sniff_binding; assert_eq!(Provider::from_sniff(cli), Some(p)); }`. Catches drift with the external `sniff` crate.
+
+4. **CLI-side wrapper exhaustiveness** — `for p in PROVIDERS_DISPLAY_ORDER { assert_eq!(wrapper_for(p).provider(), p); }`, located in the CLI crate. Mirrors invariant (1) on the parallel `wrapper_for` registry so the lib/CLI split cannot drift independently.
 
 Plus the existing per-area matrix tests (event support, linking capabilities, stream protocols, argv flags) which now derive from the same source.
 
@@ -433,8 +484,8 @@ Concretely, the new types live as follows:
 
 ```
 claudine/lib/src/provider/
-├── mod.rs              # ProviderProfile trait, provider_for()
-├── identity.rs         # ProviderIdentity (slug, display, aliases, sniff_binding, ...)
+├── mod.rs              # ProviderInfo data struct, ProviderBehavior trait, provider_info() registry
+├── identity.rs         # ProviderIdentity helper types (slug, display, aliases, sniff_binding, ...) — no AgentId field
 ├── docs.rs             # ProviderDocs, ProviderDashboards
 ├── capabilities.rs     # ProviderCapabilities, ConfigCapabilities (re-export from lib)
 ├── runtime.rs          # RuntimeCapabilities + sub-structs
@@ -454,7 +505,7 @@ claudine/lib/src/provider/
 ├── opencode.rs         # OpenCodeProvider impl
 ├── qwen.rs             # QwenProvider impl
 ├── roo.rs              # RooProvider impl
-├── registry.rs         # provider_for(), all_providers()
+├── registry.rs         # provider_info(), all_providers()
 └── tests.rs            # exhaustiveness invariants
 ```
 
@@ -464,19 +515,30 @@ The legacy paths (`agents/`, `linking/capabilities.rs`) remain as thin re-export
 
 The migration is necessarily large but can be staged incrementally, with each phase compiling, passing tests, and shippable on its own. None of the phases require synchronous changes to external consumers.
 
+### Phase 0 — `AgentId` unification (standalone PR)
+
+Collapse `AgentId` into `Provider` as an independent, mechanically-revertable PR before any new trait scaffolding lands. The load-bearing reason: separating identifier unification from trait scaffolding de-risks phase 1 and removes a class of cross-phase translation noise (`AgentId::from(provider)` / `provider.agent_id()`) that would otherwise infect every subsequent phase.
+
+1. Rename `AgentId` to `Provider` (or merge into `Provider`) at every call site in `claudine/lib/src/agents/`.
+2. Update `agents::registry::agent_for` to take `Provider`.
+3. Keep `AgentId` as a `#[deprecated]` re-export of `Provider` for one release cycle so external consumers can update without breakage.
+4. Verify all existing tests pass; no behavior change beyond the rename.
+
+Deliverable: a single-enum world where `Provider` is the only identifier. No new module exists yet.
+
 ### Phase 1 — Skeleton + facade (no behavior change)
 
-1. Create `claudine/lib/src/provider/` module with the new trait, identity types, and one stub implementor per provider that delegates everything to the existing modules (`agent_for`, `capabilities_for`, etc.).
-2. Add `provider_for(Provider) -> &'static dyn ProviderProfile`.
-3. Wire the three exhaustiveness tests above.
-4. Add `--describe` JSON output for the new profile so a snapshot test can pin behavior across migrations.
+1. Create `claudine/lib/src/provider/` module with `ProviderInfo`, `ProviderBehavior`, identity types, and one stub `ProviderInfo` constant per provider whose data fields delegate to (or duplicate) values from the existing modules (`agent_for`, `capabilities_for`, etc.). The lib stub does **not** delegate to CLI types — there is no `wrapper_profile` field.
+2. Add `provider_info(Provider) -> &'static ProviderInfo`.
+3. Wire the four exhaustiveness tests above (the CLI-side wrapper exhaustiveness lives in the CLI crate; the other three live in lib).
+4. Add `--describe` JSON output backed by `serde_json::to_string(&provider_info(p))` so a snapshot test can pin behavior across migrations.
 
-Deliverable: new module exists, no callers, all tests pass.
+Deliverable: new module exists, no callers, all tests pass. `Provider` is the only identifier.
 
 ### Phase 2 — Migrate `linking::capabilities` and `agents::registry`
 
 1. Move `ProviderCapabilities` and `AgentCapabilities` data into `provider/<provider>.rs` files (one per provider).
-2. Reroute `linking::capabilities::capabilities_for` and `agents::registry::agent_for` to `provider_for(p).capabilities()` / `provider_for(p).resource_support()`.
+2. Reroute `linking::capabilities::capabilities_for` and `agents::registry::agent_for` to `provider_info(p).capabilities` / `provider_info(p).resource_support`. (Both functions now take `Provider`, courtesy of phase 0.)
 3. Delete `agents/<provider>.rs` and the per-`*_capabilities()` functions in `linking/capabilities.rs`.
 4. Update matrix tests; snapshot output should be unchanged.
 
@@ -484,7 +546,7 @@ Deliverable: two of the eight modules consolidated; ~1000 LOC removed.
 
 ### Phase 3 — Migrate event mapping
 
-1. Move `event_support_level` and `native_event_name` per-provider rows into `provider/<provider>.rs::event_mapping()`.
+1. Move `event_support_level` and `native_event_name` per-provider rows into the `event_mapping` field of each provider's `ProviderInfo` constant.
 2. Delete `Provider::event_support_level`, `Provider::native_event_name`, `Provider::registration_native_event_name` (or thin them to forwarding).
 3. Delete the per-provider `*_SHARED_NATIVE_MAPPINGS` constants (now folded into `EventMappingTable`).
 4. Add `CaptureMethod` to `EventMapping` and wire `EventSupportLevel::Acp` for Goose `request_permission` and Kimi `ApprovalRequest`.
@@ -493,11 +555,11 @@ Deliverable: one giant file (`events/provider.rs`, currently 1474 LOC) shrinks d
 
 ### Phase 4 — Migrate stream and MCP
 
-1. `stream::stream_protocol_for(p)` → `provider_for(p).stream_protocol()`.
-2. `stream::create_semantic_parser(p, …)` → `provider_for(p).create_semantic_parser(…)`. Each provider's `create_semantic_parser` impl forwards to the existing `*_semantic.rs` constructor.
-3. Same for `mcp::import::*`, `mcp::state::*`, `mcp::inject::*` — each `match` becomes `provider_for(p).mcp().<method>(…)`.
+1. `stream::stream_protocol_for(p)` → `provider_info(p).stream_protocol`.
+2. `stream::create_semantic_parser(p, …)` → `provider_info(p).behavior.create_semantic_parser(…)`. Each provider's `ProviderBehavior` impl forwards to the existing `*_semantic.rs` constructor.
+3. Same for `mcp::import::*`, `mcp::state::*`, `mcp::inject::*` — each `match` becomes a read of `provider_info(p).mcp.<field>` (or a call into a method on `McpSupport` that takes the runtime arguments).
 
-Deliverable: `match Provider::… ` arms outside the central registry drop to zero.
+Deliverable: `match Provider::… ` arms outside the lib-side central registry drop to zero. The CLI-side `wrapper_for` registry remains as the one permitted parallel match.
 
 ### Phase 5 — Strongly type the descriptive surface
 
@@ -531,8 +593,9 @@ Deliverable: ACP becomes typed, not commentary.
 
 1. Delete `agents/` legacy re-exports.
 2. Delete `linking/capabilities.rs::*_capabilities()` re-exports.
-3. Delete dead `match Provider` arms.
-4. Update `claudine/docs/topics/building-an-agent-wrapper.md` to reflect the new architecture; remove the "Future Improvements" section.
+3. Delete the `#[deprecated]` `AgentId` re-export introduced in phase 0 (one release cycle elapsed).
+4. Delete dead `match Provider` arms.
+5. Update `claudine/docs/topics/building-an-agent-wrapper.md` to reflect the new architecture; remove the "Future Improvements" section.
 
 Deliverable: authoritative, drift-free provider system.
 
@@ -556,17 +619,17 @@ After phase 5, add a property test that for every provider × every `AgenticEven
 
 ## Open Questions
 
-1. **Module home for the central trait** — `claudine::events::provider` already owns the `Provider` enum and is 1474 LOC. Adding the trait there makes for one massive file; spinning up `claudine::provider` is cleaner but creates a new top-level module. Recommendation: new `claudine::provider` module, with `Provider` re-exported from its current home for one release cycle.
+1. **Module home for the central trait.** **Resolved:** new `claudine::provider` top-level module (see "Decision Log" / Decision 2). `Provider` is re-exported from its current home for one release cycle.
 
-2. **`AgentId` vs `Provider`** — these are two near-identical 8-variant enums living in different modules. Worth collapsing? `AgentId` was originally separate so the agent catalog could exist without taking a dependency on the events model; that distinction is no longer load-bearing now that everything routes through `ProviderProfile`. Recommendation: collapse `AgentId` into `Provider` in phase 8.
+2. **`AgentId` vs `Provider`.** **Resolved:** collapsed in phase 0 as a standalone, mechanically-revertable PR before any trait scaffolding lands (see Decision 2). `AgentId` survives one release cycle as a `#[deprecated]` re-export. Load-bearing reason: separating identifier unification from trait scaffolding de-risks phase 1 and removes cross-phase translation noise.
 
-3. **Static dispatch vs trait objects** — `ProviderProfile` as a trait gives us `&'static dyn ProviderProfile` lookups, which is ergonomic but introduces v-table overhead. We could alternatively make `provider_for` return a `&'static ProviderInfo` struct holding all the metadata directly, with function pointers for the few dynamic operations (parser construction, MCP injection). The struct approach is faster and more inspectable; the trait approach is more idiomatic and easier to extend. Recommendation: trait approach — the v-table cost is a non-issue (these are config-time lookups, not hot-path).
+3. **Static dispatch vs trait objects.** **Resolved:** hybrid — `ProviderInfo` data struct + small `ProviderBehavior` trait (see Decision 1). The load-bearing reason was structural serde round-trip (a `Serialize` derive on the data struct trivially satisfies the round-trip success criterion) plus inspectability; v-table cost was secondary.
 
-4. **External `sniff` crate dependency** — the `sniff_binding()` method depends on the external `sniff::programs::AiCli` enum. If `sniff` ever drops or renames a variant, claudine breaks. Acceptable today but worth a "known external dep" doc note. Should the sniff binding stay implicit (current state — runtime panic) or become a `Result<AiCli>` so missing variants are surfaced as a typed error? Recommendation: typed `Result`.
+4. **External `sniff` crate dependency** — the `sniff_binding` field depends on the external `sniff::programs::AiCli` enum. If `sniff` ever drops or renames a variant, claudine breaks. Acceptable today but worth a "known external dep" doc note. Should the sniff binding stay implicit (current state — runtime panic) or become a `Result<AiCli>` so missing variants are surfaced as a typed error? Recommendation: typed `Result`.
 
 5. **Backwards compatibility for external consumers** — `claudine::events::Provider`, `claudine::agents::*`, `claudine::linking::capabilities::*` are all public and may have external downstream consumers (the rusty-biscuit monorepo has none, but the API is exported). Phase 8 deletes the legacy re-exports; should we deprecate them for two cycles first? Recommendation: yes — `#[deprecated]` markers from phase 5 onwards, removal in a release after phase 8.
 
-6. **Should `WrapperProfile` move to the lib crate?** — moving it would let composition code share more catalog-derived behavior with the CLI. But `WrapperProfile` depends on `tempfile`, `std::process::Command`, etc., which the lib crate does not. Splitting `WrapperProfile` into a "data" half (in lib) and a "behavior" half (in CLI) is possible but adds a third indirection. Recommendation: keep in CLI for now; revisit after phase 6 once the catalog-derived behaviors have settled.
+6. **Should `WrapperProfile` move to the lib crate?** **Resolved:** no — `WrapperProfile` stays CLI-only with a parallel CLI-side `wrapper_for(Provider)` registry (see Decision 3). The lib-side `ProviderInfo` does NOT carry a `wrapper_profile` accessor; doing so would require lib to depend on CLI types, a circular crate dependency that the original spec implicitly assumed away. The answer here was forced by the lib/CLI crate split, not preference.
 
 7. **`KnownGap.tracker` field** — should this be a `PathBuf` (file ref) or a typed `GapTracker` enum (file, GitHub issue, comment, etc.)? Recommendation: start with `Option<&'static str>` and tighten in a future iteration when there are enough trackers to warrant a typed model.
 
@@ -576,14 +639,14 @@ After phase 5, add a property test that for every provider × every `AgenticEven
 - **Risk: snapshot test churn.** All output-affecting changes are in phase 7 (ACP) and phase 8 (cleanup); phases 1–6 maintain bit-for-bit output equivalence.
 - **Risk: external consumers break on legacy re-export removal.** Phase 8 is deferred until external consumers are surveyed; deprecation warnings ship in phase 5.
 - **Risk: `sniff` crate drift.** Phase 1's typed sniff binding round-trip test catches drift at compile time / test time, not at runtime.
-- **Risk: trait-object overhead.** Negligible — these are config-time lookups, not hot-path. A flame graph from `claudine compose` would confirm < 0.01% wall-clock impact, well within noise.
+- **Risk: trait-object overhead.** Negligible — and largely sidestepped by the hybrid design (most fields are direct struct accesses; only `info.behavior.<method>` goes through a v-table). These are config-time lookups, not hot-path. A flame graph from `claudine compose` would confirm < 0.01% wall-clock impact, well within noise.
 - **Risk: ACP modeling is premature.** Phase 7 only types what is *already* in the codebase as comments (Goose `request_permission`, Kimi `ApprovalRequest`); it does not add new capture mechanisms. Future ACP work fills the typed slots.
 
 ## Success Criteria
 
-- The number of `match` expressions over `Provider` in the codebase outside `claudine::provider::registry` drops to **zero**.
-- Adding a hypothetical ninth provider requires editing exactly **one** new file (`provider/<name>.rs`) plus extending three central registries (`Provider` enum, `PROVIDERS_DISPLAY_ORDER`, `provider_for`). All other failures (missing event mapping, missing capability, missing stream protocol) become compile errors via the trait surface.
-- `claudine providers --describe --format json` round-trips through serde without information loss.
+- The number of `match` expressions over `Provider` in the lib crate outside `claudine::provider::registry` drops to **zero**. The CLI crate retains exactly one match (the `wrapper_for` registry).
+- Adding a hypothetical ninth provider requires editing exactly **one** new lib file (`provider/<name>.rs`) plus extending the central lib registries (`Provider` enum, `PROVIDERS_DISPLAY_ORDER`, `provider_info`) and the CLI-side `wrapper_for` registry. All other failures (missing event mapping, missing capability, missing stream protocol, missing wrapper profile) become compile errors via exhaustiveness tests on each registry.
+- `claudine providers --describe --format json` round-trips through serde without information loss. **Structurally guaranteed** by the `#[derive(Serialize)]` on `ProviderInfo` — no manual serialization plumbing needed.
 - The "Future Improvements to Metadata" section in [`building-an-agent-wrapper.md`](../../topics/building-an-agent-wrapper.md) is replaced with a "Migration History" subsection.
 - `cli/src/commands/wrap/profile.rs` LOC drops by at least 40%.
 - `events/provider.rs` LOC drops by at least 50%.
