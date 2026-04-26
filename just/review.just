@@ -185,7 +185,7 @@ review feat="" agent="" spec="" design="":
         echo
         exit 0
     fi
-    just implement-feature-review spec="${spec_file}" design="${design_file}"
+    just implement-feature-review review="${review}" spec="${spec_file}" design="${design_file}"
 
 
 # implement a review that was conducted (not a feature review)
@@ -210,11 +210,14 @@ implement-review filter="":
 
 
 # implements the suggestions from a review of a feature or fix
-implement-feature-review filter="" spec="" design="" agent="":
+implement-feature-review review="" filter="" spec="" design="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo -e "Preparing to {{italic}}implement{{reset}} all of suggestions from a review."
-    review="$(just _choose_spec_review "{{filter}}")"
+    review="{{review}}"
+    if [[ -z "${review}" ]]; then
+        review="$(just _choose_spec_review "{{filter}}")"
+    fi
     dir="$(dirname "${review}")"
     spec_file="{{spec}}"
     design_file="{{design}}"
