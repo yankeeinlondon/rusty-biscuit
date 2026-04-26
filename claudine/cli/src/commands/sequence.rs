@@ -54,7 +54,7 @@ pub fn run_sequence(
 fn run_sequence_inner(
     args: SequenceArgs,
     verbose: u8,
-    _startup_timings: Option<crate::perf::StartupTimings>,
+    startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
     let SequenceArgs {
         shared,
@@ -107,5 +107,7 @@ fn run_sequence_inner(
         set_overrides,
         execution_options,
         verbose,
+        shared.perf,
+        startup_timings,
     )
 }

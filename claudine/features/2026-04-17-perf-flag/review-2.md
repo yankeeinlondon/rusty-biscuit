@@ -1,5 +1,5 @@
 ---
-ready: false
+ready: true
 agent: ${env.AGENT}
 ---
 

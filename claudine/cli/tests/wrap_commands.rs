@@ -4436,3 +4436,56 @@ fn compose_dry_run_perf_renders_report_without_agent_execution() {
         "provider should not execute in dry-run mode"
     );
 }
+
+/// Verifies that the `arg parsing:` timing in the perf report captures
+/// the full pipeline including `argv::normalize` and `parse_cli_from`.
+/// This is a smoke test: the exact duration is environment-dependent, but
+/// the line must appear with a formatted duration.
+#[cfg(unix)]
+#[test]
+fn perf_arg_parsing_includes_clap_time() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: arg parse perf\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Agent response'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The arg parsing line must be present and show a duration.
+    // We allow 0µs because timer resolution varies, but the line must exist.
+    assert!(
+        plain.contains("arg parsing:"),
+        "perf report must include arg parsing timing; got: {plain}"
+    );
+
+    // Ensure the other startup timings are also present, confirming the
+    // full CLI Overhead section is rendered.
+    assert!(
+        plain.contains("config loading:"),
+        "perf report must include config loading timing; got: {plain}"
+    );
+    assert!(
+        plain.contains("tracing init:"),
+        "perf report must include tracing init timing; got: {plain}"
+    );
+    assert!(
+        plain.contains("environment setup:"),
+        "perf report must include environment setup timing; got: {plain}"
+    );
+}
