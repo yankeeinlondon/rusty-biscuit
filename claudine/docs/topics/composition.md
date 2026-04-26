@@ -134,19 +134,64 @@ Steps:
 
 ## Provider Selection
 
-Both commands use a deterministic precedence chain:
+Provider selection behaves differently in **TTY** (interactive terminal) and **non-TTY** (piped or CI) modes. In both modes, explicit `--<provider>` flags always win unconditionally.
 
-1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--roo`) — highest priority
-2. **Single installed** — if only one provider remains after `--exclude` filtering
-3. **Frontmatter hint** — the `agent` property in the effective (composed) frontmatter, fuzzy-matched against provider names
-4. **Config favorite** — `settings.linking.preference[0]` from `~/.claudine/config.json` or `<repo>/.claudine/config.json`
-5. **Interactive chooser** — if a TTY is available, prompt the user; otherwise error
+### TTY Mode
 
-The shorthand booleans and the `--provider` value both accept fuzzy
-input (`cl` → `claude`, `gem` → `gemini`, `oc` → `open_code`). The
-[argv normalizer](argv-normalization.md) rewrites every shorthand into
-a canonical `--provider <slug>` pair before clap runs, so runtime
-provider selection only ever reads the single `--provider` field.
+When stdout is a terminal and no explicit `--<provider>` flag is given:
+
+1. **Interactive picker** — a `tui-chrome` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+
+### Non-TTY Mode
+
+When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict chain with no interactive fallback:
+
+1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
+3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
+4. **Config favorite** — `favorite_agent` from `~/.claudine/config.json`
+5. **Hard error** — if none of the above resolve, the command fails with a structured error
+
+The old "single installed" auto-selection shortcut has been removed. Even when only one provider is installed, non-TTY sessions still require an explicit signal (flag, frontmatter, or favorite).
+
+### Frontmatter `agent` and `model`
+
+Both `agent` and `model` frontmatter properties accept either a single string or an ordered list of strings:
+
+```yaml
+agent: codex
+agent: [gemini, codex, claude]
+model: gpt-4o
+model: [gpt-4o, o3-mini]
+```
+
+List-valued `agent` is treated as author preference order: the first installed provider wins. List-valued `model` is validated against the provider's model catalog; the first valid entry wins. When a catalog is unavailable (e.g., Gemini, Kimi, Goose in v1), frontmatter `model` is gracefully skipped rather than treated as an error.
+
+### Model Resolution
+
+Model selection follows a single chain independent of TTY mode:
+
+1. **CLI `--model`**
+2. **Provider-specific env var** (`CODEX_MODEL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.)
+3. **Generic `MODEL` env var**
+4. **Frontmatter `model`** (validated against catalog when available)
+5. **Provider default** (`None` — let the provider choose)
+
+### OpenCode Non-TTY Requirement
+
+OpenCode requires a model in non-interactive mode. If no model survives the resolution chain when running OpenCode in non-TTY mode, Claudine emits a hard error before launching the provider:
+
+```
+OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
+```
+
+### Roo Exclusion
+
+Roo Code is excluded from composition provider selection because it is a VS Code extension rather than a wrappable CLI. Roo does not appear in the TTY picker and is silently filtered from the installed-provider snapshot in non-TTY resolution.
+
+### Shorthand Flags
+
+The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
 ### The `--interactive` Flag
 
