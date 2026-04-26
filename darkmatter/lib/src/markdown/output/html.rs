@@ -30,6 +30,7 @@ use crate::markdown::block::{
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
+use crate::markdown::output::code_block;
 use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
 use crate::mermaid::Mermaid;
@@ -38,8 +39,6 @@ use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::renderable::BrowserRenderable;
 use html_escape;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
-use syntect::easy::HighlightLines;
-use syntect::util::LinesWithEndings;
 
 /// Options for HTML output with sensible defaults.
 ///
@@ -223,7 +222,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     }
                 } else {
                     // Render code block with highlighting
-                    let highlighted = highlight_code_block(
+                    let highlighted = code_block::render_html_code_block(
                         &code_buffer,
                         &code_lang,
                         &meta,
@@ -502,128 +501,6 @@ fn escape_markdown_image_url(value: &str) -> String {
 
 fn escape_markdown_title(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-/// Highlights a code block with syntax highlighting and optional line numbers.
-fn highlight_code_block(
-    code: &str,
-    language: &str,
-    meta: &crate::markdown::dsl::CodeBlockMeta,
-    highlighter: &CodeHighlighter,
-    options: &HtmlOptions,
-) -> MarkdownResult<String> {
-    let mut output = String::new();
-
-    // Add title if present
-    if let Some(title) = &meta.title {
-        output.push_str(&format!(
-            r#"<div class="code-block-title">{}</div>"#,
-            html_escape::encode_text(title)
-        ));
-        output.push('\n');
-    }
-
-    // Determine if we should show line numbers
-    let show_line_numbers = meta.line_numbering || options.include_line_numbers;
-
-    // Find syntax definition
-    let syntax = if language.is_empty() {
-        highlighter.syntax_set().find_syntax_plain_text()
-    } else {
-        highlighter
-            .syntax_set()
-            .find_syntax_by_token(language)
-            .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text())
-    };
-
-    // Start code block container
-    output.push_str(r#"<div class="code-block">"#);
-    output.push('\n');
-
-    // Create highlighter for this code block
-    let mut hl = HighlightLines::new(syntax, highlighter.theme());
-
-    if show_line_numbers {
-        // Use table layout for line numbers
-        output.push_str(r#"<table class="code-table"><tbody>"#);
-        output.push('\n');
-
-        let lines: Vec<&str> = LinesWithEndings::from(code).collect();
-
-        for (idx, line) in lines.iter().enumerate() {
-            let line_num = idx + 1;
-            let is_highlighted = meta.highlight.contains(line_num);
-
-            output.push_str(&format!(
-                r#"<tr{}><td class="ln-gutter"><span class="ln">{}</span></td><td class="code-content">"#,
-                if is_highlighted { r#" class="highlighted""# } else { "" },
-                line_num
-            ));
-
-            // Highlight the line
-            let ranges = hl
-                .highlight_line(line, highlighter.syntax_set())
-                .map_err(|e| {
-                    crate::markdown::MarkdownError::ThemeLoad(format!(
-                        "Syntax highlighting failed: {}",
-                        e
-                    ))
-                })?;
-
-            for (style, text) in ranges {
-                let fg = style.foreground;
-                output.push_str(&format!(
-                    r#"<span style="color: #{:02x}{:02x}{:02x};">{}</span>"#,
-                    fg.r,
-                    fg.g,
-                    fg.b,
-                    html_escape::encode_text(text)
-                ));
-            }
-
-            output.push_str("</td></tr>\n");
-        }
-
-        output.push_str("</tbody></table>\n");
-    } else {
-        // Simple pre/code block without line numbers
-        output.push_str("<pre><code");
-        if !language.is_empty() {
-            output.push_str(&format!(
-                r#" class="language-{}""#,
-                html_escape::encode_text(language)
-            ));
-        }
-        output.push('>');
-
-        for line in LinesWithEndings::from(code) {
-            let ranges = hl
-                .highlight_line(line, highlighter.syntax_set())
-                .map_err(|e| {
-                    crate::markdown::MarkdownError::ThemeLoad(format!(
-                        "Syntax highlighting failed: {}",
-                        e
-                    ))
-                })?;
-
-            for (style, text) in ranges {
-                let fg = style.foreground;
-                output.push_str(&format!(
-                    r#"<span style="color: #{:02x}{:02x}{:02x};">{}</span>"#,
-                    fg.r,
-                    fg.g,
-                    fg.b,
-                    html_escape::encode_text(text)
-                ));
-            }
-        }
-
-        output.push_str("</code></pre>\n");
-    }
-
-    output.push_str("</div>\n");
-
-    Ok(output)
 }
 
 /// Generates CSS styles for syntax highlighting.
