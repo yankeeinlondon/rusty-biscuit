@@ -180,9 +180,13 @@ pub(crate) fn execute_sequence(
                 &resolve_ctx,
             )
             .map_err(|e| eyre!("{e}"))?;
-            let harness_preflight =
-                composition::resolve_shell_approvals(None, None, Some(&harness_plan), &approval_options)
-                    .map_err(|e| eyre!("{e}"))?;
+            let harness_preflight = composition::resolve_shell_approvals(
+                None,
+                None,
+                Some(&harness_plan),
+                &approval_options,
+            )
+            .map_err(|e| eyre!("{e}"))?;
             cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
         }
 
@@ -194,28 +198,32 @@ pub(crate) fn execute_sequence(
 
     // ── Phase 1b: resolve provider/model for every step ────────────────
     let clients = sniff::programs::InstalledAiClients::new();
-    let installed: Vec<claudine::events::Provider> = [
-        claudine::events::Provider::Claude,
-        claudine::events::Provider::Codex,
-        claudine::events::Provider::Gemini,
-        claudine::events::Provider::Goose,
-        claudine::events::Provider::KimiCode,
-        claudine::events::Provider::OpenCode,
-        claudine::events::Provider::QwenCode,
-    ]
-    .into_iter()
-    .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-    .collect();
+    let installed: Vec<claudine::events::Provider> = claudine::events::PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+        .collect();
 
     let excluded = shared.excluded();
     let snapshot = claudine::composition::build_installed_snapshot(&installed, &excluded);
-    let catalog = claudine::model_catalog::ModelCatalogService::new();
-    let favorite = super::composition::load_config_favorite(
+    let selection_config = super::composition::load_selection_config(
         step_contexts
             .first()
             .and_then(|ctx| ctx.prepared.source_repo_root.as_deref())
-            .unwrap_or(std::env::current_dir().ok().as_deref().unwrap_or(std::path::Path::new("."))),
+            .unwrap_or(
+                std::env::current_dir()
+                    .ok()
+                    .as_deref()
+                    .unwrap_or(std::path::Path::new(".")),
+            ),
     );
+    let catalog = match &selection_config {
+        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+            cfg.model_overrides.clone(),
+        ),
+        None => claudine::model_catalog::ModelCatalogService::new(),
+    };
+    catalog.refresh_blocking();
+    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
 
     let explicit_provider = shared.explicit_provider();
     let cli_model = shared.model.as_deref();
@@ -246,19 +254,28 @@ pub(crate) fn execute_sequence(
             target.map(|t| t.provider)
         };
 
-        let provider_plan = match claudine::composition::build_picker_plan(prepared, &snapshot, favorite) {
-            Ok(plan) => plan,
-            Err(_) => claudine::composition::ProviderPickerPlan {
-                options: Vec::new(),
-                default_index: 0,
-            },
-        };
+        let provider_plan =
+            match claudine::composition::build_picker_plan(prepared, &snapshot, favorite) {
+                Ok(plan) => plan,
+                Err(_) => claudine::composition::ProviderPickerPlan {
+                    options: Vec::new(),
+                    default_index: 0,
+                },
+            };
 
         let provider_for_model = explicit_provider.or(provider_result.as_ref().ok().copied());
         let (model, model_reason) = if let Some(provider) = provider_for_model {
-            claudine::composition::resolve_model_with_catalog(provider, prepared, cli_model, Some(&catalog))
+            claudine::composition::resolve_model_with_catalog(
+                provider,
+                prepared,
+                cli_model,
+                Some(&catalog),
+            )
         } else {
-            (None, claudine::composition::ModelResolutionReason::ProviderDefault)
+            (
+                None,
+                claudine::composition::ModelResolutionReason::ProviderDefault,
+            )
         };
 
         match provider_result {
@@ -271,6 +288,7 @@ pub(crate) fn execute_sequence(
                     model_reason,
                     provider_locked,
                     model_locked,
+                    resolved_provider: explicit_provider,
                 });
             }
             Err(ref err) => {
@@ -285,15 +303,18 @@ pub(crate) fn execute_sequence(
     }
 
     // ── Phase 1c: review (TTY) or validate (non-TTY) ───────────────────
-    let resolved_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if !failures.is_empty() {
+    let resolved_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if !failures
+        .is_empty()
+    {
         // Non-TTY aggregate failure path
         return Err(CompositionError::SequenceSelectionFailed {
             failure_count: failures.len(),
             failures,
-        }.into());
+        }
+        .into());
     } else if is_tty && explicit_provider.is_none() {
         // TTY review screen
-        match super::selection_ui::review_sequence(drafts) {
+        match super::selection_ui::review_sequence(drafts, &catalog) {
             Ok(targets) => targets,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("cancelled") {
@@ -309,7 +330,13 @@ pub(crate) fn execute_sequence(
             .into_iter()
             .map(|draft| {
                 let provider = explicit_provider
-                    .or_else(|| draft.provider_plan.options.get(draft.provider_plan.default_index).map(|o| o.provider))
+                    .or_else(|| {
+                        draft
+                            .provider_plan
+                            .options
+                            .get(draft.provider_plan.default_index)
+                            .map(|o| o.provider)
+                    })
                     .unwrap_or(claudine::events::Provider::Claude);
                 let provider_reason = if explicit_provider.is_some() {
                     claudine::composition::ProviderResolutionReason::ExplicitFlag
@@ -422,8 +449,12 @@ pub(crate) fn execute_sequence(
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
         };
 
-        let step_result =
-            super::composition::execute_composition_request_inner(request, verbose, None, perf_enabled);
+        let step_result = super::composition::execute_composition_request_inner(
+            request,
+            verbose,
+            None,
+            perf_enabled,
+        );
 
         let duration = start.elapsed();
 

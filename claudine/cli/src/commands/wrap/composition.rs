@@ -22,7 +22,8 @@ use claudine::composition::{
     InlineClosurePlan, ResolvedExecutionTarget, SelectionReason, build_installed_snapshot,
     build_picker_plan, resolve_target_non_tty_with_catalog,
 };
-use claudine::events::Provider;
+use claudine::config::claudine_config::ProviderModelOverride;
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
@@ -207,7 +208,11 @@ pub(crate) fn execute_composition_request_inner(
     let total_start = std::time::Instant::now();
     let mut perf_collector = if perf_enabled {
         startup_timings.map(|timings| {
-            crate::perf::CommandPerfCollector::new_with_composition("Composition", timings, request.prepared.compose_perf.clone())
+            crate::perf::CommandPerfCollector::new_with_composition(
+                "Composition",
+                timings,
+                request.prepared.compose_perf.clone(),
+            )
         })
     } else {
         None
@@ -228,29 +233,28 @@ pub(crate) fn execute_composition_request_inner(
     // -- Provider detection and selection ---------------------------------
 
     let clients = InstalledAiClients::new();
-    let installed: Vec<Provider> = [
-        Provider::Claude,
-        Provider::Codex,
-        Provider::Gemini,
-        Provider::Goose,
-        Provider::KimiCode,
-        Provider::OpenCode,
-        Provider::QwenCode,
-    ]
-    .into_iter()
-    .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-    .collect();
+    let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+        .collect();
 
     let snapshot = build_installed_snapshot(&installed, &request.excluded);
 
-    let catalog = claudine::model_catalog::ModelCatalogService::new();
+    let selection_config = load_selection_config(source_repo_root.unwrap_or(&launch_cwd));
+    let catalog = match &selection_config {
+        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+            cfg.model_overrides.clone(),
+        ),
+        None => claudine::model_catalog::ModelCatalogService::new(),
+    };
+    catalog.refresh_blocking();
+    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
 
     // If a target was already resolved upstream (sequence review, non-TTY
     // preflight, etc.), use it directly.
     let target = if let Some(ref t) = request.resolved_target {
         t.clone()
     } else {
-        let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
         let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
         if is_tty {
@@ -281,7 +285,8 @@ pub(crate) fn execute_composition_request_inner(
                 );
                 ResolvedExecutionTarget {
                     provider,
-                    provider_reason: claudine::composition::ProviderResolutionReason::InteractivePicker,
+                    provider_reason:
+                        claudine::composition::ProviderResolutionReason::InteractivePicker,
                     model,
                     model_reason,
                 }
@@ -302,10 +307,16 @@ pub(crate) fn execute_composition_request_inner(
 
     let provider = target.provider;
     let _selection_reason = match target.provider_reason {
-        claudine::composition::ProviderResolutionReason::ExplicitFlag => SelectionReason::ExplicitProvider,
+        claudine::composition::ProviderResolutionReason::ExplicitFlag => {
+            SelectionReason::ExplicitProvider
+        }
         claudine::composition::ProviderResolutionReason::FrontmatterSingle
-        | claudine::composition::ProviderResolutionReason::FrontmatterList => SelectionReason::FrontmatterHint,
-        claudine::composition::ProviderResolutionReason::FavoriteAgent => SelectionReason::ConfigFavorite,
+        | claudine::composition::ProviderResolutionReason::FrontmatterList => {
+            SelectionReason::FrontmatterHint
+        }
+        claudine::composition::ProviderResolutionReason::FavoriteAgent => {
+            SelectionReason::ConfigFavorite
+        }
         _ => SelectionReason::InteractiveChoice,
     };
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
@@ -1010,7 +1021,10 @@ pub(crate) fn execute_composition_request_inner(
         let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf()).or(harness_perf),
+            agent_perf: perf_collector
+                .as_ref()
+                .and_then(|c| c.agent_perf())
+                .or(harness_perf),
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1094,7 +1108,10 @@ pub(crate) fn execute_composition_request_inner(
         let outcome = SingleCompositionOutcome {
             exit_code,
             provider,
-            agent_perf: perf_collector.as_ref().and_then(|c| c.agent_perf()).or(agent_perf),
+            agent_perf: perf_collector
+                .as_ref()
+                .and_then(|c| c.agent_perf())
+                .or(agent_perf),
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1763,14 +1780,23 @@ fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
 
 // -- Config loading -------------------------------------------------------
 
-pub(crate) fn load_config_favorite(cwd: &Path) -> Option<Provider> {
+pub(crate) struct SelectionConfig {
+    pub favorite: Option<Provider>,
+    #[allow(dead_code)]
+    pub model_overrides: HashMap<Provider, ProviderModelOverride>,
+}
+
+pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
     let repo_root = sniff::filesystem::git::detect_git(cwd, false, 1)
         .ok()
         .flatten()
         .map(|info| info.repo_root);
     let config =
         claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
-    config.preferred_agent
+    Some(SelectionConfig {
+        favorite: config.preferred_agent,
+        model_overrides: config.models,
+    })
 }
 
 #[cfg(test)]
@@ -1850,5 +1876,113 @@ mod tests {
 
         // The frontmatter portion must remain unchanged
         assert!(result.starts_with(frontmatter));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn load_selection_config_returns_both_favorite_and_overrides() {
+        use claudine::config::claudine_config::{
+            DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let claudine_dir = home.join(".claudine");
+        std::fs::create_dir_all(&claudine_dir).unwrap();
+
+        use claudine::config::claudine_config::ClaudineConfig;
+
+        let config = ClaudineConfig {
+            preferred_agent: Some(Provider::Codex),
+            models: {
+                let mut m = HashMap::new();
+                m.insert(
+                    Provider::Codex,
+                    ProviderModelOverride::Detailed(DetailedModelOverride {
+                        mode: ModelOverrideMode::Add,
+                        values: vec!["gpt-5".into()],
+                    }),
+                );
+                m
+            },
+            ..ClaudineConfig::default()
+        };
+        let config_path = claudine_dir.join("config.json");
+        claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
+
+        let old_home = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", home);
+        }
+
+        let result = load_selection_config(home);
+
+        unsafe {
+            if let Some(old) = old_home {
+                std::env::set_var("HOME", old);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+
+        let cfg = result.expect("should load config");
+        assert_eq!(cfg.favorite, Some(Provider::Codex));
+        assert!(cfg.model_overrides.contains_key(&Provider::Codex));
+        assert_eq!(cfg.model_overrides[&Provider::Codex].values(), &["gpt-5"]);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn load_selection_config_handles_missing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+
+        let old_home = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", home);
+        }
+
+        let result = load_selection_config(home);
+
+        unsafe {
+            if let Some(old) = old_home {
+                std::env::set_var("HOME", old);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn catalog_initialized_with_config_overrides() {
+        use claudine::config::claudine_config::{
+            DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+        };
+
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            Provider::Codex,
+            ProviderModelOverride::Detailed(DetailedModelOverride {
+                mode: ModelOverrideMode::Add,
+                values: vec!["gpt-5".into()],
+            }),
+        );
+
+        let config = SelectionConfig {
+            favorite: Some(Provider::Codex),
+            model_overrides: overrides,
+        };
+
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_overrides(config.model_overrides);
+
+        // Static catalog model should still be valid (additive mode)
+        assert!(catalog.is_valid(Provider::Codex, "o3-mini"));
+        // Override model should also be valid
+        assert!(catalog.is_valid(Provider::Codex, "gpt-5"));
+        // Non-overridden provider should use static catalog
+        assert!(catalog.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
     }
 }

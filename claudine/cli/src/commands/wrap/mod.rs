@@ -753,7 +753,8 @@ pub fn run_provider_wrapper(
     }
 
     let wrapper_start = std::time::Instant::now();
-    let mut perf_collector = startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
+    let mut perf_collector =
+        startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
 
     let (code, stderr_capture, model_source) =
         run_provider_wrapper_inner(provider, args, verbose, perf_collector.as_mut())?;
@@ -3100,7 +3101,9 @@ pub(crate) fn run_harness_loop(
                     }
                     if let Some(api) = p.provider_api_duration {
                         acc.provider_api_duration = Some(
-                            acc.provider_api_duration.unwrap_or(std::time::Duration::ZERO) + api,
+                            acc.provider_api_duration
+                                .unwrap_or(std::time::Duration::ZERO)
+                                + api,
                         );
                     }
                 }

@@ -227,6 +227,10 @@ Run step {{state}}
     write_executable(
         &path_dir.join("opencode"),
         r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+    echo '[]'
+    exit 0
+fi
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
@@ -973,6 +977,10 @@ Run step {{ state.name }}
     write_executable(
         &path_dir.join("opencode"),
         r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+    echo '[]'
+    exit 0
+fi
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
   IFS= read -r count < "$CLAUDINE_COUNT_FILE"
