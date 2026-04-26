@@ -159,6 +159,31 @@ Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-le
 
 Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/markdown/block/rule_processor.rs`, and `darkmatter/lib/src/markdown/output/`.
 
+### Shared Code-Block Helpers
+
+`darkmatter/lib/src/markdown/output/code_block.rs` contains `pub(crate)` helpers used by both terminal and HTML rendering:
+
+- `render_terminal_code_block` - ANSI-highlighted code with padding, line numbers, and highlighted ranges
+- `render_html_code_block` - `<div class="code-block">` wrapper with optional line-number table or `<pre><code>` output
+- `find_syntax` - Language lookup by extension, name, or alias (shared `syntect` behaviour)
+
+These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-highlighting logic.
+
+### YamlBlock Component
+
+`YamlBlock` is a typed, validated YAML payload that renders as a syntax-highlighted `yaml` code block in both terminal and browser output.
+
+- **Constructors:**
+  - `YamlBlock::new(yaml)` — from raw YAML string; validates via `serde_yaml_ng`
+  - `YamlBlock::from_yaml_file(path)` — from a YAML file on disk
+  - `YamlBlock::from_markdown_content(md)` — extracts only the frontmatter; yields `{}` if none
+  - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
+- **Validation:** all constructors parse YAML through `serde_yaml_ng::from_str` and fail fast; the parsed `Value` is not retained
+- **Rendering:** implements `Renderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
+- **No tree view or custom YAML renderer** — produces a standard highlighted code block
+
+Located in `darkmatter/lib/src/markdown/yaml_block.rs`.
+
 ## See Also
 
 - [biscuit-terminal skill](../biscuit-terminal/SKILL.md) - Terminal rendering dependency
