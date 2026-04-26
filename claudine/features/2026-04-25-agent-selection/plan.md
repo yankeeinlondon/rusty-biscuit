@@ -27,6 +27,19 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/lib/src/composition/select.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/error.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/cli/src/commands/compose.rs
+    - claudine/cli/src/commands/wrap/sequence.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - claudine
+    - claudine-cli
 ---
 
 # Agent Selection Execution Plan
@@ -131,13 +144,13 @@ Files:
 
 Steps:
 
-- [ ] Add `ResolutionMode`, `InstalledProviderSnapshot`, `ResolvedExecutionTarget`, `ProviderResolutionReason`, `ModelResolutionReason`, and the picker/review plan structs described in the design.
-- [ ] Replace the current `select_provider(...)` flow with explicit TTY and non-TTY resolution paths that remove the old `SingleInstalled` shortcut.
-- [ ] Keep explicit `--<provider>` flags higher priority than exclusions and higher priority than all other signals.
-- [ ] Implement picker-plan construction using `PROVIDERS_DISPLAY_ORDER`, frontmatter ordering, and optional favorite-agent defaulting rules.
-- [ ] Implement model precedence exactly as designed: CLI `--model`, provider-specific env, `MODEL`, frontmatter `model`, provider default.
-- [ ] Add the OpenCode non-TTY hard error when the final model chain still resolves to `None`.
-- [ ] Extend `CompositionExecutionRequest` with `resolved_target: Option<ResolvedExecutionTarget>` and update resolver-facing reason enums so downstream logging can report how the target was chosen.
+- [x] Add `ResolutionMode`, `InstalledProviderSnapshot`, `ResolvedExecutionTarget`, `ProviderResolutionReason`, `ModelResolutionReason`, and the picker/review plan structs described in the design.
+- [x] Replace the current `select_provider(...)` flow with explicit TTY and non-TTY resolution paths that remove the old `SingleInstalled` shortcut.
+- [x] Keep explicit `--<provider>` flags higher priority than exclusions and higher priority than all other signals.
+- [x] Implement picker-plan construction using `PROVIDERS_DISPLAY_ORDER`, frontmatter ordering, and optional favorite-agent defaulting rules.
+- [x] Implement model precedence exactly as designed: CLI `--model`, provider-specific env, `MODEL`, frontmatter `model`, provider default.
+- [x] Add the OpenCode non-TTY hard error when the final model chain still resolves to `None`.
+- [x] Extend `CompositionExecutionRequest` with `resolved_target: Option<ResolvedExecutionTarget>` and update resolver-facing reason enums so downstream logging can report how the target was chosen.
 
 Parallelizable:
 

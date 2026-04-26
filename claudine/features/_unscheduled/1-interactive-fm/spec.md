@@ -52,3 +52,9 @@ Rather than define the questions we should be able to define the questions exter
 - **Dialog**
     - A dialog combines multiple questions into one dialog window
     - Tab/Shift-Tab as well as up/down arrows navigate between questions
+    - you can define in YAML as:
+
+
+        ```yaml
+
+        ```
