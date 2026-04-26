@@ -62,7 +62,6 @@ pub fn resolve_target_non_tty(
 /// When a [`ModelCatalogService`] is provided, frontmatter `model` hints are
 /// validated against the merged catalog. Invalid hints are skipped rather than
 /// treated as errors.
-#[expect(dead_code)]
 pub fn resolve_target_non_tty_with_catalog(
     explicit_provider: Option<Provider>,
     prepared: &super::types::PreparedComposition,
@@ -278,7 +277,6 @@ pub fn resolve_model(
 /// against the merged catalog. Invalid single hints fall through to the
 /// provider default; invalid list entries are skipped until a valid one
 /// is found or the list is exhausted.
-#[expect(dead_code)]
 pub fn resolve_model_with_catalog(
     provider: Provider,
     prepared: &super::types::PreparedComposition,

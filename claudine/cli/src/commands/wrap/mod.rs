@@ -85,6 +85,7 @@ impl StructuredSummaryDetails {
 }
 
 pub(crate) mod composition;
+pub(crate) mod selection_ui;
 pub(crate) mod sequence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

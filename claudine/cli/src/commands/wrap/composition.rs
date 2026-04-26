@@ -6,7 +6,6 @@
 //! effective (composed) frontmatter, structured streaming, and inline
 //! closure.
 
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::Path;
@@ -20,7 +19,8 @@ use claudine::composition::lifecycle::{
 };
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
-    InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
+    InlineClosurePlan, ResolvedExecutionTarget, SelectionReason, build_installed_snapshot,
+    build_picker_plan, resolve_target_non_tty_with_catalog,
 };
 use claudine::events::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -132,7 +132,7 @@ fn resolve_prompt_display_path(
 
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
-    selection_reason: &SelectionReason,
+    target: &ResolvedExecutionTarget,
 ) -> HashMap<String, serde_json::Value> {
     let mut context = HashMap::new();
     context.insert(
@@ -152,7 +152,26 @@ fn composition_dispatch_context(
     );
     context.insert(
         "provider_selection_reason".into(),
-        serde_json::Value::String(format!("{selection_reason:?}")),
+        serde_json::Value::String(format!("{:?}", target.provider_reason)),
+    );
+    context.insert(
+        "resolved_model".into(),
+        serde_json::Value::String(target.model.clone().unwrap_or_default()),
+    );
+    context.insert(
+        "model_selection_reason".into(),
+        serde_json::Value::String(format!("{:?}", target.model_reason)),
+    );
+    context.insert(
+        "selection_mode".into(),
+        serde_json::Value::String(
+            if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+                "tty"
+            } else {
+                "non-tty"
+            }
+            .to_string(),
+        ),
     );
     context
 }
@@ -222,33 +241,73 @@ pub(crate) fn execute_composition_request_inner(
     .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
     .collect();
 
-    let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
+    let snapshot = build_installed_snapshot(&installed, &request.excluded);
 
-    let selected = match select_provider(
-        request.explicit_provider,
-        &request.prepared,
-        &installed,
-        &request.excluded,
-        favorite,
-    ) {
-        Ok(s) => s,
-        Err(CompositionError::InteractiveSelectionRequired) => {
-            interactive_select(&installed, &request.excluded)?
-        }
-        Err(CompositionError::AgentHintAmbiguous { providers, .. }) => {
-            if is_tty() {
-                interactive_select_from(&providers)?
+    let catalog = claudine::model_catalog::ModelCatalogService::new();
+
+    // If a target was already resolved upstream (sequence review, non-TTY
+    // preflight, etc.), use it directly.
+    let target = if let Some(ref t) = request.resolved_target {
+        t.clone()
+    } else {
+        let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
+        let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+        if is_tty {
+            // TTY mode: explicit flag wins unconditionally; otherwise show picker.
+            if let Some(provider) = request.explicit_provider {
+                let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                    Some(&catalog),
+                );
+                ResolvedExecutionTarget {
+                    provider,
+                    provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+                    model,
+                    model_reason,
+                }
             } else {
-                return Err(eyre!(
-                    "agent hint is ambiguous and no TTY available for interactive selection"
-                ));
+                let plan = build_picker_plan(&request.prepared, &snapshot, favorite)
+                    .map_err(|e| eyre!("{e}"))?;
+                let provider = super::selection_ui::prompt_one_shot_provider(plan)
+                    .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+                let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                    Some(&catalog),
+                );
+                ResolvedExecutionTarget {
+                    provider,
+                    provider_reason: claudine::composition::ProviderResolutionReason::InteractivePicker,
+                    model,
+                    model_reason,
+                }
             }
+        } else {
+            // Non-TTY mode: strict chain resolution, never prompt.
+            resolve_target_non_tty_with_catalog(
+                request.explicit_provider,
+                &request.prepared,
+                &snapshot,
+                favorite,
+                request.model.as_deref(),
+                Some(&catalog),
+            )
+            .map_err(|e| eyre!("{e}"))?
         }
-        Err(e) => return Err(eyre!("{e}")),
     };
 
-    let provider = selected.provider;
-    let selection_reason = selected.reason;
+    let provider = target.provider;
+    let _selection_reason = match target.provider_reason {
+        claudine::composition::ProviderResolutionReason::ExplicitFlag => SelectionReason::ExplicitProvider,
+        claudine::composition::ProviderResolutionReason::FrontmatterSingle
+        | claudine::composition::ProviderResolutionReason::FrontmatterList => SelectionReason::FrontmatterHint,
+        claudine::composition::ProviderResolutionReason::FavoriteAgent => SelectionReason::ConfigFavorite,
+        _ => SelectionReason::InteractiveChoice,
+    };
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
 
     // -- Profile, binary, arguments, environment --------------------------
@@ -485,7 +544,7 @@ pub(crate) fn execute_composition_request_inner(
                     env_plan.env.insert(k.into(), v.into());
                 },
                 has_model,
-                request.model.as_deref(),
+                target.model.as_deref(),
                 effective_non_interactive,
                 &super::profile::OpenCodeEnvSnapshot::from_system(),
             )?
@@ -495,7 +554,7 @@ pub(crate) fn execute_composition_request_inner(
 
     // Universal --model flag (non-OpenCode providers, and OpenCode interactive).
     if provider != Provider::OpenCode {
-        if let Some(ref model) = request.model {
+        if let Some(ref model) = target.model {
             let mut env_overrides = Vec::new();
             if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
                 && !silent
@@ -507,7 +566,7 @@ pub(crate) fn execute_composition_request_inner(
                 env_plan.env.insert(key.into(), value.into());
             }
         }
-    } else if let Some(ref model) = request.model
+    } else if let Some(ref model) = target.model
         && !effective_non_interactive
     {
         let mut env_overrides = Vec::new();
@@ -888,7 +947,7 @@ pub(crate) fn execute_composition_request_inner(
 
     // -- Execution --------------------------------------------------------
 
-    let dispatch_context = composition_dispatch_context(&request, &selection_reason);
+    let dispatch_context = composition_dispatch_context(&request, &target);
 
     if harness_enabled {
         let harness_mode = if is_inline {
@@ -1700,50 +1759,6 @@ fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
 
     // No closing delimiter — treat entire text as body
     ("", text)
-}
-
-// -- Interactive provider selection ---------------------------------------
-
-fn interactive_select(
-    installed: &[Provider],
-    excluded: &BTreeSet<Provider>,
-) -> Result<SelectedProvider> {
-    if !is_tty() {
-        return Err(eyre!(
-            "interactive provider selection required but no TTY available; \
-             use an explicit provider flag (--claude, --codex, etc.) or \
-             add an `agent` frontmatter property"
-        ));
-    }
-
-    let candidates = build_candidate_set(installed, excluded);
-    if candidates.is_empty() {
-        return Err(eyre!("no runnable providers available"));
-    }
-
-    interactive_select_from(&candidates)
-}
-
-fn interactive_select_from(candidates: &[Provider]) -> Result<SelectedProvider> {
-    let options: Vec<String> = candidates.iter().map(|p| p.to_string()).collect();
-    let selection = Select::new("Choose a provider:", options)
-        .prompt()
-        .map_err(|e| eyre!("selection cancelled: {e}"))?;
-
-    let provider = candidates
-        .iter()
-        .find(|p| p.to_string() == selection)
-        .copied()
-        .ok_or_else(|| eyre!("invalid selection"))?;
-
-    Ok(SelectedProvider {
-        provider,
-        reason: SelectionReason::InteractiveChoice,
-    })
-}
-
-fn is_tty() -> bool {
-    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
 // -- Config loading -------------------------------------------------------

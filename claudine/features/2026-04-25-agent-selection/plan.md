@@ -48,6 +48,17 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5:
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/commands/wrap/composition.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/select.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5:
+    - .opencode/skill/claudine/SKILL.md
 packages:
     - claudine
     - claudine-cli
