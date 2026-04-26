@@ -479,3 +479,17 @@ Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 - **Select**: `composition::select_provider()` applies the precedence chain
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)
 - **Closure**: `composition::closure::rewrite_inline_document()` reconstructs the document for inline mode; direct mode outputs to stdout
+
+## Performance Reporting
+
+Composition commands support an opt-in `--perf` flag that prints a detailed performance breakdown to stderr after execution completes. The report includes:
+
+- **CLI Overhead** — arg parsing, config loading, tracing init, and environment setup.
+- **Composition Report** — when `compose` or `inline-compose` (or each step of a `sequence`) triggers document preparation, the Darkmatter composition timings are shown (total time plus per-stage breakdown: interpolation, shell expansion, transclusion apply, etc.).
+- **Agent Execution** — launches, first-response latency, total execution time, and provider-reported API duration when available.
+
+For `sequence`, the report is aggregated across all steps: launches and total execution time are summed, first-response latencies are averaged (with the minimum shown in a note), and composition metrics are merged. The report appears exactly once at the end of the run, after the sequence summary.
+
+`--perf` is emitted unconditionally when passed, even alongside `--silent` or `--quiet`, because it is an explicit opt-in.
+
+> **Note:** `provider_api_duration` is only populated for structured-streaming providers. Legacy providers (e.g., Goose) omit this line.

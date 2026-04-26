@@ -35,7 +35,8 @@ Supported variable forms:
 
 - simple keys: `draft`
 - nested keys: `user.role`
-- context keys: `ctx.today`, `ctx.repo`, `ctx.current_package`
+- context variables: `ctx.today`, `ctx.repo`, `ctx.current_package`
+    - see [context variables](./context-variables.md) for more details
 - environment keys: `env.AGENT`, `env.HOME`
 
 One important detail: when an unprefixed key is not found in frontmatter or inherited state, Darkmatter falls back to `ctx.<key>`. That means `repo` can resolve to `ctx.repo`.

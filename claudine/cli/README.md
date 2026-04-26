@@ -137,6 +137,7 @@ Shared wrapper flags:
 | `--sandbox` | Enable provider-specific sandboxing |
 | `--repo` | Use only repo-scoped skills, commands, and agents via a shadow HOME |
 | `--dry-run` | Show what would be executed without launching the child |
+| `--perf` | Emit a detailed performance report to stderr after execution |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
 | `-- ...` | Force all remaining args to passthrough unchanged |
@@ -188,6 +189,8 @@ Shared composition flags include provider selectors (`--claude`, `--codex`, `--g
 Provider selection precedence: explicit flag → single installed remaining after `--exclude` → `agent` frontmatter hint (fuzzy-matched) → `settings.linking.preference[0]` config favorite → interactive chooser (TTY only).
 
 **Consistent Rendering (2026-04-16).** `compose` and `inline-compose` are unified into one `execute_without_harness` function parameterized by `CompositionExecutionMode::{Direct, Inline}`. Structured stream execution runs through a single `run_structured_composition` helper, and summary emission goes through a single `emit_composition_summary` function with a `defer_section_separator` flag that picks between immediate emission (compose) and post-closure deferred emission (inline-compose). Non-structured runs (Goose) call `emit_minimal_composition_summary` to produce the same stderr summary block as structured runs — no more JSONL-only silence on the legacy path. The `"agent did not provide a summarized message"` warning has been removed; the empty-text case is already recorded in the JSONL `SessionEnd` event. The only permitted stderr divergence between the two modes is the four inline-only surfaces: closure validation messages, file-write status, partial-body report on interruption, and writability pre-check.
+
+**Performance Reporting.** All three composition commands support `--perf`, which emits a post-execution performance report to stderr. `sequence` produces a single aggregated report covering all steps; `compose` and `inline-compose` produce one report per invocation. See the main README for report layout details.
 
 ## Module Structure
 
