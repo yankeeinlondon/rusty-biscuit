@@ -23,10 +23,6 @@
 //! Key matching is case-sensitive — only lowercase `prompt` / `sequence`
 //! keys are recognized, per spec §5.4.
 
-// Phase 3 scaffolding. Consumed by the composition completer wired up in
-// this phase; public items are only reachable through that module for now.
-#![allow(dead_code)]
-
 use std::fs;
 use std::path::Path;
 

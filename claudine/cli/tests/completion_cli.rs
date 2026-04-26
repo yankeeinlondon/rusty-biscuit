@@ -24,13 +24,10 @@
 //!   shell's native completion takes over.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use assert_cmd::cargo::cargo_bin_cmd;
+use std::path::Path;
 
 mod common;
+use common::completion::run_complete as run_complete_trailing;
 use common::{TestWorkspace, init_git_repo};
 
 /// Seed a fake `.git` directory plus a few markdown fixtures under a
@@ -69,83 +66,6 @@ fn seed_repo_with_package(root: &Path) {
     .unwrap();
     fs::create_dir_all(placeholder.join("src")).unwrap();
     fs::write(placeholder.join("src").join("lib.rs"), "// placeholder\n").unwrap();
-}
-
-/// Build a hermetic fake-home directory next to (not inside) the test cwd.
-///
-/// The supplement engine walks `$HOME/prompts`, `$HOME/sequences`,
-/// `$HOME/.claudine/prompts`, and `$HOME/.claudine/sequences` as part of
-/// the curated scope. Without this sandbox, tests would walk the
-/// developer's real `~/.claudine` tree and surface unrelated candidates.
-fn fake_home(cwd: &Path) -> PathBuf {
-    let parent = cwd.parent().unwrap_or(cwd);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let leaf = cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("claudine-home");
-    let home = parent.join(format!("{leaf}-home-{nonce}-{}", std::process::id()));
-    fs::create_dir_all(&home).expect("create fake home");
-    home
-}
-
-/// Invoke `claudine __complete` as a subprocess and collect stdout lines.
-///
-/// `argv_tail` is the argv as the user would have typed it, excluding the
-/// binary name. The helper prepends `"claudine"` so the engine receives a
-/// realistic argv. `current` is the 0-based index into that full argv of
-/// the token being completed — typically `argv_tail.len()` (the user is
-/// typing a new trailing token at the end).
-fn run_complete(cwd: &Path, home: &Path, argv_tail: &[&str], current: usize) -> Vec<String> {
-    let reference = cargo_bin_cmd!("claudine");
-    let program = reference.get_program().to_os_string();
-    let mut cmd = Command::new(program);
-    cmd.current_dir(cwd)
-        .env("HOME", home)
-        .env("NO_COLOR", "1")
-        // Defensive: clear any outer COMPLETE so the legacy `CompleteEnv`
-        // path never gets a chance to hijack this subprocess.
-        .env_remove("COMPLETE")
-        .env_remove("_CLAP_COMPLETE_INDEX")
-        .env_remove("_CLAP_IFS")
-        .arg("__complete")
-        .arg("--current")
-        .arg(current.to_string())
-        .arg("--")
-        .arg("claudine");
-    for arg in argv_tail {
-        cmd.arg(arg);
-    }
-
-    let output = cmd.output().expect("completion subprocess to run");
-    assert!(
-        output.status.success(),
-        "completion subprocess failed: status={:?}, stdout={}, stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-
-    let stdout = String::from_utf8(output.stdout).expect("utf-8 completion output");
-    stdout
-        .split('\n')
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-/// Convenience wrapper that provides a fresh fake home and computes the
-/// cursor index from the argv tail.
-///
-/// The cursor sits at `1 + argv_tail.len() - 1 = argv_tail.len()` — the
-/// last element of the combined `[binary, ...tail]` argv.
-fn run_complete_trailing(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
-    let home = fake_home(cwd);
-    let current = argv_tail.len();
-    run_complete(cwd, &home, argv_tail, current)
 }
 
 // ---------------------------------------------------------------------

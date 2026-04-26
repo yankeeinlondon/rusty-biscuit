@@ -17,99 +17,14 @@
 //! - A setter-shaped cursor wins over the positional classification
 //!   even when the file slot has already been committed.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use assert_cmd::cargo::cargo_bin_cmd;
-
 mod common;
+use std::fs;
+
 use common::TestWorkspace;
-
-/// Seed a minimal Cargo workspace so `sniff::detect_repo_structure`
-/// recognizes the tempdir as a monorepo. A plain `.git` is not enough
-/// for the setter-value completer when we exercise area / package-level
-/// scopes; the repo-level scope works with just a `.git` ancestor but
-/// package/area discovery requires a workspace manifest.
-fn seed_cargo_workspace(root: &Path, members: &[&str]) {
-    fs::create_dir_all(root.join(".git")).unwrap();
-    let members_list = members
-        .iter()
-        .map(|m| format!("    \"{m}\""))
-        .collect::<Vec<_>>()
-        .join(",\n");
-    let root_manifest = format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
-    fs::write(root.join("Cargo.toml"), root_manifest).unwrap();
-    for member in members {
-        let member_dir = root.join(member);
-        fs::create_dir_all(member_dir.join("src")).unwrap();
-        let name = member.replace('/', "-");
-        fs::write(
-            member_dir.join("Cargo.toml"),
-            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
-        )
-        .unwrap();
-        fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();
-    }
-}
-
-fn write_file(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-fn fake_home(cwd: &Path) -> PathBuf {
-    let parent = cwd.parent().unwrap_or(cwd);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let leaf = cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("claudine-home");
-    let home = parent.join(format!("{leaf}-home-{nonce}-{}", std::process::id()));
-    fs::create_dir_all(&home).expect("create fake home");
-    home
-}
-
-fn run_complete(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
-    let home = fake_home(cwd);
-    let current = argv_tail.len();
-    let reference = cargo_bin_cmd!("claudine");
-    let program = reference.get_program().to_os_string();
-    let mut cmd = Command::new(program);
-    cmd.current_dir(cwd)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .env_remove("COMPLETE")
-        .env_remove("_CLAP_COMPLETE_INDEX")
-        .env_remove("_CLAP_IFS")
-        .arg("__complete")
-        .arg("--current")
-        .arg(current.to_string())
-        .arg("--")
-        .arg("claudine");
-    for arg in argv_tail {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("completion subprocess to run");
-    assert!(
-        output.status.success(),
-        "completion subprocess failed: status={:?}, stderr={}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr),
-    );
-    String::from_utf8(output.stdout)
-        .expect("utf-8")
-        .split('\n')
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
+use common::completion::{
+    run_complete, seed_cargo_workspace_members as seed_cargo_workspace, seed_plain_git_repo,
+    write_file,
+};
 
 // ---------------------------------------------------------------------
 // @ trigger — file completion fires only for `@`-prefixed values
@@ -400,5 +315,66 @@ fn setter_scope_honors_gitignore() {
     assert!(
         got.iter().any(|c| c == "ref='docs/public.md'"),
         "non-ignored file must surface: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// review-3 finding 2 — nested feature-directory setter-value paths
+// ---------------------------------------------------------------------
+
+#[test]
+fn setter_resolves_nested_feature_directory_path() {
+    // Spec example:
+    //   `claudine compose foobar.md spec=@spec<tab>`
+    //   resolves to `'docs/2026-04-24-improved-shell-completions/spec.md'`
+    //
+    // The recursion contract is already implemented in the walker; this
+    // test exists purely to lock it in. The single-quote wrapping and
+    // exact relative path (with the dated feature directory) are both
+    // load-bearing — assert the full token, not just `contains("spec.md")`.
+    let ws = TestWorkspace::named("complete-setter-nested-feature-dir");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path()
+            .join("docs")
+            .join("2026-04-24-improved-shell-completions")
+            .join("spec.md"),
+        "# spec\n",
+    );
+
+    let got = run_complete(ws.path(), &["compose", "foobar.md", "spec=@spec"]);
+
+    assert!(
+        got.iter()
+            .any(|c| c == "spec='docs/2026-04-24-improved-shell-completions/spec.md'"),
+        "nested feature-dir spec path not surfaced: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// review-3 finding 3 — plain git checkout (no Cargo workspace)
+// ---------------------------------------------------------------------
+
+#[test]
+fn setter_resolves_in_plain_git_checkout() {
+    // review-3 finding 3: review-2 added plain-git fixtures for
+    // composition, but setter-value completion also depends on
+    // `effective_repo_root` via `repo_or_cwd(ctx)`. Lock in the
+    // regression guard so a future scopes.rs refactor does not silently
+    // break setter-value behavior in repos without a Cargo workspace.
+    let ws = TestWorkspace::named("complete-setter-plain-git");
+    seed_plain_git_repo(ws.path());
+    // intentionally NO Cargo.toml — sniff::detect_repo_structure
+    // returns None for this layout.
+    write_file(&ws.path().join("docs").join("spec.md"), "# spec\n");
+
+    let nested = ws.path().join("nested").join("child");
+    fs::create_dir_all(&nested).unwrap();
+
+    let got = run_complete(&nested, &["compose", "foobar.md", "spec=@spec"]);
+
+    assert!(
+        got.iter().any(|c| c == "spec='docs/spec.md'"),
+        "plain-git setter-value did not resolve docs/spec.md: {got:?}"
     );
 }

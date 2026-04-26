@@ -2,6 +2,49 @@
 phases: 5
 created: 2026-04-24
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/compose/interpolation/lexer.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/parser.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/ast.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/conditions.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/interpolation/parser.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/compose/interpolation/ast.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/parser.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/compose/interpolation/lexer.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/parser.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - darkmatter/docs/inline/interpolation.md
+  - darkmatter/docs/inline/fm-interpolation.md
+  - darkmatter/docs/topics/boolean-conditional-logic.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
+packages:
+  - darkmatter
 ---
 
 # Execution Plan: Consistent Use of Logic Operators

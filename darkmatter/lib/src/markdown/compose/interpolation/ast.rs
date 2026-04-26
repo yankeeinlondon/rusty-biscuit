@@ -10,7 +10,7 @@
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
 //! 2. **Unary NOT** - `!x`
 //! 3. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 4. **Fallback** - `|`
+//! 4. **Fallback** - `||`
 //! 5. **Ternary** - `? :`
 //!
 //! ## Examples
@@ -22,7 +22,7 @@
 //!
 //! Fallback:
 //! ```text
-//! {{ foo | "default" }} -> Fallback { primary: Variable("foo"), fallback: StringLiteral("default") }
+//! {{ foo || "default" }} -> Fallback { primary: Variable("foo"), fallback: StringLiteral("default") }
 //! ```
 //!
 //! Ternary with comparison:
@@ -54,7 +54,7 @@ pub enum Expr {
     /// Unary not expression: `!expr`.
     UnaryNot(Box<Expr>),
 
-    /// Fallback expression: `expr | fallback`.
+    /// Fallback expression: `expr || fallback`.
     ///
     /// Returns the primary if truthy, otherwise the fallback.
     Fallback {
@@ -109,7 +109,7 @@ impl fmt::Display for Expr {
             }
             Expr::UnaryNot(expr) => write!(f, "!{}", expr),
             Expr::Fallback { primary, fallback } => {
-                write!(f, "{} | {}", primary, fallback)
+                write!(f, "{} || {}", primary, fallback)
             }
             Expr::Ternary {
                 condition,
@@ -169,7 +169,7 @@ mod tests {
             primary: Box::new(Expr::Variable("foo".to_string())),
             fallback: Box::new(Expr::StringLiteral("default".to_string())),
         };
-        assert_eq!(expr.to_string(), "foo | \"default\"");
+        assert_eq!(expr.to_string(), "foo || \"default\"");
     }
 
     #[test]

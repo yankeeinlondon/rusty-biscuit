@@ -76,8 +76,8 @@ These are useful when a prompt is intended to work from a clean baseline, or whe
 In order to give you more flexibility in how and what you check, we provide the following logical operands:
 
 - Combinatorial
-    - `every`
-    - `any`
+    - `every` - `every(cond1, cond2, cond3)`
+    - `any` - `any(cond1, cond2, )
 - Atomic
     - `not`
 

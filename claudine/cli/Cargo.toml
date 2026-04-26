@@ -16,6 +16,7 @@ claudine = { path = "../lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects"] }
 sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+tui-chrome = { path = "../../biscuit-tui/lib" }
 clap = { version = "4.5", features = ["derive", "unstable-ext"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }

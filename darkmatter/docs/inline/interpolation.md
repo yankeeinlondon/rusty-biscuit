@@ -13,7 +13,7 @@ Body interpolation runs after text replacement and page blocks have been applied
     - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax:
 
       ```md
-      Bob's favorite color is {{ color | "unknown" }}.
+      Bob's favorite color is {{ color || "unknown" }}.
       ```
 
 - **Boolean Switch**
@@ -47,7 +47,7 @@ Body interpolation runs after text replacement and page blocks have been applied
     - NOTE: if a string value of "6" is used in a numeric comparison we will automatically convert it to the number 6 for the comparison.
 
       ```md
-      Bob's favorite color is {{ color | blue == "blue" ? blue (how original) : nice choice! }}
+      Bob's favorite color is {{ color || blue == "blue" ? blue (how original) : nice choice! }}
       ```
 
 - **Context Variables**
@@ -61,7 +61,7 @@ Body interpolation runs after text replacement and page blocks have been applied
     - for example:
 
         ```md
-        Bob's favorite color is {{ env.FAVORITE_COLOR | "unknown" }}
+        Bob's favorite color is {{ env.FAVORITE_COLOR || "unknown" }}
         ```
 
 - **Quoting**

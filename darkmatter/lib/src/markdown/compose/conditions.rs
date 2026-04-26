@@ -490,10 +490,10 @@ mod tests {
     }
 
     #[test]
-    fn infix_fallback_inside_or() {
-        // a || (missing | "default") — Or short-circuits on `a`.
+    fn infix_or_with_literal() {
+        // a || (missing || "default") — Or short-circuits on `a`.
         let state = test_state(json!({ "a": true }));
-        assert!(evaluate_condition(r#"a || (missing | "default")"#, &state, 1).unwrap());
+        assert!(evaluate_condition(r#"a || (missing || "default")"#, &state, 1).unwrap());
     }
 
     #[test]

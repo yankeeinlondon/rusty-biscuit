@@ -18,11 +18,6 @@
 //! symlinks the same skill body across multiple provider dirs, and
 //! following those symlinks would produce duplicate candidates).
 
-// Phase 2 scaffolding. Public items below are consumed by the composition
-// and setter-value completers wired up in Phases 3 and 4; today they are
-// exercised only through this module's own `#[cfg(test)]` coverage.
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 
 use sniff::filesystem::repo::{RepoInfo, detect_repo_structure};
