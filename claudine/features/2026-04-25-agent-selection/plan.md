@@ -67,6 +67,17 @@ docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase6:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_7:
+    - claudine/docs/topics/composition.md
+    - claudine/cli/README.md
+    - claudine/.claude/skills/claudine/SKILL.md
+    - claudine/features/2026-04-25-agent-selection/plan.md
+docs_updated_during_phase_7:
+    - claudine/docs/topics/composition.md
+    - claudine/cli/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase7:
+    - .claude/skills/claudine/SKILL.md
 packages:
     - claudine
     - claudine-cli
@@ -320,10 +331,10 @@ Files:
 
 Steps:
 
-- [ ] Update user-facing composition docs to call out the TTY vs non-TTY split, frontmatter `agent` and `model`, OpenCode's non-TTY model requirement, and Roo's continued exclusion from composition.
-- [ ] Update CLI help and README examples to show the new favorite-agent semantics and the new `config set favorite-agent` path.
-- [ ] Update the Claudine skill doc so future agents have the right selection workflow and config semantics.
-- [ ] Run a full regression sweep across library and CLI tests after the docs are aligned with the final behavior.
+- [x] Update user-facing composition docs to call out the TTY vs non-TTY split, frontmatter `agent` and `model`, OpenCode's non-TTY model requirement, and Roo's continued exclusion from composition.
+- [x] Update CLI help and README examples to show the new favorite-agent semantics and the new `config set favorite-agent` path.
+- [x] Update the Claudine skill doc so future agents have the right selection workflow and config semantics.
+- [x] Run a full regression sweep across library and CLI tests after the docs are aligned with the final behavior.
 
 Validation checkpoint:
 
