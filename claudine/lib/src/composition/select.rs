@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use crate::events::Provider;
 
 use super::error::CompositionError;
-use super::types::{PreparedComposition, SelectedProvider, SelectionReason};
+use super::types::{AgentHint, PreparedComposition, SelectedProvider, SelectionReason};
 
 /// Build the set of candidate providers by filtering installed providers.
 ///
@@ -65,7 +65,7 @@ pub fn select_provider(
     }
 
     // 3. Effective frontmatter agent hint
-    if let Some(ref hint) = prepared.effective_agent_hint
+    if let Some(ref hint) = prepared.selection_hints.agent
         && let Some(selected) = resolve_agent_hint(hint, &candidates)?
     {
         return Ok(selected);
@@ -86,58 +86,31 @@ pub fn select_provider(
 }
 
 fn resolve_agent_hint(
-    hint: &serde_json::Value,
+    hint: &AgentHint,
     candidates: &[Provider],
 ) -> Result<Option<SelectedProvider>, CompositionError> {
     match hint {
-        serde_json::Value::String(s) => {
-            let lower = s.to_lowercase();
-            if lower == "interactive" {
-                return Err(CompositionError::InteractiveSelectionRequired);
-            }
-
-            let matches = Provider::fuzzy_match_all(s);
-            if matches.is_empty() {
-                return Err(CompositionError::AgentHintInvalid(s.clone()));
-            }
-            let candidate_matches: Vec<Provider> = matches
-                .into_iter()
-                .filter(|p| candidates.contains(p))
-                .collect();
-
-            match candidate_matches.len() {
-                0 => Ok(None),
-                1 => Ok(Some(SelectedProvider {
-                    provider: candidate_matches[0],
+        AgentHint::Single(provider) => {
+            if candidates.contains(provider) {
+                Ok(Some(SelectedProvider {
+                    provider: *provider,
                     reason: SelectionReason::FrontmatterHint,
-                })),
-                _ => Err(CompositionError::AgentHintAmbiguous {
-                    hint: s.clone(),
-                    matches: candidate_matches
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    providers: candidate_matches,
-                }),
+                }))
+            } else {
+                Ok(None)
             }
         }
-        serde_json::Value::Bool(true) => Err(CompositionError::InteractiveSelectionRequired),
-        other => Err(CompositionError::AgentHintInvalid(format!(
-            "unexpected type: {}",
-            json_type_name(other)
-        ))),
-    }
-}
-
-fn json_type_name(value: &serde_json::Value) -> &'static str {
-    match value {
-        serde_json::Value::Null => "null",
-        serde_json::Value::Bool(_) => "boolean",
-        serde_json::Value::Number(_) => "number",
-        serde_json::Value::String(_) => "string",
-        serde_json::Value::Array(_) => "array",
-        serde_json::Value::Object(_) => "object",
+        AgentHint::List(providers) => {
+            for provider in providers {
+                if candidates.contains(provider) {
+                    return Ok(Some(SelectedProvider {
+                        provider: *provider,
+                        reason: SelectionReason::FrontmatterHint,
+                    }));
+                }
+            }
+            Ok(None)
+        }
     }
 }
 
@@ -148,16 +121,21 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
 
-    fn make_prepared_composition(agent_hint: Option<serde_json::Value>) -> PreparedComposition {
+    fn make_prepared_composition(agent_hint: Option<AgentHint>) -> PreparedComposition {
         use super::super::lifecycle::LifecycleConfig;
-        use super::super::types::CompositionClosurePlan;
+        use super::super::types::{
+            CompositionClosurePlan, EffectiveSelectionHints,
+        };
         PreparedComposition {
             mode: CompositionMode::ChainedDocument,
             resolved_path: PathBuf::from("/tmp/test.md"),
             source_repo_root: None,
             prompt: "test prompt".to_string(),
             effective_frontmatter: json!({}),
-            effective_agent_hint: agent_hint,
+            selection_hints: EffectiveSelectionHints {
+                agent: agent_hint,
+                model: None,
+            },
             closure: CompositionClosurePlan::Direct,
             lifecycle: LifecycleConfig::default(),
             compose_perf: None,
@@ -228,11 +206,39 @@ mod tests {
 
     #[test]
     fn frontmatter_hint_from_effective() {
-        let prepared = make_prepared_composition(Some(json!("codex")));
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Codex)));
         let installed = vec![Provider::Claude, Provider::Codex];
 
         let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
         assert_eq!(result.provider, Provider::Codex);
+        assert_eq!(result.reason, SelectionReason::FrontmatterHint);
+    }
+
+    #[test]
+    fn frontmatter_hint_list_selects_first_match() {
+        let prepared = make_prepared_composition(Some(AgentHint::List(vec![
+            Provider::Gemini,
+            Provider::Codex,
+        ])));
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
+        // Gemini is not installed, so Codex (second in list) should be selected
+        assert_eq!(result.provider, Provider::Codex);
+        assert_eq!(result.reason, SelectionReason::FrontmatterHint);
+    }
+
+    #[test]
+    fn frontmatter_hint_list_first_match_wins() {
+        let prepared = make_prepared_composition(Some(AgentHint::List(vec![
+            Provider::Claude,
+            Provider::Codex,
+        ])));
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
+        // Claude is first in the list and installed
+        assert_eq!(result.provider, Provider::Claude);
         assert_eq!(result.reason, SelectionReason::FrontmatterHint);
     }
 
@@ -275,7 +281,7 @@ mod tests {
 
     #[test]
     fn installed_but_excluded_hint_falls_through_to_favorite() {
-        let prepared = make_prepared_composition(Some(json!("codex")));
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Codex)));
         let installed = vec![Provider::Claude, Provider::Codex, Provider::Gemini];
         let excluded: BTreeSet<Provider> = [Provider::Codex].into_iter().collect();
 
@@ -305,16 +311,6 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_hint_errors() {
-        // "c" matches Claude and Codex
-        let prepared = make_prepared_composition(Some(json!("c")));
-        let installed = vec![Provider::Claude, Provider::Codex];
-
-        let err = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap_err();
-        assert!(matches!(err, CompositionError::AgentHintAmbiguous { .. }));
-    }
-
-    #[test]
     fn exclusion_narrows_to_single() {
         let prepared = make_prepared_composition(None);
         let installed = vec![Provider::Claude, Provider::Codex];
@@ -327,8 +323,8 @@ mod tests {
 
     #[test]
     fn hint_matches_known_but_uninstalled_provider_falls_through_to_favorite() {
-        // Hint is "gemini" which is a known provider, but Gemini is not installed.
-        let prepared = make_prepared_composition(Some(json!("gemini")));
+        // Hint is Gemini which is a known provider, but Gemini is not installed.
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)));
         let installed = vec![Provider::Claude, Provider::Codex];
 
         // Falls through hint (no candidate match) → config favorite
@@ -346,8 +342,8 @@ mod tests {
 
     #[test]
     fn hint_matches_known_but_uninstalled_provider_no_favorite_requires_interactive() {
-        // Hint is "gemini" (known but not installed), no favorite configured.
-        let prepared = make_prepared_composition(Some(json!("gemini")));
+        // Hint is Gemini (known but not installed), no favorite configured.
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)));
         let installed = vec![Provider::Claude, Provider::Codex];
 
         let err = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap_err();

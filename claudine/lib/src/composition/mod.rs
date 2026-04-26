@@ -31,8 +31,9 @@ pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use select::{build_candidate_set, select_provider};
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
-    CompositionClosurePlan, CompositionExecutionRequest, CompositionMode, InlineClosurePlan,
-    OutputFormat, PreparedComposition, ResolvedCompositionSource, SelectedProvider,
-    SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource,
-    SequenceStep, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
+    AgentHint, CompositionClosurePlan, CompositionExecutionRequest, CompositionMode,
+    EffectiveSelectionHints, InlineClosurePlan, ModelHint, OutputFormat, PreparedComposition,
+    ResolvedCompositionSource, SelectedProvider, SelectionReason, SequenceExecutionOptions,
+    SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep, SequenceStepOverlay,
+    SequenceStepResult, SharedApprovalCache,
 };

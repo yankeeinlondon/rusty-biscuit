@@ -69,6 +69,14 @@ pub enum CompositionError {
     #[error("agent hint `{0}` does not match any known provider")]
     AgentHintInvalid(String),
 
+    /// The `agent` frontmatter property is not a valid type.
+    #[error("frontmatter `agent` must be a string or array of strings, got {0}")]
+    AgentHintWrongType(String),
+
+    /// The `model` frontmatter property is not a valid type.
+    #[error("frontmatter `model` must be a string or array of strings, got {0}")]
+    ModelHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {

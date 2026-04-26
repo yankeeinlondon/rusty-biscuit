@@ -65,6 +65,33 @@ pub struct SelectedProvider {
     pub reason: SelectionReason,
 }
 
+/// A typed hint for which agent(s) to use, parsed from frontmatter `agent`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentHint {
+    /// A single provider.
+    Single(Provider),
+    /// An ordered list of providers (author preference order).
+    List(Vec<Provider>),
+}
+
+/// A typed hint for which model(s) to use, parsed from frontmatter `model`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelHint {
+    /// A single model identifier.
+    Single(String),
+    /// An ordered list of model identifiers (author preference order).
+    List(Vec<String>),
+}
+
+/// Typed selection hints parsed from effective frontmatter.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EffectiveSelectionHints {
+    /// Parsed `agent` frontmatter property.
+    pub agent: Option<AgentHint>,
+    /// Parsed `model` frontmatter property.
+    pub model: Option<ModelHint>,
+}
+
 /// A composition prepared with effective (composed) frontmatter.
 ///
 /// This struct carries the full effective frontmatter after Darkmatter
@@ -86,8 +113,8 @@ pub struct PreparedComposition {
     pub prompt: String,
     /// Full frontmatter after Darkmatter composition.
     pub effective_frontmatter: serde_json::Value,
-    /// The `agent` value from effective frontmatter, if present.
-    pub effective_agent_hint: Option<serde_json::Value>,
+    /// Typed selection hints parsed from effective frontmatter.
+    pub selection_hints: EffectiveSelectionHints,
     /// Closure plan for post-execution file updates.
     pub closure: CompositionClosurePlan,
     /// Parsed lifecycle notification config from effective frontmatter.
