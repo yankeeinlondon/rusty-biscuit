@@ -312,6 +312,8 @@ impl RemoteRepoProvider for GitHubRemote {
                 draft: pr.draft.unwrap_or(false),
                 source_branch: Some(pr.head.ref_name),
                 target_branch: Some(pr.base.ref_name),
+                labels: Vec::new(),
+                body: pr.body,
                 created_at: pr.created_at,
                 updated_at: Some(pr.updated_at),
                 merged_at: pr.merged_at,

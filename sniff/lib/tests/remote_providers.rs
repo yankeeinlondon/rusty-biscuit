@@ -85,6 +85,8 @@ fn github_pull_requests_fixture() -> serde_json::Value {
             "draft": false,
             "head": {"ref": "feature-branch", "sha": "abc123"},
             "base": {"ref": "main", "sha": "def456"},
+            "labels": [{"name": "enhancement"}, {"name": "help wanted"}],
+            "body": "This PR adds a new feature.\n\n## Changes\n- Added feature X",
             "created_at": "2024-06-15T10:00:00Z",
             "updated_at": "2024-06-18T14:30:00Z",
             "merged_at": null,
@@ -265,6 +267,8 @@ mod github_tests {
         assert!(!prs[0].draft);
         assert_eq!(prs[0].source_branch, Some("feature-branch".to_string()));
         assert_eq!(prs[0].target_branch, Some("main".to_string()));
+        assert!(prs[0].labels.is_empty()); // GitHub PullRequestSummary doesn't expose labels in schematic schema
+        assert!(prs[0].body.as_ref().unwrap().contains("This PR adds"));
     }
 
     #[tokio::test]
@@ -485,6 +489,8 @@ mod gitlab_tests {
                 "work_in_progress": false,
                 "source_branch": "feature-x",
                 "target_branch": "main",
+                "labels": ["testing", "feature"],
+                "description": "Implements feature X as described in #123.",
                 "created_at": "2024-06-10T08:00:00Z",
                 "updated_at": "2024-06-15T12:00:00Z",
                 "merged_at": null,
@@ -615,6 +621,8 @@ mod gitlab_tests {
         assert_eq!(mrs[0].title, "Implement feature X");
         assert_eq!(mrs[0].state, "opened");
         assert_eq!(mrs[0].author, "developer1");
+        assert_eq!(mrs[0].labels, vec!["testing", "feature"]);
+        assert_eq!(mrs[0].body, Some("Implements feature X as described in #123.".to_string()));
     }
 
     #[tokio::test]
@@ -815,6 +823,8 @@ mod gitea_tests {
                 "draft": false,
                 "head": {"ref": "new-endpoint"},
                 "base": {"ref": "main"},
+                "labels": [],
+                "body": "Adds a new API endpoint.",
                 "created_at": "2024-06-10T09:00:00Z",
                 "updated_at": "2024-06-14T15:00:00Z",
                 "merged_at": null,
@@ -936,6 +946,8 @@ mod gitea_tests {
         assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 8);
         assert_eq!(prs[0].title, "Add new endpoint");
+        assert!(prs[0].labels.is_empty());
+        assert_eq!(prs[0].body, Some("Adds a new API endpoint.".to_string()));
     }
 
     #[tokio::test]
@@ -1290,6 +1302,8 @@ mod bitbucket_tests {
         assert_eq!(prs[0].number, 100);
         assert_eq!(prs[0].title, "Refactor auth module");
         assert_eq!(prs[0].state, "open");
+        assert!(prs[0].labels.is_empty());
+        assert!(prs[0].body.is_none());
     }
 
     #[tokio::test]

@@ -131,6 +131,58 @@ pub enum DocumentCategory {
     Other,
 }
 
+/// Normalized pull request state for filtering and display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PullRequestState {
+    /// Open pull requests.
+    Open,
+    /// Closed pull requests (not merged).
+    Closed,
+    /// Merged pull requests.
+    Merged,
+    /// Draft pull requests.
+    Draft,
+    /// All pull requests regardless of state.
+    All,
+}
+
+impl PullRequestState {
+    /// Returns the lowercase string representation used for CLI input and JSON.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::Merged => "merged",
+            Self::Draft => "draft",
+            Self::All => "all",
+        }
+    }
+}
+
+impl std::fmt::Display for PullRequestState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for PullRequestState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "open" => Ok(Self::Open),
+            "closed" => Ok(Self::Closed),
+            "merged" => Ok(Self::Merged),
+            "draft" => Ok(Self::Draft),
+            "all" => Ok(Self::All),
+            _ => Err(format!(
+                "invalid PR state '{}'. Expected one of: open, closed, merged, draft, all",
+                s
+            )),
+        }
+    }
+}
+
 /// Normalized pull/merge request information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullRequestInfo {
@@ -148,6 +200,10 @@ pub struct PullRequestInfo {
     pub source_branch: Option<String>,
     /// Target branch name.
     pub target_branch: Option<String>,
+    /// Labels attached to the PR.
+    pub labels: Vec<String>,
+    /// PR description/body (if available).
+    pub body: Option<String>,
     /// Creation timestamp.
     pub created_at: String,
     /// Last update timestamp.

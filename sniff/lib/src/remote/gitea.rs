@@ -407,6 +407,8 @@ impl RemoteRepoProvider for GiteaRemote {
                     draft: pr.draft.unwrap_or(false),
                     source_branch: pr.head.and_then(|h| h.ref_name),
                     target_branch: pr.base.and_then(|b| b.ref_name),
+                    labels: Vec::new(),
+                    body: pr.body,
                     created_at,
                     updated_at: pr.updated_at,
                     merged_at: pr.merged_at,

@@ -453,6 +453,8 @@ impl RemoteRepoProvider for BitbucketRemote {
                         .destination
                         .as_ref()
                         .and_then(|d| d.branch_name().map(String::from)),
+                    labels: Vec::new(), // Bitbucket uses priority/kind instead of labels
+                    body: None,         // Not available in Bitbucket PR list API
                     created_at: pr.created_on.unwrap_or_default(),
                     updated_at,
                     merged_at,

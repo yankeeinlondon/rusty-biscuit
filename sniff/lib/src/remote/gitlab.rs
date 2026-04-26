@@ -363,6 +363,8 @@ impl RemoteRepoProvider for GitLabRemote {
                 draft: mr.draft || mr.work_in_progress,
                 source_branch: Some(mr.source_branch),
                 target_branch: Some(mr.target_branch),
+                labels: mr.labels,
+                body: mr.description,
                 created_at: mr.created_at,
                 updated_at: Some(mr.updated_at),
                 merged_at: mr.merged_at,
