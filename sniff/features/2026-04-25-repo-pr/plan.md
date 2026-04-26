@@ -39,6 +39,11 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5:
+  - sniff/cli/src/output/remote.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - sniff
   - sniff-cli
