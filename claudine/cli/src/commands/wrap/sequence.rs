@@ -290,6 +290,7 @@ pub(crate) fn execute_sequence(
             mode: CompositionMode::ChainedDocument,
             file_ref: source.original_ref.clone(),
             prepared,
+            resolved_target: None,
             explicit_provider: shared.explicit_provider(),
             excluded: shared.excluded(),
             sequence: true,
