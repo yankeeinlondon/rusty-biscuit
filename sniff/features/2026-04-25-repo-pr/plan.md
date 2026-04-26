@@ -12,9 +12,22 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - sniff/lib/src/remote/provider.rs
+  - sniff/lib/src/remote/mod.rs
+  - sniff/lib/src/remote/github.rs
+  - sniff/lib/src/remote/gitlab.rs
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/bitbucket.rs
+  - sniff/lib/tests/remote_providers.rs
+  - schematic/define/src/headers.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - sniff
   - sniff-cli
+  - schematic-define
 ---
 
 # Execution Plan: `sniff repo pr`
