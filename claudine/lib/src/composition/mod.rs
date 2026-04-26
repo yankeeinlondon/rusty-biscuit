@@ -18,7 +18,7 @@ pub mod sequence;
 mod types;
 
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
-pub use error::CompositionError;
+pub use error::{CompositionError, SequenceSelectionFailure};
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,
@@ -32,8 +32,11 @@ pub use select::{build_candidate_set, select_provider};
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
     AgentHint, CompositionClosurePlan, CompositionExecutionRequest, CompositionMode,
-    EffectiveSelectionHints, InlineClosurePlan, ModelHint, OutputFormat, PreparedComposition,
-    ResolvedCompositionSource, SelectedProvider, SelectionReason, SequenceExecutionOptions,
-    SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep, SequenceStepOverlay,
-    SequenceStepResult, SharedApprovalCache,
+    EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot, ModelHint,
+    ModelResolutionReason, OutputFormat, PickerInfluence, PreparedComposition,
+    ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
+    ResolvedCompositionSource, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
+    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource,
+    SequenceStep, SequenceStepDraft, SequenceStepOverlay, SequenceStepResult,
+    SharedApprovalCache,
 };

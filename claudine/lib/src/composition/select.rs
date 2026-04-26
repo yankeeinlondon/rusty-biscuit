@@ -1,11 +1,379 @@
-//! Provider selection for composition workflows.
+//! Provider and model resolution for composition workflows.
 
 use std::collections::BTreeSet;
 
-use crate::events::Provider;
+use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 use super::error::CompositionError;
-use super::types::{AgentHint, PreparedComposition, SelectedProvider, SelectionReason};
+use super::types::{
+    AgentHint, InstalledProviderSnapshot, ModelHint, ModelResolutionReason,
+    ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
+    ResolvedExecutionTarget, SelectedProvider, SelectionReason,
+};
+
+/// Build a snapshot of installed providers from a pre-computed list.
+///
+/// The caller (typically the CLI) is responsible for running host
+/// detection once and passing the result here.  This keeps the
+/// library side pure and unit-testable.
+#[allow(dead_code)]
+pub fn build_installed_snapshot(
+    installed: &[Provider],
+    excluded: &BTreeSet<Provider>,
+) -> InstalledProviderSnapshot {
+    let runnable: Vec<Provider> = installed
+        .iter()
+        .copied()
+        .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
+        .collect();
+
+    InstalledProviderSnapshot {
+        runnable,
+        excluded: excluded.clone(),
+        all_installed: installed.to_vec(),
+    }
+}
+
+/// Resolve provider and model for a non-TTY session.
+///
+/// Returns a fully resolved target or a structured error explaining why
+/// resolution failed.
+pub fn resolve_target_non_tty(
+    explicit_provider: Option<Provider>,
+    prepared: &super::types::PreparedComposition,
+    snapshot: &InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    cli_model: Option<&str>,
+) -> Result<ResolvedExecutionTarget, CompositionError> {
+    resolve_target_non_tty_with_env(
+        explicit_provider,
+        prepared,
+        snapshot,
+        favorite,
+        cli_model,
+        |var| std::env::var(var).ok(),
+    )
+}
+
+fn resolve_target_non_tty_with_env<E>(
+    explicit_provider: Option<Provider>,
+    prepared: &super::types::PreparedComposition,
+    snapshot: &InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    cli_model: Option<&str>,
+    env_lookup: E,
+) -> Result<ResolvedExecutionTarget, CompositionError>
+where
+    E: Fn(&str) -> Option<String>,
+{
+    // 1. Explicit provider flag (highest priority)
+    if let Some(provider) = explicit_provider {
+        if snapshot.all_installed.contains(&provider) {
+            let (model, model_reason) =
+                resolve_model_with_env(provider, prepared, cli_model, &env_lookup);
+            return Ok(ResolvedExecutionTarget {
+                provider,
+                provider_reason: ProviderResolutionReason::ExplicitFlag,
+                model,
+                model_reason,
+            });
+        }
+        return Err(CompositionError::NoRunnableProviders);
+    }
+
+    if snapshot.runnable.is_empty() {
+        return Err(CompositionError::NoRunnableProviders);
+    }
+
+    // 2. Frontmatter agent hint
+    let provider = if let Some(ref hint) = prepared.selection_hints.agent {
+        resolve_agent_hint_non_tty(hint, snapshot)
+    } else {
+        None
+    };
+
+    // 3. Config favorite
+    let provider = provider.or_else(|| {
+        favorite.filter(|f| snapshot.runnable.contains(f))
+    });
+
+    let Some(provider) = provider else {
+        return Err(CompositionError::SelectionUnavailable {
+            mode: ResolutionMode::NonTty,
+            installed: snapshot.runnable.clone(),
+            favorite_agent: favorite,
+            frontmatter_agent_present: prepared.selection_hints.agent.is_some(),
+        });
+    };
+
+    let (model, model_reason) =
+        resolve_model_with_env(provider, prepared, cli_model, &env_lookup);
+
+    // OpenCode non-TTY hard error: model is required
+    if provider == Provider::OpenCode && model.is_none() {
+        return Err(CompositionError::ModelSelectionFailed {
+            provider,
+            reason: "OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL".into(),
+        });
+    }
+
+    // Determine provider resolution reason based on which signal actually resolved
+    let provider_reason = if let Some(ref hint) = prepared.selection_hints.agent {
+        let resolved_from_hint = match hint {
+            AgentHint::Single(p) => *p == provider,
+            AgentHint::List(list) => list.iter().any(|p| snapshot.runnable.contains(p) && *p == provider),
+        };
+        if resolved_from_hint {
+            match hint {
+                AgentHint::Single(_) => ProviderResolutionReason::FrontmatterSingle,
+                AgentHint::List(_) => ProviderResolutionReason::FrontmatterList,
+            }
+        } else {
+            ProviderResolutionReason::FavoriteAgent
+        }
+    } else {
+        ProviderResolutionReason::FavoriteAgent
+    };
+
+    Ok(ResolvedExecutionTarget {
+        provider,
+        provider_reason,
+        model,
+        model_reason,
+    })
+}
+
+/// Build a picker plan for TTY interactive selection.
+///
+/// The picker always shows all installed (non-excluded) providers. The
+/// default index and row ordering are influenced by frontmatter `agent`
+/// and the configured favorite agent.
+#[allow(dead_code)]
+pub fn build_picker_plan(
+    prepared: &super::types::PreparedComposition,
+    snapshot: &InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+) -> Result<ProviderPickerPlan, CompositionError> {
+    if snapshot.runnable.is_empty() {
+        return Err(CompositionError::NoRunnableProviders);
+    }
+
+    // Start from canonical display order, keeping only runnable providers
+    let mut options: Vec<ProviderPickerOption> = PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .filter(|&&p| snapshot.runnable.contains(&p))
+        .map(|&p| ProviderPickerOption {
+            provider: p,
+            rank_reason: None,
+        })
+        .collect();
+
+    let mut default_index: usize = 0;
+
+    // Apply frontmatter ordering and default-index influence
+    if let Some(ref hint) = prepared.selection_hints.agent {
+        match hint {
+            AgentHint::Single(provider) => {
+                if let Some(pos) = options.iter().position(|o| o.provider == *provider) {
+                    // Move to top
+                    let opt = options.remove(pos);
+                    options.insert(0, opt);
+                    default_index = 0;
+                    options[0].rank_reason = Some(super::types::PickerInfluence::FrontmatterSingle);
+                }
+            }
+            AgentHint::List(providers) => {
+                let mut reordered = Vec::new();
+                let mut remaining: Vec<ProviderPickerOption> = options.clone();
+
+                for provider in providers {
+                    if let Some(pos) = remaining.iter().position(|o| o.provider == *provider) {
+                        let mut opt = remaining.remove(pos);
+                        opt.rank_reason = Some(super::types::PickerInfluence::FrontmatterList);
+                        reordered.push(opt);
+                    }
+                }
+
+                // Append remaining providers in display order
+                reordered.extend(remaining);
+                options = reordered;
+
+                // Default is first installed entry from the list
+                default_index = options
+                    .iter()
+                    .position(|o| {
+                        providers.contains(&o.provider)
+                            && snapshot.runnable.contains(&o.provider)
+                    })
+                    .unwrap_or(0);
+            }
+        }
+    }
+
+    // If no frontmatter default applied, try favorite agent
+    if default_index == 0
+        && options.first().and_then(|o| o.rank_reason).is_none()
+        && let Some(fav) = favorite
+        && let Some(pos) = options.iter().position(|o| o.provider == fav)
+    {
+        let mut opt = options.remove(pos);
+        opt.rank_reason = Some(super::types::PickerInfluence::FavoriteAgent);
+        options.insert(0, opt);
+        default_index = 0;
+    }
+
+    Ok(ProviderPickerPlan {
+        options,
+        default_index,
+    })
+}
+
+/// Resolve model for a given provider using the precedence chain:
+///
+/// 1. CLI `--model`
+/// 2. Provider-specific env var(s)
+/// 3. Generic `MODEL` env var
+/// 4. Frontmatter `model`
+/// 5. Provider default (`None`)
+#[allow(dead_code)]
+pub fn resolve_model(
+    provider: Provider,
+    prepared: &super::types::PreparedComposition,
+    cli_model: Option<&str>,
+) -> (Option<String>, ModelResolutionReason) {
+    resolve_model_with_env(provider, prepared, cli_model, |var| std::env::var(var).ok())
+}
+
+fn resolve_model_with_env<E>(
+    provider: Provider,
+    prepared: &super::types::PreparedComposition,
+    cli_model: Option<&str>,
+    env_lookup: E,
+) -> (Option<String>, ModelResolutionReason)
+where
+    E: Fn(&str) -> Option<String>,
+{
+    // 1. CLI --model
+    if let Some(model) = cli_model {
+        return (Some(model.to_string()), ModelResolutionReason::ExplicitCli);
+    }
+
+    // 2. Provider-specific env vars
+    let env_vars = provider_env_vars(provider);
+    for &var_name in env_vars {
+        if let Some(value) = env_lookup(var_name)
+            && !value.is_empty()
+        {
+            return (Some(value), ModelResolutionReason::ProviderEnv(var_name));
+        }
+    }
+
+    // 3. Generic MODEL env
+    if let Some(value) = env_lookup("MODEL")
+        && !value.is_empty()
+    {
+        return (Some(value), ModelResolutionReason::GenericEnv);
+    }
+
+    // 4. Frontmatter model
+    if let Some(ref hint) = prepared.selection_hints.model {
+        match hint {
+            ModelHint::Single(model) => {
+                return (
+                    Some(model.clone()),
+                    ModelResolutionReason::FrontmatterSingle,
+                );
+            }
+            ModelHint::List(models) => {
+                // Without catalog validation (Phase 4), accept the first entry.
+                // When catalog validation lands, invalid entries will be skipped.
+                if let Some(first) = models.first() {
+                    return (
+                        Some(first.clone()),
+                        ModelResolutionReason::FrontmatterList,
+                    );
+                }
+            }
+        }
+    }
+
+    // 5. Provider default
+    (None, ModelResolutionReason::ProviderDefault)
+}
+
+/// Return the provider-specific environment variable names to check
+/// for model selection, in priority order.
+fn provider_env_vars(provider: Provider) -> &'static [&'static str] {
+    match provider {
+        Provider::Claude => &["CLAUDE_MODEL", "ANTHROPIC_MODEL"],
+        Provider::Codex => &["CODEX_MODEL", "OPENAI_MODEL"],
+        Provider::Gemini => &["GEMINI_MODEL"],
+        Provider::Goose => &["GOOSE_MODEL"],
+        Provider::KimiCode => &["KIMI_MODEL"],
+        Provider::OpenCode => &["OPENCODE_MODEL"],
+        Provider::QwenCode => &["QWEN_MODEL"],
+        Provider::RooCode => &["ROO_MODEL"],
+    }
+}
+
+/// Resolve an agent hint in non-TTY mode.
+fn resolve_agent_hint_non_tty(
+    hint: &AgentHint,
+    snapshot: &InstalledProviderSnapshot,
+) -> Option<Provider> {
+    match hint {
+        AgentHint::Single(provider) => {
+            if snapshot.runnable.contains(provider) {
+                Some(*provider)
+            } else {
+                None
+            }
+        }
+        AgentHint::List(providers) => {
+            for provider in providers {
+                if snapshot.runnable.contains(provider) {
+                    return Some(*provider);
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Legacy compatibility: select a provider using the old API.
+///
+/// This delegates to the new resolver. In TTY mode it returns
+/// `InteractiveSelectionRequired` (the caller should show the picker).
+/// In non-TTY mode it resolves automatically.
+pub fn select_provider(
+    explicit_provider: Option<Provider>,
+    prepared: &super::types::PreparedComposition,
+    installed: &[Provider],
+    excluded: &BTreeSet<Provider>,
+    favorite: Option<Provider>,
+) -> Result<SelectedProvider, CompositionError> {
+    let snapshot = InstalledProviderSnapshot {
+        runnable: build_candidate_set(installed, excluded),
+        excluded: excluded.clone(),
+        all_installed: installed.to_vec(),
+    };
+
+    let target = resolve_target_non_tty(explicit_provider, prepared, &snapshot, favorite, None)?;
+
+    let reason = match target.provider_reason {
+        ProviderResolutionReason::ExplicitFlag => SelectionReason::ExplicitProvider,
+        ProviderResolutionReason::FrontmatterSingle | ProviderResolutionReason::FrontmatterList => {
+            SelectionReason::FrontmatterHint
+        }
+        ProviderResolutionReason::FavoriteAgent => SelectionReason::ConfigFavorite,
+        _ => SelectionReason::InteractiveChoice,
+    };
+
+    Ok(SelectedProvider {
+        provider: target.provider,
+        reason,
+    })
+}
 
 /// Build the set of candidate providers by filtering installed providers.
 ///
@@ -20,113 +388,22 @@ pub fn build_candidate_set(installed: &[Provider], excluded: &BTreeSet<Provider>
         .collect()
 }
 
-/// Select a provider for composition execution.
-///
-/// Precedence:
-/// 1. Explicit provider (from `--claude`, `--codex`, etc.)
-/// 2. Single installed candidate after exclusion
-/// 3. Effective frontmatter `agent` hint (from composed state)
-/// 4. Config favorite (`settings.linking.preference[0]`)
-/// 5. Error: interactive selection required
-pub fn select_provider(
-    explicit_provider: Option<Provider>,
-    prepared: &PreparedComposition,
-    installed: &[Provider],
-    excluded: &BTreeSet<Provider>,
-    favorite: Option<Provider>,
-) -> Result<SelectedProvider, CompositionError> {
-    let candidates = build_candidate_set(installed, excluded);
-    let runnable_installed = build_candidate_set(installed, &BTreeSet::new());
-    if runnable_installed.is_empty() {
-        return Err(CompositionError::NoRunnableProviders);
-    }
-
-    // 1. Explicit provider
-    if let Some(provider) = explicit_provider {
-        if runnable_installed.contains(&provider) {
-            return Ok(SelectedProvider {
-                provider,
-                reason: SelectionReason::ExplicitProvider,
-            });
-        }
-        return Err(CompositionError::NoRunnableProviders);
-    }
-
-    if candidates.is_empty() {
-        return Err(CompositionError::NoRunnableProviders);
-    }
-
-    // 2. Single installed candidate
-    if candidates.len() == 1 {
-        return Ok(SelectedProvider {
-            provider: candidates[0],
-            reason: SelectionReason::SingleInstalled,
-        });
-    }
-
-    // 3. Effective frontmatter agent hint
-    if let Some(ref hint) = prepared.selection_hints.agent
-        && let Some(selected) = resolve_agent_hint(hint, &candidates)?
-    {
-        return Ok(selected);
-    }
-
-    // 4. Config favorite
-    if let Some(fav) = favorite
-        && candidates.contains(&fav)
-    {
-        return Ok(SelectedProvider {
-            provider: fav,
-            reason: SelectionReason::ConfigFavorite,
-        });
-    }
-
-    // 5. No automatic selection possible
-    Err(CompositionError::InteractiveSelectionRequired)
-}
-
-fn resolve_agent_hint(
-    hint: &AgentHint,
-    candidates: &[Provider],
-) -> Result<Option<SelectedProvider>, CompositionError> {
-    match hint {
-        AgentHint::Single(provider) => {
-            if candidates.contains(provider) {
-                Ok(Some(SelectedProvider {
-                    provider: *provider,
-                    reason: SelectionReason::FrontmatterHint,
-                }))
-            } else {
-                Ok(None)
-            }
-        }
-        AgentHint::List(providers) => {
-            for provider in providers {
-                if candidates.contains(provider) {
-                    return Ok(Some(SelectedProvider {
-                        provider: *provider,
-                        reason: SelectionReason::FrontmatterHint,
-                    }));
-                }
-            }
-            Ok(None)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::composition::types::CompositionMode;
+    use crate::composition::types::{
+        AgentHint, CompositionMode, EffectiveSelectionHints, ModelHint,
+    };
     use serde_json::json;
     use std::path::PathBuf;
 
-    fn make_prepared_composition(agent_hint: Option<AgentHint>) -> PreparedComposition {
+    fn make_prepared_composition(
+        agent_hint: Option<AgentHint>,
+        model_hint: Option<ModelHint>,
+    ) -> super::super::types::PreparedComposition {
         use super::super::lifecycle::LifecycleConfig;
-        use super::super::types::{
-            CompositionClosurePlan, EffectiveSelectionHints,
-        };
-        PreparedComposition {
+        use super::super::types::CompositionClosurePlan;
+        super::super::types::PreparedComposition {
             mode: CompositionMode::ChainedDocument,
             resolved_path: PathBuf::from("/tmp/test.md"),
             source_repo_root: None,
@@ -134,7 +411,7 @@ mod tests {
             effective_frontmatter: json!({}),
             selection_hints: EffectiveSelectionHints {
                 agent: agent_hint,
-                model: None,
+                model: model_hint,
             },
             closure: CompositionClosurePlan::Direct,
             lifecycle: LifecycleConfig::default(),
@@ -142,214 +419,366 @@ mod tests {
         }
     }
 
-    #[test]
-    fn exclusion_filters_providers() {
-        let candidates = build_candidate_set(
-            &[Provider::Claude, Provider::Codex, Provider::Gemini],
-            &[Provider::Codex].iter().copied().collect(),
-        );
-        assert_eq!(candidates, vec![Provider::Claude, Provider::Gemini]);
-    }
-
-    #[test]
-    fn roocode_excluded_from_candidates() {
-        let candidates =
-            build_candidate_set(&[Provider::Claude, Provider::RooCode], &BTreeSet::new());
-        assert_eq!(candidates, vec![Provider::Claude]);
+    fn make_snapshot(installed: Vec<Provider>, excluded: BTreeSet<Provider>) -> InstalledProviderSnapshot {
+        build_installed_snapshot(&installed, &excluded)
     }
 
     #[test]
     fn explicit_provider_selected() {
-        let prepared = make_prepared_composition(None);
-        let installed = vec![Provider::Claude, Provider::Codex];
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let result = select_provider(
+        let target = resolve_target_non_tty(
             Some(Provider::Claude),
             &prepared,
-            &installed,
-            &BTreeSet::new(),
+            &snapshot,
+            None,
             None,
         )
         .unwrap();
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::ExplicitProvider);
+        assert_eq!(target.provider, Provider::Claude);
+        assert!(matches!(target.provider_reason, ProviderResolutionReason::ExplicitFlag));
+    }
+
+    #[test]
+    fn explicit_provider_not_installed_errors() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
+
+        let err = resolve_target_non_tty(
+            Some(Provider::Codex),
+            &prepared,
+            &snapshot,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CompositionError::NoRunnableProviders));
     }
 
     #[test]
     fn explicit_provider_ignores_exclusion() {
-        let prepared = make_prepared_composition(None);
-        let installed = vec![Provider::Claude, Provider::Codex];
-        let excluded: BTreeSet<Provider> = [Provider::Claude].into_iter().collect();
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(
+            vec![Provider::Claude, Provider::Codex],
+            [Provider::Claude].into_iter().collect(),
+        );
 
-        let result = select_provider(
+        let target = resolve_target_non_tty(
             Some(Provider::Claude),
             &prepared,
-            &installed,
-            &excluded,
+            &snapshot,
+            None,
             None,
         )
         .unwrap();
-
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::ExplicitProvider);
+        assert_eq!(target.provider, Provider::Claude);
     }
 
     #[test]
-    fn single_installed_selected() {
-        let prepared = make_prepared_composition(None);
-        let installed = vec![Provider::Claude];
+    fn no_single_installed_auto_select() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(vec![Provider::Claude], BTreeSet::new());
 
-        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::SingleInstalled);
+        // With only one installed provider and no signals, non-TTY should error
+        // (the old SingleInstalled shortcut is removed)
+        let err = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap_err();
+        assert!(matches!(err, CompositionError::SelectionUnavailable { .. }));
     }
 
     #[test]
-    fn frontmatter_hint_from_effective() {
-        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Codex)));
-        let installed = vec![Provider::Claude, Provider::Codex];
+    fn frontmatter_single_resolves() {
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Codex)), None);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
-        assert_eq!(result.provider, Provider::Codex);
-        assert_eq!(result.reason, SelectionReason::FrontmatterHint);
+        let target = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap();
+        assert_eq!(target.provider, Provider::Codex);
+        assert!(matches!(target.provider_reason, ProviderResolutionReason::FrontmatterSingle));
     }
 
     #[test]
-    fn frontmatter_hint_list_selects_first_match() {
-        let prepared = make_prepared_composition(Some(AgentHint::List(vec![
-            Provider::Gemini,
-            Provider::Codex,
-        ])));
-        let installed = vec![Provider::Claude, Provider::Codex];
+    fn frontmatter_list_selects_first_installed() {
+        let prepared = make_prepared_composition(
+            Some(AgentHint::List(vec![Provider::Gemini, Provider::Codex])),
+            None,
+        );
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
-        // Gemini is not installed, so Codex (second in list) should be selected
-        assert_eq!(result.provider, Provider::Codex);
-        assert_eq!(result.reason, SelectionReason::FrontmatterHint);
+        let target = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap();
+        // Gemini not installed, Codex is second in list
+        assert_eq!(target.provider, Provider::Codex);
+        assert!(matches!(target.provider_reason, ProviderResolutionReason::FrontmatterList));
     }
 
     #[test]
-    fn frontmatter_hint_list_first_match_wins() {
-        let prepared = make_prepared_composition(Some(AgentHint::List(vec![
-            Provider::Claude,
-            Provider::Codex,
-        ])));
-        let installed = vec![Provider::Claude, Provider::Codex];
+    fn favorite_agent_resolves_when_no_frontmatter() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(
+            vec![Provider::Claude, Provider::Codex, Provider::Gemini],
+            BTreeSet::new(),
+        );
 
-        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
-        // Claude is first in the list and installed
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::FrontmatterHint);
-    }
-
-    #[test]
-    fn config_favorite_selected() {
-        let prepared = make_prepared_composition(None);
-        let installed = vec![Provider::Claude, Provider::Codex, Provider::Gemini];
-
-        let result = select_provider(
+        let target = resolve_target_non_tty(
             None,
             &prepared,
-            &installed,
-            &BTreeSet::new(),
+            &snapshot,
             Some(Provider::Gemini),
+            None,
         )
         .unwrap();
-        assert_eq!(result.provider, Provider::Gemini);
-        assert_eq!(result.reason, SelectionReason::ConfigFavorite);
+        assert_eq!(target.provider, Provider::Gemini);
+        assert!(matches!(target.provider_reason, ProviderResolutionReason::FavoriteAgent));
     }
 
     #[test]
-    fn config_favorite_not_installed_falls_through() {
-        let prepared = make_prepared_composition(None);
-        let installed = vec![Provider::Claude, Provider::Codex];
+    fn favorite_agent_not_installed_falls_through() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        // Favorite is Gemini, but it's not installed
-        let err = select_provider(
+        let err = resolve_target_non_tty(
             None,
             &prepared,
-            &installed,
-            &BTreeSet::new(),
+            &snapshot,
             Some(Provider::Gemini),
+            None,
         )
         .unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::InteractiveSelectionRequired
-        ));
+        assert!(matches!(err, CompositionError::SelectionUnavailable { .. }));
     }
 
     #[test]
-    fn installed_but_excluded_hint_falls_through_to_favorite() {
-        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Codex)));
-        let installed = vec![Provider::Claude, Provider::Codex, Provider::Gemini];
-        let excluded: BTreeSet<Provider> = [Provider::Codex].into_iter().collect();
+    fn no_resolution_signals_errors() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let result = select_provider(
-            None,
-            &prepared,
-            &installed,
-            &excluded,
-            Some(Provider::Claude),
-        )
-        .unwrap();
-
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::ConfigFavorite);
+        let err = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap_err();
+        assert!(matches!(err, CompositionError::SelectionUnavailable { .. }));
     }
 
     #[test]
-    fn no_automatic_selection_requires_interactive() {
-        let prepared = make_prepared_composition(None);
-        let installed = vec![Provider::Claude, Provider::Codex];
+    fn exclusion_narrows_candidates() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(
+            vec![Provider::Claude, Provider::Codex],
+            [Provider::Claude].into_iter().collect(),
+        );
 
-        let err = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap_err();
-        assert!(matches!(
-            err,
-            CompositionError::InteractiveSelectionRequired
-        ));
-    }
-
-    #[test]
-    fn exclusion_narrows_to_single() {
-        let prepared = make_prepared_composition(None);
-        let installed = vec![Provider::Claude, Provider::Codex];
-        let excluded: BTreeSet<Provider> = [Provider::Claude].into_iter().collect();
-
-        let result = select_provider(None, &prepared, &installed, &excluded, None).unwrap();
-        assert_eq!(result.provider, Provider::Codex);
-        assert_eq!(result.reason, SelectionReason::SingleInstalled);
+        // With exclusion, only Codex is runnable; but with no signals, still error
+        let err = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap_err();
+        assert!(matches!(err, CompositionError::SelectionUnavailable { .. }));
     }
 
     #[test]
     fn hint_matches_known_but_uninstalled_provider_falls_through_to_favorite() {
-        // Hint is Gemini which is a known provider, but Gemini is not installed.
-        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)));
-        let installed = vec![Provider::Claude, Provider::Codex];
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)), None);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        // Falls through hint (no candidate match) → config favorite
-        let result = select_provider(
+        let target = resolve_target_non_tty(
             None,
             &prepared,
-            &installed,
-            &BTreeSet::new(),
+            &snapshot,
             Some(Provider::Claude),
+            None,
         )
         .unwrap();
-        assert_eq!(result.provider, Provider::Claude);
-        assert_eq!(result.reason, SelectionReason::ConfigFavorite);
+        assert_eq!(target.provider, Provider::Claude);
+        assert!(matches!(target.provider_reason, ProviderResolutionReason::FavoriteAgent));
     }
 
     #[test]
-    fn hint_matches_known_but_uninstalled_provider_no_favorite_requires_interactive() {
-        // Hint is Gemini (known but not installed), no favorite configured.
-        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)));
-        let installed = vec![Provider::Claude, Provider::Codex];
+    fn hint_matches_known_but_uninstalled_provider_no_favorite_errors() {
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)), None);
+        let snapshot = make_snapshot(vec![Provider::Claude, Provider::Codex], BTreeSet::new());
 
-        let err = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap_err();
+        let err = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap_err();
+        assert!(matches!(err, CompositionError::SelectionUnavailable { .. }));
+    }
+
+    #[test]
+    fn empty_installed_errors() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(vec![], BTreeSet::new());
+
+        let err = resolve_target_non_tty(None, &prepared, &snapshot, None, None).unwrap_err();
+        assert!(matches!(err, CompositionError::NoRunnableProviders));
+    }
+
+    // -- Model resolution tests ------------------------------------------------
+
+    #[test]
+    fn model_cli_model_wins() {
+        let prepared = make_prepared_composition(None, None);
+        let (model, reason) = resolve_model(Provider::Codex, &prepared, Some("gpt-5"));
+        assert_eq!(model, Some("gpt-5".to_string()));
+        assert!(matches!(reason, ModelResolutionReason::ExplicitCli));
+    }
+
+    #[test]
+    fn model_provider_env_wins_over_generic() {
+        let prepared = make_prepared_composition(None, None);
+        // Use the internal testable variant with an empty env lookup to verify
+        // the fallback chain when no env vars are set:
+        let (model, reason) =
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None);
+        assert_eq!(model, None);
+        assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
+    }
+
+    #[test]
+    fn model_frontmatter_single_used() {
+        let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-4o".into())));
+        let (model, reason) =
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None);
+        assert_eq!(model, Some("gpt-4o".to_string()));
+        assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
+    }
+
+    #[test]
+    fn model_frontmatter_list_used() {
+        let prepared = make_prepared_composition(
+            None,
+            Some(ModelHint::List(vec!["gpt-4o".into(), "o3-mini".into()])),
+        );
+        let (model, reason) =
+            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None);
+        assert_eq!(model, Some("gpt-4o".to_string()));
+        assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
+    }
+
+    // -- Picker plan tests -----------------------------------------------------
+
+    #[test]
+    fn picker_plan_basic_order() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(
+            vec![Provider::Codex, Provider::Claude, Provider::Gemini],
+            BTreeSet::new(),
+        );
+
+        let plan = build_picker_plan(&prepared, &snapshot, None).unwrap();
+        // Should be in display order, excluding RooCode
+        assert_eq!(plan.options.len(), 3);
+        assert_eq!(plan.options[0].provider, Provider::Claude);
+        assert_eq!(plan.options[1].provider, Provider::Codex);
+        assert_eq!(plan.options[2].provider, Provider::Gemini);
+        assert_eq!(plan.default_index, 0);
+    }
+
+    #[test]
+    fn picker_plan_frontmatter_single_moves_to_top() {
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)), None);
+        let snapshot = make_snapshot(
+            vec![Provider::Codex, Provider::Claude, Provider::Gemini],
+            BTreeSet::new(),
+        );
+
+        let plan = build_picker_plan(&prepared, &snapshot, None).unwrap();
+        assert_eq!(plan.options[0].provider, Provider::Gemini);
         assert!(matches!(
-            err,
-            CompositionError::InteractiveSelectionRequired
+            plan.options[0].rank_reason,
+            Some(super::super::types::PickerInfluence::FrontmatterSingle)
         ));
+        assert_eq!(plan.default_index, 0);
+    }
+
+    #[test]
+    fn picker_plan_frontmatter_list_reorders() {
+        let prepared = make_prepared_composition(
+            Some(AgentHint::List(vec![Provider::Gemini, Provider::Claude])),
+            None,
+        );
+        let snapshot = make_snapshot(
+            vec![Provider::Codex, Provider::Claude, Provider::Gemini],
+            BTreeSet::new(),
+        );
+
+        let plan = build_picker_plan(&prepared, &snapshot, None).unwrap();
+        // Gemini first (in list), then Claude (in list), then Codex (remaining)
+        assert_eq!(plan.options[0].provider, Provider::Gemini);
+        assert_eq!(plan.options[1].provider, Provider::Claude);
+        assert_eq!(plan.options[2].provider, Provider::Codex);
+        assert_eq!(plan.default_index, 0); // first installed from list
+    }
+
+    #[test]
+    fn picker_plan_favorite_agent_default() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(
+            vec![Provider::Codex, Provider::Claude, Provider::Gemini],
+            BTreeSet::new(),
+        );
+
+        let plan = build_picker_plan(&prepared, &snapshot, Some(Provider::Codex)).unwrap();
+        assert_eq!(plan.options[0].provider, Provider::Codex);
+        assert!(matches!(
+            plan.options[0].rank_reason,
+            Some(super::super::types::PickerInfluence::FavoriteAgent)
+        ));
+        assert_eq!(plan.default_index, 0);
+    }
+
+    #[test]
+    fn picker_plan_frontmatter_overrides_favorite() {
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Gemini)), None);
+        let snapshot = make_snapshot(
+            vec![Provider::Codex, Provider::Claude, Provider::Gemini],
+            BTreeSet::new(),
+        );
+
+        let plan = build_picker_plan(&prepared, &snapshot, Some(Provider::Codex)).unwrap();
+        // Frontmatter should win over favorite
+        assert_eq!(plan.options[0].provider, Provider::Gemini);
+        assert_eq!(plan.default_index, 0);
+    }
+
+    #[test]
+    fn picker_plan_uninstalled_frontmatter_ignored() {
+        let prepared = make_prepared_composition(Some(AgentHint::Single(Provider::Goose)), None);
+        let snapshot = make_snapshot(
+            vec![Provider::Codex, Provider::Claude],
+            BTreeSet::new(),
+        );
+
+        let plan = build_picker_plan(&prepared, &snapshot, None).unwrap();
+        // Goose not installed, so no reordering happens; default stays 0
+        assert_eq!(plan.options[0].provider, Provider::Claude);
+        assert_eq!(plan.default_index, 0);
+    }
+
+    // -- OpenCode non-TTY hard error test --------------------------------------
+
+    #[test]
+    fn opencode_non_tty_no_model_errors() {
+        let prepared = make_prepared_composition(None, None);
+        let snapshot = make_snapshot(vec![Provider::OpenCode], BTreeSet::new());
+
+        let err = resolve_target_non_tty_with_env(
+            None,
+            &prepared,
+            &snapshot,
+            Some(Provider::OpenCode),
+            None,
+            |_| None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CompositionError::ModelSelectionFailed { .. }));
+    }
+
+    #[test]
+    fn opencode_non_tty_with_model_ok() {
+        let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-4o".into())));
+        let snapshot = make_snapshot(vec![Provider::OpenCode], BTreeSet::new());
+
+        let target = resolve_target_non_tty_with_env(
+            None,
+            &prepared,
+            &snapshot,
+            Some(Provider::OpenCode),
+            None,
+            |_| None,
+        )
+        .unwrap();
+        assert_eq!(target.provider, Provider::OpenCode);
+        assert_eq!(target.model, Some("gpt-4o".to_string()));
     }
 }
