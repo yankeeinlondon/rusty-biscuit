@@ -268,6 +268,10 @@ The Darkmatter library also exposes some useful utilities for callers to be awar
     - A `Renderable` terminal component that visualizes a Markdown file's dependency surface
     - Shows references above the file line and transclusions below, with optional recursive expansion and validation overlays
     - Used by the `md graph` CLI command
+- **YamlBlock:**
+    - A validated, renderable YAML payload that produces syntax-highlighted `yaml` code blocks in both terminal and browser output
+    - Construct from raw YAML strings, YAML files, or Markdown frontmatter
+    - Reuses the same `syntect` / `two-face` highlighting pipeline as Markdown `yaml` fences
 
 ## Darkmatter Dependencies
 
@@ -582,6 +586,38 @@ let updated = "Hello\nUniverse";
 let output = render_visual_diff_str(original, updated, &VisualDiffOptions::default());
 println!("{}", output);
 ```
+
+### YamlBlock
+
+`YamlBlock` validates YAML at construction time and renders it as a syntax-highlighted `yaml` code block through the same terminal and browser paths used by Markdown fences.
+
+```rust
+use darkmatter::markdown::YamlBlock;
+
+// From raw YAML
+let block = YamlBlock::new("foo: 1\nbar: 2")?;
+println!("{}", block.yaml());
+
+// From a YAML file
+let block = YamlBlock::from_yaml_file("config.yaml")?;
+
+// From Markdown frontmatter (body is ignored)
+let block = YamlBlock::from_markdown_content("---\ntitle: Hello\n---\n# Body")?;
+// block.yaml() contains "title: Hello" only
+
+// From a Markdown file on disk
+let block = YamlBlock::from_markdown_file("README.md")?;
+
+// Terminal rendering (via Renderable trait)
+let term = biscuit_terminal::terminal::Terminal::new();
+let ansi = block.render(&term);
+
+// Browser rendering (via BrowserRenderable trait)
+let html = block.render_to_browser();
+// html contains <pre><code class="language-yaml">...</code></pre>
+```
+
+`YamlBlock` stores the raw YAML text after validation. It does not retain the parsed `serde_yaml_ng::Value`, keeping the public API small.
 
 ### Heading Normalization
 
