@@ -32,6 +32,13 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3:
   - .opencode/skill/sniff/SKILL.md
+source_files_during_phase_4:
+  - sniff/cli/src/commands.rs
+  - sniff/cli/src/output/remote.rs
+  - sniff/cli/src/output/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 packages:
   - sniff
   - sniff-cli
