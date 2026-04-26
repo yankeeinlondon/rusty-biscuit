@@ -85,6 +85,7 @@ impl StructuredSummaryDetails {
 }
 
 pub(crate) mod composition;
+pub(crate) mod selection_ui;
 pub(crate) mod sequence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -752,7 +753,8 @@ pub fn run_provider_wrapper(
     }
 
     let wrapper_start = std::time::Instant::now();
-    let mut perf_collector = startup_timings.map(WrapperPerfCollector::new);
+    let mut perf_collector =
+        startup_timings.map(|timings| crate::perf::CommandPerfCollector::new("Wrapper", timings));
 
     let (code, stderr_capture, model_source) =
         run_provider_wrapper_inner(provider, args, verbose, perf_collector.as_mut())?;
@@ -768,6 +770,8 @@ pub fn run_provider_wrapper(
         report.render(&term);
     }
 
+    // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+    // The perf report is always emitted to stderr when requested.
     if let Some(collector) = perf_collector {
         let total = wrapper_start.elapsed();
         let report = collector.into_report(total);
@@ -837,7 +841,7 @@ fn run_provider_wrapper_inner(
     provider: Provider,
     args: WrapperArgs,
     verbose: u8,
-    mut perf_collector: Option<&mut WrapperPerfCollector>,
+    mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
 ) -> Result<(i32, Option<String>, Option<profile::OpenCodeModelSource>)> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
@@ -2756,7 +2760,8 @@ pub(crate) fn run_harness_loop(
     );
     let mut attempt = 1u32;
     let mut initial_materialized = initial_materialized;
-    let mut last_perf: Option<crate::perf::AgentExecutionPerf> = None;
+    let mut harness_perf: Option<crate::perf::AgentExecutionPerf> = None;
+    let mut _harness_attempts: usize = 0;
 
     loop {
         let _attempt_cycle_span = info_span!(
@@ -3085,7 +3090,28 @@ pub(crate) fn run_harness_loop(
             guard.mark_provider_launched();
         }
         let (outcome, perf) = attempt_result?;
-        last_perf = perf;
+        if let Some(p) = perf {
+            _harness_attempts += 1;
+            match harness_perf.as_mut() {
+                Some(acc) => {
+                    acc.launches += p.launches;
+                    acc.total_elapsed += p.total_elapsed;
+                    if acc.first_response_latency.is_none() && p.first_response_latency.is_some() {
+                        acc.first_response_latency = p.first_response_latency;
+                    }
+                    if let Some(api) = p.provider_api_duration {
+                        acc.provider_api_duration = Some(
+                            acc.provider_api_duration
+                                .unwrap_or(std::time::Duration::ZERO)
+                                + api,
+                        );
+                    }
+                }
+                None => {
+                    harness_perf = Some(p);
+                }
+            }
+        }
 
         if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
             // Surface the interrupt to the user before we let the guard
@@ -3093,7 +3119,7 @@ pub(crate) fn run_harness_loop(
             // and the operator has no feedback that Claudine noticed.
             eprintln!("{}", crate::output::format_user_interrupt_status());
             guard.emit_terminal(LifecycleSignal::Failure);
-            return Ok((outcome.exit_code, last_perf));
+            return Ok((outcome.exit_code, harness_perf));
         }
 
         if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
@@ -3223,7 +3249,7 @@ pub(crate) fn run_harness_loop(
 
         if post_report.all_passed() {
             guard.emit_terminal(LifecycleSignal::Success);
-            return Ok((outcome.exit_code, last_perf));
+            return Ok((outcome.exit_code, harness_perf));
         }
 
         let failures = post_report.failures();
@@ -3667,65 +3693,6 @@ struct ExtractedWrapperFlags {
 
 /// Collector for wrapper-level performance telemetry.
 ///
-/// Only constructed when `--perf` is enabled. Measures environment setup
-/// duration and aggregates child-process telemetry into the shared perf
-/// report shape.
-#[derive(Debug)]
-struct WrapperPerfCollector {
-    startup: crate::perf::StartupTimings,
-    env_setup_started_at: Option<std::time::Instant>,
-    env_setup_elapsed: std::time::Duration,
-    agent_perf: Option<crate::perf::AgentExecutionPerf>,
-    dry_run: bool,
-}
-
-impl WrapperPerfCollector {
-    fn new(startup: crate::perf::StartupTimings) -> Self {
-        Self {
-            startup,
-            env_setup_started_at: Some(std::time::Instant::now()),
-            env_setup_elapsed: std::time::Duration::ZERO,
-            agent_perf: None,
-            dry_run: false,
-        }
-    }
-
-    fn mark_env_setup_complete(&mut self) {
-        if let Some(started) = self.env_setup_started_at.take() {
-            self.env_setup_elapsed = started.elapsed();
-        }
-    }
-
-    fn set_agent_perf(&mut self, perf: crate::perf::AgentExecutionPerf) {
-        self.agent_perf = Some(perf);
-    }
-
-    fn set_dry_run(&mut self) {
-        self.dry_run = true;
-        self.mark_env_setup_complete();
-    }
-
-    fn into_report(self, total_elapsed: std::time::Duration) -> crate::perf::CommandPerfReport {
-        crate::perf::CommandPerfReport {
-            title: "Wrapper",
-            total_elapsed,
-            cli: crate::perf::CliOverheadReport {
-                arg_parsing: self.startup.arg_parsing,
-                config_loading: self.startup.config_loading,
-                tracing_init: self.startup.tracing_init,
-                environment_setup: self.env_setup_elapsed,
-            },
-            composition: None,
-            agent: if self.dry_run { None } else { self.agent_perf },
-            notes: if self.dry_run {
-                vec!["Agent execution skipped (dry run)".into()]
-            } else {
-                vec![]
-            },
-        }
-    }
-}
-
 /// Locate the POSIX `--` separator in the wrapper passthrough vector.
 ///
 /// Returns the index of the first `--` that delimits agent-only arguments.

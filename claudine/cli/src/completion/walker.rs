@@ -31,10 +31,6 @@
 //! soon as the accumulator reaches the limit — callers that need a
 //! different cap pass an explicit budget via [`walk_scope_limited`].
 
-// Phase 2 scaffolding. Callers land in Phase 3; test coverage exercises
-// every public item today.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use ignore::{DirEntry, WalkBuilder};

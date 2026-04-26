@@ -1,6 +1,7 @@
 //! Serial sequence orchestrator.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -8,9 +9,9 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
-    self, CompositionExecutionRequest, CompositionMode, PrepareOptions, PreparedComposition,
-    ResolvedCompositionSource, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
-    SequenceStepResult,
+    self, CompositionError, CompositionExecutionRequest, CompositionMode, PrepareOptions,
+    PreparedComposition, ResolvedCompositionSource, SequenceExecutionOptions, SequencePlan,
+    SequenceRunSummary, SequenceStepDraft, SequenceStepResult,
 };
 use claudine::harness::{HarnessResolutionContext, has_harness_properties, parse_harness_plan};
 use color_eyre::eyre::{Result, eyre};
@@ -34,6 +35,7 @@ struct StepContext {
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
 #[allow(deprecated)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_sequence(
     source: &ResolvedCompositionSource,
     plan: SequencePlan,
@@ -41,8 +43,23 @@ pub(crate) fn execute_sequence(
     user_set_overrides: Option<serde_json::Value>,
     execution_options: SequenceExecutionOptions,
     verbose: u8,
+    perf_enabled: bool,
+    startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let sequence_start = std::time::Instant::now();
     let silent = shared.silent;
+
+    let mut perf_accumulator = if perf_enabled {
+        startup_timings.map(|timings| {
+            let mut acc = crate::perf::SequencePerfAccumulator::new(timings);
+            if shared.dry_run {
+                acc.set_dry_run();
+            }
+            acc
+        })
+    } else {
+        None
+    };
 
     let effective_fail_fast = execution_options
         .fail_fast_override
@@ -73,14 +90,6 @@ pub(crate) fn execute_sequence(
     };
 
     // Persistent SIGINT tracker for the duration of the sequence run.
-    //
-    // The provider children installed by `wait_with_signal_handling` have
-    // their own SIGINT handler scoped to each invocation; once a child
-    // exits, that handler no longer updates any flag the sequence can
-    // observe. We also need to catch Ctrl+C that arrives outside a child
-    // (Phase 1 prep, between steps, or while finalizing summaries). This
-    // flag flips on the first SIGINT and is checked before each step and
-    // after each step completes so the loop aborts promptly.
     let interrupted = Arc::new(AtomicBool::new(false));
     let interrupted_handler = interrupted.clone();
     let _sigint_guard = {
@@ -95,42 +104,26 @@ pub(crate) fn execute_sequence(
         }
         #[cfg(not(unix))]
         {
-            // No-op on non-Unix; sequence is Unix-only in practice.
             let _ = interrupted_handler;
             Option::<()>::None
         }
     };
 
     let mut cumulative_approved: HashSet<String> = HashSet::new();
-
-    // Shared approval cache lives for the whole sequence run so that
-    // "allow once" decisions from earlier steps survive into later
-    // steps for both template `::shell` directives and harness shell
-    // commands.
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
-    if !silent {
-        let term = log::terminal();
-        let status = Status::from_prose("Starting pre-flight checks".to_string())
-            .state(StatusState::Info)
-            .theme(biscuit_terminal::components::status::StatusTheme::Circular);
-        log::message(&status.render(&term));
-    }
-
-    // ── Phase 1: run pre-flight shell discovery for every step ─────────
-    //
-    // Template `::shell` directives can reference per-step state
-    // (`{{state.name}}`, `{{previous_state.foo}}`, etc.) so each step's
-    // discovery pass needs its own compose context. Running the whole
-    // pass up-front means any required approval prompts fire BEFORE
-    // the first agent launches — the operator reviews all shell commands
-    // (both template and harness) once and then walks away.
-    let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
-
+    // ── Phase 1a: build overlays and prepare each step ─────────────────
     let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
         if interrupted.load(Ordering::SeqCst) {
+            if let Some(mut acc) = perf_accumulator {
+                acc.mark_env_setup_complete();
+                acc.set_partial();
+                let total = sequence_start.elapsed();
+                let report = acc.into_report(total);
+                eprint!("{}", crate::perf::render_perf_report(&report));
+            }
             return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
         }
         let overlay = build_step_overlay(&plan, step_index);
@@ -139,10 +132,6 @@ pub(crate) fn execute_sequence(
         let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
         env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
 
-        // The compose context used for ::shell discovery must see the
-        // same `FAIL_FAST` value the child process will see, otherwise
-        // the template interpolation used for pre-flight may diverge
-        // from runtime.
         let compose_options = {
             let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
             for (key, value) in &env_overrides {
@@ -160,44 +149,44 @@ pub(crate) fn execute_sequence(
             Some(Arc::clone(&shared_approval_cache)),
         );
 
-        // ── Template pre-flight ───────────────────────────────────────
+        // Template pre-flight
         let template_preflight = composition::resolve_shell_approvals(
             Some(&source.markdown),
             Some(&compose_options),
             None,
             &approval_options,
         )?;
-
         cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
 
-        // ── Prepare composition ───────────────────────────────────────
+        // Prepare composition
         let prepare_options = PrepareOptions {
             set_overrides: Some(step_set_overrides.clone()),
             pre_approved_commands: Some(cumulative_approved.clone()),
             env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
         };
-
         let prepared = composition::prepare_direct(source, prepare_options)?;
 
-        // ── Harness pre-flight ────────────────────────────────────────
+        // Harness pre-flight
         if has_harness_properties(&prepared.effective_frontmatter) {
             let effective_repo_root = prepared.source_repo_root.as_deref();
             let resolve_ctx = HarnessResolutionContext {
                 source_path: &prepared.resolved_path,
                 repo_root: effective_repo_root,
             };
-            let plan = parse_harness_plan(
+            let harness_plan = parse_harness_plan(
                 &prepared.effective_frontmatter,
                 &prepared.resolved_path,
                 &resolve_ctx,
             )
             .map_err(|e| eyre!("{e}"))?;
-
-            let harness_preflight =
-                composition::resolve_shell_approvals(None, None, Some(&plan), &approval_options)
-                    .map_err(|e| eyre!("{e}"))?;
-
+            let harness_preflight = composition::resolve_shell_approvals(
+                None,
+                None,
+                Some(&harness_plan),
+                &approval_options,
+            )
+            .map_err(|e| eyre!("{e}"))?;
             cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
         }
 
@@ -205,6 +194,179 @@ pub(crate) fn execute_sequence(
             env_overrides,
             prepared,
         });
+    }
+
+    // ── Phase 1b: resolve provider/model for every step ────────────────
+    let clients = sniff::programs::InstalledAiClients::new();
+    let installed: Vec<claudine::events::Provider> = claudine::events::PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+        .collect();
+
+    let excluded = shared.excluded();
+    let snapshot = claudine::composition::build_installed_snapshot(&installed, &excluded);
+    let selection_config = super::composition::load_selection_config(
+        step_contexts
+            .first()
+            .and_then(|ctx| ctx.prepared.source_repo_root.as_deref())
+            .unwrap_or(
+                std::env::current_dir()
+                    .ok()
+                    .as_deref()
+                    .unwrap_or(std::path::Path::new(".")),
+            ),
+    );
+    let catalog = match &selection_config {
+        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+            cfg.model_overrides.clone(),
+        ),
+        None => claudine::model_catalog::ModelCatalogService::new(),
+    };
+    catalog.refresh_blocking();
+    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+
+    let explicit_provider = shared.explicit_provider();
+    let cli_model = shared.model.as_deref();
+    let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let provider_locked = explicit_provider.is_some();
+    let model_locked = cli_model.is_some();
+
+    let mut drafts: Vec<SequenceStepDraft> = Vec::with_capacity(total_steps);
+    let mut failures: Vec<claudine::composition::SequenceSelectionFailure> = Vec::new();
+
+    for (step_index, step_ctx) in step_contexts.iter().enumerate() {
+        let step = &plan.steps[step_index];
+        let prepared = &step_ctx.prepared;
+
+        // Resolve provider for this step
+        let provider_result = if let Some(provider) = explicit_provider {
+            Ok(provider)
+        } else {
+            // Non-TTY resolution per step; TTY mode will use the review screen
+            let target = claudine::composition::resolve_target_non_tty_with_catalog(
+                None,
+                prepared,
+                &snapshot,
+                favorite,
+                cli_model,
+                Some(&catalog),
+            );
+            target.map(|t| t.provider)
+        };
+
+        let provider_plan =
+            match claudine::composition::build_picker_plan(prepared, &snapshot, favorite) {
+                Ok(plan) => plan,
+                Err(_) => claudine::composition::ProviderPickerPlan {
+                    options: Vec::new(),
+                    default_index: 0,
+                },
+            };
+
+        let provider_for_model = explicit_provider.or(provider_result.as_ref().ok().copied());
+        let (model, model_reason) = if let Some(provider) = provider_for_model {
+            claudine::composition::resolve_model_with_catalog(
+                provider,
+                prepared,
+                cli_model,
+                Some(&catalog),
+            )
+        } else {
+            (
+                None,
+                claudine::composition::ModelResolutionReason::ProviderDefault,
+            )
+        };
+
+        match provider_result {
+            Ok(_provider) => {
+                drafts.push(SequenceStepDraft {
+                    step_index,
+                    step_name: step.name.clone(),
+                    provider_plan,
+                    proposed_model: model.clone(),
+                    model_reason,
+                    provider_locked,
+                    model_locked,
+                    resolved_provider: explicit_provider,
+                });
+            }
+            Err(ref err) => {
+                failures.push(claudine::composition::SequenceSelectionFailure {
+                    step: step_index + 1,
+                    step_name: step.name.clone(),
+                    reason: err.to_string(),
+                    installed: snapshot.all_installed.clone(),
+                });
+            }
+        }
+    }
+
+    // ── Phase 1c: review (TTY) or validate (non-TTY) ───────────────────
+    let resolved_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if !failures
+        .is_empty()
+    {
+        // Non-TTY aggregate failure path
+        return Err(CompositionError::SequenceSelectionFailed {
+            failure_count: failures.len(),
+            failures,
+        }
+        .into());
+    } else if is_tty && explicit_provider.is_none() {
+        // TTY review screen
+        match super::selection_ui::review_sequence(drafts, &catalog) {
+            Ok(targets) => targets,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("cancelled") {
+                    return Ok(130); // Treat as interrupt
+                }
+                return Err(e.into());
+            }
+        }
+    } else {
+        // Non-TTY success path: convert drafts to resolved targets directly.
+        // When an explicit provider flag was given, every step uses it.
+        drafts
+            .into_iter()
+            .map(|draft| {
+                let provider = explicit_provider
+                    .or_else(|| {
+                        draft
+                            .provider_plan
+                            .options
+                            .get(draft.provider_plan.default_index)
+                            .map(|o| o.provider)
+                    })
+                    .unwrap_or(claudine::events::Provider::Claude);
+                let provider_reason = if explicit_provider.is_some() {
+                    claudine::composition::ProviderResolutionReason::ExplicitFlag
+                } else {
+                    claudine::composition::ProviderResolutionReason::FrontmatterSingle
+                };
+                claudine::composition::ResolvedExecutionTarget {
+                    provider,
+                    provider_reason,
+                    model: draft.proposed_model,
+                    model_reason: draft.model_reason,
+                }
+            })
+            .collect()
+    };
+
+    if !silent {
+        let term = log::terminal();
+        let status = Status::from_prose("Starting pre-flight checks".to_string())
+            .state(StatusState::Info)
+            .theme(biscuit_terminal::components::status::StatusTheme::Circular);
+        log::message(&status.render(&term));
+    }
+
+    // ── Phase 1d: shell pre-flight for finalized steps ─────────────────
+    let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
+    // (Shell approvals were already collected during Phase 1a)
+
+    if let Some(ref mut acc) = perf_accumulator {
+        acc.mark_env_setup_complete();
     }
 
     if !silent {
@@ -224,6 +386,9 @@ pub(crate) fn execute_sequence(
     for (step_index, step_ctx) in step_contexts.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
             interrupt_observed = true;
+            if let Some(ref mut acc) = perf_accumulator {
+                acc.set_partial();
+            }
             break;
         }
         let step = &plan.steps[step_index];
@@ -247,9 +412,8 @@ pub(crate) fn execute_sequence(
         }
 
         let start = std::time::Instant::now();
-
-        // Use the prepared composition from Phase 1 instead of re-preparing
         let prepared = step_ctx.prepared.clone();
+        let resolved_target = resolved_targets.get(step_index).cloned();
 
         let system_prompt_args = claudine::system_prompt::SystemPromptArgs {
             append_file: shared.append_system_prompt.clone(),
@@ -260,6 +424,7 @@ pub(crate) fn execute_sequence(
             mode: CompositionMode::ChainedDocument,
             file_ref: source.original_ref.clone(),
             prepared,
+            resolved_target,
             explicit_provider: shared.explicit_provider(),
             excluded: shared.excluded(),
             sequence: true,
@@ -284,15 +449,25 @@ pub(crate) fn execute_sequence(
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
         };
 
-        let step_result =
-            super::composition::execute_composition_request_inner(request, verbose, None, false);
+        let step_result = super::composition::execute_composition_request_inner(
+            request,
+            verbose,
+            None,
+            perf_enabled,
+        );
 
         let duration = start.elapsed();
 
         match step_result {
             Ok(outcome) if outcome.exit_code == 0 => {
-                // Phase 6 will aggregate agent_perf across sequence steps.
-                let _ = outcome.agent_perf;
+                if let Some(ref mut acc) = perf_accumulator {
+                    acc.add_step(crate::perf::SequenceStepPerf {
+                        step_index,
+                        step_name: step.name.clone(),
+                        compose_perf: step_ctx.prepared.compose_perf.clone(),
+                        agent_perf: outcome.agent_perf,
+                    });
+                }
                 summary.succeeded += 1;
                 summary.steps.push(SequenceStepResult {
                     step: step_index + 1,
@@ -317,11 +492,15 @@ pub(crate) fn execute_sequence(
                 if outcome.exit_code == SEQUENCE_INTERRUPT_EXIT_CODE
                     || interrupted.load(Ordering::SeqCst) =>
             {
-                // Ctrl+C was observed either by the in-child signal handler
-                // (exit 130) or by our persistent process-level handler.
-                // Record the failure, stop the loop unconditionally, and
-                // propagate the interrupt exit code to the caller regardless
-                // of `fail_fast`.
+                if let Some(ref mut acc) = perf_accumulator {
+                    acc.add_step(crate::perf::SequenceStepPerf {
+                        step_index,
+                        step_name: step.name.clone(),
+                        compose_perf: step_ctx.prepared.compose_perf.clone(),
+                        agent_perf: outcome.agent_perf,
+                    });
+                    acc.set_partial();
+                }
                 summary.failed += 1;
                 summary.steps.push(SequenceStepResult {
                     step: step_index + 1,
@@ -344,6 +523,14 @@ pub(crate) fn execute_sequence(
                 break;
             }
             Ok(outcome) => {
+                if let Some(ref mut acc) = perf_accumulator {
+                    acc.add_step(crate::perf::SequenceStepPerf {
+                        step_index,
+                        step_name: step.name.clone(),
+                        compose_perf: step_ctx.prepared.compose_perf.clone(),
+                        agent_perf: outcome.agent_perf,
+                    });
+                }
                 let error_msg = format!(
                     "provider {} exited with code {}",
                     outcome.provider, outcome.exit_code
@@ -368,6 +555,9 @@ pub(crate) fn execute_sequence(
                     log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
+                    if let Some(ref mut acc) = perf_accumulator {
+                        acc.set_partial();
+                    }
                     debug!(step_index = step_index + 1, step_name = %step.name, fail_fast = %effective_fail_fast, "sequence fail-fast triggered");
                     break;
                 }
@@ -394,6 +584,9 @@ pub(crate) fn execute_sequence(
                     log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
+                    if let Some(ref mut acc) = perf_accumulator {
+                        acc.set_partial();
+                    }
                     debug!(step_index = step_index + 1, step_name = %step.name, fail_fast = %effective_fail_fast, "sequence fail-fast triggered");
                     break;
                 }
@@ -419,6 +612,14 @@ pub(crate) fn execute_sequence(
             .state(StatusState::Failure);
             log::message(&status.render(&log::terminal()));
         }
+    }
+
+    // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
+    // The perf report is always emitted to stderr when requested.
+    if let Some(acc) = perf_accumulator {
+        let total = sequence_start.elapsed();
+        let report = acc.into_report(total);
+        eprint!("{}", crate::perf::render_perf_report(&report));
     }
 
     if interrupt_observed || interrupted.load(Ordering::SeqCst) {

@@ -72,9 +72,11 @@ review feat="" agent="" spec="" design="":
                 [[ "${spec_file}" == "NONE" ]] && spec_file=""
             fi
         fi
+        spec_file="${spec}"
+        design_file="${design}"
     else
         # Interactive feature chooser path
-        doc="$(just _choose_feature {{feat}}'')"
+        doc="$(just _choose_feature "{{feat}}")"
         dir="$(dirname "${doc}")"
         spec_file=""
         design_file=""
@@ -121,19 +123,24 @@ review feat="" agent="" spec="" design="":
         (( iteration++ ))
     done
 
+    full_dir="$(sniff repo package-area)/${dir}"
+    full_dir_pretty="{{dim}}$(sniff repo package-area)/$(dirname "${dir}")/{{reset}}$(basename "${dir}")"
+    PROMPT="@prompts/review-feature.md"
     echo -e "Review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
-    [[ -n "${spec_file}" ]] && echo -e "    - Specification File: {{dim}}$(basename "${spec_file}"){{reset}}"
-    [[ -n "${design_file}" ]] && echo -e "    - Design File: {{dim}}$(basename "${design_file}"){{reset}}"
-    echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
+    echo -e "    - Feature Directory: {{dim}}${full_dir_pretty}{{reset}}"
+    [[ -n "${spec_file}" ]] && echo -e "    - Specification File: {{blue}}{{dim}}$(just _link "${full_dir}/{{reset}}{{blue}}$(basename "${spec_file}"){{reset}}" "${spec_file}"){{reset}}"
+    [[ -n "${design_file}" ]] && echo -e "    - Design File: {{blue}}{{dim}}$(just _link "${full_dir}/{{reset}}{{blue}}$(basename "${design_file}"){{reset}}" "${spec_file}"){{reset}}"
     echo -e "    - Review Iteration:  {{dim}}${iteration}{{reset}}"
+    echo -e "    - Prompt File: {{dim}}${PROMPT}{{reset}}"
     echo
+    saved_to="${full_dir_pretty}/review-${iteration}.md"
     if [[ -z "${model}" ]];then
-        echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used"
+        echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used and saved to ${saved_to}"
     else
-        echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used {{italic}}with{{reset}} the model {{green}}${model}{{reset}}"
+        echo -e "The {{yellow}}${use_agent}{{reset}} agent will be used {{italic}}with{{reset}} the model {{green}}${model}{{reset}} and the review saved to ${saved_to}"
     fi
-
+    echo
     if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
         echo
         echo -e "Ok bye"
@@ -145,7 +152,7 @@ review feat="" agent="" spec="" design="":
     design_name=""
     [[ -n "${design_file}" ]] && design_name="$(basename "${design_file}")"
 
-    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" --${use_agent} ${use_model} || (
+    claudine compose "${PROMPT}" -y dir="${full_dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" --${use_agent} ${use_model} || (
         just _play two-tone
         echo -e "{{red}}ERROR:{{reset}} There was a problem trying to create the review for ${feature}"
         exit 1
@@ -178,7 +185,7 @@ review feat="" agent="" spec="" design="":
         echo
         exit 0
     fi
-    just implement-feature-review spec="${spec_file}" design="${design_file}"
+    just implement-feature-review review="${review}" spec="${spec_file}" design="${design_file}"
 
 
 # implement a review that was conducted (not a feature review)
@@ -203,11 +210,14 @@ implement-review filter="":
 
 
 # implements the suggestions from a review of a feature or fix
-implement-feature-review filter="" spec="" design="" agent="":
+implement-feature-review review="" filter="" spec="" design="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo -e "Preparing to {{italic}}implement{{reset}} all of suggestions from a review."
-    review="$(just _choose_spec_review "{{filter}}")"
+    review="{{review}}"
+    if [[ -z "${review}" ]]; then
+        review="$(just _choose_spec_review "{{filter}}")"
+    fi
     dir="$(dirname "${review}")"
     spec_file="{{spec}}"
     design_file="{{design}}"

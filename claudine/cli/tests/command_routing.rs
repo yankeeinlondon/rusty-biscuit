@@ -2,7 +2,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
 
-use common::{strip_ansi, write, TestWorkspace};
+use common::{TestWorkspace, strip_ansi, write};
 
 fn seed_user_config(home: &std::path::Path) {
     let config = serde_json::json!({

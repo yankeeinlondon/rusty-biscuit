@@ -115,6 +115,24 @@ Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatte
 
 For full details, see [Composition](./docs/topics/composition.md).
 
+### Performance Reporting
+
+All wrapper and composition commands support an opt-in `--perf` flag that emits a detailed performance report to **stderr** after the command completes:
+
+- `claudine {agent} --perf ...`
+- `claudine compose --perf ...`
+- `claudine inline-compose --perf ...`
+- `claudine sequence --perf ...`
+
+The report is divided into three sections:
+
+1. **CLI Overhead** — time spent on arg parsing, config loading, tracing init, and environment setup.
+2. **Composition Report** — when document composition occurred, shows Darkmatter pipeline timings (transclusion, interpolation, shell expansion, etc.).
+3. **Agent Execution** — number of launches, first-response latency, total execution time, and provider-reported API duration when available.
+
+For `sequence`, a single aggregated report is printed at the very end, averaging first-response latencies across all steps and summing launches and total time. The report is emitted unconditionally when `--perf` is passed, even if `--silent` or `--quiet` are also present — perf is an explicit opt-in that overrides silence settings.
+
+> **Note:** `provider_api_duration` is only available for providers that use the structured-streaming path (e.g., Codex, Gemini, OpenCode). Legacy providers such as Goose do not report this metric.
 
 ## Getting Started
 

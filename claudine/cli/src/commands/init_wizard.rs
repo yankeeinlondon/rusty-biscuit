@@ -133,12 +133,12 @@ fn configure_tts() -> Result<TtsValue> {
     }
 }
 
-fn configure_preferred_agent() -> Result<Provider> {
+fn configure_preferred_agent() -> Result<Option<Provider>> {
     log::message("");
-    log::message("  Preferred Agent");
+    log::message("  Favorite Agent");
     log::message("");
     log::message("  When using compose without specifying a provider,");
-    log::message("  which agent should be the default?");
+    log::message("  which agent should be the default? (You can skip this and set it later.)");
     log::message("");
 
     let agents = discover_agents_full();
@@ -149,19 +149,26 @@ fn configure_preferred_agent() -> Result<Provider> {
         .collect();
 
     if installed.is_empty() {
-        log::message("  No agents detected. Defaulting to Claude.");
-        return Ok(Provider::Claude);
+        log::message("  No agents detected. No favorite agent will be configured.");
+        log::message("  Set one later with: claudine config set favorite-agent <provider>");
+        return Ok(None);
     }
 
-    let names: Vec<String> = installed.iter().map(|p| p.to_string()).collect();
-    let selection = inquire::Select::new("  Select your preferred agent:", names).prompt()?;
+    const SKIP_LABEL: &str = "(no favorite — decide each run)";
+    let mut names: Vec<String> = installed.iter().map(|p| p.to_string()).collect();
+    names.push(SKIP_LABEL.to_string());
+    let selection = inquire::Select::new("  Select your favorite agent:", names).prompt()?;
+
+    if selection == SKIP_LABEL {
+        return Ok(None);
+    }
 
     let index = installed
         .iter()
         .position(|p| p.to_string() == selection)
         .unwrap_or(0);
 
-    Ok(installed[index])
+    Ok(Some(installed[index]))
 }
 
 fn configure_messenger() -> Result<Option<ClaudineMessengerConfig>> {
@@ -239,7 +246,7 @@ fn configure_messenger() -> Result<Option<ClaudineMessengerConfig>> {
 
 fn build_config(
     tts: TtsValue,
-    preferred_agent: Provider,
+    preferred_agent: Option<Provider>,
     messenger: Option<ClaudineMessengerConfig>,
 ) -> ClaudineConfig {
     let mut actions = HashMap::new();
@@ -260,6 +267,7 @@ fn build_config(
         actions,
         preferred_agent,
         canonical_provider: None,
+        models: HashMap::new(),
         default_sounds: DefaultSounds {
             success: Some("confirmation".to_string()),
             attention: Some("doorbell".to_string()),
@@ -271,11 +279,7 @@ fn build_config(
 /// CI-safe headless defaults: TTS off, Logging on, Protect default.
 fn build_headless_config() -> ClaudineConfig {
     let agents = discover_agents_full();
-    let preferred_agent = agents
-        .iter()
-        .find(|a| a.on_path)
-        .map(|a| a.provider)
-        .unwrap_or(Provider::Claude);
+    let preferred_agent = agents.iter().find(|a| a.on_path).map(|a| a.provider);
 
     build_config(TtsValue::Boolean(false), preferred_agent, None)
 }

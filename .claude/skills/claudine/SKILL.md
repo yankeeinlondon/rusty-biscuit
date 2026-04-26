@@ -1,7 +1,7 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-04-24
+last_updated: 2026-04-25
 ---
 
 ## Claudine Library
@@ -26,6 +26,14 @@ Composition rendering was unified on 2026-04-16 (fix: `2026-04-16-consistent-ren
 
 The non-interactive stderr surface was strengthened on 2026-04-16 (fix: `2026-04-16-more-is-more`). Tool call rendering switched from `→ Name · summary` to `→ Name(summary)` / `← Name(slot)` so it reads like a function call; shell-style tools (`Bash`, `bash`, `shell`, `run_command`) prepend the canonical shell name to the command (`bash ls -la`); and the `Task` extractor now prefers `description → subject → prompt → task` so the agent's actual task body wins over fields like `subagent_type`. `StreamTextRenderer` gained `last_block_growth_at` plus `flush_if_idle()`, and the heartbeat thread calls `flush_if_idle(silence_window)` (default 30 s) before emitting any status line so a dangling final paragraph reaches the user even when the provider never closes stdout. OpenCode now exposes a typed `Reasoning` variant on `OpenCodeEvent` (top-level `text` and nested `part.text`) that routes into `SemanticEvent::Reasoning` instead of `ProviderExtension`; `render_thinking_block()` was widened from a thin border to `▌ ` so thinking matches System Prompt and Agent Prompt visually. Finally, `SemanticEvent::Error` gained a typed `kind: SemanticErrorKind` field (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`, with `#[serde(default) = Unknown]` for replay compatibility); each provider parser classifies its errors before emission; the live sink renders them as colored `BlockQuote`s with `▌ ` border (orange `Configuration Error`, red `Agent Error` / `API Error`, yellow `Interrupted`, red `Error`); and `From<SemanticErrorKind> for AgentErrorCategory` aligns live error kinds with the end-of-run [`AgentErrorReport`](../../../claudine/cli/src/output/error_report.rs) surface. Dispatch behavior remains keyed off `terminal: bool`; `kind` is classificatory metadata only.
 
+The composition resolver was redesigned on 2026-04-25 (feature: `2026-04-25-agent-selection`, Phase 3).  The old `SingleInstalled` auto-selection shortcut was removed.  In **TTY mode**, an explicit `--<provider>` flag wins unconditionally; otherwise an interactive picker is always shown (frontmatter `agent` and config `favorite_agent` only influence the picker's default index and row ordering).  In **non-TTY mode**, resolution follows a strict chain: explicit flag > singular frontmatter `agent` > list-valued frontmatter `agent` (first installed match) > configured favorite > structured hard error.  Model resolution is independent of TTY mode and follows: CLI `--model` > provider-specific env vars (`CODEX_MODEL`, `CLAUDE_MODEL`, etc.) > generic `MODEL` env > frontmatter `model` > provider default.  OpenCode has a special non-TTY hard error when no model survives the chain.  The library now exports pure resolution functions (`resolve_target_non_tty`, `build_picker_plan`, `resolve_model`) and typed plan structs (`ProviderPickerPlan`, `SequenceStepDraft`, `ResolvedExecutionTarget`) so the CLI can render interactive UI with `tui-chrome` components while the library remains testable without a terminal.
+
+A model catalog service was added on 2026-04-25 (feature: `2026-04-25-agent-selection`, Phase 4).  Frontmatter `model` hints are validated against a merged catalog that combines cached provider model lists with user-configured overrides (additive or replace mode).  Catalog sources: Codex and Claude use static model lists derived from `unchained-ai` generated enums; OpenCode and Qwen source dynamically by shelling out to `opencode models`; Gemini, Kimi, and Goose rely on user overrides only in v1.  When a catalog is unavailable, frontmatter `model` is gracefully skipped rather than treated as an error.  The cache lives under `~/.claudine/cache/models/<provider>.json` with stale-cache fallback when refresh fails.
+
+The composition executor was wired end-to-end on 2026-04-25 (feature: `2026-04-25-agent-selection`, Phase 5).  `compose` and `inline-compose` now resolve provider and model through the Phase 3/4 resolver before launching.  In TTY mode with no explicit `--<provider>` flag, an interactive one-shot picker built on `tui-chrome::ChooseOne` is shown; in non-TTY mode, resolution follows the strict chain with no interactive fallback.  The `ResolvedExecutionTarget` (provider + model + reasons) is threaded through `CompositionExecutionRequest` so the wrapper pipeline no longer re-resolves at launch time.  `composition_dispatch_context` carries `provider_selection_reason`, `resolved_model`, `model_selection_reason`, and `selection_mode` for downstream telemetry.  The old `inquire`-based interactive selection and the `SingleInstalled` auto-selection shortcut were both removed.
+
+The sequence orchestrator was updated on 2026-04-25 (feature: `2026-04-25-agent-selection`, Phase 6).  `sequence` now resolves every step's provider and model before shell preflight or execution.  In TTY mode with no explicit `--<provider>` flag, a single `tui-chrome::InputTable` review screen is presented where the user can edit per-step provider and model choices; on `Ctrl+S` the edited targets are carried into execution, and on `Esc` the sequence aborts before any step runs.  In non-TTY mode, any unresolved step causes an immediate aggregate `SequenceSelectionFailed` error that prevents the whole run from starting.  Resolved per-step targets are passed through `CompositionExecutionRequest.resolved_target` so execution reuses the front-loaded decision instead of resolving again mid-run.  Explicit `--<provider>` and `--model` flags lock the corresponding cells in the review table and are respected in both TTY and non-TTY paths.
+
 - [Supported Platforms](supported-platforms.md)
 - [Unified Hook/Event Model](unified-hooks.md)
 - [Supported Actions](hook-actions.md)
@@ -42,6 +50,7 @@ For deeper topic references in the repo (not duplicated here), see:
 - [Protect Service](../../../claudine/docs/topics/protect-service.md) — standalone deny catalog, scan surfaces, rule groups, merge semantics, dispatch integration
 - [Traces and Logging](../../../claudine/docs/topics/traces-and-logging.md), [Log Reporting](../../../claudine/docs/topics/log-reporting.md)
 - [CLI Pre-Parsing and Clap Parsing](../../../claudine/docs/topics/cli-pre-parsing.md) — pre-clap argv normalization pipeline, strict vs. lenient clap passes, why the pre-parser exists, and best practices for maintaining the layer. Rule-by-rule reference: [argv-normalization.md](../../../claudine/docs/topics/argv-normalization.md).
+- [Shell Completions](../../../claudine/docs/topics/shell-completions.md) — dynamic completion engine, root-menu rules, per-mode composition pipelines (`compose` / `inline-compose` / `sequence`), magic `@` resolution, setter-value file references, and performance strategy
 
 
 ## Claudine CLI
@@ -99,6 +108,7 @@ System prompt handling is shared across wrapped provider subcommands and the Mar
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine completions <shell>` | Generate shell completions |
+| `claudine config set favorite-agent <provider>` | Set or clear the favorite agent for non-TTY composition resolution |
 | `claudine` *(no subcommand)* | Render rich grouped help (replaces retired `about` command) |
 
 **Config TUI Messenger Tab**

@@ -93,19 +93,20 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         .collect();
 
     if selected_agents.is_empty() {
-        log::error("No agents detected. Exiting.");
-        return Ok(());
+        log::warn("No agents detected on this host.");
+        log::message("Continuing without a favorite agent — you can configure one later.");
+        log::message("");
+    } else {
+        log::message("");
+        log::message(&format!(
+            "Detected {} available agent(s)",
+            selected_agents.len()
+        ));
+        for agent in &selected_agents {
+            log::message(&format!("  {}", agent.provider));
+        }
+        log::message("");
     }
-
-    log::message("");
-    log::message(&format!(
-        "Detected {} available agent(s)",
-        selected_agents.len()
-    ));
-    for agent in &selected_agents {
-        log::message(&format!("  {}", agent.provider));
-    }
-    log::message("");
 
     // Phase 2: Provider Preferences
     log::message("Phase 2: Provider Preferences");
@@ -136,13 +137,15 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         }
     };
 
-    let first_agent = selected_agents.first().expect("at least one agent");
+    let first_agent = selected_agents.first();
 
     let mut actions = HashMap::new();
-    let hook_events = provider_hook_events(first_agent.provider);
-    for event in &hook_events {
-        let event_actions = actions_for_event(*event, &action_profile);
-        actions.insert(*event, event_actions);
+    if let Some(agent) = first_agent {
+        let hook_events = provider_hook_events(agent.provider);
+        for event in &hook_events {
+            let event_actions = actions_for_event(*event, &action_profile);
+            actions.insert(*event, event_actions);
+        }
     }
 
     let total_bindings = actions.len();
@@ -182,8 +185,9 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         logging: true,
         protect,
         actions,
-        preferred_agent: first_agent.provider,
+        preferred_agent: first_agent.map(|agent| agent.provider),
         canonical_provider: canonical_provider.and_then(|_| preference.first().copied()),
+        models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
     };
 
@@ -437,7 +441,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         .filter(|provider| !provider_hook_events(*provider).is_empty())
         .collect();
 
-    let preferred_agent = quick_providers.first().copied().unwrap_or(Provider::Claude);
+    let preferred_agent = quick_providers.first().copied();
 
     let mut actions = HashMap::new();
     if let Some(&first_provider) = quick_providers.first() {
@@ -494,6 +498,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         actions,
         preferred_agent,
         canonical_provider,
+        models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
     })
 }
@@ -597,8 +602,9 @@ mod tests {
             logging: true,
             protect: ProtectConfig::default(),
             actions,
-            preferred_agent: Provider::Claude,
+            preferred_agent: Some(Provider::Claude),
             canonical_provider: None,
+            models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
         }
     }

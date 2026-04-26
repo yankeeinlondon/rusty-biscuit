@@ -5,7 +5,9 @@ On every `<TAB>` the generated script invokes a hidden subcommand,
 `claudine __complete`, which classifies the cursor position, dispatches
 to a slot-specific completer, and prints one candidate per line on
 stdout. Non-targeted slots produce no candidates, which lets each shell
-fall back to its native file / flag completion.
+fall back to its native file / flag completion. Fish uses an explicit
+`__fish_complete_path` call inside the generated function so empty
+engine output still surfaces path candidates.
 
 This document is the user-facing reference for the completion surface:
 how to install it, what the root menu offers, how composition-command
@@ -286,6 +288,39 @@ a marker for "resolve from the scope tree." Once completion has resolved
 the file, the marker has done its job; leaving it in would force the
 shell to re-resolve on every subsequent edit.
 
+#### Directory candidates in magic mode
+
+Directories surface alongside file matches at Short (1–2 char) and Long
+(3+ char) prefix lengths in magic mode, mirroring Word-mode directory
+behavior. Empty (`@<TAB>`) remains directory-free.
+
+| Prefix length | File matching | Directory matching |
+| :--- | :--- | :--- |
+| Empty (`@<TAB>`) | every file in the winning tier | none |
+| Short (`@pl`) | fuzzy on file stem | starting-substring on dir leaf |
+| Long (`@plan`) | fuzzy on file stem | fuzzy on dir leaf |
+
+For bare magic (e.g. `@pl`), directory candidates come from the
+**repo-wide directory walk** — the same walk Word mode uses — rooted at
+the workspace / git / cwd root. For path-shaped magic (e.g.
+`@prompts/pl`), the directory walk is constrained to the magic-resolved
+subdirectory, so `@prompts/pl<TAB>` surfaces `prompts/planning/` rather
+than every `pl*`-named directory at the repo root.
+
+The directory walk runs **independently of the file-tier shadow rule**.
+The first-hit-wins shadowing in spec §5.5 only applies to **files**:
+when a higher-priority scope (e.g. repo `prompts/`) wins the file tier,
+lower-priority scopes (e.g. `~/.claudine/prompts/`) are shadowed for
+files, but matching directories from the repo-wide walk still surface.
+
+**Why mirror Word and Magic for directories.** The `@` sigil is the
+search sigil — users reach for it interchangeably with Word mode. An
+asymmetry where `pl<TAB>` surfaces `planning/` but `@pl<TAB>` does not
+would be a UX surprise tied to no real semantic distinction. Files
+participate in scope priority because authoring intent depends on which
+prompt source the user wants; directories are filesystem navigation and
+share the same surface across both sigils.
+
 ### Committed directory
 
 A partial ending in `/` (or preceded by any path segment) is a committed
@@ -338,7 +373,13 @@ itself would refuse.
 #### `inline-compose`
 
 - **Scope extras:** `<repo>/docs/`; agent-skill peer directories
-  (`.claude/skills/`, `.codex/skills/`, …) with `follow_links = false`.
+  with `follow_links = false`:
+  `.claude/skills/`, `.codex/skills/`, `.gemini/skills/`,
+  `.opencode/skills/`, `.goose/skills/`, `.qwen/skills/`,
+  `.kimi/skills/`. The same seven peers are enumerated in
+  `cli/src/completion/scopes.rs::SKILL_PEER_DIRS` — that constant is
+  the source of truth; if it changes, this list and the spec must
+  change with it.
 - **Frontmatter gate:** the file must have a non-empty string `prompt`
   key.
 
@@ -351,14 +392,22 @@ duplicates from Claudine's own cross-provider linker.
 
 - **Scope extras:** same as `inline-compose` (`docs/` + agent-skill
   peers, `follow_links = false`).
-- **Frontmatter gate:** the file must have a `sequence` key that
-  resolves to an inline list or an external `.yaml` / `.yml` file.
+- **Frontmatter gate:** the file must have a `sequence` key (markdown
+  candidate) or a top-level `sequence` key (raw `.yaml` / `.yml`
+  candidate). Presence-only — the validator does not resolve external
+  references; see the "Why presence-only" note below.
 
-**Why resolve external references at completion time.** A dangling
-external reference would render a file that never actually runs; the
-user would lose trust in the candidate list the first time a
-suggestion failed. The validator resolves inline or external sequence
-specs so every offered candidate is runnable.
+**Why presence-only validation for sequence frontmatter.** The
+completion validator accepts a `sequence:` markdown candidate so
+long as the `sequence` key is present in frontmatter — it does
+**not** resolve external `sequence` references (`sequence:
+steps.yaml`) at completion time. The runtime composition pipeline
+is the authority on whether a given sequence file actually runs.
+Resolving externals in the validator would have to re-implement
+the runtime resolver, double the per-candidate cost in the
+frontmatter parse path, and still not catch every runtime failure
+mode. Completion is content to surface the candidate and let
+runtime fail loudly if the external is missing.
 
 ### `.gitignore` honored
 
@@ -641,6 +690,34 @@ $ claudine compose @prompts/plan<TAB>
 
 $ claudine compose @.claudine/prompts/plan<TAB>
 → .claudine/prompts/plan.md
+
+# Nested directories work too — drills into <repo>/prompts/drafts/
+$ claudine compose @prompts/drafts/plan<TAB>
+→ prompts/drafts/plan.md
+```
+
+### Non-magic repo `.claudine` scope
+
+```text
+# Given <repo>/.claudine/prompts/plan.md exists
+$ claudine compose .claudine/prompts/plan<TAB>
+→ .claudine/prompts/plan.md
+```
+
+### Non-magic package scope
+
+```text
+# Given <repo>/<pkg>/prompts/plan.md exists and cwd is inside <pkg>/
+$ claudine compose plan<TAB>
+→ prompts/plan.md
+```
+
+### Non-magic user-global scope
+
+```text
+# Given ~/.claudine/prompts/plan.md exists and no repo-local match
+$ claudine compose plan<TAB>
+→ ~/.claudine/prompts/plan.md
 ```
 
 ### One-character partial surfaces repo directories
