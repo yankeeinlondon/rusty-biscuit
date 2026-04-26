@@ -16,7 +16,7 @@
 use sniff::error::SniffError;
 use sniff::remote::{
     BitbucketRemote, DocumentCategory, GitHubRemote, GitLabRemote, GitProvider, GitRemote,
-    GiteaRemote, RemoteRepoProvider,
+    GiteaRemote, PullRequestState, RemoteRepoProvider,
 };
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -255,7 +255,7 @@ mod github_tests {
             .await;
 
         let prs = provider
-            .list_pull_requests("test-owner", "test-repo")
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
             .await
             .unwrap();
 
@@ -269,6 +269,113 @@ mod github_tests {
         assert_eq!(prs[0].target_branch, Some("main".to_string()));
         assert!(prs[0].labels.is_empty()); // GitHub PullRequestSummary doesn't expose labels in schematic schema
         assert!(prs[0].body.as_ref().unwrap().contains("This PR adds"));
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_merged_filter() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 1,
+                    "title": "Merged PR",
+                    "state": "closed",
+                    "user": {"login": "user1", "id": 1},
+                    "draft": false,
+                    "head": {"ref": "branch1", "sha": "abc123"},
+                    "base": {"ref": "main", "sha": "def456"},
+                    "labels": [],
+                    "body": null,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-02T00:00:00Z",
+                    "merged_at": "2024-01-02T00:00:00Z",
+                    "html_url": "https://github.com/test-owner/test-repo/pull/1",
+                    "url": "https://api.github.com/repos/test-owner/test-repo/pulls/1"
+                },
+                {
+                    "number": 2,
+                    "title": "Closed PR",
+                    "state": "closed",
+                    "user": {"login": "user2", "id": 2},
+                    "draft": false,
+                    "head": {"ref": "branch2", "sha": "abc123"},
+                    "base": {"ref": "main", "sha": "def456"},
+                    "labels": [],
+                    "body": null,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-02T00:00:00Z",
+                    "merged_at": null,
+                    "html_url": "https://github.com/test-owner/test-repo/pull/2",
+                    "url": "https://api.github.com/repos/test-owner/test-repo/pulls/2"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Merged)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 1);
+        assert_eq!(prs[0].title, "Merged PR");
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_draft_filter() {
+        let (server, provider) = setup_github_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 1,
+                    "title": "Draft PR",
+                    "state": "open",
+                    "user": {"login": "user1", "id": 1},
+                    "draft": true,
+                    "head": {"ref": "branch1", "sha": "abc123"},
+                    "base": {"ref": "main", "sha": "def456"},
+                    "labels": [],
+                    "body": null,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-02T00:00:00Z",
+                    "merged_at": null,
+                    "html_url": "https://github.com/test-owner/test-repo/pull/1",
+                    "url": "https://api.github.com/repos/test-owner/test-repo/pulls/1"
+                },
+                {
+                    "number": 2,
+                    "title": "Open PR",
+                    "state": "open",
+                    "user": {"login": "user2", "id": 2},
+                    "draft": false,
+                    "head": {"ref": "branch2", "sha": "abc123"},
+                    "base": {"ref": "main", "sha": "def456"},
+                    "labels": [],
+                    "body": null,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-02T00:00:00Z",
+                    "merged_at": null,
+                    "html_url": "https://github.com/test-owner/test-repo/pull/2",
+                    "url": "https://api.github.com/repos/test-owner/test-repo/pulls/2"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Draft)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 1);
+        assert_eq!(prs[0].title, "Draft PR");
+        assert!(prs[0].draft);
     }
 
     #[tokio::test]
@@ -612,7 +719,7 @@ mod gitlab_tests {
             .await;
 
         let mrs = provider
-            .list_pull_requests("test-owner", "test-repo")
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
             .await
             .unwrap();
 
@@ -623,6 +730,64 @@ mod gitlab_tests {
         assert_eq!(mrs[0].author, "developer1");
         assert_eq!(mrs[0].labels, vec!["testing", "feature"]);
         assert_eq!(mrs[0].body, Some("Implements feature X as described in #123.".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_draft_filter() {
+        let (server, provider) = setup_gitlab_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v4/projects/.*/merge_requests.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": 1000,
+                    "iid": 15,
+                    "project_id": 5000,
+                    "title": "Draft MR",
+                    "state": "opened",
+                    "author": {"username": "developer1", "id": 100},
+                    "draft": true,
+                    "work_in_progress": true,
+                    "source_branch": "feature-x",
+                    "target_branch": "main",
+                    "labels": ["testing"],
+                    "description": "WIP: draft work",
+                    "created_at": "2024-06-10T08:00:00Z",
+                    "updated_at": "2024-06-15T12:00:00Z",
+                    "merged_at": null,
+                    "web_url": "https://gitlab.com/test-owner/test-repo/-/merge_requests/15"
+                },
+                {
+                    "id": 1001,
+                    "iid": 16,
+                    "project_id": 5000,
+                    "title": "Open MR",
+                    "state": "opened",
+                    "author": {"username": "developer2", "id": 101},
+                    "draft": false,
+                    "work_in_progress": false,
+                    "source_branch": "feature-y",
+                    "target_branch": "main",
+                    "labels": ["feature"],
+                    "description": "Ready for review",
+                    "created_at": "2024-06-10T08:00:00Z",
+                    "updated_at": "2024-06-15T12:00:00Z",
+                    "merged_at": null,
+                    "web_url": "https://gitlab.com/test-owner/test-repo/-/merge_requests/16"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let mrs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Draft)
+            .await
+            .unwrap();
+
+        assert_eq!(mrs.len(), 1);
+        assert_eq!(mrs[0].number, 15);
+        assert_eq!(mrs[0].title, "Draft MR");
+        assert!(mrs[0].draft);
     }
 
     #[tokio::test]
@@ -939,7 +1104,7 @@ mod gitea_tests {
             .await;
 
         let prs = provider
-            .list_pull_requests("test-owner", "test-repo")
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
             .await
             .unwrap();
 
@@ -948,6 +1113,57 @@ mod gitea_tests {
         assert_eq!(prs[0].title, "Add new endpoint");
         assert!(prs[0].labels.is_empty());
         assert_eq!(prs[0].body, Some("Adds a new API endpoint.".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_merged_filter() {
+        let (server, provider) = setup_gitea_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 1,
+                    "title": "Merged PR",
+                    "state": "closed",
+                    "user": {"login": "user1", "id": 1},
+                    "draft": false,
+                    "head": {"ref": "branch1"},
+                    "base": {"ref": "main"},
+                    "labels": [],
+                    "body": null,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-02T00:00:00Z",
+                    "merged_at": "2024-01-02T00:00:00Z",
+                    "html_url": "https://gitea.example.com/test-owner/test-repo/pulls/1"
+                },
+                {
+                    "number": 2,
+                    "title": "Closed PR",
+                    "state": "closed",
+                    "user": {"login": "user2", "id": 2},
+                    "draft": false,
+                    "head": {"ref": "branch2"},
+                    "base": {"ref": "main"},
+                    "labels": [],
+                    "body": null,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-02T00:00:00Z",
+                    "merged_at": null,
+                    "html_url": "https://gitea.example.com/test-owner/test-repo/pulls/2"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Merged)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 1);
+        assert_eq!(prs[0].title, "Merged PR");
     }
 
     #[tokio::test]
@@ -1294,7 +1510,7 @@ mod bitbucket_tests {
             .await;
 
         let prs = provider
-            .list_pull_requests("test-workspace", "test-repo")
+            .list_pull_requests("test-workspace", "test-repo", PullRequestState::Open)
             .await
             .unwrap();
 
@@ -1304,6 +1520,81 @@ mod bitbucket_tests {
         assert_eq!(prs[0].state, "open");
         assert!(prs[0].labels.is_empty());
         assert!(prs[0].body.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_merged_filter() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/pullrequests.*",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "values": [
+                        {
+                            "id": 1,
+                            "title": "Merged PR",
+                            "state": "MERGED",
+                            "author": {"type": "user", "display_name": "Alice Developer"},
+                            "source": {"branch": {"name": "feature/merged"}},
+                            "destination": {"branch": {"name": "main"}},
+                            "created_on": "2024-06-12T14:00:00Z",
+                            "updated_on": "2024-06-16T09:00:00Z",
+                            "links": {"html": {"href": "https://bitbucket.org/test-workspace/test-repo/pull-requests/1"}}
+                        },
+                        {
+                            "id": 2,
+                            "title": "Declined PR",
+                            "state": "DECLINED",
+                            "author": {"type": "user", "display_name": "Bob Developer"},
+                            "source": {"branch": {"name": "feature/declined"}},
+                            "destination": {"branch": {"name": "main"}},
+                            "created_on": "2024-06-12T14:00:00Z",
+                            "updated_on": "2024-06-16T09:00:00Z",
+                            "links": {"html": {"href": "https://bitbucket.org/test-workspace/test-repo/pull-requests/2"}}
+                        }
+                    ],
+                    "size": 2,
+                    "pagelen": 10,
+                    "page": 1
+                })),
+            )
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-workspace", "test-repo", PullRequestState::Merged)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 1);
+        assert_eq!(prs[0].title, "Merged PR");
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_draft_returns_empty() {
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/pullrequests.*",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(bitbucket_pull_requests_fixture()),
+            )
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-workspace", "test-repo", PullRequestState::Draft)
+            .await
+            .unwrap();
+
+        // Bitbucket doesn't have draft PRs
+        assert!(prs.is_empty());
     }
 
     #[tokio::test]
