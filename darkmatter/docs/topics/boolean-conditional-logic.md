@@ -1,6 +1,11 @@
 # Boolean Conditional Logic
 
-Darkmatter uses a shared condition evaluator for `when="..."` expressions. That evaluator powers:
+Darkmatter relies on boolean logic expressions in various parts of Darkmatter:
+
+- the `when="..."` clause of [page blocks](../inline/page-blocks.md), [transclusion](../transclusion/block-transclusion.md), and in all other directives which provide a _conditional_ feature.
+- beyond directives with a `when` parameter, we can also use 
+
+uses a shared condition evaluator for `when="..."` expressions. That evaluator powers:
 
 - page blocks via `::block when="..."`
 - block transclusion via `::file`, `::code`, and `::url` directives with `when="..."`
@@ -39,7 +44,9 @@ Supported variable forms:
     - see [context variables](./context-variables.md) for more details
 - environment keys: `env.AGENT`, `env.HOME`
 
-One important detail: when an unprefixed key is not found in frontmatter or inherited state, Darkmatter falls back to `ctx.<key>`. That means `repo` can resolve to `ctx.repo`.
+One important detail: 
+
+- when an unprefixed key is not found in frontmatter or inherited state, Darkmatter falls back to `ctx.<key>`. That means `repo` can resolve to `ctx.repo`.
 
 ## Truthiness Rules
 
@@ -67,7 +74,7 @@ Conditions support:
 
 - string literals with either double or single quotes: `"claude"`, `'claude'`
 - numeric literals: `0`, `1`, `3.14`
-- parentheses for grouping: `(env.AGENT | "default") == "claude"`
+- parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
 
 ## Operator Precedence
 
@@ -76,12 +83,11 @@ From highest precedence to lowest:
 1. function calls
 2. unary `!`
 3. comparisons: `==`, `!=`, `>`, `>=`, `<`
-4. fallback: `|`
-5. logical AND: `&&`
-6. logical OR: `||`
-7. ternary: `? :`
+4. logical AND: `&&`
+5. logical OR: `||`
+6. ternary: `? :`
 
-Fallback binds tighter than `&&`, and `&&` binds tighter than `||`. Use parentheses whenever the desired grouping is not obvious.
+`&&` binds tighter than `||`. Use parentheses whenever the desired grouping is not obvious.
 
 There is no `<=` operator today. Express that as `!(x > y)` or by flipping the comparison.
 
@@ -89,15 +95,15 @@ There is no `<=` operator today. Express that as `!(x > y)` or by flipping the c
 
 Darkmatter parses `{{ ... }}` interpolation expressions and `when="..."` condition expressions with the same parser but in two different modes. The operator set differs between modes:
 
-| Context | `\|` | `\|\|` | `&&` |
-|---------|------|--------|------|
-| Interpolation `{{ ... }}` | fallback | fallback (alias of `\|`) | syntax error |
-| Condition `when="..."` | fallback | logical OR | logical AND |
+| Surface | `||` meaning |
+| --- | --- |
+| `{{ ... }}` | fallback, first truthy value wins |
+| `when="..."` | logical OR, returns a boolean |
 
 That means:
 
 - `when="a || b"` is logical OR and evaluates to a boolean
-- `{{ a || "default" }}` remains fallback sugar and expands to the first truthy value
+- `{{ a || "default" }}` is fallback sugar and expands to the first truthy value
 - `{{ a && b }}` is still rejected at parse time
 - `when="a && b"` is logical AND
 
@@ -216,16 +222,6 @@ Use parentheses whenever the desired grouping would otherwise be ambiguous:
 ::file ./alert.md when="priority == 'high' && (env.PROD || env.FORCE)"
 ```
 
-### Fallback Mixed with Boolean Logic
-
-Fallback `|` still binds tighter than `&&`. You can pick a default for an operand without changing the surrounding boolean expression:
-
-```md
-::file ./notes.md when="(env.AGENT | env.DEFAULT_AGENT) == 'claude' && !draft"
-```
-
-Here `env.AGENT | env.DEFAULT_AGENT` resolves first, then the comparison runs, and finally the AND combines with `!draft`.
-
 ## Functions
 
 Function names are case-insensitive. `HasKey`, `has_key`, and `haskey` all resolve to the same function.
@@ -324,18 +320,6 @@ Top-tier result
 ## Fallback and Ternary Expressions
 
 Because the condition evaluator reuses Darkmatter's expression parser, `when=` also supports fallback and ternary expressions.
-
-### Fallback with `|`
-
-`a | b` returns `a` when `a` is truthy; otherwise it returns `b`.
-
-```md
-::block when="env.AGENT | env.DEFAULT_AGENT"
-Some agent value is available.
-::end-block
-```
-
-In condition mode, `|` is still fallback — only `||` is logical OR.
 
 ### Ternary with `? :`
 

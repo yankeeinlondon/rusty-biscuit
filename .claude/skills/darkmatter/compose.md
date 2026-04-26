@@ -113,8 +113,8 @@ Expressions between `{{ }}` are evaluated and replaced with values.
 ### Fallback Expressions
 
 ```handlebars
-{{ color | "unknown" }}
-{{ primary | secondary | "default" }}
+{{ color || "unknown" }}
+{{ primary || secondary || "default" }}
 ```
 
 Uses first truthy value, or the fallback.
