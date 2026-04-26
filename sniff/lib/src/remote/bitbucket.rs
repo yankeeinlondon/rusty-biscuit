@@ -11,7 +11,8 @@ use super::{
     provider::RemoteRepoProvider,
     types::{
         CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-        OrgRepoRef, PullRequestInfo, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
+        OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
+        TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -403,8 +404,24 @@ impl RemoteRepoProvider for BitbucketRemote {
         &self,
         workspace: &str,
         repo_slug: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let request = ListPullRequestsRequest::new(workspace, repo_slug);
+        let mut request = ListPullRequestsRequest::new(workspace, repo_slug);
+
+        // Map PullRequestState to Bitbucket API state parameter
+        match state {
+            PullRequestState::Open => {
+                request = request.with_state("OPEN".to_string());
+            }
+            PullRequestState::Merged => {
+                request = request.with_state("MERGED".to_string());
+            }
+            PullRequestState::Closed | PullRequestState::Draft | PullRequestState::All => {
+                // Bitbucket doesn't support querying multiple states or "ALL" in a single
+                // request. Leave state unset to get all PRs, then post-filter.
+            }
+        }
+
         let response: PaginatedResponse<PullRequest> = self
             .client
             .request(request)
@@ -412,7 +429,7 @@ impl RemoteRepoProvider for BitbucketRemote {
             .map_err(map_schematic_error)?;
 
         // Extract .values from paginated response (first page only for MVP)
-        Ok(response
+        let mut prs: Vec<PullRequestInfo> = response
             .values
             .into_iter()
             .map(|pr| {
@@ -461,7 +478,24 @@ impl RemoteRepoProvider for BitbucketRemote {
                     html_url,
                 }
             })
-            .collect())
+            .collect();
+
+        // Post-filter for states Bitbucket API doesn't support directly
+        match state {
+            PullRequestState::Closed => {
+                prs.retain(|pr| pr.state == "declined" || pr.state == "superseded");
+            }
+            PullRequestState::Merged => {
+                prs.retain(|pr| pr.state == "merged");
+            }
+            PullRequestState::Draft => {
+                // Bitbucket doesn't have draft PRs
+                prs.clear();
+            }
+            _ => {}
+        }
+
+        Ok(prs)
     }
 
     async fn list_issues(

@@ -11,7 +11,8 @@ use super::{
     provider::RemoteRepoProvider,
     types::{
         CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, LicenseRef,
-        OrgInfo, OrgRepoRef, PullRequestInfo, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
+        OrgInfo, OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
+        TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -294,15 +295,30 @@ impl RemoteRepoProvider for GitHubRemote {
         &self,
         owner: &str,
         repo: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let request = ListPullRequestsRequest::new(owner, repo);
+        let mut request = ListPullRequestsRequest::new(owner, repo);
+
+        // Map PullRequestState to GitHub API state parameter
+        match state {
+            PullRequestState::Open => {
+                request = request.with_state("open".to_string());
+            }
+            PullRequestState::Closed => {
+                request = request.with_state("closed".to_string());
+            }
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => {
+                request = request.with_state("all".to_string());
+            }
+        }
+
         let prs: Vec<PullRequestSummary> = self
             .client
             .request(request)
             .await
             .map_err(map_schematic_error)?;
 
-        Ok(prs
+        let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
             .map(|pr| PullRequestInfo {
                 number: pr.number,
@@ -319,7 +335,20 @@ impl RemoteRepoProvider for GitHubRemote {
                 merged_at: pr.merged_at,
                 html_url: pr.html_url,
             })
-            .collect())
+            .collect();
+
+        // Post-filter for states GitHub API doesn't support directly
+        match state {
+            PullRequestState::Merged => {
+                prs.retain(|pr| pr.merged_at.is_some());
+            }
+            PullRequestState::Draft => {
+                prs.retain(|pr| pr.draft);
+            }
+            _ => {}
+        }
+
+        Ok(prs)
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {

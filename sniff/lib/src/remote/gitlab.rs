@@ -19,7 +19,8 @@ use super::{
     provider::RemoteRepoProvider,
     types::{
         CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-        OrgRepoRef, PullRequestInfo, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
+        OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
+        TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -344,16 +345,34 @@ impl RemoteRepoProvider for GitLabRemote {
         &self,
         owner: &str,
         repo: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
         let project_id = encode_project_id(owner, repo);
-        let request = ListMergeRequestsRequest::new(&project_id);
+        let mut request = ListMergeRequestsRequest::new(&project_id);
+
+        // Map PullRequestState to GitLab API state parameter
+        match state {
+            PullRequestState::Open => {
+                request = request.with_state("opened".to_string());
+            }
+            PullRequestState::Closed => {
+                request = request.with_state("closed".to_string());
+            }
+            PullRequestState::Merged => {
+                request = request.with_state("merged".to_string());
+            }
+            PullRequestState::Draft | PullRequestState::All => {
+                request = request.with_state("all".to_string());
+            }
+        }
+
         let mrs: Vec<MergeRequest> = self
             .client
             .request(request)
             .await
             .map_err(map_schematic_error)?;
 
-        Ok(mrs
+        let mut mrs: Vec<PullRequestInfo> = mrs
             .into_iter()
             .map(|mr| PullRequestInfo {
                 number: mr.iid,
@@ -370,7 +389,14 @@ impl RemoteRepoProvider for GitLabRemote {
                 merged_at: mr.merged_at,
                 html_url: mr.web_url.unwrap_or_default(),
             })
-            .collect())
+            .collect();
+
+        // Post-filter for Draft since GitLab API doesn't have a direct draft filter
+        if state == PullRequestState::Draft {
+            mrs.retain(|mr| mr.draft);
+        }
+
+        Ok(mrs)
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {

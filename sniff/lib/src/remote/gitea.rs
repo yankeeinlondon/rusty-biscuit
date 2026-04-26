@@ -15,7 +15,8 @@ use super::{
     provider::RemoteRepoProvider,
     types::{
         CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-        OrgRepoRef, PullRequestInfo, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
+        OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
+        TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -377,15 +378,30 @@ impl RemoteRepoProvider for GiteaRemote {
         &self,
         owner: &str,
         repo: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let request = ListPullRequestsRequest::new(owner, repo);
+        let mut request = ListPullRequestsRequest::new(owner, repo);
+
+        // Map PullRequestState to Gitea API state parameter
+        match state {
+            PullRequestState::Open => {
+                request = request.with_state("open".to_string());
+            }
+            PullRequestState::Closed => {
+                request = request.with_state("closed".to_string());
+            }
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => {
+                request = request.with_state("all".to_string());
+            }
+        }
+
         let prs: Vec<PullRequestSummary> = self
             .client
             .request(request)
             .await
             .map_err(map_schematic_error)?;
 
-        Ok(prs
+        let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
             .filter_map(|pr| {
                 // Skip PRs without essential fields
@@ -415,7 +431,20 @@ impl RemoteRepoProvider for GiteaRemote {
                     html_url,
                 })
             })
-            .collect())
+            .collect();
+
+        // Post-filter for states Gitea API doesn't support directly
+        match state {
+            PullRequestState::Merged => {
+                prs.retain(|pr| pr.merged_at.is_some());
+            }
+            PullRequestState::Draft => {
+                prs.retain(|pr| pr.draft);
+            }
+            _ => {}
+        }
+
+        Ok(prs)
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
