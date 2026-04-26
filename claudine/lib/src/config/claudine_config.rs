@@ -1886,7 +1886,10 @@ mod tests {
             }
         });
         let result = serde_json::from_value::<ClaudineConfig>(json);
-        assert!(result.is_err(), "unknown field inside detailed override should be rejected");
+        assert!(
+            result.is_err(),
+            "unknown field inside detailed override should be rejected"
+        );
     }
 
     // -------------------------------------------------------------------------
