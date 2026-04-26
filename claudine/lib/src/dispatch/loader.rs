@@ -1020,7 +1020,7 @@ mod tests {
 
         let user_path = dir.path().join("user-config.json");
         let user_config = ClaudineConfig {
-            preferred_agent: Provider::Claude,
+            preferred_agent: Some(Provider::Claude),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&user_config, &user_path).unwrap();
@@ -1042,7 +1042,7 @@ mod tests {
         let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
         assert_eq!(
             loaded.preferred_agent,
-            Provider::Claude,
+            Some(Provider::Claude),
             "user config should be returned when repo config is old format"
         );
 
@@ -1092,7 +1092,7 @@ mod tests {
         let path = dir.path().join("config.json");
 
         let config = ClaudineConfig {
-            preferred_agent: Provider::Codex,
+            preferred_agent: Some(Provider::Codex),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&config, &path).unwrap();
@@ -1100,7 +1100,7 @@ mod tests {
         let loaded = load_claudine_config(Some(&path), None).unwrap();
         assert_eq!(
             loaded.preferred_agent,
-            Provider::Codex,
+            Some(Provider::Codex),
             "preferred_agent should be Codex as written"
         );
     }
@@ -1122,16 +1122,27 @@ mod tests {
         for provider in providers {
             let path = dir.path().join(format!("{provider:?}.json"));
             let config = ClaudineConfig {
-                preferred_agent: provider,
+                preferred_agent: Some(provider),
                 ..ClaudineConfig::default()
             };
             save_claudine_config(&config, &path).unwrap();
             let loaded = load_claudine_config(Some(&path), None).unwrap();
             assert_eq!(
-                loaded.preferred_agent, provider,
+                loaded.preferred_agent,
+                Some(provider),
                 "preferred_agent round-trip failed for {provider:?}"
             );
         }
+    }
+
+    #[test]
+    fn load_claudine_config_preferred_agent_absent_loads_as_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+
+        let loaded = load_claudine_config(Some(&path), None).unwrap();
+        assert!(loaded.preferred_agent.is_none());
     }
 
     #[test]
@@ -1140,7 +1151,7 @@ mod tests {
 
         let user_path = dir.path().join("user.json");
         let user_config = ClaudineConfig {
-            preferred_agent: Provider::Codex,
+            preferred_agent: Some(Provider::Codex),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&user_config, &user_path).unwrap();
@@ -1156,7 +1167,7 @@ mod tests {
         let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
         assert_eq!(
             loaded.preferred_agent,
-            Provider::Codex,
+            Some(Provider::Codex),
             "repo should not override user's preferred_agent"
         );
         assert_eq!(
@@ -1270,13 +1281,13 @@ mod tests {
         let path = dir.path().join("config.json");
 
         let new_config = ClaudineConfig {
-            preferred_agent: Provider::Claude,
+            preferred_agent: Some(Provider::Claude),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&new_config, &path).unwrap();
 
         let loaded = load_claudine_config(Some(&path), None).unwrap();
-        assert_eq!(loaded.preferred_agent, Provider::Claude);
+        assert_eq!(loaded.preferred_agent, Some(Provider::Claude));
         assert!(
             !dir.path().join("config.json.bak").exists(),
             "new format should not produce a backup"
