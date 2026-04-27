@@ -721,9 +721,10 @@ pub(crate) fn execute_composition_request_inner(
     // prompt-free base (the harness manages prompt delivery itself).
     let args_before_prompt = child_args.clone();
     let prompt_source = super::profile::PromptSource::Inline(effective_prompt.clone());
-    let stdin_seed = profile
-        .prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?
-        .apply_to(&mut child_args);
+    let delivery =
+        profile.prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?;
+    let wire_prompt = delivery.as_wire_rpc().map(str::to_string);
+    let stdin_seed = delivery.apply_to(&mut child_args);
 
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = env_plan.child_cwd.as_path();
@@ -1074,6 +1075,7 @@ pub(crate) fn execute_composition_request_inner(
             &env_plan.env,
             child_cwd,
             stdin_seed.as_deref(),
+            wire_prompt.as_deref(),
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
@@ -1150,6 +1152,7 @@ fn execute_without_harness(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
+    wire_prompt: Option<&str>,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
@@ -1175,6 +1178,7 @@ fn execute_without_harness(
             child_env,
             child_cwd,
             stdin_seed,
+            wire_prompt,
             structured_codex_output,
             stderr_noise,
             stream_verbosity,
@@ -1523,6 +1527,7 @@ fn run_structured_composition(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
+    wire_prompt: Option<&str>,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
@@ -1546,24 +1551,59 @@ fn run_structured_composition(
     let section_stream = sink.section_stream();
     let (build_parser, stderr_bridge) =
         super::build_structured_plumbing(provider, sink, parser_config);
-    let stream_result = exec::run_child_stream_semantic(
-        binary_path,
-        child_args,
-        child_env,
-        child_cwd,
-        None,
-        None,
-        stderr_noise,
-        profile.suppress_structured_stderr_on_success(),
-        stream_verbosity != Verbosity::Silent,
-        stdin_seed,
-        build_parser,
-        child_spawned,
-        live_metrics,
-        stream_output,
-        stderr_bridge,
-        prompt_timing,
-    )?;
+    let stream_result = if let Some(wire_prompt) = wire_prompt {
+        let runtime_context =
+            match claudine::dispatch::DispatchRuntimeContext::load_for_env(env_context) {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::warn!(%provider, "failed to preload wire runtime config: {error}");
+                    claudine::dispatch::DispatchRuntimeContext::default()
+                }
+            };
+        let _ = stderr_bridge;
+        let _ = prompt_timing;
+        let _ = stdin_seed;
+        super::wire_io::run_kimi_wire_session(
+            super::wire_io::WireSessionConfig {
+                binary: binary_path,
+                args: child_args,
+                env: child_env,
+                cwd: child_cwd,
+                prompt: wire_prompt.to_string(),
+                timeout: None,
+                client_name: env!("CARGO_PKG_NAME"),
+                client_version: env!("CARGO_PKG_VERSION"),
+                capabilities: super::wire_io::WireClientCapabilities::default_for_claudine(),
+                env_context: env_context.clone(),
+            },
+            super::wire_io::WireSessionWiring {
+                build_parser,
+                stream_output,
+                live_metrics,
+                runtime_context,
+            },
+            child_spawned,
+        )?
+    } else {
+        exec::run_child_stream_semantic(
+            binary_path,
+            child_args,
+            child_env,
+            child_cwd,
+            None,
+            None,
+            stderr_noise,
+            profile.suppress_structured_stderr_on_success(),
+            stream_verbosity != Verbosity::Silent,
+            stdin_seed,
+            build_parser,
+            child_spawned,
+            live_metrics,
+            stream_output,
+            stderr_bridge,
+            prompt_timing,
+        )?
+    };
     let telemetry = stream_result.telemetry;
     let mut summary = stream_result.data;
 

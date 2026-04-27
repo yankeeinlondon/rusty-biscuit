@@ -130,6 +130,11 @@ pub(crate) struct AttemptLaunch {
     pub(crate) args: Vec<String>,
     pub(crate) env: HashMap<OsString, OsString>,
     pub(crate) stdin_seed: Option<String>,
+    /// Wire-mode JSON-RPC prompt body, when the provider's prompt
+    /// delivery requested transport via [`super::wire_io::run_kimi_wire_session`]
+    /// instead of stdin / argv. Mutually exclusive with `stdin_seed` for
+    /// the same launch.
+    pub(crate) wire_prompt: Option<String>,
     pub(crate) timeout: Option<u64>,
     /// Silence-detection step timeout in seconds, if configured.
     ///
@@ -1484,10 +1489,13 @@ fn run_provider_wrapper_inner(
         None
     };
 
+    let mut wire_prompt: Option<String> = None;
     let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {
-        profile
-            .prompt_delivery(&child_args, prompt, effective_non_interactive)?
-            .apply_to(&mut child_args)
+        let delivery = profile.prompt_delivery(&child_args, prompt, effective_non_interactive)?;
+        if let Some(body) = delivery.as_wire_rpc() {
+            wire_prompt = Some(body.to_string());
+        }
+        delivery.apply_to(&mut child_args)
     } else {
         None
     };
@@ -1650,24 +1658,57 @@ fn run_provider_wrapper_inner(
             let (build_parser, stderr_bridge) =
                 build_structured_plumbing(provider, sink, parser_config);
             let mut _spawned = false;
-            let stream_result = exec::run_child_stream_semantic(
-                binary_path.as_path(),
-                &child_args,
-                &env_plan.env,
-                child_cwd,
-                args.timeout,
-                cli_step_timeout_secs,
-                stderr_noise,
-                profile.suppress_structured_stderr_on_success(),
-                stream_verbosity != Verbosity::Silent,
-                stdin_seed.as_deref(),
-                build_parser,
-                &mut _spawned,
-                live_metrics,
-                stream_output,
-                stderr_bridge,
-                None,
-            )?;
+            let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
+                let runtime_context =
+                    match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env_context) {
+                        Ok(runtime) => runtime,
+                        Err(error) => {
+                            tracing::warn!(%provider, "failed to preload wire runtime config: {error}");
+                            claudine::dispatch::DispatchRuntimeContext::default()
+                        }
+                    };
+                let _ = stderr_bridge;
+                wire_io::run_kimi_wire_session(
+                    wire_io::WireSessionConfig {
+                        binary: binary_path.as_path(),
+                        args: &child_args,
+                        env: &env_plan.env,
+                        cwd: child_cwd,
+                        prompt: wire_prompt,
+                        timeout: args.timeout,
+                        client_name: env!("CARGO_PKG_NAME"),
+                        client_version: env!("CARGO_PKG_VERSION"),
+                        capabilities: wire_io::WireClientCapabilities::default_for_claudine(),
+                        env_context: env_context.clone(),
+                    },
+                    wire_io::WireSessionWiring {
+                        build_parser,
+                        stream_output,
+                        live_metrics,
+                        runtime_context,
+                    },
+                    &mut _spawned,
+                )?
+            } else {
+                exec::run_child_stream_semantic(
+                    binary_path.as_path(),
+                    &child_args,
+                    &env_plan.env,
+                    child_cwd,
+                    args.timeout,
+                    cli_step_timeout_secs,
+                    stderr_noise,
+                    profile.suppress_structured_stderr_on_success(),
+                    stream_verbosity != Verbosity::Silent,
+                    stdin_seed.as_deref(),
+                    build_parser,
+                    &mut _spawned,
+                    live_metrics,
+                    stream_output,
+                    stderr_bridge,
+                    None,
+                )?
+            };
             let mut summary = stream_result.data;
             let api_duration_ms = summary.duration_ms;
             if let Some(collector) = perf_collector.as_mut() {
@@ -2022,9 +2063,9 @@ fn build_harness_launch(
 
     let prompt = strip_prompt_tags_for_provider(provider, &materialized.prompt);
     let prompt_source = profile::PromptSource::Inline(prompt.clone());
-    let stdin_seed = profile
-        .prompt_delivery(&args, &prompt, effective_non_interactive)?
-        .apply_to(&mut args);
+    let delivery = profile.prompt_delivery(&args, &prompt, effective_non_interactive)?;
+    let wire_prompt = delivery.as_wire_rpc().map(str::to_string);
+    let stdin_seed = delivery.apply_to(&mut args);
     profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
 
     let mut env = base_env.clone();
@@ -2043,6 +2084,7 @@ fn build_harness_launch(
         args,
         env,
         stdin_seed,
+        wire_prompt,
         timeout: timeouts.timeout,
         step_timeout: timeouts.step_timeout,
     })
@@ -2124,24 +2166,58 @@ fn execute_harness_attempt(
         let section_stream = sink.section_stream();
         let (build_parser, stderr_bridge) =
             build_structured_plumbing(provider, sink, parser_config);
-        let stream_result = exec::run_child_stream_semantic(
-            binary_path,
-            &launch.args,
-            &launch.env,
-            child_cwd,
-            launch.timeout,
-            launch.step_timeout,
-            stderr_noise,
-            suppress_stderr_on_success,
-            stream_verbosity != Verbosity::Silent,
-            launch.stdin_seed.as_deref(),
-            build_parser,
-            child_spawned,
-            live_metrics,
-            stream_output,
-            stderr_bridge,
-            prompt_timing,
-        )?;
+        let stream_result = if let Some(wire_prompt) = launch.wire_prompt.clone() {
+            let runtime_context =
+                match claudine::dispatch::DispatchRuntimeContext::load_for_env(env_context) {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        tracing::warn!(%provider, "failed to preload wire runtime config: {error}");
+                        claudine::dispatch::DispatchRuntimeContext::default()
+                    }
+                };
+            let _ = stderr_bridge;
+            let _ = prompt_timing;
+            wire_io::run_kimi_wire_session(
+                wire_io::WireSessionConfig {
+                    binary: binary_path,
+                    args: &launch.args,
+                    env: &launch.env,
+                    cwd: child_cwd,
+                    prompt: wire_prompt,
+                    timeout: launch.timeout,
+                    client_name: env!("CARGO_PKG_NAME"),
+                    client_version: env!("CARGO_PKG_VERSION"),
+                    capabilities: wire_io::WireClientCapabilities::default_for_claudine(),
+                    env_context: env_context.clone(),
+                },
+                wire_io::WireSessionWiring {
+                    build_parser,
+                    stream_output,
+                    live_metrics,
+                    runtime_context,
+                },
+                child_spawned,
+            )?
+        } else {
+            exec::run_child_stream_semantic(
+                binary_path,
+                &launch.args,
+                &launch.env,
+                child_cwd,
+                launch.timeout,
+                launch.step_timeout,
+                stderr_noise,
+                suppress_stderr_on_success,
+                stream_verbosity != Verbosity::Silent,
+                launch.stdin_seed.as_deref(),
+                build_parser,
+                child_spawned,
+                live_metrics,
+                stream_output,
+                stderr_bridge,
+                prompt_timing,
+            )?
+        };
         let api_duration_ms = stream_result.data.duration_ms;
         let perf = Some(stream_result.telemetry.into_agent_perf(api_duration_ms));
         let termination = stream_result.termination;
