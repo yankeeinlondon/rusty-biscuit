@@ -60,6 +60,17 @@ skills_files_updated_during_phase4: []
 packages_during_phase_4:
     - claudine
     - claudine-cli
+source_files_during_phase_5:
+    - claudine/cli/src/commands/wrap/live_semantic_sink.rs
+    - claudine/cli/src/commands/wrap/wire_io.rs
+    - claudine/lib/src/adapters/kimicode.rs
+    - claudine/lib/src/stream/kimi_semantic.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
+packages_during_phase_5:
+    - claudine
+    - claudine-cli
 ---
 
 # Fix Kimi Wrapper Execution Plan
@@ -294,13 +305,13 @@ Files:
 
 Steps:
 
-- [ ] Add defensive Kimi entries to `SILENT_PROVIDER_EXTENSION_KINDS` for high-volume wire fallback kinds such as message deltas or tool-call parts.
-- [ ] Ensure Kimi `Notification` info renders as a readable block quote or equivalent existing info surface without raw JSON.
-- [ ] Ensure `PlanDisplay`, subagent, hook, auto-approval, unexpected-question, unsupported-external-tool, and diff-display events render as compact status/info lines.
-- [ ] Confirm `HookRequest.payload.event` maps through `adapters::kimicode` to Claudine canonical events.
-- [ ] Define the hook response conversion from dispatch outcomes, including allow, deny, and mutation cases if Kimi supports mutation in the payload.
-- [ ] Ensure hook dispatch errors are returned to Kimi as JSON-RPC errors or hook-deny responses and are also surfaced as `SemanticEvent::Error` or `Warning`.
-- [ ] Add tests proving known Kimi wire events do not leak to visible `ProviderExtension`, while unknown events remain logged as `ProviderExtension`.
+- [x] Add defensive Kimi entries to `SILENT_PROVIDER_EXTENSION_KINDS` for high-volume wire fallback kinds such as message deltas or tool-call parts. *(Added 7 Kimi entries covering `event:ContentPart`, `event:ToolCallPart`, `event:StatusUpdate`, plus legacy `event:MessageStart`/`event:MessageDelta`/`event:MessageEnd`/`event:Thinking` for cross-mode/payload-drift safety; events still flow through dispatch and JSONL log, only the stderr line is suppressed.)*
+- [x] Ensure Kimi `Notification` info renders as a readable block quote or equivalent existing info surface without raw JSON. *(Parser maps `Notification.message`/`title` to a plain `SemanticEvent::Info` whose live-sink renderer is `render_status(Info, message)` — a single compact status line with no raw JSON dumped.)*
+- [x] Ensure `PlanDisplay`, subagent, hook, auto-approval, unexpected-question, unsupported-external-tool, and diff-display events render as compact status/info lines. *(All wire events route through typed `SemanticEvent::Info`/`Warning`/`PlanUpdate` variants; the live sink renders each as a compact `render_status` line — verified by reading the `render_event` match arms and confirming none emit raw JSON.)*
+- [x] Confirm `HookRequest.payload.event` maps through `adapters::kimicode` to Claudine canonical events. *(Extended `adapters::kimicode::map_event` with the wire-mode hook event names (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionStart`, `SessionEnd`, `Notification`, `SubagentStart`, `SubagentStop`) so both transport paths share one canonical surface; added module-level doc explaining the relationship to `wire_io::map_kimi_hook_event`; covered by the new `hook_event_names_resolve_to_canonical_events` test.)*
+- [x] Define the hook response conversion from dispatch outcomes, including allow, deny, and mutation cases if Kimi supports mutation in the payload. *(`build_hook_response` maps `HookOutcome::Allow → "approve"`, `Deny → "reject"`, `Ask → "ask"`, with optional `reason`. Mutation is **not** supported by Kimi's wire `HookRequest` schema — hook responses carry only `decision` and `reason`, so v1 deliberately does not model a mutation field; if Kimi adds one, this builder is the single seam to extend.)*
+- [x] Ensure hook dispatch errors are returned to Kimi as JSON-RPC errors or hook-deny responses and are also surfaced as `SemanticEvent::Error` or `Warning`. *(Refactored `dispatch_hook_request` to return `HookDispatchResult { outcome, warning }`. Infrastructure failures (no runtime handle, dispatch `Err`) keep returning `Allow` to Kimi so the agent doesn't deadlock, and now also populate `warning` with a user-facing message. `handle_request_dispatch` returns an optional synthetic envelope on warnings; the reader thread feeds it through the parser. Parser `Notification` handler updated to emit Warning when `level == "error"`/`"warn"` so the synthetic envelope surfaces visibly.)*
+- [x] Add tests proving known Kimi wire events do not leak to visible `ProviderExtension`, while unknown events remain logged as `ProviderExtension`. *(Added `known_wire_events_do_not_leak_as_provider_extension` (sweeps every modeled event/request type and asserts no `ProviderExtension`), `unknown_event_type_emits_provider_extension_with_event_kind` (asserts `event:FutureKimiEvent` falls back as `ProviderExtension`), live-sink `provider_extension_kimi_high_volume_kinds_are_silent`, and `provider_extension_kimi_unknown_kinds_still_surface`.)*
 
 Parallelizable:
 
@@ -308,9 +319,11 @@ Parallelizable:
 
 Validation checkpoint:
 
-- `cargo test -p claudine-cli live_semantic_sink`
-- `cargo test -p claudine canonical_dispatch kimi`
-- Fixture replay confirms zero visible `ProviderExtension` events for covered Kimi wire fixtures.
+- `cargo test -p claudine-cli live_semantic_sink` — passes (7 tests including 2 new Kimi cases).
+- `cargo test -p claudine adapters::kimicode` — passes (8 tests including the new hook-name canonical-mapping case).
+- `cargo test -p claudine stream::kimi_semantic` — passes (26 tests including 4 new ones).
+- `cargo test -p claudine-cli wire_io` — passes (28 tests including 3 new ones).
+- Fixture replay (`known_wire_events_do_not_leak_as_provider_extension`) confirms zero visible `ProviderExtension` events for covered Kimi wire fixtures.
 
 ## Phase 6: End-To-End Validation And Drift Maintenance
 
