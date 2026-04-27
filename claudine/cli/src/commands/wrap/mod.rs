@@ -6,6 +6,7 @@ pub(crate) mod repo_home;
 pub(crate) mod section;
 pub(crate) mod stream_io;
 pub(crate) mod system_prompt;
+pub(crate) mod wire_io;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
