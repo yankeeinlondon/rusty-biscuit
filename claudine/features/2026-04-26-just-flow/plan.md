@@ -14,6 +14,12 @@ docs_created_during_phase_1:
     - claudine/prompts/implement-feature-review-suggestions.md
 skills_files_updated_during_phase1:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_2:
+    - just/flow.just
+docs_updated_during_phase_2:
+    - claudine/features/2026-04-26-just-flow/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
     - claudine
 ---
