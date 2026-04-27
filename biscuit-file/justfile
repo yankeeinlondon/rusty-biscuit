@@ -1,6 +1,8 @@
-set dotenv-load
-set positional-arguments
+set dotenv-load := true
+set positional-arguments := true
+
 # set allow-duplicate-recipes
+
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
@@ -8,6 +10,7 @@ import "../just/plan.just"
 import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
+import "../just/spec.just"
 import "../just/devops.just"
 
 BOLD := '\033[1m'
@@ -23,9 +26,7 @@ MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 WHITE := '\033[37m'
 DOCS := ""
-
 PACKAGE := "Biscuit File"
-
 
 default:
     #!/usr/bin/env bash
@@ -35,7 +36,7 @@ default:
     if command -v md &> /dev/null; then
         md just.md
     else
-        echo "{{PACKAGE}}"
+        echo "{{ PACKAGE }}"
         echo "============"
     fi
 
@@ -45,25 +46,25 @@ default:
 
 # Uses TTS if available but never error
 _speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+    @so-you-say "{{ args }}" --background >/dev/null 2>&1 || exit 0
 
 # Build the library and CLI
 build *args="":
-    @just _build biscuit-file "biscuit-file Library" {{args}}
-    @just _build biscuit-file-cli "biscuit-file CLI" {{args}}
+    @just _build biscuit-file "biscuit-file Library" {{ args }}
+    @just _build biscuit-file-cli "biscuit-file CLI" {{ args }}
 
 # run tests for biscuit-file packages
 test *args="":
     @echo ""
-    @echo "Testing {{BOLD}}biscuit-file{{RESET}} Packages"
+    @echo "Testing {{ BOLD }}biscuit-file{{ RESET }} Packages"
     @echo "--------------------------"
     @echo ""
-    @cargo test -p biscuit-file -p biscuit-file-cli {{args}}
+    @cargo test -p biscuit-file -p biscuit-file-cli {{ args }}
 
 # run clippy on biscuit-file packages
 lint:
     @echo ""
-    @echo "Linting {{BOLD}}biscuit-file{{RESET}} Packages"
+    @echo "Linting {{ BOLD }}biscuit-file{{ RESET }} Packages"
     @echo "--------------------------"
     @echo ""
     @cargo clippy -p biscuit-file -- -D warnings
@@ -75,44 +76,44 @@ install:
     @echo "Installing biscuit-file CLI"
     @echo "--------------------------"
     @echo ""
-    @echo "{{BOLD}}Building biscuit-file Library{{RESET}}"
+    @echo "{{ BOLD }}Building biscuit-file Library{{ RESET }}"
     @cargo build -p biscuit-file --release
     @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing biscuit-file CLI{{RESET}}"
+    @echo "{{ BOLD }}{{ YELLOW }}Installing biscuit-file CLI{{ RESET }}"
     @cargo install --path ./cli
     @echo ""
 
 # check biscuit-file lib and CLI
 check:
     @echo ""
-    @echo "Checking {{BOLD}}biscuit-file{{RESET}}"
+    @echo "Checking {{ BOLD }}biscuit-file{{ RESET }}"
     @echo ""
     @cargo check -p biscuit-file -p biscuit-file-cli
 
 # Open Opencode
 oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
+    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{ args }}
 
 # Open Claude Code in YOLO mode
 cc *args="":
-    @claudine claude --yolo {{args}}
+    @claudine claude --yolo {{ args }}
 
 # Open codex in YOLO mode
 codex *args="":
-    @claudine codex --yolo {{args}}
+    @claudine codex --yolo {{ args }}
 
 # Open Claude Code
 gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
-    @claudine codex {{args}}
+    @claudine gemini --yolo --include GEMINI_API_KEY {{ args }}
+    @claudine codex {{ args }}
 
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
     @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
+    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
+    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{ DIM }}model{{ RESET }}"
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
+    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
     @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
     @just _speak "git commits completed in rusty-biscuit monorepo"
@@ -122,17 +123,18 @@ commit:
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}biscuit-file{{RESET}} via Rust drift script"
+    @printf "%b\n" "Running drift workflow for {{ BOLD }}biscuit-file{{ RESET }} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- biscuit-file {{DOCS}} {{args}}
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- biscuit-file {{ DOCS }} {{ args }}
     @_speak "the drift recipe for the biscuit-file package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 # No-op recipe: reference color vars so linters won't report them as unused.
+
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true

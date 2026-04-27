@@ -1,11 +1,14 @@
 ---
-dir: "$(dirname "{{ spec || design }}")"
+area: "{{ctx.current_package_area}}"
+dir: "$(dirname {{ "{{spec}}" || "{{design}}" }})"
 spec: ""
 design: ""
 plan: "plan.md"
 success:
-    stderr: "The [{{dir}}/{{plan}}]({{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}) _plan_ has been completed"
-    message: "✅ the **{{dir}}/{{plan}}** _plan_ has been completed _at_ {{ctx.time}}"
+    stderr: "The **{{area}}/{{dir}}/{{plan}}** _plan_ has been completed"
+    message: "✅ the **{{area}}/{{dir}}/{{plan}}** _plan_ has been completed _at_ {{ctx.time}}"
+failure: 
+    message: "❌ the **{{area}}/{{dir}}/{{plan}}** _plan_ has failed to complete!"
 ---
 You are a planning agent. Convert the following documents into a high confidence execution plan:
 

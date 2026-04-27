@@ -124,6 +124,12 @@ pub(crate) enum PromptDelivery {
     Stdin(String),
     AppendArgs(Vec<String>),
     InsertArgs { index: usize, args: Vec<String> },
+    /// Wire-mode JSON-RPC prompt delivery: the prompt is sent as the
+    /// `params.user_input` of a JSON-RPC `prompt` request after
+    /// `initialize` completes. Used by Kimi non-interactive runs which
+    /// route through [`super::wire_io::run_kimi_wire_session`] instead of
+    /// the standard structured-stream child-stdin path.
+    WireRpc(String),
 }
 
 impl PromptDelivery {
@@ -138,6 +144,22 @@ impl PromptDelivery {
                 args.splice(index..index, extra);
                 None
             }
+            // Wire-mode delivery is handled by the wire_io session
+            // orchestrator, not the structured-stream child-stdin path.
+            // Returning `None` here keeps the standard pipeline from
+            // seeding stdin; the dispatcher inspects the original
+            // `PromptDelivery` value before `apply_to` is consumed when
+            // it needs the prompt body for the JSON-RPC request.
+            Self::WireRpc(_) => None,
+        }
+    }
+
+    /// Returns the wire-mode prompt body when this delivery routes through
+    /// the JSON-RPC `prompt` request path, otherwise `None`.
+    pub(crate) fn as_wire_rpc(&self) -> Option<&str> {
+        match self {
+            Self::WireRpc(prompt) => Some(prompt.as_str()),
+            _ => None,
         }
     }
 }
@@ -1198,8 +1220,8 @@ impl WrapperProfile for KimiWrapper {
     }
 
     fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if non_interactive && !has_flag(args, "--print") {
-            args.push("--print".to_string());
+        if non_interactive && !has_flag(args, "--wire") {
+            args.push("--wire".to_string());
         }
     }
 
@@ -1247,11 +1269,19 @@ impl WrapperProfile for KimiWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        Ok(prompt_delivery_stdin_or_append(
-            prompt,
-            non_interactive,
-            &["--prompt"],
-        ))
+        // Non-interactive Kimi runs are dispatched through the JSON-RPC
+        // wire-mode session orchestrator, which sends the prompt as a
+        // typed `prompt` request rather than seeding it on stdin or argv.
+        // Interactive runs fall back to the legacy `--prompt` argv form
+        // because `--wire` is not active in that mode.
+        if non_interactive {
+            Ok(PromptDelivery::WireRpc(prompt.to_string()))
+        } else {
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--prompt".to_string(),
+                prompt.to_string(),
+            ]))
+        }
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -1259,7 +1289,7 @@ impl WrapperProfile for KimiWrapper {
             "kimi".to_string(),
             "--resume".to_string(),
             session_id.to_string(),
-            "--print".to_string(),
+            "--wire".to_string(),
         ])
     }
 
@@ -1272,11 +1302,17 @@ impl WrapperProfile for KimiWrapper {
     }
 
     fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::StreamJson)
+        Some(StreamProtocol::WireJsonRpc)
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        push_stream_json_flags(args, &["--print"]);
+        // Wire mode is the structured-stream channel for Kimi: a single
+        // `--wire` flag selects the JSON-RPC line protocol on stdin/stdout
+        // and replaces the legacy `--print` + `--output-format stream-json`
+        // pair used by other providers.
+        if !has_flag(args, "--wire") {
+            args.push("--wire".to_string());
+        }
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
@@ -2731,6 +2767,63 @@ mod tests {
         let conv = profile(Provider::KimiCode).prompt_arg_conventions();
         assert_eq!(conv.prompt_flags, &["--prompt"]);
         assert_eq!(conv.entrypoint, None);
+    }
+
+    #[test]
+    fn kimi_non_interactive_uses_wire_protocol_and_wire_rpc_delivery() {
+        let p = profile(Provider::KimiCode);
+        assert_eq!(p.stream_protocol(), Some(StreamProtocol::WireJsonRpc));
+
+        let mut args: Vec<String> = Vec::new();
+        p.apply_entrypoint(&mut args, true);
+        assert!(args.contains(&"--wire".to_string()));
+        assert!(!args.contains(&"--print".to_string()));
+
+        let mut structured_args: Vec<String> = Vec::new();
+        p.apply_structured_stream(&mut structured_args);
+        assert_eq!(structured_args, vec!["--wire".to_string()]);
+
+        let delivery = p
+            .prompt_delivery(&args, "hello kimi", true)
+            .expect("kimi prompt_delivery should succeed");
+        match delivery {
+            PromptDelivery::WireRpc(prompt) => assert_eq!(prompt, "hello kimi"),
+            other => panic!("expected WireRpc delivery, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kimi_interactive_continues_using_prompt_argv_flag() {
+        let p = profile(Provider::KimiCode);
+        let mut args: Vec<String> = Vec::new();
+        p.apply_entrypoint(&mut args, false);
+        assert!(args.is_empty(), "interactive must not append --wire");
+
+        let delivery = p
+            .prompt_delivery(&args, "hello", false)
+            .expect("kimi prompt_delivery should succeed in interactive mode");
+        match delivery {
+            PromptDelivery::AppendArgs(extra) => {
+                assert_eq!(extra, vec!["--prompt".to_string(), "hello".to_string()]);
+            }
+            other => panic!("expected AppendArgs delivery, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kimi_resume_uses_wire_flag() {
+        let p = profile(Provider::KimiCode);
+        let resume = p.build_resume_args("session-123").unwrap();
+        assert_eq!(
+            resume,
+            vec![
+                "kimi".to_string(),
+                "--resume".to_string(),
+                "session-123".to_string(),
+                "--wire".to_string(),
+            ]
+        );
+        assert!(!resume.contains(&"--print".to_string()));
     }
 
     #[test]
