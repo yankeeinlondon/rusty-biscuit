@@ -5,8 +5,12 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::expression::{evaluate, is_truthy, parse_condition};
+use super::expression::{evaluate, is_truthy, parse_condition, EvaluationLookup};
+use serde_json::Value;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::path::Path;
 use tracing::{debug, trace};
 
 /// Errors from condition parsing or evaluation.
@@ -117,6 +121,158 @@ fn caret_marker(input: &str, byte_offset: usize) -> String {
         .take_while(|(idx, _)| *idx < clamped)
         .count();
     format!("  {}^", " ".repeat(column))
+}
+
+/// Evaluates a condition expression against plain JSON data without
+/// constructing an [`EffectiveState`].
+///
+/// This is a shortcut for external callers who only need the boolean
+/// DSL with no frontmatter pipeline involvement.
+///
+/// ## Resolution Order
+///
+/// 1. **Top-level properties** are resolved against the provided `data`.
+/// 2. **`env.*` properties** are resolved against the system environment.
+/// 3. **`ctx.*` properties** are resolved via lazy runtime context capture
+///    based on the referenced context group.
+/// 4. **Unprefixed missing keys** fall back to the `ctx.*` namespace
+///    (same behavior as [`EffectiveState`]).
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+/// use serde_json::json;
+/// use std::path::Path;
+///
+/// let data = json!({ "draft": true, "audience": "internal" });
+/// let result = evaluate_condition_against(
+///     "draft && audience == 'internal'",
+///     &data,
+///     Path::new("."),
+/// ).unwrap();
+/// assert!(result);
+/// ```
+pub fn evaluate_condition_against(
+    expr: &str,
+    data: &Value,
+    work_dir: &Path,
+) -> Result<bool, ConditionError> {
+    trace!(expr = %expr, "conditions: evaluating against plain data");
+
+    let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
+        expr: expr.to_string(),
+        line: 1,
+        message: e.message.clone(),
+        span: parse_error_span(expr, e.position),
+    })?;
+
+    let lookup = ShortcutLookup::new(data, work_dir);
+    let value = evaluate(&parsed, &lookup).map_err(|message| ConditionError::Eval {
+        expr: expr.to_string(),
+        line: 1,
+        message,
+    })?;
+
+    let result = is_truthy(&value);
+    debug!(expr = %expr, result, "conditions: evaluated against plain data");
+
+    Ok(result)
+}
+
+/// Lookup implementation for the shortcut API that resolves variables
+/// against plain JSON data, environment variables, and lazily-captured
+/// runtime context.
+struct ShortcutLookup<'a> {
+    /// Plain data payload for top-level and nested lookups.
+    data: &'a Value,
+    /// Base directory for runtime context capture.
+    work_dir: &'a Path,
+    /// Cache of lazily-captured context values.
+    ctx_cache: RefCell<HashMap<String, Value>>,
+    /// Set of context groups that have already been captured.
+    captured_groups: RefCell<HashSet<super::context::capture::ContextGroup>>,
+}
+
+impl<'a> ShortcutLookup<'a> {
+    fn new(data: &'a Value, work_dir: &'a Path) -> Self {
+        Self {
+            data,
+            work_dir,
+            ctx_cache: RefCell::new(HashMap::new()),
+            captured_groups: RefCell::new(HashSet::new()),
+        }
+    }
+
+    /// Looks up a value from the plain data payload using dot notation.
+    fn get_from_data(&self, path: &str) -> Option<Value> {
+        let parts: Vec<&str> = path.split('.').collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        let mut current = self.data.get(parts[0])?.clone();
+
+        for part in &parts[1..] {
+            current = match current {
+                Value::Object(obj) => obj.get(*part)?.clone(),
+                _ => return None,
+            };
+        }
+
+        Some(current)
+    }
+
+    /// Captures a single context group and merges its values into the cache.
+    fn capture_group(&self, group: super::context::capture::ContextGroup) {
+        let mut groups = HashSet::new();
+        groups.insert(group);
+
+        let (values, _diagnostics, _timings) =
+            super::context::capture::capture_runtime_context_for_groups(self.work_dir, &groups);
+
+        let mut cache = self.ctx_cache.borrow_mut();
+        let mut captured = self.captured_groups.borrow_mut();
+        for (key, value) in values {
+            cache.insert(key, value);
+        }
+        captured.insert(group);
+    }
+}
+
+impl EvaluationLookup for ShortcutLookup<'_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        // Handle ctx.* prefixes with lazy capture
+        if let Some(ctx_key) = path.strip_prefix("ctx.") {
+            // Check cache first
+            if let Some(cached) = self.ctx_cache.borrow().get(ctx_key) {
+                return Some(cached.clone());
+            }
+
+            // Determine which group this key belongs to
+            if let Some(group) = super::context::capture::ContextGroup::for_key(ctx_key) {
+                let need_capture = !self.captured_groups.borrow().contains(&group);
+                if need_capture {
+                    self.capture_group(group);
+                }
+            }
+
+            return self.ctx_cache.borrow().get(ctx_key).cloned();
+        }
+
+        // Handle env.* prefixes
+        if let Some(env_key) = path.strip_prefix("env.") {
+            return std::env::var(env_key).ok().map(Value::String);
+        }
+
+        // Try plain data lookup first
+        if let Some(value) = self.get_from_data(path) {
+            return Some(value);
+        }
+
+        // Fall back to ctx.* (same behavior as EffectiveState)
+        self.get(&format!("ctx.{path}"))
+    }
 }
 
 #[cfg(test)]
@@ -352,5 +508,189 @@ mod tests {
         assert!(evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1).unwrap());
         assert!(!evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1).unwrap());
         assert!(evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1).unwrap());
+    }
+
+    // ── Shortcut API: evaluate_condition_against ──────────────────────
+
+    #[test]
+    fn shortcut_top_level_lookup() {
+        let data = json!({ "draft": true, "title": "Hello" });
+        assert!(
+            evaluate_condition_against("draft", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("title == 'Hello'", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_nested_lookup() {
+        let data = json!({ "user": { "name": "Alice", "admin": true } });
+        assert!(
+            evaluate_condition_against("user.name == 'Alice'", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+        assert!(
+            evaluate_condition_against("user.admin", &data, std::path::Path::new(".")).unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_missing_values() {
+        let data = json!({});
+        assert!(
+            !evaluate_condition_against("missing", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("!missing", &data, std::path::Path::new(".")).unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_comparisons_and_helpers() {
+        let data = json!({ "count": 5, "items": [1, 2, 3], "user": { "name": "Alice" } });
+        assert!(
+            evaluate_condition_against("count > 0", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("count >= 5", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("count < 10", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("length(items) == 3", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+        assert!(
+            evaluate_condition_against(
+                "HasKey(user, 'name')",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_short_circuits() {
+        let data = json!({ "false_flag": false, "truthy_flag": true });
+        // Infix AND short-circuits on false
+        assert!(
+            !evaluate_condition_against(
+                "false_flag && UnknownFn(x)",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+        // Infix OR short-circuits on true
+        assert!(
+            evaluate_condition_against(
+                "truthy_flag || UnknownFn(x)",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_and_or_functions() {
+        let data = json!({ "a": true, "b": false });
+        assert!(
+            !evaluate_condition_against("And(a, b)", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("Or(a, b)", &data, std::path::Path::new(".")).unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_ternary() {
+        let data = json!({ "enabled": true, "yes": "yes", "empty": "" });
+        assert!(
+            evaluate_condition_against(
+                "enabled ? yes : empty",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+        let data = json!({ "enabled": false, "yes": "yes", "empty": "" });
+        assert!(
+            !evaluate_condition_against(
+                "enabled ? yes : empty",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_parse_error_shape() {
+        let data = json!({});
+        let result = evaluate_condition_against("&& invalid", &data, std::path::Path::new("."));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConditionError::Parse { line: 1, .. }));
+    }
+
+    #[test]
+    fn shortcut_eval_error_shape() {
+        let data = json!({ "truthy_flag": true });
+        let result =
+            evaluate_condition_against("truthy_flag && UnknownFn(x)", &data, std::path::Path::new("."));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConditionError::Eval { line: 1, .. }));
+    }
+
+    #[test]
+    fn shortcut_env_lookup() {
+        // Set a known env var for the test
+        unsafe {
+            std::env::set_var("DM_TEST_AGENT", "claude");
+        }
+        let data = json!({});
+        assert!(
+            evaluate_condition_against(
+                "env.DM_TEST_AGENT == 'claude'",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+        assert!(
+            !evaluate_condition_against(
+                "env.DM_TEST_AGENT == 'opencode'",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+        unsafe {
+            std::env::remove_var("DM_TEST_AGENT");
+        }
+    }
+
+    #[test]
+    fn shortcut_ctx_datetime_lookup() {
+        let data = json!({});
+        // ctx.today and ctx.year are cheap (no I/O)
+        let result = evaluate_condition_against("ctx.today", &data, std::path::Path::new("."));
+        assert!(result.is_ok());
+        // The result depends on the actual date, but it should evaluate without error
+    }
+
+    #[test]
+    fn shortcut_unprefixed_fallback_to_ctx() {
+        let data = json!({});
+        // When a key is not in data, fall back to ctx.* (same as EffectiveState)
+        // We test with a datetime key since it's always available
+        let result = evaluate_condition_against("year", &data, std::path::Path::new("."));
+        assert!(result.is_ok());
     }
 }
