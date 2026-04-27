@@ -5,7 +5,7 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::interpolation::{ComparisonOp, Expr, parse_condition};
+use super::expression::{ComparisonOp, Expr, is_truthy, parse_condition, scalar_string, to_number, to_number_coerce};
 use serde_json::Value;
 use std::ops::Range;
 use tracing::{debug, trace};
@@ -274,41 +274,6 @@ fn eval_function(name: &str, args: &[Expr], state: &EffectiveState) -> Result<Va
             Ok(Value::Number(serde_json::Number::from(number)))
         }
         _ => Err(format!("Unknown function: {name}")),
-    }
-}
-
-fn to_number(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse::<f64>().ok(),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Null => None,
-        Value::Array(_) | Value::Object(_) => None,
-    }
-}
-
-fn to_number_coerce(value: &Value) -> f64 {
-    to_number(value).unwrap_or(0.0)
-}
-
-fn scalar_string(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
-        Value::Array(_) | Value::Object(_) => value.to_string(),
-    }
-}
-
-fn is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(v) => *v,
-        Value::Number(n) => n.as_f64().unwrap_or(0.0) != 0.0,
-        Value::String(s) => !s.is_empty(),
-        Value::Array(values) => !values.is_empty(),
-        Value::Object(values) => !values.is_empty(),
     }
 }
 

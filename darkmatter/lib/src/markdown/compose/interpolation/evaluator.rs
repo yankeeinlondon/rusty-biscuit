@@ -68,25 +68,9 @@
 //! ```
 
 use super::ComparisonOp;
-use super::ast::Expr;
+use crate::markdown::compose::expression::{EvaluationLookup, Expr};
 use serde_json::Value;
 use tracing::{debug, trace};
-
-/// Trait for types that can resolve interpolation variable lookups.
-///
-/// Implementors provide path-based access to a key-value store
-/// (frontmatter, context, environment variables, etc.).
-pub trait InterpolationLookup {
-    /// Looks up a value by dotted path.
-    ///
-    /// Returns `None` if the path does not resolve to a value.
-    fn get(&self, path: &str) -> Option<Value>;
-
-    /// Looks up a value by path, coercing to a string.
-    ///
-    /// Returns an empty string if the path does not resolve.
-    fn get_string(&self, path: &str) -> String;
-}
 
 /// Result of evaluating an expression.
 #[derive(Debug, Clone, PartialEq)]
@@ -214,12 +198,12 @@ impl EvalValue {
 /// Evaluator for interpolation expressions.
 ///
 /// The evaluator takes parsed AST expressions and evaluates them against
-/// an [`InterpolationLookup`] implementation to produce string output.
-pub struct Evaluator<'a, L: InterpolationLookup> {
+/// an [`EvaluationLookup`] implementation to produce string output.
+pub struct Evaluator<'a, L: EvaluationLookup> {
     state: &'a L,
 }
 
-impl<'a, L: InterpolationLookup> Evaluator<'a, L> {
+impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// Creates a new evaluator with the given lookup state.
     pub fn new(state: &'a L) -> Self {
         Self { state }

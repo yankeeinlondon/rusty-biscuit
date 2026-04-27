@@ -50,6 +50,7 @@ pub(crate) mod perf;
 mod state;
 mod types;
 
+pub mod expression;
 pub mod interpolation;
 pub mod page_blocks;
 pub mod replacement;

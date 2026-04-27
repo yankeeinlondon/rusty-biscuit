@@ -8,6 +8,23 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - darkmatter/features/2026-04-26-exposing-boolean-parsing/phase1-notes.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+  - darkmatter/lib/src/markdown/compose/expression/parser.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+  - darkmatter/lib/src/markdown/compose/conditions.rs
+  - darkmatter/lib/src/markdown/compose/state.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+docs_updated_during_phase_2:
+  - darkmatter/features/2026-04-26-exposing-boolean-parsing/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .opencode/skill/darkmatter/SKILL.md
 packages:
   - darkmatter
 ---

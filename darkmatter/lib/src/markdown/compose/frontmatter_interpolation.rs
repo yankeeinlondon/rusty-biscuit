@@ -14,9 +14,8 @@
 //! references `base`, and `plan` references `spec`, then `plan` will
 //! see the raw (unrewritten) value of `spec`, not its resolved form.
 
-use super::interpolation::{
-    Evaluator, ExpressionFinder, InterpolationLookup, ScanMode, interpolate_text,
-};
+use super::expression::{EvaluationLookup, ExpressionFinder};
+use super::interpolation::{Evaluator, ScanMode, interpolate_text};
 use super::types::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownError;
@@ -48,7 +47,7 @@ impl FrontmatterSeedState {
     }
 }
 
-impl InterpolationLookup for FrontmatterSeedState {
+impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
         // ctx.* prefix
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
@@ -102,7 +101,7 @@ fn get_nested(value: &Value, path: &str) -> Option<Value> {
 }
 
 /// Recursively rewrites interpolation expressions in a JSON value tree.
-fn rewrite_value<L: InterpolationLookup>(
+fn rewrite_value<L: EvaluationLookup>(
     value: &Value,
     evaluator: &Evaluator<L>,
     fail_fast: bool,
