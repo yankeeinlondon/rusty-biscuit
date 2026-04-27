@@ -64,7 +64,7 @@ The first bare rule uses all frontmatter defaults. The second rule inherits styl
 
 ## Terminal vs Browser Rendering
 
-- **Terminal**: image-first progressive enhancement. Terminals with Kitty-compatible image support receive a rasterized SVG via `resvg` and `TerminalImage`; failures fall back to Unicode, then ASCII when the locale does not signal UTF-8.
+- **Terminal**: image-first progressive enhancement. Terminals with Kitty-compatible image support receive a rasterized SVG via `resvg` and `TerminalImage`; failures fall back to Unicode, then ASCII when the locale does not signal UTF-8. When no explicit `color` is set, the image tier chooses a visible default based on the detected terminal color mode — `white` for dark terminals and `black` for light terminals — so the rule is never invisible against the terminal background.
 - **Browser**: SVG with `stroke="var(--hr-color, currentColor)"` and root-level `--hr-weight`, `--hr-color`, and `--hr-width` custom properties.
 
 ## Attribute Honoring by Target
@@ -75,7 +75,7 @@ The first bare rule uses all frontmatter defaults. The second rule inherits styl
 | `alignment` | Positions the rendered rule within terminal columns     | `margin` behavior on the root `<svg>`    |
 | `weight`    | Image height/stroke or heavy Unicode glyphs             | `stroke-width` via `--hr-weight`         |
 | `width`     | Clamped to the terminal's column width                  | `width` attribute + `--hr-width` CSS var |
-| `color`     | Image stroke/fill or ANSI escape wrap                   | `stroke` / `fill` via `--hr-color`       |
+| `color`     | Image stroke/fill or ANSI escape wrap. When omitted, the terminal image tier defaults to `white` on dark terminals and `black` on light terminals. | `stroke` / `fill` via `--hr-color`       |
 
 ## Validation
 
