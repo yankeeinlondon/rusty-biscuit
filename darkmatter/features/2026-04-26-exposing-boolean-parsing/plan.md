@@ -47,6 +47,16 @@ docs_updated_during_phase_5:
   - darkmatter/features/2026-04-26-exposing-boolean-parsing/plan.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - darkmatter/lib/src/markdown/compose/conditions.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+docs_updated_during_phase_6:
+  - darkmatter/features/2026-04-26-exposing-boolean-parsing/plan.md
+  - darkmatter/docs/topics/boolean-conditional-logic.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .opencode/skill/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/SKILL.md
 packages:
   - darkmatter
 ---
