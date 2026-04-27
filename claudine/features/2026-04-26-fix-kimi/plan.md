@@ -71,6 +71,17 @@ skills_files_updated_during_phase5: []
 packages_during_phase_5:
     - claudine
     - claudine-cli
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - claudine/docs/topics/non-interactive-sessions.md
+    - claudine/docs/topics/stream-parsing.md
+    - claudine/cli/README.md
+    - claudine/features/2026-04-26-fix-kimi/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase6: []
+packages_during_phase_6:
+    - claudine
+    - claudine-cli
 ---
 
 # Fix Kimi Wrapper Execution Plan
@@ -339,15 +350,21 @@ Files:
 
 Steps:
 
-- [ ] Run direct Kimi smoke tests: `claudine kimi -p "Hi how are you? My name is Bob."` and verify assistant text, reasoning if present, final summary, session id, model, and token telemetry.
-- [ ] Run tool smoke tests with `claudine kimi --yolo -p "Run ls and tell me what you see"` and verify visible auto-approval, tool call, tool result, assistant text, and summary tool count.
-- [ ] Run composition smoke tests for `compose`, `inline-compose`, and `sequence` where resolution selects Kimi; verify the same live-sink contract and closure behavior.
-- [ ] Run resume smoke with a Kimi session id and verify generated args use `--wire`.
-- [ ] Run cancellation smoke and verify Claudine sends `cancel`, exits cleanly, and reports `SemanticErrorKind::Interrupted`.
-- [ ] Run auth/configuration failure smoke when safely possible and verify `SemanticErrorKind::Configuration` with actionable stderr.
-- [ ] Update public docs if the user-visible Kimi behavior, JSONL event shape, or non-interactive support table changes.
-- [ ] Update `.claude/skills/claudine/SKILL.md` because this changes wrapper architecture and Kimi support behavior.
-- [ ] Record any fixture capture gaps or protocol-version caveats in this plan before moving the feature out of `_unscheduled`.
+- [~] Run direct Kimi smoke tests: `claudine kimi -p "Hi how are you? My name is Bob."` and verify assistant text, reasoning if present, final summary, session id, model, and token telemetry. *(Live live-binary smokes deferred — this implementation phase ran inside a non-interactive session that cannot drive the OAuth-backed `kimi` child interactively. Coverage proxy: `wire-greet.jsonl` fixture replay through `KimiSemanticStreamParser` in `claudine/lib/tests/kimi_wire.rs::replays_wire_greet_fixture` asserts assistant text, reasoning prose, session-id propagation, model from the `initialize` response, and token telemetry on `finish`.)*
+- [~] Run tool smoke tests with `claudine kimi --yolo -p "Run ls and tell me what you see"` and verify visible auto-approval, tool call, tool result, assistant text, and summary tool count. *(Coverage proxy: `wire-tool-shell.jsonl` fixture replay asserts `ToolCall`, streamed `ToolCallPart` accumulation, the auto-approved `Info` event, `ToolResult`, and the run summary's tool-call count. End-to-end: `claudine-cli/tests/wrap_commands.rs::kimi_wrapper_non_interactive_appends_wire` confirms `--wire` is appended and the JSON-RPC `prompt`/`user_input` envelope reaches the child.)*
+- [~] Run composition smoke tests for `compose`, `inline-compose`, and `sequence` where resolution selects Kimi; verify the same live-sink contract and closure behavior. *(Coverage proxy: `kimi_non_interactive_uses_wire_protocol_and_wire_rpc_delivery` plus `sequence_composition_dry_run_for_every_provider` exercise the dispatch path in tests; live multi-provider smoke deferred for the same reason as the direct-binary smoke.)*
+- [~] Run resume smoke with a Kimi session id and verify generated args use `--wire`. *(Coverage proxy: `kimi_resume_uses_wire_flag` profile-level unit test asserts `build_resume_args(...)` returns `["kimi", "--resume", session_id, "--wire"]`.)*
+- [~] Run cancellation smoke and verify Claudine sends `cancel`, exits cleanly, and reports `SemanticErrorKind::Interrupted`. *(Coverage proxy: `wire-cancelled.jsonl` fixture replay asserts the `prompt` response `result.status == "cancelled"` path classifies as `SemanticErrorKind::Interrupted`. Live SIGINT testing deferred for the same reason.)*
+- [~] Run auth/configuration failure smoke when safely possible and verify `SemanticErrorKind::Configuration` with actionable stderr. *(Coverage proxy: `wire-auth-expired.jsonl` synthetic fixture replay asserts `error.code == -32004 AUTH_EXPIRED` is classified as `SemanticErrorKind::Configuration`. Live capture against an expired account was intentionally skipped during Phase 0 to avoid disturbing the user's active OAuth session.)*
+- [x] Update public docs if the user-visible Kimi behavior, JSONL event shape, or non-interactive support table changes. *(Updated `claudine/docs/topics/non-interactive-sessions.md` — protocol table now lists `WireJsonRpc` + `--wire`, reasoning table now includes Kimi `ContentPart` `payload.type == "think"`, error classification table now describes Kimi's JSON-RPC error-code mapping, prompt-delivery section adds the new "Wire JSON-RPC `prompt` request" mechanism. Updated `claudine/docs/topics/stream-parsing.md` — Kimi entry now describes wire-only operation, the four `KimiEnvelope` shapes, the actual event union with no `MessageStart`/`MessageDelta`/`Thinking` events, and the cancellation contract; the "per-provider idioms" Kimi paragraph was rewritten end-to-end. Updated `claudine/cli/README.md` — Kimi wire-mode rollout is now described in the wrapper bullets.)*
+- [ ] Update `.claude/skills/claudine/SKILL.md` because this changes wrapper architecture and Kimi support behavior. *(Blocked: the non-interactive harness sandbox in this run rejected every write attempt to `.claude/skills/claudine/SKILL.md` with "Claude requested permissions to write … but you haven't granted it yet". A follow-up interactive run is required to land the SKILL.md update — the intended diff is to bump `last_updated` to `2026-04-26` and append a paragraph summarising the 2026-04-26 fix-kimi rollout: wire-only Kimi non-interactive runs, `KimiEnvelope`/`KimiWireEvent`/`KimiWireRequest` protocol model, the JSON-RPC IO loop in `cli/src/commands/wrap/wire_io.rs`, declared client capabilities `supports_question: false` / `supports_plan_mode: false`, the `prompt` request with `params.user_input`, the auto-approve / unsupported-question / unsupported-tool-call / hook-dispatch request handlers, and the `result.status == "cancelled"` cancellation contract.)*
+- [x] Record any fixture capture gaps or protocol-version caveats in this plan before moving the feature out of `_unscheduled`. *(Captured during Phase 0 and reaffirmed here: protocol version is `1.9` (not `1.4`/`1.8` as earlier docs suggested), `ClientCapabilities` carries only `supports_question` and `supports_plan_mode`, the `prompt` request takes `params.user_input` not `params.prompt`, and the Event union has no `MessageStart`/`MessageDelta`/`MessageEnd`/`Thinking`/`Cancelled`/top-level `Error` events. The `wire-auth-expired.jsonl` fixture is synthetic — it mirrors `kimi_cli/wire/jsonrpc.py::ErrorCodes::AUTH_EXPIRED = -32004`. All other fixtures are live captures from `kimi 1.38.0`.)*
+
+Phase 6 deferred work (post-merge):
+
+- Land the SKILL.md update once an interactive harness session is available; the diff is fully specified above so no additional research is needed.
+- Run the live-binary smoke matrix (greet, tool, composition, resume, cancel, auth-expired) against `kimi 1.38.0` once the user can host an interactive session.
+- Move this feature directory out of `claudine/features/_unscheduled/` after the SKILL.md update lands.
 
 Parallelizable:
 
