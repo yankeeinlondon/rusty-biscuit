@@ -192,7 +192,7 @@ Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-le
 - **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
 - **Bare `---`:** produces a configured rule when `hr:` frontmatter is present, otherwise the default dashed rule.
 - **Terminal rendering tiers:**
-  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals.
+  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals. When no `color` is specified, the image tier detects the terminal's color mode and uses `white` for dark terminals and `black` for light terminals, avoiding invisible black-on-dark output.
   2. **Tier 2 (Unicode):** fallback when image rendering is unavailable and the locale signals UTF-8.
   3. **Tier 3 (ASCII):** fallback otherwise.
 - **Browser rendering:** SVG with `--hr-weight`, `--hr-color`, `--hr-width` CSS variables; per-instance overrides via `render_to_browser_with_inline_variables`.
