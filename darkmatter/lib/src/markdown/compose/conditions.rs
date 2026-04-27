@@ -238,6 +238,11 @@ impl<'a> ShortcutLookup<'a> {
         }
         captured.insert(group);
     }
+
+    #[cfg(test)]
+    fn captured_groups(&self) -> Vec<super::context::capture::ContextGroup> {
+        self.captured_groups.borrow().iter().cloned().collect()
+    }
 }
 
 impl EvaluationLookup for ShortcutLookup<'_> {
@@ -692,5 +697,109 @@ mod tests {
         // We test with a datetime key since it's always available
         let result = evaluate_condition_against("year", &data, std::path::Path::new("."));
         assert!(result.is_ok());
+    }
+
+    // ── Lazy Context Resolution ─────────────────────────────────────────
+
+    #[test]
+    fn shortcut_and_short_circuits_prevents_ctx_capture() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "false_flag": false });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("false_flag && ctx.repo == 'x'").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "Repo context should not be captured when short-circuited: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_or_short_circuits_prevents_ctx_capture() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "true_flag": true });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("true_flag || ctx.gpu").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "GPU context should not be captured when short-circuited: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_plain_data_expression_does_not_capture_context() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "draft": true });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("draft == true").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "No context should be captured for plain-data expressions: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_unknown_ctx_key_does_not_capture() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({});
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("missing_repo_name").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "Unknown context keys should not trigger capture: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_ctx_reference_captures_needed_group() {
+        use crate::markdown::compose::context::capture::ContextGroup;
+        use crate::markdown::compose::expression;
+
+        let data = json!({});
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("ctx.today").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.contains(&ContextGroup::DateTime),
+            "DateTime group should be captured when ctx.today is referenced"
+        );
+    }
+
+    #[test]
+    fn shortcut_same_group_captured_only_once() {
+        use crate::markdown::compose::context::capture::ContextGroup;
+        use crate::markdown::compose::expression;
+
+        let data = json!({});
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("ctx.today && ctx.year").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert_eq!(
+            captured.len(),
+            1,
+            "DateTime should only be captured once, but got: {:?}",
+            captured
+        );
+        assert!(
+            captured.contains(&ContextGroup::DateTime),
+            "DateTime group should be in captured set"
+        );
     }
 }
