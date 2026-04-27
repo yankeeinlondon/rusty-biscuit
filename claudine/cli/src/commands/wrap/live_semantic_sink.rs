@@ -3627,11 +3627,11 @@ mod tests {
             let lines = replay_to_stderr(
                 Provider::KimiCode,
                 &[
-                    r#"{"type":"init","session_id":"k1","model":"kimi-coder"}"#,
-                    r#"{"type":"tool_use","id":"k1","name":"bash","input":{"cmd":"ls"}}"#,
-                    r#"{"type":"tool_result","tool_use_id":"k1","status":"success","content":"ok"}"#,
-                    r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
-                    r#"{"type":"future.unknown"}"#,
+                    r#"{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.9","server":{"name":"Kimi Code CLI","version":"1.38.0"},"slash_commands":[],"hooks":[],"capabilities":{"supports_question":true}}}"#,
+                    r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCall","payload":{"id":"k1","function":{"name":"Shell","arguments":"{\"command\":\"ls\"}"}}}}"#,
+                    r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolResult","payload":{"tool_call_id":"k1","return_value":{"is_error":false,"output":"ok"}}}}"#,
+                    r#"{"jsonrpc":"2.0","id":"prompt-2","error":{"code":-32005,"message":"slow down","data":null}}"#,
+                    r#"{"jsonrpc":"2.0","method":"event","params":{"type":"BrandNewEvent","payload":{}}}"#,
                 ],
                 None,
             );
@@ -3639,9 +3639,9 @@ mod tests {
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
             assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("Bash"));
+            assert!(joined.contains("Shell"));
             assert!(joined.contains("slow down"));
-            assert!(joined.contains("kimi/future.unknown"));
+            assert!(joined.contains("kimi/event:BrandNewEvent"));
         }
 
         #[test]

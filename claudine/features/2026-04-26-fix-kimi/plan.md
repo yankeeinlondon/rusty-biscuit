@@ -27,6 +27,18 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
 packages_during_phase_1:
     - claudine
+source_files_during_phase_2:
+    - claudine/lib/src/stream/kimi_semantic.rs
+    - claudine/lib/src/stream/protocol/kimi.rs
+    - claudine/lib/tests/kimi_wire.rs
+    - claudine/lib/tests/semantic_fidelity.rs
+    - claudine/cli/src/commands/wrap/live_semantic_sink.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
+packages_during_phase_2:
+    - claudine
+    - claudine-cli
 ---
 
 # Fix Kimi Wrapper Execution Plan
@@ -146,19 +158,19 @@ Files:
 
 Steps:
 
-- [ ] Refactor `feed_line` to parse raw `serde_json::Value` first, then typed `KimiEnvelope`, preserving malformed-line behavior and raw fallback payloads.
-- [ ] Track per-run state for `session_id`, `model`, token usage, cost, context usage, duration, status, assistant text, turn count, tool calls, and badges.
-- [ ] Track per-turn state for message buffers and partial tool calls; reset on `TurnBegin` and flush on `TurnEnd`.
-- [ ] Map `MessageDelta` to `SemanticEvent::OutputText` and append it to `assistant_text`; ensure completed messages do not concatenate without whitespace.
-- [ ] Map `Thinking` to `SemanticEvent::Reasoning`.
-- [ ] Map `ToolCall` and accumulated `ToolCallPart` data to `SemanticEvent::ToolCall` with structured JSON input when argument decoding succeeds and string passthrough when it fails.
-- [ ] Map `ToolResult` to `SemanticEvent::ToolResult`, correlated by `tool_call_id` where possible.
-- [ ] Map `Notification`, `PlanDisplay`, `SubagentEvent`, `HookTriggered`, `HookResolved`, and `DiffDisplayBlock` to typed `SemanticEvent::Info` with stable `extra.kind` values.
-- [ ] Preserve the current 80% context-pressure warning behavior from `CONTEXT_PRESSURE_WARN_PERCENT`.
-- [ ] Rewrite `classify_error` for JSON-RPC error codes, notification-shaped errors, auth/provider/rate-limit/billing keywords, and cancel/abort as `Interrupted`.
-- [ ] Make request envelopes visible as `Info` or `Warning` events even before the CLI response path is wired.
-- [ ] Update `finish` so Kimi summaries report `session_id`, `model`, `assistant_text`, `token_usage`, `cost_usd`, `duration_ms`, `num_turns`, `tool_calls`, `context_usage`, and provider status when present.
-- [ ] Add fixture replay tests that assert event kinds, assistant text, tool call/result counts, warning/error kinds, and final summary fields.
+- [x] Refactor `feed_line` to parse raw `serde_json::Value` first, then typed `KimiEnvelope`, preserving malformed-line behavior and raw fallback payloads.
+- [x] Track per-run state for `session_id`, `model`, token usage, cost, context usage, duration, status, assistant text, turn count, tool calls, and badges.
+- [x] Track per-turn state for message buffers and partial tool calls; reset on `TurnBegin` and flush on `TurnEnd`. *(`pending_text` flushes on TurnEnd / when reasoning interrupts text; `pending_tool_call` flushes on `TurnBegin`/`TurnEnd`/`ToolResult`/new `ToolCall`/`SubagentEvent` boundaries.)*
+- [x] Map `MessageDelta` to `SemanticEvent::OutputText` and append it to `assistant_text`; ensure completed messages do not concatenate without whitespace. *(Wire mode has no `MessageDelta`; assistant text streams as `ContentPart` with `payload.type == "text"`. `flush_pending_text` adds a separator newline on TurnEnd between consecutive assistant messages.)*
+- [x] Map `Thinking` to `SemanticEvent::Reasoning`. *(Wire mode has no `Thinking` event; reasoning streams as `ContentPart` with `payload.type == "think"`.)*
+- [x] Map `ToolCall` and accumulated `ToolCallPart` data to `SemanticEvent::ToolCall` with structured JSON input when argument decoding succeeds and string passthrough when it fails.
+- [x] Map `ToolResult` to `SemanticEvent::ToolResult`, correlated by `tool_call_id` where possible.
+- [x] Map `Notification`, `PlanDisplay`, `SubagentEvent`, `HookTriggered`, `HookResolved`, and `DiffDisplayBlock` to typed `SemanticEvent::Info` with stable `extra.kind` values. *(`PlanDisplay` routes to `SemanticEvent::PlanUpdate` instead — the typed variant exists and carries the `plan`/`display` blobs in `extra` for live-sink rendering.)*
+- [x] Preserve the current 80% context-pressure warning behavior from `CONTEXT_PRESSURE_WARN_PERCENT`.
+- [x] Rewrite `classify_error` for JSON-RPC error codes, notification-shaped errors, auth/provider/rate-limit/billing keywords, and cancel/abort as `Interrupted`. *(New `classify_jsonrpc_error` maps `AUTH_EXPIRED → Configuration`, `CHAT_PROVIDER_ERROR → ApiRemote`, standard JSON-RPC codes → `AgentNative`, with message-keyword fallback for rate/quota/billing → `ApiRemote`, auth/api-key/permission → `Configuration`, interrupt/cancel → `Interrupted`.)*
+- [x] Make request envelopes visible as `Info` or `Warning` events even before the CLI response path is wired. *(`ApprovalRequest` → auto-approved Info, `QuestionRequest` → unexpected-question Warning, `ToolCallRequest` → external-tool-request Warning, `HookRequest` → hook-request Info.)*
+- [x] Update `finish` so Kimi summaries report `session_id`, `model`, `assistant_text`, `token_usage`, `cost_usd`, `duration_ms`, `num_turns`, `tool_calls`, `context_usage`, and provider status when present.
+- [x] Add fixture replay tests that assert event kinds, assistant text, tool call/result counts, warning/error kinds, and final summary fields. *(Added `claudine/lib/tests/kimi_wire.rs` with 6 tests covering all five captured fixtures plus an unknown-event fallback case. The legacy `kimi_round_trip` block in `semantic_fidelity.rs` and the CLI `kimi_stderr_snapshot` test were rewritten onto wire-mode envelopes.)*
 
 Parallelizable:
 
