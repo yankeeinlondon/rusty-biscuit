@@ -26,6 +26,7 @@ When using the library, you configure the component via `TextAreaInputState`.
 ## Usage Examples
 
 ### Basic Multi-line Input
+
 ```rust
 use tui_chrome::prelude::*;
 
@@ -37,6 +38,7 @@ let content: String = state.value();
 ```
 
 ### Advanced Configuration with Label and Scrollbar
+
 ```rust
 use tui_chrome::prelude::*;
 
@@ -47,6 +49,7 @@ let state = TextAreaInputState::new(80, 15)
 ```
 
 ### Rendering as a Widget
+
 ```rust
 use ratatui::widgets::StatefulWidget;
 
@@ -82,7 +85,7 @@ question text-area-input --label "Notes" --initial "Line 1\nLine 2" --scrollbar 
 
 ## Functional Enhancement Suggestions
 
-1.  **Syntax Highlighting:** Integrate with a library like `syntect` to provide real-time syntax highlighting for common formats like Markdown, YAML, or Rust.
-2.  **Line Numbers:** Add an option to render line numbers in a gutter on the left side of the editor.
-3.  **Search and Replace:** Implement a modal or hotkey-driven interface for finding and replacing text within the buffer.
-4.  **Auto-indentation:** Add basic logic to preserve the indentation level of the previous line when the user presses `Enter`.
+1. **Syntax Highlighting:** Integrate with a library like `syntect` to provide real-time syntax highlighting for common formats like Markdown, YAML, or Rust.
+2. **Line Numbers:** Add an option to render line numbers in a gutter on the left side of the editor.
+3. **Search and Replace:** Implement a modal or hotkey-driven interface for finding and replacing text within the buffer.
+4. **Auto-indentation:** Add basic logic to preserve the indentation level of the previous line when the user presses `Enter`.

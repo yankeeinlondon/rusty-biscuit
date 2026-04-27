@@ -25,7 +25,9 @@ Every component follows the same pattern:
 
 ## Components
 
-### TextInput
+### Atomic Components
+
+#### TextInput
 Single-line text input. Uses `tui_input` as private edit engine.
 
 ```rust
@@ -36,7 +38,7 @@ let state = TextInputState::new()
     .with_value("Alice");
 ```
 
-### TextAreaInput
+#### TextAreaInput
 Multi-line editor. Uses `tui_textarea` as private edit engine. Default submit is `Ctrl+S` (not Enter).
 
 ```rust
@@ -45,8 +47,8 @@ let state = TextAreaInputState::new(60, 10)
     .with_value(&["line 1", "line 2"]);
 ```
 
-### BooleanSwitch
-Toggle with customizable on/off labels.
+#### BooleanSwitch
+Toggle with customizable on/off labels. Always valid (no validation logic). Supports Space toggle, Left/Right force-set, vim h/l.
 
 ```rust
 let state = BooleanSwitchState::new()
@@ -54,8 +56,8 @@ let state = BooleanSwitchState::new()
     .with_value(true);
 ```
 
-### ChooseOne
-Single-selection list with fuzzy filter, hotkeys, vim navigation, scrolling.
+#### ChooseOne
+Single-selection list with fuzzy filter, hotkeys, vim navigation, scrolling. Auto-selects hovered item on Enter if none selected.
 
 ```rust
 let input = ChoiceInput::new("colour", "Pick a colour")
@@ -67,8 +69,8 @@ let input = ChoiceInput::new("colour", "Pick a colour")
 let state = ChooseOneState::new(input);
 ```
 
-### ChooseMany
-Multi-selection with `min_selections` / `max_selections`, `Ctrl+A` select all, `Ctrl+D` clear.
+#### ChooseMany
+Multi-selection with `min_selections` / `max_selections`, `Ctrl+A` select all, `Ctrl+D` clear. Auto-selects hovered item on Enter if none selected.
 
 ```rust
 let input = ChoiceInput::new("toppings", "Pick toppings")
@@ -80,7 +82,26 @@ let input = ChoiceInput::new("toppings", "Pick toppings")
 let state = ChooseManyState::new(input);
 ```
 
-### InputTable
+### Container Components
+
+#### FrameChrome
+Wraps any `StatefulWidget` with optional border, title, and margin. Not an input itself — adds visual chrome. Used by the CLI via `--border` / `--border-label` / `--border-style` / `--margin` flags on choose commands.
+
+```rust
+use tui_chrome::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
+
+let config = FrameChromeConfig {
+    border: BorderStyle::Rounded,
+    border_label: Some("Settings".into()),
+    margin: Margin::uniform(1),
+    ..Default::default()
+};
+let frame = FrameChrome::from_config(BooleanSwitch::new(), &config);
+```
+
+See `docs/components/frame_chrome.md` for the full `BorderStyle` variant list (14 styles).
+
+#### InputTable
 2D grid of heterogeneous cells. Supports: `StaticText`, `BooleanSwitch`, `TextInput`, `TextAreaInput`, `ChooseOne`, `ChooseMany`.
 
 - Focus: arrows navigate; Tab/Shift+Tab wrap; `Ctrl+S` validates and submits
@@ -100,13 +121,18 @@ let state = InputTableState::new(columns, vec![]);
 |------|---------|
 | `EventOutcome` | Canonical event result (Consumed, Ignored, Submitted, Cancelled) |
 | `StandaloneState` / `HandleEvent` | Traits for driving components |
-| `run_standalone` / `drive_event_loop` | Terminal event loops with Ctrl-C/Esc handling |
+| `run_standalone` / `run_standalone_with_chrome` | Terminal event loops with Ctrl-C/Esc handling; `*_with_chrome` variant wraps with `FrameChrome` |
+| `drive_event_loop` / `drive_event_loop_with_chrome` | Lower-level loop drivers accepting any event source |
 | `KeyBindings` | Configurable bindings (vim `h`/`j`/`k`/`l` by default) |
 | `ComponentTheme` | Visual constants (glyphs, colors, styles) |
-| `FrameChrome` / `FrameChromeConfig` | Borders, margins, height specs |
+| `FrameChrome` / `FrameChromeConfig` | Container widget for borders, margins, and titles |
+| `BorderStyle` | 14 border glyph styles (None, Rounded, Sharp, Bold, Double, Block, ThinBlock, Horizontal, Vertical, Line, Top, Bottom, Left, Right) |
+| `Margin` | Four-sided margin outside the border |
+| `HeightSpec` | Parsed `--height` flag (absolute cells or percentage of terminal) |
+| `SortOrder` | Ordering for choice options (Natural, Reverse, Asc, Desc) |
 | `FuzzyFilter` | Fuzzy search via `nucleo-matcher` |
 | `ValidationState` | Uniform validation error read access |
-| `Label` / `LabelPosition` | Shared label placement |
+| `Label` / `LabelPosition` | Shared label placement (Above, Below, Left, Right) |
 
 ## Helpers
 
@@ -131,6 +157,30 @@ question input-table --columns '[{"type":"text","id":"name"}]'
 
 **Exit codes:** `0` = submitted, `1` = Esc cancelled, `130` = Ctrl-C interrupted
 
+### Choose-specific Flags (`choose-one`, `choose-many`)
+
+**Option sources (mutually exclusive):**
+- Positional args: `question choose-one Alpha Beta Gamma`
+- `--options "Red,Green,Blue"` — comma-separated list
+- `--options-from-file <PATH>` — markdown bullet/numbered list
+- `--options-from-dictionary <PATH>` — YAML/JSON `label: value` map
+- Piped stdin (automatic when stdin is not a TTY)
+
+**Selection & filtering:**
+- `--selected <VALUE>` — pre-select by value (repeatable for `choose-many`)
+- `--required` — fail if nothing selected
+- `--min-selections <N>` / `--max-selections <N>` — choose-many limits
+- `--delimiter <CHAR>` — split each option into `label<CHAR>value`
+- `--no-filter` — disable fuzzy search (use hotkey shortcuts instead)
+- `--sort <natural|reverse|asc|desc>` — reorder options before display
+
+**Chrome (FrameChrome wrapping):**
+- `--border` — draw a border (defaults to rounded)
+- `--border-label <TEXT>` — title in the border (implies `--border`)
+- `--border-style <STYLE>` — glyph style (implies `--border` unless `none`)
+- `--margin <CELLS>` — uniform margin outside border
+- `--mt` / `--mb` / `--ml` / `--mr` — per-side margin overrides
+
 ## Key Design Principles
 
 1. **Consistent API** — every component is `StatefulWidget` + `*State` + `HandleEvent`
@@ -138,6 +188,8 @@ question input-table --columns '[{"type":"text","id":"name"}]'
 3. **Typed values** — choice components generic over `V`; InputTable preserves booleans and arrays
 4. **Testable** — `drive_event_loop` accepts any event source for synthetic injection
 5. **Embeddable or standalone** — works in larger TUIs or as fullscreen/inline prompts
+6. **Container composition** — `FrameChrome` wraps any widget; `InputTable` embeds atomic widgets as cells
+7. **Component docs** — detailed per-component docs live in `biscuit-tui/docs/components/`
 
 ## Module Map
 
@@ -147,14 +199,14 @@ lib/src/
 ├── prelude.rs      # Convenience re-exports
 ├── core/
 │   ├── event.rs        # EventOutcome
-│   ├── standalone.rs   # run_standalone, drive_event_loop, StandaloneState, HandleEvent
+│   ├── standalone.rs   # run_standalone, run_standalone_with_chrome, drive_event_loop, StandaloneState, HandleEvent
 │   ├── keybindings.rs  # KeyBindings
 │   ├── theme.rs        # ComponentTheme
-│   ├── frame.rs        # FrameChrome, BorderStyle, Margin, HeightSpec
+│   ├── frame.rs        # FrameChrome, FrameChromeConfig, BorderStyle, Margin, HeightSpec
 │   ├── fuzzy.rs        # FuzzyFilter
 │   ├── validation.rs   # ValidationState
 │   ├── label.rs        # Label, LabelPosition, render_with_label
-│   └── sort.rs         # SortOrder
+│   └── sort.rs         # SortOrder (Natural, Reverse, Asc, Desc)
 ├── components/
 │   ├── text_input.rs
 │   ├── text_area_input.rs
@@ -180,7 +232,7 @@ cli/src/
     ├── boolean_switch.rs
     ├── choose_one.rs
     ├── choose_many.rs
-    ├── common_choose.rs
+    ├── common_choose.rs   # Shared args: ChooseChromeArgs, source resolution, FrameChrome/build helpers
     └── input_table.rs
 ```
 

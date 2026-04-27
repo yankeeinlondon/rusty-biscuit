@@ -1,0 +1,122 @@
+# FrameChrome
+
+The `FrameChrome` is a stateful wrapper widget that draws an optional border, title, and margin around any inner component. It is the mechanism by which the CLI's `--border`, `--border-label`, `--border-style`, and `--margin` flags are rendered.
+
+## Description
+
+`FrameChrome<'a, W>` is a generic `StatefulWidget` that wraps an inner widget `W`. On render, it first shrinks the allocated area by the margin, then (if a visible border is configured) draws a ratatui `Block` with the requested sides and style, and finally renders the inner widget into the remaining interior rectangle.
+
+It is not a user-input component itself — it has no `HandleEvent` implementation and no value. It is a **container** that adds visual chrome around a real input widget.
+
+The companion `FrameChromeConfig` struct is a plain data configuration object used by the CLI layer to assemble a `FrameChrome` from parsed flags.
+
+## Parameters & Defaults
+
+### FrameChromeConfig
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `border` | `BorderStyle` | `BorderStyle::None` | Which sides and glyph style to draw. |
+| `border_label` | `Option<String>` | `None` | Title rendered in the top-left of the border. |
+| `margin` | `Margin` | `Margin::default()` (all zeros) | Cells of margin on each side outside the border. |
+| `border_style` | `Style` | `Style::default()` | ratatui style applied to the border glyphs. |
+
+### BorderStyle Variants
+
+| Variant | Sides | Glyph Style |
+|---------|-------|-------------|
+| `None` | — | No border drawn |
+| `Rounded` | All four | Rounded corners |
+| `Sharp` | All four | Plain single-line |
+| `Bold` | All four | Thick single-line |
+| `Double` | All four | Double-line |
+| `Block` | All four | Quadrant-outside |
+| `ThinBlock` | All four | Quadrant-inside |
+| `Horizontal` | Top + Bottom | Plain |
+| `Vertical` | Left + Right | Plain |
+| `Line` | Top only | Plain |
+| `Top` | Top only | Plain |
+| `Bottom` | Bottom only | Plain |
+| `Left` | Left only | Plain |
+| `Right` | Right only | Plain |
+
+### Margin
+
+Four-sided margin with per-side overrides. Margins are applied **outside** the border — they shrink the area before the border is drawn.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `top` | `u16` | `0` | Cells of margin above |
+| `bottom` | `u16` | `0` | Cells of margin below |
+| `left` | `u16` | `0` | Cells of margin to the left |
+| `right` | `u16` | `0` | Cells of margin to the right |
+
+Use `Margin::uniform(n)` for equal sides, then override individual fields as needed.
+
+## Usage Examples
+
+### 1. Wrapping a Component with a Border
+
+```rust
+use tui_chrome::prelude::*;
+use tui_chrome::core::{BorderStyle, FrameChrome, FrameChromeConfig, Margin};
+
+let config = FrameChromeConfig {
+    border: BorderStyle::Rounded,
+    border_label: Some("Pick a color".into()),
+    ..Default::default()
+};
+let frame = FrameChrome::from_config(ChooseOne::new(), &config);
+```
+
+### 2. Border with Margin
+
+```rust
+let config = FrameChromeConfig {
+    border: BorderStyle::Double,
+    border_label: Some("Settings".into()),
+    margin: Margin::uniform(1),
+    border_style: Style::default().fg(Color::Cyan),
+};
+let frame = FrameChrome::from_config(BooleanSwitch::new(), &config);
+```
+
+### 3. No-Op Wrapper
+
+When `FrameChromeConfig::is_empty()` returns `true` (no visible border, zero margin), callers can skip wrapping entirely or use `FrameChrome::bare(inner)` for type uniformity.
+
+```rust
+let frame = FrameChrome::bare(TextInput::new());
+```
+
+## CLI Usage
+
+The `FrameChrome` is not exposed as its own subcommand. Instead, it is implicitly created by the `question` CLI for the `choose-one` and `choose-many` subcommands (and any other command that flattens `ChooseChromeArgs`).
+
+### Common Flags
+
+- `--border`: Draw a border (defaults to `Rounded` style).
+- `--border-label <TEXT>`: Title in the top-left of the border. Implies `--border`.
+- `--border-style <STYLE>`: Border glyph style (see `BorderStyle` variants above). Any non-`none` value implies `--border`. Explicit `none` suppresses the border even if `--border` is set.
+- `--margin <CELLS>`: Uniform margin on all four sides.
+- `--mt`, `--mb`, `--ml`, `--mr`: Per-side margin overrides that take precedence over `--margin`.
+
+### Example CLI Commands
+
+```bash
+# Rounded border with a title
+question choose-one --border --border-label "Server" Alpha Beta Gamma
+
+# Double border with 1-cell margin
+question choose-many --border-style double --margin 1 Red Green Blue
+
+# Thick border, custom margin (zero top, 2 on other sides)
+question choose-one --border-style bold --margin 2 --mt 0 One Two Three
+```
+
+## Enhancement Suggestions
+
+1. **Custom Title Position**: Support rendering the border label at different positions (center, right) via a `title_position` field on `FrameChromeConfig`.
+2. **Footer/Subtitle**: Add a second label rendered at the bottom of the border for status text or contextual hints.
+3. **Padding (Inner Margin)**: Add an inner margin applied between the border and the inner widget, distinct from the outer margin applied outside the border.
+4. **Styled Title**: Allow the border label to have its own `Style` independent of the border glyph style, so titles can be highlighted without affecting the border color.
