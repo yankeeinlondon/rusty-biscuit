@@ -20,6 +20,12 @@ docs_updated_during_phase_2:
     - claudine/features/2026-04-26-just-flow/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+    - just/flow.just
+docs_updated_during_phase_3:
+    - claudine/features/2026-04-26-just-flow/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
 packages:
     - claudine
 ---
