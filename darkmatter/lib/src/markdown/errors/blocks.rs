@@ -214,10 +214,7 @@ mod tests {
         let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_err();
         let out = render_block(&frontmatter_parse_block(&err, yaml));
 
-        assert!(
-            out.contains("Position:"),
-            "missing position label: {out}"
-        );
+        assert!(out.contains("Position:"), "missing position label: {out}");
         assert!(
             out.contains("'@' magic lookup emits results"),
             "missing offending line snippet: {out}",

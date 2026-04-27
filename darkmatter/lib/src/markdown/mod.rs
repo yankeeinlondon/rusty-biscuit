@@ -44,6 +44,7 @@ pub mod output;
 pub mod reference;
 pub mod toc;
 mod types;
+pub mod yaml_block;
 
 pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
@@ -61,6 +62,7 @@ pub use reference::{
 };
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+pub use yaml_block::{YamlBlock, YamlBlockError};
 
 use std::path::Path;
 

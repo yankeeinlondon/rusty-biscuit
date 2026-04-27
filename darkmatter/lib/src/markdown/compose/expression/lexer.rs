@@ -11,7 +11,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter::markdown::compose::interpolation::{ExpressionFinder, Lexer, Token};
+//! use darkmatter::markdown::compose::expression::{ExpressionFinder, Lexer, Token};
 //!
 //! // Find expressions in content
 //! let content = "Hello {{ name }}!";
@@ -56,7 +56,7 @@ pub struct ExpressionLocation {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::interpolation::ExpressionFinder;
+/// use darkmatter::markdown::compose::expression::ExpressionFinder;
 ///
 /// let content = "Hello {{ name }}! Code: `{{ not_this }}`";
 /// let finder = ExpressionFinder::new(content);
@@ -350,7 +350,7 @@ impl LexerError {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::interpolation::{Lexer, Token, ComparisonOp};
+/// use darkmatter::markdown::compose::expression::{Lexer, Token, ComparisonOp};
 ///
 /// let mut lexer = Lexer::new("count > 0 ? \"yes\" : \"no\"");
 /// let tokens = lexer.tokenize_all().unwrap();
@@ -426,12 +426,8 @@ impl<'a> Lexer<'a> {
                 } else {
                     Err(LexerError::new(
                         match self.mode {
-                            ParseMode::Interpolation => {
-                                "Unexpected '|'. Use '||' for fallback."
-                            }
-                            ParseMode::Condition => {
-                                "Unexpected '|'. Use '||' for logical OR."
-                            }
+                            ParseMode::Interpolation => "Unexpected '|'. Use '||' for fallback.",
+                            ParseMode::Condition => "Unexpected '|'. Use '||' for logical OR.",
                         },
                         start_pos,
                     ))

@@ -50,6 +50,7 @@ pub(crate) mod perf;
 mod state;
 mod types;
 
+pub mod expression;
 pub mod interpolation;
 pub mod page_blocks;
 pub mod replacement;
@@ -2531,7 +2532,11 @@ mod tests {
 
         let err = md.compose_with(options).unwrap_err();
         let err_string = format!("{}", err);
-        assert!(err_string.contains("Unexpected '|'") || err_string.contains("parse"), "Expected bare pipe error, got: {}", err_string);
+        assert!(
+            err_string.contains("Unexpected '|'") || err_string.contains("parse"),
+            "Expected bare pipe error, got: {}",
+            err_string
+        );
     }
 
     #[test]
@@ -4266,8 +4271,7 @@ Rounded: {{ round(pi) }}"#;
         #[test]
         fn page_block_with_bare_pipe_fails_parse() {
             // Bare `|` in condition expressions should produce a parse error
-            let content =
-                "---\na: true\n---\n::block when=\"a | b\"\ninside\n::end-block\n";
+            let content = "---\na: true\n---\n::block when=\"a | b\"\ninside\n::end-block\n";
             let md: Markdown = content.into();
             let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
             let err = md.compose_with(options).unwrap_err();

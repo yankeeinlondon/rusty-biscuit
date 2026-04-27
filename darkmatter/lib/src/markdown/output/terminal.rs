@@ -35,6 +35,7 @@ use crate::markdown::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
     inline::{InlineEvent, InlineTag, MarkProcessor},
+    output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
@@ -52,9 +53,15 @@ use biscuit_terminal::utils::UnicodeWidthStr;
 use biscuit_terminal::utils::layout::Alignment;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::path::{Path, PathBuf};
-use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
-use syntect::parsing::{Scope, SyntaxReference};
+use syntect::parsing::Scope;
+
+// Re-export shared code-block helpers so existing call sites and tests keep working.
+#[cfg(test)]
+pub(crate) use code_block::compute_highlight_bg;
+#[cfg(test)]
+pub(crate) use code_block::find_syntax;
+pub(crate) use code_block::render_terminal_code_block as highlight_code;
 
 /// Parse image alt text to extract optional width specification.
 ///
@@ -1865,7 +1872,13 @@ fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
 /// ANSI-formatted string with title (if present) on the left and language right-aligned.
 /// Title is bold, language is not. For title-only headers (empty language with title),
 /// only the title is rendered.
-fn format_header_row(
+///
+/// ## Notes
+///
+/// This helper is also reused by [`crate::markdown::yaml_block::YamlBlock`] to keep
+/// the YAML-fence header row byte-identical between Markdown and YamlBlock outputs.
+/// Any signature change here must keep that consumer in sync.
+pub(crate) fn format_header_row(
     title: Option<&str>,
     language: &str,
     bg_color: Color,
@@ -1928,20 +1941,6 @@ fn format_header_row(
     }
 
     output
-}
-
-/// Emits a padding row with the specified background color.
-///
-/// The padding row consists of:
-/// - Setting the background color
-/// - Clearing to end of line (\x1b[K)
-/// - Resetting all attributes (\x1b[0m)
-/// - Adding a newline
-fn emit_padding_row(bg_color: Color) -> String {
-    format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
-        bg_color.r, bg_color.g, bg_color.b
-    )
 }
 
 /// A wrapper that handles word-based line wrapping for prose text.
@@ -2345,7 +2344,7 @@ fn write_horizontal_rule(
 /// let adjusted = adjust_background(theme_bg, ColorMode::Dark, (30, 25, 0), (20, 15, 0));
 /// // Result: Color { r: 70, g: 65, b: 40, a: 255 }
 /// ```
-fn adjust_background(
+pub(crate) fn adjust_background(
     base: Color,
     color_mode: ColorMode,
     dark_delta: (u8, u8, u8),
@@ -2367,214 +2366,12 @@ fn adjust_background(
     }
 }
 
-/// Computes a highlighted background color based on the theme background and color mode.
-///
-/// Uses warmer tones (more red/green) to create a visual highlight effect.
-#[inline]
-fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
-    adjust_background(theme_bg, color_mode, (30, 25, 0), (20, 15, 0))
-}
-
 /// Computes a subtle background color for blockquotes based on the theme background.
 ///
 /// Uses uniform brightness adjustment for subtle visual separation.
 #[inline]
 fn compute_blockquote_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
     adjust_background(theme_bg, color_mode, (20, 20, 20), (15, 15, 15))
-}
-
-/// Highlights code with syntax highlighting and optional line numbers.
-///
-/// Applies syntax highlighting using syntect, adds top/bottom padding rows,
-/// and optionally renders line numbers and line highlighting based on DSL metadata.
-///
-/// ## Arguments
-///
-/// * `code` - Source code to highlight
-/// * `language` - Programming language identifier (e.g., "rust", "python")
-/// * `highlighter` - Code highlighter with loaded syntax set and theme
-/// * `options` - Terminal rendering options (includes global line numbering flag)
-/// * `meta` - Code block DSL metadata (title, highlight ranges, line numbering override)
-/// * `color_mode` - Dark or light mode for computing highlight background colors
-///
-/// ## Returns
-///
-/// ANSI-formatted string with:
-/// - Top padding row (blank line with theme background)
-/// - Code lines with syntax highlighting, optional line numbers, and highlight backgrounds
-/// - Bottom padding row (blank line with theme background)
-///
-/// ## Examples
-///
-/// ```ignore
-/// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-/// use darkmatter::markdown::output::TerminalOptions;
-/// use darkmatter::markdown::dsl::CodeBlockMeta;
-///
-/// let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-/// let options = TerminalOptions::default();
-/// let meta = CodeBlockMeta::default();
-///
-/// let result = highlight_code(
-///     "fn main() {}",
-///     "rust",
-///     &highlighter,
-///     &options,
-///     &meta,
-///     ColorMode::Dark
-/// );
-/// // Result: ANSI-formatted code with padding, syntax colors, and backgrounds
-/// ```
-fn highlight_code(
-    code: &str,
-    language: &str,
-    highlighter: &CodeHighlighter,
-    options: &TerminalOptions,
-    meta: &crate::markdown::dsl::CodeBlockMeta,
-    color_mode: ColorMode,
-) -> Result<String, MarkdownError> {
-    let syntax = find_syntax(language, highlighter.syntax_set())
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
-    let theme = highlighter.theme();
-
-    // Get background color from theme
-    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
-
-    // Use LinesWithEndings to preserve newlines - required for proper multi-line
-    // syntax parsing in grammars like bash/shell that track state across lines
-    use syntect::util::LinesWithEndings;
-    let lines: Vec<&str> = LinesWithEndings::from(code).collect();
-    let mut output = String::with_capacity(code.len() * 2);
-
-    // Determine line number width
-    let line_number_width = if options.include_line_numbers || meta.line_numbering {
-        format!("{}", lines.len()).len()
-    } else {
-        0
-    };
-
-    // Add top padding row
-    output.push_str(&emit_padding_row(bg_color));
-
-    // Create highlighter for this code block
-    let mut hl = HighlightLines::new(syntax, theme);
-
-    for (idx, line) in lines.iter().enumerate() {
-        let line_number = idx + 1;
-
-        // Determine if this line should be highlighted
-        let is_highlighted = meta.highlight.contains(line_number);
-        let line_bg = if is_highlighted {
-            compute_highlight_bg(bg_color, color_mode)
-        } else {
-            bg_color
-        };
-
-        // Set background color for the line (applies to gutter and content)
-        output.push_str(&format!(
-            "\x1b[48;2;{};{};{}m",
-            line_bg.r, line_bg.g, line_bg.b
-        ));
-
-        // Add line number gutter if enabled (with background already set)
-        if line_number_width > 0 {
-            // Gray foreground for line numbers, background already set above
-            output.push_str(&format!(
-                "\x1b[38;2;128;128;128m{:>width$} │ ",
-                line_number,
-                width = line_number_width
-            ));
-        } else {
-            // Add left padding (1 character) when no line numbers
-            output.push(' ');
-        }
-
-        // Highlight the line and get styled ranges
-        let ranges = hl
-            .highlight_line(line, highlighter.syntax_set())
-            .map_err(|e| MarkdownError::ThemeLoad(format!("Syntax highlighting failed: {}", e)))?;
-
-        // Convert styled ranges to ANSI escape codes, but filter out newlines
-        // from the output (we handle line breaks ourselves)
-        for (style, text) in &ranges {
-            let text_without_newline = text.trim_end_matches('\n');
-            if !text_without_newline.is_empty() {
-                output.push_str(&format!(
-                    "\x1b[38;2;{};{};{}m{}",
-                    style.foreground.r,
-                    style.foreground.g,
-                    style.foreground.b,
-                    text_without_newline
-                ));
-            }
-        }
-
-        // Clear to end of line with background color, then reset
-        // \x1b[K clears from cursor to end of line using current background
-        output.push_str("\x1b[K\x1b[0m");
-
-        // Add newline after each line (including last line, so bottom padding is on its own line)
-        output.push('\n');
-    }
-
-    // Add bottom padding row (without trailing newline to avoid double spacing)
-    output.push_str(&format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
-        bg_color.r, bg_color.g, bg_color.b
-    ));
-
-    Ok(output)
-}
-
-/// Finds syntax definition by language identifier.
-///
-/// Searches in the following order:
-/// 1. By file extension (e.g., "rs", "py", "js")
-/// 2. By exact name (e.g., "Rust", "Python")
-/// 3. By case-insensitive name match (e.g., "rust" -> "Rust")
-/// 4. By common alias mapping (e.g., "shell" -> "bash", "c++" -> "cpp")
-fn find_syntax<'a>(
-    language: &str,
-    syntax_set: &'a syntect::parsing::SyntaxSet,
-) -> Option<&'a SyntaxReference> {
-    if language.is_empty() {
-        return None;
-    }
-
-    // Try by extension first (common case)
-    if let Some(syntax) = syntax_set.find_syntax_by_extension(language) {
-        return Some(syntax);
-    }
-
-    // Try by exact name
-    if let Some(syntax) = syntax_set.find_syntax_by_name(language) {
-        return Some(syntax);
-    }
-
-    // Try case-insensitive name match
-    let language_lower = language.to_lowercase();
-    for syntax in syntax_set.syntaxes() {
-        if syntax.name.to_lowercase() == language_lower {
-            return Some(syntax);
-        }
-    }
-
-    // Try common aliases that differ from extension/name
-    let alias = match language_lower.as_str() {
-        "shell" | "zsh" => "bash",
-        "c++" => "cpp",
-        "dockerfile" => "Dockerfile",
-        "makefile" | "make" => "Makefile",
-        "javascript" => "js",
-        "typescript" => "ts",
-        "python3" => "py",
-        _ => return None,
-    };
-
-    // Try alias as extension first, then as name
-    syntax_set
-        .find_syntax_by_extension(alias)
-        .or_else(|| syntax_set.find_syntax_by_name(alias))
 }
 
 #[cfg(test)]

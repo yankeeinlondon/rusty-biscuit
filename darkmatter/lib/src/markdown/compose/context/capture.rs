@@ -67,7 +67,7 @@ impl ContextGroup {
     }
 
     /// Map a ctx variable name to its owning group.
-    fn for_key(key: &str) -> Option<ContextGroup> {
+    pub(crate) fn for_key(key: &str) -> Option<ContextGroup> {
         match key {
             // DateTime
             "now"
@@ -566,7 +566,7 @@ pub(crate) fn capture_runtime_context_for_content(base_dir: &Path, content: &str
 }
 
 /// Capture runtime context for the specified groups only.
-fn capture_runtime_context_for_groups(
+pub(crate) fn capture_runtime_context_for_groups(
     base_dir: &Path,
     groups: &HashSet<ContextGroup>,
 ) -> CaptureResult {
