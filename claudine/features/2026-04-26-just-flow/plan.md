@@ -11,7 +11,8 @@ docs_created_during_phase_1:
     - claudine/prompts/commit.md
     - claudine/prompts/review-feature.md
     - claudine/prompts/implement-feature-review-suggestions.md
-skills_files_updated_during_phase1: []
+skills_files_updated_during_phase1:
+    - .claude/skills/claudine/SKILL.md
 packages:
     - claudine
 ---
