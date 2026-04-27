@@ -82,12 +82,18 @@ use serde_json::Value;
 pub trait EvaluationLookup {
     /// Looks up a value by dotted path.
     ///
-    /// Returns `None` if the path does not resolve to a value.
+    /// ## Returns
+    ///
+    /// - `Some(Value)` when the path resolves to a value
+    /// - `None` when the path does not resolve
     fn get(&self, path: &str) -> Option<Value>;
 
     /// Looks up a value by path, coercing to a string.
     ///
-    /// Returns an empty string if the path does not resolve.
+    /// ## Returns
+    ///
+    /// - The string representation of the value when the path resolves
+    /// - An empty string when the path does not resolve or the value is null
     fn get_string(&self, path: &str) -> String {
         match self.get(path) {
             None | Some(Value::Null) => String::new(),

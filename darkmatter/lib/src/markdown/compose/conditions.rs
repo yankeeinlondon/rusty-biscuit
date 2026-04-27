@@ -73,7 +73,40 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
     }
 }
 
-/// Evaluates a `when` condition expression.
+/// Evaluates a `when` condition expression against an effective state.
+///
+/// This is the primary entry point for condition evaluation in the compose
+/// pipeline. It parses the expression in condition mode (where `||` is logical
+/// OR and `&&` is logical AND) and evaluates it against the provided state.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::{conditions::evaluate_condition, EffectiveStateBuilder, ComposeContext};
+/// use serde_json::json;
+/// use std::collections::HashMap;
+/// use std::path::Path;
+///
+/// let state = EffectiveStateBuilder::new()
+///     .with_frontmatter([("draft".to_string(), json!(true))].into())
+///     .with_context(ComposeContext::capture_for_dir(Path::new(".")))
+///     .build()
+///     .unwrap();
+///
+/// assert!(evaluate_condition("draft", &state, 1).unwrap());
+/// assert!(!evaluate_condition("!draft", &state, 1).unwrap());
+/// ```
+///
+/// ## Returns
+///
+/// - `Ok(true)` when the expression evaluates to a truthy value
+/// - `Ok(false)` when the expression evaluates to a falsy value
+///
+/// ## Errors
+///
+/// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
+/// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
+/// Both variants include the source expression and line number.
 pub fn evaluate_condition(
     expr: &str,
     state: &EffectiveState,
@@ -153,6 +186,24 @@ fn caret_marker(input: &str, byte_offset: usize) -> String {
 /// ).unwrap();
 /// assert!(result);
 /// ```
+///
+/// ## Returns
+///
+/// - `Ok(true)` when the expression evaluates to a truthy value
+/// - `Ok(false)` when the expression evaluates to a falsy value
+///
+/// ## Errors
+///
+/// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
+/// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
+/// Both variants use line `1` for the shortcut API.
+///
+/// ## Notes
+///
+/// - [`ConditionError`] implements [`biscuit_terminal::errors::BlockError`],
+///   so parse and evaluation failures can be rendered as status blocks.
+/// - Context capture is lazy: only the context groups actually referenced
+///   by the expression are captured, and only when needed.
 pub fn evaluate_condition_against(
     expr: &str,
     data: &Value,
