@@ -15,7 +15,7 @@ docs_created_during_phase_0:
     - claudine/lib/src/stream/protocol/fixtures/kimi/wire-cancelled.jsonl
     - claudine/lib/src/stream/protocol/fixtures/kimi/wire-auth-expired.jsonl
     - claudine/features/2026-04-26-fix-kimi/phase-0/wire-driver.py
-skills_files_updated_during_phase0: []
+skills_files_updated_during_phase_0: []
 packages_during_phase_0:
     - claudine
 ---
