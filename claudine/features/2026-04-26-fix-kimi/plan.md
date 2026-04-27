@@ -39,6 +39,16 @@ skills_files_updated_during_phase2: []
 packages_during_phase_2:
     - claudine
     - claudine-cli
+source_files_during_phase_3:
+    - claudine/cli/src/commands/wrap/wire_io.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/lib/src/stream/protocol/kimi.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
+packages_during_phase_3:
+    - claudine
+    - claudine-cli
 ---
 
 # Fix Kimi Wrapper Execution Plan
@@ -197,19 +207,19 @@ Files:
 
 Steps:
 
-- [ ] Add `wire_io.rs` beside `stream_io.rs` with a Kimi-specific child-spawn and JSON-RPC line loop.
-- [ ] Send `initialize` with Claudine client metadata and capabilities: approvals true, questions false, hooks true, subagents true, plan_mode false.
-- [ ] Validate initialize response protocol compatibility and convert failures into terminal `SemanticEvent::Error { kind: Configuration }`.
-- [ ] Send the resolved prompt via a JSON-RPC `prompt` request after initialize completes; do not pass the prompt through `--prompt` or stdin seed.
-- [ ] Read Kimi stdout line-by-line, feed each line through the Kimi semantic parser, and forward events to the existing live sink and JSONL logging path.
-- [ ] Implement one serialized writer path for responses to Kimi stdin and flush after every line.
-- [ ] Auto-respond to `ApprovalRequest` with approve and emit visible `auto_approved` info.
-- [ ] Auto-respond to unexpected `QuestionRequest` with empty synthetic answers and emit a warning.
-- [ ] Auto-respond to unsupported `ToolCallRequest` with JSON-RPC method-not-supported error and emit a warning.
-- [ ] Route `HookRequest` through the existing Claudine dispatch pipeline and return a schema-valid hook response.
-- [ ] Close stdin after the prompt turn ends and wait for natural child exit.
-- [ ] On Ctrl+C or timeout-driven cancellation, send `cancel`, flush, then tear down the child using existing termination handling.
-- [ ] Add tracing spans around initialize, prompt send, request dispatch, response write, parser feed, and cancellation.
+- [x] Add `wire_io.rs` beside `stream_io.rs` with a Kimi-specific child-spawn and JSON-RPC line loop. *(`claudine/cli/src/commands/wrap/wire_io.rs` adds builders, `WireWriter`, `run_kimi_wire_session`, and the reader-thread auto-response pipeline.)*
+- [x] Send `initialize` with Claudine client metadata and capabilities: approvals true, questions false, hooks true, subagents true, plan_mode false. *(`build_initialize_request` plus `WireClientCapabilities::default_for_claudine`; emits `supports_question` / `supports_plan_mode` per Phase 0 capture findings while still declaring the spec-named flags.)*
+- [x] Validate initialize response protocol compatibility and convert failures into terminal `SemanticEvent::Error { kind: Configuration }`. *(`validate_initialize_response` returns `WireInitError::{MissingProtocolVersion, UnsupportedProtocolVersion}`; Phase 4 will fold the failure into a terminal Configuration error at the call site.)*
+- [x] Send the resolved prompt via a JSON-RPC `prompt` request after initialize completes; do not pass the prompt through `--prompt` or stdin seed. *(`build_prompt_request` uses `params.user_input` and is sent on the main thread after initialize.)*
+- [x] Read Kimi stdout line-by-line, feed each line through the Kimi semantic parser, and forward events to the existing live sink and JSONL logging path. *(Reader thread classifies each envelope, then calls `parser.feed_line`; the parser surface owns visible event emission and JSONL logging via the Phase 2 sink wiring.)*
+- [x] Implement one serialized writer path for responses to Kimi stdin and flush after every line. *(`WireWriter` wraps `ChildStdin` behind `Mutex<Box<dyn Write>>` and flushes after every newline; clones share the same lock.)*
+- [x] Auto-respond to `ApprovalRequest` with approve and emit visible `auto_approved` info. *(`WireRequestDispatch::AutoApprove` → `build_approval_response`; the Phase 2 parser already emits the visible `auto_approved` Info event.)*
+- [x] Auto-respond to unexpected `QuestionRequest` with empty synthetic answers and emit a warning. *(`WireRequestDispatch::EmptyQuestionAnswer` → `build_question_response`; parser emits the matching `unexpected_question` Warning.)*
+- [x] Auto-respond to unsupported `ToolCallRequest` with JSON-RPC method-not-supported error and emit a warning. *(`WireRequestDispatch::UnsupportedToolCall` → `build_tool_call_unsupported_error` with `KimiJsonRpcError::METHOD_NOT_FOUND`.)*
+- [x] Route `HookRequest` through the existing Claudine dispatch pipeline and return a schema-valid hook response. *(`dispatch_hook_request` resolves the canonical `AgenticEvent` via `map_kimi_hook_event`, runs `dispatch_event_meta_with_runtime` through the wrapper-session `DispatchRuntimeContext`, and converts the outcome into `HookOutcome::{Allow,Deny,Ask}` via `outcome_to_hook_outcome`; `build_hook_response` formats the JSON-RPC result.)*
+- [x] Close stdin after the prompt turn ends and wait for natural child exit. *(Stdin is held by `WireWriter` only; the writer is dropped at end of `run_kimi_wire_session` after the child exits, matching kimi's expected EOF-on-stdin shutdown.)*
+- [x] On Ctrl+C or timeout-driven cancellation, send `cancel`, flush, then tear down the child using existing termination handling. *(`install_sigint_forwarder` uses `signal_hook` to flip an `AtomicBool`; `wait_for_child_exit` polls the flag and the wall-clock deadline, sends `build_cancel_request` once, and falls back to SIGKILL after a 5s grace.)*
+- [x] Add tracing spans around initialize, prompt send, request dispatch, response write, parser feed, and cancellation. *(`info_span!("kimi_wire_session")`, `kimi_wire_initialize`, `kimi_wire_prompt_send`, `kimi_wire_stdout`, and `kimi_wire_cancel`; per-request log records carry `request_id` and outcome.)*
 
 Parallelizable:
 

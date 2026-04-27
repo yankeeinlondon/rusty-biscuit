@@ -787,7 +787,7 @@ pub struct KimiToolCallRequest {
 
 /// `HookRequest` request payload — server asks Claudine to run hook actions
 /// for a lifecycle event. Routed through `crate::dispatch` in Phase 5.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct KimiHookRequest {
     #[serde(default)]
     pub id: Option<String>,
