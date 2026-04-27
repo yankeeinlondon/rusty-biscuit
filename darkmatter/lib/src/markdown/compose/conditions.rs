@@ -5,7 +5,7 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::expression::{evaluate, is_truthy, parse_condition, EvaluationLookup};
+use super::expression::{EvaluationLookup, evaluate, is_truthy, parse_condition};
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -571,9 +571,7 @@ mod tests {
     #[test]
     fn shortcut_top_level_lookup() {
         let data = json!({ "draft": true, "title": "Hello" });
-        assert!(
-            evaluate_condition_against("draft", &data, std::path::Path::new(".")).unwrap()
-        );
+        assert!(evaluate_condition_against("draft", &data, std::path::Path::new(".")).unwrap());
         assert!(
             evaluate_condition_against("title == 'Hello'", &data, std::path::Path::new("."))
                 .unwrap()
@@ -595,20 +593,14 @@ mod tests {
     #[test]
     fn shortcut_missing_values() {
         let data = json!({});
-        assert!(
-            !evaluate_condition_against("missing", &data, std::path::Path::new(".")).unwrap()
-        );
-        assert!(
-            evaluate_condition_against("!missing", &data, std::path::Path::new(".")).unwrap()
-        );
+        assert!(!evaluate_condition_against("missing", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("!missing", &data, std::path::Path::new(".")).unwrap());
     }
 
     #[test]
     fn shortcut_comparisons_and_helpers() {
         let data = json!({ "count": 5, "items": [1, 2, 3], "user": { "name": "Alice" } });
-        assert!(
-            evaluate_condition_against("count > 0", &data, std::path::Path::new(".")).unwrap()
-        );
+        assert!(evaluate_condition_against("count > 0", &data, std::path::Path::new(".")).unwrap());
         assert!(
             evaluate_condition_against("count >= 5", &data, std::path::Path::new(".")).unwrap()
         );
@@ -620,12 +612,8 @@ mod tests {
                 .unwrap()
         );
         assert!(
-            evaluate_condition_against(
-                "HasKey(user, 'name')",
-                &data,
-                std::path::Path::new(".")
-            )
-            .unwrap()
+            evaluate_condition_against("HasKey(user, 'name')", &data, std::path::Path::new("."))
+                .unwrap()
         );
     }
 
@@ -658,30 +646,20 @@ mod tests {
         assert!(
             !evaluate_condition_against("And(a, b)", &data, std::path::Path::new(".")).unwrap()
         );
-        assert!(
-            evaluate_condition_against("Or(a, b)", &data, std::path::Path::new(".")).unwrap()
-        );
+        assert!(evaluate_condition_against("Or(a, b)", &data, std::path::Path::new(".")).unwrap());
     }
 
     #[test]
     fn shortcut_ternary() {
         let data = json!({ "enabled": true, "yes": "yes", "empty": "" });
         assert!(
-            evaluate_condition_against(
-                "enabled ? yes : empty",
-                &data,
-                std::path::Path::new(".")
-            )
-            .unwrap()
+            evaluate_condition_against("enabled ? yes : empty", &data, std::path::Path::new("."))
+                .unwrap()
         );
         let data = json!({ "enabled": false, "yes": "yes", "empty": "" });
         assert!(
-            !evaluate_condition_against(
-                "enabled ? yes : empty",
-                &data,
-                std::path::Path::new(".")
-            )
-            .unwrap()
+            !evaluate_condition_against("enabled ? yes : empty", &data, std::path::Path::new("."))
+                .unwrap()
         );
     }
 
@@ -697,8 +675,11 @@ mod tests {
     #[test]
     fn shortcut_eval_error_shape() {
         let data = json!({ "truthy_flag": true });
-        let result =
-            evaluate_condition_against("truthy_flag && UnknownFn(x)", &data, std::path::Path::new("."));
+        let result = evaluate_condition_against(
+            "truthy_flag && UnknownFn(x)",
+            &data,
+            std::path::Path::new("."),
+        );
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, ConditionError::Eval { line: 1, .. }));

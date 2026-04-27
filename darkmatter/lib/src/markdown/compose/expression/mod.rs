@@ -261,21 +261,15 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
             let both_null = left.is_null() && right.is_null();
 
             let outcome = match op {
-                ComparisonOp::Equal => {
-                    !both_null && scalar_string(&left) == scalar_string(&right)
-                }
+                ComparisonOp::Equal => !both_null && scalar_string(&left) == scalar_string(&right),
                 ComparisonOp::NotEqual => {
                     !both_null && scalar_string(&left) != scalar_string(&right)
                 }
-                ComparisonOp::GreaterThan => {
-                    to_number_coerce(&left) > to_number_coerce(&right)
-                }
+                ComparisonOp::GreaterThan => to_number_coerce(&left) > to_number_coerce(&right),
                 ComparisonOp::GreaterThanOrEqual => {
                     to_number_coerce(&left) >= to_number_coerce(&right)
                 }
-                ComparisonOp::LessThan => {
-                    to_number_coerce(&left) < to_number_coerce(&right)
-                }
+                ComparisonOp::LessThan => to_number_coerce(&left) < to_number_coerce(&right),
             };
             Ok(Value::Bool(outcome))
         }
@@ -434,14 +428,8 @@ mod tests {
                 ],
             };
 
-            assert_eq!(
-                evaluate(&fallback_expr, &state).unwrap(),
-                json!("present")
-            );
-            assert_eq!(
-                evaluate(&or_expr, &state).unwrap(),
-                json!(true)
-            );
+            assert_eq!(evaluate(&fallback_expr, &state).unwrap(), json!("present"));
+            assert_eq!(evaluate(&or_expr, &state).unwrap(), json!(true));
         }
 
         #[test]
@@ -452,10 +440,7 @@ mod tests {
                 fallback: Box::new(Expr::StringLiteral("default".to_string())),
             };
 
-            assert_eq!(
-                evaluate(&expr, &state).unwrap(),
-                json!("default")
-            );
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("default"));
         }
 
         #[test]

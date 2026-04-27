@@ -5,9 +5,7 @@
 //! returns the rewritten string. Supports both markdown-aware scanning
 //! (skipping code regions) and plain-text scanning.
 
-use super::{
-    EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse,
-};
+use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
 use crate::markdown::compose::expression::EvaluationLookup;
 use crate::markdown::compose::types::ComposeWarning;
 use crate::markdown::types::MarkdownError;
