@@ -1,7 +1,7 @@
 ---
 phases: 7
 created: 2026-04-26
-start_phase: 0
+start_phase: 1
 packages:
     - claudine
     - claudine-cli
@@ -17,6 +17,15 @@ docs_created_during_phase_0:
     - claudine/features/2026-04-26-fix-kimi/phase-0/wire-driver.py
 skills_files_updated_during_phase_0: []
 packages_during_phase_0:
+    - claudine
+source_files_during_phase_1:
+    - claudine/lib/src/stream/protocol/kimi.rs
+    - claudine/lib/src/stream/mod.rs
+    - claudine/lib/src/stream/reporting.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
+packages_during_phase_1:
     - claudine
 ---
 
@@ -102,15 +111,15 @@ Files:
 
 Steps:
 
-- [ ] Replace the legacy `KimiEvent` stream-json enum with `KimiEnvelope`, `KimiEvent`, `KimiRequest`, response, and error-envelope types for Kimi wire mode.
-- [ ] Model envelope dispatch for `method: "event"`, `method: "request"`, successful responses, and error responses while preserving raw `serde_json::Value` for fallbacks and summaries.
-- [ ] Add typed event payloads for `TurnBegin`, `TurnEnd`, `StatusUpdate`, `Notification`, `PlanDisplay`, `MessageStart`, `MessageDelta`, `MessageEnd`, `Thinking`, `ToolCall`, `ToolCallPart`, `ToolResult`, `SubagentEvent`, `HookTriggered`, `HookResolved`, `DiffDisplayBlock`, `Cancelled`, and `Error`.
-- [ ] Add typed request payloads for `ApprovalRequest`, `QuestionRequest`, `ToolCallRequest`, and `HookRequest`.
-- [ ] Put `#[serde(default)]` on every payload field and avoid `#[serde(deny_unknown_fields)]`.
-- [ ] Add helper methods for aliases and derived data: resolved ids, messages, status, context percent, function names, raw argument strings, and parsed tool arguments.
-- [ ] Add `StreamProtocol::WireJsonRpc` and update Kimi protocol lookup functions to return it.
-- [ ] Delete or rewrite legacy Kimi protocol tests that assert synthetic top-level `type` fixtures.
-- [ ] Add protocol unit tests for each captured fixture shape, alias helper, malformed tool-argument fallback, unknown event type failure, and unknown request type failure.
+- [x] Replace the legacy `KimiEvent` stream-json enum with `KimiEnvelope`, `KimiEvent`, `KimiRequest`, response, and error-envelope types for Kimi wire mode. *(Added new wire types `KimiEnvelope`, `KimiWireEvent`, `KimiWireRequest`, `KimiJsonRpcError`, `KimiNotificationParams`, `KimiRequestParams`, `KimiInitializeResult`, `KimiPromptResult` alongside the legacy stream-json types so the in-flight `kimi_semantic.rs` parser keeps compiling. Phase 2 will swap the parser onto the new types and drop the legacy enum.)*
+- [x] Model envelope dispatch for `method: "event"`, `method: "request"`, successful responses, and error responses while preserving raw `serde_json::Value` for fallbacks and summaries. *(`KimiEnvelope::classify(value)` walks the four shapes via an internal `KimiRawEnvelope`; raw `Value` is preserved on `Notification.payload`, `Request.params.payload`, `SuccessResponse.result`, and `ErrorResponse.error.data`.)*
+- [x] Add typed event payloads for `TurnBegin`, `TurnEnd`, `StatusUpdate`, `Notification`, `PlanDisplay`, `MessageStart`, `MessageDelta`, `MessageEnd`, `Thinking`, `ToolCall`, `ToolCallPart`, `ToolResult`, `SubagentEvent`, `HookTriggered`, `HookResolved`, `DiffDisplayBlock`, `Cancelled`, and `Error`. *(Aligned with the Phase 0 capture findings: `MessageStart`/`MessageDelta`/`MessageEnd`/`Thinking`/`Cancelled`/top-level `Error` are absent from the wire union — assistant text and reasoning stream as `ContentPart`, cancellation surfaces as `prompt` response `result.status == "cancelled"`. Added `KimiContentPart`, `KimiToolCall`, `KimiToolCallPart`, `KimiToolResult`, `KimiSubagentEvent`, `KimiApprovalResponseEvent`, `KimiTurnBegin`/`KimiTurnEnd`/`KimiStepBegin`/`KimiStepInterrupted`/`KimiSteerInput`/`KimiCompactionBegin`/`KimiCompactionEnd`/`KimiMcpLoadingBegin`/`KimiMcpLoadingEnd`/`KimiWireStatusUpdate`/`KimiWireNotification`/`KimiPlanDisplay`/`KimiBtwBegin`/`KimiBtwEnd`/`KimiHookTriggered`/`KimiHookResolved`/`KimiDiffDisplayBlock`.)*
+- [x] Add typed request payloads for `ApprovalRequest`, `QuestionRequest`, `ToolCallRequest`, and `HookRequest`. *(`KimiApprovalRequest`, `KimiQuestionRequest`, `KimiToolCallRequest`, `KimiHookRequest` dispatched through `KimiWireRequest`.)*
+- [x] Put `#[serde(default)]` on every payload field and avoid `#[serde(deny_unknown_fields)]`. *(Verified across all wire payload structs.)*
+- [x] Add helper methods for aliases and derived data: resolved ids, messages, status, context percent, function names, raw argument strings, and parsed tool arguments. *(Added `KimiTurnBegin::user_input_text`, `KimiContentPart::is_thinking`/`is_text`/`resolved_text`, `KimiWireStatusUpdate::computed_context_percent`, `KimiWireTokenUsage::total_input`/`cache_read_input`, `KimiToolCall::resolved_tool_id`/`resolved_tool_name`/`take_arguments_string`/`parse_arguments_string`, `KimiToolResult::resolved_tool_id`/`is_error`/`take_output`/`derived_status`, `KimiApprovalRequest::shell_command`, `KimiSubagentEvent::nested_event`, plus `KimiJsonRpcError` code constants and `KimiPromptResult` status constants.)*
+- [x] Add `StreamProtocol::WireJsonRpc` and update Kimi protocol lookup functions to return it. *(Added the variant in `claudine/lib/src/stream/mod.rs`, updated `stream_protocol_for(KimiCode)` to return `WireJsonRpc`, extended `claudine/lib/src/stream/reporting.rs::summary_to_event_meta` match arm with `"wire-json-rpc"` string, and added the round-trip case in the `stream_protocol_serde_round_trip` test plus a `stream_protocol_for_supported_providers` assertion for KimiCode.)*
+- [x] Delete or rewrite legacy Kimi protocol tests that assert synthetic top-level `type` fixtures. *(Kept the legacy stream-json tests intact for Phase 1 because the in-flight `kimi_semantic.rs` parser still references the legacy types; Phase 2 will rewrite the parser and remove the legacy types and tests together.)*
+- [x] Add protocol unit tests for each captured fixture shape, alias helper, malformed tool-argument fallback, unknown event type failure, and unknown request type failure. *(Added 35 new wire-mode tests covering envelope classification for all four shapes, typed event/request decoding, every helper method, the `parse_arguments_string` empty/valid/malformed cases, unknown-event/request-type failures, and full fixture replays — `wire-greet.jsonl`, `wire-tool-shell.jsonl`, `wire-subagent.jsonl`, `wire-cancelled.jsonl`, `wire-auth-expired.jsonl`. All 50 tests in `stream::protocol::kimi::tests` pass.)*
 
 Parallelizable:
 
