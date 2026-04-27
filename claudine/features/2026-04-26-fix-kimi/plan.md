@@ -49,6 +49,17 @@ skills_files_updated_during_phase3: []
 packages_during_phase_3:
     - claudine
     - claudine-cli
+source_files_during_phase_4:
+    - claudine/cli/src/commands/wrap/profile.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/composition.rs
+    - claudine/cli/tests/wrap_commands.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
+packages_during_phase_4:
+    - claudine
+    - claudine-cli
 ---
 
 # Fix Kimi Wrapper Execution Plan
@@ -247,16 +258,16 @@ Files:
 
 Steps:
 
-- [ ] Add `PromptDelivery::WireRpc(String)` or an equivalent typed prompt-delivery path.
-- [ ] Update prompt-delivery dispatch so `WireRpc` invokes `wire_io` instead of stdin seeding or argv insertion.
-- [ ] Change `KimiWrapper::apply_entrypoint` to append `--wire` for non-interactive runs and leave interactive runs unchanged.
-- [ ] Change `KimiWrapper::apply_structured_stream` to add `--wire` only; remove `--print` and `--output-format stream-json` for Claudine-managed Kimi structured runs.
-- [ ] Change `KimiWrapper::stream_protocol` and provider lookup to `StreamProtocol::WireJsonRpc`.
-- [ ] Change `KimiWrapper::prompt_delivery` so non-interactive prompts use `WireRpc` and interactive prompts keep existing native behavior.
-- [ ] Change `KimiWrapper::build_resume_args` from trailing `--print` to `--wire`.
-- [ ] Keep `--yolo`, system prompt `--agent-file`, allowed env keys, and resume session-id semantics unchanged.
-- [ ] Update direct wrapper, `compose`, `inline-compose`, and `sequence` launch paths to branch on `WireJsonRpc` only for Kimi and preserve existing structured paths for other providers.
-- [ ] Remove any Kimi print-mode assumptions from resume normalization and prompt-arg convention tests.
+- [x] Add `PromptDelivery::WireRpc(String)` or an equivalent typed prompt-delivery path. *(Added `PromptDelivery::WireRpc(String)` plus `PromptDelivery::as_wire_rpc()` accessor; `apply_to` returns `None` for the variant so the orchestrator owns transport.)*
+- [x] Update prompt-delivery dispatch so `WireRpc` invokes `wire_io` instead of stdin seeding or argv insertion. *(Direct wrapper, harness loop, and composition's `run_structured_composition` all branch on `wire_prompt`/`launch.wire_prompt`; when present, they call `wire_io::run_kimi_wire_session`. `AttemptLaunch` gained a `wire_prompt: Option<String>` field that flows through `prepare_attempt_launch`.)*
+- [x] Change `KimiWrapper::apply_entrypoint` to append `--wire` for non-interactive runs and leave interactive runs unchanged.
+- [x] Change `KimiWrapper::apply_structured_stream` to add `--wire` only; remove `--print` and `--output-format stream-json` for Claudine-managed Kimi structured runs.
+- [x] Change `KimiWrapper::stream_protocol` and provider lookup to `StreamProtocol::WireJsonRpc`. *(Provider lookup was already on `WireJsonRpc` from Phase 1; this profile method now matches.)*
+- [x] Change `KimiWrapper::prompt_delivery` so non-interactive prompts use `WireRpc` and interactive prompts keep existing native behavior. *(Non-interactive returns `PromptDelivery::WireRpc(prompt)`; interactive returns `AppendArgs(["--prompt", prompt])`.)*
+- [x] Change `KimiWrapper::build_resume_args` from trailing `--print` to `--wire`.
+- [x] Keep `--yolo`, system prompt `--agent-file`, allowed env keys, and resume session-id semantics unchanged.
+- [x] Update direct wrapper, `compose`, `inline-compose`, and `sequence` launch paths to branch on `WireJsonRpc` only for Kimi and preserve existing structured paths for other providers. *(`execute_without_harness` and `run_structured_composition` thread `wire_prompt` through to `run_kimi_wire_session`; `sequence` reuses `execute_composition_request_inner` so it inherits the same dispatch.)*
+- [x] Remove any Kimi print-mode assumptions from resume normalization and prompt-arg convention tests. *(Replaced `kimi_wrapper_non_interactive_appends_print` with `kimi_wrapper_non_interactive_appends_wire`, asserting the JSON-RPC `prompt`/`user_input` envelope reaches the child stub; added `kimi_non_interactive_uses_wire_protocol_and_wire_rpc_delivery`, `kimi_interactive_continues_using_prompt_argv_flag`, and `kimi_resume_uses_wire_flag` profile-level unit tests.)*
 
 Parallelizable:
 
