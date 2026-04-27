@@ -49,6 +49,10 @@ pub enum StreamProtocol {
     StreamJson,
     Ndjson,
     Jsonl,
+    /// JSON-RPC 2.0 over line-delimited JSON. Used by Kimi Code's `--wire`
+    /// mode where stdout carries `{"jsonrpc":"2.0",…}` envelopes (events,
+    /// requests, responses) instead of provider-specific stream-json shapes.
+    WireJsonRpc,
 }
 
 /// Optional configuration for parser construction.
@@ -92,7 +96,7 @@ pub fn stream_protocol_for(provider: Provider) -> Option<StreamProtocol> {
         Provider::Claude => Some(StreamProtocol::StreamJson),
         Provider::Codex => Some(StreamProtocol::Jsonl),
         Provider::Gemini => Some(StreamProtocol::StreamJson),
-        Provider::KimiCode => Some(StreamProtocol::StreamJson),
+        Provider::KimiCode => Some(StreamProtocol::WireJsonRpc),
         Provider::OpenCode => Some(StreamProtocol::Ndjson),
         Provider::QwenCode => Some(StreamProtocol::StreamJson),
         _ => None,
@@ -222,6 +226,7 @@ mod tests {
             (StreamProtocol::StreamJson, "\"stream-json\""),
             (StreamProtocol::Ndjson, "\"ndjson\""),
             (StreamProtocol::Jsonl, "\"jsonl\""),
+            (StreamProtocol::WireJsonRpc, "\"wire-json-rpc\""),
         ];
         for (proto, expected_json) in &protocols {
             let json = serde_json::to_string(proto).unwrap();
@@ -244,6 +249,10 @@ mod tests {
         assert_eq!(
             stream_protocol_for(Provider::OpenCode),
             Some(StreamProtocol::Ndjson)
+        );
+        assert_eq!(
+            stream_protocol_for(Provider::KimiCode),
+            Some(StreamProtocol::WireJsonRpc)
         );
     }
 
