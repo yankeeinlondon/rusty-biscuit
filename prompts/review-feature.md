@@ -46,7 +46,8 @@ Read both the specification document and then perform a review on the implementa
 
 - Save your review suggestions to "{{area}}/{{dir}}/review-{{iteration}}.md"
 - based on your review suggestions indicate whether you think this feature is ready for production by setting the `ready` frontmatter property on "{{area}}/{{dir}}/review-{{iteration}}.md"
-- save the `agent` frontmatter property as "${env.AGENT}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
+- save the `agent` frontmatter property as "{{env.AGENT}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
+- save the `model` frontmatter property as "{{env.MODEL}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
 
 **IMPORTANT:**
 
