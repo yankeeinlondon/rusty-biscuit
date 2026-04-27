@@ -1,5 +1,3 @@
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
-
 import "./util.just"
 
 # Read a frontmatter value from the feature spec.
@@ -51,7 +49,7 @@ _get_flow_iteration spec="spec.md":
 # Run the feature lifecycle flow through interactive setup and clarification.
 flow filter="":
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -Eeuo pipefail
 
     red=$'\033[31m'
     green=$'\033[32m'
@@ -59,6 +57,63 @@ flow filter="":
     blue=$'\033[34m'
     bold=$'\033[1m'
     reset=$'\033[0m'
+    spec=""
+    feature_dir=""
+
+    artifact_link() {
+        local label="$1"
+        local path="$2"
+        local abs
+        if [[ "${path}" = /* ]]; then
+            abs="${path}"
+        else
+            abs="$(pwd)/${path}"
+        fi
+        printf '\033]8;;file://%s\033\\%s\033]8;;\033\\' "${abs}" "${label}"
+    }
+
+    status_line() {
+        local stage="$1"
+        local state="$2"
+        local message="$3"
+        printf '\n%s[%s]%s %s -- %s\n' "${blue}${bold}" "${stage}" "${reset}" "${state}" "${message}"
+    }
+
+    mark_progress() {
+        local stage="$1"
+        if [[ -n "${spec}" && -f "${spec}" ]]; then
+            md set --save "${spec}" flow_stage "${stage}" >/dev/null 2>&1 || true
+        fi
+    }
+
+    persist_flow_state() {
+        if [[ -z "${spec}" || ! -f "${spec}" ]]; then
+            return 0
+        fi
+
+        local iteration start_phase plan
+        iteration="$(md get --raw "${spec}" flow_iteration 2>/dev/null || true)"
+        [[ "${iteration}" =~ ^[0-9]+$ ]] || iteration=0
+        md set --save "${spec}" flow_iteration "${iteration}" >/dev/null 2>&1 || true
+
+        if [[ -n "${feature_dir}" ]]; then
+            plan="${feature_dir}/plan.md"
+            if [[ -f "${plan}" ]]; then
+                start_phase="$(md get --raw "${plan}" start_phase 2>/dev/null || true)"
+                [[ "${start_phase}" =~ ^[0-9]+$ ]] || start_phase=1
+                md set --save "${spec}" flow_plan_start_phase "${start_phase}" >/dev/null 2>&1 || true
+            fi
+        fi
+    }
+
+    on_flow_error() {
+        local status="$?"
+        persist_flow_state
+        printf '\n%sERROR:%s flow stopped; progress was saved to %s.\n' "${red}${bold}" "${reset}" "$(artifact_link spec.md "${spec:-spec.md}")" >&2
+        exit "${status}"
+    }
+
+    trap on_flow_error ERR
 
     require_command() {
         local cmd="$1"
@@ -91,10 +146,10 @@ flow filter="":
 
     commit_flow_changes() {
         local label="$1"
-        printf '\n%sCommit%s %s\n' "${green}${bold}" "${reset}" "${label}"
+        status_line Commit Running "${label}"
         git add .
         if git diff --cached --quiet; then
-            printf '%sCommit%s no staged changes after %s; skipping commit.\n' "${yellow}${bold}" "${reset}" "${label}"
+            status_line Commit Skipping "no staged changes after ${label}"
             return 0
         fi
         just commit
@@ -106,7 +161,8 @@ flow filter="":
         local dir_arg="$3"
         local design_file="${feature_dir}/design.md"
         if file_has_content "${design_file}"; then
-            printf '\n%sDesign%s skipping; %s already has content.\n' "${blue}${bold}" "${reset}" "${design_file}"
+            status_line Design Skipping "$(artifact_link design.md "${design_file}") already has content."
+            mark_progress design_complete
             return 0
         fi
 
@@ -114,8 +170,9 @@ flow filter="":
         agent="$(read_config "${spec}" design_agent)"
         model="$(read_config "${spec}" design_model)"
         mapfile -d '' -t model_args < <(model_args_for "${agent}" "${model}")
-        printf '\n%sDesign%s running %s for %s\n' "${green}${bold}" "${reset}" "${agent}" "${feature_dir}"
+        status_line Design Running "${agent} will write $(artifact_link design.md "${design_file}")."
         claudine compose @prompts/design.md "--${agent}" -y dir="${dir_arg}" spec="spec.md" design="design.md" "${model_args[@]}"
+        mark_progress design_complete
     }
 
     run_plan_stage() {
@@ -124,7 +181,8 @@ flow filter="":
         local dir_arg="$3"
         local plan_file="${feature_dir}/plan.md"
         if file_has_content "${plan_file}"; then
-            printf '\n%sPlan%s skipping; %s already has content.\n' "${blue}${bold}" "${reset}" "${plan_file}"
+            status_line Plan Skipping "$(artifact_link plan.md "${plan_file}") already has content."
+            mark_progress plan_complete
             return 0
         fi
 
@@ -132,8 +190,9 @@ flow filter="":
         agent="$(read_config "${spec}" planning_agent)"
         model="$(read_config "${spec}" planning_model)"
         mapfile -d '' -t model_args < <(model_args_for "${agent}" "${model}")
-        printf '\n%sPlan%s running %s for %s\n' "${green}${bold}" "${reset}" "${agent}" "${feature_dir}"
+        status_line Plan Running "${agent} will write $(artifact_link plan.md "${plan_file}")."
         claudine compose @prompts/plan.md "--${agent}" -y dir="${dir_arg}" spec="spec.md" design="design.md" plan="plan.md" "${model_args[@]}"
+        mark_progress plan_complete
     }
 
     run_implementation_plan() {
@@ -156,7 +215,8 @@ flow filter="":
         current="$(md get --raw "${plan}" start_phase 2>/dev/null || true)"
         [[ "${current}" =~ ^[0-9]+$ ]] || current=1
         if (( current > total )); then
-            printf '\n%sImplement%s skipping; %s is already complete.\n' "${blue}${bold}" "${reset}" "${plan}"
+            status_line Implement Skipping "$(artifact_link plan.md "${plan}") is already complete."
+            mark_progress implementation_complete
             return 0
         fi
 
@@ -165,13 +225,16 @@ flow filter="":
         model="$(read_config "${spec}" implementation_model)"
         mapfile -d '' -t model_args < <(model_args_for "${agent}" "${model}")
 
-        printf '\n%sImplement%s running phases %s through %s with %s\n' "${green}${bold}" "${reset}" "${current}" "${total}" "${agent}"
+        status_line Implement Running "phases ${current} through ${total} from $(artifact_link plan.md "${plan}") with ${agent}."
         while (( current <= total )); do
-            printf '\n%sImplement%s phase %s/%s\n' "${green}${bold}" "${reset}" "${current}" "${total}"
+            status_line Implement Running "phase ${current}/${total}"
+            md set --save "${spec}" flow_plan_start_phase "${current}" >/dev/null
             claudine compose @prompts/implement-phase.md "--${agent}" -y plan="${plan}" phase="${current}" total_phases="${total}" memory="${memory}" "${model_args[@]}"
             (( current++ ))
             md set --save "${plan}" start_phase "${current}" >/dev/null
+            md set --save "${spec}" flow_plan_start_phase "${current}" >/dev/null
         done
+        mark_progress implementation_complete
     }
 
     run_review_loop() {
@@ -189,12 +252,14 @@ flow filter="":
             review_number=$((iteration + 1))
             review="${feature_dir}/review-${review_number}.md"
 
-            printf '\n%sReview%s iteration %s with %s\n' "${green}${bold}" "${reset}" "${review_number}" "${agent}"
+            status_line Review Running "iteration ${review_number} with ${agent}; output $(artifact_link "review-${review_number}.md" "${review}")."
             claudine compose @prompts/review-feature.md "--${agent}" -y dir="${dir_arg}" spec="spec.md" design="design.md" plan="plan.md" iteration="${review_number}" review="review-${review_number}.md" "${review_model_args[@]}"
+            mark_progress "review_${review_number}_complete"
 
             ready="$(md get --raw "${review}" ready 2>/dev/null || true)"
             if [[ "${ready}" == "true" ]]; then
-                printf '\n%sFlow complete%s review %s marked ready.\n' "${green}${bold}" "${reset}" "${review}"
+                mark_progress complete
+                status_line Flow Complete "$(artifact_link "review-${review_number}.md" "${review}") marked ready."
                 return 0
             fi
 
@@ -212,8 +277,9 @@ flow filter="":
             repair_agent="$(read_config "${spec}" implementation_agent)"
             repair_model="$(read_config "${spec}" implementation_model)"
             mapfile -d '' -t repair_model_args < <(model_args_for "${repair_agent}" "${repair_model}")
-            printf '\n%sReview Repair%s applying suggestions from %s with %s\n' "${green}${bold}" "${reset}" "${review}" "${repair_agent}"
+            status_line "Review Repair" Running "applying suggestions from $(artifact_link "review-${review_number}.md" "${review}") with ${repair_agent}."
             claudine compose @prompts/implement-feature-review-suggestions.md "--${repair_agent}" -y dir="${dir_arg}" spec="spec.md" design="design.md" plan="plan.md" review="review-${review_number}.md" iteration="${review_number}" "${repair_model_args[@]}"
+            mark_progress "review_${review_number}_repair_complete"
             commit_flow_changes "review iteration ${review_number}"
         done
     }
@@ -347,7 +413,7 @@ flow filter="":
     feature_dir="$(dirname "${spec}")"
     abs_spec="$(cd "$(dirname "${spec}")" && pwd)/$(basename "${spec}")"
 
-    printf '\n%sFlow%s %s\n' "${bold}" "${reset}" "${feature_dir}"
+    status_line Flow Starting "$(artifact_link spec.md "${spec}")"
 
     ensure_stage_config "${spec}" "Clarify" clarify_agent clarify_model
     ensure_stage_config "${spec}" "Design" design_agent design_model
@@ -368,8 +434,9 @@ flow filter="":
         model_args=(--model "${clarify_model}")
     fi
 
-    printf '\n%sClarify%s launching %s for %s\n' "${green}${bold}" "${reset}" "${clarify_agent}" "${spec}"
+    status_line Clarify Running "launching ${clarify_agent} for $(artifact_link spec.md "${spec}")."
     claudine compose @prompts/clarify.md "--${clarify_agent}" -y -i "doc=${abs_spec}" "${model_args[@]}"
+    mark_progress clarify_complete
 
     printf '\n%sPhase 1 complete -> entering autonomous mode%s\n' "${green}${bold}" "${reset}"
 
