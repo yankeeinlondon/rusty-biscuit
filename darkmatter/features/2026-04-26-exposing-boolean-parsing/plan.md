@@ -57,6 +57,14 @@ docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .opencode/skill/darkmatter/SKILL.md
   - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_7:
+  - darkmatter/lib/src/markdown/compose/conditions.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+docs_updated_during_phase_7:
+  - darkmatter/features/2026-04-26-exposing-boolean-parsing/plan.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 packages:
   - darkmatter
 ---
