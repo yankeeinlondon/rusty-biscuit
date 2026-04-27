@@ -5,8 +5,7 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::expression::{ComparisonOp, Expr, is_truthy, parse_condition, scalar_string, to_number, to_number_coerce};
-use serde_json::Value;
+use super::expression::{evaluate, is_truthy, parse_condition};
 use std::ops::Range;
 use tracing::{debug, trace};
 
@@ -85,7 +84,7 @@ pub fn evaluate_condition(
         span: parse_error_span(expr, e.position),
     })?;
 
-    let value = eval_expr(&parsed, state).map_err(|message| ConditionError::Eval {
+    let value = evaluate(&parsed, state).map_err(|message| ConditionError::Eval {
         expr: expr.to_string(),
         line,
         message,
@@ -120,168 +119,11 @@ fn caret_marker(input: &str, byte_offset: usize) -> String {
     format!("  {}^", " ".repeat(column))
 }
 
-fn eval_expr(expr: &Expr, state: &EffectiveState) -> Result<Value, String> {
-    match expr {
-        Expr::Variable(path) => Ok(state.get(path).unwrap_or(Value::Null)),
-        Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
-        Expr::NumberLiteral(n) => {
-            let num = serde_json::Number::from_f64(*n)
-                .ok_or_else(|| format!("Invalid numeric literal: {n}"))?;
-            Ok(Value::Number(num))
-        }
-        Expr::UnaryNot(inner) => {
-            let value = eval_expr(inner, state)?;
-            Ok(Value::Bool(!is_truthy(&value)))
-        }
-        Expr::Fallback { primary, fallback } => {
-            let primary = eval_expr(primary, state)?;
-            if is_truthy(&primary) {
-                Ok(primary)
-            } else {
-                eval_expr(fallback, state)
-            }
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            let condition = eval_expr(condition, state)?;
-            if is_truthy(&condition) {
-                eval_expr(then_branch, state)
-            } else {
-                eval_expr(else_branch, state)
-            }
-        }
-        Expr::Comparison { left, op, right } => {
-            let left = eval_expr(left, state)?;
-            let right = eval_expr(right, state)?;
-
-            // Null-safe comparisons: when both sides are Null (undefined),
-            // equality and inequality both return false. Comparing two
-            // unknown values yields no meaningful result.
-            let both_null = left.is_null() && right.is_null();
-
-            let outcome = match op {
-                ComparisonOp::Equal => !both_null && scalar_string(&left) == scalar_string(&right),
-                ComparisonOp::NotEqual => {
-                    !both_null && scalar_string(&left) != scalar_string(&right)
-                }
-                ComparisonOp::GreaterThan => to_number_coerce(&left) > to_number_coerce(&right),
-                ComparisonOp::GreaterThanOrEqual => {
-                    to_number_coerce(&left) >= to_number_coerce(&right)
-                }
-                ComparisonOp::LessThan => to_number_coerce(&left) < to_number_coerce(&right),
-            };
-            Ok(Value::Bool(outcome))
-        }
-        Expr::FunctionCall { name, args } => eval_function(name, args, state),
-    }
-}
-
-fn eval_function(name: &str, args: &[Expr], state: &EffectiveState) -> Result<Value, String> {
-    let name = name.to_ascii_lowercase();
-    match name.as_str() {
-        "and" => {
-            for arg in args {
-                let value = eval_expr(arg, state)?;
-                if !is_truthy(&value) {
-                    return Ok(Value::Bool(false));
-                }
-            }
-            Ok(Value::Bool(true))
-        }
-        "or" => {
-            for arg in args {
-                let value = eval_expr(arg, state)?;
-                if is_truthy(&value) {
-                    return Ok(Value::Bool(true));
-                }
-            }
-            Ok(Value::Bool(false))
-        }
-        "haskey" | "has_key" => {
-            if args.len() < 2 {
-                return Err("HasKey() requires 2 arguments".to_string());
-            }
-            let object = eval_expr(&args[0], state)?;
-            let key = scalar_string(&eval_expr(&args[1], state)?);
-            let has = object
-                .as_object()
-                .map(|obj| obj.contains_key(&key))
-                .unwrap_or(false);
-            Ok(Value::Bool(has))
-        }
-        "contains" => {
-            if args.len() < 2 {
-                return Err("Contains() requires 2 arguments".to_string());
-            }
-            let haystack = eval_expr(&args[0], state)?;
-            let needle = eval_expr(&args[1], state)?;
-            let found = match haystack {
-                Value::Array(values) => values
-                    .iter()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::Object(values) => values
-                    .values()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::String(value) => value.contains(&scalar_string(&needle)),
-                value => scalar_string(&value).contains(&scalar_string(&needle)),
-            };
-            Ok(Value::Bool(found))
-        }
-        "length" => {
-            if args.is_empty() {
-                return Err("Length() requires 1 argument".to_string());
-            }
-            let value = eval_expr(&args[0], state)?;
-            let len = match value {
-                Value::String(s) => s.chars().count(),
-                Value::Array(arr) => arr.len(),
-                Value::Object(obj) => obj.len(),
-                Value::Number(n) => n.to_string().chars().count(),
-                Value::Bool(_) => 0,
-                Value::Null => 0,
-            };
-            Ok(Value::Number(serde_json::Number::from(len)))
-        }
-        "number" => {
-            if args.is_empty() {
-                return Err("number() requires at least 1 argument".to_string());
-            }
-            let value = eval_expr(&args[0], state)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&eval_expr(&args[1], state)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default);
-            let json_number = serde_json::Number::from_f64(number)
-                .ok_or_else(|| "Unable to represent number".to_string())?;
-            Ok(Value::Number(json_number))
-        }
-        "round" => {
-            if args.is_empty() {
-                return Err("round() requires at least 1 argument".to_string());
-            }
-            let value = eval_expr(&args[0], state)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&eval_expr(&args[1], state)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default).round() as i64;
-            Ok(Value::Number(serde_json::Number::from(number)))
-        }
-        _ => Err(format!("Unknown function: {name}")),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::collections::HashMap;
 
     fn test_state(data: Value) -> EffectiveState {

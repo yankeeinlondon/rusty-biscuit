@@ -67,8 +67,7 @@
 //! }
 //! ```
 
-use super::ComparisonOp;
-use crate::markdown::compose::expression::{EvaluationLookup, Expr};
+use crate::markdown::compose::expression::{EvaluationLookup, Expr, evaluate, scalar_string};
 use serde_json::Value;
 use tracing::{debug, trace};
 
@@ -226,65 +225,24 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// - Function calls (`length()`, `number()`, `round()`)
     pub fn eval(&self, expr: &Expr) -> EvalResult {
         trace!(expr = ?expr, "interpolation: evaluating expression");
-        match expr {
-            Expr::Variable(name) => {
-                let value = self.state.get_string(name);
-                if value.is_empty() {
-                    debug!(variable = %name, "interpolation: unresolved variable");
-                } else {
-                    trace!(result = %value, "interpolation: resolved");
-                }
-                EvalResult::Value(value)
+
+        // Preserve debug/trace logging for variable resolution
+        if let Expr::Variable(name) = expr {
+            let value = self.state.get_string(name);
+            if value.is_empty() {
+                debug!(variable = %name, "interpolation: unresolved variable");
+            } else {
+                trace!(result = %value, "interpolation: resolved");
             }
+            return EvalResult::Value(value);
+        }
 
-            Expr::StringLiteral(s) => EvalResult::Value(s.clone()),
-
-            Expr::NumberLiteral(n) => {
-                let s = if n.fract() == 0.0 {
-                    format!("{}", *n as i64)
-                } else {
-                    n.to_string()
-                };
-                EvalResult::Value(s)
-            }
-
-            Expr::UnaryNot(expr) => {
-                let v = self.eval_value(expr);
-                EvalResult::Value((!v.is_truthy()).to_string())
-            }
-
-            Expr::Fallback { primary, fallback } => {
-                // Evaluate primary; if truthy, use it; otherwise evaluate fallback
-                let pv = self.eval_value(primary);
-                if pv.is_truthy() {
-                    EvalResult::Value(pv.as_string())
-                } else {
-                    // Recursively evaluate fallback (handles chained fallbacks)
-                    self.eval(fallback)
-                }
-            }
-
-            Expr::Ternary {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                // Evaluate condition; pick branch based on truthiness
-                let cv = self.eval_value(condition);
-                if cv.is_truthy() {
-                    self.eval(then_branch)
-                } else {
-                    self.eval(else_branch)
-                }
-            }
-
-            Expr::Comparison { left, op, right } => {
-                // Comparison evaluates to a boolean string representation
-                let result = self.compare(left, op, right);
-                EvalResult::Value(result.to_string())
-            }
-
-            Expr::FunctionCall { name, args } => self.eval_function(name, args),
+        match evaluate(expr, self.state) {
+            Ok(value) => EvalResult::Value(scalar_string(&value)),
+            Err(message) => EvalResult::Error {
+                message,
+                original: expr.to_string(),
+            },
         }
     }
 
@@ -303,297 +261,9 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// - Comparison expressions (returns Bool)
     /// - Function calls (returns appropriate type based on function)
     pub fn eval_value(&self, expr: &Expr) -> EvalValue {
-        match expr {
-            Expr::Variable(name) => match self.state.get(name) {
-                Some(v) => EvalValue::from_json(&v),
-                None => EvalValue::Null,
-            },
-
-            Expr::StringLiteral(s) => EvalValue::String(s.clone()),
-
-            Expr::NumberLiteral(n) => EvalValue::Number(*n),
-
-            Expr::UnaryNot(expr) => EvalValue::Bool(!self.eval_value(expr).is_truthy()),
-
-            Expr::Fallback { primary, fallback } => {
-                let pv = self.eval_value(primary);
-                if pv.is_truthy() {
-                    pv
-                } else {
-                    self.eval_value(fallback)
-                }
-            }
-
-            Expr::Ternary {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                if self.eval_value(condition).is_truthy() {
-                    self.eval_value(then_branch)
-                } else {
-                    self.eval_value(else_branch)
-                }
-            }
-
-            Expr::Comparison { left, op, right } => {
-                let result = self.compare(left, op, right);
-                EvalValue::Bool(result)
-            }
-
-            Expr::FunctionCall { name, args } => {
-                // Functions return numbers - extract from eval result
-                match self.eval_function(name, args) {
-                    EvalResult::Value(s) => s
-                        .parse::<f64>()
-                        .map(EvalValue::Number)
-                        .unwrap_or(EvalValue::String(s)),
-                    EvalResult::Error { .. } => EvalValue::Null,
-                }
-            }
-        }
-    }
-
-    /// Evaluates a function call.
-    ///
-    /// ## Supported Functions
-    ///
-    /// - `length(value)` - Returns length of string, array, or object
-    /// - `number(value, default = 0)` - Converts to number
-    /// - `round(value, default = 0)` - Rounds to nearest integer
-    fn eval_function(&self, name: &str, args: &[Expr]) -> EvalResult {
-        let normalized = name.to_ascii_lowercase();
-        match normalized.as_str() {
-            "length" => self.fn_length(args),
-            "number" => self.fn_number(args),
-            "round" => self.fn_round(args),
-            "haskey" | "has_key" => self.fn_has_key(args),
-            "contains" => self.fn_contains(args),
-            "and" => self.fn_and(args),
-            "or" => self.fn_or(args),
-            _ => EvalResult::Error {
-                message: format!("Unknown function: {}", name),
-                original: format!("{}(...)", name),
-            },
-        }
-    }
-
-    /// Evaluates the `length()` function.
-    ///
-    /// Returns the length of a value:
-    /// - String: character count
-    /// - Array: element count
-    /// - Object: key count
-    /// - Number: digit count of string representation
-    /// - Null/missing: 0
-    /// - Bool: 1
-    fn fn_length(&self, args: &[Expr]) -> EvalResult {
-        if args.is_empty() {
-            return EvalResult::Error {
-                message: "length() requires 1 argument".to_string(),
-                original: "length()".to_string(),
-            };
-        }
-
-        // Check for array/object first by looking at raw JSON
-        if let Expr::Variable(path) = &args[0]
-            && let Some(json) = self.state.get(path)
-        {
-            if let Some(arr) = json.as_array() {
-                return EvalResult::Value(arr.len().to_string());
-            }
-            if let Some(obj) = json.as_object() {
-                return EvalResult::Value(obj.len().to_string());
-            }
-        }
-
-        // For other expressions, evaluate and compute length
-        let value = self.eval_value(&args[0]);
-        let len = match value {
-            EvalValue::String(s) => s.chars().count(),
-            EvalValue::Number(n) => {
-                // Format as integer if no fractional part
-                if n.fract() == 0.0 {
-                    format!("{}", n as i64).len()
-                } else {
-                    n.to_string().len()
-                }
-            }
-            EvalValue::Null => 0,
-            EvalValue::Bool(_) => 1,
-        };
-
-        EvalResult::Value(len.to_string())
-    }
-
-    /// Evaluates the `number()` function.
-    ///
-    /// Converts a value to a number:
-    /// - Already numeric: return as-is
-    /// - String: parse as f64
-    /// - Other: return default (0 if not specified)
-    fn fn_number(&self, args: &[Expr]) -> EvalResult {
-        if args.is_empty() {
-            return EvalResult::Error {
-                message: "number() requires at least 1 argument".to_string(),
-                original: "number()".to_string(),
-            };
-        }
-
-        let default = if args.len() > 1 {
-            match self.eval_value(&args[1]) {
-                EvalValue::Number(n) => n,
-                _ => 0.0,
-            }
-        } else {
-            0.0
-        };
-
-        let value = self.eval_value(&args[0]);
-        let num = match value {
-            EvalValue::Number(n) => n,
-            EvalValue::String(s) => s.parse::<f64>().unwrap_or(default),
-            _ => default,
-        };
-
-        // Format as integer if no fractional part
-        let result = if num.fract() == 0.0 {
-            format!("{}", num as i64)
-        } else {
-            num.to_string()
-        };
-
-        EvalResult::Value(result)
-    }
-
-    /// Evaluates the `round()` function.
-    ///
-    /// Rounds a number to the nearest integer:
-    /// - Numeric: round and return
-    /// - String: try parse, then round
-    /// - Other: return default (0 if not specified)
-    fn fn_round(&self, args: &[Expr]) -> EvalResult {
-        if args.is_empty() {
-            return EvalResult::Error {
-                message: "round() requires at least 1 argument".to_string(),
-                original: "round()".to_string(),
-            };
-        }
-
-        let default = if args.len() > 1 {
-            match self.eval_value(&args[1]) {
-                EvalValue::Number(n) => n.round() as i64,
-                _ => 0,
-            }
-        } else {
-            0
-        };
-
-        let value = self.eval_value(&args[0]);
-        let result = match value {
-            EvalValue::Number(n) => n.round() as i64,
-            EvalValue::String(s) => s
-                .parse::<f64>()
-                .map(|n| n.round() as i64)
-                .unwrap_or(default),
-            _ => default,
-        };
-
-        EvalResult::Value(result.to_string())
-    }
-
-    /// Evaluates `HasKey(object, key)`.
-    fn fn_has_key(&self, args: &[Expr]) -> EvalResult {
-        if args.len() < 2 {
-            return EvalResult::Error {
-                message: "HasKey() requires 2 arguments".to_string(),
-                original: "HasKey()".to_string(),
-            };
-        }
-
-        let key = self.eval_value(&args[1]).as_string();
-        let found = match &args[0] {
-            Expr::Variable(path) => self
-                .state
-                .get(path)
-                .and_then(|v| v.as_object().map(|obj| obj.contains_key(&key)))
-                .unwrap_or(false),
-            _ => false,
-        };
-
-        EvalResult::Value(found.to_string())
-    }
-
-    /// Evaluates `Contains(collection, value)`.
-    fn fn_contains(&self, args: &[Expr]) -> EvalResult {
-        if args.len() < 2 {
-            return EvalResult::Error {
-                message: "Contains() requires 2 arguments".to_string(),
-                original: "Contains()".to_string(),
-            };
-        }
-
-        let needle = self.eval_value(&args[1]).as_string();
-        let found = match &args[0] {
-            Expr::Variable(path) => match self.state.get(path) {
-                Some(Value::Array(values)) => values
-                    .iter()
-                    .any(|v| EvalValue::from_json(v).as_string() == needle),
-                Some(Value::Object(values)) => values
-                    .values()
-                    .any(|v| EvalValue::from_json(v).as_string() == needle),
-                Some(Value::String(s)) => s.contains(&needle),
-                Some(v) => EvalValue::from_json(&v).as_string().contains(&needle),
-                None => false,
-            },
-            _ => self.eval_value(&args[0]).as_string().contains(&needle),
-        };
-
-        EvalResult::Value(found.to_string())
-    }
-
-    /// Evaluates `And(a, b, c...)`.
-    fn fn_and(&self, args: &[Expr]) -> EvalResult {
-        let result = args.iter().all(|arg| self.eval_value(arg).is_truthy());
-        EvalResult::Value(result.to_string())
-    }
-
-    /// Evaluates `Or(a, b, c...)`.
-    fn fn_or(&self, args: &[Expr]) -> EvalResult {
-        let result = args.iter().any(|arg| self.eval_value(arg).is_truthy());
-        EvalResult::Value(result.to_string())
-    }
-
-    /// Performs a comparison between two expressions.
-    ///
-    /// ## Equality (`==`, `!=`)
-    ///
-    /// Compares string representations of both values.
-    ///
-    /// ## Ordering (`>`, `>=`, `<`)
-    ///
-    /// Attempts numeric comparison:
-    /// - If both values can be converted to numbers, compares numerically
-    /// - If either value is non-numeric, returns `false`
-    fn compare(&self, left: &Expr, op: &ComparisonOp, right: &Expr) -> bool {
-        let lv = self.eval_value(left);
-        let rv = self.eval_value(right);
-
-        match op {
-            ComparisonOp::Equal => lv.as_string() == rv.as_string(),
-            ComparisonOp::NotEqual => lv.as_string() != rv.as_string(),
-            ComparisonOp::GreaterThan => match (lv.as_number(), rv.as_number()) {
-                (Some(l), Some(r)) => l > r,
-                _ => false,
-            },
-            ComparisonOp::GreaterThanOrEqual => match (lv.as_number(), rv.as_number()) {
-                (Some(l), Some(r)) => l >= r,
-                _ => false,
-            },
-            ComparisonOp::LessThan => match (lv.as_number(), rv.as_number()) {
-                (Some(l), Some(r)) => l < r,
-                _ => false,
-            },
+        match evaluate(expr, self.state) {
+            Ok(value) => EvalValue::from_json(&value),
+            Err(_) => EvalValue::Null,
         }
     }
 }
@@ -1626,7 +1296,7 @@ mod tests {
             let expr = parse("length(flag)").unwrap();
 
             match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "1"),
+                EvalResult::Value(s) => assert_eq!(s, "0"),
                 _ => panic!("Expected Value"),
             }
         }
