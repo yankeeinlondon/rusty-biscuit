@@ -94,6 +94,46 @@ let options = ComposeOptions::new()
 - `number(x, default)` - Parse as number
 - `round(x, default)` - Round to integer
 
+### Expression Module
+
+The `compose::expression` module is the canonical home for expression parsing and evaluation infrastructure:
+
+- **`ast::Expr`** — AST nodes for parsed expressions
+- **`lexer::Lexer`** — Tokenizes expression strings
+- **`parser::Parser`** — Builds AST from tokens (supports interpolation and condition modes)
+- **`EvaluationLookup`** — Trait for variable resolution used by both interpolation and condition evaluation
+- **`evaluate`** — Core expression evaluator shared by interpolation and condition evaluation
+- **Shared helpers** — `is_truthy`, `to_number`, `scalar_string` for JSON value manipulation
+
+`compose::interpolation` re-exports these types for backward compatibility (`InterpolationLookup` is an alias for `EvaluationLookup`).
+
+### Shortcut API
+
+For external callers who only need the boolean DSL without constructing a full `ComposeContext` + `EffectiveState`, use `compose::conditions::evaluate_condition_against`:
+
+```rust
+use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+use serde_json::json;
+use std::path::Path;
+
+let data = json!({ "draft": true, "audience": "internal" });
+let result = evaluate_condition_against(
+    "draft && audience == 'internal'",
+    &data,
+    Path::new("."),
+)?;
+```
+
+This shortcut resolves:
+- Top-level and nested paths against the provided `data`
+- `env.*` against `std::env`
+- `ctx.*` via lazy runtime context capture (only the groups actually referenced are captured)
+- Missing unprefixed keys fall back to `ctx.*` (same behavior as `EffectiveState`)
+
+`ConditionError` implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks. Context capture is lazy and short-circuit aware: `false_flag && ctx.repo == "x"` does not trigger repo context capture.
+
+`ConditionError` implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks. Context capture is lazy and short-circuit aware: `false_flag && ctx.repo == "x"` does not trigger repo context capture.
+
 ### Shell Expansion Notes
 
 - Body `::shell` and top-level frontmatter `$(...)` share policy loading, whitelist/blacklist checks, approval, and timeout behavior.
