@@ -23,6 +23,7 @@
 //! ```
 
 mod ast;
+pub(crate) mod code_block;
 pub mod html;
 mod string;
 pub mod terminal;

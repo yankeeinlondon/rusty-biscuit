@@ -1,13 +1,14 @@
 //! Shared string rewrite helper for interpolation.
 //!
 //! Provides `interpolate_text`, which scans a string for `{{ }}` expressions,
-//! evaluates them against an [`InterpolationLookup`] implementation, and
+//! evaluates them against an [`EvaluationLookup`] implementation, and
 //! returns the rewritten string. Supports both markdown-aware scanning
 //! (skipping code regions) and plain-text scanning.
 
 use super::{
-    EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, InterpolationLookup, parse,
+    EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse,
 };
+use crate::markdown::compose::expression::EvaluationLookup;
 use crate::markdown::compose::types::ComposeWarning;
 use crate::markdown::types::MarkdownError;
 
@@ -41,7 +42,7 @@ pub(crate) struct InterpolationRewrite {
 /// - `scan_mode` — whether to respect code regions or scan everything
 /// - `fail_fast` — if `true`, return an error on the first parse/eval failure
 /// - `warning_stage` — label attached to any warnings produced
-pub(crate) fn interpolate_text<L: InterpolationLookup>(
+pub(crate) fn interpolate_text<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
     scan_mode: ScanMode,
