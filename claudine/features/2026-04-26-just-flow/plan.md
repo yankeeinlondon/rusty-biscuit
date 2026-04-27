@@ -3,7 +3,8 @@ phases: 5
 created: 2026-04-26
 start_phase: 1
 source_files_during_phase_1: []
-docs_updated_during_phase_1: []
+docs_updated_during_phase_1:
+    - claudine/features/2026-04-26-just-flow/plan.md
 docs_created_during_phase_1:
     - claudine/prompts/design.md
     - claudine/prompts/plan.md
