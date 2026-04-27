@@ -1376,6 +1376,33 @@ const SILENT_PROVIDER_EXTENSION_KINDS: &[(Provider, &str)] = &[
     // the raw event is still in the JSONL log.
     (Provider::Codex, "item.started"),
     (Provider::Codex, "item.completed"),
+    // Kimi: high-volume wire envelope kinds that the Kimi semantic parser
+    // already maps to first-class semantic events. If a future Kimi
+    // protocol revision changes the payload shape so typed
+    // deserialization fails, the parser falls back to a
+    // `ProviderExtension` with a `event:<inner_type>` raw_kind. These
+    // entries keep the stderr surface quiet on drift; the raw envelopes
+    // still flow through dispatch and the JSONL log.
+    //
+    // ContentPart (assistant text/think deltas) and ToolCallPart
+    // (streamed tool argument fragments) can fire many times per turn,
+    // so suppressing fallback rendering here matches the "high-volume
+    // wire fallback kinds" contract from Phase 5 of the fix-kimi plan.
+    (Provider::KimiCode, "event:ContentPart"),
+    (Provider::KimiCode, "event:ToolCallPart"),
+    // StatusUpdate fires on every step boundary and carries token /
+    // context-percent telemetry. The parser emits a Warning only when
+    // the context-pressure threshold is crossed; routine StatusUpdate
+    // payload-shape drift should not surface as a fallback line.
+    (Provider::KimiCode, "event:StatusUpdate"),
+    // Legacy stream-json payload names that Kimi is unlikely to emit on
+    // the wire transport but are kept here as defensive entries so an
+    // accidental cross-mode payload (or replay of a legacy fixture) does
+    // not flood stderr.
+    (Provider::KimiCode, "event:MessageStart"),
+    (Provider::KimiCode, "event:MessageDelta"),
+    (Provider::KimiCode, "event:MessageEnd"),
+    (Provider::KimiCode, "event:Thinking"),
 ];
 
 fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
@@ -2649,6 +2676,69 @@ mod tests {
         assert!(
             !rendered.contains("claude/stream_event"),
             "silent-kind allowlist must suppress the status line entirely: {rendered}"
+        );
+    }
+
+    #[test]
+    fn provider_extension_kimi_high_volume_kinds_are_silent() {
+        // Phase 5 of the fix-kimi plan adds defensive Kimi entries to the
+        // silent-extension allowlist so high-volume wire fallback kinds
+        // (ContentPart, ToolCallPart, StatusUpdate, and legacy
+        // stream-json names) don't flood stderr if a future Kimi
+        // protocol revision changes payload shapes and the typed
+        // deserialization falls back to ProviderExtension.
+        for kind in [
+            "event:ContentPart",
+            "event:ToolCallPart",
+            "event:StatusUpdate",
+            "event:MessageStart",
+            "event:MessageDelta",
+            "event:MessageEnd",
+            "event:Thinking",
+        ] {
+            let lines = Arc::new(StdMutex::new(Vec::new()));
+            let dispatched = Arc::new(StdMutex::new(Vec::new()));
+            let mut sink = make_sink_for_provider(
+                Provider::KimiCode,
+                Verbosity::Normal,
+                lines.clone(),
+                dispatched.clone(),
+            );
+            sink.on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::KimiCode,
+                kind: kind.into(),
+                payload: json!({"delta": "x"}),
+            });
+            let rendered = lines.lock().unwrap().join("\n");
+            assert!(
+                !rendered.contains(&format!("kimi/{kind}")),
+                "kimi {kind} must be suppressed: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_extension_kimi_unknown_kinds_still_surface() {
+        // Inverse of the silent-allowlist: unknown Kimi event types must
+        // still render as ProviderExtension status lines so operators
+        // can see protocol drift and add explicit handling.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink_for_provider(
+            Provider::KimiCode,
+            Verbosity::Normal,
+            lines.clone(),
+            dispatched.clone(),
+        );
+        sink.on_semantic_event(SemanticEvent::ProviderExtension {
+            provider: Provider::KimiCode,
+            kind: "event:FutureKimiEvent".into(),
+            payload: json!({"x": 1}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("kimi/event:FutureKimiEvent"),
+            "unknown Kimi event types must surface as ProviderExtension: {rendered}"
         );
     }
 

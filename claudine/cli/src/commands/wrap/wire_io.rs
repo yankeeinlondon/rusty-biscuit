@@ -255,6 +255,38 @@ impl HookOutcome {
     }
 }
 
+/// Result returned by [`dispatch_hook_request`]. Carries the Kimi-bound
+/// hook outcome plus an optional user-facing warning message that the
+/// caller can surface via the live semantic sink.
+///
+/// `warning` is set when the dispatch infrastructure itself fails — e.g.
+/// no async runtime handle is available, the canonical event name is
+/// unrecognized, or `dispatch_event_meta_with_runtime` returns `Err`. A
+/// dispatch that returns a normal `Allow`/`Deny`/`Ask` decision has no
+/// warning attached even when the decision is `Deny`, because that's a
+/// successful policy evaluation rather than an infrastructure error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HookDispatchResult {
+    pub outcome: HookOutcome,
+    pub warning: Option<String>,
+}
+
+impl HookDispatchResult {
+    pub(crate) fn allow_default() -> Self {
+        Self {
+            outcome: HookOutcome::allow_default(),
+            warning: None,
+        }
+    }
+
+    pub(crate) fn allow_with_warning(warning: impl Into<String>) -> Self {
+        Self {
+            outcome: HookOutcome::allow_default(),
+            warning: Some(warning.into()),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Serialized writer
 // ---------------------------------------------------------------------------
@@ -360,20 +392,21 @@ pub(crate) fn map_kimi_hook_event(event: &str) -> Option<AgenticEvent> {
 // ---------------------------------------------------------------------------
 
 /// Dispatch a Kimi `HookRequest` through Claudine's canonical pipeline
-/// and return the negotiated [`HookOutcome`].
+/// and return the negotiated [`HookDispatchResult`].
 ///
-/// Falls back to [`HookOutcome::allow_default`] when no Claudine config is
-/// loaded, when the runtime resolution fails, when the event name is
-/// unknown, or when no async runtime handle is available. Errors are
-/// logged via tracing rather than propagated so a misconfigured hook
-/// never deadlocks the agent.
+/// Falls back to [`HookDispatchResult::allow_default`] when no Claudine
+/// config is loaded, when the runtime resolution fails, when the event
+/// name is unknown, or when no async runtime handle is available. The
+/// `warning` field is populated when the dispatch infrastructure itself
+/// fails so the caller can surface the failure via a synthetic
+/// `Notification` envelope routed through the semantic parser.
 pub(crate) fn dispatch_hook_request(
     request: &KimiHookRequest,
     runtime_handle: Option<&tokio::runtime::Handle>,
     runtime_context: &claudine::dispatch::DispatchRuntimeContext,
-) -> HookOutcome {
+) -> HookDispatchResult {
     let Some(event_name) = request.event.as_deref() else {
-        return HookOutcome::allow_default();
+        return HookDispatchResult::allow_default();
     };
     let Some(canonical_event) = map_kimi_hook_event(event_name) else {
         debug!(
@@ -381,7 +414,7 @@ pub(crate) fn dispatch_hook_request(
             event = %event_name,
             "unknown Kimi hook event name; defaulting to allow"
         );
-        return HookOutcome::allow_default();
+        return HookDispatchResult::allow_default();
     };
     let Some(handle) = runtime_handle else {
         debug!(
@@ -389,7 +422,7 @@ pub(crate) fn dispatch_hook_request(
             event = %event_name,
             "no async runtime handle for hook dispatch; defaulting to allow"
         );
-        return HookOutcome::allow_default();
+        return HookDispatchResult::allow_default();
     };
 
     let mut meta = EventMeta::new(Provider::KimiCode, canonical_event);
@@ -421,7 +454,10 @@ pub(crate) fn dispatch_hook_request(
     ));
 
     match dispatch_result {
-        Ok(outcome) => outcome_to_hook_outcome(&outcome),
+        Ok(outcome) => HookDispatchResult {
+            outcome: outcome_to_hook_outcome(&outcome),
+            warning: None,
+        },
         Err(error) => {
             warn!(
                 provider = "kimi",
@@ -429,7 +465,9 @@ pub(crate) fn dispatch_hook_request(
                 error = %error,
                 "hook dispatch failed; defaulting to allow"
             );
-            HookOutcome::allow_default()
+            HookDispatchResult::allow_with_warning(format!(
+                "Hook dispatch failed for {event_name}: {error}"
+            ))
         }
     }
 }
@@ -643,7 +681,7 @@ pub(crate) fn run_kimi_wire_session(
                     continue;
                 }
 
-                handle_request_dispatch(
+                let synthetic = handle_request_dispatch(
                     trimmed,
                     &writer_for_reader,
                     runtime_handle.as_ref(),
@@ -658,6 +696,17 @@ pub(crate) fn run_kimi_wire_session(
                     Err(StreamParseError::Fatal(error)) => {
                         warn!(error = %error, "kimi wire parser fatal error; continuing");
                     }
+                }
+
+                // Feed any synthetic diagnostic envelope produced by the
+                // request-dispatch path (e.g. hook dispatch failures) so
+                // the semantic parser surfaces it as a Warning on the
+                // live stderr surface and JSONL log.
+                if let Some(envelope) = synthetic
+                    && let Ok(serialized) = serde_json::to_string(&envelope)
+                    && let Err(error) = parser.feed_line(&serialized)
+                {
+                    debug!(?error, "failed to feed synthetic warning envelope");
                 }
             }
 
@@ -751,22 +800,27 @@ pub(crate) fn run_kimi_wire_session(
 /// Pulled out as a free function so the reader-thread closure stays
 /// readable and so unit tests can drive the dispatch path without
 /// constructing a full session.
+///
+/// Returns `Some(envelope)` when the request produced a user-visible
+/// diagnostic (currently: hook dispatch infrastructure failures) that
+/// the caller should feed back into the semantic parser so it surfaces
+/// as a `SemanticEvent::Warning`. Returns `None` for normal flows.
+#[must_use = "synthetic envelope must be fed into the semantic parser"]
 fn handle_request_dispatch(
     trimmed: &str,
     writer: &WireWriter,
     runtime_handle: Option<&tokio::runtime::Handle>,
     runtime_context: &claudine::dispatch::DispatchRuntimeContext,
-) {
+) -> Option<Value> {
     let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
-        return;
+        return None;
     };
     let Some(KimiEnvelope::Request { id, params }) = KimiEnvelope::classify(value) else {
-        return;
+        return None;
     };
-    let Some(request) = params.into_request() else {
-        return;
-    };
+    let request = params.into_request()?;
     let dispatch = dispatch_for_request(&request);
+    let mut synthetic: Option<Value> = None;
     let response = match dispatch {
         WireRequestDispatch::AutoApprove => {
             info!(request_id = %id, "auto-approving Kimi ApprovalRequest");
@@ -787,19 +841,46 @@ fn handle_request_dispatch(
             build_tool_call_unsupported_error(id)
         }
         WireRequestDispatch::HookRequest(hook) => {
-            let outcome = dispatch_hook_request(&hook, runtime_handle, runtime_context);
+            let result = dispatch_hook_request(&hook, runtime_handle, runtime_context);
             info!(
                 request_id = %id,
                 event = ?hook.event,
-                outcome = ?outcome,
+                outcome = ?result.outcome,
                 "Kimi HookRequest dispatched"
             );
-            build_hook_response(id, outcome)
+            if let Some(message) = &result.warning {
+                synthetic = Some(build_synthetic_warning_envelope(message));
+            }
+            build_hook_response(id, result.outcome)
         }
     };
     if let Err(error) = writer.send_value(&response) {
         warn!(error = %error, "failed to write Kimi wire auto-response");
     }
+    synthetic
+}
+
+/// Construct a synthetic `Notification` envelope with `level == "error"`
+/// so the Kimi semantic parser surfaces it as a
+/// [`SemanticEvent::Warning`] on the live stderr surface and JSONL log.
+///
+/// Used by [`handle_request_dispatch`] to make hook dispatch
+/// infrastructure failures visible to the user. The envelope shape
+/// matches Kimi's wire `Notification` event so it round-trips through
+/// the existing parser path without special-casing.
+pub(crate) fn build_synthetic_warning_envelope(message: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "event",
+        "params": {
+            "type": "Notification",
+            "payload": {
+                "level": "error",
+                "source": "claudine",
+                "message": message,
+            },
+        },
+    })
 }
 
 #[cfg(unix)]
@@ -1202,16 +1283,22 @@ mod tests {
             ..Default::default()
         };
         let runtime_context = claudine::dispatch::DispatchRuntimeContext::default();
-        let outcome = dispatch_hook_request(&request, None, &runtime_context);
-        assert!(matches!(outcome, HookOutcome::Allow { .. }));
+        let result = dispatch_hook_request(&request, None, &runtime_context);
+        assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
+        assert!(
+            result.warning.is_none(),
+            "unknown events are silent fallbacks, not user-facing warnings: {:?}",
+            result.warning
+        );
     }
 
     #[test]
     fn dispatch_hook_request_missing_event_returns_allow() {
         let request = KimiHookRequest::default();
         let runtime_context = claudine::dispatch::DispatchRuntimeContext::default();
-        let outcome = dispatch_hook_request(&request, None, &runtime_context);
-        assert!(matches!(outcome, HookOutcome::Allow { .. }));
+        let result = dispatch_hook_request(&request, None, &runtime_context);
+        assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
+        assert!(result.warning.is_none());
     }
 
     #[test]
@@ -1243,7 +1330,8 @@ mod tests {
             }
         });
         let trimmed = serde_json::to_string(&line).unwrap();
-        handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        assert!(synthetic.is_none(), "approval requests are not diagnostics");
 
         let captured = buf.lock().unwrap().clone();
         let text = String::from_utf8(captured).unwrap();
@@ -1274,7 +1362,8 @@ mod tests {
             "params": {"type": "TurnEnd", "payload": {}}
         });
         let trimmed = serde_json::to_string(&line).unwrap();
-        handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        assert!(synthetic.is_none(), "notifications produce no synthetic envelopes");
         assert!(buf.lock().unwrap().is_empty());
     }
 
@@ -1300,11 +1389,46 @@ mod tests {
             "params": {"type": "ToolCallRequest", "payload": {"id": "x"}}
         });
         let trimmed = serde_json::to_string(&line).unwrap();
-        handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
+        assert!(synthetic.is_none(), "tool call rejections are not diagnostics");
         let captured = buf.lock().unwrap().clone();
         let text = String::from_utf8(captured).unwrap();
         let response: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(response["id"], "req-tool");
         assert_eq!(response["error"]["code"], KimiJsonRpcError::METHOD_NOT_FOUND);
+    }
+
+    #[test]
+    fn build_synthetic_warning_envelope_round_trips_as_error_notification() {
+        let envelope = build_synthetic_warning_envelope("Hook dispatch failed: boom");
+        assert_eq!(envelope["jsonrpc"], "2.0");
+        assert_eq!(envelope["method"], "event");
+        assert_eq!(envelope["params"]["type"], "Notification");
+        assert_eq!(envelope["params"]["payload"]["level"], "error");
+        assert_eq!(envelope["params"]["payload"]["source"], "claudine");
+        assert_eq!(
+            envelope["params"]["payload"]["message"],
+            "Hook dispatch failed: boom"
+        );
+        // Must classify as a Notification envelope so the parser routes it.
+        let classified = KimiEnvelope::classify(envelope.clone());
+        assert!(
+            matches!(classified, Some(KimiEnvelope::Notification(_))),
+            "synthetic envelope must classify as a wire Notification"
+        );
+    }
+
+    #[test]
+    fn hook_dispatch_result_allow_with_warning_carries_message() {
+        let result = HookDispatchResult::allow_with_warning("dispatch boom");
+        assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
+        assert_eq!(result.warning.as_deref(), Some("dispatch boom"));
+    }
+
+    #[test]
+    fn hook_dispatch_result_default_is_silent_allow() {
+        let result = HookDispatchResult::allow_default();
+        assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
+        assert!(result.warning.is_none());
     }
 }
