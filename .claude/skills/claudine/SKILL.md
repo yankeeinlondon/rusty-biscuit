@@ -34,6 +34,8 @@ The composition executor was wired end-to-end on 2026-04-25 (feature: `2026-04-2
 
 The sequence orchestrator was updated on 2026-04-25 (feature: `2026-04-25-agent-selection`, Phase 6).  `sequence` now resolves every step's provider and model before shell preflight or execution.  In TTY mode with no explicit `--<provider>` flag, a single `tui-chrome::InputTable` review screen is presented where the user can edit per-step provider and model choices; on `Ctrl+S` the edited targets are carried into execution, and on `Esc` the sequence aborts before any step runs.  In non-TTY mode, any unresolved step causes an immediate aggregate `SequenceSelectionFailed` error that prevents the whole run from starting.  Resolved per-step targets are passed through `CompositionExecutionRequest.resolved_target` so execution reuses the front-loaded decision instead of resolving again mid-run.  Explicit `--<provider>` and `--model` flags lock the corresponding cells in the review table and are respected in both TTY and non-TTY paths.
 
+End-to-end flow prompt infrastructure started on 2026-04-26 (feature: `2026-04-26-just-flow`, Phase 1).  Package-local compose prompts now live under [`claudine/prompts/`](../../../claudine/prompts/) for design generation, plan generation, phase implementation, commit orchestration, feature review, and review-suggestion implementation.  These prompts are intended to be called by the upcoming `just flow` lifecycle and are separate from the repo-level shared prompts under [`prompts/`](../../../prompts/).
+
 - [Supported Platforms](supported-platforms.md)
 - [Unified Hook/Event Model](unified-hooks.md)
 - [Supported Actions](hook-actions.md)
