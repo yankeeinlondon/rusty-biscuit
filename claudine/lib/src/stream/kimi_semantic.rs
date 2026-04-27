@@ -402,14 +402,30 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 if let Some(title) = &notification.title {
                     extra.insert("title".into(), Value::from(title.as_str()));
                 }
+                let level = notification.level.as_deref().map(str::to_ascii_lowercase);
                 let message = notification
                     .message
                     .or(notification.title)
                     .unwrap_or_else(|| "Notification".into());
-                self.sink.on_semantic_event(SemanticEvent::Info {
-                    message,
-                    extra: Value::Object(extra),
-                });
+                // Error/warning-level notifications surface as Warning so the
+                // user sees them in the live stderr surface. This also lets
+                // wire_io feed synthetic Notification envelopes for hook
+                // dispatch failures and have them rendered as Warnings.
+                let is_warning = matches!(
+                    level.as_deref(),
+                    Some("error") | Some("warning") | Some("warn")
+                );
+                if is_warning {
+                    self.sink.on_semantic_event(SemanticEvent::Warning {
+                        message,
+                        extra: Value::Object(extra),
+                    });
+                } else {
+                    self.sink.on_semantic_event(SemanticEvent::Info {
+                        message,
+                        extra: Value::Object(extra),
+                    });
+                }
             }
             KimiWireEvent::PlanDisplay(plan) => {
                 let mut extra = self.info_extra_with_kind(raw_kind, "plan_display");
@@ -1368,6 +1384,143 @@ mod tests {
             events.lock().unwrap()[0],
             SemanticEvent::ProviderExtension { .. }
         ));
+    }
+
+    #[test]
+    fn notification_with_error_level_emits_warning() {
+        // Used by wire_io for hook dispatch failures: a synthetic
+        // Notification envelope with `level: "error"` must surface as a
+        // Warning so the user sees the diagnostic on the live stderr
+        // surface, not as a quiet Info line.
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"level":"error","source":"claudine","message":"Hook dispatch failed: boom"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.iter().any(|e| matches!(e,
+                SemanticEvent::Warning { message, .. } if message.contains("Hook dispatch failed"))),
+            "error-level notification must surface as Warning; got {:?}",
+            kinds(&collected)
+        );
+        assert!(
+            !collected.iter().any(|e| matches!(e,
+                SemanticEvent::Info { message, .. } if message.contains("Hook dispatch failed"))),
+            "error-level notification must NOT also emit Info"
+        );
+    }
+
+    #[test]
+    fn notification_with_warn_level_emits_warning() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"level":"warn","message":"Approaching limit"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(collected.iter().any(|e| matches!(e,
+                SemanticEvent::Warning { message, .. } if message.contains("Approaching limit"))));
+    }
+
+    #[test]
+    fn notification_with_info_level_emits_info() {
+        // Default behavior is preserved: info/no-level notifications
+        // remain Info events.
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"level":"info","message":"Hello"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(collected.iter().any(|e| matches!(e,
+                SemanticEvent::Info { message, .. } if message.contains("Hello"))));
+        assert!(
+            !collected.iter().any(|e| matches!(e, SemanticEvent::Warning { .. })),
+            "info-level notification must not surface as Warning"
+        );
+    }
+
+    #[test]
+    fn known_wire_events_do_not_leak_as_provider_extension() {
+        // Phase 5 contract: every Kimi wire event covered by the typed
+        // protocol catalog must route through the typed semantic surface
+        // (OutputText / Reasoning / ToolCall / ToolResult / Info /
+        // Warning / PlanUpdate / TurnStart / TurnComplete / SessionStart),
+        // never through the `ProviderExtension` fallback path. Unknown
+        // events still fall back, which is verified separately above.
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        for line in [
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnBegin","payload":{"user_input":"hi"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepBegin","payload":{"n":1}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"pondering"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"hello"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCall","payload":{"id":"t1","function":{"name":"Shell","arguments":"{\"command\":\"ls\"}"}}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCallPart","payload":{"arguments_part":""}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolResult","payload":{"tool_call_id":"t1","return_value":{"is_error":false,"output":"ok"}}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"PlanDisplay","payload":{"plan":["step a"]}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"message":"hi"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StatusUpdate","payload":{"context_usage":0.05,"context_tokens":100,"max_context_tokens":1000}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"CompactionBegin","payload":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"CompactionEnd","payload":{"tokens_saved":42}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"MCPLoadingBegin","payload":{"server":"weather"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"MCPLoadingEnd","payload":{"server":"weather","status":"ok"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"SubagentEvent","payload":{"subagent_type":"explore","event":{}}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"BtwBegin","payload":{"topic":"hi"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"BtwEnd","payload":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"DiffDisplayBlock","payload":{"diff":"+a","is_summary":false}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ApprovalResponse","payload":{"request_id":"r1","response":"approve"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"SteerInput","payload":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"StepInterrupted","payload":{"reason":"cancel"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"request","id":"r1","params":{"type":"ApprovalRequest","payload":{"id":"r1"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"request","id":"q1","params":{"type":"QuestionRequest","payload":{"question":"?"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"request","id":"x1","params":{"type":"ToolCallRequest","payload":{"id":"x1"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"request","id":"h1","params":{"type":"HookRequest","payload":{"event":"PreToolUse"}}}"#,
+        ] {
+            parser.feed_line(line).unwrap();
+        }
+        let collected = events.lock().unwrap().clone();
+        let leaks: Vec<_> = collected
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::ProviderExtension { kind, .. } => Some(kind.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            leaks.is_empty(),
+            "known wire events must not surface as ProviderExtension; got leaks: {leaks:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_event_type_emits_provider_extension_with_event_kind() {
+        // Unknown event types must still surface so operators can see
+        // protocol drift, but the live sink's silent allowlist will
+        // suppress the high-volume ones (see live_semantic_sink.rs).
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"FutureKimiEvent","payload":{"x":1}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let ext_kind = collected
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::ProviderExtension { kind, .. } => Some(kind.clone()),
+                _ => None,
+            })
+            .expect("ProviderExtension fallback must fire for unknown event types");
+        assert_eq!(ext_kind, "event:FutureKimiEvent");
     }
 
     #[test]
