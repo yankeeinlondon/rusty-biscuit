@@ -43,6 +43,7 @@ Commands:
     sniff editors                         Show editors (supports 'install' and 'install-plan')
     sniff utilities                       Show utilities
     sniff agents                          Show AI agent CLI tools
+    sniff notification-helpers            Show desktop notification helpers
 
   Services:
     sniff services        Show running services

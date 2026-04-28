@@ -117,6 +117,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Handle programs mode separately (doesn't use SniffResult)
     if let Some(ref cmd) = cli.command {
+        // Handle notification-helpers before generic programs mode
+        if matches!(cmd, Commands::NotificationHelpers) {
+            let programs = sniff::programs::ProgramsInfo::detect();
+            if cli.json {
+                output::print_notification_helpers_json(&programs.notification_helpers)?;
+            } else {
+                let rendered = output::render_notification_helpers_markdown(
+                    &programs.notification_helpers,
+                    cli.verbose,
+                );
+                output::emit_text(&rendered, cli.plain);
+            }
+            perf.emit_stdout(None);
+            return Ok(());
+        }
+
         if cmd.is_programs_mode() {
             // Plan-aware install or install-plan
             if let Some((kind, args)) = cmd.install_command_args() {
@@ -673,6 +689,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
