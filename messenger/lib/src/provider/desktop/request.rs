@@ -15,6 +15,8 @@ use crate::dispatch::{
 };
 use crate::receipt::DesktopPlatform;
 
+use super::helpers::HelperName;
+
 /// Normalized desktop notification request ready for backend delivery.
 ///
 /// All fields have already been resolved against [`DesktopConfig`](super::DesktopConfig),
@@ -56,6 +58,13 @@ pub struct DesktopNotificationRequest {
     pub progress: Option<NotificationProgress>,
     /// Badge count for app icon badges on supported platforms.
     pub badge_count: Option<u32>,
+    /// Helper to prefer when routing replace requests.
+    ///
+    /// Set by the provider's `replace()` from the original receipt's
+    /// `helper_used` metadata so the new send goes back to the same
+    /// helper instance. `None` lets the platform backend pick a helper or
+    /// fall through to native.
+    pub replace_helper_hint: Option<HelperName>,
 }
 
 /// Receipt returned by a [`DesktopBackend`] after a successful send.

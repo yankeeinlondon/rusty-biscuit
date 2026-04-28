@@ -41,7 +41,7 @@ pub use crate::message::{Location, Message, MessageBody};
 pub use crate::provider::{Messenger, Provider, SendPlan};
 #[cfg(feature = "telegram")]
 pub use crate::receipt::TelegramChatRef;
-pub use crate::receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
+pub use crate::receipt::{Activation, DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
 #[cfg(feature = "signal")]
 pub use crate::receipt::{SignalAuthor, SignalThreadKey};
 #[cfg(feature = "apns")]

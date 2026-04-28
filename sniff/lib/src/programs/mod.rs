@@ -14,6 +14,7 @@
 //! - **Terminal Apps**: Terminal emulators (alacritty, kitty, wezterm, etc.)
 //! - **Headless Audio**: Background audio players (afplay, pacat, aplay, etc.)
 //! - **AI CLI Tools**: AI-powered coding assistants (claude, aider, goose, etc.)
+//! - **Notification Helpers**: Desktop notification utilities (terminal-notifier, alerter, snoretoast, burnttoast, dunstify, notify-send)
 //!
 //! ## Usage
 //!
@@ -105,6 +106,7 @@ pub mod install_plan;
 pub mod installer;
 pub mod inventory;
 pub mod macos_bundle;
+pub mod notification_helpers;
 pub mod pkg_mngrs;
 pub mod schema;
 pub mod terminal_apps;
@@ -120,9 +122,10 @@ use tracing::{info_span, instrument};
 pub use ai_cli::InstalledAiClients;
 pub use editors::InstalledEditors;
 pub use enums::{
-    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
-    TerminalApp, TtsClient, Utility,
+    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
+    OsPackageManager, TerminalApp, TtsClient, Utility,
 };
+pub use notification_helpers::InstalledNotificationHelpers;
 pub use find_program::{
     ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
     find_programs_with_source_from_index, find_programs_with_source_parallel,
@@ -184,6 +187,9 @@ pub struct ProgramsInfo {
 
     /// AI-powered CLI coding tools installed on the system.
     pub ai_clients: InstalledAiClients,
+
+    /// Desktop notification helper utilities installed on the system.
+    pub notification_helpers: InstalledNotificationHelpers,
 }
 
 impl ProgramsInfo {
@@ -230,6 +236,8 @@ impl ProgramsInfo {
             || InstalledAiClients::new_with_index(&index),
         );
 
+        let notification_helpers = InstalledNotificationHelpers::new_with_index(&index);
+
         Self {
             editors,
             utilities,
@@ -239,6 +247,7 @@ impl ProgramsInfo {
             terminal_apps,
             headless_audio,
             ai_clients,
+            notification_helpers,
         }
     }
 
