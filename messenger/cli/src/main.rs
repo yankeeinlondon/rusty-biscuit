@@ -823,6 +823,7 @@ fn build_desktop_provider_from_route(
                 },
                 linux: messenger::LinuxDesktopConfig {
                     desktop_entry: linux.desktop_entry.clone(),
+                    prefer_helpers: Vec::new(),
                 },
             };
             Ok(messenger::DesktopNotificationProvider::new(config))
@@ -1045,6 +1046,7 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 },
                 linux: messenger::LinuxDesktopConfig {
                     desktop_entry: linux.desktop_entry.clone(),
+                    prefer_helpers: Vec::new(),
                 },
             };
             messenger.register(Box::new(messenger::DesktopNotificationProvider::new(

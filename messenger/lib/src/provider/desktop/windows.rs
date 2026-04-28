@@ -221,6 +221,7 @@ mod tests {
             actions: Vec::new(),
             progress: None,
             badge_count: None,
+            replace_helper_hint: None,
         };
 
         let error = backend.send(request).await.unwrap_err();
