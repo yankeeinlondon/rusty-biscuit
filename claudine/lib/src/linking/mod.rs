@@ -1,6 +1,6 @@
 pub mod agents;
 mod canonical;
-mod capabilities;
+pub(crate) mod capabilities;
 pub mod commands;
 mod compatibility;
 mod conflict;
