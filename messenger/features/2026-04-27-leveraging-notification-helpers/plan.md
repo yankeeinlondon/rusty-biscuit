@@ -44,6 +44,16 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3: []
+source_files_during_phase_4:
+  - messenger/lib/src/provider/desktop/helpers/mod.rs
+  - messenger/lib/src/provider/desktop/helpers/snoretoast.rs
+  - messenger/lib/src/provider/desktop/helpers/burnttoast.rs
+  - messenger/lib/src/provider/desktop/windows.rs
+  - messenger/lib/src/provider/desktop/mod.rs
+  - messenger/cli/src/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 packages:
   - sniff
   - sniff-cli
