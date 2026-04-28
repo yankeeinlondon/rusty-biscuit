@@ -132,7 +132,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Skills(_) => "skills",
         Commands::Agents(_) => "agents",
         Commands::SlashCommands(_) => "commands",
-        Commands::Providers => "providers",
+        Commands::Providers(_) => "providers",
         Commands::Logs(_) => "logs",
         Commands::Uninstall(_) => "uninstall",
         Commands::Mcp(_) => "mcp",
@@ -552,7 +552,15 @@ mod tests {
 
     #[test]
     fn provider_subcommand_only_exists_for_wrapper_commands() {
-        assert_eq!(provider_subcommand_name(Some(&Commands::Providers)), None);
+        assert_eq!(
+            provider_subcommand_name(Some(&Commands::Providers(
+                crate::commands::providers::ProvidersArgs {
+                    describe: false,
+                    format: crate::commands::providers::ProvidersFormat::Text,
+                }
+            ))),
+            None
+        );
         assert_eq!(
             provider_subcommand_name(Some(&Commands::Codex(minimal_wrapper_args()))),
             Some("codex")

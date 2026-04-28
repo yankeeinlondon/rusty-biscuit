@@ -251,7 +251,7 @@ async fn async_main(
         Commands::Skills(args) => commands::skills::run(args, cli.verbose > 0).await,
         Commands::Agents(args) => commands::agents::run(args, cli.verbose > 0).await,
         Commands::SlashCommands(args) => commands::slash_commands::run(args, cli.verbose > 0).await,
-        Commands::Providers => commands::providers::run(),
+        Commands::Providers(args) => commands::providers::run(args),
         Commands::Logs(args) => commands::logs::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
         Commands::Mcp(args) => commands::mcp::run(args),

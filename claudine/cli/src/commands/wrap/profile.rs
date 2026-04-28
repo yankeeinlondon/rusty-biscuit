@@ -2668,6 +2668,38 @@ mod tests {
         }
     }
 
+    /// Phase 1 invariant 4: every wrapped provider's `WrapperProfile` reports
+    /// the same [`Provider`] it was looked up under, and `RooCode` is the
+    /// only variant without a wrapper. Mirrors the lib-side
+    /// `provider_info(p).provider == p` registry round-trip on the parallel
+    /// CLI-side `wrapper_for` registry.
+    #[test]
+    fn wrapper_registry_is_exhaustive_and_self_consistent() {
+        use claudine::events::PROVIDERS_DISPLAY_ORDER;
+
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            match profile_for_provider(provider) {
+                Some(profile) => {
+                    assert_eq!(
+                        profile.provider(),
+                        provider,
+                        "{provider:?}: wrapper_for returned a profile for the wrong provider \
+                         (got {:?})",
+                        profile.provider()
+                    );
+                }
+                None => {
+                    assert_eq!(
+                        provider,
+                        Provider::RooCode,
+                        "{provider:?}: wrapper_for returned None but only RooCode is allowed \
+                         to lack a wrapper"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn claude_output_format_supports_all_formats() {
         let p = profile(Provider::Claude);

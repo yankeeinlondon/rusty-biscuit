@@ -79,7 +79,7 @@ pub(crate) enum Commands {
     #[allow(clippy::enum_variant_names)]
     SlashCommands(commands::slash_commands::SlashCommandsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
-    Providers,
+    Providers(commands::providers::ProvidersArgs),
     /// Query and sync Claudine JSONL logs through the reporting index.
     Logs(commands::logs::LogsArgs),
     /// Remove Claudine hooks from all agents.
