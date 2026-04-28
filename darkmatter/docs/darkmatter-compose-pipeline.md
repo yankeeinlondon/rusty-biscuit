@@ -9,8 +9,8 @@
 | [3. Text Replacement 🏁](./inline/text-replacement.md)          | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
 | [4. Page Blocks 🏁](./inline/page-blocks.md)                    | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
 | [5. Interpolation 🏁](./inline/interpolation.md)                | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
-| [6. Shell Expansion 🏁](./inline/shell-expansion.md)       | [AI Summarization](./transclusion/summarization.md)               |                                                                 |
-|                                                                  | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 |
+| [6. Shell Expansion 🏁](./inline/shell-expansion.md)        | [AI Summarization](./transclusion/summarization.md)               | |
+| [7. Shell Block](./inline/shell-expansion.md)               | [AI Consolidation](./transclusion/consolidation.md)               | |
 
 > **Note:** items marked with `🏁` are implemented
 
