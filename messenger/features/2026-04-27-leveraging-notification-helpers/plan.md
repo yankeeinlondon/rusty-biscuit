@@ -64,6 +64,14 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase5: []
+source_files_during_phase_6:
+  - messenger/lib/src/lib.rs
+  - messenger/lib/src/prelude.rs
+  - messenger/lib/src/receipt.rs
+docs_updated_during_phase_6:
+  - messenger/docs/user-guide.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase6: []
 packages:
   - sniff
   - sniff-cli
