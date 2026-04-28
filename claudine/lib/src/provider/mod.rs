@@ -18,6 +18,7 @@ mod behavior;
 mod claude;
 mod codex;
 mod errors;
+mod event_mapping;
 mod gemini;
 mod goose;
 mod identity;
@@ -32,6 +33,7 @@ mod tests;
 
 pub use behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 pub use errors::{ConfigError, McpError};
+pub use event_mapping::{EventMapping, EventMappingTable};
 pub use identity::{Provider, PROVIDERS_DISPLAY_ORDER};
 pub use registry::{all_providers, provider_info};
 
@@ -84,6 +86,18 @@ pub struct ProviderInfo {
 
     /// Whether this provider supports skill discovery.
     pub supports_skills: bool,
+
+    /// Per-provider event mapping table. Source of truth for event support
+    /// level, provider-native event names, parse aliases, and which rows
+    /// participate in standard hook registration.
+    ///
+    /// Skipped during serialization because Phase 3 of the centralized
+    /// providers refactor deliberately preserves the existing
+    /// `claudine providers --describe --format json` payload bit-for-bit;
+    /// Phase 5 introduces typed event-mapping serialization as an additive
+    /// change.
+    #[serde(skip)]
+    pub event_mapping: &'static EventMappingTable,
 
     /// Cross-cutting dynamic behavior (payload detection, parser construction).
     #[serde(skip)]
