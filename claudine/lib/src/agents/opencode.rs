@@ -1,12 +1,13 @@
+use crate::events::Provider;
+
 use super::Confidence;
 use super::model::{
-    ActivationStyle, Agent, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentId,
-    AgentMeta, BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat,
-    ConfidenceProfile, ConfigCapabilities, ConfigFormat, InvocationStyle, LoggingCapabilities,
-    ModelCapabilities, NonInteractiveCapabilities, PermissionCapabilities, ReasoningCapabilities,
-    ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
-    SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities, area_confidence,
-    frontmatter, path_vec, paths,
+    ActivationStyle, Agent, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
+    BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, ConfidenceProfile,
+    ConfigCapabilities, ConfigFormat, InvocationStyle, LoggingCapabilities, ModelCapabilities,
+    NonInteractiveCapabilities, PermissionCapabilities, ReasoningCapabilities, ReasoningStyle,
+    RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities, SlashCommandCapabilities,
+    SubagentCapabilities, SystemPromptCapabilities, area_confidence, frontmatter, path_vec, paths,
 };
 
 #[derive(Debug, Clone)]
@@ -29,8 +30,8 @@ impl Default for OpenCodeAgent {
 }
 
 impl Agent for OpenCodeAgent {
-    fn id(&self) -> AgentId {
-        AgentId::OpenCode
+    fn id(&self) -> Provider {
+        Provider::OpenCode
     }
 
     fn capabilities(&self) -> &AgentCapabilities {
@@ -41,7 +42,7 @@ impl Agent for OpenCodeAgent {
 fn opencode_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
-            id: AgentId::OpenCode,
+            id: Provider::OpenCode,
             display_name: "OpenCode",
             binary: "opencode",
         },

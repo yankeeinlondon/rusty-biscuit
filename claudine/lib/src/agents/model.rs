@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::events::Provider;
+
 /// Canonical capability model for a supported agentic CLI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCapabilities {
@@ -18,60 +20,9 @@ pub struct AgentCapabilities {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentMeta {
-    pub id: AgentId,
+    pub id: Provider,
     pub display_name: &'static str,
     pub binary: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AgentId {
-    ClaudeCode,
-    Codex,
-    GeminiCli,
-    Goose,
-    KimiCode,
-    OpenCode,
-    QwenCli,
-    RooCode,
-}
-
-impl AgentId {
-    pub const ALL: [AgentId; 8] = [
-        AgentId::ClaudeCode,
-        AgentId::Codex,
-        AgentId::GeminiCli,
-        AgentId::Goose,
-        AgentId::KimiCode,
-        AgentId::OpenCode,
-        AgentId::QwenCli,
-        AgentId::RooCode,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AgentId::ClaudeCode => "claude-code",
-            AgentId::Codex => "codex",
-            AgentId::GeminiCli => "gemini-cli",
-            AgentId::Goose => "goose",
-            AgentId::KimiCode => "kimi-code",
-            AgentId::OpenCode => "opencode",
-            AgentId::QwenCli => "qwen-cli",
-            AgentId::RooCode => "roo-code",
-        }
-    }
-
-    pub fn aliases(self) -> &'static [&'static str] {
-        match self {
-            AgentId::ClaudeCode => &["claude", "claude-code"],
-            AgentId::Codex => &["codex"],
-            AgentId::GeminiCli => &["gemini", "gemini-cli"],
-            AgentId::Goose => &["goose"],
-            AgentId::KimiCode => &["kimi", "kimi-code"],
-            AgentId::OpenCode => &["opencode", "open-code"],
-            AgentId::QwenCli => &["qwen", "qwen-cli", "qwen-code"],
-            AgentId::RooCode => &["roo", "roo-code"],
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -325,7 +276,7 @@ pub enum Confidence {
 
 /// Shared trait implemented by every supported agent capability descriptor.
 pub trait Agent: Send + Sync + std::fmt::Debug {
-    fn id(&self) -> AgentId;
+    fn id(&self) -> Provider;
     fn capabilities(&self) -> &AgentCapabilities;
 
     fn meta(&self) -> &AgentMeta {

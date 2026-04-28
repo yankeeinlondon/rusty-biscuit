@@ -1,12 +1,13 @@
+use crate::events::Provider;
+
 use super::Confidence;
 use super::model::{
-    ActivationStyle, Agent, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentId,
-    AgentMeta, BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat,
-    ConfidenceProfile, ConfigCapabilities, ConfigFormat, InvocationStyle, LoggingCapabilities,
-    ModelCapabilities, NonInteractiveCapabilities, PermissionCapabilities, ReasoningCapabilities,
-    ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
-    SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities, area_confidence,
-    frontmatter, path_vec, paths,
+    ActivationStyle, Agent, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
+    BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, ConfidenceProfile,
+    ConfigCapabilities, ConfigFormat, InvocationStyle, LoggingCapabilities, ModelCapabilities,
+    NonInteractiveCapabilities, PermissionCapabilities, ReasoningCapabilities, ReasoningStyle,
+    RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities, SlashCommandCapabilities,
+    SubagentCapabilities, SystemPromptCapabilities, area_confidence, frontmatter, path_vec, paths,
 };
 
 #[derive(Debug, Clone)]
@@ -29,8 +30,8 @@ impl Default for RooCodeAgent {
 }
 
 impl Agent for RooCodeAgent {
-    fn id(&self) -> AgentId {
-        AgentId::RooCode
+    fn id(&self) -> Provider {
+        Provider::RooCode
     }
 
     fn capabilities(&self) -> &AgentCapabilities {
@@ -41,7 +42,7 @@ impl Agent for RooCodeAgent {
 fn roo_code_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
-            id: AgentId::RooCode,
+            id: Provider::RooCode,
             display_name: "Roo Code",
             binary: "roo",
         },
