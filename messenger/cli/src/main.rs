@@ -29,6 +29,8 @@ Examples:
 
 mod config;
 mod desktop_setup;
+mod info;
+mod install;
 mod receipt_store;
 mod setup;
 
@@ -212,6 +214,25 @@ enum Commands {
         /// Provider to configure.
         provider: Option<RouteProvider>,
     },
+    /// Show host detection, notification helpers, and configured routes.
+    Info {
+        /// Emit a JSON record instead of styled terminal output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install one or more notification helpers via the host package manager.
+    Install {
+        /// Skip interactive selection — install every uninstalled helper that
+        /// applies to the host (or every helper named via `--helper`).
+        #[arg(long)]
+        yes: bool,
+        /// Restrict the install set to the named helpers. Repeatable.
+        #[arg(long, value_name = "NAME")]
+        helper: Vec<String>,
+        /// Show what would be installed without executing the commands.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show shell completions setup instructions.
     #[command(after_help = COMPLETIONS_HELP)]
     Completions,
@@ -321,6 +342,20 @@ async fn main() -> Result<()> {
         }
         Commands::Setup { provider } | Commands::Init { provider } => {
             setup::run(provider)?;
+        }
+        Commands::Info { json } => {
+            info::run(json)?;
+        }
+        Commands::Install {
+            yes,
+            helper,
+            dry_run,
+        } => {
+            install::run(install::InstallArgs {
+                yes,
+                helpers: helper,
+                dry_run,
+            })?;
         }
         Commands::Completions => {
             print!("{}", COMPLETIONS_HELP.trim_start());
@@ -771,6 +806,22 @@ fn build_desktop_provider_from_route(
     route: &RouteConfig,
 ) -> Result<messenger::DesktopNotificationProvider> {
     match route {
+        RouteConfig::Desktop { .. } => {
+            let config = build_desktop_config_from_route(route)?;
+            Ok(messenger::DesktopNotificationProvider::new(config))
+        }
+        _ => Err(eyre!("expected Desktop route")),
+    }
+}
+
+/// Convert a CLI `RouteConfig::Desktop` into the library's `DesktopConfig`.
+///
+/// Centralises the field mapping (including helper preference resolution
+/// from the per-OS config plus the `MESSENGER_DESKTOP_PREFER_HELPERS`
+/// env override) so both `register_provider` and the standalone provider
+/// builder agree on the resolved configuration.
+fn build_desktop_config_from_route(route: &RouteConfig) -> Result<messenger::DesktopConfig> {
+    match route {
         RouteConfig::Desktop {
             app_name,
             default_title,
@@ -784,49 +835,47 @@ fn build_desktop_provider_from_route(
             windows,
             macos,
             linux,
-        } => {
-            let config = messenger::DesktopConfig {
-                app_name: app_name.clone(),
-                default_title: default_title.clone(),
-                category: category.clone(),
-                urgency: route_urgency_to_messenger(*urgency),
-                timeout_ms: *timeout_ms,
-                icon: icon.clone().map(icon_string_to_messenger),
-                actions: actions
-                    .iter()
-                    .map(|a| messenger::NotificationAction {
-                        id: a.id.clone(),
-                        label: a.label.clone(),
-                    })
-                    .collect(),
-                progress: progress.map(|p| messenger::NotificationProgress {
-                    current: p.current,
-                    total: p.total,
-                }),
-                badge_count: *badge_count,
-                windows: messenger::WindowsDesktopConfig {
-                    app_id: windows.app_id.clone(),
+        } => Ok(messenger::DesktopConfig {
+            app_name: app_name.clone(),
+            default_title: default_title.clone(),
+            category: category.clone(),
+            urgency: route_urgency_to_messenger(*urgency),
+            timeout_ms: *timeout_ms,
+            icon: icon.clone().map(icon_string_to_messenger),
+            actions: actions
+                .iter()
+                .map(|a| messenger::NotificationAction {
+                    id: a.id.clone(),
+                    label: a.label.clone(),
+                })
+                .collect(),
+            progress: progress.map(|p| messenger::NotificationProgress {
+                current: p.current,
+                total: p.total,
+            }),
+            badge_count: *badge_count,
+            windows: messenger::WindowsDesktopConfig {
+                app_id: windows.app_id.clone(),
+                prefer_helpers: config::resolve_prefer_helpers(&windows.prefer_helpers),
+            },
+            macos: messenger::MacOsDesktopConfig {
+                bundle_id: macos.bundle_id.clone(),
+                strategy: match macos.strategy {
+                    config::RouteMacOsStrategy::Auto => messenger::MacOsNotificationStrategy::Auto,
+                    config::RouteMacOsStrategy::NativeUserNotifications => {
+                        messenger::MacOsNotificationStrategy::NativeUserNotifications
+                    }
+                    config::RouteMacOsStrategy::AppleScript => {
+                        messenger::MacOsNotificationStrategy::AppleScript
+                    }
                 },
-                macos: messenger::MacOsDesktopConfig {
-                    bundle_id: macos.bundle_id.clone(),
-                    strategy: match macos.strategy {
-                        config::RouteMacOsStrategy::Auto => {
-                            messenger::MacOsNotificationStrategy::Auto
-                        }
-                        config::RouteMacOsStrategy::NativeUserNotifications => {
-                            messenger::MacOsNotificationStrategy::NativeUserNotifications
-                        }
-                        config::RouteMacOsStrategy::AppleScript => {
-                            messenger::MacOsNotificationStrategy::AppleScript
-                        }
-                    },
-                },
-                linux: messenger::LinuxDesktopConfig {
-                    desktop_entry: linux.desktop_entry.clone(),
-                },
-            };
-            Ok(messenger::DesktopNotificationProvider::new(config))
-        }
+                prefer_helpers: config::resolve_prefer_helpers(&macos.prefer_helpers),
+            },
+            linux: messenger::LinuxDesktopConfig {
+                desktop_entry: linux.desktop_entry.clone(),
+                prefer_helpers: config::resolve_prefer_helpers(&linux.prefer_helpers),
+            },
+        }),
         _ => Err(eyre!("expected Desktop route")),
     }
 }
@@ -993,60 +1042,8 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 ),
             ));
         }
-        RouteConfig::Desktop {
-            app_name,
-            default_title,
-            icon,
-            category,
-            urgency,
-            timeout_ms,
-            actions,
-            progress,
-            badge_count,
-            windows,
-            macos,
-            linux,
-        } => {
-            let config = messenger::DesktopConfig {
-                app_name: app_name.clone(),
-                default_title: default_title.clone(),
-                category: category.clone(),
-                urgency: route_urgency_to_messenger(*urgency),
-                timeout_ms: *timeout_ms,
-                icon: icon.clone().map(icon_string_to_messenger),
-                actions: actions
-                    .iter()
-                    .map(|a| messenger::NotificationAction {
-                        id: a.id.clone(),
-                        label: a.label.clone(),
-                    })
-                    .collect(),
-                progress: progress.map(|p| messenger::NotificationProgress {
-                    current: p.current,
-                    total: p.total,
-                }),
-                badge_count: *badge_count,
-                windows: messenger::WindowsDesktopConfig {
-                    app_id: windows.app_id.clone(),
-                },
-                macos: messenger::MacOsDesktopConfig {
-                    bundle_id: macos.bundle_id.clone(),
-                    strategy: match macos.strategy {
-                        config::RouteMacOsStrategy::Auto => {
-                            messenger::MacOsNotificationStrategy::Auto
-                        }
-                        config::RouteMacOsStrategy::NativeUserNotifications => {
-                            messenger::MacOsNotificationStrategy::NativeUserNotifications
-                        }
-                        config::RouteMacOsStrategy::AppleScript => {
-                            messenger::MacOsNotificationStrategy::AppleScript
-                        }
-                    },
-                },
-                linux: messenger::LinuxDesktopConfig {
-                    desktop_entry: linux.desktop_entry.clone(),
-                },
-            };
+        RouteConfig::Desktop { .. } => {
+            let config = build_desktop_config_from_route(route)?;
             messenger.register(Box::new(messenger::DesktopNotificationProvider::new(
                 config,
             )));
@@ -1678,13 +1675,16 @@ mod tests {
             badge_count: None,
             windows: config::DesktopWindowsConfig {
                 app_id: Some("RustyBiscuit.Messenger".into()),
+                prefer_helpers: Vec::new(),
             },
             macos: config::DesktopMacOsConfig {
                 bundle_id: Some("com.rustybiscuit.messenger".into()),
                 strategy: config::RouteMacOsStrategy::NativeUserNotifications,
+                prefer_helpers: Vec::new(),
             },
             linux: config::DesktopLinuxConfig {
                 desktop_entry: Some("messenger".into()),
+                prefer_helpers: Vec::new(),
             },
         };
 

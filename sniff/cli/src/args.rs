@@ -535,6 +535,9 @@ pub enum Commands {
         action: Option<AgentAction>,
     },
 
+    /// Show only desktop notification helpers
+    NotificationHelpers,
+
     /// Show only system services (init system and service list)
     Services {
         /// Filter services by state
@@ -855,6 +858,7 @@ impl Commands {
             Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
             Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
+            Commands::NotificationHelpers => OutputFilter::NotificationHelpers,
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
             Commands::Just { .. } => OutputFilter::Just,
@@ -1403,6 +1407,7 @@ Commands:
     sniff editors                         Show editors (supports 'install' and 'install-plan')
     sniff utilities                       Show utilities
     sniff agents                          Show AI agent CLI tools
+    sniff notification-helpers            Show desktop notification helpers
 
   Services:
     sniff services        Show running services

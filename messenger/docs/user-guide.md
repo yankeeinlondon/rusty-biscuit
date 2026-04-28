@@ -384,6 +384,66 @@ Key behavioral differences from the Slack bot route:
 
 Desktop routes persist configuration only — no secrets. Running `messenger send --provider desktop` ad-hoc (without a route) uses the library defaults for every field, which is enough for a simple `--title "..."` notification.
 
+### Desktop Notification Helpers
+
+Each desktop backend can delegate delivery to a third-party CLI helper before falling back to its native API. The library detects which helpers are present at startup, scores them per dispatch, and uses the highest-scoring one. If a helper fails (missing binary, exited non-zero, timed out), the backend tries the next helper and finally the native path.
+
+**Helpers per OS:**
+
+| OS      | Helpers                            | Best for                             |
+|---------|------------------------------------|--------------------------------------|
+| Linux   | `dunstify`, `notify-send`          | Interactive actions on dunst; universal notice-only |
+| macOS   | `terminal-notifier`, `alerter`     | Notice-only on macOS; interactive actions/replies   |
+| Windows | `snoretoast`, `BurntToast`         | Default Windows toasts; PowerShell module fallback  |
+
+**Inspecting helper availability:**
+
+```bash
+messenger info            # human-readable table
+messenger info --json     # machine-readable record
+messenger info --plain    # uncolored text (for scripts)
+```
+
+The output lists every helper in the catalog, whether it is installed, the detected version, the active notification daemon (Linux only), and the election order the backend will use on this host.
+
+**Installing missing helpers:**
+
+```bash
+messenger install                     # interactively pick from missing helpers
+messenger install --yes               # install everything that applies to the host
+messenger install --helper dunstify   # install a specific helper
+messenger install --dry-run           # print the install plan without executing
+```
+
+`messenger install` reuses sniff's install pipeline (Homebrew, apt, dnf, pacman, scoop, winget, PowerShellGet for `BurntToast`) and prints elevation badges for steps that need `sudo` or admin.
+
+**Configuring helper preference:**
+
+Each per-OS desktop config section accepts a `prefer_helpers` array that reorders the election. Names use the snake_case form of the helper (`dunstify`, `notify_send`, `terminal_notifier`, `alerter`, `snore_toast`, `burnt_toast`). Unknown names are ignored.
+
+```json
+{
+  "routes": {
+    "desk": {
+      "provider": "desktop",
+      "linux": { "prefer_helpers": ["dunstify", "notify_send"] },
+      "macos": { "prefer_helpers": ["alerter"] },
+      "windows": { "prefer_helpers": ["snore_toast"] }
+    }
+  }
+}
+```
+
+The `MESSENGER_DESKTOP_PREFER_HELPERS` environment variable (comma-separated) overrides any value in the config file. Any helper not listed in `prefer_helpers` keeps its default order behind the listed entries.
+
+**Capability notes:**
+
+- `terminal-notifier` is notice-only; supplying `actions` or `reply` gives it a score of 0 so the backend picks `alerter` (or the native path) instead.
+- `alerter` blocks until the user dismisses or activates the toast — only elected for interactive sends.
+- `dunstify` only scores above 0 when the active D-Bus daemon is dunst.
+- `snoretoast` requires a registered AppID; the backend auto-registers it via the configured Start Menu shortcut.
+- `BurntToast` requires PowerShell and the `BurntToast` module; the backend installs nothing automatically — use `messenger install --helper burnt_toast`.
+
 ### Receipt Storage
 
 Every successful send writes a JSON receipt to:
@@ -603,3 +663,32 @@ async fn main() -> Result<(), messenger::MessengerError> {
 `DesktopNotificationProvider::new` picks the runtime backend based on the compile target: `notify-rust` on Linux, AppleScript or native `UserNotifications.framework` on macOS, and `winrt-notification` on Windows. Platform-specific behavior — including the Windows setup prerequisite and the macOS strategy choice — is covered in [`docs/platforms/desktop.md`](./platforms/desktop.md).
 
 Per-dispatch overrides (subtitle, category, urgency, timeout, icon, replace ID, app name) are supplied via `ProviderOverrides::Desktop(DesktopOverrides { .. })` on the `Dispatch`.
+
+### Reading Helper Activations
+
+When a desktop helper captures a user activation (action click, inline reply, dismissal, timeout, content click), the result is recorded on the `SendReceipt`. Decode it with [`SendReceipt::activation`] instead of reading metadata strings:
+
+```rust
+use messenger::prelude::*;
+
+# fn _example(receipt: SendReceipt) {
+match receipt.activation() {
+    Some(Activation::Action(id))      => println!("user clicked action {id}"),
+    Some(Activation::Reply(text))     => println!("user replied: {text}"),
+    Some(Activation::Dismissed)       => println!("user dismissed"),
+    Some(Activation::Timeout)         => println!("notification timed out"),
+    Some(Activation::ContentClicked)  => println!("user clicked the body"),
+    None                              => {} // notice-only or non-desktop send
+}
+
+if let Some(name) = receipt.helper_used() {
+    println!("delivered via helper {name}");
+}
+
+if let Some(text) = receipt.reply_text() {
+    println!("inline reply: {text}");
+}
+# }
+```
+
+`helper_used()` returns `None` when the native backend handled the send — callers can use this to detect whether a fallback occurred without inspecting metadata directly. `reply_text()` is a convenience for the `Activation::Reply` arm and returns `None` for any other activation type.
