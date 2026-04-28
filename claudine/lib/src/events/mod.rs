@@ -4,7 +4,6 @@ mod environment;
 mod event_meta;
 mod init_defaults;
 mod matrix;
-mod provider;
 mod resolved_hook;
 
 pub use agentic_event::AgenticEvent;
@@ -22,7 +21,10 @@ pub use init_defaults::{
 };
 pub use matrix::{
     EventNativeMappingCell, EventNativeMappingRow, EventSupportCell, EventSupportRow,
-    NativeEventName, PROVIDERS_DISPLAY_ORDER, event_native_mapping_matrix, event_support_matrix,
+    NativeEventName, event_native_mapping_matrix, event_support_matrix,
 };
-pub use provider::{EventSupportLevel, Provider};
 pub use resolved_hook::ResolvedHook;
+
+// Phase 8: `Provider`, `PROVIDERS_DISPLAY_ORDER`, and `EventSupportLevel`
+// previously lived in `crate::events::provider`. They are now owned by
+// `crate::provider`. Internal consumers must import directly from there.

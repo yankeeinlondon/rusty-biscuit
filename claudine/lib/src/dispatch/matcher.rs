@@ -57,6 +57,7 @@ pub fn matches_with_pattern(pattern: Option<&str>, meta: &EventMeta) -> bool {
 mod tests {
     use super::*;
     use crate::events::*;
+    use crate::provider::Provider;
     use chrono::Utc;
     use std::collections::HashMap;
 

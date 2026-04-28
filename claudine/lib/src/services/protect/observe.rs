@@ -114,7 +114,7 @@ fn extract_path_string(input: &Value) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use serde_json::json;
 
     fn meta_with_command(command: &str) -> EventMeta {

@@ -962,8 +962,8 @@ mod tests {
     use crate::config::claudine_config::{
         ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
     };
-    use crate::events::{EnvironmentContext, Provider, TtsSettings};
-
+    use crate::events::{EnvironmentContext, TtsSettings};
+    use crate::provider::Provider;
     fn meta() -> EventMeta {
         EventMeta {
             provider: Provider::Claude,

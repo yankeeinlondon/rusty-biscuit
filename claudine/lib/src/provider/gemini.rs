@@ -31,7 +31,8 @@ use crate::mcp::types::McpServer;
 use crate::stream::{ParserConfig, StreamProtocol};
 use crate::stream::gemini_semantic::GeminiSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
-use crate::events::{AgenticEvent, EventSupportLevel};
+use crate::events::AgenticEvent;
+use crate::provider::EventSupportLevel;
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,

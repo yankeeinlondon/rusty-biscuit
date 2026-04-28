@@ -22,7 +22,8 @@ use super::acp::{AcpEvent, AcpServerMode, AcpSupport};
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
-use crate::events::{AgenticEvent, EventSupportLevel};
+use crate::events::AgenticEvent;
+use crate::provider::EventSupportLevel;
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,

@@ -26,8 +26,7 @@ use super::protocol::claude::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Max number of hook events to buffer before `SessionStart` is emitted.
 /// If the buffer grows past this, we flush early so live streaming wins
 /// over cosmetic ordering (spec: "preserving streaming wins over

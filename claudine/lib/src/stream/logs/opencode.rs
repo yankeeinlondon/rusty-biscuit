@@ -1859,7 +1859,7 @@ mod tests {
 
     #[test]
     fn merge_stderr_state_applies_diagnostics_without_emitting_config_badge() {
-        use crate::events::Provider;
+        use crate::provider::Provider;
         use crate::stream::badges::BadgeCategory;
         use crate::stream::summary::StreamExecutionSummary;
 
@@ -1900,7 +1900,7 @@ mod tests {
 
     #[test]
     fn merge_stderr_state_merges_rate_limit_and_yields_rate_limit_badge() {
-        use crate::events::Provider;
+        use crate::provider::Provider;
         use crate::stream::badges::BadgeCategory;
         use crate::stream::summary::StreamExecutionSummary;
         use chrono::TimeZone;
@@ -1944,7 +1944,7 @@ mod tests {
 
     #[test]
     fn merge_stderr_state_without_records_does_not_attach_diagnostics() {
-        use crate::events::Provider;
+        use crate::provider::Provider;
         use crate::stream::summary::StreamExecutionSummary;
 
         let state = Arc::new(Mutex::new(SharedStderrState::default()));

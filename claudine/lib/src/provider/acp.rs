@@ -6,7 +6,7 @@
 //! provider's ACP server posture, client capability, and the set of events
 //! captured via ACP queryable from [`ProviderInfo`](super::ProviderInfo).
 //!
-//! The [`EventSupportLevel::Acp`](crate::events::EventSupportLevel) variant
+//! The [`EventSupportLevel::Acp`](crate::provider::EventSupportLevel) variant
 //! tags individual event mapping rows whose capture mechanism is ACP. The
 //! library guarantees (via tests) that any provider with at least one
 //! `EventSupportLevel::Acp` row reports a non-`NotSupported` ACP server

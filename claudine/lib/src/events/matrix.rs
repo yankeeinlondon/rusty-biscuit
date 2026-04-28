@@ -1,7 +1,5 @@
-use super::{AgenticEvent, EventSupportLevel, Provider};
-use crate::provider::provider_info;
-
-pub use super::provider::PROVIDERS_DISPLAY_ORDER;
+use super::AgenticEvent;
+use crate::provider::{EventSupportLevel, Provider, provider_info};
 
 /// A single support cell in the provider/event support matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

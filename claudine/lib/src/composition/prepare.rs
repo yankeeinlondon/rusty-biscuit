@@ -57,8 +57,7 @@ use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     ModelHint, PreparedComposition, ResolvedCompositionSource,
 };
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the
@@ -306,7 +305,7 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use darkmatter::markdown::Frontmatter;
     use serde_json::json;
     use std::fs;

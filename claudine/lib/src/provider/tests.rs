@@ -308,8 +308,8 @@ fn no_unauthorized_match_provider_in_lib() {
 /// Every supported event mapping has a non-empty native name.
 #[test]
 fn supported_events_have_non_empty_native_names() {
-    use crate::events::{AgenticEvent, EventSupportLevel};
-
+    use crate::events::AgenticEvent;
+    use crate::provider::EventSupportLevel;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         for event in AgenticEvent::ALL {
@@ -333,8 +333,8 @@ fn supported_events_have_non_empty_native_names() {
 /// support without specifically marking every event as a Hook.)
 #[test]
 fn hook_events_imply_configurator_hooks_supported() {
-    use crate::events::{AgenticEvent, EventSupportLevel};
-
+    use crate::events::AgenticEvent;
+    use crate::provider::EventSupportLevel;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         let has_hook_event = AgenticEvent::ALL.iter().any(|event| {
@@ -356,8 +356,8 @@ fn hook_events_imply_configurator_hooks_supported() {
 /// non-empty native name (they need *something* to parse).
 #[test]
 fn stream_providers_expose_at_least_one_event() {
-    use crate::events::{AgenticEvent, EventSupportLevel};
-
+    use crate::events::AgenticEvent;
+    use crate::provider::EventSupportLevel;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         if info.stream_protocol.is_none() {
@@ -386,8 +386,8 @@ fn stream_providers_expose_at_least_one_event() {
 #[test]
 fn acp_events_imply_acp_support() {
     use super::acp::AcpServerMode;
-    use crate::events::{AgenticEvent, EventSupportLevel};
-
+    use crate::events::AgenticEvent;
+    use crate::provider::EventSupportLevel;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         let has_acp_event = AgenticEvent::ALL.iter().any(|event| {
@@ -413,8 +413,8 @@ fn acp_events_imply_acp_support() {
 #[test]
 fn goose_request_permission_is_acp() {
     use super::acp::{AcpEvent, AcpServerMode};
-    use crate::events::{AgenticEvent, EventSupportLevel};
-
+    use crate::events::AgenticEvent;
+    use crate::provider::EventSupportLevel;
     let info = provider_info(Provider::Goose);
     assert_eq!(
         info.event_mapping.support_level(AgenticEvent::HumanInTheLoop),
@@ -433,8 +433,8 @@ fn goose_request_permission_is_acp() {
 #[test]
 fn kimi_approval_request_is_acp() {
     use super::acp::{AcpEvent, AcpServerMode};
-    use crate::events::{AgenticEvent, EventSupportLevel};
-
+    use crate::events::AgenticEvent;
+    use crate::provider::EventSupportLevel;
     let info = provider_info(Provider::KimiCode);
     assert_eq!(
         info.event_mapping
@@ -457,8 +457,8 @@ fn kimi_approval_request_is_acp() {
 #[test]
 fn non_acp_providers_have_not_supported_acp() {
     use super::acp::AcpServerMode;
-    use crate::events::{AgenticEvent, EventSupportLevel};
-
+    use crate::events::AgenticEvent;
+    use crate::provider::EventSupportLevel;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         let has_acp_event = AgenticEvent::ALL.iter().any(|event| {

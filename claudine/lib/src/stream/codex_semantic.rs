@@ -36,8 +36,7 @@ use super::protocol::codex::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Native stream parser for Codex CLI emitting [`SemanticEvent`]s.
 pub struct CodexSemanticStreamParser<S: SemanticEventSink> {
     sink: S,

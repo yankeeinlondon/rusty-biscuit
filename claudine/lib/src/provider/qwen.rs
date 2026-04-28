@@ -25,7 +25,8 @@ use crate::config::AgentConfigurator;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::qwen_semantic::QwenSemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
-use crate::events::{AgenticEvent, EventSupportLevel};
+use crate::events::AgenticEvent;
+use crate::provider::EventSupportLevel;
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,

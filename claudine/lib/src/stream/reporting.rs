@@ -189,7 +189,7 @@ pub fn summary_to_event_meta_with_context(
 ///   same way [`summary_to_event_meta_with_context`] does.
 pub fn semantic_event_to_event_meta(
     event: &SemanticEvent,
-    provider: crate::events::Provider,
+    provider: crate::provider::Provider,
     env: &EnvironmentContext,
     context_extra: Option<&HashMap<String, Value>>,
 ) -> EventMeta {
@@ -401,7 +401,7 @@ pub fn write_summary_event(meta: &EventMeta) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use crate::stream::token_usage::NormalizedTokenUsage;
 
     fn make_test_summary() -> StreamExecutionSummary {

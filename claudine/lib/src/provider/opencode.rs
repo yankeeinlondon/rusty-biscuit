@@ -29,7 +29,8 @@ use crate::mcp::types::McpServer;
 use crate::stream::opencode_semantic::OpenCodeSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
-use crate::events::{AgenticEvent, EventSupportLevel};
+use crate::events::AgenticEvent;
+use crate::provider::EventSupportLevel;
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,

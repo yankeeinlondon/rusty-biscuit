@@ -23,7 +23,8 @@ use crate::error::Result;
 use crate::mcp::export::ExportServer;
 use crate::mcp::state::Scope;
 use crate::mcp::types::McpServer;
-use crate::events::{AgenticEvent, EventSupportLevel};
+use crate::events::AgenticEvent;
+use crate::provider::EventSupportLevel;
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,

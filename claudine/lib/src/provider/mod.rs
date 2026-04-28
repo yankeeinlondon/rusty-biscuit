@@ -25,6 +25,7 @@ mod goose;
 mod identity;
 mod kimi;
 mod known_gap;
+mod methods;
 mod opencode;
 mod output_format;
 mod path_template;
@@ -42,7 +43,7 @@ mod tests;
 pub use acp::{AcpEvent, AcpServerMode, AcpSupport};
 pub use behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 pub use errors::{ConfigError, McpError};
-pub use event_mapping::{EventMapping, EventMappingTable};
+pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 pub use identity::{Provider, PROVIDERS_DISPLAY_ORDER};
 pub use known_gap::{KnownGap, KnownGapArea};
 pub use output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
@@ -243,5 +244,19 @@ impl ProviderInfo {
     /// cross-provider linking layer.
     pub fn resource_support(&self) -> &'static ProviderCapabilities {
         (self.resource_support_fn)()
+    }
+}
+
+// Implementing [`crate::agents::Agent`] on `ProviderInfo` lets the legacy
+// `agents::agent_for(provider)` registry forward straight to
+// [`provider_info`](registry::provider_info) without keeping per-provider
+// thin facade structs around.
+impl crate::agents::Agent for ProviderInfo {
+    fn id(&self) -> Provider {
+        self.provider
+    }
+
+    fn capabilities(&self) -> &AgentCapabilities {
+        self.agent_capabilities()
     }
 }

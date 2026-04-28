@@ -17,8 +17,7 @@ use super::protocol::qwen::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 pub struct QwenSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
     line_num: usize,

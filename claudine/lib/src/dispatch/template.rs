@@ -397,6 +397,7 @@ impl TemplateVariable {
 /// ```
 /// # use claudine::dispatch::template::interpolate;
 /// # use claudine::events::*;
+/// # use claudine::provider::Provider;
 /// # use std::collections::HashMap;
 /// # use chrono::Utc;
 /// # let meta = EventMeta {
@@ -549,6 +550,7 @@ fn opt_nested_to_cow(opt: Option<&str>) -> Cow<'static, str> {
 mod tests {
     use super::*;
     use crate::events::*;
+    use crate::provider::Provider;
     use chrono::Utc;
     use std::collections::HashMap;
 

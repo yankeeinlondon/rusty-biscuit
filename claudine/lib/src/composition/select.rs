@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use crate::model_catalog::ModelCatalogService;
 
 use super::error::CompositionError;

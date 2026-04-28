@@ -22,7 +22,53 @@
 //! Empty `native_name` strings carry the legacy "supported but no specific
 //! native name" meaning so existing snapshots are preserved bit-for-bit.
 
-use crate::events::{AgenticEvent, EventSupportLevel};
+use crate::events::AgenticEvent;
+
+/// Level of event support for a provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventSupportLevel {
+    /// Event is supported via native hooks (config-file based).
+    ///
+    /// These events can be registered by modifying the provider's config file.
+    /// Examples: Claude hooks, Gemini hooks, OpenCode plugins.
+    Hook,
+
+    /// Event is supported via non-hook methods (wrapper/wire-mode/stream parsing).
+    ///
+    /// These events require alternative capture methods that are not yet implemented:
+    /// - **Wrapper scripts**: Intercept CLI invocation (Goose GOOSE_STATUS_HOOK)
+    /// - **Wire mode proxy**: JSON-RPC interception (Kimi Code --wire)
+    /// - **Stream parsing**: Parse CLI output (Codex JSONL, Qwen stream-json)
+    NonHook,
+
+    /// Event is captured via the Agent Client Protocol (ACP).
+    ///
+    /// Examples: Goose `request_permission`, Kimi `ApprovalRequest` (when
+    /// reached via Claudine's wire-mode JSON-RPC proxy). Providers with at
+    /// least one `Acp` row are required to report a non-`NotSupported`
+    /// [`AcpSupport::server_mode`](super::AcpSupport).
+    Acp,
+
+    /// Event is not supported by this provider.
+    NotSupported,
+}
+
+impl EventSupportLevel {
+    /// Returns whether this level indicates any form of support.
+    pub fn is_supported(&self) -> bool {
+        !matches!(self, EventSupportLevel::NotSupported)
+    }
+
+    /// Returns whether this level indicates hook-based support.
+    pub fn is_hook(&self) -> bool {
+        matches!(self, EventSupportLevel::Hook)
+    }
+
+    /// Returns whether this level indicates ACP-based capture.
+    pub fn is_acp(&self) -> bool {
+        matches!(self, EventSupportLevel::Acp)
+    }
+}
 
 /// Single event mapping entry: support level + native name + parse aliases.
 #[derive(Debug, Clone, Copy)]
