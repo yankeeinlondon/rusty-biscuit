@@ -3,7 +3,7 @@ mod codex;
 mod gemini_cli;
 mod goose;
 mod kimi_code;
-mod model;
+pub(crate) mod model;
 mod opencode;
 mod qwen_cli;
 mod registry;
