@@ -210,6 +210,12 @@ pub trait SemanticEventSink: Send {
     fn on_semantic_event(&mut self, event: SemanticEvent);
 }
 
+impl<S: SemanticEventSink + ?Sized> SemanticEventSink for Box<S> {
+    fn on_semantic_event(&mut self, event: SemanticEvent) {
+        (**self).on_semantic_event(event);
+    }
+}
+
 /// No-op sink that discards all events.
 pub struct NullSemanticSink;
 
