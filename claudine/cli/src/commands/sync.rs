@@ -12,8 +12,7 @@ use claudine::config::{
     ProviderHookPlan, RegistrationResult, SkipReason, detect_agents, get_configurator,
 };
 use claudine::dispatch::loader::load_claudine_config;
-use claudine::events::Provider;
-
+use claudine::provider::Provider;
 use crate::cli_utils::event_name_pascal;
 use crate::log;
 use crate::provider_values::provider_value_parser;

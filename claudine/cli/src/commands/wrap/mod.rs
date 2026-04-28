@@ -12,7 +12,8 @@ pub(crate) mod wire_io;
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
 use claudine::composition::lifecycle::LifecycleSignal;
-use claudine::events::{EnvironmentContext, Provider};
+use claudine::events::EnvironmentContext;
+use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
@@ -1886,11 +1887,10 @@ fn find_wrapper_harness_source(
     repo_root: Option<&Path>,
     cwd: &Path,
 ) -> Option<PathBuf> {
-    let agent = claudine::agents::agent_for(provider);
+    let capabilities = claudine::provider::provider_info(provider).agent_capabilities();
     let search_root = repo_root.unwrap_or(cwd);
 
-    agent
-        .capabilities()
+    capabilities
         .runtime
         .system_prompt
         .memory_files
@@ -4406,7 +4406,7 @@ mod tests {
 
     #[test]
     fn format_summary_prose_appends_badge_markup() {
-        use claudine::events::Provider;
+        use claudine::provider::Provider;
         use claudine::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
         use claudine::stream::summary::StreamExecutionSummary;
         let summary = StreamExecutionSummary {
@@ -4429,7 +4429,7 @@ mod tests {
 
     #[test]
     fn format_summary_prose_without_badges_has_no_badge_markup() {
-        use claudine::events::Provider;
+        use claudine::provider::Provider;
         use claudine::stream::summary::StreamExecutionSummary;
         let summary = StreamExecutionSummary {
             provider: Provider::Claude,

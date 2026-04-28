@@ -39,8 +39,7 @@
 use std::ffi::OsString;
 use std::sync::LazyLock;
 
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
-
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use crate::commands::compose::ComposeArgs;
 use crate::commands::sequence::SequenceArgs;
 

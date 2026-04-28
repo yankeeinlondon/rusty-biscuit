@@ -12,10 +12,8 @@ use claudine::config::claudine_config::ClaudineConfig;
 use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_claudine_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
-use claudine::events::{
-    AgenticEvent, EventMeta, EventSupportLevel, NativeEventName, PROVIDERS_DISPLAY_ORDER, Provider,
-    detect_environment, event_native_mapping_matrix, event_support_matrix,
-};
+use claudine::events::{AgenticEvent, EventMeta, NativeEventName, detect_environment, event_native_mapping_matrix, event_support_matrix};
+use claudine::provider::{EventSupportLevel, PROVIDERS_DISPLAY_ORDER, Provider};
 use playa::SoundEffect;
 use sniff::programs::InstalledAiClients;
 

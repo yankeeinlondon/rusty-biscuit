@@ -8,7 +8,7 @@ use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::terminal::Terminal;
 use chrono::Utc;
 use clap::{Args, Subcommand, ValueEnum};
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::linking::resolve_repo_root;
 use claudine::mcp::catalog::McpCatalogStore;
 use claudine::mcp::defaults::{

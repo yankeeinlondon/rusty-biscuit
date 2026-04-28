@@ -5,7 +5,8 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use clap::{Args, ValueEnum};
-use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::events::AgenticEvent;
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::linking::{LinkableResource, capabilities_for};
 use claudine::provider::{all_providers, provider_info};
 

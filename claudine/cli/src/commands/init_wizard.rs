@@ -13,8 +13,8 @@ use claudine::config::claudine_config::{
 use claudine::config::{
     ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
 };
-use claudine::events::{AgenticEvent, Provider, recommended_sound};
-
+use claudine::events::{AgenticEvent, recommended_sound};
+use claudine::provider::Provider;
 use crate::log;
 
 #[derive(Debug, Args)]

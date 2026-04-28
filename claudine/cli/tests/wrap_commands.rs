@@ -944,7 +944,7 @@ exit 0
         "kimi non-interactive run must not append --print; got args: {args:?}"
     );
     assert!(
-        !args.iter().any(|a| *a == "--output-format"),
+        !args.contains(&"--output-format"),
         "kimi non-interactive run must not pass --output-format; got args: {args:?}"
     );
 

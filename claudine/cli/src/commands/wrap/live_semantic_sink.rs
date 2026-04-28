@@ -39,9 +39,8 @@ use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Margin, WordWrap};
-use claudine::events::{
-    AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
-};
+use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
+use claudine::provider::Provider;
 use claudine::stream::path_link::format_file_link;
 use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};

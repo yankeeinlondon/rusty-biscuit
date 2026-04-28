@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use color_eyre::eyre::{Context, Result, bail};
 
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::linking::resolve_repo_root;
 
 pub struct RepoHomeManager {

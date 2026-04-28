@@ -10,10 +10,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use claudine::actions::{HookAction, LogTarget};
-use claudine::events::{
-    AgenticEvent, INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, Provider,
-    default_speak_template, recommended_sound,
-};
+use claudine::events::{AgenticEvent, INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, default_speak_template, recommended_sound};
+use claudine::provider::Provider;
 use claudine::linking::preference_prompt_count;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};

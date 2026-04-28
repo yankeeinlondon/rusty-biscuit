@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::provider::{PromptArgConventions, provider_info};
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
@@ -2512,8 +2512,7 @@ mod tests {
     /// CLI-side `wrapper_for` registry.
     #[test]
     fn wrapper_registry_is_exhaustive_and_self_consistent() {
-        use claudine::events::PROVIDERS_DISPLAY_ORDER;
-
+        use claudine::provider::PROVIDERS_DISPLAY_ORDER;
         for provider in PROVIDERS_DISPLAY_ORDER {
             match profile_for_provider(provider) {
                 Some(profile) => {

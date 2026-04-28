@@ -38,7 +38,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta};
+
+use claudine::provider::Provider;
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::LiveMetrics;
 use claudine::stream::protocol::kimi::{

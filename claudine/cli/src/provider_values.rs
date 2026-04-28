@@ -1,6 +1,5 @@
 use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
-
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use crate::cli_utils::parse_provider_clap;
 
 /// Return a Clap parser that advertises supported provider values and aliases.

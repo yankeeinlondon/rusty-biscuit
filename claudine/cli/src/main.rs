@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use color_eyre::eyre::{Report, Result};
 
 mod args;
