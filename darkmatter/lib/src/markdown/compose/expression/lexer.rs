@@ -58,13 +58,15 @@ pub struct ExpressionLocation {
 /// ```
 /// use darkmatter::markdown::compose::expression::ExpressionFinder;
 ///
-/// let content = "Hello {{ name }}! Code: `{{ not_this }}`";
+/// let content = "Hello {{ name }}! Inline: `{{ also_this }}`";
 /// let finder = ExpressionFinder::new(content);
 /// let expressions = finder.find_all();
 ///
-/// // Only the first expression is found (code span is skipped)
-/// assert_eq!(expressions.len(), 1);
+/// // Both expressions are found — inline code spans are scanned.
+/// // Fenced and indented code blocks are still skipped.
+/// assert_eq!(expressions.len(), 2);
 /// assert_eq!(expressions[0].expression, "name");
+/// assert_eq!(expressions[1].expression, "also_this");
 /// ```
 pub struct ExpressionFinder<'a> {
     content: &'a str,
@@ -74,8 +76,9 @@ pub struct ExpressionFinder<'a> {
 impl<'a> ExpressionFinder<'a> {
     /// Creates a new expression finder for the given content.
     ///
-    /// This pre-computes code regions (inline code and fenced code blocks)
-    /// that should be excluded from expression scanning.
+    /// Pre-computes fenced and indented code-block regions that should be
+    /// excluded from expression scanning. Inline code spans (single backticks)
+    /// are intentionally NOT skipped — `{{ }}` inside `` ` ` `` is interpolated.
     pub fn new(content: &'a str) -> Self {
         let code_regions = Self::find_code_regions(content);
         Self {
@@ -169,7 +172,11 @@ impl<'a> ExpressionFinder<'a> {
         finder.find_all()
     }
 
-    /// Finds all code regions (inline code and fenced code blocks) in content.
+    /// Finds fenced and indented code-block regions in content.
+    ///
+    /// Inline code spans (single backticks) are intentionally NOT collected
+    /// here — interpolation runs inside them so that templated identifiers
+    /// like `` `var_{{ phase }}` `` expand as expected.
     fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
         let mut regions = Vec::new();
         let parser = Parser::new_ext(content, Options::all()).into_offset_iter();
@@ -179,10 +186,6 @@ impl<'a> ExpressionFinder<'a> {
 
         for (event, range) in parser {
             match event {
-                Event::Code(_) => {
-                    // Inline code span
-                    regions.push((range.start, range.end));
-                }
                 Event::Start(Tag::CodeBlock(_)) => {
                     // Start of fenced/indented code block
                     in_code_block = true;
@@ -766,13 +769,16 @@ mod tests {
         }
 
         #[test]
-        fn skips_code_span() {
-            let content = "Hello {{ name }}! Code: `{{ not_this }}`";
+        fn scans_inline_code_spans() {
+            // Inline code spans are NOT skipped — interpolation runs inside
+            // single-backtick spans so `` `var_{{ phase }}` `` works.
+            let content = "Hello {{ name }}! Code: `{{ also_this }}`";
             let finder = ExpressionFinder::new(content);
             let exprs = finder.find_all();
 
-            assert_eq!(exprs.len(), 1);
+            assert_eq!(exprs.len(), 2);
             assert_eq!(exprs[0].expression, "name");
+            assert_eq!(exprs[1].expression, "also_this");
         }
 
         #[test]
