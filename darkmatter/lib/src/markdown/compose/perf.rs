@@ -19,6 +19,7 @@ pub(crate) enum PerfMetricKind {
     PageBlocks,
     Interpolation,
     ShellExpansion,
+    ShellBlocks,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
@@ -38,6 +39,7 @@ impl PerfMetricKind {
             Self::PageBlocks => ComposeStage::PageBlocks,
             Self::Interpolation => ComposeStage::Interpolation,
             Self::ShellExpansion => ComposeStage::ShellExpansion,
+            Self::ShellBlocks => ComposeStage::ShellBlocks,
             Self::TransclusionParse => ComposeStage::TransclusionParse,
             Self::TransclusionPrepare => ComposeStage::TransclusionPrepare,
             Self::TransclusionResolve => ComposeStage::TransclusionResolve,
@@ -57,6 +59,7 @@ impl PerfMetricKind {
             Self::PageBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
+            Self::ShellBlocks,
             Self::TransclusionParse,
             Self::TransclusionPrepare,
             Self::TransclusionResolve,
@@ -74,7 +77,7 @@ pub(crate) struct PerfCollector {
     enabled: bool,
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
-    durations: [(Duration, usize); 13],
+    durations: [(Duration, usize); 14],
 }
 
 impl PerfCollector {
@@ -84,7 +87,7 @@ impl PerfCollector {
         Self {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
-            durations: [(Duration::ZERO, 0); 13],
+            durations: [(Duration::ZERO, 0); 14],
         }
     }
 

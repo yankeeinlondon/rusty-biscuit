@@ -10,16 +10,17 @@
 //! 4. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
 //! 5. **Interpolation** - Expand `{{variable}}` expressions in body content
 //! 6. **Shell Expansion** - Execute `::shell` directives with security controls
+//! 7. **Shell Blocks** - Execute `::shell-block` directives with security controls
 //!
 //! **Transclusion** (concurrent execution after serial preparation):
-//! 7. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 8. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 9. **Code Transclusion** - Include `::code` file content as fenced blocks
-//! 10. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 8. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 9. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 10. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 11. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
-//! 11. **Cleanup** - Normalize markdown formatting
-//! 12. **Normalization** - Adjust heading levels
+//! 12. **Cleanup** - Normalize markdown formatting
+//! 13. **Normalization** - Adjust heading levels
 //!
 //! ## Examples
 //!
@@ -50,10 +51,12 @@ pub(crate) mod perf;
 mod state;
 mod types;
 
+pub mod block_pairs;
 pub mod expression;
 pub mod interpolation;
 pub mod page_blocks;
 pub mod replacement;
+pub mod shell_blocks;
 pub mod shell_expansion;
 pub mod toc_linking;
 pub mod transclusion;
@@ -61,6 +64,7 @@ pub mod transclusion;
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
+pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
@@ -318,7 +322,7 @@ impl Markdown {
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
     /// Executes operations in three phases:
-    /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion
+    /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
     ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
     /// 3. **Inline Post** (serial): Cleanup, Normalization
@@ -498,6 +502,9 @@ impl Markdown {
                                 ComposeOperation::ShellExpansion => {
                                     perf::PerfMetricKind::ShellExpansion
                                 }
+                                ComposeOperation::ShellBlocks => {
+                                    perf::PerfMetricKind::ShellBlocks
+                                }
                                 _ => unreachable!(),
                             };
                             perf.record(kind, start.elapsed());
@@ -581,6 +588,10 @@ impl Markdown {
             }
             ComposeOperation::ShellExpansion => {
                 self.run_shell_expansion_stage(options, runtime, report)
+            }
+            ComposeOperation::ShellBlocks => {
+                // Placeholder: shell blocks stage will be implemented in Phase 2
+                Ok(())
             }
             _ => Ok(()),
         }

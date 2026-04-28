@@ -16,6 +16,7 @@ use biscuit_terminal::errors::BlockError;
 
 use crate::editor::EditorError;
 use crate::markdown::MarkdownError;
+use crate::markdown::compose::ShellBlockError;
 use crate::markdown::compose::ShellExpansionError;
 use crate::markdown::compose::TocLinkingError;
 use crate::markdown::compose::TransclusionError;
@@ -61,6 +62,9 @@ pub fn as_block_error<'a>(
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<ShellExpansionError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<ShellBlockError>() {
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<PageBlockError>() {
