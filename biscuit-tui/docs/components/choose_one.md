@@ -10,6 +10,8 @@ The component is split into two parts:
 - **`ChooseOne`**: A zero-sized `StatefulWidget` responsible for rendering.
 - **`ChooseOneState<V>`**: The mutable state holding the options, current selection, and transient UI state (hover, scroll, filter).
 
+`ChooseOneState::new(input)` implicitly sets `SelectionMode::Single` on the underlying `ChoiceInput<V>`. This is the default for all single-selection use cases.
+
 ## Parameters
 
 The component is primarily configured through a `ChoiceInput<V>` struct, which is then passed to `ChooseOneState::new()`. Additional UI-only settings can be applied directly to the state.
@@ -20,7 +22,7 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 | :--- | :--- | :--- | :--- |
 | `id` | `String` | Stable identifier for the input. | (Required) |
 | `prompt` | `String` | The question or prompt text shown to the user. | (Required) |
-| `help_text` | `Option<String>` | Optional help description surfaced below the prompt. | `None` |
+| `help_text` | `Option<String>` | Optional help description surfaced below the prompt. When set, the text appears in a dimmed style directly under the prompt row. | `None` |
 | `options` | `Vec<ChoiceOption<V>>` | The list of selectable options. | `Vec::new()` |
 | `required` | `bool` | If `true`, submitting with no selection fails validation. | `false` |
 | `shuffle_options` | `bool` | If `true`, randomizes option order on initialization. | `false` |
@@ -34,7 +36,7 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 | `with_theme(ComponentTheme)` | Overrides the default visual styling. |
 | `with_key_bindings(KeyBindings)` | Overrides the default key mapping. |
 | `with_initial_selection(&str)` | Pre-selects an option by its stable `id`. |
-| `with_initial_value(&str)` | Pre-selects an option by matching its `value` field. |
+| `with_initial_value(&str)` | Pre-selects an option by matching its `value` field using `PartialEq`. When no `--delimiter` is used, the `value` equals the `label`, so both methods behave similarly. |
 
 ### Key Bindings (Default)
 
@@ -53,6 +55,16 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 - **Fuzzy Filtering**: When active, only options matching the pattern are displayed. The hover cursor is snapped to the first visible result, and matching characters are highlighted in the labels.
 - **Hotkeys**: When filtering is inactive, pressing the first character of a label (case-insensitive) jumps focus to that option and selects it immediately.
 - **Disabled Options**: Options can be marked as `disabled`. They are rendered dimmed, cannot be hovered or selected, and are skipped by navigation.
+
+## Helper Functions
+
+The `tui_chrome::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
+
+- `choose_one_from_csv(id, prompt, csv)` — builds options from a comma-separated string.
+- `choose_one_from_markdown_list(id, prompt, markdown)` — builds options from a Markdown bullet or numbered list.
+- `choose_one_from_dictionary(id, prompt, yaml_or_json)` — builds options from a YAML/JSON mapping where keys become labels and values become option values.
+
+See the [CLI Reference](../cli-reference.md) and [Theming & Configuration](../theming.md) docs for cross-cutting topics.
 
 ## Usage Examples
 
@@ -109,12 +121,38 @@ The `choose_one` component is exposed via the `question choose-one` command. It 
 
 ### Common Flags
 
-- `--options <LIST>`: Comma-separated list of simple option strings.
+- `--options <LIST>`: Comma-separated list of simple option strings (legacy; positional args are preferred).
 - `--options-from-file <PATH>`: Load options from a markdown list file.
+- `--options-from-dictionary <PATH>`: Load options from a YAML/JSON mapping file.
 - `--selected <VALUE>`: Pre-select a specific value.
 - `--required`: Fail if no item is selected.
 - `--delimiter <CHAR>`: Split each option string into `label<CHAR>value`.
 - `--no-filter`: Disable the fuzzy search prompt (uses hotkeys instead).
+
+### Global Flags
+
+- `--output <raw|json|null>`: Serialisation format for the submitted value (`raw` is the default). `null` emits the value followed by a NUL (`\0`) terminator instead of a newline.
+- `--height <CELLS_OR_PERCENT>`: Render inline at an explicit height instead of fullscreen.
+
+### Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | Value submitted successfully. |
+| `130` | User pressed `Ctrl-C` (SIGINT). |
+| `1` | User pressed `Esc` to abort. |
+
+### Positional vs `--options`
+
+Both syntaxes are valid. When no `--options*` flag is provided, trailing positional arguments become the option list. Positional args are the modern default; `--options` exists for backward compatibility.
+
+```bash
+# Positional args (preferred)
+question choose-one Apple Banana Cherry
+
+# Legacy comma-separated flag
+question choose-one --options "Apple,Banana,Cherry"
+```
 
 ### Example CLI Command
 

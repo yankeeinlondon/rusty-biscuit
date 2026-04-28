@@ -73,6 +73,9 @@ question text-input --label "Enter your username"
 
 # Pre-filled with a character limit and specific output format
 question text-input --label "Code" --initial "ABC" --max-length 3 --output json
+
+# NUL-terminated output for safe parsing in shell scripts
+question text-input --label "Token" --output null
 ```
 
 ### CLI Arguments
@@ -80,7 +83,18 @@ question text-input --label "Code" --initial "ABC" --max-length 3 --output json
 - `--label-position <above|below|left|right>`: Position of the label relative to the input (default: `above`).
 - `--max-length <COUNT>`: Maximum number of characters the user is allowed to type.
 - `--initial <TEXT>`: Initial value to load into the input buffer.
-- `--output <raw|json|null>`: How to format the result on `stdout`.
+- `--output <raw|json|null>`: How to format the result on `stdout`. `raw` appends a newline; `json` wraps the string in JSON quotes; `null` appends a NUL (`\0`) terminator.
+
+### Global Flags
+- `--height <CELLS_OR_PERCENT>`: Render inline at an explicit height instead of fullscreen.
+
+### Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | Value submitted successfully. |
+| `130` | User pressed `Ctrl-C` (SIGINT). |
+| `1` | User pressed `Esc` to abort. |
 
 ## Functional Enhancement Suggestions
 

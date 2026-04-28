@@ -83,11 +83,31 @@ The `boolean_switch` is exposed as a standalone command via the CLI (e.g., `ques
 - `--initial <true|false>`: The starting state of the switch.
 - `--labels <ON,OFF>`: A comma-separated pair of custom labels for the on and off states.
 
+### Global Flags
+
+- `--output <raw|json|null>`: Serialisation format for the submitted value (`raw` is the default). `null` emits the value followed by a NUL (`\0`) terminator instead of a newline.
+- `--height <CELLS_OR_PERCENT>`: Render inline at an explicit height instead of fullscreen.
+
+### Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | Value submitted successfully. |
+| `130` | User pressed `Ctrl-C` (SIGINT). |
+| `1` | User pressed `Esc` to abort. |
+
+### `--labels` Parsing
+
+The `--labels` argument uses `splitn(2, ',')` and trims whitespace around each side. Both `--labels "YES,NO"` and `--labels " enabled , disabled "` produce the same result. Omitting the comma or either side (e.g. `--labels YES`) is a hard error.
+
 ### Example CLI Command
 
 ```bash
 # Ask the user if they want to enable telemetry
 question boolean-switch --label "Enable Telemetry?" --labels "YES,NO" --initial true
+
+# JSON output for programmatic consumption
+question boolean-switch --label "Enable Telemetry?" --output json
 ```
 
 ## Enhancement Suggestions

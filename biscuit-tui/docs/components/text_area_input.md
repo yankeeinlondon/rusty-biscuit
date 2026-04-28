@@ -15,7 +15,7 @@ When using the library, you configure the component via `TextAreaInputState`.
 | Parameter | Method | Default | Description |
 |-----------|--------|---------|-------------|
 | **Width** | `new(width, ...)` | `60` | The preferred width of the editor in terminal cells. |
-| **Height** | `new(..., height)` | `10` | The preferred height of the editor in terminal cells. |
+| **Height** | `new(..., height)` | `10` | The preferred height of the editor in terminal cells. This is the *library* default; the CLI overrides it with the global `--height` flag when supplied as a cell count. |
 | **Label** | `with_label(Label)` | `None` | An optional `Label` rendered relative to the editor body. |
 | **Scrollbar** | `with_scrollbar(bool)` | `false` | If `true`, a vertical scrollbar overlay appears when content exceeds the viewport height. |
 | **Initial Value** | `with_value(&[String])` | `[""]` | A slice of strings to initialize the editor buffer. |
@@ -74,6 +74,9 @@ question text-area-input --label "Description"
 
 # Pre-filled with content and scrollbar enabled
 question text-area-input --label "Notes" --initial "Line 1\nLine 2" --scrollbar --width 40
+
+# NUL-terminated output for multi-line values in scripts
+question text-area-input --label "Notes" --output null
 ```
 
 ### CLI Arguments
@@ -82,6 +85,18 @@ question text-area-input --label "Notes" --initial "Line 1\nLine 2" --scrollbar 
 - `--width <CELLS>`: Preferred width of the editor (default: `60`).
 - `--scrollbar`: Enable the vertical scrollbar.
 - `--initial <TEXT>`: Initial text to load into the editor. Use `\n` for line breaks.
+- `--output <raw|json|null>`: How to format the result on `stdout`. `raw` appends a trailing newline to the full buffer; `json` escapes newlines as `\n`; `null` appends a NUL (`\0`) terminator.
+
+### Global Flags
+- `--height <CELLS_OR_PERCENT>`: Render inline at an explicit height instead of fullscreen. When supplied as a cell count (e.g. `--height 15`), it overrides the default editor height of 10 rows. Percentage values fall back to the default 10 rows because the editor's preferred height is a structural hint rather than a viewport dimension.
+
+### Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | Value submitted successfully. |
+| `130` | User pressed `Ctrl-C` (SIGINT). |
+| `1` | User pressed `Esc` to abort. |
 
 ## Functional Enhancement Suggestions
 

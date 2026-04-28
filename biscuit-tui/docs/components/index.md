@@ -2,6 +2,27 @@
 
 The `tui-chrome` library provides composable, Ratatui-based input widgets for terminal user interfaces. Every component follows the same pattern: a zero-sized `StatefulWidget` marker paired with a component-specific `*State` struct owned by the caller. All widgets implement `HandleEvent` so they can be driven by `run_standalone` or embedded in an application event loop.
 
+## Getting Started
+
+Add `tui-chrome` to your project and import the prelude for common types:
+
+```rust
+use tui_chrome::prelude::*;
+```
+
+The quickest way to see a component in action is via the `question` CLI (installed from the `biscuit-tui` crate):
+
+```bash
+question text-input --label "Your name"
+```
+
+For library usage, there are two integration modes:
+
+1. **Standalone** — the component takes over the terminal for one prompt. Use [`run_standalone`](../theming.md#standalone-vs-embedded) for fullscreen or inline prompts.
+2. **Embedded** — the component renders inside your own Ratatui application. You own the event loop and terminal lifecycle.
+
+See the [CLI Reference](../cli-reference.md) for global flags and exit codes, and [Theming & Configuration](../theming.md) for shared visual and keyboard settings.
+
 ## Atomic Components
 
 Single-purpose input widgets that capture one value type each.
@@ -41,9 +62,9 @@ All components share these cross-cutting primitives from `tui_chrome::core`:
 
 The choice components (`ChooseOne`, `ChooseMany`) also share:
 
-- **`ChoiceInput<V>`** — configuration struct for the option list, selection limits, and filter settings
-- **`ChoiceOption<V>`** — individual option with `id`, `label`, `value`, and `disabled` flag
-- **`SelectionMode`** — `Single` or `Multiple`
+- **`ChoiceOption<V>`** — individual option with `id`, `label`, `value`, and `disabled` flag.
+- **`ChoiceInput<V>`** — configuration struct for the option list, selection limits, and filter settings. Defaults to `SelectionMode::Single`; `ChooseManyState::new` implicitly sets it to `Multiple`.
+- **`SelectionMode`** — `Single` or `Multiple`.
 
 The `tui_chrome::helpers` module provides builder functions for constructing choice inputs from CSV, Markdown lists, and dictionaries (`choose_one_from_csv`, `choose_many_from_markdown_list`, etc.).
 
@@ -51,7 +72,9 @@ The `tui_chrome::helpers` module provides builder functions for constructing cho
 
 The `question` CLI exposes each component as a subcommand. All subcommands share these global flags:
 
-- **`--output <raw|json|null>`** — serialisation format for the submitted value (`raw` is the default)
-- **`--height <CELLS_OR_PERCENT>`** — render inline at an explicit height instead of fullscreen
+- **`--output <raw|json|null>`** — serialisation format for the submitted value (`raw` is the default).
+- **`--height <CELLS_OR_PERCENT>`** — render inline at an explicit height instead of fullscreen.
 
 Exit codes: `0` on successful submission, `130` on Ctrl-C (SIGINT), `1` on abort (Esc).
+
+See the [CLI Reference](../cli-reference.md) for full details on global flags, exit codes, and subcommand listings.

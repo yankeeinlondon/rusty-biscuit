@@ -89,6 +89,8 @@ When `FrameChromeConfig::is_empty()` returns `true` (no visible border, zero mar
 let frame = FrameChrome::bare(TextInput::new());
 ```
 
+See the [CLI Reference](../cli-reference.md) for global flags and exit codes, and [Theming & Configuration](../theming.md) for shared visual settings.
+
 ## CLI Usage
 
 The `FrameChrome` is not exposed as its own subcommand. Instead, it is implicitly created by the `question` CLI for the `choose-one` and `choose-many` subcommands (and any other command that flattens `ChooseChromeArgs`).

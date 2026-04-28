@@ -8,6 +8,8 @@ The `InputTable` is a grid-based form component for terminal user interfaces. It
 
 It follows the standard `ratatui` stateful widget pattern, separating the rendering logic (`InputTable` widget) from the schema and data management (`InputTableState`).
 
+`InputTableState` implements the [`StandaloneState`](../../theming.md#standalonestate) trait with `Value = Vec<Row>`, so it can be driven by [`run_standalone`](../../theming.md#run_standalone) or embedded in a larger application event loop.
+
 ## Parameters & Defaults
 
 Configuration is handled via `InputTableState`.
@@ -65,6 +67,19 @@ let state = InputTableState::new(columns, initial_rows);
 let values: &[Row] = state.value();
 ```
 
+### `RowCell` and `CellValue`
+
+Each cell in a row is a `RowCell { column_id, value }`. The `column_id` must match the `id` field of the corresponding `InputTableColumn`. `CellValue` preserves the semantic type of each cell:
+
+| Variant | Source Column | Description |
+| :--- | :--- | :--- |
+| `CellValue::StaticText(String)` | `StaticText` | Display-only text. |
+| `CellValue::Boolean(bool)` | `BooleanSwitch` | Toggle state. |
+| `CellValue::Text(String)` | `TextInput` | Single-line text. |
+| `CellValue::TextArea(Vec<String>)` | `TextAreaInput` | Multi-line text (one string per line). |
+| `CellValue::ChosenOne(Option<String>)` | `ChooseOne` | Selected option value, or `None`. |
+| `CellValue::ChosenMany(Vec<String>)` | `ChooseMany` | Selected option values in option order. |
+
 ### Standalone Runner
 ```rust
 use tui_chrome::{run_standalone, InputTable, InputTableState};
@@ -105,6 +120,18 @@ question input-table \
 - `--rows <JSON>`: (Optional) A JSON array of arrays, where each inner array provides initial values for a row, matching the column order.
 
 The CLI outputs a JSON array of row objects upon successful submission.
+
+### Global Flags
+- `--output <raw|json|null>`: Serialisation format for the submitted values (`json` is the default for `input-table`).
+- `--height <CELLS_OR_PERCENT>`: Render inline at an explicit height instead of fullscreen.
+
+### Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | Value submitted successfully. |
+| `130` | User pressed `Ctrl-C` (SIGINT). |
+| `1` | User pressed `Esc` to abort. |
 
 ## Functional Enhancement Suggestions
 

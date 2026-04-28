@@ -10,6 +10,8 @@ The component is split into two parts:
 - **`ChooseMany`**: A zero-sized `StatefulWidget` responsible for rendering.
 - **`ChooseManyState<V>`**: The mutable state holding the options, current selection, and transient UI state (hover, scroll, filter).
 
+`ChooseManyState::new(input)` implicitly sets `SelectionMode::Multiple` on the underlying `ChoiceInput<V>`, enabling multi-select behaviour by default.
+
 ## Parameters
 
 The component is primarily configured through a `ChoiceInput<V>` struct, which is then passed to `ChooseManyState::new()`. Additional UI-only settings can be applied directly to the state.
@@ -57,6 +59,16 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 - **Selection Enforcement**: `max_selections` is enforced at the moment of toggling (further selections are silently blocked). `min_selections` and `required` are validated at submission time, displaying an error message if unsatisfied.
 - **Fuzzy Filtering**: When active, only options matching the pattern are displayed. The hover cursor is snapped to the first visible result.
 - **Disabled Options**: Options can be marked as `disabled`. They are rendered dimmed, cannot be hovered or toggled, and are skipped by `Ctrl+A`.
+
+## Helper Functions
+
+The `tui_chrome::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
+
+- `choose_many_from_csv(id, prompt, csv)` — builds options from a comma-separated string.
+- `choose_many_from_markdown_list(id, prompt, markdown)` — builds options from a Markdown bullet or numbered list.
+- `choose_many_from_dictionary(id, prompt, yaml_or_json)` — builds options from a YAML/JSON mapping where keys become labels and values become option values.
+
+See the [CLI Reference](../cli-reference.md) and [Theming & Configuration](../theming.md) docs for cross-cutting topics.
 
 ## Usage Examples
 
@@ -113,13 +125,39 @@ The `choose_many` component is exposed via the `question choose-many` command. B
 
 ### Common Flags
 
-- `--options <LIST>`: Comma-separated list of simple option strings.
+- `--options <LIST>`: Comma-separated list of simple option strings (legacy; positional args are preferred).
 - `--options-from-file <PATH>`: Load options from a markdown list file.
+- `--options-from-dictionary <PATH>`: Load options from a YAML/JSON mapping file.
 - `--selected <VALUE>`: Pre-select a value (repeatable).
 - `--required`: Fail if no items are selected.
 - `--min-selections <N>`: Require at least N items.
 - `--max-selections <N>`: Limit to at most N items.
 - `--no-filter`: Disable the fuzzy search prompt (uses hotkeys instead).
+
+### Global Flags
+
+- `--output <raw|json|null>`: Serialisation format for the submitted values (`raw` is the default). `null` emits each value followed by a NUL (`\0`) terminator instead of a newline.
+- `--height <CELLS_OR_PERCENT>`: Render inline at an explicit height instead of fullscreen.
+
+### Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | Value submitted successfully. |
+| `130` | User pressed `Ctrl-C` (SIGINT). |
+| `1` | User pressed `Esc` to abort. |
+
+### Positional vs `--options`
+
+Both syntaxes are valid. When no `--options*` flag is provided, trailing positional arguments become the option list. Positional args are the modern default; `--options` exists for backward compatibility.
+
+```bash
+# Positional args (preferred)
+question choose-many Apple Banana Cherry Date
+
+# Legacy comma-separated flag
+question choose-many --options "Apple,Banana,Cherry,Date"
+```
 
 ### Example CLI Command
 
