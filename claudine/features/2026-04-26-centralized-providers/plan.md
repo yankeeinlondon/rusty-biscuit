@@ -5,6 +5,23 @@ start_phase: 0
 packages:
     - claudine
     - claudine-cli
+source_files_during_phase_0:
+    - claudine/lib/src/agents/mod.rs
+    - claudine/lib/src/agents/model.rs
+    - claudine/lib/src/agents/registry.rs
+    - claudine/lib/src/agents/claude_code.rs
+    - claudine/lib/src/agents/codex.rs
+    - claudine/lib/src/agents/gemini_cli.rs
+    - claudine/lib/src/agents/goose.rs
+    - claudine/lib/src/agents/kimi_code.rs
+    - claudine/lib/src/agents/opencode.rs
+    - claudine/lib/src/agents/qwen_cli.rs
+    - claudine/lib/src/agents/roo_code.rs
+    - claudine/lib/src/agents/tests.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+docs_updated_during_phase_0: []
+docs_created_during_phase_0: []
+skills_files_updated_during_phase_0: []
 ---
 
 # Centralized Providers Execution Plan
