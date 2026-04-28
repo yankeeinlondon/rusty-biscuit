@@ -1,7 +1,7 @@
 ---
 phases: 9
 created: 2026-04-26
-start_phase: 1
+start_phase: 4
 packages:
     - claudine
     - claudine-cli
@@ -89,6 +89,27 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/behavior.rs
+    - claudine/lib/src/provider/claude.rs
+    - claudine/lib/src/provider/codex.rs
+    - claudine/lib/src/provider/gemini.rs
+    - claudine/lib/src/provider/goose.rs
+    - claudine/lib/src/provider/kimi.rs
+    - claudine/lib/src/provider/opencode.rs
+    - claudine/lib/src/provider/qwen.rs
+    - claudine/lib/src/provider/roo.rs
+    - claudine/lib/src/provider/tests.rs
+    - claudine/lib/src/stream/mod.rs
+    - claudine/lib/src/mcp/import.rs
+    - claudine/lib/src/mcp/inject.rs
+    - claudine/lib/src/mcp/export.rs
+    - claudine/lib/src/adapters/mod.rs
+    - claudine/lib/src/config/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Centralized Providers Execution Plan
