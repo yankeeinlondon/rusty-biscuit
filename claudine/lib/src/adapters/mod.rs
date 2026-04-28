@@ -1,11 +1,11 @@
-mod claude;
-mod codex;
-mod gemini;
-mod goose;
-mod kimicode;
-mod opencode;
-mod qwen;
-mod roo;
+pub(crate) mod claude;
+pub(crate) mod codex;
+pub(crate) mod gemini;
+pub(crate) mod goose;
+pub(crate) mod kimicode;
+pub(crate) mod opencode;
+pub(crate) mod qwen;
+pub(crate) mod roo;
 
 use serde_json::Value;
 
@@ -106,27 +106,20 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
-static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
-static CODEX_ADAPTER: codex::CodexAdapter = codex::CodexAdapter;
-static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;
-static GOOSE_ADAPTER: goose::GooseAdapter = goose::GooseAdapter;
-static KIMI_ADAPTER: kimicode::KimiCodeAdapter = kimicode::KimiCodeAdapter;
-static OPENCODE_ADAPTER: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
-static QWEN_ADAPTER: qwen::QwenAdapter = qwen::QwenAdapter;
-static ROO_ADAPTER: roo::RooAdapter = roo::RooAdapter;
+pub(crate) static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
+pub(crate) static CODEX_ADAPTER: codex::CodexAdapter = codex::CodexAdapter;
+pub(crate) static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;
+pub(crate) static GOOSE_ADAPTER: goose::GooseAdapter = goose::GooseAdapter;
+pub(crate) static KIMI_ADAPTER: kimicode::KimiCodeAdapter = kimicode::KimiCodeAdapter;
+pub(crate) static OPENCODE_ADAPTER: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
+pub(crate) static QWEN_ADAPTER: qwen::QwenAdapter = qwen::QwenAdapter;
+pub(crate) static ROO_ADAPTER: roo::RooAdapter = roo::RooAdapter;
 
 /// Returns the adapter singleton for a provider.
 pub fn adapter_for(provider: Provider) -> &'static dyn ProviderAdapter {
-    match provider {
-        Provider::Claude => &CLAUDE_ADAPTER,
-        Provider::Codex => &CODEX_ADAPTER,
-        Provider::Gemini => &GEMINI_ADAPTER,
-        Provider::Goose => &GOOSE_ADAPTER,
-        Provider::KimiCode => &KIMI_ADAPTER,
-        Provider::OpenCode => &OPENCODE_ADAPTER,
-        Provider::QwenCode => &QWEN_ADAPTER,
-        Provider::RooCode => &ROO_ADAPTER,
-    }
+    crate::provider::provider_info(provider)
+        .adapter
+        .provider_adapter()
 }
 
 pub(crate) fn str_field(raw: &Value, key: &str) -> Option<String> {

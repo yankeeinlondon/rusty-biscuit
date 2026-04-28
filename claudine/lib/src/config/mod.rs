@@ -1,18 +1,27 @@
 pub mod atomic;
 pub(crate) mod backup;
-mod claude;
+pub(crate) mod claude;
 pub mod claudine_config;
-mod codex;
-mod gemini;
-mod goose;
-mod kimicode;
+pub(crate) mod codex;
+pub(crate) mod gemini;
+pub(crate) mod goose;
+pub(crate) mod kimicode;
 pub mod migration;
-mod opencode;
-mod qwen;
-mod roo;
+pub(crate) mod opencode;
+pub(crate) mod qwen;
+pub(crate) mod roo;
 mod trait_def;
 
 pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
+
+pub(crate) use claude::ClaudeConfigurator;
+pub(crate) use codex::CodexConfigurator;
+pub(crate) use gemini::GeminiConfigurator;
+pub(crate) use goose::GooseConfigurator;
+pub(crate) use kimicode::KimiCodeConfigurator;
+pub(crate) use opencode::OpenCodeConfigurator;
+pub(crate) use qwen::QwenConfigurator;
+pub(crate) use roo::RooConfigurator;
 
 use std::path::PathBuf;
 
@@ -39,15 +48,6 @@ pub(crate) fn claudine_handle_command(provider: Provider) -> impl Fn(&str) -> St
 }
 
 use crate::events::Provider;
-
-use claude::ClaudeConfigurator;
-use codex::CodexConfigurator;
-use gemini::GeminiConfigurator;
-use goose::GooseConfigurator;
-use kimicode::KimiCodeConfigurator;
-use opencode::OpenCodeConfigurator;
-use qwen::QwenConfigurator;
-use roo::RooConfigurator;
 
 /// Rich information about a detected agent.
 #[derive(Debug, Clone)]
@@ -153,16 +153,9 @@ pub fn discover_agents_full() -> Vec<AgentInfo> {
 /// config file exists. Use this when you want to register hooks for a provider
 /// that may not have been set up yet.
 pub fn get_configurator(provider: Provider) -> Box<dyn AgentConfigurator> {
-    match provider {
-        Provider::Claude => Box::new(ClaudeConfigurator),
-        Provider::Codex => Box::new(CodexConfigurator),
-        Provider::Gemini => Box::new(GeminiConfigurator),
-        Provider::Goose => Box::new(GooseConfigurator),
-        Provider::KimiCode => Box::new(KimiCodeConfigurator),
-        Provider::OpenCode => Box::new(OpenCodeConfigurator),
-        Provider::QwenCode => Box::new(QwenConfigurator),
-        Provider::RooCode => Box::new(RooConfigurator),
-    }
+    crate::provider::provider_info(provider)
+        .configurator
+        .agent_configurator()
 }
 
 /// Detect available agents by checking for their config files.
@@ -170,63 +163,11 @@ pub fn get_configurator(provider: Provider) -> Box<dyn AgentConfigurator> {
 /// Returns a list of `(Provider, Configurator)` pairs for every provider
 /// whose config directory exists on the current system.
 pub fn detect_agents() -> Vec<(Provider, Box<dyn AgentConfigurator>)> {
-    let mut agents: Vec<(Provider, Box<dyn AgentConfigurator>)> = Vec::new();
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return agents,
-    };
-
-    // Claude: ~/.claude/settings.json
-    if home.join(".claude").join("settings.json").exists() {
-        agents.push((Provider::Claude, Box::new(ClaudeConfigurator)));
-    }
-
-    // Gemini: ~/.gemini/settings.json
-    if home.join(".gemini").join("settings.json").exists() {
-        agents.push((Provider::Gemini, Box::new(GeminiConfigurator)));
-    }
-
-    // Codex: ~/.codex/config.toml
-    if home.join(".codex").join("config.toml").exists() {
-        agents.push((Provider::Codex, Box::new(CodexConfigurator)));
-    }
-
-    // OpenCode: ~/.config/opencode/opencode.json
-    if home
-        .join(".config")
-        .join("opencode")
-        .join("opencode.json")
-        .exists()
-    {
-        agents.push((Provider::OpenCode, Box::new(OpenCodeConfigurator)));
-    }
-
-    // Qwen Code: ~/.qwen/settings.json
-    if home.join(".qwen").join("settings.json").exists() {
-        agents.push((Provider::QwenCode, Box::new(QwenConfigurator)));
-    }
-
-    // Goose: ~/.config/goose/config.yaml
-    if home
-        .join(".config")
-        .join("goose")
-        .join("config.yaml")
-        .exists()
-    {
-        agents.push((Provider::Goose, Box::new(GooseConfigurator)));
-    }
-
-    // Kimi Code: ~/.kimi/config.json
-    if home.join(".kimi").join("config.json").exists() {
-        agents.push((Provider::KimiCode, Box::new(KimiCodeConfigurator)));
-    }
-
-    // Roo Code: ~/.roo/settings.json
-    if home.join(".roo").join("settings.json").exists() {
-        agents.push((Provider::RooCode, Box::new(RooConfigurator)));
-    }
-
-    agents
+    discover_agents_full()
+        .into_iter()
+        .filter(|info| info.config_exists)
+        .map(|info| (info.provider, get_configurator(info.provider)))
+        .collect()
 }
 
 #[cfg(test)]
