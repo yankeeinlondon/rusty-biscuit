@@ -45,6 +45,10 @@ pub struct HooksArgs {
     /// Show available template variables for speak/report actions
     #[arg(long)]
     pub variables: bool,
+
+    /// Show per-event capture method (hook / non-hook / acp / -) for each provider
+    #[arg(long = "capture-method")]
+    pub capture_method: bool,
 }
 
 /// All supported providers in display order.
@@ -478,6 +482,7 @@ fn run_provider_detail(provider: Provider, config: Option<&ClaudineConfig>) -> R
             EventSupportLevel::NonHook => {
                 Prose::new("{{dim}}non-hook{{reset}}").render(&term).into()
             }
+            EventSupportLevel::Acp => Prose::new("{{cyan}}acp{{reset}}").render(&term).into(),
             EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}").render(&term).into(),
         };
 
@@ -594,6 +599,9 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
     }
     if args.variables {
         return run_variables();
+    }
+    if args.capture_method {
+        return run_capture_method();
     }
 
     // Try to load claudine config for sync checking
@@ -762,6 +770,7 @@ fn run_simple(
         "{{dim}}- Use <blue><bold>--mapping</bold></blue>{{dim}} to see native event name mappings{{reset}}",
         "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
         "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
+        "{{dim}}- Use <blue><bold>--capture-method</bold></blue>{{dim}} to see how each event is captured (hook / non-hook / acp){{reset}}",
     ];
     for hint in hints {
         log::data(&format!(
@@ -874,6 +883,8 @@ fn find_configurator(
 const HOOK_SUPPORT: &str = "✅";
 /// Indicator for non-hook support (wrapper/wire-mode required).
 const NON_HOOK_SUPPORT: &str = "⛔️";
+/// Indicator for ACP-based support (Goose request_permission, Kimi ApprovalRequest).
+const ACP_SUPPORT: &str = "🅐";
 /// Indicator for no support (using ❌ U+274C which has width 2 like other emoji).
 const NO_SUPPORT: &str = "❌";
 
@@ -904,6 +915,7 @@ fn run_support() -> Result<()> {
             let rendered = match cell.level {
                 EventSupportLevel::Hook => HOOK_SUPPORT.into(),
                 EventSupportLevel::NonHook => NON_HOOK_SUPPORT.into(),
+                EventSupportLevel::Acp => ACP_SUPPORT.into(),
                 EventSupportLevel::NotSupported => NO_SUPPORT.into(),
             };
             row.push(rendered);
@@ -921,6 +933,72 @@ fn run_support() -> Result<()> {
         "{{dim}}Legend: {{reset}}✅{{dim}} = hook support (config file), {{reset}}⛔️{{dim}} = non-hook (wrapper/proxy required), {{reset}}{{NO_SUPPORT}}{{dim}} = not supported{{reset}}",
     );
     log::data(&format!(" {}\n", legend.render(&term)));
+
+    Ok(())
+}
+
+/// Show the capture method (hook / non-hook / acp / -) for each event x
+/// provider pair.
+///
+/// Phase 7 of the centralized providers refactor surfaces ACP-based capture
+/// as a first-class metadata column. Goose `request_permission` and Kimi
+/// `ApprovalRequest` are tagged via [`EventSupportLevel::Acp`] in their
+/// per-provider `EventMappingTable`, and a non-`NotSupported`
+/// [`AcpSupport`](claudine::provider::AcpSupport) is published from the
+/// matching `ProviderInfo`. This view renders that pairing per provider.
+fn run_capture_method() -> Result<()> {
+    use claudine::provider::provider_info;
+
+    let term = crate::log::terminal();
+    let matrix = event_support_matrix(&ALL_PROVIDERS);
+
+    // Per-provider header: also include ACP server-mode badge so the
+    // capture method matrix and provider ACP posture are co-visible.
+    let mut columns = vec![TableColumn::new(bold("Event"))];
+    for provider in ALL_PROVIDERS {
+        let info = provider_info(provider);
+        let header = if info.acp.is_supported() {
+            format!("{} {}", provider, ACP_SUPPORT)
+        } else {
+            provider.to_string()
+        };
+        columns.push(TableColumn::new(bold(&header)).with_alignment(Alignment::Center));
+    }
+
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    table.layout_mut().left_margin = Margin::Chars(1);
+
+    for matrix_row in matrix {
+        let mut row: Vec<TableCellContent> = vec![matrix_row.event.as_pascal_case().into()];
+
+        for cell in matrix_row.cells {
+            let rendered: TableCellContent = match cell.level {
+                EventSupportLevel::Hook => "hook".into(),
+                EventSupportLevel::NonHook => "non-hook".into(),
+                EventSupportLevel::Acp => Prose::new("{{cyan}}acp{{reset}}").render(&term).into(),
+                EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}")
+                    .render(&term)
+                    .into(),
+            };
+            row.push(rendered);
+        }
+
+        table.add_row(row);
+    }
+
+    let rendered = table.render(&term);
+    log::data(&format!("\n{}", rendered));
+
+    log::data("");
+    let legend = Prose::new(
+        "{{dim}}Legend: {{reset}}hook{{dim}} = config-file hook, {{reset}}non-hook{{dim}} = wrapper/wire-mode/stream parsing, {{reset}}{{cyan}}acp{{reset}}{{dim}} = Agent Client Protocol, {{reset}}-{{dim}} = not supported{{reset}}",
+    );
+    log::data(&format!(" {}", legend.render(&term)));
+
+    let acp_note = Prose::new(
+        "{{dim}}- 🅐 next to a provider name marks an ACP-supported provider (server or wire-proxy){{reset}}",
+    );
+    log::data(&format!(" {}", acp_note.render(&term)));
 
     Ok(())
 }
