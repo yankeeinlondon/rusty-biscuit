@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use claudine::events::Provider;
+use claudine::provider::{PromptArgConventions, provider_info};
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail, eyre};
@@ -211,65 +212,17 @@ impl PromptSource {
 }
 
 // ---------------------------------------------------------------------------
-// PromptArgConventions — per-provider prompt-argv parsing knowledge
+// PromptArgConventions — re-exported from claudine::provider
 // ---------------------------------------------------------------------------
-
-/// Describes how a provider's native CLI represents a prompt on argv.
-///
-/// Used by `extract_prompt_source_from_passthrough` to find a prompt in
-/// raw passthrough arguments without embedding per-provider logic in a
-/// central match.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct PromptArgConventions {
-    /// Value-taking flags that carry the prompt string when present,
-    /// e.g. `&["-p", "--prompt"]` for Gemini, `&["-t", "--text"]` for
-    /// Goose. Empty for providers that accept only a positional prompt.
-    pub prompt_flags: &'static [&'static str],
-    /// An optional entrypoint subcommand that must be skipped when
-    /// scanning for a positional prompt, e.g. `Some("exec")` for Codex
-    /// or `Some("run")` for OpenCode / Goose. `None` for providers that
-    /// have no subcommand entrypoint.
-    pub entrypoint: Option<&'static str>,
-    /// Additional value-taking flags whose values must not be mistaken
-    /// for a positional prompt, e.g. `&["-m", "--model", "--output-format"]`.
-    pub value_taking_flags: &'static [&'static str],
-}
-
-impl PromptArgConventions {
-    /// Conventions for a provider that accepts only a positional prompt
-    /// after an entrypoint subcommand (e.g. Codex `exec`, OpenCode `run`).
-    pub(crate) const fn positional_after(entrypoint: &'static str) -> Self {
-        Self {
-            prompt_flags: &[],
-            entrypoint: Some(entrypoint),
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
-    }
-}
-
-/// Value-taking flags recognized by the prompt extractor across every
-/// wrapped provider. This is intentionally the UNION of every provider's
-/// value-taking flags, not a per-provider list — the extractor's job is
-/// to avoid mistaking a flag's value for a positional prompt, and
-/// over-skipping an unknown flag's value is harmless. Per-provider
-/// `prompt_arg_conventions` implementations can swap in a narrower list
-/// if a future provider needs it.
-const COMMON_VALUE_TAKING_FLAGS: &[&str] = &[
-    "-m",
-    "--model",
-    "-o",
-    "--output",
-    "--output-format",
-    "--output-last-message",
-    "--approval-mode",
-    "--config",
-    "-c",
-    "--profile",
-    "--system-prompt",
-    "--sandbox-image",
-    "--auth-type",
-    "--format",
-];
+//
+// Phase 6 of the centralized providers refactor moved the type into the
+// lib crate so per-provider data lives alongside the rest of the provider
+// catalog. The CLI re-exports it under the same name for source
+// compatibility with prior callers.
+//
+// `WrapperProfile::prompt_arg_conventions` now defaults to reading from
+// `provider_info(self.provider()).prompt_arg_conventions`, so individual
+// wrapper impls no longer override it.
 
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -319,10 +272,22 @@ pub(crate) trait WrapperProfile: Send + Sync {
     fn provider(&self) -> Provider;
 
     /// The binary name to exec (e.g. `"claude"`, `"codex"`).
-    fn binary(&self) -> &'static str;
+    ///
+    /// Defaults to `provider_info(self.provider()).binary`. Per-provider
+    /// overrides are unnecessary because the binary name lives in the
+    /// central provider catalog.
+    fn binary(&self) -> &'static str {
+        provider_info(self.provider()).binary
+    }
 
     /// The value injected as the `AGENT` environment variable.
-    fn agent_env(&self) -> &'static str;
+    ///
+    /// Defaults to `provider_info(self.provider()).binary`. Every wrapped
+    /// provider currently sets `AGENT` to its binary name; the default
+    /// matches that convention.
+    fn agent_env(&self) -> &'static str {
+        provider_info(self.provider()).binary
+    }
 
     // -- YOLO mode ----------------------------------------------------------
 
@@ -540,13 +505,19 @@ pub(crate) trait WrapperProfile: Send + Sync {
     // -- Structured stream support -------------------------------------------
 
     /// Whether this provider supports internal structured streaming.
+    ///
+    /// Defaults to `provider_info(self.provider()).stream_protocol.is_some()`
+    /// so providers with a structured stream protocol declared in the
+    /// central catalog inherit the correct value automatically.
     fn supports_structured_stream(&self) -> bool {
-        false
+        provider_info(self.provider()).stream_protocol.is_some()
     }
 
     /// The stream protocol this provider uses.
+    ///
+    /// Defaults to `provider_info(self.provider()).stream_protocol`.
     fn stream_protocol(&self) -> Option<StreamProtocol> {
-        None
+        provider_info(self.provider()).stream_protocol
     }
 
     // -- Resume support -------------------------------------------------------
@@ -586,16 +557,12 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Describe how this provider represents a prompt on argv.
     ///
     /// Used by `extract_prompt_source_from_passthrough` to locate and
-    /// remove a prompt from raw passthrough args. Every provider that
-    /// supports non-interactive mode must implement this; the default
-    /// returns "positional-only, no entrypoint" which works for Claude
-    /// (prompt as bare positional, no subcommand).
+    /// remove a prompt from raw passthrough args. The default reads the
+    /// provider's `PromptArgConventions` from the central provider
+    /// catalog so per-provider overrides are not required for ordinary
+    /// cases.
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &[],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
+        provider_info(self.provider()).prompt_arg_conventions
     }
 }
 
@@ -645,12 +612,6 @@ pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn Wr
 impl WrapperProfile for ClaudeWrapper {
     fn provider(&self) -> Provider {
         Provider::Claude
-    }
-    fn binary(&self) -> &'static str {
-        "claude"
-    }
-    fn agent_env(&self) -> &'static str {
-        "claude"
     }
 
     fn apply_yolo(
@@ -765,14 +726,6 @@ impl WrapperProfile for ClaudeWrapper {
         true
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::StreamJson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         push_stream_json_flags(args, &["--print", "--verbose"]);
     }
@@ -785,12 +738,6 @@ impl WrapperProfile for ClaudeWrapper {
 impl WrapperProfile for CodexWrapper {
     fn provider(&self) -> Provider {
         Provider::Codex
-    }
-    fn binary(&self) -> &'static str {
-        "codex"
-    }
-    fn agent_env(&self) -> &'static str {
-        "codex"
     }
 
     fn apply_yolo(
@@ -938,14 +885,6 @@ impl WrapperProfile for CodexWrapper {
         true
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::Jsonl)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Codex uses `exec --json` for structured output.
         // The `exec` subcommand is expected to already be present.
@@ -961,10 +900,6 @@ impl WrapperProfile for CodexWrapper {
     fn supports_interactive_inline_closure(&self) -> bool {
         true
     }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions::positional_after("exec")
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -974,12 +909,6 @@ impl WrapperProfile for CodexWrapper {
 impl WrapperProfile for GeminiWrapper {
     fn provider(&self) -> Provider {
         Provider::Gemini
-    }
-    fn binary(&self) -> &'static str {
-        "gemini"
-    }
-    fn agent_env(&self) -> &'static str {
-        "gemini"
     }
 
     fn apply_yolo(
@@ -1156,24 +1085,8 @@ impl WrapperProfile for GeminiWrapper {
         ))
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::StreamJson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         push_stream_json_flags(args, &[]);
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["-p", "--prompt"],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
     }
 }
 
@@ -1184,12 +1097,6 @@ impl WrapperProfile for GeminiWrapper {
 impl WrapperProfile for KimiWrapper {
     fn provider(&self) -> Provider {
         Provider::KimiCode
-    }
-    fn binary(&self) -> &'static str {
-        "kimi"
-    }
-    fn agent_env(&self) -> &'static str {
-        "kimi"
     }
 
     fn apply_yolo(
@@ -1297,14 +1204,6 @@ impl WrapperProfile for KimiWrapper {
         true
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::WireJsonRpc)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Wire mode is the structured-stream channel for Kimi: a single
         // `--wire` flag selects the JSON-RPC line protocol on stdin/stdout
@@ -1312,14 +1211,6 @@ impl WrapperProfile for KimiWrapper {
         // pair used by other providers.
         if !has_flag(args, "--wire") {
             args.push("--wire".to_string());
-        }
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["--prompt"],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
         }
     }
 }
@@ -1331,12 +1222,6 @@ impl WrapperProfile for KimiWrapper {
 impl WrapperProfile for QwenWrapper {
     fn provider(&self) -> Provider {
         Provider::QwenCode
-    }
-    fn binary(&self) -> &'static str {
-        "qwen"
-    }
-    fn agent_env(&self) -> &'static str {
-        "qwen"
     }
 
     fn apply_yolo(
@@ -1453,24 +1338,8 @@ impl WrapperProfile for QwenWrapper {
         true
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::StreamJson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         push_stream_json_flags(args, &[]);
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["-p", "--prompt"],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
     }
 }
 
@@ -1481,12 +1350,6 @@ impl WrapperProfile for QwenWrapper {
 impl WrapperProfile for OpencodeWrapper {
     fn provider(&self) -> Provider {
         Provider::OpenCode
-    }
-    fn binary(&self) -> &'static str {
-        "opencode"
-    }
-    fn agent_env(&self) -> &'static str {
-        "opencode"
     }
 
     fn apply_yolo(
@@ -1653,14 +1516,6 @@ impl WrapperProfile for OpencodeWrapper {
         }
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::Ndjson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         args.push("--format".to_string());
         args.push("json".to_string());
@@ -1671,10 +1526,6 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
         opencode_default_tui_noise_prefixes()
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions::positional_after("run")
     }
 }
 
@@ -1699,12 +1550,6 @@ pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
 impl WrapperProfile for GooseWrapper {
     fn provider(&self) -> Provider {
         Provider::Goose
-    }
-    fn binary(&self) -> &'static str {
-        "goose"
-    }
-    fn agent_env(&self) -> &'static str {
-        "goose"
     }
 
     fn apply_yolo(
@@ -1791,14 +1636,6 @@ impl WrapperProfile for GooseWrapper {
                 "-t".to_string(),
                 prompt.to_string(),
             ]))
-        }
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["-t", "--text"],
-            entrypoint: Some("run"),
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
         }
     }
 }

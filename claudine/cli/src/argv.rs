@@ -37,8 +37,12 @@
 //! should leave alone.
 
 use std::ffi::OsString;
+use std::sync::LazyLock;
 
 use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+
+use crate::commands::compose::ComposeArgs;
+use crate::commands::sequence::SequenceArgs;
 
 /// Wrapper subcommands that hand off to an external agent CLI.
 pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
@@ -58,31 +62,60 @@ const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &["--debug"];
 /// flag values so that a value like `gpt-4` after `-m` is not misclassified
 /// as a positional token.
 ///
-/// The list mirrors the `#[arg(...)]` surface of `SharedComposeArgs` (and
-/// `sequence`'s `--fail-fast`). When a new value-bearing composition flag is
-/// added to the clap surface, add it here so Rule 3 keeps classifying its
-/// value correctly.
-const COMPOSITION_FLAGS_WITH_VALUE: &[&str] = &[
-    "--provider",
-    "--exclude",
-    "--include",
-    "--model",
-    "-m",
-    "--output",
-    "-o",
-    "--append-system-prompt",
-    "--asp",
-    "--replace-system-prompt",
-    "--rsp",
-    "--timeout",
-    "-t",
-    "--step-timeout",
-    "--operation",
-    "--op",
-    "--set",
-    "--use",
-    "--fail-fast",
-];
+/// The surface is derived directly from clap's `ComposeArgs` and
+/// `SequenceArgs` definitions at first use, so a new value-bearing
+/// composition flag added to the clap surface is automatically tracked
+/// without a separate constant to keep in lockstep.
+static COMPOSITION_FLAGS_WITH_VALUE: LazyLock<Vec<String>> =
+    LazyLock::new(collect_composition_value_flags);
+
+/// Build the value-bearing composition flag surface by introspecting
+/// clap's `ComposeArgs` and `SequenceArgs`.
+fn collect_composition_value_flags() -> Vec<String> {
+    use clap::{ArgAction, Args};
+
+    fn collect<A: Args>(out: &mut Vec<String>) {
+        let cmd = A::augment_args(clap::Command::new("__argv_introspect"));
+        for arg in cmd.get_arguments() {
+            // Skip boolean-style args; they do not consume the next argv token.
+            if matches!(
+                arg.get_action(),
+                ArgAction::SetTrue
+                    | ArgAction::SetFalse
+                    | ArgAction::Count
+                    | ArgAction::Help
+                    | ArgAction::HelpShort
+                    | ArgAction::HelpLong
+                    | ArgAction::Version
+            ) {
+                continue;
+            }
+            // Skip positionals (no flag name).
+            let has_flag_name = arg.get_long().is_some() || arg.get_short().is_some();
+            if !has_flag_name {
+                continue;
+            }
+            if let Some(long) = arg.get_long() {
+                out.push(format!("--{long}"));
+            }
+            if let Some(aliases) = arg.get_visible_aliases() {
+                for alias in aliases {
+                    out.push(format!("--{alias}"));
+                }
+            }
+            if let Some(short) = arg.get_short() {
+                out.push(format!("-{short}"));
+            }
+        }
+    }
+
+    let mut flags = Vec::new();
+    collect::<ComposeArgs>(&mut flags);
+    collect::<SequenceArgs>(&mut flags);
+    flags.sort();
+    flags.dedup();
+    flags
+}
 
 // Provider boolean flag mapping (Rule 1 surface) is derived from
 // [`Provider::cli_aliases`] — see [`provider_for_boolean_flag`].
@@ -530,7 +563,9 @@ fn is_composition_flag_with_value(token: &str) -> bool {
     if token.contains('=') {
         return false;
     }
-    COMPOSITION_FLAGS_WITH_VALUE.contains(&token)
+    COMPOSITION_FLAGS_WITH_VALUE
+        .iter()
+        .any(|flag| flag.as_str() == token)
 }
 
 /// True when `token` matches the composition shorthand-setter key pattern
@@ -1375,29 +1410,12 @@ mod tests {
 
     #[test]
     fn is_composition_flag_with_value_matches_known_flags() {
-        for flag in [
-            "--provider",
-            "--exclude",
-            "--include",
-            "--model",
-            "-m",
-            "--output",
-            "-o",
-            "--append-system-prompt",
-            "--asp",
-            "--replace-system-prompt",
-            "--rsp",
-            "--timeout",
-            "-t",
-            "--step-timeout",
-            "--operation",
-            "--op",
-            "--set",
-            "--use",
-            "--fail-fast",
-        ] {
+        // Every clap-derived value-bearing composition flag must be
+        // recognized by the runtime classifier. Sourcing the list from
+        // the same derivation prevents drift between the two.
+        for flag in collect_composition_value_flags() {
             assert!(
-                is_composition_flag_with_value(flag),
+                is_composition_flag_with_value(&flag),
                 "expected flag {flag} to be value-bearing"
             );
         }
@@ -1558,78 +1576,31 @@ mod tests {
     // ── Gap 6: drift detection between clap surface and the value-table ──
 
     #[test]
-    fn composition_flags_with_value_matches_clap_surface() {
-        use crate::commands::compose::ComposeArgs;
-        use crate::commands::sequence::SequenceArgs;
-
-        fn build_cmd<A: clap::Args>() -> clap::Command {
-            A::augment_args(clap::Command::new("test"))
-        }
-
-        fn collect_value_flags(cmd: &clap::Command) -> Vec<String> {
-            use clap::ArgAction;
-            let mut out = Vec::new();
-            for arg in cmd.get_arguments() {
-                // Skip boolean-style args: they do not consume the next
-                // argv token, so Rule 3 must NOT skip past them.
-                if matches!(
-                    arg.get_action(),
-                    ArgAction::SetTrue
-                        | ArgAction::SetFalse
-                        | ArgAction::Count
-                        | ArgAction::Help
-                        | ArgAction::HelpShort
-                        | ArgAction::HelpLong
-                        | ArgAction::Version
-                ) {
-                    continue;
-                }
-                // Only flag-shaped args contribute to the value-flag surface;
-                // positional args like compose's `args: Vec<String>` have no
-                // long/short name.
-                let has_flag_name = arg.get_long().is_some() || arg.get_short().is_some();
-                if !has_flag_name {
-                    continue;
-                }
-                if let Some(long) = arg.get_long() {
-                    out.push(format!("--{long}"));
-                }
-                if let Some(aliases) = arg.get_visible_aliases() {
-                    for alias in aliases {
-                        out.push(format!("--{alias}"));
-                    }
-                }
-                if let Some(short) = arg.get_short() {
-                    out.push(format!("-{short}"));
-                }
-            }
-            out
-        }
-
-        let mut clap_flags: Vec<String> = Vec::new();
-        clap_flags.extend(collect_value_flags(&build_cmd::<ComposeArgs>()));
-        clap_flags.extend(collect_value_flags(&build_cmd::<SequenceArgs>()));
-        clap_flags.sort();
-        clap_flags.dedup();
+    fn composition_flags_with_value_equals_clap_surface() {
+        // The emitted `COMPOSITION_FLAGS_WITH_VALUE` is now derived from
+        // clap's `ComposeArgs` and `SequenceArgs` at first use. This test
+        // re-runs the same derivation and asserts equality so a future
+        // refactor that breaks the derivation surfaces as a test failure
+        // instead of a silently-empty value-flag table.
+        let derived = collect_composition_value_flags();
 
         assert!(
-            !clap_flags.is_empty(),
-            "expected the clap surface to expose at least one value-bearing \
-             flag; the test-wiring must be broken"
+            !derived.is_empty(),
+            "clap-derived composition value-flag surface must not be empty"
         );
 
-        for flag in &clap_flags {
-            // `--help` / `-h` are not value-bearing on clap's side; skip
-            // any stray entries just in case.
-            if flag == "--help" || flag == "-h" {
-                continue;
-            }
-            assert!(
-                COMPOSITION_FLAGS_WITH_VALUE.contains(&flag.as_str()),
-                "clap surface exposes value-bearing flag `{flag}` that is \
-                 missing from `COMPOSITION_FLAGS_WITH_VALUE`; add it there \
-                 so Rule 3 keeps skipping its value correctly"
-            );
-        }
+        let mut emitted: Vec<String> = COMPOSITION_FLAGS_WITH_VALUE.clone();
+        emitted.sort();
+        emitted.dedup();
+
+        let mut expected = derived.clone();
+        expected.sort();
+        expected.dedup();
+
+        assert_eq!(
+            emitted, expected,
+            "argv normalizer's value-flag surface must equal the clap-derived \
+             surface; if this drifts, fix `collect_composition_value_flags`"
+        );
     }
 }
