@@ -20,6 +20,7 @@ use super::reasoning::ReasoningSupport;
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
+use super::acp::{AcpEvent, AcpServerMode, AcpSupport};
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
@@ -120,12 +121,19 @@ pub(super) static KIMI_INFO: ProviderInfo = ProviderInfo {
         off: "--no-thinking",
     },
     known_gaps: KIMI_KNOWN_GAPS,
+    acp: AcpSupport {
+        server_mode: AcpServerMode::AvailableViaWireProxy,
+        client_supported: true,
+        events_via_acp: KIMI_ACP_EVENTS,
+    },
     prompt_arg_conventions: PromptArgConventions {
         prompt_flags: &["--prompt"],
         entrypoint: None,
         value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
     },
 };
+
+const KIMI_ACP_EVENTS: &[AcpEvent] = &[AcpEvent::ApprovalRequest];
 
 const KIMI_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(
     "~/.kimi/sessions/<dir-hash>/<session-id>/context.jsonl",
@@ -221,14 +229,14 @@ pub(super) static KIMI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
-            support_level: EventSupportLevel::NonHook,
+            support_level: EventSupportLevel::Acp,
             native_name: "ApprovalRequest",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::NonHook,
+            support_level: EventSupportLevel::Acp,
             native_name: "ApprovalRequest",
             parse_aliases: &[],
             registration_target: false,

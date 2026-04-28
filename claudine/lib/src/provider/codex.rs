@@ -21,6 +21,7 @@ use super::reasoning::ReasoningSupport;
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
+use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
@@ -166,6 +167,7 @@ pub(super) static CODEX_INFO: ProviderInfo = ProviderInfo {
         levels: &["minimal", "low", "medium", "high", "xhigh"],
     },
     known_gaps: CODEX_KNOWN_GAPS,
+    acp: AcpSupport::NOT_SUPPORTED,
     prompt_arg_conventions: PromptArgConventions::positional_after("exec"),
 };
 

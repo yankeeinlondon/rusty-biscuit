@@ -14,6 +14,7 @@
 //! data into [`ProviderInfo`] fields and dynamic dispatch through the
 //! behavior traits.
 
+mod acp;
 mod behavior;
 mod claude;
 mod codex;
@@ -38,6 +39,7 @@ mod yolo;
 #[cfg(test)]
 mod tests;
 
+pub use acp::{AcpEvent, AcpServerMode, AcpSupport};
 pub use behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable};
@@ -211,6 +213,17 @@ pub struct ProviderInfo {
     /// Known gaps in provider capability data, classified by area.
     #[serde(skip)]
     pub known_gaps: &'static [KnownGap],
+
+    /// Typed ACP capability descriptor.
+    ///
+    /// Skipped during serialization to keep the
+    /// `claudine providers --describe --format json` payload byte-for-byte
+    /// identical with prior phases. The descriptor is consumed by hook
+    /// reporting (`claudine hooks --capture-method`) and by the
+    /// invariant test that pairs `EventSupportLevel::Acp` rows with a
+    /// non-`NotSupported` [`AcpSupport::server_mode`].
+    #[serde(skip)]
+    pub acp: AcpSupport,
 
     /// Argv conventions describing how this provider's native CLI
     /// represents a prompt (prompt-carrying flags, optional entrypoint

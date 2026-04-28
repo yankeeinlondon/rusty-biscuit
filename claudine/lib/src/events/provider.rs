@@ -30,6 +30,14 @@ pub enum EventSupportLevel {
     /// - **Stream parsing**: Parse CLI output (Codex JSONL, Qwen stream-json)
     NonHook,
 
+    /// Event is captured via the Agent Client Protocol (ACP).
+    ///
+    /// Examples: Goose `request_permission`, Kimi `ApprovalRequest` (when
+    /// reached via Claudine's wire-mode JSON-RPC proxy). Providers with at
+    /// least one `Acp` row are required to report a non-`NotSupported`
+    /// [`AcpSupport::server_mode`](crate::provider::AcpSupport).
+    Acp,
+
     /// Event is not supported by this provider.
     NotSupported,
 }
@@ -43,6 +51,11 @@ impl EventSupportLevel {
     /// Returns whether this level indicates hook-based support.
     pub fn is_hook(&self) -> bool {
         matches!(self, EventSupportLevel::Hook)
+    }
+
+    /// Returns whether this level indicates ACP-based capture.
+    pub fn is_acp(&self) -> bool {
+        matches!(self, EventSupportLevel::Acp)
     }
 }
 
@@ -745,7 +758,7 @@ mod tests {
     fn event_support_level_kimicode_all_non_hook() {
         use super::EventSupportLevel::*;
         use crate::events::AgenticEvent::*;
-        // Kimi Code: all supported events via wire mode
+        // Kimi Code: most events via wire mode; permission is captured via ACP.
         assert_eq!(
             Provider::KimiCode.event_support_level(&TurnComplete),
             NonHook
@@ -753,7 +766,7 @@ mod tests {
         assert_eq!(Provider::KimiCode.event_support_level(&BeforeTool), NonHook);
         assert_eq!(
             Provider::KimiCode.event_support_level(&PermissionRequest),
-            NonHook
+            Acp
         );
         assert_eq!(
             Provider::KimiCode.event_support_level(&SessionStart),

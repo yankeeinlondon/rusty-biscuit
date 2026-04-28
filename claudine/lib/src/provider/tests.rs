@@ -377,6 +377,110 @@ fn stream_providers_expose_at_least_one_event() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 7: ACP invariants
+// ---------------------------------------------------------------------------
+
+/// Any provider with at least one [`EventSupportLevel::Acp`] mapping row
+/// must report a non-`NotSupported` ACP server mode.
+#[test]
+fn acp_events_imply_acp_support() {
+    use super::acp::AcpServerMode;
+    use crate::events::{AgenticEvent, EventSupportLevel};
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let has_acp_event = AgenticEvent::ALL.iter().any(|event| {
+            matches!(
+                info.event_mapping.support_level(*event),
+                EventSupportLevel::Acp
+            )
+        });
+        if has_acp_event {
+            assert!(
+                !matches!(info.acp.server_mode, AcpServerMode::NotSupported),
+                "{provider:?}: declares EventSupportLevel::Acp rows but acp.server_mode is NotSupported"
+            );
+            assert!(
+                !info.acp.events_via_acp.is_empty(),
+                "{provider:?}: declares EventSupportLevel::Acp rows but acp.events_via_acp is empty"
+            );
+        }
+    }
+}
+
+/// Goose maps `request_permission` to ACP capture.
+#[test]
+fn goose_request_permission_is_acp() {
+    use super::acp::{AcpEvent, AcpServerMode};
+    use crate::events::{AgenticEvent, EventSupportLevel};
+
+    let info = provider_info(Provider::Goose);
+    assert_eq!(
+        info.event_mapping.support_level(AgenticEvent::HumanInTheLoop),
+        EventSupportLevel::Acp
+    );
+    assert_eq!(
+        info.event_mapping
+            .native_name(AgenticEvent::HumanInTheLoop),
+        Some("request_permission")
+    );
+    assert!(matches!(info.acp.server_mode, AcpServerMode::Native));
+    assert!(info.acp.events_via_acp.contains(&AcpEvent::RequestPermission));
+}
+
+/// Kimi maps `ApprovalRequest` to ACP capture.
+#[test]
+fn kimi_approval_request_is_acp() {
+    use super::acp::{AcpEvent, AcpServerMode};
+    use crate::events::{AgenticEvent, EventSupportLevel};
+
+    let info = provider_info(Provider::KimiCode);
+    assert_eq!(
+        info.event_mapping
+            .support_level(AgenticEvent::PermissionRequest),
+        EventSupportLevel::Acp
+    );
+    assert_eq!(
+        info.event_mapping
+            .native_name(AgenticEvent::PermissionRequest),
+        Some("ApprovalRequest")
+    );
+    assert!(matches!(
+        info.acp.server_mode,
+        AcpServerMode::AvailableViaWireProxy
+    ));
+    assert!(info.acp.events_via_acp.contains(&AcpEvent::ApprovalRequest));
+}
+
+/// Providers without any ACP rows report `AcpSupport::NOT_SUPPORTED`.
+#[test]
+fn non_acp_providers_have_not_supported_acp() {
+    use super::acp::AcpServerMode;
+    use crate::events::{AgenticEvent, EventSupportLevel};
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let has_acp_event = AgenticEvent::ALL.iter().any(|event| {
+            matches!(
+                info.event_mapping.support_level(*event),
+                EventSupportLevel::Acp
+            )
+        });
+        if !has_acp_event {
+            assert!(
+                matches!(info.acp.server_mode, AcpServerMode::NotSupported),
+                "{provider:?}: has no EventSupportLevel::Acp rows but acp.server_mode is {:?}",
+                info.acp.server_mode
+            );
+            assert!(
+                info.acp.events_via_acp.is_empty(),
+                "{provider:?}: has no EventSupportLevel::Acp rows but acp.events_via_acp is non-empty"
+            );
+        }
+    }
+}
+
 /// Every PathTemplate in the typed catalog data round-trips its raw form.
 #[test]
 fn typed_path_templates_have_non_empty_raw() {

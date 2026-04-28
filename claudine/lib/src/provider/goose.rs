@@ -18,6 +18,7 @@ use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
+use super::acp::{AcpEvent, AcpServerMode, AcpSupport};
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
@@ -104,12 +105,19 @@ pub(super) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     },
     reasoning: ReasoningSupport::ProviderSpecific(ReasoningCustomTag::GooseDelegated),
     known_gaps: GOOSE_KNOWN_GAPS,
+    acp: AcpSupport {
+        server_mode: AcpServerMode::Native,
+        client_supported: true,
+        events_via_acp: GOOSE_ACP_EVENTS,
+    },
     prompt_arg_conventions: PromptArgConventions {
         prompt_flags: &["-t", "--text"],
         entrypoint: Some("run"),
         value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
     },
 };
+
+const GOOSE_ACP_EVENTS: &[AcpEvent] = &[AcpEvent::RequestPermission];
 
 const GOOSE_SESSION_LOG_PATHS: &[PathTemplate] =
     &[PathTemplate::Static("~/.local/share/goose/sessions/sessions.db")];
@@ -233,7 +241,7 @@ pub(super) static GOOSE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::NonHook,
+            support_level: EventSupportLevel::Acp,
             native_name: "request_permission",
             parse_aliases: &[],
             registration_target: false,

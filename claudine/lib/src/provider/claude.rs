@@ -19,6 +19,7 @@ use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
@@ -161,6 +162,7 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         levels: &["low", "medium", "high"],
     },
     known_gaps: CLAUDE_KNOWN_GAPS,
+    acp: AcpSupport::NOT_SUPPORTED,
     prompt_arg_conventions: PromptArgConventions::positional_only(),
 };
 

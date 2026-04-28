@@ -15,6 +15,7 @@ use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
@@ -134,6 +135,7 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     yolo: YoloSupport::None,
     reasoning: ReasoningSupport::ProviderSpecific(ReasoningCustomTag::RooModeBased),
     known_gaps: ROO_KNOWN_GAPS,
+    acp: AcpSupport::NOT_SUPPORTED,
     prompt_arg_conventions: PromptArgConventions::positional_only(),
 };
 
