@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use crate::error::Result;
 use crate::events::Provider;
+use crate::provider::provider_info;
 
 use super::catalog::McpCatalogStore;
 use super::state::{McpProviderStateStore, Scope};
@@ -89,16 +90,11 @@ impl<'a> McpImporter<'a> {
     pub fn import_all(&mut self, repo_root: Option<&Path>) -> ImportReport {
         let mut report = ImportReport::default();
 
-        let providers = [
-            Provider::Claude,
-            Provider::Codex,
-            Provider::Gemini,
-            Provider::OpenCode,
-            Provider::RooCode,
-        ];
-
-        for provider in providers {
-            let provider_report = self.import_provider(provider, repo_root);
+        for info in crate::provider::all_providers() {
+            if !info.mcp.supported() {
+                continue;
+            }
+            let provider_report = self.import_provider(info.provider, repo_root);
             report.imported.extend(provider_report.imported);
             report.merged.extend(provider_report.merged);
             report.conflicts.extend(provider_report.conflicts);
@@ -116,11 +112,12 @@ impl<'a> McpImporter<'a> {
         repo_root: Option<&Path>,
     ) -> ImportReport {
         let mut report = ImportReport::default();
+        let info = provider_info(provider);
 
-        let configs = discover_provider_configs(provider, repo_root);
+        let configs = info.mcp.discover_configs(repo_root);
 
         for (config_path, scope) in configs {
-            let parsed = match parse_provider_mcp(provider, &config_path) {
+            let parsed = match info.mcp.parse_config(&config_path) {
                 Ok(servers) => servers,
                 Err(e) => {
                     report.errors.push(ImportError {
@@ -252,105 +249,104 @@ impl<'a> McpImporter<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// Provider config discovery
+// Provider config discovery (per-provider helpers used by McpBehavior)
 // ---------------------------------------------------------------------------
 
-fn discover_provider_configs(
-    provider: Provider,
-    repo_root: Option<&Path>,
-) -> Vec<(PathBuf, Scope)> {
+pub(crate) fn discover_claude_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut configs = Vec::new();
 
-    match provider {
-        Provider::Claude => {
-            // User: ~/.claude.json (NOT ~/.claude/settings.json)
-            let user_config = home.join(".claude.json");
-            if user_config.exists() {
-                configs.push((user_config, Scope::User));
-            }
-            for plugin_config in
-                discover_claude_plugin_configs(&home.join(".claude").join("plugins"))
-            {
-                configs.push((plugin_config, Scope::User));
-            }
-            // Repo: .mcp.json
-            if let Some(root) = repo_root {
-                let repo_config = root.join(".mcp.json");
-                if repo_config.exists() {
-                    configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-                }
-                let local_config = root.join(".claude").join("settings.local.json");
-                if local_config.exists() {
-                    configs.push((local_config, Scope::Repo(root.to_path_buf())));
-                }
-                for plugin_config in
-                    discover_claude_plugin_configs(&root.join(".claude").join("plugins"))
-                {
-                    configs.push((plugin_config, Scope::Repo(root.to_path_buf())));
-                }
-            }
+    let user_config = home.join(".claude.json");
+    if user_config.exists() {
+        configs.push((user_config, Scope::User));
+    }
+    for plugin_config in discover_claude_plugin_configs(&home.join(".claude").join("plugins")) {
+        configs.push((plugin_config, Scope::User));
+    }
+    if let Some(root) = repo_root {
+        let repo_config = root.join(".mcp.json");
+        if repo_config.exists() {
+            configs.push((repo_config, Scope::Repo(root.to_path_buf())));
         }
-        Provider::Codex => {
-            let user_config = home.join(".codex").join("config.toml");
-            if user_config.exists() {
-                configs.push((user_config, Scope::User));
-            }
-            if let Some(root) = repo_root {
-                let repo_config = root.join(".codex").join("config.toml");
-                if repo_config.exists() {
-                    configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-                }
-            }
+        let local_config = root.join(".claude").join("settings.local.json");
+        if local_config.exists() {
+            configs.push((local_config, Scope::Repo(root.to_path_buf())));
         }
-        Provider::Gemini => {
-            let user_config = home.join(".gemini").join("settings.json");
-            if user_config.exists() {
-                configs.push((user_config, Scope::User));
-            }
-            if let Some(root) = repo_root {
-                let repo_config = root.join(".gemini").join("settings.json");
-                if repo_config.exists() {
-                    configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-                }
-            }
-        }
-        Provider::OpenCode => {
-            // ~/.config/opencode/opencode.json
-            let user_config = home.join(".config").join("opencode").join("opencode.json");
-            if user_config.exists() {
-                configs.push((user_config, Scope::User));
-            }
-            if let Some(root) = repo_root {
-                let repo_config = root.join("opencode.json");
-                if repo_config.exists() {
-                    configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-                }
-            }
-        }
-        Provider::RooCode => {
-            // Repo: .roo/mcp.json
-            if let Some(root) = repo_root {
-                let repo_config = root.join(".roo").join("mcp.json");
-                if repo_config.exists() {
-                    configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-                }
-            }
-            // User: platform-specific VS Code globalStorage path
-            #[cfg(target_os = "macos")]
-            {
-                let global = home
-                    .join("Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json");
-                if global.exists() {
-                    configs.push((global, Scope::User));
-                }
-            }
-        }
-        _ => {
-            tracing::debug!(provider = %provider.as_slug(), "provider not supported for MCP import");
+        for plugin_config in
+            discover_claude_plugin_configs(&root.join(".claude").join("plugins"))
+        {
+            configs.push((plugin_config, Scope::Repo(root.to_path_buf())));
         }
     }
 
+    configs
+}
+
+pub(crate) fn discover_codex_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut configs = Vec::new();
+    let user_config = home.join(".codex").join("config.toml");
+    if user_config.exists() {
+        configs.push((user_config, Scope::User));
+    }
+    if let Some(root) = repo_root {
+        let repo_config = root.join(".codex").join("config.toml");
+        if repo_config.exists() {
+            configs.push((repo_config, Scope::Repo(root.to_path_buf())));
+        }
+    }
+    configs
+}
+
+pub(crate) fn discover_gemini_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut configs = Vec::new();
+    let user_config = home.join(".gemini").join("settings.json");
+    if user_config.exists() {
+        configs.push((user_config, Scope::User));
+    }
+    if let Some(root) = repo_root {
+        let repo_config = root.join(".gemini").join("settings.json");
+        if repo_config.exists() {
+            configs.push((repo_config, Scope::Repo(root.to_path_buf())));
+        }
+    }
+    configs
+}
+
+pub(crate) fn discover_opencode_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut configs = Vec::new();
+    let user_config = home.join(".config").join("opencode").join("opencode.json");
+    if user_config.exists() {
+        configs.push((user_config, Scope::User));
+    }
+    if let Some(root) = repo_root {
+        let repo_config = root.join("opencode.json");
+        if repo_config.exists() {
+            configs.push((repo_config, Scope::Repo(root.to_path_buf())));
+        }
+    }
+    configs
+}
+
+pub(crate) fn discover_roo_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+    let _home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut configs = Vec::new();
+    if let Some(root) = repo_root {
+        let repo_config = root.join(".roo").join("mcp.json");
+        if repo_config.exists() {
+            configs.push((repo_config, Scope::Repo(root.to_path_buf())));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let global = _home
+            .join("Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json");
+        if global.exists() {
+            configs.push((global, Scope::User));
+        }
+    }
     configs
 }
 
@@ -381,24 +377,10 @@ fn discover_claude_plugin_configs(plugin_root: &Path) -> Vec<PathBuf> {
 // Per-provider parsers
 // ---------------------------------------------------------------------------
 
-/// Parse MCP servers from a provider config file.
-///
-/// Returns a list of `(native_name, McpServer)` tuples.
-fn parse_provider_mcp(provider: Provider, config_path: &Path) -> Result<Vec<(String, McpServer)>> {
-    match provider {
-        Provider::Claude => parse_claude_mcp(config_path),
-        Provider::Codex => parse_codex_mcp(config_path),
-        Provider::Gemini => parse_gemini_mcp(config_path),
-        Provider::OpenCode => parse_opencode_mcp(config_path),
-        Provider::RooCode => parse_roo_mcp(config_path),
-        _ => Ok(Vec::new()),
-    }
-}
-
 /// Parse Claude's MCP config (`~/.claude.json` or `.mcp.json`).
 ///
 /// Both use `mcpServers` as a top-level object with server-name keys.
-fn parse_claude_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+pub(crate) fn parse_claude_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
     let content = fs::read_to_string(config_path)?;
     let doc: Value = serde_json::from_str(&content)?;
 
@@ -470,7 +452,7 @@ fn parse_claude_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
 /// Parse Codex's MCP config (`~/.codex/config.toml`).
 ///
 /// Format: `[mcp_servers.<name>]` tables with `command`, `args`, `env` etc.
-fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+pub(crate) fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
     let content = fs::read_to_string(config_path)?;
     let doc: toml_edit::DocumentMut = content
         .parse()
@@ -617,7 +599,7 @@ fn parse_codex_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
 }
 
 /// Parse Gemini's MCP config (`~/.gemini/settings.json`).
-fn parse_gemini_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+pub(crate) fn parse_gemini_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
     let content = fs::read_to_string(config_path)?;
     let doc: Value = serde_json::from_str(&content)?;
 
@@ -682,7 +664,7 @@ fn parse_gemini_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
 }
 
 /// Parse OpenCode's MCP config.
-fn parse_opencode_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+pub(crate) fn parse_opencode_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
     let content = fs::read_to_string(config_path)?;
     let doc: Value = serde_json::from_str(&content)?;
 
@@ -743,7 +725,7 @@ fn parse_opencode_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
 }
 
 /// Parse Roo Code's MCP config (`.roo/mcp.json` or `mcp_settings.json`).
-fn parse_roo_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+pub(crate) fn parse_roo_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
     let content = fs::read_to_string(config_path)?;
     let doc: Value = serde_json::from_str(&content)?;
 

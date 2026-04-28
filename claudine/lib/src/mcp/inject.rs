@@ -362,12 +362,7 @@ impl McpInjector for GeminiInjector {
 /// - Roo (VS Code extension, not a wrapper target)
 /// - Qwen, Goose, Kimi (blocked on research)
 pub fn injector_for_provider(provider: Provider) -> Option<Box<dyn McpInjector>> {
-    match provider {
-        Provider::OpenCode => Some(Box::new(OpenCodeInjector)),
-        Provider::Codex => Some(Box::new(CodexInjector)),
-        Provider::Gemini => Some(Box::new(GeminiInjector)),
-        _ => None,
-    }
+    crate::provider::provider_info(provider).mcp.runtime_injector()
 }
 
 fn provider_override_value<'a>(
