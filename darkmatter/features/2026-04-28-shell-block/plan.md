@@ -14,6 +14,16 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1:
   - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/shell_blocks/types.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/parser.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/body.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/render.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - darkmatter
 ---
