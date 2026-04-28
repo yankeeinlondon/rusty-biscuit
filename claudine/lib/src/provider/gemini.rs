@@ -11,6 +11,14 @@ use super::behavior::{
 };
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::KnownGap;
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
+use super::path_template::PathTemplate;
+use super::reasoning::ReasoningSupport;
+use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
@@ -140,7 +148,96 @@ pub(super) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     configurator: &GEMINI_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: GEMINI_SESSION_LOG_PATHS,
+    session_locations: GEMINI_SESSION_LOCATIONS,
+    config_paths: GEMINI_CONFIG_PATHS,
+    memory_files: GEMINI_MEMORY_FILES,
+    output_formats: GEMINI_OUTPUT_FORMATS,
+    entrypoints: GEMINI_ENTRYPOINTS,
+    system_prompt: &GEMINI_SYSTEM_PROMPT,
+    yolo: YoloSupport::DirectFlag {
+        native_flag: "--approval-mode=yolo",
+    },
+    reasoning: ReasoningSupport::NumericBudget {
+        flag: "thinkingBudget",
+        min: 0,
+        max: 32_768,
+        default: None,
+    },
+    known_gaps: GEMINI_KNOWN_GAPS,
 };
+
+const GEMINI_SESSION_LOG_PATHS: &[PathTemplate] =
+    &[PathTemplate::Static("~/.gemini/tmp/<project_hash>/chats/")];
+
+const GEMINI_SESSION_LOCATIONS: &[PathTemplate] = &[];
+
+const GEMINI_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.gemini/settings.json"),
+    PathTemplate::Static(".gemini/settings.json"),
+];
+
+const GEMINI_MEMORY_FILES: &[PathTemplate] = &[
+    PathTemplate::Static("~/.gemini/GEMINI.md"),
+    PathTemplate::Static(".gemini/GEMINI.md"),
+    PathTemplate::Static("GEMINI.md"),
+];
+
+const GEMINI_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
+    OutputFormatSupport {
+        format: OutputFormat::Text,
+        native_name: "text",
+        cli_flag: None,
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Json,
+        native_name: "json",
+        cli_flag: Some("--output-format"),
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Stream,
+        native_name: "stream-json",
+        cli_flag: Some("--output-format"),
+        stdin_supported: true,
+    },
+];
+
+const GEMINI_ENTRYPOINTS: &[EntrypointSpec] = &[
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["-p"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["--prompt"],
+        mode: EntrypointMode::NonInteractive,
+    },
+];
+
+static GEMINI_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::ShadowHomeFile {
+            relative_path: ".gemini/GEMINI.md",
+        },
+        non_interactive: SystemPromptDelivery::ShadowHomeFile {
+            relative_path: ".gemini/GEMINI.md",
+        },
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::ShadowHomeFile {
+            relative_path: ".gemini/GEMINI.md",
+        },
+        non_interactive: SystemPromptDelivery::ShadowHomeFile {
+            relative_path: ".gemini/GEMINI.md",
+        },
+    },
+    memory_files: GEMINI_MEMORY_FILES,
+};
+
+const GEMINI_KNOWN_GAPS: &[KnownGap] = &[];
 
 pub(super) static GEMINI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[

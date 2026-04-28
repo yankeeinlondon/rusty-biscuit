@@ -11,6 +11,12 @@ use super::behavior::{
 };
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::{KnownGap, KnownGapArea};
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormatSupport};
+use super::path_template::PathTemplate;
+use super::reasoning::ReasoningSupport;
+use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
@@ -140,7 +146,56 @@ pub(super) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     configurator: &OPENCODE_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: OPENCODE_SESSION_LOG_PATHS,
+    session_locations: OPENCODE_SESSION_LOCATIONS,
+    config_paths: OPENCODE_CONFIG_PATHS,
+    memory_files: OPENCODE_MEMORY_FILES,
+    output_formats: OPENCODE_OUTPUT_FORMATS,
+    entrypoints: OPENCODE_ENTRYPOINTS,
+    system_prompt: &OPENCODE_SYSTEM_PROMPT,
+    yolo: YoloSupport::NonInteractiveOnly {
+        non_interactive_flag: "--dangerously-skip-permissions",
+    },
+    reasoning: ReasoningSupport::NotDocumented,
+    known_gaps: OPENCODE_KNOWN_GAPS,
 };
+
+const OPENCODE_SESSION_LOG_PATHS: &[PathTemplate] = &[];
+
+const OPENCODE_SESSION_LOCATIONS: &[PathTemplate] = &[];
+
+const OPENCODE_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.config/opencode/opencode.json"),
+    PathTemplate::Static("opencode.json"),
+];
+
+const OPENCODE_MEMORY_FILES: &[PathTemplate] = &[PathTemplate::Static("AGENTS.md")];
+
+const OPENCODE_OUTPUT_FORMATS: &[OutputFormatSupport] = &[];
+
+const OPENCODE_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
+    subcommand: Some("run"),
+    required_flags: &[],
+    mode: EntrypointMode::NonInteractive,
+}];
+
+static OPENCODE_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Unsupported,
+        non_interactive: SystemPromptDelivery::Unsupported,
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Unsupported,
+        non_interactive: SystemPromptDelivery::Unsupported,
+    },
+    memory_files: OPENCODE_MEMORY_FILES,
+};
+
+const OPENCODE_KNOWN_GAPS: &[KnownGap] = &[KnownGap {
+    area: KnownGapArea::Other,
+    note: "Populate claudine/docs/agent-cli/opencode.md",
+    tracker: Some("claudine/docs/agent-cli/opencode.md"),
+}];
 
 pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[

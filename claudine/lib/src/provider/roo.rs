@@ -9,6 +9,12 @@ use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::KnownGap;
+use super::output_format::{EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::path_template::PathTemplate;
+use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
+use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
@@ -117,7 +123,70 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     configurator: &ROO_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: ROO_SESSION_LOG_PATHS,
+    session_locations: ROO_SESSION_LOCATIONS,
+    config_paths: ROO_CONFIG_PATHS,
+    memory_files: ROO_MEMORY_FILES,
+    output_formats: ROO_OUTPUT_FORMATS,
+    entrypoints: ROO_ENTRYPOINTS,
+    system_prompt: &ROO_SYSTEM_PROMPT,
+    yolo: YoloSupport::None,
+    reasoning: ReasoningSupport::ProviderSpecific(ReasoningCustomTag::RooModeBased),
+    known_gaps: ROO_KNOWN_GAPS,
 };
+
+const ROO_SESSION_LOG_PATHS: &[PathTemplate] = &[];
+
+const ROO_SESSION_LOCATIONS: &[PathTemplate] = &[PathTemplate::Static(
+    "@roo-code/core debug-log output",
+)];
+
+const ROO_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.roo/custom_modes.yaml"),
+    PathTemplate::Static("~/.roo/custom_modes.json"),
+];
+
+const ROO_MEMORY_FILES: &[PathTemplate] = &[
+    PathTemplate::Static("AGENTS.md"),
+    PathTemplate::Static("AGENT.md"),
+];
+
+const ROO_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
+    OutputFormatSupport {
+        format: OutputFormat::Text,
+        native_name: "text",
+        cli_flag: None,
+        stdin_supported: false,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Json,
+        native_name: "json",
+        cli_flag: None,
+        stdin_supported: false,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Stream,
+        native_name: "stream-json",
+        cli_flag: None,
+        stdin_supported: false,
+    },
+];
+
+const ROO_ENTRYPOINTS: &[EntrypointSpec] = &[];
+
+static ROO_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Unsupported,
+        non_interactive: SystemPromptDelivery::Unsupported,
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Unsupported,
+        non_interactive: SystemPromptDelivery::Unsupported,
+    },
+    memory_files: ROO_MEMORY_FILES,
+};
+
+const ROO_KNOWN_GAPS: &[KnownGap] = &[];
 
 pub(super) static ROO_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[

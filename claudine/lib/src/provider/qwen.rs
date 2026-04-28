@@ -10,6 +10,14 @@ use super::behavior::{
 };
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::KnownGap;
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
+use super::path_template::PathTemplate;
+use super::reasoning::ReasoningSupport;
+use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::stream::parser::SemanticStreamParser;
@@ -93,7 +101,84 @@ pub(super) static QWEN_INFO: ProviderInfo = ProviderInfo {
     configurator: &QWEN_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: QWEN_SESSION_LOG_PATHS,
+    session_locations: QWEN_SESSION_LOCATIONS,
+    config_paths: QWEN_CONFIG_PATHS,
+    memory_files: QWEN_MEMORY_FILES,
+    output_formats: QWEN_OUTPUT_FORMATS,
+    entrypoints: QWEN_ENTRYPOINTS,
+    system_prompt: &QWEN_SYSTEM_PROMPT,
+    yolo: YoloSupport::DirectFlag {
+        native_flag: "--yolo",
+    },
+    reasoning: ReasoningSupport::NumericBudget {
+        flag: "thinkingBudget",
+        min: 0,
+        max: 32_768,
+        default: None,
+    },
+    known_gaps: QWEN_KNOWN_GAPS,
 };
+
+const QWEN_SESSION_LOG_PATHS: &[PathTemplate] =
+    &[PathTemplate::Static("~/.qwen/projects/<sanitized-cwd>/chats/")];
+
+const QWEN_SESSION_LOCATIONS: &[PathTemplate] = &[PathTemplate::Static("logs/openai")];
+
+const QWEN_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.qwen/settings.json"),
+    PathTemplate::Static(".qwen/settings.json"),
+];
+
+const QWEN_MEMORY_FILES: &[PathTemplate] = &[
+    PathTemplate::Static("~/.qwen/QWEN.md"),
+    PathTemplate::Static("QWEN.md"),
+];
+
+const QWEN_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
+    OutputFormatSupport {
+        format: OutputFormat::Text,
+        native_name: "text",
+        cli_flag: None,
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Json,
+        native_name: "json",
+        cli_flag: Some("--output-format"),
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Stream,
+        native_name: "stream-json",
+        cli_flag: Some("--output-format"),
+        stdin_supported: true,
+    },
+];
+
+const QWEN_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
+    subcommand: None,
+    required_flags: &["-p"],
+    mode: EntrypointMode::NonInteractive,
+}];
+
+static QWEN_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::ShadowHomeFile {
+            relative_path: ".qwen/QWEN.md",
+        },
+        non_interactive: SystemPromptDelivery::ShadowHomeFile {
+            relative_path: ".qwen/QWEN.md",
+        },
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Unsupported,
+        non_interactive: SystemPromptDelivery::Unsupported,
+    },
+    memory_files: QWEN_MEMORY_FILES,
+};
+
+const QWEN_KNOWN_GAPS: &[KnownGap] = &[];
 
 pub(super) static QWEN_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[

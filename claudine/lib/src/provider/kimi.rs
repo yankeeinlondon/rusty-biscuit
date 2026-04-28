@@ -10,6 +10,16 @@ use super::behavior::{
 };
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::KnownGap;
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
+use super::path_template::PathTemplate;
+use super::reasoning::ReasoningSupport;
+use super::system_prompt::{
+    SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::stream::{ParserConfig, StreamProtocol};
@@ -93,7 +103,71 @@ pub(super) static KIMI_INFO: ProviderInfo = ProviderInfo {
     configurator: &KIMI_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: KIMI_SESSION_LOG_PATHS,
+    session_locations: KIMI_SESSION_LOCATIONS,
+    config_paths: KIMI_CONFIG_PATHS,
+    memory_files: KIMI_MEMORY_FILES,
+    output_formats: KIMI_OUTPUT_FORMATS,
+    entrypoints: KIMI_ENTRYPOINTS,
+    system_prompt: &KIMI_SYSTEM_PROMPT,
+    yolo: YoloSupport::DirectFlag {
+        native_flag: "--yolo",
+    },
+    reasoning: ReasoningSupport::BinaryToggle {
+        flag: "--thinking",
+        on: "--thinking",
+        off: "--no-thinking",
+    },
+    known_gaps: KIMI_KNOWN_GAPS,
 };
+
+const KIMI_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(
+    "~/.kimi/sessions/<dir-hash>/<session-id>/context.jsonl",
+)];
+
+const KIMI_SESSION_LOCATIONS: &[PathTemplate] = &[];
+
+const KIMI_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.kimi/config.toml"),
+    PathTemplate::Static("~/.kimi/mcp.json"),
+];
+
+const KIMI_MEMORY_FILES: &[PathTemplate] = &[PathTemplate::Static("AGENTS.md")];
+
+const KIMI_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
+    OutputFormatSupport {
+        format: OutputFormat::Text,
+        native_name: "text",
+        cli_flag: None,
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Stream,
+        native_name: "stream-json",
+        cli_flag: Some("--print"),
+        stdin_supported: true,
+    },
+];
+
+const KIMI_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
+    subcommand: None,
+    required_flags: &["--print"],
+    mode: EntrypointMode::NonInteractive,
+}];
+
+static KIMI_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::KimiAgentFile),
+        non_interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::KimiAgentFile),
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::KimiAgentFile),
+        non_interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::KimiAgentFile),
+    },
+    memory_files: KIMI_MEMORY_FILES,
+};
+
+const KIMI_KNOWN_GAPS: &[KnownGap] = &[];
 
 pub(super) static KIMI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[

@@ -8,6 +8,16 @@ use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::KnownGap;
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
+use super::path_template::PathTemplate;
+use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
+use super::system_prompt::{
+    SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::events::{AgenticEvent, EventSupportLevel};
@@ -80,7 +90,89 @@ pub(super) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     configurator: &GOOSE_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: GOOSE_SESSION_LOG_PATHS,
+    session_locations: GOOSE_SESSION_LOCATIONS,
+    config_paths: GOOSE_CONFIG_PATHS,
+    memory_files: GOOSE_MEMORY_FILES,
+    output_formats: GOOSE_OUTPUT_FORMATS,
+    entrypoints: GOOSE_ENTRYPOINTS,
+    system_prompt: &GOOSE_SYSTEM_PROMPT,
+    yolo: YoloSupport::EnvVar {
+        env_var: "GOOSE_MODE",
+        value: "auto",
+    },
+    reasoning: ReasoningSupport::ProviderSpecific(ReasoningCustomTag::GooseDelegated),
+    known_gaps: GOOSE_KNOWN_GAPS,
 };
+
+const GOOSE_SESSION_LOG_PATHS: &[PathTemplate] =
+    &[PathTemplate::Static("~/.local/share/goose/sessions/sessions.db")];
+
+const GOOSE_SESSION_LOCATIONS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.local/state/goose/logs/cli/"),
+    PathTemplate::Static("~/.local/state/goose/logs/server/"),
+    PathTemplate::Static("~/.local/state/goose/logs/llm_request.*.jsonl"),
+];
+
+const GOOSE_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.config/goose/config.yaml"),
+    PathTemplate::Static("~/.config/goose/permission.yaml"),
+];
+
+const GOOSE_MEMORY_FILES: &[PathTemplate] = &[PathTemplate::Static(".goosehints")];
+
+const GOOSE_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
+    OutputFormatSupport {
+        format: OutputFormat::Text,
+        native_name: "text",
+        cli_flag: None,
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Json,
+        native_name: "json",
+        cli_flag: None,
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Stream,
+        native_name: "stream-json",
+        cli_flag: None,
+        stdin_supported: true,
+    },
+];
+
+const GOOSE_ENTRYPOINTS: &[EntrypointSpec] = &[
+    EntrypointSpec {
+        subcommand: Some("run"),
+        required_flags: &["-t"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: Some("run"),
+        required_flags: &["-i"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: Some("run"),
+        required_flags: &["--recipe"],
+        mode: EntrypointMode::NonInteractive,
+    },
+];
+
+static GOOSE_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::GooseRecipe),
+        non_interactive: SystemPromptDelivery::InlineFlag { flag: "--system" },
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Unsupported,
+        non_interactive: SystemPromptDelivery::Unsupported,
+    },
+    memory_files: GOOSE_MEMORY_FILES,
+};
+
+const GOOSE_KNOWN_GAPS: &[KnownGap] = &[];
 
 pub(super) static GOOSE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[

@@ -11,6 +11,16 @@ use super::behavior::{
 };
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::KnownGap;
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
+use super::path_template::PathTemplate;
+use super::reasoning::ReasoningSupport;
+use super::system_prompt::{
+    SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
@@ -140,7 +150,101 @@ pub(super) static CODEX_INFO: ProviderInfo = ProviderInfo {
     configurator: &CODEX_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: CODEX_SESSION_LOG_PATHS,
+    session_locations: CODEX_SESSION_LOCATIONS,
+    config_paths: CODEX_CONFIG_PATHS,
+    memory_files: CODEX_MEMORY_FILES,
+    output_formats: CODEX_OUTPUT_FORMATS,
+    entrypoints: CODEX_ENTRYPOINTS,
+    system_prompt: &CODEX_SYSTEM_PROMPT,
+    yolo: YoloSupport::DirectFlag {
+        native_flag: "--dangerously-bypass-approvals-and-sandbox",
+    },
+    reasoning: ReasoningSupport::NamedLevels {
+        flag: "model_reasoning_effort",
+        levels: &["minimal", "low", "medium", "high", "xhigh"],
+    },
+    known_gaps: CODEX_KNOWN_GAPS,
 };
+
+const CODEX_SESSION_LOG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.codex/sessions/YYYY/MM/DD/<session-id>/"),
+    PathTemplate::Static("~/.codex/history.jsonl"),
+];
+
+const CODEX_SESSION_LOCATIONS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.codex/log/codex-tui.log"),
+    PathTemplate::Static("~/.codex/shell_snapshots/"),
+];
+
+const CODEX_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.codex/config.toml"),
+    PathTemplate::Static(".codex/config.toml"),
+];
+
+const CODEX_MEMORY_FILES: &[PathTemplate] = &[
+    PathTemplate::Static("~/.codex/AGENTS.override.md"),
+    PathTemplate::Static("~/.codex/AGENTS.md"),
+    PathTemplate::Static("AGENTS.md"),
+];
+
+const CODEX_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
+    OutputFormatSupport {
+        format: OutputFormat::Text,
+        native_name: "text",
+        cli_flag: None,
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Json,
+        native_name: "jsonl",
+        cli_flag: Some("--json"),
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Stream,
+        native_name: "schema-json",
+        cli_flag: Some("--output-schema"),
+        stdin_supported: true,
+    },
+];
+
+const CODEX_ENTRYPOINTS: &[EntrypointSpec] = &[
+    EntrypointSpec {
+        subcommand: Some("exec"),
+        required_flags: &[],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: Some("review"),
+        required_flags: &[],
+        mode: EntrypointMode::Interactive,
+    },
+    EntrypointSpec {
+        subcommand: Some("exec review"),
+        required_flags: &[],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: Some("exec resume"),
+        required_flags: &[],
+        mode: EntrypointMode::NonInteractive,
+    },
+];
+
+static CODEX_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
+        non_interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
+        non_interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
+    },
+    memory_files: CODEX_MEMORY_FILES,
+};
+
+const CODEX_KNOWN_GAPS: &[KnownGap] = &[];
 
 pub(super) static CODEX_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[

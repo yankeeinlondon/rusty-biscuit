@@ -11,6 +11,14 @@ use super::behavior::{
 };
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use super::known_gap::{KnownGap, KnownGapArea};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
+};
+use super::path_template::PathTemplate;
+use super::reasoning::ReasoningSupport;
+use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
@@ -137,7 +145,109 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     configurator: &CLAUDE_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+    session_log_paths: CLAUDE_SESSION_LOG_PATHS,
+    session_locations: CLAUDE_SESSION_LOCATIONS,
+    config_paths: CLAUDE_CONFIG_PATHS,
+    memory_files: CLAUDE_MEMORY_FILES,
+    output_formats: CLAUDE_OUTPUT_FORMATS,
+    entrypoints: CLAUDE_ENTRYPOINTS,
+    system_prompt: &CLAUDE_SYSTEM_PROMPT,
+    yolo: YoloSupport::DirectFlag {
+        native_flag: "--dangerously-skip-permissions",
+    },
+    reasoning: ReasoningSupport::NamedLevels {
+        flag: "thinking_effort",
+        levels: &["low", "medium", "high"],
+    },
+    known_gaps: CLAUDE_KNOWN_GAPS,
 };
+
+const CLAUDE_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(
+    "~/.claude/projects/<encoded-directory>/<session-uuid>.jsonl",
+)];
+
+const CLAUDE_SESSION_LOCATIONS: &[PathTemplate] =
+    &[PathTemplate::Static("~/.claude/projects/")];
+
+const CLAUDE_CONFIG_PATHS: &[PathTemplate] = &[
+    PathTemplate::Static("~/.claude/settings.json"),
+    PathTemplate::Static("~/.claude.json"),
+    PathTemplate::Static(".claude/settings.json"),
+    PathTemplate::Static(".mcp.json"),
+    PathTemplate::Static(".claude/settings.local.json"),
+];
+
+const CLAUDE_MEMORY_FILES: &[PathTemplate] = &[
+    PathTemplate::Static("~/.claude/CLAUDE.md"),
+    PathTemplate::Static("CLAUDE.md"),
+    PathTemplate::Static(".claude/CLAUDE.md"),
+    PathTemplate::Static(".claude/CLAUDE.local.md"),
+];
+
+const CLAUDE_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
+    OutputFormatSupport {
+        format: OutputFormat::Text,
+        native_name: "text",
+        cli_flag: Some("--output-format"),
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Json,
+        native_name: "json",
+        cli_flag: Some("--output-format"),
+        stdin_supported: true,
+    },
+    OutputFormatSupport {
+        format: OutputFormat::Stream,
+        native_name: "stream-json",
+        cli_flag: Some("--output-format"),
+        stdin_supported: true,
+    },
+];
+
+const CLAUDE_ENTRYPOINTS: &[EntrypointSpec] = &[
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["--print"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["-c", "--print"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["-r", "--print"],
+        mode: EntrypointMode::NonInteractive,
+    },
+];
+
+static CLAUDE_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
+    append: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--append-system-prompt",
+        },
+        non_interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--append-system-prompt",
+        },
+    },
+    replace: SystemPromptDeliveryByMode {
+        interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--system-prompt",
+        },
+        non_interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--system-prompt",
+        },
+    },
+    memory_files: CLAUDE_MEMORY_FILES,
+};
+
+const CLAUDE_KNOWN_GAPS: &[KnownGap] = &[KnownGap {
+    area: KnownGapArea::Other,
+    note: "Populate claudine/docs/cross-referencing/claude-code.md",
+    tracker: Some("claudine/docs/cross-referencing/claude-code.md"),
+}];
 
 pub(super) static CLAUDE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
