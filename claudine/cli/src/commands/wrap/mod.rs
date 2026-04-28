@@ -1,3 +1,4 @@
+pub(crate) mod catalog_helpers;
 pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod live_semantic_sink;
