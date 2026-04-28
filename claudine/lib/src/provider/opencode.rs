@@ -1,13 +1,26 @@
 //! OpenCode provider definition.
 
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
-use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::behavior::{
+    AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
+};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::mcp::export::ExportServer;
+use crate::mcp::inject::{McpInjector, OpenCodeInjector};
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::stream::opencode_semantic::OpenCodeSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
+use crate::stream::{ParserConfig, StreamProtocol};
 use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
@@ -28,16 +41,69 @@ pub(super) struct OpenCodeProvider;
 
 pub(super) static OPENCODE_PROVIDER: OpenCodeProvider = OpenCodeProvider;
 
-impl ProviderBehavior for OpenCodeProvider {}
+impl ProviderBehavior for OpenCodeProvider {
+    fn create_semantic_parser(
+        &self,
+        sink: BoxedSemanticEventSink,
+        config: ParserConfig,
+    ) -> Box<dyn SemanticStreamParser> {
+        Box::new(OpenCodeSemanticStreamParser::new(sink, config.model))
+    }
+}
 impl McpBehavior for OpenCodeProvider {
     fn supported(&self) -> bool {
         true
     }
+
+    fn provider_for_error(&self) -> Provider {
+        Provider::OpenCode
+    }
+
+    fn runtime_injector(&self) -> Option<Box<dyn McpInjector>> {
+        Some(Box::new(OpenCodeInjector))
+    }
+
+    fn discover_configs(&self, repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+        crate::mcp::import::discover_opencode_configs(repo_root)
+    }
+
+    fn parse_config(&self, config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+        crate::mcp::import::parse_opencode_mcp(config_path)
+    }
+
+    fn native_config_path(&self, scope: &Scope) -> Option<PathBuf> {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        Some(match scope {
+            Scope::User => home.join(".config").join("opencode").join("opencode.json"),
+            Scope::Repo(root) => root.join("opencode.json"),
+        })
+    }
+
+    fn read_existing_native_servers(&self, config_path: &Path) -> Result<Vec<String>> {
+        crate::mcp::export::read_existing_opencode_mcp_servers(config_path)
+    }
+
+    fn write_native_config(
+        &self,
+        servers: &[ExportServer<'_>],
+        config_path: &Path,
+        managed_names: &[String],
+    ) -> Result<()> {
+        crate::mcp::export::write_opencode_mcp(servers, config_path, managed_names)
+    }
 }
-impl AdapterBehavior for OpenCodeProvider {}
+impl AdapterBehavior for OpenCodeProvider {
+    fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
+        &crate::adapters::OPENCODE_ADAPTER
+    }
+}
 impl ConfiguratorBehavior for OpenCodeProvider {
     fn hooks_supported(&self) -> bool {
         true
+    }
+
+    fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
+        Box::new(crate::config::OpenCodeConfigurator)
     }
 }
 
@@ -66,6 +132,7 @@ pub(super) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: None,
     sniff_binding: AiCli::Opencode,
     supports_skills: true,
+    stream_protocol: Some(StreamProtocol::Ndjson),
     event_mapping: &OPENCODE_EVENT_MAPPING,
     behavior: &OPENCODE_PROVIDER,
     mcp: &OPENCODE_PROVIDER,

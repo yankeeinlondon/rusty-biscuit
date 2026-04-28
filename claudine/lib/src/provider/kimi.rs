@@ -5,9 +5,16 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
-use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::behavior::{
+    AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
+};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
+use crate::stream::{ParserConfig, StreamProtocol};
+use crate::stream::kimi_semantic::KimiSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
 use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
@@ -28,10 +35,30 @@ pub(super) struct KimiProvider;
 
 pub(super) static KIMI_PROVIDER: KimiProvider = KimiProvider;
 
-impl ProviderBehavior for KimiProvider {}
-impl McpBehavior for KimiProvider {}
-impl AdapterBehavior for KimiProvider {}
-impl ConfiguratorBehavior for KimiProvider {}
+impl ProviderBehavior for KimiProvider {
+    fn create_semantic_parser(
+        &self,
+        sink: BoxedSemanticEventSink,
+        _config: ParserConfig,
+    ) -> Box<dyn SemanticStreamParser> {
+        Box::new(KimiSemanticStreamParser::new(sink))
+    }
+}
+impl McpBehavior for KimiProvider {
+    fn provider_for_error(&self) -> Provider {
+        Provider::KimiCode
+    }
+}
+impl AdapterBehavior for KimiProvider {
+    fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
+        &crate::adapters::KIMI_ADAPTER
+    }
+}
+impl ConfiguratorBehavior for KimiProvider {
+    fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
+        Box::new(crate::config::KimiCodeConfigurator)
+    }
+}
 
 static KIMI_AGENT_CAPABILITIES: LazyLock<AgentCapabilities> =
     LazyLock::new(build_kimi_agent_capabilities);
@@ -58,6 +85,7 @@ pub(super) static KIMI_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: Some("https://platform.moonshot.cn/console/account"),
     sniff_binding: AiCli::KimiCli,
     supports_skills: false,
+    stream_protocol: Some(StreamProtocol::WireJsonRpc),
     event_mapping: &KIMI_EVENT_MAPPING,
     behavior: &KIMI_PROVIDER,
     mcp: &KIMI_PROVIDER,

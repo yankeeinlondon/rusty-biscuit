@@ -5,9 +5,16 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
-use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::behavior::{
+    AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
+};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
+use crate::stream::parser::SemanticStreamParser;
+use crate::stream::qwen_semantic::QwenSemanticStreamParser;
+use crate::stream::{ParserConfig, StreamProtocol};
 use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
@@ -28,10 +35,30 @@ pub(super) struct QwenProvider;
 
 pub(super) static QWEN_PROVIDER: QwenProvider = QwenProvider;
 
-impl ProviderBehavior for QwenProvider {}
-impl McpBehavior for QwenProvider {}
-impl AdapterBehavior for QwenProvider {}
-impl ConfiguratorBehavior for QwenProvider {}
+impl ProviderBehavior for QwenProvider {
+    fn create_semantic_parser(
+        &self,
+        sink: BoxedSemanticEventSink,
+        _config: ParserConfig,
+    ) -> Box<dyn SemanticStreamParser> {
+        Box::new(QwenSemanticStreamParser::new(sink))
+    }
+}
+impl McpBehavior for QwenProvider {
+    fn provider_for_error(&self) -> Provider {
+        Provider::QwenCode
+    }
+}
+impl AdapterBehavior for QwenProvider {
+    fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
+        &crate::adapters::QWEN_ADAPTER
+    }
+}
+impl ConfiguratorBehavior for QwenProvider {
+    fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
+        Box::new(crate::config::QwenConfigurator)
+    }
+}
 
 static QWEN_AGENT_CAPABILITIES: LazyLock<AgentCapabilities> =
     LazyLock::new(build_qwen_agent_capabilities);
@@ -58,6 +85,7 @@ pub(super) static QWEN_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: Some("https://bailian.console.aliyun.com/"),
     sniff_binding: AiCli::QwenCli,
     supports_skills: true,
+    stream_protocol: Some(StreamProtocol::StreamJson),
     event_mapping: &QWEN_EVENT_MAPPING,
     behavior: &QWEN_PROVIDER,
     mcp: &QWEN_PROVIDER,

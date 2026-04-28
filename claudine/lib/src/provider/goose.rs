@@ -8,6 +8,8 @@ use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
 use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
@@ -29,9 +31,21 @@ pub(super) struct GooseProvider;
 pub(super) static GOOSE_PROVIDER: GooseProvider = GooseProvider;
 
 impl ProviderBehavior for GooseProvider {}
-impl McpBehavior for GooseProvider {}
-impl AdapterBehavior for GooseProvider {}
-impl ConfiguratorBehavior for GooseProvider {}
+impl McpBehavior for GooseProvider {
+    fn provider_for_error(&self) -> Provider {
+        Provider::Goose
+    }
+}
+impl AdapterBehavior for GooseProvider {
+    fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
+        &crate::adapters::GOOSE_ADAPTER
+    }
+}
+impl ConfiguratorBehavior for GooseProvider {
+    fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
+        Box::new(crate::config::GooseConfigurator)
+    }
+}
 
 static GOOSE_AGENT_CAPABILITIES: LazyLock<AgentCapabilities> =
     LazyLock::new(build_goose_agent_capabilities);
@@ -58,6 +72,7 @@ pub(super) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: None,
     sniff_binding: AiCli::Goose,
     supports_skills: false,
+    stream_protocol: None,
     event_mapping: &GOOSE_EVENT_MAPPING,
     behavior: &GOOSE_PROVIDER,
     mcp: &GOOSE_PROVIDER,

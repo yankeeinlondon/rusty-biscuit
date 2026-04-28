@@ -42,6 +42,7 @@ use sniff::programs::AiCli;
 
 use crate::agents::AgentCapabilities;
 use crate::linking::capabilities::ProviderCapabilities;
+use crate::stream::StreamProtocol;
 
 /// All static, serializable facts about a provider.
 ///
@@ -86,6 +87,15 @@ pub struct ProviderInfo {
 
     /// Whether this provider supports skill discovery.
     pub supports_skills: bool,
+
+    /// Structured stream format used by the provider, when one is present.
+    ///
+    /// `None` for providers without a structured non-interactive output
+    /// stream. Skipped during serialization to keep the
+    /// `claudine providers --describe --format json` payload byte-for-byte
+    /// identical with prior phases.
+    #[serde(skip)]
+    pub stream_protocol: Option<StreamProtocol>,
 
     /// Per-provider event mapping table. Source of truth for event support
     /// level, provider-native event names, parse aliases, and which rows

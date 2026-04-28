@@ -1,13 +1,25 @@
 //! Claude Code provider definition.
 
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
-use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::behavior::{
+    AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
+};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::mcp::export::ExportServer;
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::stream::{ParserConfig, StreamProtocol};
+use crate::stream::claude_semantic::ClaudeSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
 use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
@@ -30,16 +42,65 @@ pub(super) struct ClaudeProvider;
 
 pub(super) static CLAUDE_PROVIDER: ClaudeProvider = ClaudeProvider;
 
-impl ProviderBehavior for ClaudeProvider {}
+impl ProviderBehavior for ClaudeProvider {
+    fn create_semantic_parser(
+        &self,
+        sink: BoxedSemanticEventSink,
+        _config: ParserConfig,
+    ) -> Box<dyn SemanticStreamParser> {
+        Box::new(ClaudeSemanticStreamParser::new(sink))
+    }
+}
 impl McpBehavior for ClaudeProvider {
     fn supported(&self) -> bool {
         true
     }
+
+    fn provider_for_error(&self) -> Provider {
+        Provider::Claude
+    }
+
+    fn discover_configs(&self, repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+        crate::mcp::import::discover_claude_configs(repo_root)
+    }
+
+    fn parse_config(&self, config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+        crate::mcp::import::parse_claude_mcp(config_path)
+    }
+
+    fn native_config_path(&self, scope: &Scope) -> Option<PathBuf> {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        Some(match scope {
+            Scope::User => home.join(".claude.json"),
+            Scope::Repo(root) => root.join(".mcp.json"),
+        })
+    }
+
+    fn read_existing_native_servers(&self, config_path: &Path) -> Result<Vec<String>> {
+        crate::mcp::export::read_existing_json_mcp_servers(config_path)
+    }
+
+    fn write_native_config(
+        &self,
+        servers: &[ExportServer<'_>],
+        config_path: &Path,
+        managed_names: &[String],
+    ) -> Result<()> {
+        crate::mcp::export::write_claude_mcp(servers, config_path, managed_names)
+    }
 }
-impl AdapterBehavior for ClaudeProvider {}
+impl AdapterBehavior for ClaudeProvider {
+    fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
+        &crate::adapters::CLAUDE_ADAPTER
+    }
+}
 impl ConfiguratorBehavior for ClaudeProvider {
     fn hooks_supported(&self) -> bool {
         true
+    }
+
+    fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
+        Box::new(crate::config::ClaudeConfigurator)
     }
 }
 
@@ -68,6 +129,7 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: Some("https://console.anthropic.com/settings/billing"),
     sniff_binding: AiCli::Claude,
     supports_skills: true,
+    stream_protocol: Some(StreamProtocol::StreamJson),
     event_mapping: &CLAUDE_EVENT_MAPPING,
     behavior: &CLAUDE_PROVIDER,
     mcp: &CLAUDE_PROVIDER,

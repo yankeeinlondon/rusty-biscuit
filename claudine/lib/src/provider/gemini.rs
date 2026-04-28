@@ -1,13 +1,26 @@
 //! Gemini CLI provider definition.
 
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
-use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::behavior::{
+    AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
+};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::mcp::export::ExportServer;
+use crate::mcp::inject::{GeminiInjector, McpInjector};
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::stream::{ParserConfig, StreamProtocol};
+use crate::stream::gemini_semantic::GeminiSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
 use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
@@ -28,16 +41,69 @@ pub(super) struct GeminiProvider;
 
 pub(super) static GEMINI_PROVIDER: GeminiProvider = GeminiProvider;
 
-impl ProviderBehavior for GeminiProvider {}
+impl ProviderBehavior for GeminiProvider {
+    fn create_semantic_parser(
+        &self,
+        sink: BoxedSemanticEventSink,
+        _config: ParserConfig,
+    ) -> Box<dyn SemanticStreamParser> {
+        Box::new(GeminiSemanticStreamParser::new(sink))
+    }
+}
 impl McpBehavior for GeminiProvider {
     fn supported(&self) -> bool {
         true
     }
+
+    fn provider_for_error(&self) -> Provider {
+        Provider::Gemini
+    }
+
+    fn runtime_injector(&self) -> Option<Box<dyn McpInjector>> {
+        Some(Box::new(GeminiInjector))
+    }
+
+    fn discover_configs(&self, repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+        crate::mcp::import::discover_gemini_configs(repo_root)
+    }
+
+    fn parse_config(&self, config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+        crate::mcp::import::parse_gemini_mcp(config_path)
+    }
+
+    fn native_config_path(&self, scope: &Scope) -> Option<PathBuf> {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        Some(match scope {
+            Scope::User => home.join(".gemini").join("settings.json"),
+            Scope::Repo(root) => root.join(".gemini").join("settings.json"),
+        })
+    }
+
+    fn read_existing_native_servers(&self, config_path: &Path) -> Result<Vec<String>> {
+        crate::mcp::export::read_existing_json_mcp_servers(config_path)
+    }
+
+    fn write_native_config(
+        &self,
+        servers: &[ExportServer<'_>],
+        config_path: &Path,
+        managed_names: &[String],
+    ) -> Result<()> {
+        crate::mcp::export::write_gemini_mcp(servers, config_path, managed_names)
+    }
 }
-impl AdapterBehavior for GeminiProvider {}
+impl AdapterBehavior for GeminiProvider {
+    fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
+        &crate::adapters::GEMINI_ADAPTER
+    }
+}
 impl ConfiguratorBehavior for GeminiProvider {
     fn hooks_supported(&self) -> bool {
         true
+    }
+
+    fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
+        Box::new(crate::config::GeminiConfigurator)
     }
 }
 
@@ -66,6 +132,7 @@ pub(super) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: Some("https://aistudio.google.com/billing"),
     sniff_binding: AiCli::GeminiCli,
     supports_skills: true,
+    stream_protocol: Some(StreamProtocol::StreamJson),
     event_mapping: &GEMINI_EVENT_MAPPING,
     behavior: &GEMINI_PROVIDER,
     mcp: &GEMINI_PROVIDER,

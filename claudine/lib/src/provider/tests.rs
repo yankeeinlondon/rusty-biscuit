@@ -200,3 +200,103 @@ fn resource_support_provider_matches_provider() {
         );
     }
 }
+
+/// Phase 4 guard: the only authoritative `match Provider` site in the lib
+/// crate is the central registry in [`crate::provider::registry`]. Every
+/// other per-domain dispatch must route through provider behavior traits.
+///
+/// The scan walks `claudine/lib/src/**/*.rs` and flags any file whose source
+/// contains the literal `match provider` (case-insensitive) outside the
+/// allowed audit-list. Allowed sites are the registry itself, the
+/// `provider/identity.rs` helpers that own the canonical mapping (string
+/// slugs, sniff bindings, display order), and a small set of compatibility
+/// shims that still need direct `match` dispatch on the canonical enum.
+#[test]
+fn no_unauthorized_match_provider_in_lib() {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn collect_rs_files(root: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let lib_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let allowed: &[&str] = &[
+        // Central registry (the one authoritative dispatch site).
+        "src/provider/registry.rs",
+        // Canonical identity helpers (slug, sniff binding, aliases, display
+        // order). These are part of the central registry surface.
+        "src/provider/identity.rs",
+        // The guard test source code itself contains the literal pattern
+        // `match provider {` as a string. Allow.
+        "src/provider/tests.rs",
+        // Event matrix and event provider helpers still own canonical
+        // event-shape pattern matching (Phase 3 retained these as the
+        // matrix surface). Compatibility shim.
+        "src/events/provider.rs",
+        "src/events/matrix.rs",
+        // Test fixture in the adapters module uses `match provider` to
+        // synthesize raw payloads. Test-only.
+        "src/adapters/mod.rs",
+        // `agents::registry::agent_for` returns a `&'static dyn Agent`
+        // (not the same as `provider_info(provider).agent_capabilities`).
+        // Phase 8 cleanup will remove this legacy facade once consumers
+        // migrate. Compatibility shim.
+        "src/agents/registry.rs",
+        // Phase 5 migrates these stringly-typed capability surfaces into
+        // typed ProviderInfo fields (env vars, CLI override sensitivity,
+        // model catalog sources). Compatibility shims for now.
+        "src/composition/select.rs",
+        "src/permissions/query.rs",
+        "src/model_catalog/provider_sources.rs",
+    ];
+
+    let mut files = Vec::new();
+    collect_rs_files(&lib_src, &mut files);
+
+    let mut violators: Vec<String> = Vec::new();
+    for file in &files {
+        let rel = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(file)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if allowed.iter().any(|allow| rel.ends_with(allow)) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(file) else {
+            continue;
+        };
+        // Strip line comments so doc/comment references don't trip the scan.
+        let stripped: String = content
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let lower = stripped.to_ascii_lowercase();
+        // Look for `match <ident>` where <ident> is a binding expected to
+        // be a Provider; conservatively flag any literal `match provider`.
+        if lower.contains("match provider {") || lower.contains("match provider\n") {
+            violators.push(rel);
+        }
+    }
+
+    assert!(
+        violators.is_empty(),
+        "Phase 4 guard: unauthorized `match provider` dispatch found in lib crate. \
+         Route per-domain dispatch through ProviderInfo behavior traits or add \
+         the file to the allow-list in `provider::tests::no_unauthorized_match_provider_in_lib`. \
+         Violators: {violators:?}"
+    );
+}

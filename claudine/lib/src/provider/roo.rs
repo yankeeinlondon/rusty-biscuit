@@ -1,5 +1,6 @@
 //! Roo Code provider definition.
 
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use sniff::programs::AiCli;
@@ -8,6 +9,12 @@ use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::adapters::ProviderAdapter;
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::mcp::export::ExportServer;
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
 use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
@@ -33,9 +40,49 @@ impl McpBehavior for RooProvider {
     fn supported(&self) -> bool {
         true
     }
+
+    fn provider_for_error(&self) -> Provider {
+        Provider::RooCode
+    }
+
+    fn discover_configs(&self, repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
+        crate::mcp::import::discover_roo_configs(repo_root)
+    }
+
+    fn parse_config(&self, config_path: &Path) -> Result<Vec<(String, McpServer)>> {
+        crate::mcp::import::parse_roo_mcp(config_path)
+    }
+
+    fn native_config_path(&self, scope: &Scope) -> Option<PathBuf> {
+        match scope {
+            Scope::User => None,
+            Scope::Repo(root) => Some(root.join(".roo").join("mcp.json")),
+        }
+    }
+
+    fn read_existing_native_servers(&self, config_path: &Path) -> Result<Vec<String>> {
+        crate::mcp::export::read_existing_json_mcp_servers(config_path)
+    }
+
+    fn write_native_config(
+        &self,
+        servers: &[ExportServer<'_>],
+        config_path: &Path,
+        managed_names: &[String],
+    ) -> Result<()> {
+        crate::mcp::export::write_roo_mcp(servers, config_path, managed_names)
+    }
 }
-impl AdapterBehavior for RooProvider {}
-impl ConfiguratorBehavior for RooProvider {}
+impl AdapterBehavior for RooProvider {
+    fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
+        &crate::adapters::ROO_ADAPTER
+    }
+}
+impl ConfiguratorBehavior for RooProvider {
+    fn agent_configurator(&self) -> Box<dyn AgentConfigurator> {
+        Box::new(crate::config::RooConfigurator)
+    }
+}
 
 static ROO_AGENT_CAPABILITIES: LazyLock<AgentCapabilities> =
     LazyLock::new(build_roo_agent_capabilities);
@@ -62,6 +109,7 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: None,
     sniff_binding: AiCli::Roo,
     supports_skills: true,
+    stream_protocol: None,
     event_mapping: &ROO_EVENT_MAPPING,
     behavior: &ROO_PROVIDER,
     mcp: &ROO_PROVIDER,
