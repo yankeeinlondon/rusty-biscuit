@@ -7,8 +7,8 @@
 use async_trait::async_trait;
 
 use super::types::{
-    CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo, OrgRepoRef,
-    PullRequestInfo, PullRequestState, RemoteReport, RepoMetadata, TagsAndReleases,
+    CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo, OrgRepoRef, PullRequestInfo,
+    PullRequestState, RemoteReport, RepoMetadata, TagsAndReleases,
 };
 use crate::error::SniffError;
 

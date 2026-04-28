@@ -456,15 +456,16 @@ pub fn render_pull_requests_verbose(prs: &[PullRequestInfo]) -> String {
         meta_parts.push(format!("<dim>{}</dim>", pr.created_at));
         write!(out, "{}", Prose::new(meta_parts.join("  ")).display(&term)).unwrap();
 
-        // Labels
+        // Labels (omitted entirely when empty, mirroring how the body is handled)
         if !pr.labels.is_empty() {
             let labels_str = pr
                 .labels
                 .iter()
                 .map(|l| format!("<cyan>{l}</cyan>"))
                 .collect::<Vec<_>>()
-                .join("  ");
-            write!(out, "{}", Prose::new(&labels_str).display(&term)).unwrap();
+                .join(", ");
+            let labels_line = format!("<b>Labels:</b> {labels_str}");
+            write!(out, "{}", Prose::new(&labels_line).display(&term)).unwrap();
         }
 
         // URL
@@ -670,12 +671,29 @@ mod tests {
         let prs = vec![make_test_pr_with_labels_and_body(42)];
         let rendered = render_pull_requests_verbose(&prs);
         assert!(rendered.contains("#42"));
+        assert!(
+            rendered.contains("Labels:"),
+            "verbose output should include the 'Labels:' row"
+        );
         assert!(rendered.contains("bug"));
         assert!(rendered.contains("urgent"));
         // Body is rendered through markdown terminal renderer which wraps words
         // in ANSI escape codes, so we check for individual words rather than phrases.
         assert!(rendered.contains("description"));
         assert!(rendered.contains("multiple"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_omits_labels_when_empty() {
+        // PR with no labels and no body — Labels: row should be absent (consistent
+        // with how Option fields like body are omitted entirely when missing).
+        let prs = vec![make_test_pr(7, "open", false, None)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("#7"));
+        assert!(
+            !rendered.contains("Labels:"),
+            "verbose output should omit 'Labels:' row when labels are empty"
+        );
     }
 
     #[test]

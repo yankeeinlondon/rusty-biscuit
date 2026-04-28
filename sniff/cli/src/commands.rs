@@ -977,7 +977,7 @@ async fn handle_pr_command(
         Ok(prs) => prs,
         Err(sniff::SniffError::MissingCredentials { provider, env_var }) => {
             return Err(format!(
-                "Authentication required for {}: set the {} environment variable",
+                "{} requires credentials for this resource: set the {} environment variable",
                 provider, env_var
             )
             .into());

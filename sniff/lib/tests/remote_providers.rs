@@ -267,8 +267,97 @@ mod github_tests {
         assert!(!prs[0].draft);
         assert_eq!(prs[0].source_branch, Some("feature-branch".to_string()));
         assert_eq!(prs[0].target_branch, Some("main".to_string()));
-        assert!(prs[0].labels.is_empty()); // GitHub PullRequestSummary doesn't expose labels in schematic schema
+        assert_eq!(
+            prs[0].labels,
+            vec!["enhancement".to_string(), "help wanted".to_string()]
+        );
         assert!(prs[0].body.as_ref().unwrap().contains("This PR adds"));
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_no_labels() {
+        let (server, provider) = setup_github_mock().await;
+
+        // Fixture with explicitly empty labels array.
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 7,
+                    "title": "PR with no labels",
+                    "state": "open",
+                    "user": {"login": "contributor1", "id": 5678},
+                    "draft": false,
+                    "head": {"ref": "feature-branch", "sha": "abc123"},
+                    "base": {"ref": "main", "sha": "def456"},
+                    "labels": [],
+                    "body": "Body without labels.",
+                    "created_at": "2024-06-15T10:00:00Z",
+                    "updated_at": "2024-06-18T14:30:00Z",
+                    "merged_at": null,
+                    "html_url": "https://github.com/test-owner/test-repo/pull/7",
+                    "url": "https://api.github.com/repos/test-owner/test-repo/pulls/7"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 7);
+        assert!(
+            prs[0].labels.is_empty(),
+            "Expected empty labels, got: {:?}",
+            prs[0].labels
+        );
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_omitted_labels() {
+        let (server, provider) = setup_github_mock().await;
+
+        // Fixture that omits the `labels` field entirely. This proves the
+        // schema's `#[serde(default)]` lets the response deserialize without
+        // requiring the labels key, so older API responses (or partial
+        // payloads) still parse cleanly.
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 9,
+                    "title": "PR with omitted labels field",
+                    "state": "open",
+                    "user": {"login": "contributor2", "id": 9999},
+                    "draft": false,
+                    "head": {"ref": "feature-branch", "sha": "abc123"},
+                    "base": {"ref": "main", "sha": "def456"},
+                    "body": "No labels key in fixture.",
+                    "created_at": "2024-06-15T10:00:00Z",
+                    "updated_at": "2024-06-18T14:30:00Z",
+                    "merged_at": null,
+                    "html_url": "https://github.com/test-owner/test-repo/pull/9",
+                    "url": "https://api.github.com/repos/test-owner/test-repo/pulls/9"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 9);
+        assert!(
+            prs[0].labels.is_empty(),
+            "Expected empty labels (omitted field), got: {:?}",
+            prs[0].labels
+        );
     }
 
     #[tokio::test]
@@ -729,7 +818,10 @@ mod gitlab_tests {
         assert_eq!(mrs[0].state, "opened");
         assert_eq!(mrs[0].author, "developer1");
         assert_eq!(mrs[0].labels, vec!["testing", "feature"]);
-        assert_eq!(mrs[0].body, Some("Implements feature X as described in #123.".to_string()));
+        assert_eq!(
+            mrs[0].body,
+            Some("Implements feature X as described in #123.".to_string())
+        );
     }
 
     #[tokio::test]
@@ -998,6 +1090,29 @@ mod gitea_tests {
         ])
     }
 
+    fn gitea_pull_requests_with_labels_fixture() -> serde_json::Value {
+        serde_json::json!([
+            {
+                "number": 11,
+                "title": "Labeled PR",
+                "state": "open",
+                "user": {"login": "developer2", "id": 601},
+                "draft": false,
+                "head": {"ref": "labeled-branch"},
+                "base": {"ref": "main"},
+                "labels": [
+                    {"name": "feature"},
+                    {"name": "good first issue"}
+                ],
+                "body": "PR with labels populated.",
+                "created_at": "2024-06-11T09:00:00Z",
+                "updated_at": "2024-06-15T15:00:00Z",
+                "merged_at": null,
+                "html_url": "https://gitea.example.com/test-owner/test-repo/pulls/11"
+            }
+        ])
+    }
+
     fn gitea_issues_fixture() -> serde_json::Value {
         serde_json::json!([
             {
@@ -1113,6 +1228,33 @@ mod gitea_tests {
         assert_eq!(prs[0].title, "Add new endpoint");
         assert!(prs[0].labels.is_empty());
         assert_eq!(prs[0].body, Some("Adds a new API endpoint.".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_pull_requests_with_labels() {
+        let (server, provider) = setup_gitea_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(gitea_pull_requests_with_labels_fixture()),
+            )
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0].number, 11);
+        assert_eq!(prs[0].title, "Labeled PR");
+        assert_eq!(
+            prs[0].labels,
+            vec!["feature".to_string(), "good first issue".to_string()],
+            "Expected labels to round-trip through PullRequestInfo"
+        );
     }
 
     #[tokio::test]
@@ -1523,6 +1665,42 @@ mod bitbucket_tests {
     }
 
     #[tokio::test]
+    async fn list_pull_requests_body_is_none() {
+        // Bitbucket Cloud's list-pull-requests endpoint does NOT include the
+        // PR description in the response. The provider therefore documents
+        // this limitation by always mapping `body` to `None` in the list
+        // response. Populating `body` would require a follow-up
+        // `GET /pullrequests/{id}` call per PR. This test pins that
+        // contract so a future schema change cannot silently regress it.
+        let (server, provider) = setup_bitbucket_mock().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/pullrequests.*",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(bitbucket_pull_requests_fixture()),
+            )
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-workspace", "test-repo", PullRequestState::Open)
+            .await
+            .unwrap();
+
+        assert_eq!(prs.len(), 1);
+        assert!(
+            prs[0].body.is_none(),
+            "Bitbucket list endpoint does not return PR descriptions; body must be None"
+        );
+        assert!(
+            prs[0].labels.is_empty(),
+            "Bitbucket Cloud's PR API does not expose labels"
+        );
+    }
+
+    #[tokio::test]
     async fn list_pull_requests_merged_filter() {
         let (server, provider) = setup_bitbucket_mock().await;
 
@@ -1823,6 +2001,398 @@ mod shorthand_tests {
             Err(_) => {
                 // Network errors, etc. — GitHub was still attempted
             }
+        }
+    }
+}
+
+// =============================================================================
+// Unauthenticated Fallback Tests
+// =============================================================================
+//
+// These tests verify the spec-mandated "Attempt Unauthenticated" strategy for
+// `list_pull_requests` across all four providers.
+//
+// Two scenarios per provider:
+//
+// 1. `<provider>_list_pull_requests_falls_back_to_unauthenticated_when_token_missing`
+//    - With NO credentials in the environment, the provider must NOT
+//      short-circuit to `MissingCredentials`. It must retry the request with
+//      an explicitly anonymous client and surface the (successful) result.
+//
+// 2. `<provider>_list_pull_requests_returns_*_credentials_when_anonymous_rejected`
+//    - With NO credentials in the environment, when the upstream API rejects
+//      the anonymous request with 401, the provider must surface a credentials
+//      error. GitHub maps 401 → `InvalidCredentials`; the others map 401 →
+//      `MissingCredentials`. (Per Phase 2 design notes.)
+//
+// All tests in this module use `#[serial_test::serial]` because they mutate
+// process-global env vars and would race with the existing tests in this
+// file that *set* credentials via `unsafe { std::env::set_var(...) }`.
+//
+// The `setup_*_mock_no_creds` helpers mirror the `setup_*_mock` helpers but
+// skip the env-var setting step. Tests must explicitly remove env vars
+// before constructing the provider so the schematic client cannot pick up
+// credentials from a leaked previous test.
+
+mod unauth_fallback_tests {
+    use super::*;
+    use serial_test::serial;
+
+    // -----------------------------------------------------------------------
+    // GitHub
+    // -----------------------------------------------------------------------
+
+    async fn setup_github_mock_no_creds() -> (MockServer, GitHubRemote) {
+        let server = MockServer::start().await;
+        // Build the provider WITHOUT setting any credential env vars. Tests
+        // are responsible for removing them before calling this.
+        let provider = GitHubRemote::with_base_url(&server.uri()).unwrap();
+        (server, provider)
+    }
+
+    fn remove_github_env_vars() {
+        // SAFETY: serialized via `#[serial]`; only this test mutates env.
+        unsafe {
+            std::env::remove_var("GITHUB_TOKEN");
+            std::env::remove_var("GH_TOKEN");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn github_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
+        remove_github_env_vars();
+        let (server, provider) = setup_github_mock_no_creds().await;
+
+        // Mock returns 200 with a minimal PR fixture; no Authorization
+        // header matcher, so both authenticated and anonymous requests match.
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 42,
+                    "title": "Anonymous PR",
+                    "state": "open",
+                    "user": {"login": "anon", "id": 1},
+                    "draft": false,
+                    "head": {"ref": "branch", "sha": "abc"},
+                    "base": {"ref": "main", "sha": "def"},
+                    "labels": [],
+                    "body": null,
+                    "created_at": "2024-06-15T10:00:00Z",
+                    "updated_at": "2024-06-18T14:30:00Z",
+                    "merged_at": null,
+                    "html_url": "https://github.com/test-owner/test-repo/pull/42",
+                    "url": "https://api.github.com/repos/test-owner/test-repo/pulls/42"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await
+            .expect("anonymous fallback should succeed when remote returns 200");
+
+        assert!(
+            !prs.is_empty(),
+            "Expected at least one PR after anonymous retry"
+        );
+        assert_eq!(prs[0].number, 42);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn github_list_pull_requests_returns_invalid_credentials_when_anonymous_rejected() {
+        remove_github_env_vars();
+        let (server, provider) = setup_github_mock_no_creds().await;
+
+        // Mock returns 401 — the anonymous retry must fail and the provider
+        // must surface a credentials error. GitHub maps 401 → InvalidCredentials.
+        Mock::given(method("GET"))
+            .and(path_regex(r"/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Bad credentials"))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await;
+
+        match result {
+            Err(SniffError::InvalidCredentials { provider, .. }) => {
+                assert_eq!(provider, "GitHub");
+            }
+            other => panic!(
+                "Expected InvalidCredentials error from GitHub, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Gitea
+    // -----------------------------------------------------------------------
+
+    async fn setup_gitea_mock_no_creds() -> (MockServer, GiteaRemote) {
+        let server = MockServer::start().await;
+        let provider = GiteaRemote::with_base_url(&server.uri()).unwrap();
+        (server, provider)
+    }
+
+    fn remove_gitea_env_vars() {
+        // SAFETY: serialized via `#[serial]`; only this test mutates env.
+        unsafe {
+            std::env::remove_var("GITEA_TOKEN");
+            std::env::remove_var("CODEBERG_TOKEN");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn gitea_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
+        remove_gitea_env_vars();
+        let (server, provider) = setup_gitea_mock_no_creds().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "number": 8,
+                    "title": "Anonymous Gitea PR",
+                    "state": "open",
+                    "user": {"login": "anon", "id": 1},
+                    "draft": false,
+                    "head": {"ref": "branch"},
+                    "base": {"ref": "main"},
+                    "labels": [],
+                    "body": "Body",
+                    "created_at": "2024-06-10T09:00:00Z",
+                    "updated_at": "2024-06-14T15:00:00Z",
+                    "merged_at": null,
+                    "html_url": "https://gitea.example.com/test-owner/test-repo/pulls/8"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await
+            .expect("anonymous fallback should succeed when Gitea returns 200");
+
+        assert!(
+            !prs.is_empty(),
+            "Expected at least one PR after anonymous retry"
+        );
+        assert_eq!(prs[0].number, 8);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn gitea_list_pull_requests_returns_missing_credentials_when_anonymous_rejected() {
+        remove_gitea_env_vars();
+        let (server, provider) = setup_gitea_mock_no_creds().await;
+
+        // Gitea maps 401 → MissingCredentials.
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/pulls.*"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await;
+
+        match result {
+            Err(SniffError::MissingCredentials { provider, .. }) => {
+                assert_eq!(provider, "Gitea");
+            }
+            other => panic!(
+                "Expected MissingCredentials error from Gitea, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // GitLab
+    // -----------------------------------------------------------------------
+
+    async fn setup_gitlab_mock_no_creds() -> (MockServer, GitLabRemote) {
+        let server = MockServer::start().await;
+        let provider = GitLabRemote::with_base_url(&server.uri()).unwrap();
+        (server, provider)
+    }
+
+    fn remove_gitlab_env_vars() {
+        // SAFETY: serialized via `#[serial]`; only this test mutates env.
+        unsafe {
+            std::env::remove_var("GITLAB_TOKEN");
+            std::env::remove_var("GITLAB_PRIVATE_TOKEN");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn gitlab_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
+        remove_gitlab_env_vars();
+        let (server, provider) = setup_gitlab_mock_no_creds().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v4/projects/.*/merge_requests.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                {
+                    "id": 1000,
+                    "iid": 15,
+                    "project_id": 5000,
+                    "title": "Anonymous MR",
+                    "state": "opened",
+                    "author": {"username": "anon", "id": 1},
+                    "draft": false,
+                    "work_in_progress": false,
+                    "source_branch": "feature",
+                    "target_branch": "main",
+                    "labels": [],
+                    "description": "Body",
+                    "created_at": "2024-06-10T08:00:00Z",
+                    "updated_at": "2024-06-15T12:00:00Z",
+                    "merged_at": null,
+                    "web_url": "https://gitlab.com/test-owner/test-repo/-/merge_requests/15"
+                }
+            ])))
+            .mount(&server)
+            .await;
+
+        let mrs = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await
+            .expect("anonymous fallback should succeed when GitLab returns 200");
+
+        assert!(
+            !mrs.is_empty(),
+            "Expected at least one MR after anonymous retry"
+        );
+        assert_eq!(mrs[0].number, 15);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn gitlab_list_pull_requests_returns_missing_credentials_when_anonymous_rejected() {
+        remove_gitlab_env_vars();
+        let (server, provider) = setup_gitlab_mock_no_creds().await;
+
+        // GitLab maps 401 → MissingCredentials.
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v4/projects/.*/merge_requests.*"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("401 Unauthorized"))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .list_pull_requests("test-owner", "test-repo", PullRequestState::Open)
+            .await;
+
+        match result {
+            Err(SniffError::MissingCredentials { provider, .. }) => {
+                assert_eq!(provider, "GitLab");
+            }
+            other => panic!(
+                "Expected MissingCredentials error from GitLab, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Bitbucket
+    // -----------------------------------------------------------------------
+
+    async fn setup_bitbucket_mock_no_creds() -> (MockServer, BitbucketRemote) {
+        let server = MockServer::start().await;
+        let provider = BitbucketRemote::with_base_url(&server.uri()).unwrap();
+        (server, provider)
+    }
+
+    fn remove_bitbucket_env_vars() {
+        // SAFETY: serialized via `#[serial]`; only this test mutates env.
+        unsafe {
+            std::env::remove_var("BITBUCKET_USERNAME");
+            std::env::remove_var("BITBUCKET_APP_PASSWORD");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn bitbucket_list_pull_requests_falls_back_to_unauthenticated_when_token_missing() {
+        remove_bitbucket_env_vars();
+        let (server, provider) = setup_bitbucket_mock_no_creds().await;
+
+        Mock::given(method("GET"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/pullrequests.*",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "values": [
+                    {
+                        "id": 100,
+                        "title": "Anonymous Bitbucket PR",
+                        "state": "OPEN",
+                        "author": {"type": "user", "display_name": "Anon"},
+                        "source": {"branch": {"name": "feature"}},
+                        "destination": {"branch": {"name": "main"}},
+                        "created_on": "2024-06-12T14:00:00Z",
+                        "updated_on": "2024-06-16T09:00:00Z",
+                        "links": {"html": {"href": "https://bitbucket.org/test-workspace/test-repo/pull-requests/100"}}
+                    }
+                ],
+                "size": 1,
+                "pagelen": 10,
+                "page": 1
+            })))
+            .mount(&server)
+            .await;
+
+        let prs = provider
+            .list_pull_requests("test-workspace", "test-repo", PullRequestState::Open)
+            .await
+            .expect("anonymous fallback should succeed when Bitbucket returns 200");
+
+        assert!(
+            !prs.is_empty(),
+            "Expected at least one PR after anonymous retry"
+        );
+        assert_eq!(prs[0].number, 100);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn bitbucket_list_pull_requests_returns_missing_credentials_when_anonymous_rejected() {
+        remove_bitbucket_env_vars();
+        let (server, provider) = setup_bitbucket_mock_no_creds().await;
+
+        // Bitbucket maps 401 → MissingCredentials.
+        Mock::given(method("GET"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/pullrequests.*",
+            ))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
+            .mount(&server)
+            .await;
+
+        let result = provider
+            .list_pull_requests("test-workspace", "test-repo", PullRequestState::Open)
+            .await;
+
+        match result {
+            Err(SniffError::MissingCredentials { provider, .. }) => {
+                assert_eq!(provider, "Bitbucket");
+            }
+            other => panic!(
+                "Expected MissingCredentials error from Bitbucket, got: {:?}",
+                other
+            ),
         }
     }
 }

@@ -12,6 +12,7 @@
 
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::gitlab::*;
 use schematic_schema::shared::SchematicError;
 
@@ -99,6 +100,30 @@ impl Default for GitLabRemote {
     }
 }
 
+impl GitLabRemote {
+    /// Build a GitLab API client variant that performs no authentication.
+    ///
+    /// The client is constructed by overriding both the env-fallback list
+    /// (so no credentials can be picked up from `GITLAB_TOKEN`,
+    /// `GITLAB_PRIVATE_TOKEN`, etc.) **and** the auth strategy itself (so
+    /// the schematic runtime does not pre-flight-reject the request for
+    /// missing credentials). The combination produces a truly anonymous
+    /// client whose request passes through to the wire and is judged by
+    /// the API alone.
+    ///
+    /// This supports the "attempt unauthenticated" fallback: when an
+    /// authenticated request fails because no credentials are configured,
+    /// we retry once with this anonymous client before surfacing a
+    /// `MissingCredentials` error to the user.
+    fn unauthenticated_client(&self) -> GitLab {
+        self.client
+            .variant()
+            .env_auth(Vec::new())
+            .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
+            .build()
+    }
+}
+
 /// Encode a project path for GitLab API.
 ///
 /// GitLab requires project paths to be URL-encoded in API requests.
@@ -111,15 +136,32 @@ fn encode_project_id(owner: &str, repo: &str) -> String {
 /// Map a [`SchematicError`] to a [`SniffError`].
 ///
 /// Handles special cases:
-/// - 401 -> `MissingCredentials`
+/// - `MissingCredential` / `AuthenticationRequired` -> `MissingCredentials`
+/// - 401 -> `MissingCredentials` (anonymous request rejected)
 /// - 403 with rate limit info -> `RateLimited`
 /// - 404 -> `RemoteApi` with "Not found"
 /// - Other HTTP errors -> `RemoteApi`
+///
+/// ## Notes
+///
+/// `MissingCredentials` is only emitted *after* the anonymous retry has
+/// failed (see [`GitLabRemote::unauthenticated_client`]) or when the API
+/// explicitly demands credentials for a private resource (a real 401
+/// response). Call sites that want the "attempt unauthenticated"
+/// behaviour must wrap the initial request in a
+/// `MissingCredential`/`AuthenticationRequired` retry rather than mapping
+/// the first failure directly through this function.
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
         SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
             provider: "GitLab".to_string(),
             env_var: env_vars.join(" or "),
+        },
+        SchematicError::AuthenticationRequired {
+            env_fallback_vars, ..
+        } => SniffError::MissingCredentials {
+            provider: "GitLab".to_string(),
+            env_var: env_fallback_vars.join(" or "),
         },
         SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
             provider: "GitLab".to_string(),
@@ -366,11 +408,20 @@ impl RemoteRepoProvider for GitLabRemote {
             }
         }
 
-        let mrs: Vec<MergeRequest> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        // Attempt the request with the configured client first. If it fails
+        // because no credentials are available, retry once with an explicitly
+        // unauthenticated client. Only after the anonymous retry also fails
+        // (or on a real 401/403) do we surface a credentials error.
+        let mrs: Vec<MergeRequest> = match self.client.request(request.clone()).await {
+            Ok(mrs) => mrs,
+            Err(SchematicError::MissingCredential { .. })
+            | Err(SchematicError::AuthenticationRequired { .. }) => self
+                .unauthenticated_client()
+                .request(request)
+                .await
+                .map_err(map_schematic_error)?,
+            Err(err) => return Err(map_schematic_error(err)),
+        };
 
         let mut mrs: Vec<PullRequestInfo> = mrs
             .into_iter()

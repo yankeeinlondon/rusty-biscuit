@@ -832,7 +832,7 @@ pub enum RepoSubcommand {
     },
     /// List pull requests for the current repository's remote
     Pr {
-        /// Filter pull requests by state
+        /// Filter pull requests by state (note: 'draft' returns no results on Bitbucket — drafts are not a Bitbucket Cloud feature)
         #[arg(long, default_value = "open")]
         status: sniff::remote::PullRequestState,
     },
