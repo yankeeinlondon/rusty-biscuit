@@ -23,10 +23,16 @@ mod gemini;
 mod goose;
 mod identity;
 mod kimi;
+mod known_gap;
 mod opencode;
+mod output_format;
+mod path_template;
 mod qwen;
+mod reasoning;
 mod registry;
 mod roo;
+mod system_prompt;
+mod yolo;
 
 #[cfg(test)]
 mod tests;
@@ -35,7 +41,15 @@ pub use behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderB
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable};
 pub use identity::{Provider, PROVIDERS_DISPLAY_ORDER};
+pub use known_gap::{KnownGap, KnownGapArea};
+pub use output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+pub use path_template::{GlobKind, PathContext, PathSegment, PathTemplate};
+pub use reasoning::{ReasoningCustomTag, ReasoningSupport};
 pub use registry::{all_providers, provider_info};
+pub use system_prompt::{
+    SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+};
+pub use yolo::YoloSupport;
 
 use serde::Serialize;
 use sniff::programs::AiCli;
@@ -147,6 +161,54 @@ pub struct ProviderInfo {
     /// provider module so the linking facade can forward to it.
     #[serde(skip)]
     pub resource_support_fn: fn() -> &'static ProviderCapabilities,
+
+    // -- Phase 5: typed catalog data ----------------------------------------
+    //
+    // These fields are additive for Phase 5 of the centralized providers
+    // refactor. They live alongside the legacy `Vec<&'static str>` fields
+    // on `RuntimeCapabilities` (kept through Phase 8) and are skipped
+    // during serialization so the existing `claudine providers --describe
+    // --format json` payload is unchanged.
+    /// Templates for per-session log files (e.g. JSONL transcripts).
+    #[serde(skip)]
+    pub session_log_paths: &'static [PathTemplate],
+
+    /// Templates for ancillary session-state directories.
+    #[serde(skip)]
+    pub session_locations: &'static [PathTemplate],
+
+    /// Templates for user / project / local config files.
+    #[serde(skip)]
+    pub config_paths: &'static [PathTemplate],
+
+    /// Templates for memory / instruction files contributing to the
+    /// system prompt hierarchy.
+    #[serde(skip)]
+    pub memory_files: &'static [PathTemplate],
+
+    /// Output formats supported in non-interactive mode.
+    #[serde(skip)]
+    pub output_formats: &'static [OutputFormatSupport],
+
+    /// Available non-interactive (and selected interactive) entrypoints.
+    #[serde(skip)]
+    pub entrypoints: &'static [EntrypointSpec],
+
+    /// Typed system-prompt delivery descriptor.
+    #[serde(skip)]
+    pub system_prompt: &'static SystemPromptSpec,
+
+    /// Typed YOLO / auto-approve descriptor.
+    #[serde(skip)]
+    pub yolo: YoloSupport,
+
+    /// Typed reasoning / extended-thinking descriptor.
+    #[serde(skip)]
+    pub reasoning: ReasoningSupport,
+
+    /// Known gaps in provider capability data, classified by area.
+    #[serde(skip)]
+    pub known_gaps: &'static [KnownGap],
 }
 
 impl ProviderInfo {
