@@ -1,9 +1,15 @@
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sniff::programs::AiCli;
 use std::fmt;
 
 use super::AgenticEvent;
+
+// Canonical Provider enum and PROVIDERS_DISPLAY_ORDER moved to
+// `crate::provider` in Phase 1 of the centralized providers refactor.
+// This module retains an un-deprecated re-export so existing internal
+// callers compile without churn; Phase 8 will mark the re-export as
+// `#[deprecated]` after consumer migration is complete.
+pub use crate::provider::{Provider, PROVIDERS_DISPLAY_ORDER};
 
 /// Level of event support for a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,41 +43,6 @@ impl EventSupportLevel {
         matches!(self, EventSupportLevel::Hook)
     }
 }
-
-/// Supported agentic CLI providers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum Provider {
-    /// Claude Code (Anthropic).
-    Claude,
-    /// Codex CLI (OpenAI).
-    Codex,
-    /// Gemini CLI (Google).
-    Gemini,
-    /// Goose (Block).
-    Goose,
-    /// Kimi Code CLI (Moonshot AI).
-    KimiCode,
-    /// OpenCode.
-    OpenCode,
-    /// Qwen Code CLI (Alibaba).
-    QwenCode,
-    /// Roo Code.
-    RooCode,
-}
-
-/// Providers in canonical display order for matrix-style reporting.
-pub const PROVIDERS_DISPLAY_ORDER: [Provider; 8] = [
-    Provider::Claude,
-    Provider::Codex,
-    Provider::Gemini,
-    Provider::Goose,
-    Provider::KimiCode,
-    Provider::OpenCode,
-    Provider::QwenCode,
-    Provider::RooCode,
-];
 
 /// Shared provider-native event mappings used by both configurators and adapters.
 ///
