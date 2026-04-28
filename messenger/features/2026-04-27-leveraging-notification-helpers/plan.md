@@ -33,6 +33,17 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+  - messenger/lib/src/provider/desktop/helpers/mod.rs
+  - messenger/lib/src/provider/desktop/helpers/election.rs
+  - messenger/lib/src/provider/desktop/helpers/terminal_notifier.rs
+  - messenger/lib/src/provider/desktop/helpers/alerter.rs
+  - messenger/lib/src/provider/desktop/macos.rs
+  - messenger/lib/src/provider/desktop/mod.rs
+  - messenger/cli/src/main.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
 packages:
   - sniff
   - sniff-cli
