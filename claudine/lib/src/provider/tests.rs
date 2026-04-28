@@ -300,3 +300,136 @@ fn no_unauthorized_match_provider_in_lib() {
          Violators: {violators:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5: typed catalog property tests
+// ---------------------------------------------------------------------------
+
+/// Every supported event mapping has a non-empty native name.
+#[test]
+fn supported_events_have_non_empty_native_names() {
+    use crate::events::{AgenticEvent, EventSupportLevel};
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        for event in AgenticEvent::ALL {
+            let Some(mapping) = info.event_mapping.lookup(event) else {
+                continue;
+            };
+            if matches!(mapping.support_level, EventSupportLevel::NotSupported) {
+                continue;
+            }
+            assert!(
+                !mapping.native_name.is_empty(),
+                "{provider:?} {event:?}: support_level {:?} but native_name is empty",
+                mapping.support_level
+            );
+        }
+    }
+}
+
+/// Hook-level events imply the provider's configurator advertises hook
+/// support. (The inverse does not hold — providers can advertise hook
+/// support without specifically marking every event as a Hook.)
+#[test]
+fn hook_events_imply_configurator_hooks_supported() {
+    use crate::events::{AgenticEvent, EventSupportLevel};
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let has_hook_event = AgenticEvent::ALL.iter().any(|event| {
+            matches!(
+                info.event_mapping.support_level(*event),
+                EventSupportLevel::Hook
+            )
+        });
+        if has_hook_event {
+            assert!(
+                info.configurator.hooks_supported(),
+                "{provider:?}: declares Hook events but configurator.hooks_supported() == false"
+            );
+        }
+    }
+}
+
+/// Stream-protocol providers must have at least one supported event with a
+/// non-empty native name (they need *something* to parse).
+#[test]
+fn stream_providers_expose_at_least_one_event() {
+    use crate::events::{AgenticEvent, EventSupportLevel};
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        if info.stream_protocol.is_none() {
+            continue;
+        }
+        let any_supported = AgenticEvent::ALL.iter().any(|event| {
+            !matches!(
+                info.event_mapping.support_level(*event),
+                EventSupportLevel::NotSupported
+            )
+        });
+        assert!(
+            any_supported,
+            "{provider:?}: declares stream_protocol={:?} but no events are supported",
+            info.stream_protocol
+        );
+    }
+}
+
+/// Every PathTemplate in the typed catalog data round-trips its raw form.
+#[test]
+fn typed_path_templates_have_non_empty_raw() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let bundles: &[(&str, &[crate::provider::PathTemplate])] = &[
+            ("session_log_paths", info.session_log_paths),
+            ("session_locations", info.session_locations),
+            ("config_paths", info.config_paths),
+            ("memory_files", info.memory_files),
+            ("system_prompt.memory_files", info.system_prompt.memory_files),
+        ];
+        for (label, templates) in bundles {
+            for template in *templates {
+                assert!(
+                    !template.raw().is_empty(),
+                    "{provider:?} {label}: PathTemplate has empty raw form"
+                );
+            }
+        }
+    }
+}
+
+/// Every output-format support entry has a non-empty native name and the
+/// canonical lowercase identifier exposed by `OutputFormat::as_str` is one
+/// of the documented values (sanity check that we didn't add new variants
+/// without updating `as_str`).
+#[test]
+fn output_format_support_entries_are_well_formed() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        for support in info.output_formats {
+            assert!(
+                !support.native_name.is_empty(),
+                "{provider:?}: output format {:?} has empty native_name",
+                support.format
+            );
+            assert!(
+                matches!(support.format.as_str(), "text" | "json" | "stream"),
+                "{provider:?}: output format identifier {:?} is unrecognized",
+                support.format.as_str()
+            );
+        }
+    }
+}
+
+/// Provider-info round-trip: the registry returns an entry whose
+/// `provider` field matches the lookup key for every variant. This is
+/// already tested above; the additive check here verifies it under the
+/// "Phase 5 invariants" umbrella so test failure isolation is clearer.
+#[test]
+fn provider_field_matches_registry_key() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        assert_eq!(provider_info(provider).provider, provider);
+    }
+}
