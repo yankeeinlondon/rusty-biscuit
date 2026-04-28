@@ -29,7 +29,7 @@
 // unused. Suppress the dead-code lint there so unfinished platforms stay
 // CI-clean without per-item annotations.
 #![cfg_attr(
-    not(any(target_os = "linux", target_os = "macos")),
+    not(any(target_os = "linux", target_os = "macos", target_os = "windows")),
     allow(dead_code)
 )]
 
@@ -46,11 +46,16 @@ pub(crate) mod alerter;
 #[cfg(target_os = "macos")]
 pub(crate) mod terminal_notifier;
 
+#[cfg(target_os = "windows")]
+pub(crate) mod burnttoast;
+#[cfg(target_os = "windows")]
+pub(crate) mod snoretoast;
+
 use async_trait::async_trait;
 
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) use election::{HelperAttempt, elect_helpers};
 
 /// Public identifier for a notification helper.

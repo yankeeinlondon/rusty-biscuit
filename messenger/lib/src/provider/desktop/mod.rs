@@ -91,6 +91,12 @@ pub struct WindowsDesktopConfig {
     /// `messenger setup desktop`; unset sends on Windows must fail with
     /// [`MessengerError::MissingConfiguration`].
     pub app_id: Option<String>,
+    /// Caller-supplied helper preference order.
+    ///
+    /// Helpers named here win score ties during election. Names that do
+    /// not apply on Windows (e.g. `dunstify`) are silently ignored. Empty
+    /// means "use the library default order".
+    pub prefer_helpers: Vec<helpers::HelperName>,
 }
 
 /// macOS-specific desktop configuration.
