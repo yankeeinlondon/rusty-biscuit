@@ -96,7 +96,7 @@ implement-plan filter="":
     fi
     echo
     while true; do
-        claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} total_phases=${total} memory="${memory}" --${agent} -y ${model} || (
+        claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} total_phases=${total} memory="${memory}" --${agent} -y ${model} -v || (
             echo
             echo -e "{{red}}{{bold}}ERROR:{{reset}} the implementation of the plan {{blue}}$(just _link "${plan}") was unable to complete phase {{yellow}}${current}{{reset}}" || echo "failed at phase ${current}"
             md set "${plan}" "start_phase" ${current} || true
@@ -105,22 +105,8 @@ implement-plan filter="":
         )
         just _message "Phase ${current} (_of ${total}_) of the plan '${plan}' was implemented"
         echo
-        git add . || (
-            echo -e "- phase ${current} of the ${plan} plan appears to have had no changes to the $(sniff repo package-area) package area"
-            echo -e "- that might be ok and because we're in a long running process we will continue"
-            echo -e "- below you'll find the current git status:"
-            sniff repo git-status --compact || true
-            just _play_background two-tone
-        ) && just commit || (
-            echo
-            echo -e "- During phase {{yellow}}${current}{{reset}} of the ${plan} plan there was a failure running {{green}}just commit{{reset}}."
-            echo -e "- because this is a long running process we will continue with the plan."
-            echo -e "- below is the current git status:"
-            sniff repo git-status --compact || true
-            echo
-            just _play two-tone
-            just _speak "During phase ${current} of a plan implementation in the $(sniff repo package-area) package area there was a problem committing files but we will continue with the plan's implementation and commit during the next phase."
-        )
+        git add . || true
+        just commit || true
         echo
         [[ ${current} -ge ${phases} ]] && break
         ((current++))
