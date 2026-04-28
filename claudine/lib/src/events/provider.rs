@@ -11,6 +11,8 @@ use super::AgenticEvent;
 // `#[deprecated]` after consumer migration is complete.
 pub use crate::provider::{Provider, PROVIDERS_DISPLAY_ORDER};
 
+use crate::provider::provider_info;
+
 /// Level of event support for a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventSupportLevel {
@@ -44,214 +46,11 @@ impl EventSupportLevel {
     }
 }
 
-/// Shared provider-native event mappings used by both configurators and adapters.
-///
-/// This is the canonical source for event-name mappings that appear in both:
-/// - `config/*` registration logic (`AgenticEvent -> native_name`)
-/// - `adapters/*` parse logic (`native_name -> AgenticEvent`)
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SharedNativeEventMapping {
-    pub(crate) event: AgenticEvent,
-    pub(crate) native_name: &'static str,
-    pub(crate) parse_aliases: &'static [&'static str],
-}
-
-const CLAUDE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
-    SharedNativeEventMapping {
-        event: AgenticEvent::SessionStart,
-        native_name: "SessionStart",
-        parse_aliases: &["SessionStart"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::SessionEnd,
-        native_name: "SessionEnd",
-        parse_aliases: &["SessionEnd"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforePrompt,
-        native_name: "UserPromptSubmit",
-        parse_aliases: &["UserPromptSubmit"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeTool,
-        native_name: "PreToolUse",
-        parse_aliases: &["PreToolUse"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::AfterTool,
-        native_name: "PostToolUse",
-        parse_aliases: &["PostToolUse"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::ToolError,
-        native_name: "PostToolUseFailure",
-        parse_aliases: &["PostToolUseFailure"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::PermissionRequest,
-        native_name: "PermissionRequest",
-        parse_aliases: &["PermissionRequest"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::TurnComplete,
-        native_name: "Stop",
-        parse_aliases: &["Stop", "TeammateIdle", "TaskCompleted"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::SubagentStart,
-        native_name: "SubagentStart",
-        parse_aliases: &["SubagentStart"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::SubagentStop,
-        native_name: "SubagentStop",
-        parse_aliases: &["SubagentStop"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeCompact,
-        native_name: "PreCompact",
-        parse_aliases: &["PreCompact"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::Notification,
-        native_name: "Notification",
-        parse_aliases: &["Notification"],
-    },
-];
-
-const GEMINI_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
-    SharedNativeEventMapping {
-        event: AgenticEvent::SessionStart,
-        native_name: "SessionStart",
-        parse_aliases: &["SessionStart"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::SessionEnd,
-        native_name: "SessionEnd",
-        parse_aliases: &["SessionEnd"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforePrompt,
-        native_name: "BeforeAgent",
-        parse_aliases: &["BeforeAgent"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::TurnComplete,
-        native_name: "AfterAgent",
-        parse_aliases: &["AfterAgent"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeModel,
-        native_name: "BeforeModel",
-        parse_aliases: &["BeforeModel", "BeforeToolSelection"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::AfterModel,
-        native_name: "AfterModel",
-        parse_aliases: &["AfterModel"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeTool,
-        native_name: "BeforeTool",
-        parse_aliases: &["BeforeTool"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::AfterTool,
-        native_name: "AfterTool",
-        parse_aliases: &["AfterTool"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeCompact,
-        native_name: "PreCompress",
-        parse_aliases: &["PreCompress"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::Notification,
-        native_name: "Notification",
-        parse_aliases: &["Notification"],
-    },
-];
-
-const OPENCODE_SHARED_NATIVE_MAPPINGS: &[SharedNativeEventMapping] = &[
-    SharedNativeEventMapping {
-        event: AgenticEvent::SessionStart,
-        native_name: "session.created",
-        parse_aliases: &["session.created"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::SessionEnd,
-        native_name: "session.deleted",
-        parse_aliases: &["session.deleted"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforePrompt,
-        native_name: "chat.message",
-        parse_aliases: &["chat.message"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeTool,
-        native_name: "tool.execute.before",
-        parse_aliases: &["tool.execute.before"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::AfterTool,
-        native_name: "tool.execute.after",
-        parse_aliases: &["tool.execute.after"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeModel,
-        native_name: "chat.params",
-        parse_aliases: &[
-            "chat.params",
-            "chat.headers",
-            "experimental.chat.system.transform",
-            "experimental.chat.messages.transform",
-        ],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::AfterModel,
-        native_name: "message.updated",
-        parse_aliases: &[
-            "message.updated",
-            "message.part.updated",
-            "experimental.text.complete",
-        ],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::TurnComplete,
-        native_name: "session.idle",
-        parse_aliases: &["session.idle"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::TurnError,
-        native_name: "session.error",
-        parse_aliases: &["session.error"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::BeforeCompact,
-        native_name: "session.compacted",
-        parse_aliases: &[
-            "session.compacted",
-            "session.compacting",
-            "experimental.session.compacting",
-        ],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::PermissionRequest,
-        native_name: "permission.ask",
-        parse_aliases: &["permission.ask"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::HumanInTheLoop,
-        native_name: "permission.asked",
-        parse_aliases: &["permission.asked"],
-    },
-    SharedNativeEventMapping {
-        event: AgenticEvent::Notification,
-        native_name: "tui.toast.show",
-        parse_aliases: &["tui.toast.show", "event"],
-    },
-];
+// Phase 3 of the centralized providers refactor moved per-provider event
+// mapping data into [`crate::provider::EventMappingTable`] tables owned by
+// each provider's `ProviderInfo` constant. The legacy
+// `SharedNativeEventMapping` constants and shape lived here previously and
+// are no longer the source of truth.
 
 impl Provider {
     /// Returns common CLI aliases accepted for this provider.
@@ -398,12 +197,10 @@ impl Provider {
             // Both Claude and Gemini use `hook_event_name`, but with different
             // native event names. If the value resolves to a Gemini event but
             // NOT a Claude event, it's Gemini.
-            let is_gemini = Provider::Gemini
-                .event_from_shared_native_name(name)
-                .is_some()
-                && Provider::Claude
-                    .event_from_shared_native_name(name)
-                    .is_none();
+            let gemini_table = provider_info(Provider::Gemini).event_mapping;
+            let claude_table = provider_info(Provider::Claude).event_mapping;
+            let is_gemini = gemini_table.event_from_native_name(name).is_some()
+                && claude_table.event_from_native_name(name).is_none();
             return Some(if is_gemini {
                 Provider::Gemini
             } else {
@@ -496,44 +293,30 @@ impl Provider {
         }
     }
 
-    /// Shared native mappings for providers that currently deduplicate
-    /// configurator registration and adapter parsing through one source.
-    pub(crate) fn shared_native_mappings(&self) -> &'static [SharedNativeEventMapping] {
-        match self {
-            Provider::Claude => CLAUDE_SHARED_NATIVE_MAPPINGS,
-            Provider::Gemini => GEMINI_SHARED_NATIVE_MAPPINGS,
-            Provider::OpenCode => OPENCODE_SHARED_NATIVE_MAPPINGS,
-            _ => &[],
-        }
-    }
-
     /// Returns the native name used by configurators for hook registration.
+    ///
+    /// Forwards to the provider's [`EventMappingTable`](crate::provider::EventMappingTable).
     pub(crate) fn registration_native_event_name(
         &self,
         event: &AgenticEvent,
     ) -> Option<&'static str> {
-        self.shared_native_mappings()
-            .iter()
-            .find(|entry| entry.event == *event)
-            .map(|entry| entry.native_name)
+        provider_info(*self)
+            .event_mapping
+            .registration_native_name(*event)
     }
 
     /// Maps a provider-native event name back to a canonical `AgenticEvent`.
+    ///
+    /// Forwards to the provider's [`EventMappingTable`](crate::provider::EventMappingTable).
     pub(crate) fn event_from_shared_native_name(&self, native_name: &str) -> Option<AgenticEvent> {
-        self.shared_native_mappings().iter().find_map(|entry| {
-            if entry
-                .parse_aliases
-                .iter()
-                .any(|alias| alias.eq_ignore_ascii_case(native_name))
-            {
-                Some(entry.event)
-            } else {
-                None
-            }
-        })
+        provider_info(*self)
+            .event_mapping
+            .event_from_native_name(native_name)
     }
 
     /// Returns the level of support for the given event.
+    ///
+    /// Forwards to the provider's [`EventMappingTable`](crate::provider::EventMappingTable).
     ///
     /// ## Support Levels
     ///
@@ -553,71 +336,7 @@ impl Provider {
     /// | Kimi Code  | -                          | Wire mode JSON-RPC proxy     |
     /// | Qwen Code  | -                          | stream-json parsing          |
     pub fn event_support_level(&self, event: &super::AgenticEvent) -> EventSupportLevel {
-        use super::AgenticEvent::*;
-        use EventSupportLevel::*;
-
-        match self {
-            // Claude: All supported events use native hooks
-            // HumanInTheLoop captured via PreToolUse hook with AskUserQuestion tool matcher
-            Provider::Claude => match event {
-                BeforeModel | AfterModel | TurnError => NotSupported,
-                _ => Hook,
-            },
-
-            // Gemini: All supported events use native hooks
-            // No native support for HumanInTheLoop
-            Provider::Gemini => match event {
-                ToolError | PermissionRequest | TurnError | SubagentStart | SubagentStop
-                | HumanInTheLoop => NotSupported,
-                _ => Hook,
-            },
-
-            // OpenCode: All supported events use plugin hooks
-            // HumanInTheLoop via permission.asked hook
-            Provider::OpenCode => match event {
-                ToolError | SubagentStart | SubagentStop => NotSupported,
-                _ => Hook,
-            },
-
-            // Codex: Only turn_complete via notify config, rest via JSONL stream
-            // HumanInTheLoop via tool/requestUserInput in JSONL stream
-            Provider::Codex => match event {
-                TurnComplete => Hook,
-                SessionEnd | PermissionRequest | SubagentStart | SubagentStop | BeforeModel
-                | BeforeCompact => NotSupported,
-                _ => NonHook, // SessionStart, BeforePrompt, BeforeTool, AfterTool, ToolError, TurnError, AfterModel, Notification, HumanInTheLoop
-            },
-
-            // Goose: All events via stream-json/env var (no config hooks)
-            // HumanInTheLoop via request_permission in ACP stream
-            Provider::Goose => match event {
-                SessionStart | SessionEnd | BeforePrompt | BeforeTool | AfterTool | ToolError
-                | PermissionRequest | BeforeModel | BeforeCompact => NotSupported,
-                _ => NonHook, // TurnComplete, TurnError, AfterModel, Notification, SubagentStart, SubagentStop, HumanInTheLoop
-            },
-
-            // Kimi Code: All events via wire mode JSON-RPC (requires proxy)
-            // HumanInTheLoop via ApprovalRequest in wire mode
-            Provider::KimiCode => match event {
-                SessionStart | SessionEnd | BeforeModel => NotSupported,
-                _ => NonHook, // All other events via wire mode, including HumanInTheLoop
-            },
-
-            // Qwen Code: Limited events via stream-json output
-            // No native support for HumanInTheLoop
-            Provider::QwenCode => match event {
-                TurnComplete | TurnError | AfterModel | Notification | PermissionRequest => NonHook,
-                _ => NotSupported, // Including HumanInTheLoop
-            },
-
-            // Roo Code: rich event emitter + stream-json, all observational.
-            Provider::RooCode => match event {
-                SessionStart | SessionEnd | BeforeTool | AfterTool | ToolError | HumanInTheLoop
-                | TurnComplete | TurnError | SubagentStart | SubagentStop | BeforeModel
-                | AfterModel | Notification => NonHook,
-                BeforePrompt | PermissionRequest | BeforeCompact => NotSupported,
-            },
-        }
+        provider_info(*self).event_mapping.support_level(*event)
     }
 
     /// Returns whether this provider supports the given event (via any method).
@@ -641,166 +360,12 @@ impl Provider {
 
     /// Returns the native event name used by this provider for the given event.
     ///
+    /// Forwards to the provider's [`EventMappingTable`](crate::provider::EventMappingTable).
+    ///
     /// Returns `None` if the provider doesn't support the event.
     /// Returns `Some("")` (empty string) if supported but no specific native name.
     pub fn native_event_name(&self, event: &super::AgenticEvent) -> Option<&'static str> {
-        use super::AgenticEvent::*;
-
-        if !self.supports_event(event) {
-            return None;
-        }
-
-        if let Some(name) = self.registration_native_event_name(event) {
-            return Some(name);
-        }
-
-        Some(match self {
-            Provider::Claude => match event {
-                SessionStart => "PreToolUse",
-                SessionEnd => "",
-                BeforePrompt => "PreToolUse",
-                BeforeTool => "PreToolUse",
-                AfterTool => "PostToolUse",
-                ToolError => "PostToolUse",
-                PermissionRequest => "PreToolUse",
-                HumanInTheLoop => "PreToolUse", // AskUserQuestion tool
-                TurnComplete => "Stop",
-                TurnError => "",
-                SubagentStart => "PreToolUse",
-                SubagentStop => "PostToolUse",
-                BeforeModel => "",
-                AfterModel => "",
-                BeforeCompact => "",
-                Notification => "Notification",
-            },
-            Provider::Codex => match event {
-                SessionStart => "thread.started",
-                SessionEnd => "",
-                BeforePrompt => "turn.started",
-                BeforeTool => "item.started",
-                AfterTool => "item.completed",
-                ToolError => "error",
-                PermissionRequest => "",
-                HumanInTheLoop => "tool/requestUserInput",
-                TurnComplete => "turn.completed",
-                TurnError => "turn.failed",
-                SubagentStart => "",
-                SubagentStop => "",
-                BeforeModel => "",
-                AfterModel => "agent_message",
-                BeforeCompact => "",
-                Notification => "reasoning",
-            },
-            Provider::Gemini => match event {
-                SessionStart => "SessionStart",
-                SessionEnd => "SessionEnd",
-                BeforePrompt => "BeforeAgent",
-                BeforeTool => "BeforeTool",
-                AfterTool => "AfterTool",
-                ToolError => "",
-                PermissionRequest => "",
-                HumanInTheLoop => "",
-                TurnComplete => "AfterAgent",
-                TurnError => "",
-                SubagentStart => "",
-                SubagentStop => "",
-                BeforeModel => "BeforeModel",
-                AfterModel => "AfterModel",
-                BeforeCompact => "PreCompress",
-                Notification => "Notification",
-            },
-            Provider::Goose => match event {
-                SessionStart => "",
-                SessionEnd => "",
-                BeforePrompt => "",
-                BeforeTool => "",
-                AfterTool => "",
-                ToolError => "",
-                PermissionRequest => "",
-                HumanInTheLoop => "request_permission",
-                TurnComplete => "complete",
-                TurnError => "error",
-                SubagentStart => "subagent_tool_request",
-                SubagentStop => "tasks_complete",
-                BeforeModel => "",
-                AfterModel => "message",
-                BeforeCompact => "",
-                Notification => "notification",
-            },
-            Provider::KimiCode => match event {
-                SessionStart => "",
-                SessionEnd => "",
-                BeforePrompt => "TurnBegin",
-                BeforeTool => "ToolCall",
-                AfterTool => "ToolResult",
-                ToolError => "ToolResult",
-                PermissionRequest => "ApprovalRequest",
-                HumanInTheLoop => "ApprovalRequest",
-                TurnComplete => "TurnEnd",
-                TurnError => "prompt.status",
-                SubagentStart => "SubagentEvent",
-                SubagentStop => "SubagentEvent",
-                BeforeModel => "",
-                AfterModel => "ContentPart",
-                BeforeCompact => "CompactionBegin",
-                Notification => "StatusUpdate",
-            },
-            Provider::OpenCode => match event {
-                SessionStart => "session.created",
-                SessionEnd => "session.deleted",
-                BeforePrompt => "chat.message",
-                BeforeTool => "tool.execute.before",
-                AfterTool => "tool.execute.after",
-                ToolError => "",
-                PermissionRequest => "permission.ask",
-                HumanInTheLoop => "permission.asked",
-                TurnComplete => "session.idle",
-                TurnError => "session.error",
-                SubagentStart => "",
-                SubagentStop => "",
-                BeforeModel => "chat.params",
-                AfterModel => "message.part.updated",
-                BeforeCompact => "session.compacting",
-                Notification => "event",
-            },
-            Provider::QwenCode => match event {
-                // Stream-json events (headless mode)
-                SessionStart => "",
-                SessionEnd => "",
-                BeforePrompt => "",
-                BeforeTool => "",
-                AfterTool => "",
-                ToolError => "",
-                PermissionRequest => "CanUseTool",
-                HumanInTheLoop => "",
-                TurnComplete => "result",
-                TurnError => "result",
-                SubagentStart => "",
-                SubagentStop => "",
-                BeforeModel => "",
-                AfterModel => "assistant",
-                BeforeCompact => "",
-                Notification => "system",
-            },
-            Provider::RooCode => match event {
-                SessionStart => "TaskCreated",
-                SessionEnd => "TaskAborted",
-                BeforePrompt => "",
-                BeforeTool => "ToolUseOutput",
-                AfterTool => "ToolResultOutput",
-                ToolError => "TaskToolFailed",
-                PermissionRequest => "",
-                HumanInTheLoop => "WaitingForInput",
-                TurnComplete => "TaskCompleted",
-                TurnError => "Error",
-                SubagentStart => "TaskSpawned",
-                SubagentStop => "TaskDelegationCompleted",
-                BeforeModel => "StreamingStarted",
-                AfterModel => "StreamingEnded",
-                BeforeCompact => "",
-                Notification => "ModeChanged",
-            },
-        })
+        provider_info(*self).event_mapping.native_name(*event)
     }
 
     /// Returns the agent offset directory name for this provider.

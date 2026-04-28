@@ -242,15 +242,19 @@ mod tests {
 
     #[test]
     fn shared_native_mappings_are_hook_supported() {
+        use crate::provider::provider_info;
+
         for provider in [Provider::Claude, Provider::Gemini, Provider::OpenCode] {
-            for mapping in provider.shared_native_mappings() {
+            for mapping in provider_info(provider).event_mapping.registration_targets() {
                 assert!(
                     provider.supports_event_via_hook(&mapping.event),
                     "shared mapping marks {provider}/{:?} but provider is not hook-supported",
                     mapping.event
                 );
                 assert_eq!(
-                    provider.registration_native_event_name(&mapping.event),
+                    provider_info(provider)
+                        .event_mapping
+                        .registration_native_name(mapping.event),
                     Some(mapping.native_name),
                     "shared registration mapping mismatch for {provider}/{:?}",
                     mapping.event
@@ -261,10 +265,12 @@ mod tests {
 
     #[test]
     fn adapters_conform_to_shared_native_mappings() {
+        use crate::provider::provider_info;
+
         for provider in [Provider::Claude, Provider::Gemini, Provider::OpenCode] {
             let adapter = adapter_for(provider);
 
-            for mapping in provider.shared_native_mappings() {
+            for mapping in provider_info(provider).event_mapping.registration_targets() {
                 for alias in mapping.parse_aliases {
                     let raw = raw_for_native(provider, alias);
                     let (event, _) = adapter.parse_event(&raw).unwrap_or_else(|err| {
