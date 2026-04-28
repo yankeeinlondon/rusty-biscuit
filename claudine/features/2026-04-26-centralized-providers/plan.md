@@ -148,6 +148,23 @@ source_files_during_phase_6:
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+    - claudine/lib/src/provider/acp.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/claude.rs
+    - claudine/lib/src/provider/codex.rs
+    - claudine/lib/src/provider/gemini.rs
+    - claudine/lib/src/provider/goose.rs
+    - claudine/lib/src/provider/kimi.rs
+    - claudine/lib/src/provider/opencode.rs
+    - claudine/lib/src/provider/qwen.rs
+    - claudine/lib/src/provider/roo.rs
+    - claudine/lib/src/provider/tests.rs
+    - claudine/lib/src/events/provider.rs
+    - claudine/cli/src/commands/hooks.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
 packages:
     - claudine
     - claudine-cli
