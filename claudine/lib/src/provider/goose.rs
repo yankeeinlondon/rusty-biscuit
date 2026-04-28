@@ -13,6 +13,7 @@ use super::output_format::{
     EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
 use super::path_template::PathTemplate;
+use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
@@ -103,6 +104,11 @@ pub(super) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     },
     reasoning: ReasoningSupport::ProviderSpecific(ReasoningCustomTag::GooseDelegated),
     known_gaps: GOOSE_KNOWN_GAPS,
+    prompt_arg_conventions: PromptArgConventions {
+        prompt_flags: &["-t", "--text"],
+        entrypoint: Some("run"),
+        value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+    },
 };
 
 const GOOSE_SESSION_LOG_PATHS: &[PathTemplate] =

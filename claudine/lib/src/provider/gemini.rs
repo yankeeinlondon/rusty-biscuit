@@ -16,6 +16,7 @@ use super::output_format::{
     EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
 use super::path_template::PathTemplate;
+use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use super::yolo::YoloSupport;
@@ -165,6 +166,11 @@ pub(super) static GEMINI_INFO: ProviderInfo = ProviderInfo {
         default: None,
     },
     known_gaps: GEMINI_KNOWN_GAPS,
+    prompt_arg_conventions: PromptArgConventions {
+        prompt_flags: &["-p", "--prompt"],
+        entrypoint: None,
+        value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+    },
 };
 
 const GEMINI_SESSION_LOG_PATHS: &[PathTemplate] =

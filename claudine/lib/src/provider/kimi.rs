@@ -15,6 +15,7 @@ use super::output_format::{
     EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
 use super::path_template::PathTemplate;
+use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
@@ -119,6 +120,11 @@ pub(super) static KIMI_INFO: ProviderInfo = ProviderInfo {
         off: "--no-thinking",
     },
     known_gaps: KIMI_KNOWN_GAPS,
+    prompt_arg_conventions: PromptArgConventions {
+        prompt_flags: &["--prompt"],
+        entrypoint: None,
+        value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+    },
 };
 
 const KIMI_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(

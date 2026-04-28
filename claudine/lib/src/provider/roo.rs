@@ -12,6 +12,7 @@ use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::output_format::{EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
+use super::prompt_args::PromptArgConventions;
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use super::yolo::YoloSupport;
@@ -133,6 +134,7 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     yolo: YoloSupport::None,
     reasoning: ReasoningSupport::ProviderSpecific(ReasoningCustomTag::RooModeBased),
     known_gaps: ROO_KNOWN_GAPS,
+    prompt_arg_conventions: PromptArgConventions::positional_only(),
 };
 
 const ROO_SESSION_LOG_PATHS: &[PathTemplate] = &[];

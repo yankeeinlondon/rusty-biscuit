@@ -16,6 +16,7 @@ use super::output_format::{
     EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
 use super::path_template::PathTemplate;
+use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use super::yolo::YoloSupport;
@@ -160,6 +161,7 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         levels: &["low", "medium", "high"],
     },
     known_gaps: CLAUDE_KNOWN_GAPS,
+    prompt_arg_conventions: PromptArgConventions::positional_only(),
 };
 
 const CLAUDE_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(

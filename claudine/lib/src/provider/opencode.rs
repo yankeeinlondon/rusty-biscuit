@@ -14,6 +14,7 @@ use super::identity::Provider;
 use super::known_gap::{KnownGap, KnownGapArea};
 use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormatSupport};
 use super::path_template::PathTemplate;
+use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use super::yolo::YoloSupport;
@@ -158,6 +159,7 @@ pub(super) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     },
     reasoning: ReasoningSupport::NotDocumented,
     known_gaps: OPENCODE_KNOWN_GAPS,
+    prompt_arg_conventions: PromptArgConventions::positional_after("run"),
 };
 
 const OPENCODE_SESSION_LOG_PATHS: &[PathTemplate] = &[];

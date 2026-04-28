@@ -27,6 +27,7 @@ mod known_gap;
 mod opencode;
 mod output_format;
 mod path_template;
+mod prompt_args;
 mod qwen;
 mod reasoning;
 mod registry;
@@ -44,6 +45,7 @@ pub use identity::{Provider, PROVIDERS_DISPLAY_ORDER};
 pub use known_gap::{KnownGap, KnownGapArea};
 pub use output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 pub use path_template::{GlobKind, PathContext, PathSegment, PathTemplate};
+pub use prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 pub use reasoning::{ReasoningCustomTag, ReasoningSupport};
 pub use registry::{all_providers, provider_info};
 pub use system_prompt::{
@@ -209,6 +211,13 @@ pub struct ProviderInfo {
     /// Known gaps in provider capability data, classified by area.
     #[serde(skip)]
     pub known_gaps: &'static [KnownGap],
+
+    /// Argv conventions describing how this provider's native CLI
+    /// represents a prompt (prompt-carrying flags, optional entrypoint
+    /// subcommand, and additional value-taking flags). Consumed by the
+    /// CLI wrapper's prompt-extraction helpers.
+    #[serde(skip)]
+    pub prompt_arg_conventions: PromptArgConventions,
 }
 
 impl ProviderInfo {

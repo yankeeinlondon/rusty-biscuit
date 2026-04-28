@@ -16,6 +16,7 @@ use super::output_format::{
     EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
 use super::path_template::PathTemplate;
+use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
@@ -165,6 +166,7 @@ pub(super) static CODEX_INFO: ProviderInfo = ProviderInfo {
         levels: &["minimal", "low", "medium", "high", "xhigh"],
     },
     known_gaps: CODEX_KNOWN_GAPS,
+    prompt_arg_conventions: PromptArgConventions::positional_after("exec"),
 };
 
 const CODEX_SESSION_LOG_PATHS: &[PathTemplate] = &[
