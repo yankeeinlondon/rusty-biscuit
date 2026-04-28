@@ -55,7 +55,7 @@ pub use crate::github::{
 pub use crate::gitea::{
     AnnotatedTagObject as GiteaAnnotatedTagObject, GitRef as GiteaGitRef,
     GitTreeResponse as GiteaGitTreeResponse, IssueSummary as GiteaIssueSummary,
-    PullRequestSummary as GiteaPullRequestSummary, Release as GiteaRelease,
+    Label as GiteaLabel, PullRequestSummary as GiteaPullRequestSummary, Release as GiteaRelease,
     RepoTag as GiteaRepoTag, RepositoryInfo as GiteaRepositoryInfo,
 };
 
