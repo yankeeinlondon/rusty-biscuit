@@ -1880,26 +1880,12 @@ fn materialize_passthrough_harness_seed(
     })
 }
 
-fn provider_agent_id(provider: Provider) -> Option<claudine::agents::AgentId> {
-    match provider {
-        Provider::Claude => Some(claudine::agents::AgentId::ClaudeCode),
-        Provider::Codex => Some(claudine::agents::AgentId::Codex),
-        Provider::Gemini => Some(claudine::agents::AgentId::GeminiCli),
-        Provider::Goose => Some(claudine::agents::AgentId::Goose),
-        Provider::KimiCode => Some(claudine::agents::AgentId::KimiCode),
-        Provider::OpenCode => Some(claudine::agents::AgentId::OpenCode),
-        Provider::QwenCode => Some(claudine::agents::AgentId::QwenCli),
-        Provider::RooCode => Some(claudine::agents::AgentId::RooCode),
-        _ => None,
-    }
-}
-
 fn find_wrapper_harness_source(
     provider: Provider,
     repo_root: Option<&Path>,
     cwd: &Path,
 ) -> Option<PathBuf> {
-    let agent = claudine::agents::agent_for(provider_agent_id(provider)?);
+    let agent = claudine::agents::agent_for(provider);
     let search_root = repo_root.unwrap_or(cwd);
 
     agent
