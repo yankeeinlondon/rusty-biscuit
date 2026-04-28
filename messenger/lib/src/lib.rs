@@ -35,7 +35,7 @@ pub use provider::desktop::{
 #[cfg(feature = "fcm")]
 pub use provider::fcm::{FcmConfig, FcmProvider};
 pub use provider::{Messenger, Provider, SendPlan};
-pub use receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
+pub use receipt::{Activation, DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
 #[cfg(feature = "apns")]
 pub use target::ApnsTarget;
 #[cfg(feature = "desktop")]

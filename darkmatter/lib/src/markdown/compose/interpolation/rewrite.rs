@@ -1,23 +1,26 @@
 //! Shared string rewrite helper for interpolation.
 //!
 //! Provides `interpolate_text`, which scans a string for `{{ }}` expressions,
-//! evaluates them against an [`InterpolationLookup`] implementation, and
+//! evaluates them against an [`EvaluationLookup`] implementation, and
 //! returns the rewritten string. Supports both markdown-aware scanning
 //! (skipping code regions) and plain-text scanning.
 
-use super::{
-    EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, InterpolationLookup, parse,
-};
+use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
+use crate::markdown::compose::expression::EvaluationLookup;
 use crate::markdown::compose::types::ComposeWarning;
 use crate::markdown::types::MarkdownError;
 
 /// Controls how `interpolate_text` scans for `{{ }}` expressions.
 pub(crate) enum ScanMode {
-    /// Skip expressions inside code spans and fenced code blocks.
-    /// Used by body interpolation.
+    /// Skip expressions inside fenced and indented code blocks.
+    ///
+    /// Inline code spans (single backticks) are still scanned —
+    /// the common templating pattern `` `var_{{ phase }}` `` is supported
+    /// by default. Used by body interpolation.
     MarkdownAware,
     /// Scan the entire string with no exclusions.
-    /// Used by frontmatter interpolation.
+    /// Used by frontmatter interpolation, and by body interpolation when
+    /// `interpolate_code_blocks` is enabled.
     Plain,
 }
 
@@ -41,7 +44,7 @@ pub(crate) struct InterpolationRewrite {
 /// - `scan_mode` — whether to respect code regions or scan everything
 /// - `fail_fast` — if `true`, return an error on the first parse/eval failure
 /// - `warning_stage` — label attached to any warnings produced
-pub(crate) fn interpolate_text<L: InterpolationLookup>(
+pub(crate) fn interpolate_text<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
     scan_mode: ScanMode,
@@ -154,7 +157,9 @@ mod tests {
     }
 
     #[test]
-    fn markdown_aware_skips_code_spans() {
+    fn markdown_aware_scans_inline_code_spans() {
+        // Inline code spans are scanned in MarkdownAware mode — only
+        // fenced/indented code blocks are skipped.
         let state = make_state(json!({"name": "Alice"}));
         let evaluator = Evaluator::new(&state);
         let result = interpolate_text(
@@ -165,8 +170,20 @@ mod tests {
             "test",
         )
         .unwrap();
-        assert_eq!(result.output, "`{{ name }}`");
-        assert_eq!(result.replacements, 0);
+        assert_eq!(result.output, "`Alice`");
+        assert_eq!(result.replacements, 1);
+    }
+
+    #[test]
+    fn markdown_aware_skips_fenced_code_blocks() {
+        let state = make_state(json!({"name": "Alice"}));
+        let evaluator = Evaluator::new(&state);
+        let input = "before {{ name }}\n\n```\n{{ name }}\n```\nafter";
+        let result =
+            interpolate_text(input, &evaluator, ScanMode::MarkdownAware, false, "test").unwrap();
+        assert!(result.output.contains("before Alice"));
+        assert!(result.output.contains("```\n{{ name }}\n```"));
+        assert_eq!(result.replacements, 1);
     }
 
     #[test]

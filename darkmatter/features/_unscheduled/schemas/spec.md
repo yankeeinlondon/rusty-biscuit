@@ -54,7 +54,7 @@ To illustrate this here are some example definitions:
 
 ```yaml
 some_number: number
-postive_int: "number(min(0), integer)"
+positive_int: "number(min(0), integer)"
 ```
 
 #### Strings

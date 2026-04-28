@@ -27,7 +27,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter::markdown::compose::interpolation::{parse, Expr};
+//! use darkmatter::markdown::compose::expression::{parse, Expr};
 //!
 //! // Simple variable
 //! let expr = parse("foo").unwrap();
@@ -370,7 +370,7 @@ impl<'a> Parser<'a> {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::interpolation::{parse, Expr};
+/// use darkmatter::markdown::compose::expression::{parse, Expr};
 ///
 /// let expr = parse("foo || \"default\"").unwrap();
 /// assert!(matches!(expr, Expr::Fallback { .. }));
@@ -393,7 +393,7 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::interpolation::{parse_condition, Expr};
+/// use darkmatter::markdown::compose::expression::{parse_condition, Expr};
 ///
 /// let expr = parse_condition("a && b").unwrap();
 /// match expr {
@@ -903,17 +903,31 @@ mod tests {
         #[test]
         fn error_bare_pipe_in_interpolation() {
             let result = parse(r#"foo | "default""#);
-            assert!(result.is_err(), "bare '|' should be rejected in interpolation mode");
+            assert!(
+                result.is_err(),
+                "bare '|' should be rejected in interpolation mode"
+            );
             let err = result.unwrap_err();
-            assert!(err.message.contains("Unexpected '|'"), "error should mention '|', got: {}", err.message);
+            assert!(
+                err.message.contains("Unexpected '|'"),
+                "error should mention '|', got: {}",
+                err.message
+            );
         }
 
         #[test]
         fn error_bare_pipe_in_condition() {
             let result = parse_condition("a | b");
-            assert!(result.is_err(), "bare '|' should be rejected in condition mode");
+            assert!(
+                result.is_err(),
+                "bare '|' should be rejected in condition mode"
+            );
             let err = result.unwrap_err();
-            assert!(err.message.contains("Unexpected '|'"), "error should mention '|', got: {}", err.message);
+            assert!(
+                err.message.contains("Unexpected '|'"),
+                "error should mention '|', got: {}",
+                err.message
+            );
         }
 
         #[test]

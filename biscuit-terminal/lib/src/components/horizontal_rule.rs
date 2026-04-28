@@ -3,7 +3,7 @@ use std::io::Cursor;
 
 use crate::components::renderable::{BrowserRenderable, Renderable};
 use crate::components::terminal_image::TerminalImage;
-use crate::discovery::detection::{ColorDepth, ImageSupport};
+use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
 use crate::utils::color::{BasicColor, RgbColor, TermColor};
 use crate::utils::layout::{Layout, Margin};
@@ -382,7 +382,11 @@ impl HorizontalRule {
         let pixel_width = (rule_width as u32).saturating_mul(cell_width).max(1);
         let pixel_height = height_cells * cell_height;
 
-        let svg = self.render_image_svg(pixel_width, pixel_height);
+        let default_color = match Terminal::color_mode() {
+            ColorMode::Light => "black",
+            ColorMode::Dark | ColorMode::Unknown => "white",
+        };
+        let svg = self.render_image_svg(pixel_width, pixel_height, default_color);
         self.render_image_tier_from_svg(term, &svg, rule_width, height_cells)
     }
 
@@ -435,13 +439,13 @@ impl HorizontalRule {
         ))
     }
 
-    fn render_image_svg(&self, pixel_width: u32, pixel_height: u32) -> String {
+    fn render_image_svg(&self, pixel_width: u32, pixel_height: u32, default_color: &str) -> String {
         let stroke_width = match self.weight {
             RuleWeight::Thin => 2,
             RuleWeight::Medium => 4,
             RuleWeight::Thick => 8,
         };
-        let color = self.color.as_deref().unwrap_or("currentColor");
+        let color = self.color.as_deref().unwrap_or(default_color);
         let y = pixel_height as f32 / 2.0;
         let width = pixel_width as f32;
 
@@ -1204,6 +1208,34 @@ mod tests {
 
         let result = hr.render(&term);
         assert!(result.contains("\x1b_G"), "{result:?}");
+    }
+
+    #[test]
+    fn test_image_tier_svg_uses_visible_default_color() {
+        // When no explicit color is set, the image-tier SVG must not use
+        // `currentColor` — resvg resolves it to black, making the rule
+        // invisible on dark terminal backgrounds.
+        let hr = HorizontalRule::new().style(RuleStyle::Dashes);
+        let svg = hr.render_image_svg(100, 32, "white");
+        assert!(
+            !svg.contains("currentColor"),
+            "SVG should not use currentColor: {svg}"
+        );
+        assert!(svg.contains("white"), "SVG should use a visible default color: {svg}");
+    }
+
+    #[test]
+    fn test_image_tier_svg_respects_explicit_color() {
+        let hr = HorizontalRule::new().style(RuleStyle::Dashes).color("red");
+        let svg = hr.render_image_svg(100, 32, "white");
+        assert!(
+            svg.contains("red"),
+            "SVG should use the explicitly set color: {svg}"
+        );
+        assert!(
+            !svg.contains("white"),
+            "SVG should not use the default when color is explicit: {svg}"
+        );
     }
 
     #[test]

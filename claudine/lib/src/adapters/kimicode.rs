@@ -1,3 +1,21 @@
+//! Kimi Code adapter for the legacy stdin-fed hook surface (`claudine
+//! handle`). Kimi's `--wire` JSON-RPC mode has its own dispatch path
+//! ([`crate::dispatch`] called from the CLI's `wire_io` module) that
+//! resolves canonical events through `wire_io::map_kimi_hook_event`. The
+//! two paths share the canonical [`AgenticEvent`] surface but stay
+//! independent because:
+//!
+//! - This adapter parses Kimi *event* names (`TurnBegin`, `ToolCall`,
+//!   `ToolResult`, …) emitted by Kimi's hook system on stdin.
+//! - The wire-mode dispatch parses Kimi *hook* event names
+//!   (`PreToolUse`, `PostToolUse`, `Stop`, …) carried inside a wire
+//!   `HookRequest` envelope's `payload.event` field.
+//!
+//! The canonical event names overlap deliberately so a Kimi hook payload
+//! routed through either entry point reaches the same dispatch
+//! pipeline. See `wire_io::map_kimi_hook_event` for the wire-mode
+//! mapping.
+
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
@@ -95,6 +113,7 @@ impl ProviderAdapter for KimiCodeAdapter {
 
 fn map_event(event_name: &str, raw: &Value) -> Result<AgenticEvent, AdapterError> {
     match event_name {
+        // Kimi wire/stream event names.
         "TurnBegin" => Ok(AgenticEvent::BeforePrompt),
         "TurnEnd" => Ok(AgenticEvent::TurnComplete),
         "StepBegin" => Ok(AgenticEvent::Notification),
@@ -126,6 +145,20 @@ fn map_event(event_name: &str, raw: &Value) -> Result<AgenticEvent, AdapterError
                 _ => Ok(AgenticEvent::SubagentStart),
             }
         }
+        // Kimi hook event names — payloads delivered through
+        // `claudine handle` from the legacy hook surface use the same
+        // names that wire mode's `HookRequest.payload.event` carries.
+        // Mapping them here keeps the two transport paths aligned on a
+        // single canonical event surface.
+        "PreToolUse" => Ok(AgenticEvent::BeforeTool),
+        "PostToolUse" => Ok(AgenticEvent::AfterTool),
+        "UserPromptSubmit" => Ok(AgenticEvent::BeforePrompt),
+        "Stop" => Ok(AgenticEvent::TurnComplete),
+        "SessionStart" => Ok(AgenticEvent::SessionStart),
+        "SessionEnd" => Ok(AgenticEvent::SessionEnd),
+        "Notification" => Ok(AgenticEvent::Notification),
+        "SubagentStart" => Ok(AgenticEvent::SubagentStart),
+        "SubagentStop" => Ok(AgenticEvent::SubagentStop),
         other => Err(AdapterError::UnknownEvent(other.to_string())),
     }
 }
@@ -293,5 +326,33 @@ mod tests {
             .format_response(&AgenticEvent::PermissionRequest, &response)
             .unwrap();
         assert_eq!(body["decision"], "approve");
+    }
+
+    #[test]
+    fn hook_event_names_resolve_to_canonical_events() {
+        // Phase 5 contract: Kimi hook event names (carried inside wire
+        // `HookRequest.payload.event` and on the legacy stdin hook
+        // surface) must resolve to the same canonical [`AgenticEvent`]
+        // variants the wire-mode dispatch path uses. Keeps both
+        // transports aligned so dispatch policy doesn't depend on which
+        // entry point the hook came through.
+        let adapter = KimiCodeAdapter;
+        for (name, expected) in [
+            ("PreToolUse", AgenticEvent::BeforeTool),
+            ("PostToolUse", AgenticEvent::AfterTool),
+            ("UserPromptSubmit", AgenticEvent::BeforePrompt),
+            ("Stop", AgenticEvent::TurnComplete),
+            ("SessionStart", AgenticEvent::SessionStart),
+            ("SessionEnd", AgenticEvent::SessionEnd),
+            ("Notification", AgenticEvent::Notification),
+            ("SubagentStart", AgenticEvent::SubagentStart),
+            ("SubagentStop", AgenticEvent::SubagentStop),
+        ] {
+            let raw = json!({ "event_name": name });
+            let (event, _) = adapter.parse_event(&raw).unwrap_or_else(|err| {
+                panic!("expected {name} to map to a canonical event, got {err:?}")
+            });
+            assert_eq!(event, expected, "{name} should map to {expected:?}");
+        }
     }
 }

@@ -51,7 +51,7 @@ pub(crate) enum ContextGroup {
 
 impl ContextGroup {
     /// All available groups.
-    pub(crate) fn all() -> HashSet<ContextGroup> {
+    pub(crate) fn all() -> [ContextGroup; 8] {
         [
             Self::DateTime,
             Self::Repo,
@@ -62,12 +62,10 @@ impl ContextGroup {
             Self::Hardware,
             Self::Gpu,
         ]
-        .into_iter()
-        .collect()
     }
 
     /// Map a ctx variable name to its owning group.
-    fn for_key(key: &str) -> Option<ContextGroup> {
+    pub(crate) fn for_key(key: &str) -> Option<ContextGroup> {
         match key {
             // DateTime
             "now"
@@ -244,7 +242,7 @@ impl ContextCapture {
     /// Uses `GitRepo` for atomic queries. `GitRepo::discover` is the only
     /// sequential step (cheap — just finds `.git`). All other probes run
     /// in parallel via `std::thread::scope`.
-    fn new(base_dir: &Path, groups: &HashSet<ContextGroup>) -> Self {
+    fn new(base_dir: &Path, groups: &[ContextGroup]) -> Self {
         let mut diagnostics = Vec::new();
         let mut timings = Vec::new();
 
@@ -558,17 +556,17 @@ pub(crate) fn capture_runtime_context(base_dir: &Path) -> CaptureResult {
 /// groups. If no `ctx.*` references are found, only populates datetime
 /// (which is purely local computation with no I/O).
 pub(crate) fn capture_runtime_context_for_content(base_dir: &Path, content: &str) -> CaptureResult {
-    let groups = scan_needed_groups(content);
+    let mut groups = scan_needed_groups(content);
     // DateTime is always included (zero-cost local computation)
-    let mut groups = groups;
     groups.insert(ContextGroup::DateTime);
-    capture_runtime_context_for_groups(base_dir, &groups)
+    let groups_vec: Vec<ContextGroup> = groups.into_iter().collect();
+    capture_runtime_context_for_groups(base_dir, &groups_vec)
 }
 
 /// Capture runtime context for the specified groups only.
-fn capture_runtime_context_for_groups(
+pub(crate) fn capture_runtime_context_for_groups(
     base_dir: &Path,
-    groups: &HashSet<ContextGroup>,
+    groups: &[ContextGroup],
 ) -> CaptureResult {
     let cap = ContextCapture::new(base_dir, groups);
     let mut values = Map::new();

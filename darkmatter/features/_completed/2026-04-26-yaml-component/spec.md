@@ -34,7 +34,7 @@ impl YamlBlock {
 - **The parsed `serde_yaml_ng::Value` is not retained.** `YamlBlock` stores the raw YAML text; parsing exists only for validation. This keeps the type small and avoids leaking `serde_yaml_ng::Value` into the public API.
 - **Markdown extraction is frontmatter-only.** `from_markdown_content` and `from_markdown_file` reuse the existing frontmatter parser at `darkmatter/lib/src/markdown/frontmatter.rs`. They do **not** scan the markdown body for fenced ` ```yaml ` blocks.
 - **Missing or empty frontmatter ⇒ empty mapping.** A markdown document with no frontmatter produces a valid `YamlBlock` whose payload is `{}`. (This replaces the previous spec's ambiguous "if there's no markdown then YAML is an empty object" line.)
-- **Malformed frontmatter ⇒ `YamlBlockError::YamlParse`** when the frontmatter block is present but is not valid YAML.
+- **Malformed frontmatter ⇒ `YamlBlockError::MarkdownParse`** (wrapping `MarkdownError::FrontmatterParse`). This preserves the rich diagnostics surfaced by `Markdown::try_from_content`. See tech-design §"Error Type" for the rationale. Note: `YamlBlockError::YamlParse` is still surfaced for `new`, `from_yaml_file`, and any re-serialization validation failures inside `from_markdown_content` / `from_markdown_file`.
 
 ## Rendering
 
@@ -77,7 +77,7 @@ A future opt-in tree view (e.g. `.with_view(YamlView::Tree)`) could be added lat
 
 ## Acceptance Criteria
 
-1. `YamlBlock::new("foo: 1")` returns `Ok(YamlBlock)`; `YamlBlock::new("foo: : :")` returns `Err(YamlBlockError::YamlParse(_))`.
+1. `YamlBlock::new("foo: 1")` returns `Ok(YamlBlock)`; `YamlBlock::new("foo: : :")` returns `Err(YamlBlockError::YamlParse(_))`. A markdown document with a malformed frontmatter block (e.g. `"---\nfoo: : :\n---\n"`) returned from `YamlBlock::from_markdown_content` returns `Err(YamlBlockError::MarkdownParse(_))` (the rich error from `Markdown::try_from_content`), not `YamlParse`.
 2. `YamlBlock::from_yaml_file(path)` on a missing path returns `Err(YamlBlockError::Io(_))`; on a malformed YAML file returns `Err(YamlBlockError::YamlParse(_))`.
 3. `YamlBlock::from_markdown_content("# hello\n")` (no frontmatter) returns `Ok(YamlBlock)` whose rendered payload is the empty mapping `{}`.
 4. `YamlBlock::from_markdown_content("---\nfoo: 1\n---\nbody\n")` returns `Ok(YamlBlock)` containing the frontmatter YAML only; the body is ignored.

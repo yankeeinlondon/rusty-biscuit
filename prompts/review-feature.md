@@ -6,10 +6,10 @@ start:
     message: "🏃‍♂️ starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
-    message: "✅ feature review {{iteration}} in the **{{ctx.current_package_area}}** package area has completed:\nSpecification: '{{dir}}/{{spec}}\nDesign: {{dir}}/{{design}}\n\nThe review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
+    message: "✅ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
 failure:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
-    message: "❌ feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
+    message: "❌ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area failed to complete!"
 ---
 
 We have just completed a feature defined in "{{area}}/{{dir}}":
@@ -46,7 +46,8 @@ Read both the specification document and then perform a review on the implementa
 
 - Save your review suggestions to "{{area}}/{{dir}}/review-{{iteration}}.md"
 - based on your review suggestions indicate whether you think this feature is ready for production by setting the `ready` frontmatter property on "{{area}}/{{dir}}/review-{{iteration}}.md"
-- save the `agent` frontmatter property as "${env.AGENT}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
+- save the `agent` frontmatter property as "{{env.AGENT}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
+- save the `model` frontmatter property as "{{env.MODEL}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
 
 **IMPORTANT:**
 

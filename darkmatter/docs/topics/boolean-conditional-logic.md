@@ -1,17 +1,26 @@
 # Boolean Conditional Logic
 
-Darkmatter relies on boolean logic expressions in various parts of Darkmatter:
+Darkmatter uses boolean expressions to conditionally include or exclude content.
+The primary mechanism is the `when="..."` attribute, which appears on:
 
-- the `when="..."` clause of [page blocks](../inline/page-blocks.md), [transclusion](../transclusion/block-transclusion.md), and in all other directives which provide a _conditional_ feature.
-- beyond directives with a `when` parameter, we can also use 
-
-uses a shared condition evaluator for `when="..."` expressions. That evaluator powers:
-
-- page blocks via `::block when="..."`
-- block transclusion via `::file`, `::code`, and `::url` directives with `when="..."`
+- [page blocks](../inline/page-blocks.md) (`::block when="..."`)
+- [transclusion directives](../transclusion/block-transclusion.md) (`::file`, `::code`, `::url`)
 - reference-graph conditional extraction
 
-This means page blocks, transclusion directives, and reference-graph traversal all support the same condition syntax, the same functions, and the same truthiness rules.
+All three surfaces use the same shared condition evaluator, so the syntax,
+truthiness rules, and helper functions are identical everywhere.
+
+## Core Expression Engine
+
+The underlying parser, AST, and evaluator live in the [`expression`](../../lib/src/markdown/compose/expression/mod.rs) module and are public API. Both condition evaluation and `{{ ... }}` interpolation share this core engine:
+
+- **`expression::Expr`** — the AST type for parsed expressions
+- **`expression::Lexer`** — tokenizes expression strings
+- **`expression::Parser`** — builds an `Expr` from tokens
+- **`expression::evaluate`** — evaluates an `Expr` against any [`EvaluationLookup`](#evaluationlookup-trait) implementation
+- **`expression::parse_condition`** — parses a string in condition mode (`||` is logical OR, `&&` is logical AND)
+
+This unification means the same operators, functions, and truthiness rules apply everywhere.
 
 ## Where Conditions Read Values From
 
@@ -398,6 +407,111 @@ Use these instead:
 - `!(a > b)` or `b >= a`
 - keep `&&` / `||` in `when="..."` conditions
 - write `&&` for logical AND in conditions
+
+## Programmatic Evaluation
+
+Darkmatter exposes the condition evaluator as a Rust API so external tools and tests can evaluate boolean expressions without running the full compose pipeline.
+
+### `evaluate_condition_against`
+
+Use [`evaluate_condition_against`](../../lib/src/markdown/compose/conditions.rs) when you have plain JSON data and want a simple boolean result:
+
+```rust
+use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+use serde_json::json;
+use std::path::Path;
+
+let data = json!({ "draft": true, "audience": "internal" });
+let result = evaluate_condition_against(
+    "draft && audience == 'internal'",
+    &data,
+    Path::new("."),
+).unwrap();
+assert!(result);
+```
+
+This shortcut resolves variables in the same order as the compose pipeline:
+
+1. **Top-level and nested paths** against the provided `data`.
+2. **`env.*` paths** against the system environment.
+3. **`ctx.*` paths** via lazy runtime context capture.
+4. **Unprefixed missing keys** fall back to `ctx.*` (same behavior as `EffectiveState`).
+
+Because it takes `&serde_json::Value` and `&Path`, you can use it in tests, build scripts, or other Rust code without constructing a `ComposeContext` or `EffectiveState`.
+
+### `evaluate_condition`
+
+Use [`evaluate_condition`](../../lib/src/markdown/compose/conditions.rs) when you are already inside the compose pipeline and have an [`EffectiveState`](../../lib/src/markdown/compose/state.rs):
+
+```rust
+use darkmatter::markdown::compose::{conditions::evaluate_condition, EffectiveStateBuilder, ComposeContext};
+use serde_json::json;
+use std::collections::HashMap;
+use std::path::Path;
+
+let state = EffectiveStateBuilder::new()
+    .with_frontmatter([("draft".to_string(), json!(true))].into())
+    .with_context(ComposeContext::capture_for_dir(Path::new(".")))
+    .build()
+    .unwrap();
+
+assert!(evaluate_condition("draft", &state, 1).unwrap());
+```
+
+### `EvaluationLookup` Trait
+
+For custom evaluation backends, implement the [`EvaluationLookup`](../../lib/src/markdown/compose/expression/mod.rs) trait and call `expression::evaluate` directly:
+
+```rust
+use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, Expr};
+use serde_json::{Value, json};
+use std::collections::HashMap;
+
+struct SimpleLookup {
+    data: HashMap<String, Value>,
+}
+
+impl EvaluationLookup for SimpleLookup {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.data.get(path).cloned()
+    }
+}
+
+let lookup = SimpleLookup {
+    data: [("name".to_string(), json!("Alice"))].into(),
+};
+let expr = Expr::Variable("name".to_string());
+assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
+```
+
+This is the trait that both `EffectiveState` and the shortcut API's internal `ShortcutLookup` implement.
+
+### Lazy `ctx.*` Resolution
+
+Context capture is **lazy**: only the context groups actually referenced by the expression are captured, and only when evaluation reaches a `ctx.*` lookup. This matters because some context groups perform I/O (e.g. reading git state or querying hardware).
+
+Examples of lazy behavior:
+
+- `false_flag && ctx.repo == "x"` — does **not** capture repo context because `&&` short-circuits on `false`.
+- `true_flag || ctx.gpu` — does **not** capture hardware context because `||` short-circuits on `true`.
+- `draft == true` — does **not** capture any context because no `ctx.*` key is referenced.
+
+### Error Handling
+
+Both `evaluate_condition` and `evaluate_condition_against` return [`ConditionError`](../../lib/src/markdown/compose/conditions.rs), which implements [`biscuit_terminal::errors::BlockError`](../../lib/src/markdown/compose/conditions.rs). This means parse and evaluation failures can be rendered as rich status blocks in terminal output.
+
+```rust
+use darkmatter::markdown::compose::conditions::ConditionError;
+
+let err = ConditionError::Parse {
+    expr: "a &&& b".to_string(),
+    line: 1,
+    message: "Unexpected token".to_string(),
+    span: 2..3,
+};
+
+// Can be rendered via biscuit_terminal::errors::BlockError
+```
 
 ## See Also
 

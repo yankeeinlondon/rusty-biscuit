@@ -94,6 +94,46 @@ let options = ComposeOptions::new()
 - `number(x, default)` - Parse as number
 - `round(x, default)` - Round to integer
 
+### Expression Module
+
+The `compose::expression` module is the canonical home for expression parsing and evaluation infrastructure:
+
+- **`ast::Expr`** — AST nodes for parsed expressions
+- **`lexer::Lexer`** — Tokenizes expression strings
+- **`parser::Parser`** — Builds AST from tokens (supports interpolation and condition modes)
+- **`EvaluationLookup`** — Trait for variable resolution used by both interpolation and condition evaluation
+- **`evaluate`** — Core expression evaluator shared by interpolation and condition evaluation
+- **Shared helpers** — `is_truthy`, `to_number`, `scalar_string` for JSON value manipulation
+
+`compose::interpolation` re-exports these types for backward compatibility (`InterpolationLookup` is an alias for `EvaluationLookup`).
+
+### Shortcut API
+
+For external callers who only need the boolean DSL without constructing a full `ComposeContext` + `EffectiveState`, use `compose::conditions::evaluate_condition_against`:
+
+```rust
+use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+use serde_json::json;
+use std::path::Path;
+
+let data = json!({ "draft": true, "audience": "internal" });
+let result = evaluate_condition_against(
+    "draft && audience == 'internal'",
+    &data,
+    Path::new("."),
+)?;
+```
+
+This shortcut resolves:
+- Top-level and nested paths against the provided `data`
+- `env.*` against `std::env`
+- `ctx.*` via lazy runtime context capture (only the groups actually referenced are captured)
+- Missing unprefixed keys fall back to `ctx.*` (same behavior as `EffectiveState`)
+
+`ConditionError` implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks. Context capture is lazy and short-circuit aware: `false_flag && ctx.repo == "x"` does not trigger repo context capture.
+
+`ConditionError` implements `biscuit_terminal::errors::BlockError`, so failures render as rich status blocks. Context capture is lazy and short-circuit aware: `false_flag && ctx.repo == "x"` does not trigger repo context capture.
+
 ### Shell Expansion Notes
 
 - Body `::shell` and top-level frontmatter `$(...)` share policy loading, whitelist/blacklist checks, approval, and timeout behavior.
@@ -152,12 +192,37 @@ Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-le
 - **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
 - **Bare `---`:** produces a configured rule when `hr:` frontmatter is present, otherwise the default dashed rule.
 - **Terminal rendering tiers:**
-  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals.
+  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals. When no `color` is specified, the image tier detects the terminal's color mode and uses `white` for dark terminals and `black` for light terminals, avoiding invisible black-on-dark output.
   2. **Tier 2 (Unicode):** fallback when image rendering is unavailable and the locale signals UTF-8.
   3. **Tier 3 (ASCII):** fallback otherwise.
 - **Browser rendering:** SVG with `--hr-weight`, `--hr-color`, `--hr-width` CSS variables; per-instance overrides via `render_to_browser_with_inline_variables`.
 
 Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/markdown/block/rule_processor.rs`, and `darkmatter/lib/src/markdown/output/`.
+
+### Shared Code-Block Helpers
+
+`darkmatter/lib/src/markdown/output/code_block.rs` contains `pub(crate)` helpers used by both terminal and HTML rendering:
+
+- `render_terminal_code_block` - ANSI-highlighted code with padding, line numbers, and highlighted ranges
+- `render_html_code_block` - `<div class="code-block">` wrapper with optional line-number table or `<pre><code>` output
+- `find_syntax` - Language lookup by extension, name, or alias (shared `syntect` behaviour)
+
+These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-highlighting logic.
+
+### YamlBlock Component
+
+`YamlBlock` is a typed, validated YAML payload that renders as a syntax-highlighted `yaml` code block in both terminal and browser output.
+
+- **Constructors:**
+  - `YamlBlock::new(yaml)` — from raw YAML string; validates via `serde_yaml_ng`
+  - `YamlBlock::from_yaml_file(path)` — from a YAML file on disk
+  - `YamlBlock::from_markdown_content(md)` — extracts only the frontmatter; yields `{}` if none
+  - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
+- **Validation:** all constructors parse YAML through `serde_yaml_ng::from_str` and fail fast; the parsed `Value` is not retained
+- **Rendering:** implements `Renderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
+- **No tree view or custom YAML renderer** — produces a standard highlighted code block
+
+Located in `darkmatter/lib/src/markdown/yaml_block.rs`.
 
 ## See Also
 

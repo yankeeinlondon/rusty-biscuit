@@ -691,4 +691,21 @@ mod tests {
             "TerminalImageMode::Never should fall back to text HR output: {output:?}"
         );
     }
+
+    #[test]
+    fn test_terminal_image_mode_force_enables_hr_image_tier() {
+        let markdown = "---\n\nSome content after";
+        let md: Markdown = markdown.into();
+        let mut options = TerminalOptions::default();
+        options.image_mode = TerminalImageMode::Force;
+        options.max_width = Some(80);
+        options.color_depth = Some(ColorDepth::TrueColor);
+
+        let output = for_terminal(&md, options).unwrap();
+
+        assert!(
+            output.contains("\x1b_G"),
+            "TerminalImageMode::Force must emit Kitty image escapes for HR: {output:?}"
+        );
+    }
 }

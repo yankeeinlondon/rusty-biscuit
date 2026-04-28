@@ -294,7 +294,7 @@ impl EffectiveState {
     }
 }
 
-impl super::interpolation::InterpolationLookup for EffectiveState {
+impl super::expression::EvaluationLookup for EffectiveState {
     fn get(&self, path: &str) -> Option<Value> {
         self.get(path)
     }

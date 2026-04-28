@@ -55,6 +55,7 @@ pub fn summary_to_event_meta_with_context(
         StreamProtocol::StreamJson => "stream-json",
         StreamProtocol::Ndjson => "ndjson",
         StreamProtocol::Jsonl => "jsonl",
+        StreamProtocol::WireJsonRpc => "wire-json-rpc",
     };
     extra.insert("stream_protocol".into(), Value::String(protocol_str.into()));
 

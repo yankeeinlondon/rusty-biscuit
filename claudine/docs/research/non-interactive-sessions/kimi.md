@@ -4,7 +4,7 @@ schema_type: python-pydantic
 data_format: jsonl
 docs: https://moonshotai.github.io/kimi-cli/en/customization/wire-mode.html
 created: 2026-04-06
-last_updated: 2026-04-06
+last_updated: 2026-04-26
 ---
 
 ## Summary
@@ -516,3 +516,200 @@ Kimi’s hook system and Kimi’s wire stream overlap, but they are not identica
   - tool failures can often be observed both in the normal stream and in hook callbacks
   - human interaction requests are wire-native requests, not hook-native events
   - quota, cap, no-funds, and model-used signals are not well covered by either surface
+
+## Wire Protocol Capture (2026-04-26 refresh)
+
+A live capture against `kimi --wire` from `kimi 1.38.0` was recorded for the
+fix-kimi feature. Fixtures live at
+`claudine/lib/src/stream/protocol/fixtures/kimi/`. Several aspects of the
+runtime protocol differ materially from the description in the older wire-mode
+docs and from the original fix-kimi spec; the items below are authoritative for
+the parser/wire-mode work.
+
+### Confirmed protocol version
+
+- `kimi --wire` running against `kimi 1.38.0` reports `protocol_version: "1.9"`
+  in the `initialize` response.
+- The published Wire docs were behind the source at `1.4`; the fix-kimi spec
+  used `1.8`. Treat `1.9` as the authoritative current version and target it in
+  Claudine's `initialize` request. Field-by-field shape is preserved across
+  these versions for the events Claudine consumes.
+
+### Initialize request and response shapes
+
+- Initialize request params: `protocol_version: str`, `client: ClientInfo`,
+  optional `external_tools`, optional `hooks` (subscriptions),
+  optional `capabilities`.
+- `ClientCapabilities` carries **only** `supports_question: bool` and
+  `supports_plan_mode: bool`. There is no `approvals`, `hooks`, or `subagents`
+  field on `ClientCapabilities`. (Pydantic ignores unknown fields, so older
+  clients sending the broader set still initialize successfully but those
+  fields are dropped.)
+- Initialize response result keys: `protocol_version`, `server` (`{name,
+  version}`), `slash_commands` (large array of `{name, description, aliases}`),
+  `hooks`, and `capabilities` (server-side advertisement). It does not include
+  `tools` or `subagents` — those are runtime concerns, not init-time.
+
+### Prompt request param shape
+
+- `prompt` request params take a single `user_input: str | list[ContentPart]`.
+  Sending `{prompt: "..."}`, `{text: "..."}`, `{messages: [...]}`, or any other
+  shape returns `-32602 Invalid parameters for method 'prompt'`.
+- The final response to a `prompt` request returns
+  `{result: {status: "<Statuses value>"}}` where `Statuses` is one of
+  `finished`, `cancelled`, `max_steps_reached`, `steered` (per
+  `kimi_cli/wire/jsonrpc.py`).
+- `result.status == "cancelled"` is the canonical signal that a turn was
+  interrupted by a client-issued `cancel` request.
+
+### Event taxonomy is `ContentPart`-centred, not message-centred
+
+The actual `Event` union exposed on the wire is:
+
+- `TurnBegin`, `SteerInput`, `TurnEnd`, `StepBegin`, `StepInterrupted`
+- `CompactionBegin`, `CompactionEnd`
+- `MCPLoadingBegin`, `MCPLoadingEnd`
+- `StatusUpdate`, `Notification`, `PlanDisplay`
+- `ContentPart`, `ToolCall`, `ToolCallPart`, `ToolResult`
+- `ApprovalResponse`, `SubagentEvent`, `BtwBegin`, `BtwEnd`
+
+There is **no** `MessageStart`, `MessageDelta`, `MessageEnd`, `Thinking`,
+`DiffDisplayBlock`, `Cancelled`, or top-level `Error` event. Specifically:
+
+- Reasoning and assistant text are streamed as `ContentPart` events whose
+  payload is one of `kosong.message` content-part subtypes, distinguished by
+  an inner `payload.type` discriminator. The captured fixtures show `think`
+  (with field `think: str` and optional `encrypted: str | null`) and
+  `text` (with field `text: str`). The full `ContentPart` union also defines
+  `image_url`, `audio_url`, and `video_url` subtypes — Claudine should treat
+  unknown inner part types as silent passthrough.
+- Diffs surface inside `ApprovalRequest.display` as a typed `DisplayBlock`
+  list (variants: `BriefDisplayBlock`, `ShellDisplayBlock`, `DiffDisplayBlock`,
+  `TodoDisplayBlock`, `BackgroundTaskDisplayBlock`, `UnknownDisplayBlock`).
+  The captured `wire-tool-shell.jsonl` shows
+  `display: [{"type":"shell","language":"bash","command":"echo hello-from-kimi"}]`.
+- Cancellation is *not* an event. The client sends a `cancel` request, kimi
+  returns `{"id":"cancel-N","result":{}}`, emits `TurnEnd`, and finally returns
+  `prompt` with `{result: {status: "cancelled"}}`. There may also be a
+  `StepInterrupted` event if cancellation arrives mid-step.
+- Errors are returned on JSON-RPC responses to the request that triggered them
+  (typically `prompt`), not as standalone events. Auth-expired surfaces as
+  `error.code == -32004` (`AUTH_EXPIRED`).
+
+### `ContentPart` streaming pattern
+
+Captured streams interleave `think` parts and `text` parts as **per-token
+deltas** sharing the same payload shape. Example (from `wire-greet.jsonl`):
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"The","encrypted":null}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":" user","encrypted":null}}}
+...
+{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"Hi"}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":" Bob"}}}
+```
+
+A complete assistant reply is reconstructed by concatenating consecutive
+`text` parts; consecutive `think` parts form a single thinking block. The
+parser must accumulate these per-turn and only flush at `TurnEnd` (or when
+the part type changes, to avoid mixing think and text into one block).
+
+### `ToolCall` / `ToolCallPart` streaming pattern
+
+`ToolCall` arrives once with the full envelope but with potentially **empty**
+`function.arguments`; subsequent `ToolCallPart` events carry
+`{arguments_part: "<json fragment>"}` deltas that must be concatenated and
+JSON-parsed once complete. Captured shape:
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCall","payload":{"type":"function","id":"tool_…","function":{"name":"Shell","arguments":""},"extras":null}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCallPart","payload":{"arguments_part":"{\""}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCallPart","payload":{"arguments_part":"command"}}}
+```
+
+`ToolCallPart` payloads are scoped to the most recently announced `ToolCall`;
+there is no per-part `tool_call_id` field, so order matters.
+
+### `ApprovalRequest` request envelope
+
+Captured request envelope shape (the request envelope's outer JSON-RPC `id`
+and the inner payload `id` are equal in observed traffic):
+
+```json
+{"jsonrpc":"2.0","method":"request","id":"<uuid>","params":{"type":"ApprovalRequest","payload":{"id":"<uuid>","tool_call_id":"tool_…","sender":"Shell","action":"run command","description":"Run command `echo hello`","source_kind":"foreground_turn","source_id":"<hex>","agent_id":null,"subagent_type":null,"source_description":null,"display":[{"type":"shell","language":"bash","command":"echo hello"}]}}}
+```
+
+Reply shape on approval:
+
+```json
+{"jsonrpc":"2.0","id":"<uuid>","result":{"request_id":"<uuid>","response":"approve"}}
+```
+
+After Claudine replies, kimi emits a confirmatory `ApprovalResponse` **event**
+on the stream:
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"type":"ApprovalResponse","payload":{"request_id":"<uuid>","response":"approve","feedback":""}}}
+```
+
+`ApprovalResponse` is *also* in the Event union (it is replayed back as a
+notification), distinct from the JSON-RPC response Claudine sent.
+
+### `SubagentEvent` envelope
+
+Subagent traffic is wrapped in a thin envelope and the inner `event` carries
+the same shape as parent-stream events:
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{"type":"SubagentEvent","payload":{"parent_tool_call_id":"tool_…","agent_id":"<id>","subagent_type":"explore","event":{"type":"ToolCall","payload":{...}}}}}
+```
+
+`parent_tool_call_id` was previously named `task_tool_call_id`; the model has a
+backwards-compatibility validator. `ApprovalRequest` and `QuestionRequest`
+remain on the parent stream rather than nested inside a `SubagentEvent`.
+
+### `StatusUpdate` payload shape
+
+Captured shape carries everything Claudine needs for token telemetry:
+
+```json
+{"context_usage": 0.06, "context_tokens": 15969, "max_context_tokens": 262144,
+ "token_usage": {"input_other": 10081, "output": 52, "input_cache_read": 5888, "input_cache_creation": 0},
+ "message_id": "chatcmpl-…", "plan_mode": false, "mcp_status": null}
+```
+
+`token_usage` is a `kosong.chat_provider.TokenUsage` with `input_other`,
+`output`, `input_cache_read`, `input_cache_creation` keys (no top-level
+`input_tokens` field).
+
+### Auth expired error envelope
+
+`AUTH_EXPIRED` is `-32004` (per `kimi_cli/wire/jsonrpc.py::ErrorCodes`) and
+is delivered as a JSON-RPC error response on the `prompt` request:
+
+```json
+{"jsonrpc":"2.0","id":"prompt-2","error":{"code":-32004,"message":"Authentication expired; please re-authenticate","data":null}}
+```
+
+Other classifiable codes from the same module:
+
+- `-32001` `LLM_NOT_SET`
+- `-32002` `LLM_NOT_SUPPORTED`
+- `-32003` `CHAT_PROVIDER_ERROR`
+- `-32004` `AUTH_EXPIRED`
+- `-32000` `INVALID_STATE`
+- Standard JSON-RPC: `-32700` parse, `-32600` invalid request,
+  `-32601` method not found, `-32602` invalid params, `-32603` internal.
+
+### Captured fixtures
+
+| Fixture | Source | Coverage |
+| --- | --- | --- |
+| `wire-greet.jsonl` | live capture | `initialize`, `TurnBegin`, `StepBegin`, streamed `ContentPart` (think + text), `StatusUpdate`, `TurnEnd`, prompt response `status: "finished"` |
+| `wire-tool-shell.jsonl` | live capture | full tool lifecycle: `ToolCall`, streamed `ToolCallPart`, `ApprovalRequest` request envelope, `ApprovalResponse` event echo, `ToolResult`, two-step `StatusUpdate`s |
+| `wire-subagent.jsonl` | live capture | nested `SubagentEvent` envelopes wrapping `TurnBegin`, `StepBegin`, `ContentPart`, `ToolCall`, `ToolCallPart`, `ToolResult`, `StatusUpdate`, `TurnEnd`; parent-stream `ApprovalRequest`s for tool calls inside the subagent |
+| `wire-cancelled.jsonl` | live capture | `cancel` request response with empty result, `TurnEnd`, prompt response `status: "cancelled"` |
+| `wire-auth-expired.jsonl` | **synthetic** | `prompt` response with `error.code: -32004 AUTH_EXPIRED`. Real capture skipped to avoid disturbing the user's active OAuth session; shape mirrors `kimi_cli/wire/jsonrpc.py::ErrorCodes::AUTH_EXPIRED`. |
+
+The phase-0 scratch driver used to produce these captures lives at
+`claudine/features/2026-04-26-fix-kimi/phase-0/wire-driver.py`.

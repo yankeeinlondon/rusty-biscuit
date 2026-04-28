@@ -459,15 +459,14 @@ pub struct ComposeOptions {
 
     // ── Interpolation ─────────────────────────────────────────────
     /// When `true`, body interpolation processes `{{ }}` expressions
-    /// inside inline code spans and fenced code blocks.
+    /// inside fenced and indented code blocks.
     ///
-    /// By default (`false`), the interpolation scanner skips code
-    /// regions to preserve literal code examples. Set this to `true`
-    /// for template documents where backtick-wrapped expressions
-    /// should still be interpolated.
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this flag only governs fenced/indented code blocks, which by
+    /// default (`false`) are skipped to preserve literal code examples.
     ///
-    /// Can also be set via frontmatter: `interpolate_code_spans: true`.
-    pub(crate) interpolate_code_spans: bool,
+    /// Can also be set via frontmatter: `interpolate_code_blocks: true`.
+    pub(crate) interpolate_code_blocks: bool,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -513,7 +512,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("perf_enabled", &self.perf_enabled)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
-            .field("interpolate_code_spans", &self.interpolate_code_spans)
+            .field("interpolate_code_blocks", &self.interpolate_code_blocks)
             .field(
                 "allow_invalid_frontmatter_assignment",
                 &self.allow_invalid_frontmatter_assignment,
@@ -576,7 +575,7 @@ impl ComposeOptions {
             context,
             replace_parent_wins: false,
             one_off_replace: None,
-            interpolate_code_spans: false,
+            interpolate_code_blocks: false,
             shell_strip_ansi: true,
         }
     }
@@ -712,14 +711,15 @@ impl ComposeOptions {
         self
     }
 
-    /// Enables interpolation inside code spans and fenced code blocks.
+    /// Enables interpolation inside fenced and indented code blocks.
     ///
-    /// When set, `{{ }}` expressions inside backticks and code fences
-    /// are evaluated instead of being skipped. Useful for template
-    /// documents where code formatting wraps interpolation targets.
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this option only opts fenced/indented code blocks into the
+    /// interpolation scan, which is otherwise skipped to preserve
+    /// literal code examples.
     #[must_use]
-    pub fn with_interpolate_code_spans(mut self, enabled: bool) -> Self {
-        self.interpolate_code_spans = enabled;
+    pub fn with_interpolate_code_blocks(mut self, enabled: bool) -> Self {
+        self.interpolate_code_blocks = enabled;
         self
     }
 
