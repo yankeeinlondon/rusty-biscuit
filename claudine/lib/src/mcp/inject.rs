@@ -6,8 +6,7 @@ use serde_json::json;
 
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::types::{McpServer, McpTransport};
 
 // ---------------------------------------------------------------------------

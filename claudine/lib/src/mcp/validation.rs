@@ -234,7 +234,7 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use crate::mcp::state::Scope;
     use crate::mcp::types::{McpServerMetadata, McpTransport, ProviderStateEntry};
 

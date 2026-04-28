@@ -4,7 +4,8 @@ use claudine::actions::HookAction;
 use claudine::config::claudine_config::{ClaudineConfig, DefaultSounds};
 use claudine::dispatch::loader::{CanonicalRuntimeConfig, compile_canonical_runtime};
 use claudine::dispatch::{dispatch_canonical_with_runtime, write_dispatch_event_to};
-use claudine::events::{AgenticEvent, EventMeta, Provider};
+use claudine::events::{AgenticEvent, EventMeta};
+use claudine::provider::Provider;
 use tempfile::TempDir;
 
 fn make_config_with_action(event: AgenticEvent, action: HookAction) -> CanonicalRuntimeConfig {

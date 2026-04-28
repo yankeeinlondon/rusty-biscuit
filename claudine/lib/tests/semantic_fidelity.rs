@@ -14,7 +14,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use claudine::events::{EnvironmentContext, Provider};
+use claudine::events::EnvironmentContext;
+
+use claudine::provider::Provider;
 use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::reporting::{semantic_event_to_event_meta, summary_to_event_meta};
 use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};

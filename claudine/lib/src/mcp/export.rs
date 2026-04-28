@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 use crate::config::atomic::atomic_write;
 use crate::config::backup::create_backup;
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
+use crate::provider::Provider;
 use crate::provider::provider_info;
 
 use super::catalog::McpCatalogStore;

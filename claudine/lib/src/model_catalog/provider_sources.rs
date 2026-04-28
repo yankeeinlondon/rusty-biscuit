@@ -9,8 +9,7 @@ use std::process::Stdio;
 
 use tokio::process::Command;
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Return a static catalog for providers with known model enums.
 ///
 /// These lists are derived from the generated enums in `unchained-ai/lib`.

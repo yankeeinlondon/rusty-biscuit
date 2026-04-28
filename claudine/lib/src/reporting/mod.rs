@@ -127,8 +127,9 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use tempfile::tempdir;
 
-    use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+    use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
 
+    use crate::provider::Provider;
     use super::*;
 
     #[test]

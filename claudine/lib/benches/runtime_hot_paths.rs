@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use claudine::dispatch::loader::{compile_canonical_runtime, load_claudine_config};
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::services::protect::catalog::{ProtectPlatform, RuleGroup};
 use claudine::services::protect::config::{
     CustomPattern, ProtectConfig, ProtectRuleToggles, RuleGroupConfig, RuleGroupDetailedConfig,

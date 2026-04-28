@@ -67,15 +67,13 @@ Key types:
 
 ### Agents (`agents`)
 
-Comprehensive capability catalog for all 8 supported agentic CLIs:
+Capability model and `Agent` trait shared across all 8 supported agentic CLIs:
 
-- `Agent` trait — shared interface for capability descriptors (`id()`, `capabilities()`, `supports_skills()`, `supports_custom_slash_commands()`, `supports_subagents()`, `validate()`)
+- `Agent` trait — shared interface for capability descriptors (`id()`, `capabilities()`, `supports_skills()`, `supports_custom_slash_commands()`, `supports_subagents()`, `validate()`). Implemented directly on `crate::provider::ProviderInfo`.
 - `AgentCapabilities` — full capability model covering meta, docs, config, runtime, skills, commands, subagents, scripts, and confidence
-- `AgentId` — 8-variant enum with string slugs and aliases for CLI parsing
-- `agent_for(id)` / `all_agents()` / `parse_agent_id(input)` — registry functions
-- Per-agent implementations: `ClaudeCodeAgent`, `CodexAgent`, `GeminiCliAgent`, `GooseAgent`, `KimiCodeAgent`, `OpenCodeAgent`, `QwenCliAgent`, `RooCodeAgent`
+- `agent_for(provider)` / `all_agents()` / `parse_agent_id(input)` — thin forwarding facades over `crate::provider::provider_info(provider)`
 
-Each agent descriptor captures: model selection, non-interactive mode, system prompt, permissions, reasoning style, logging, billing, skill paths, command paths, subagent paths, and script support.
+Per-provider data construction lives in [`crate::provider`](src/provider/) (one `<NAME>_INFO: ProviderInfo` constant per provider). Each entry captures: identity, documentation links, event mapping table, behavior trait objects, agent capability accessors, resource support accessors, typed catalog data (path templates, output formats, entrypoints, system prompt delivery, YOLO/reasoning/known gaps), and ACP support.
 
 ### Adapters (`adapters`)
 

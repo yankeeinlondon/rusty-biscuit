@@ -6,8 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::config::claudine_config::{ClaudineConfig, ProviderModelOverride};
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::cache::{ModelCache, ModelCacheEntry};
 use super::config::merge_overrides;
 use super::provider_sources::{fetch_provider_catalog, static_catalog_for_provider};

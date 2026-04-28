@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::error::Result;
-use crate::events::Provider;
+use crate::provider::Provider;
 use crate::provider::provider_info;
 
 use super::catalog::McpCatalogStore;

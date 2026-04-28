@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use claudine::config::claudine_config::{
     DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
 };
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::model_catalog::ModelCatalogService;
 
 #[test]

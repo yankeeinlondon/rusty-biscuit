@@ -10,8 +10,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// A single cached catalog entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelCacheEntry {

@@ -5,8 +5,7 @@ use chrono::Utc;
 
 use crate::config::atomic::atomic_write;
 use crate::error::Result;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::types::{
     McpOrigin, McpProviderState, ProviderScopeEntries, ProviderStateEntry, provider_state_path,
 };
