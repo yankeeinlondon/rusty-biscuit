@@ -132,6 +132,25 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/prompt_args.rs
+    - claudine/lib/src/provider/claude.rs
+    - claudine/lib/src/provider/codex.rs
+    - claudine/lib/src/provider/gemini.rs
+    - claudine/lib/src/provider/goose.rs
+    - claudine/lib/src/provider/kimi.rs
+    - claudine/lib/src/provider/opencode.rs
+    - claudine/lib/src/provider/qwen.rs
+    - claudine/lib/src/provider/roo.rs
+    - claudine/cli/src/argv.rs
+    - claudine/cli/src/commands/wrap/profile.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+packages:
+    - claudine
+    - claudine-cli
 ---
 
 # Centralized Providers Execution Plan
