@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use tracing::info_span;
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::backend::{BackendCapabilities, ProviderPolicyBackend};
 use super::change::PolicyChange;
 use super::context::{CliPolicyInput, PolicyContext};

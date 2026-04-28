@@ -24,7 +24,7 @@ pub use canonical::{
 };
 pub use capabilities::{
     ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourcePropertySchema,
-    ResourceSupport, SkillFrontmatter, SupportLevel, all_capabilities, capabilities_for,
+    ResourceSupport, SkillFrontmatter, SupportLevel, capabilities_for,
 };
 pub use commands::{
     CommandDirectoryDiagnostic, CommandException, CommandExceptionType, CommandFixSummary,
@@ -88,7 +88,7 @@ fn link_skills_inner(
         skill.hash = hashing::hash_skill_dir(&skill.path).ok();
     }
 
-    let providers: Vec<crate::events::Provider> = provider_paths
+    let providers: Vec<crate::provider::Provider> = provider_paths
         .for_scope(scope)
         .iter()
         .map(|(provider, _)| *provider)
@@ -266,7 +266,7 @@ fn link_commands(
         }
     }
 
-    let providers: Vec<crate::events::Provider> = provider_paths
+    let providers: Vec<crate::provider::Provider> = provider_paths
         .commands_for_scope(scope)
         .iter()
         .map(|(provider, _)| *provider)
@@ -291,7 +291,7 @@ fn report_category_level_symlinks(
     resource: LinkableResource,
     report: &mut LinkReport,
 ) -> Result<()> {
-    let roots: Vec<(crate::events::Provider, &std::path::PathBuf)> = match resource {
+    let roots: Vec<(crate::provider::Provider, &std::path::PathBuf)> = match resource {
         LinkableResource::Skill => provider_paths.for_scope(scope),
         LinkableResource::Command => provider_paths.commands_for_scope(scope),
         LinkableResource::Agent => provider_paths.agents_for_scope(scope),
@@ -328,8 +328,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::events::Provider;
-
+    use crate::provider::Provider;
     fn empty_provider(provider: Provider) -> ProviderPaths {
         ProviderPaths {
             provider,

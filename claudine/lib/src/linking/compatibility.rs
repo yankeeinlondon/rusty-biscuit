@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
+use crate::provider::Provider;
 use biscuit_file::serde_yaml_ng;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};

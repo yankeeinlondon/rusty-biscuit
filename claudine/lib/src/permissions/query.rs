@@ -1,7 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::canonical::{
     CanonicalPolicy, MappingFidelity, PolicyCertainty, PolicyEffect, PolicyWarning, TernaryState,
 };

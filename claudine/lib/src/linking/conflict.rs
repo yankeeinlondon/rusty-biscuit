@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::capabilities::LinkableResource;
 use super::discovery::DiscoveredSkill;
 use super::paths::{ProviderSkillPaths, ResourceScope};

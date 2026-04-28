@@ -47,8 +47,7 @@ pub(crate) fn claudine_handle_command(provider: Provider) -> impl Fn(&str) -> St
     move |event| format!("{claudine_bin} handle {event} --provider {provider}")
 }
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Rich information about a detected agent.
 #[derive(Debug, Clone)]
 pub struct AgentInfo {

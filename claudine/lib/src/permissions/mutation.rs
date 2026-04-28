@@ -4,8 +4,7 @@ use std::path::PathBuf;
 
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::canonical::{MappingFidelity, PolicyWarning};
 
 /// Structured mutation plan produced by a backend.

@@ -2,8 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 #[cfg(test)]
 use super::paths::ProviderPaths;
 use super::paths::{ProviderSkillPaths, ResourceScope};

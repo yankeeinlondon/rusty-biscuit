@@ -1,6 +1,5 @@
 use crate::error::Result;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::canonical::CanonicalPolicy;
 use super::change::PolicyChange;
 use super::context::{CliPolicyInput, PolicyContext};

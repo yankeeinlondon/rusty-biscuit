@@ -6,8 +6,7 @@ use biscuit_file::serde_yaml_ng;
 use regex::Regex;
 
 use crate::error::Result;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::compatibility::{
     fix_frontmatter_indentation_tabs, frontmatter_has_indentation_tabs,

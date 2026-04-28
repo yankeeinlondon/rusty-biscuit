@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::actions::HookAction;
 use crate::error::{ClaudineError, Result};
-use crate::events::{AgenticEvent, Provider};
+use crate::events::AgenticEvent;
+use crate::provider::Provider;
 use crate::services::protect::config::ProtectConfig;
 
 // ============================================================================

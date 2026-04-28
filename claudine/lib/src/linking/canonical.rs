@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::events::{CanonicalProviderSettings, Provider};
+use crate::events::CanonicalProviderSettings;
 
+use crate::provider::Provider;
 use super::capabilities::{LinkableResource, ResourceFormat, capabilities_for};
 use super::paths::ResourceScope;
 

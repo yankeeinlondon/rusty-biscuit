@@ -11,7 +11,7 @@
 //! - **Agents**: Subagent/persona definitions for task delegation
 //! - **Scripts**: Executable scripts that can be invoked by skills/agents
 
-use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use std::path::PathBuf;
 
 /// Types of linkable resources across providers.
@@ -411,14 +411,6 @@ pub fn capabilities_for(provider: Provider) -> ProviderCapabilities {
         .clone()
 }
 
-/// Get capabilities for all providers.
-pub fn all_capabilities() -> Vec<ProviderCapabilities> {
-    PROVIDERS_DISPLAY_ORDER
-        .into_iter()
-        .map(capabilities_for)
-        .collect()
-}
-
 /// All providers in display order.
 pub const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
 
@@ -432,12 +424,6 @@ mod tests {
             let caps = capabilities_for(provider);
             assert_eq!(caps.provider, provider);
         }
-    }
-
-    #[test]
-    fn all_capabilities_returns_all_providers() {
-        let caps = all_capabilities();
-        assert_eq!(caps.len(), 8);
     }
 
     #[test]

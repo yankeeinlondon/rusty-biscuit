@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capabilities_for};
 use super::hashing;
 use super::paths::{ProviderSkillPaths, ResourceScope};

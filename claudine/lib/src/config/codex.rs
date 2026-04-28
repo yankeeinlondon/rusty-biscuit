@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 use crate::error::Result;
-use crate::events::{AgenticEvent, Provider};
-
+use crate::events::AgenticEvent;
+use crate::provider::Provider;
 use super::atomic::atomic_write;
 use super::backup::create_backup;
 use super::claudine_handle_command;

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use serde_json::{Map, Value, json};
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
+use crate::provider::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CommandAccessRule,

@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::Result;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 use super::atomic::atomic_write;
 use super::backup::create_backup;
 use super::claudine_handle_command;
