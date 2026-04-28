@@ -16,6 +16,9 @@ use super::{HelperBackend, HelperError, HelperName};
 #[derive(Debug, Clone)]
 pub(crate) struct HelperAttempt {
     pub name: HelperName,
+    /// Full error message captured for diagnostics. Currently retained for
+    /// future debug surfaces; the `summary()` text only emits `name:tag`.
+    #[allow(dead_code)]
     pub error: String,
     pub tag: &'static str,
 }

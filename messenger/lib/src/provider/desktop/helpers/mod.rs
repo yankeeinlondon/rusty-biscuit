@@ -23,10 +23,15 @@
 //!   by the platform backend; only `Unsupported` and `Parse` are propagated
 //!   directly to the caller.
 
-// Phase 2 wires only the Linux backend to these adapters; Phases 3 and 4
-// extend the macOS and Windows backends. Until then, suppress the dead-code
-// lint on non-Linux to keep CI quiet without per-item annotations.
-#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+// Phase 2 wires the Linux backend; Phase 3 wires macOS; Phase 4 wires
+// Windows. On platforms not yet covered by a backend integration, the
+// helper trait, capabilities struct, and error variants are present but
+// unused. Suppress the dead-code lint there so unfinished platforms stay
+// CI-clean without per-item annotations.
+#![cfg_attr(
+    not(any(target_os = "linux", target_os = "macos")),
+    allow(dead_code)
+)]
 
 pub(crate) mod election;
 pub(crate) mod process;
@@ -36,11 +41,16 @@ pub(crate) mod dunstify;
 #[cfg(target_os = "linux")]
 pub(crate) mod notify_send;
 
+#[cfg(target_os = "macos")]
+pub(crate) mod alerter;
+#[cfg(target_os = "macos")]
+pub(crate) mod terminal_notifier;
+
 use async_trait::async_trait;
 
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use election::{HelperAttempt, elect_helpers};
 
 /// Public identifier for a notification helper.
@@ -51,9 +61,12 @@ pub type HelperName = sniff::programs::NotificationHelper;
 
 /// Capability flags advertised by a [`HelperBackend`].
 ///
-/// Used by [`elect_helpers`] to filter helpers that cannot serve a request
-/// shape (interactive vs notice-only, image present, replace requested).
+/// Documents what each helper can deliver. Election currently relies on
+/// `score()` for filtering; the struct is published on the trait so future
+/// dispatch logic can introspect helper surfaces without reading every
+/// adapter's source.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub(crate) struct HelperCapabilities {
     pub actions: bool,
     pub reply: bool,
@@ -128,6 +141,7 @@ pub(crate) trait HelperBackend: Send + Sync {
     fn name(&self) -> HelperName;
 
     /// What the helper can deliver on the host.
+    #[allow(dead_code)]
     fn capabilities(&self) -> HelperCapabilities;
 
     /// Per-send fitness for this dispatch.

@@ -820,6 +820,7 @@ fn build_desktop_provider_from_route(
                             messenger::MacOsNotificationStrategy::AppleScript
                         }
                     },
+                    prefer_helpers: Vec::new(),
                 },
                 linux: messenger::LinuxDesktopConfig {
                     desktop_entry: linux.desktop_entry.clone(),
@@ -1043,6 +1044,7 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                             messenger::MacOsNotificationStrategy::AppleScript
                         }
                     },
+                    prefer_helpers: Vec::new(),
                 },
                 linux: messenger::LinuxDesktopConfig {
                     desktop_entry: linux.desktop_entry.clone(),

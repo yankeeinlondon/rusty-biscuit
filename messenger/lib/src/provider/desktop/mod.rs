@@ -101,6 +101,12 @@ pub struct MacOsDesktopConfig {
     /// How the macOS backend should pick between AppleScript and native
     /// `UserNotifications.framework` delivery.
     pub strategy: MacOsNotificationStrategy,
+    /// Caller-supplied helper preference order.
+    ///
+    /// Helpers named here win score ties during election. Names that do
+    /// not apply on macOS (e.g. `dunstify`) are silently ignored. Empty
+    /// means "use the library default order".
+    pub prefer_helpers: Vec<helpers::HelperName>,
 }
 
 /// macOS notification delivery strategy.
@@ -428,10 +434,7 @@ fn select_backend(config: &DesktopConfig) -> Arc<dyn DesktopBackend> {
     }
     #[cfg(target_os = "macos")]
     {
-        Arc::new(macos::MacOsBackend::new(
-            config.macos.strategy,
-            config.macos.bundle_id.clone(),
-        ))
+        Arc::new(macos::MacOsBackend::new(config.macos.clone()))
     }
     #[cfg(target_os = "windows")]
     {
