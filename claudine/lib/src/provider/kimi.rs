@@ -6,7 +6,9 @@ use sniff::programs::AiCli;
 
 use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -56,12 +58,130 @@ pub(super) static KIMI_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: Some("https://platform.moonshot.cn/console/account"),
     sniff_binding: AiCli::KimiCli,
     supports_skills: false,
+    event_mapping: &KIMI_EVENT_MAPPING,
     behavior: &KIMI_PROVIDER,
     mcp: &KIMI_PROVIDER,
     adapter: &KIMI_PROVIDER,
     configurator: &KIMI_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+};
+
+pub(super) static KIMI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
+    mappings: &[
+        EventMapping {
+            event: AgenticEvent::SessionStart,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::SessionEnd,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforePrompt,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "TurnBegin",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeTool,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "ToolCall",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterTool,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "ToolResult",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::ToolError,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "ToolResult",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::PermissionRequest,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "ApprovalRequest",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::HumanInTheLoop,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "ApprovalRequest",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnComplete,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "TurnEnd",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnError,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "prompt.status",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStart,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "SubagentEvent",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStop,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "SubagentEvent",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeModel,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterModel,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "ContentPart",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeCompact,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "CompactionBegin",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::Notification,
+            support_level: EventSupportLevel::NonHook,
+            native_name: "StatusUpdate",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+    ],
 };
 
 const KIMI_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(

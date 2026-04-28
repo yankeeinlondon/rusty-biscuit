@@ -6,7 +6,9 @@ use sniff::programs::AiCli;
 
 use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -66,12 +68,130 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: Some("https://console.anthropic.com/settings/billing"),
     sniff_binding: AiCli::Claude,
     supports_skills: true,
+    event_mapping: &CLAUDE_EVENT_MAPPING,
     behavior: &CLAUDE_PROVIDER,
     mcp: &CLAUDE_PROVIDER,
     adapter: &CLAUDE_PROVIDER,
     configurator: &CLAUDE_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+};
+
+pub(super) static CLAUDE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
+    mappings: &[
+        EventMapping {
+            event: AgenticEvent::SessionStart,
+            support_level: EventSupportLevel::Hook,
+            native_name: "SessionStart",
+            parse_aliases: &["SessionStart"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::SessionEnd,
+            support_level: EventSupportLevel::Hook,
+            native_name: "SessionEnd",
+            parse_aliases: &["SessionEnd"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforePrompt,
+            support_level: EventSupportLevel::Hook,
+            native_name: "UserPromptSubmit",
+            parse_aliases: &["UserPromptSubmit"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeTool,
+            support_level: EventSupportLevel::Hook,
+            native_name: "PreToolUse",
+            parse_aliases: &["PreToolUse"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterTool,
+            support_level: EventSupportLevel::Hook,
+            native_name: "PostToolUse",
+            parse_aliases: &["PostToolUse"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::ToolError,
+            support_level: EventSupportLevel::Hook,
+            native_name: "PostToolUseFailure",
+            parse_aliases: &["PostToolUseFailure"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::PermissionRequest,
+            support_level: EventSupportLevel::Hook,
+            native_name: "PermissionRequest",
+            parse_aliases: &["PermissionRequest"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::HumanInTheLoop,
+            support_level: EventSupportLevel::Hook,
+            native_name: "PreToolUse",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnComplete,
+            support_level: EventSupportLevel::Hook,
+            native_name: "Stop",
+            parse_aliases: &["Stop", "TeammateIdle", "TaskCompleted"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnError,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStart,
+            support_level: EventSupportLevel::Hook,
+            native_name: "SubagentStart",
+            parse_aliases: &["SubagentStart"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStop,
+            support_level: EventSupportLevel::Hook,
+            native_name: "SubagentStop",
+            parse_aliases: &["SubagentStop"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeModel,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterModel,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeCompact,
+            support_level: EventSupportLevel::Hook,
+            native_name: "PreCompact",
+            parse_aliases: &["PreCompact"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::Notification,
+            support_level: EventSupportLevel::Hook,
+            native_name: "Notification",
+            parse_aliases: &["Notification"],
+            registration_target: true,
+        },
+    ],
 };
 
 const CLAUDE_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(

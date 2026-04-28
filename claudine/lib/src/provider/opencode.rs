@@ -6,7 +6,9 @@ use sniff::programs::AiCli;
 
 use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -64,12 +66,143 @@ pub(super) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: None,
     sniff_binding: AiCli::Opencode,
     supports_skills: true,
+    event_mapping: &OPENCODE_EVENT_MAPPING,
     behavior: &OPENCODE_PROVIDER,
     mcp: &OPENCODE_PROVIDER,
     adapter: &OPENCODE_PROVIDER,
     configurator: &OPENCODE_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+};
+
+pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
+    mappings: &[
+        EventMapping {
+            event: AgenticEvent::SessionStart,
+            support_level: EventSupportLevel::Hook,
+            native_name: "session.created",
+            parse_aliases: &["session.created"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::SessionEnd,
+            support_level: EventSupportLevel::Hook,
+            native_name: "session.deleted",
+            parse_aliases: &["session.deleted"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforePrompt,
+            support_level: EventSupportLevel::Hook,
+            native_name: "chat.message",
+            parse_aliases: &["chat.message"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeTool,
+            support_level: EventSupportLevel::Hook,
+            native_name: "tool.execute.before",
+            parse_aliases: &["tool.execute.before"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterTool,
+            support_level: EventSupportLevel::Hook,
+            native_name: "tool.execute.after",
+            parse_aliases: &["tool.execute.after"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::ToolError,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::PermissionRequest,
+            support_level: EventSupportLevel::Hook,
+            native_name: "permission.ask",
+            parse_aliases: &["permission.ask"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::HumanInTheLoop,
+            support_level: EventSupportLevel::Hook,
+            native_name: "permission.asked",
+            parse_aliases: &["permission.asked"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnComplete,
+            support_level: EventSupportLevel::Hook,
+            native_name: "session.idle",
+            parse_aliases: &["session.idle"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnError,
+            support_level: EventSupportLevel::Hook,
+            native_name: "session.error",
+            parse_aliases: &["session.error"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStart,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStop,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeModel,
+            support_level: EventSupportLevel::Hook,
+            native_name: "chat.params",
+            parse_aliases: &[
+                "chat.params",
+                "chat.headers",
+                "experimental.chat.system.transform",
+                "experimental.chat.messages.transform",
+            ],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterModel,
+            support_level: EventSupportLevel::Hook,
+            native_name: "message.updated",
+            parse_aliases: &[
+                "message.updated",
+                "message.part.updated",
+                "experimental.text.complete",
+            ],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeCompact,
+            support_level: EventSupportLevel::Hook,
+            native_name: "session.compacted",
+            parse_aliases: &[
+                "session.compacted",
+                "session.compacting",
+                "experimental.session.compacting",
+            ],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::Notification,
+            support_level: EventSupportLevel::Hook,
+            native_name: "tui.toast.show",
+            parse_aliases: &["tui.toast.show", "event"],
+            registration_target: true,
+        },
+    ],
 };
 
 const OPENCODE_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(

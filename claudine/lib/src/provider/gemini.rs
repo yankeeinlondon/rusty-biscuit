@@ -6,7 +6,9 @@ use sniff::programs::AiCli;
 
 use super::ProviderInfo;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
+use crate::events::{AgenticEvent, EventSupportLevel};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -64,12 +66,130 @@ pub(super) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     usage_dashboard_url: Some("https://aistudio.google.com/billing"),
     sniff_binding: AiCli::GeminiCli,
     supports_skills: true,
+    event_mapping: &GEMINI_EVENT_MAPPING,
     behavior: &GEMINI_PROVIDER,
     mcp: &GEMINI_PROVIDER,
     adapter: &GEMINI_PROVIDER,
     configurator: &GEMINI_PROVIDER,
     agent_capabilities_fn: agent_capabilities,
     resource_support_fn: resource_support,
+};
+
+pub(super) static GEMINI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
+    mappings: &[
+        EventMapping {
+            event: AgenticEvent::SessionStart,
+            support_level: EventSupportLevel::Hook,
+            native_name: "SessionStart",
+            parse_aliases: &["SessionStart"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::SessionEnd,
+            support_level: EventSupportLevel::Hook,
+            native_name: "SessionEnd",
+            parse_aliases: &["SessionEnd"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforePrompt,
+            support_level: EventSupportLevel::Hook,
+            native_name: "BeforeAgent",
+            parse_aliases: &["BeforeAgent"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeTool,
+            support_level: EventSupportLevel::Hook,
+            native_name: "BeforeTool",
+            parse_aliases: &["BeforeTool"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterTool,
+            support_level: EventSupportLevel::Hook,
+            native_name: "AfterTool",
+            parse_aliases: &["AfterTool"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::ToolError,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::PermissionRequest,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::HumanInTheLoop,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnComplete,
+            support_level: EventSupportLevel::Hook,
+            native_name: "AfterAgent",
+            parse_aliases: &["AfterAgent"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::TurnError,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStart,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::SubagentStop,
+            support_level: EventSupportLevel::NotSupported,
+            native_name: "",
+            parse_aliases: &[],
+            registration_target: false,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeModel,
+            support_level: EventSupportLevel::Hook,
+            native_name: "BeforeModel",
+            parse_aliases: &["BeforeModel", "BeforeToolSelection"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::AfterModel,
+            support_level: EventSupportLevel::Hook,
+            native_name: "AfterModel",
+            parse_aliases: &["AfterModel"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::BeforeCompact,
+            support_level: EventSupportLevel::Hook,
+            native_name: "PreCompress",
+            parse_aliases: &["PreCompress"],
+            registration_target: true,
+        },
+        EventMapping {
+            event: AgenticEvent::Notification,
+            support_level: EventSupportLevel::Hook,
+            native_name: "Notification",
+            parse_aliases: &["Notification"],
+            registration_target: true,
+        },
+    ],
 };
 
 const GEMINI_SKILL_SCHEMA: ResourcePropertySchema = ResourcePropertySchema::new(
