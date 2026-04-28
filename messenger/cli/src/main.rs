@@ -806,6 +806,7 @@ fn build_desktop_provider_from_route(
                 badge_count: *badge_count,
                 windows: messenger::WindowsDesktopConfig {
                     app_id: windows.app_id.clone(),
+                    prefer_helpers: Vec::new(),
                 },
                 macos: messenger::MacOsDesktopConfig {
                     bundle_id: macos.bundle_id.clone(),
@@ -1030,6 +1031,7 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 badge_count: *badge_count,
                 windows: messenger::WindowsDesktopConfig {
                     app_id: windows.app_id.clone(),
+                    prefer_helpers: Vec::new(),
                 },
                 macos: messenger::MacOsDesktopConfig {
                     bundle_id: macos.bundle_id.clone(),
