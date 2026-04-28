@@ -38,6 +38,9 @@ pub use registry::{all_providers, provider_info};
 use serde::Serialize;
 use sniff::programs::AiCli;
 
+use crate::agents::AgentCapabilities;
+use crate::linking::capabilities::ProviderCapabilities;
+
 /// All static, serializable facts about a provider.
 ///
 /// Populated once per provider variant as a `&'static ProviderInfo` accessed
@@ -100,4 +103,37 @@ pub struct ProviderInfo {
     /// "not supported" results for providers without config-file hooks.
     #[serde(skip)]
     pub configurator: &'static dyn ConfiguratorBehavior,
+
+    /// Accessor for the provider's full agent capability descriptor.
+    ///
+    /// The accessor returns a `'static` reference into a per-provider
+    /// `LazyLock<AgentCapabilities>` defined alongside the provider's
+    /// [`ProviderInfo`] constant. Phase 2 of the centralized providers
+    /// refactor moves the data definitions into `provider/<name>.rs`;
+    /// the legacy `agents::registry::agent_for` facade now forwards to
+    /// this accessor.
+    #[serde(skip)]
+    pub agent_capabilities_fn: fn() -> &'static AgentCapabilities,
+
+    /// Accessor for the provider's resource portability descriptor used by
+    /// cross-provider linking.
+    ///
+    /// As with [`agent_capabilities_fn`](Self::agent_capabilities_fn), the
+    /// underlying data is built once via a `LazyLock` and lives in the
+    /// provider module so the linking facade can forward to it.
+    #[serde(skip)]
+    pub resource_support_fn: fn() -> &'static ProviderCapabilities,
+}
+
+impl ProviderInfo {
+    /// Returns the provider's full [`AgentCapabilities`] descriptor.
+    pub fn agent_capabilities(&self) -> &'static AgentCapabilities {
+        (self.agent_capabilities_fn)()
+    }
+
+    /// Returns the provider's resource portability descriptor used by the
+    /// cross-provider linking layer.
+    pub fn resource_support(&self) -> &'static ProviderCapabilities {
+        (self.resource_support_fn)()
+    }
 }

@@ -134,3 +134,69 @@ fn provider_info_serializes_round_trip() {
     assert_eq!(json["slug"], serde_json::json!("claude"));
     assert_eq!(json["display_name"], serde_json::json!("Claude"));
 }
+
+#[test]
+fn agent_capabilities_facade_matches_catalog() {
+    use crate::agents::agent_for;
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let from_facade = agent_for(provider).capabilities();
+        let from_catalog = provider_info(provider).agent_capabilities();
+        assert_eq!(
+            from_facade, from_catalog,
+            "{provider:?}: agent_for facade does not match provider_info catalog"
+        );
+    }
+}
+
+#[test]
+fn resource_support_facade_matches_catalog() {
+    use crate::linking::capabilities::capabilities_for;
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let from_facade = capabilities_for(provider);
+        let from_catalog = provider_info(provider).resource_support();
+        assert_eq!(
+            from_facade.provider, from_catalog.provider,
+            "{provider:?}: resource_support provider mismatch"
+        );
+        assert_eq!(
+            from_facade.skills.level, from_catalog.skills.level,
+            "{provider:?}: skills support level mismatch"
+        );
+        assert_eq!(
+            from_facade.commands.level, from_catalog.commands.level,
+            "{provider:?}: commands support level mismatch"
+        );
+        assert_eq!(
+            from_facade.agents.level, from_catalog.agents.level,
+            "{provider:?}: agents support level mismatch"
+        );
+        assert_eq!(
+            from_facade.scripts.level, from_catalog.scripts.level,
+            "{provider:?}: scripts support level mismatch"
+        );
+    }
+}
+
+#[test]
+fn agent_capabilities_id_matches_provider() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let caps = provider_info(provider).agent_capabilities();
+        assert_eq!(
+            caps.meta.id, provider,
+            "{provider:?}: agent_capabilities meta.id mismatch"
+        );
+    }
+}
+
+#[test]
+fn resource_support_provider_matches_provider() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let support = provider_info(provider).resource_support();
+        assert_eq!(
+            support.provider, provider,
+            "{provider:?}: resource_support provider field mismatch"
+        );
+    }
+}
