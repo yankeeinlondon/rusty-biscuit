@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
-use crate::events::{AgenticEvent, EventMeta, Provider};
-
+use crate::events::{AgenticEvent, EventMeta};
+use crate::provider::Provider;
 use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct QwenAdapter;

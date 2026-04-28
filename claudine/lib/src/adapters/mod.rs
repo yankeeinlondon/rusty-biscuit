@@ -10,7 +10,8 @@ pub(crate) mod roo;
 use serde_json::Value;
 
 use crate::actions::HookResponse;
-use crate::events::{AgenticEvent, EventMeta, Provider};
+use crate::events::{AgenticEvent, EventMeta};
+use crate::provider::Provider;
 use crate::services::protect::decision::ProtectDecision;
 
 /// Adapter-level parse/format errors.

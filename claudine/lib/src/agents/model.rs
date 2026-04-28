@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Canonical capability model for a supported agentic CLI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentCapabilities {

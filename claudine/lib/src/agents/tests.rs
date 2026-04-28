@@ -1,5 +1,4 @@
-use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
-
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use super::{
     Agent, AgentCapabilities, AgentDefinitionFormat, CapabilityStatus, CommandFormat, ConfigFormat,
     agent_for, all_agents, parse_agent_id,
