@@ -93,3 +93,16 @@ if [ -n "$PKG" ]; then
     cargo test -p "$PKG"
 fi
 ```
+
+## JSON Output (`--json`)
+
+```bash
+sniff --json repo package
+```
+
+Returns a `{ name: "<pkg>" }` object. Exit code semantics still
+honour `--no-error` / `--on-error`.
+
+```json
+{ "name": "sniff-cli" }
+```

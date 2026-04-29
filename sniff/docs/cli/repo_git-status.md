@@ -152,103 +152,99 @@ Shows git user identity (`user.name` and `user.email`) when configured. At `verb
 sniff --json repo git-status [--history <N>] [--refresh-remotes] [-p <PKG>]
 ```
 
-Returns the full `FilesystemInfo` JSON object. The `git` field contains the `GitInfo` structure:
+Returns the `GitInfo` object directly at the top level (not nested under `filesystem.git`). This mirrors what `git-status` shows in text mode and keeps JSON consumers focused on git data instead of unrelated repository structure:
 
 ```json
 {
-  "filesystem": {
-    "git": {
-      "repo_root": "/absolute/path/to/repo",
-      "org": "owner",
-      "repo": "repo-name",
-      "current_branch": "main",
-      "branches": [
+  "repo_root": "/absolute/path/to/repo",
+  "org": "owner",
+  "repo": "repo-name",
+  "current_branch": "main",
+  "branches": [
+    {
+      "name": "main",
+      "short_hash": "a1b2c3d4",
+      "ahead": 0,
+      "behind": 0
+    }
+  ],
+  "in_worktree": false,
+  "base_repo_root": null,
+  "recent": [
+    {
+      "sha": "a1b2c3d4e5f6...",
+      "message": "feat(cli): add new flag",
+      "author": "Ken Snyder",
+      "timestamp": "2026-03-24T12:00:00Z",
+      "refs": [
         {
           "name": "main",
-          "short_hash": "a1b2c3d4",
-          "ahead": 0,
-          "behind": 0
-        }
-      ],
-      "in_worktree": false,
-      "base_repo_root": null,
-      "recent": [
-        {
-          "sha": "a1b2c3d4e5f6...",
-          "message": "feat(cli): add new flag",
-          "author": "Ken Snyder",
-          "timestamp": "2026-03-24T12:00:00Z",
-          "refs": [
-            {
-              "name": "main",
-              "kind": "LocalBranch",
-              "is_head": true
-            }
-          ]
-        }
-      ],
-      "status": {
-        "is_dirty": true,
-        "staged_count": 1,
-        "unstaged_count": 2,
-        "untracked_count": 0,
-        "dirty": [
-          {
-            "filepath": "src/main.rs",
-            "absolute_filepath": "/path/to/repo/src/main.rs",
-            "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n...",
-            "last_local_commit": "a1b2c3d4...",
-            "origin_commit": "a1b2c3d4..."
-          }
-        ],
-        "untracked": [],
-        "is_behind": false
-      },
-      "remotes": [
-        {
-          "name": "origin",
-          "url": "https://github.com/owner/repo.git",
-          "provider": "GitHub",
-          "branches": null,
-          "default_branch": null
-        }
-      ],
-      "worktrees": {
-        "feat/my-feature": {
-          "branch": "feat/my-feature",
-          "filepath": "/path/to/worktrees/feat-my-feature",
-          "sha": "b2c3d4e5f6a1...",
-          "dirty": false,
-          "ahead": 3,
-          "behind": 0,
-          "base_branch": "main",
-          "has_conflicts": false,
-          "merged": false,
-          "changed_files": 0
-        }
-      },
-      "config": {
-        "user_name": "Ken Snyder",
-        "user_email": "ken@example.com"
-      },
-      "tracking": [
-        {
-          "remote": "origin",
-          "ahead": 2,
-          "behind": 0
-        }
-      ],
-      "file_changes": [
-        {
-          "path": "src/main.rs",
-          "status": "Staged",
-          "action": "Modified",
-          "lines_added": 5,
-          "lines_removed": 2
+          "kind": "LocalBranch",
+          "is_head": true
         }
       ]
     }
-  }
+  ],
+  "status": {
+    "is_dirty": true,
+    "staged_count": 1,
+    "unstaged_count": 2,
+    "untracked_count": 0,
+    "dirty": [
+      {
+        "filepath": "src/main.rs",
+        "absolute_filepath": "/path/to/repo/src/main.rs",
+        "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n...",
+        "last_local_commit": "a1b2c3d4...",
+        "origin_commit": "a1b2c3d4..."
+      }
+    ],
+    "untracked": [],
+    "is_behind": false
+  },
+  "remotes": [
+    {
+      "name": "origin",
+      "url": "https://github.com/owner/repo.git",
+      "provider": "GitHub",
+      "branches": null,
+      "default_branch": null
+    }
+  ],
+  "worktrees": {
+    "feat/my-feature": {
+      "branch": "feat/my-feature",
+      "filepath": "/path/to/worktrees/feat-my-feature",
+      "sha": "b2c3d4e5f6a1...",
+      "dirty": false,
+      "ahead": 3,
+      "behind": 0,
+      "base_branch": "main",
+      "has_conflicts": false,
+      "merged": false,
+      "changed_files": 0
+    }
+  },
+  "config": {
+    "user_name": "Ken Snyder",
+    "user_email": "ken@example.com"
+  },
+  "tracking": [
+    {
+      "remote": "origin",
+      "ahead": 2,
+      "behind": 0
+    }
+  ],
+  "file_changes": [
+    {
+      "path": "src/main.rs",
+      "status": "Staged",
+      "action": "Modified",
+      "lines_added": 5,
+      "lines_removed": 2
+    }
+  ]
 }
 ```
 

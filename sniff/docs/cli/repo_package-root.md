@@ -57,6 +57,20 @@ cd "$(sniff repo package-root)"
 PKG_ROOT=$(sniff repo package-root)
 ```
 
+## JSON Output (`--json`)
+
+```bash
+sniff --json repo package-root
+```
+
+Returns a `{ root: "<abs-path>" }` object. When the current directory
+is outside any package, `root` is the empty string and the process
+still exits with code `1` to mirror the text-mode behaviour.
+
+```json
+{ "root": "/Users/ken/projects/rusty-biscuit/sniff/cli" }
+```
+
 ## Related Subcommands
 
 | Subcommand | Returns |
