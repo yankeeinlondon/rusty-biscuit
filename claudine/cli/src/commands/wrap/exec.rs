@@ -518,10 +518,23 @@ pub(crate) fn run_child(
     };
 
     // Write stdin seed AFTER reader threads are spawned (see deadlock note above).
+    //
+    // A `BrokenPipe` here is benign: it means the child closed stdin (or
+    // exited) before we finished writing the seed. That is a legitimate child
+    // behavior — for example, agent stubs in tests, or providers that ignore
+    // their seed and exit immediately. Treat it as success and let the
+    // subsequent `wait_with_*` decide the real exit status. Any other I/O
+    // error still propagates.
     if let Some(seed) = io.stdin_seed
         && let Some(mut stdin_pipe) = child.stdin.take()
     {
-        stdin_pipe.write_all(seed.as_bytes())?;
+        match stdin_pipe.write_all(seed.as_bytes()) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                // Child closed stdin or exited early; nothing more to do.
+            }
+            Err(e) => return Err(e.into()),
+        }
         // Drop closes the pipe so the child sees EOF.
     }
 
@@ -1284,10 +1297,16 @@ pub(crate) fn run_child_capture(
     });
 
     // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
+    // A `BrokenPipe` here is benign — the child closed stdin or exited before
+    // we finished writing the seed. See `run_child` for the same rationale.
     if let Some(seed) = io.stdin_seed
         && let Some(mut stdin_pipe) = child.stdin.take()
     {
-        stdin_pipe.write_all(seed.as_bytes())?;
+        match stdin_pipe.write_all(seed.as_bytes()) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(e) => return Err(e.into()),
+        }
     }
 
     let (exit_code, termination) = if let Some(seconds) = timeout {
@@ -2020,7 +2039,13 @@ pub(crate) fn run_child_stream_semantic(
     if let Some(seed) = stdin_seed
         && let Some(mut stdin_pipe) = child.stdin.take()
     {
-        stdin_pipe.write_all(seed.as_bytes())?;
+        // BrokenPipe is benign: child closed stdin or exited before we
+        // finished writing the seed. See `run_child` for the same rationale.
+        match stdin_pipe.write_all(seed.as_bytes()) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(e) => return Err(e.into()),
+        }
     }
 
     // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"

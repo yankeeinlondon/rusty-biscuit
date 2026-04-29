@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use color_eyre::eyre::{Context, Result, bail};
 
-use claudine::provider::Provider;
 use claudine::linking::resolve_repo_root;
+use claudine::provider::Provider;
 
 pub struct RepoHomeManager {
     agent_offset: String,

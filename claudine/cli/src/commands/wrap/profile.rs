@@ -126,7 +126,10 @@ pub(crate) enum OutputFormat {
 pub(crate) enum PromptDelivery {
     Stdin(String),
     AppendArgs(Vec<String>),
-    InsertArgs { index: usize, args: Vec<String> },
+    InsertArgs {
+        index: usize,
+        args: Vec<String>,
+    },
     /// Wire-mode JSON-RPC prompt delivery: the prompt is sent as the
     /// `params.user_input` of a JSON-RPC `prompt` request after
     /// `initialize` completes. Used by Kimi non-interactive runs which
@@ -311,19 +314,27 @@ pub(crate) trait WrapperProfile: Send + Sync {
                 }
                 Ok(None)
             }
-            YoloSupport::DirectFlagWithAlias { native_flag, aliases } => {
+            YoloSupport::DirectFlagWithAlias {
+                native_flag,
+                aliases,
+            } => {
                 if !has_any_flag(args, native_flag, aliases) {
                     args.push(native_flag.to_string());
                 }
                 Ok(None)
             }
             YoloSupport::EnvVar { env_var, value } => {
-                if !env_overrides.iter().any(|(k, v)| k == env_var && v == value) {
+                if !env_overrides
+                    .iter()
+                    .any(|(k, v)| k == env_var && v == value)
+                {
                     env_overrides.push((env_var.to_string(), value.to_string()));
                 }
                 Ok(None)
             }
-            YoloSupport::NonInteractiveOnly { non_interactive_flag } => {
+            YoloSupport::NonInteractiveOnly {
+                non_interactive_flag,
+            } => {
                 if !has_flag(args, non_interactive_flag) {
                     args.push(non_interactive_flag.to_string());
                 }
@@ -370,9 +381,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// [`YoloSupport::DirectFlagWithAlias`] native flags.
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
         match provider_info(self.provider()).yolo {
-            YoloSupport::DirectFlag { native_flag }
-                if has_flag(args, native_flag) =>
-            {
+            YoloSupport::DirectFlag { native_flag } if has_flag(args, native_flag) => {
                 bail!(
                     "do not pass <blue>{native_flag}</blue> directly to claudine {}; \
                      use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
@@ -380,9 +389,10 @@ pub(crate) trait WrapperProfile: Send + Sync {
                     self.provider()
                 );
             }
-            YoloSupport::DirectFlagWithAlias { native_flag, aliases }
-                if has_any_flag(args, native_flag, aliases) =>
-            {
+            YoloSupport::DirectFlagWithAlias {
+                native_flag,
+                aliases,
+            } if has_any_flag(args, native_flag, aliases) => {
                 bail!(
                     "do not pass <blue>{native_flag}</blue> directly to claudine {}; \
                      use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
@@ -416,9 +426,11 @@ pub(crate) trait WrapperProfile: Send + Sync {
         } else {
             EntrypointMode::Interactive
         };
-        if let Some(ep) = info.entrypoints.iter().find(|ep| {
-            matches!(ep.mode, EntrypointMode::Both) || ep.mode == target_mode
-        }) {
+        if let Some(ep) = info
+            .entrypoints
+            .iter()
+            .find(|ep| matches!(ep.mode, EntrypointMode::Both) || ep.mode == target_mode)
+        {
             if let Some(sub) = ep.subcommand
                 && args.first().is_none_or(|first| first != sub)
             {
@@ -476,7 +488,11 @@ pub(crate) trait WrapperProfile: Send + Sync {
             OutputFormat::Text => claudine::provider::OutputFormat::Text,
             OutputFormat::Stream => claudine::provider::OutputFormat::Stream,
         };
-        let Some(support) = info.output_formats.iter().find(|s| s.format == provider_format) else {
+        let Some(support) = info
+            .output_formats
+            .iter()
+            .find(|s| s.format == provider_format)
+        else {
             return Some(format!(
                 "{} does not support --output {format}; this flag was skipped",
                 self.provider()
