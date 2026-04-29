@@ -46,8 +46,7 @@ const DEFAULT_STALL_WINDOW: Duration = Duration::from_secs(5);
 ///
 /// The slot is a `Mutex<Option<Arc<MixerDeviceSink>>>` so a failed
 /// initial open does not poison the slot — subsequent calls retry.
-static SHARED_DEFAULT_SINK: OnceLock<Mutex<Option<Arc<rodio::MixerDeviceSink>>>> =
-    OnceLock::new();
+static SHARED_DEFAULT_SINK: OnceLock<Mutex<Option<Arc<rodio::MixerDeviceSink>>>> = OnceLock::new();
 
 fn shared_default_sink_slot() -> &'static Mutex<Option<Arc<rodio::MixerDeviceSink>>> {
     SHARED_DEFAULT_SINK.get_or_init(|| Mutex::new(None))
@@ -591,10 +590,10 @@ mod tests {
                 )
             };
 
-            let r1 = with_cached_default_mixer(&try_open, |_mixer| Ok(()));
+            let r1 = with_cached_default_mixer(try_open, |_mixer| Ok(()));
             assert!(r1.is_err());
 
-            let r2 = with_cached_default_mixer(&try_open, |_mixer| Ok(()));
+            let r2 = with_cached_default_mixer(try_open, |_mixer| Ok(()));
             assert!(r2.is_err());
 
             assert_eq!(opens.load(Ordering::SeqCst), 2);

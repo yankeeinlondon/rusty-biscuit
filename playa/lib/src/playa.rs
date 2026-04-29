@@ -459,7 +459,10 @@ mod tests {
             std::env::remove_var("PLAYA_DRY_RUN");
         }
 
-        assert!(result.is_ok(), "env var dry-run play should succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "env var dry-run play should succeed: {result:?}"
+        );
     }
 
     /// Process-local mutex shared by tests that read/write env vars.
