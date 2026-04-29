@@ -13,24 +13,19 @@ pub(crate) fn parse_shell_block_region(
     let opener_line = opening_text.lines().next().unwrap_or(opening_text);
     let (options, timeout_override) = parse_opener_params(opener_line, pair.start_line)?;
 
-    let body_text = &content[pair.body_span.clone()];
-    let excerpt = SourceExcerpt::from_text(body_text, pair.start_line, pair.start_line + 1, 2);
-
     Ok(ShellBlockRegion {
-        span: pair.span.clone(),
-        body_span: pair.body_span.clone(),
-        start_line: pair.start_line,
-        end_line: pair.end_line,
         options,
         timeout_override,
-        excerpt,
     })
 }
 
 /// Parse key=value parameters from a `::shell-block` opener line.
 ///
 /// Returns `(ErrorHandling, Option<Duration>)`.
-fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Option<Duration>), ShellBlockError> {
+fn parse_opener_params(
+    opener: &str,
+    line: usize,
+) -> Result<(ErrorHandling, Option<Duration>), ShellBlockError> {
     let prefix = "::shell-block";
     let after_prefix = opener.strip_prefix(prefix).unwrap_or(opener).trim_start();
 
@@ -50,7 +45,9 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
         }
 
         // Detect wrong-style flags
-        if let Some(ch) = cursor.current() && ch == '-' {
+        if let Some(ch) = cursor.current()
+            && ch == '-'
+        {
             // Read the flag text for the error message
             let mut flag = String::new();
             flag.push(ch);
@@ -92,7 +89,9 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
             if cursor.current() == Some(':') {
                 return Err(ShellBlockError::Parse {
                     line,
-                    message: format!("Expected '=' after '{key}', found ':'. Use {key}=\"<value>\" syntax."),
+                    message: format!(
+                        "Expected '=' after '{key}', found ':'. Use {key}=\"<value>\" syntax."
+                    ),
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                     source_file: None,
                 });
@@ -112,12 +111,12 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
         let value = match cursor.read_value(line) {
             Ok(v) => v,
             Err(e) => {
-            return Err(ShellBlockError::Parse {
-                line,
-                message: e.message,
-                excerpt: SourceExcerpt::from_text(opener, line, line, 0),
-                source_file: None,
-            });
+                return Err(ShellBlockError::Parse {
+                    line,
+                    message: e.message,
+                    excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                    source_file: None,
+                });
             }
         };
 
@@ -167,28 +166,28 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
                     handling.enrich_error_on.push((code, text));
                 }
             }
-            "timeout" => {
-                match value.parse::<u64>() {
-                    Ok(secs) => {
-                        timeout_override = Some(Duration::from_secs(secs));
-                    }
-                    Err(_) => {
+            "timeout" => match value.parse::<u64>() {
+                Ok(secs) => {
+                    timeout_override = Some(Duration::from_secs(secs));
+                }
+                Err(_) => {
                     return Err(ShellBlockError::Parse {
                         line,
-                        message: format!("Invalid timeout value '{value}'. Expected a number of seconds."),
+                        message: format!(
+                            "Invalid timeout value '{value}'. Expected a number of seconds."
+                        ),
                         excerpt: SourceExcerpt::from_text(opener, line, line, 0),
                         source_file: None,
                     });
-                    }
                 }
-            }
+            },
             _ => {
-            return Err(ShellBlockError::Parse {
-                line,
-                message: format!("Unknown shell block option: '{key}'"),
-                excerpt: SourceExcerpt::from_text(opener, line, line, 0),
-                source_file: None,
-            });
+                return Err(ShellBlockError::Parse {
+                    line,
+                    message: format!("Unknown shell block option: '{key}'"),
+                    excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                    source_file: None,
+                });
             }
         }
     }
@@ -197,9 +196,12 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
 }
 
 /// Read a key identifier from the cursor.
-fn read_key(cursor: &mut super::super::parse_utils::Cursor, _line: usize) -> Result<String, String> {
-    use super::super::parse_utils::is_identifier_start;
+fn read_key(
+    cursor: &mut super::super::parse_utils::Cursor,
+    _line: usize,
+) -> Result<String, String> {
     use super::super::parse_utils::is_identifier_char;
+    use super::super::parse_utils::is_identifier_start;
 
     match cursor.current() {
         Some(ch) if is_identifier_start(ch) => {
@@ -276,12 +278,22 @@ fn parse_string_pair(
 fn wrong_style_hint(input: &str) -> String {
     match input {
         "--when-error" | "-when-error" => "Use when_error=\"<text>\" instead.".to_string(),
-        "--when-exit-code" | "-when-exit-code" => "Use when_exit_code=\"<N>,<text>\" instead.".to_string(),
-        "--except-exit-code" | "-except-exit-code" => "Use except_exit_code=\"<N>,<text>\" instead.".to_string(),
-        "--stderr-contains" | "-stderr-contains" => "Use stderr_contains=\"<find>,<text>\" instead.".to_string(),
-        "--stderr-lacks" | "-stderr-lacks" => "Use stderr_lacks=\"<find>,<text>\" instead.".to_string(),
+        "--when-exit-code" | "-when-exit-code" => {
+            "Use when_exit_code=\"<N>,<text>\" instead.".to_string()
+        }
+        "--except-exit-code" | "-except-exit-code" => {
+            "Use except_exit_code=\"<N>,<text>\" instead.".to_string()
+        }
+        "--stderr-contains" | "-stderr-contains" => {
+            "Use stderr_contains=\"<find>,<text>\" instead.".to_string()
+        }
+        "--stderr-lacks" | "-stderr-lacks" => {
+            "Use stderr_lacks=\"<find>,<text>\" instead.".to_string()
+        }
         "--enrich-error" | "-enrich-error" => "Use enrich_error=\"<text>\" instead.".to_string(),
-        "--enrich-error-on" | "-enrich-error-on" => "Use enrich_error_on=\"<N>,<text>\" instead.".to_string(),
+        "--enrich-error-on" | "-enrich-error-on" => {
+            "Use enrich_error_on=\"<N>,<text>\" instead.".to_string()
+        }
         "--timeout" | "-timeout" => "Use timeout=<seconds> instead.".to_string(),
         s if s.contains('-') => format!("Use {}=\"<value>\" syntax.", s.replace('-', "_")),
         _ => "Shell block parameters use key=\"value\" syntax.".to_string(),
@@ -301,21 +313,27 @@ mod tests {
 
     #[test]
     fn parse_when_error() {
-        let (handling, timeout) = parse_opener_params("::shell-block when_error=\"fallback\"", 1).unwrap();
+        let (handling, timeout) =
+            parse_opener_params("::shell-block when_error=\"fallback\"", 1).unwrap();
         assert_eq!(handling.when_error, Some("fallback".to_string()));
         assert!(timeout.is_none());
     }
 
     #[test]
     fn parse_when_exit_code() {
-        let (handling, _) = parse_opener_params("::shell-block when_exit_code=\"1,oops\"", 1).unwrap();
+        let (handling, _) =
+            parse_opener_params("::shell-block when_exit_code=\"1,oops\"", 1).unwrap();
         assert_eq!(handling.when_exit_code, vec![(1, "oops".to_string())]);
     }
 
     #[test]
     fn parse_stderr_contains() {
-        let (handling, _) = parse_opener_params("::shell-block stderr_contains=\"warn,warning found\"", 1).unwrap();
-        assert_eq!(handling.stderr_contains, vec![("warn".to_string(), "warning found".to_string())]);
+        let (handling, _) =
+            parse_opener_params("::shell-block stderr_contains=\"warn,warning found\"", 1).unwrap();
+        assert_eq!(
+            handling.stderr_contains,
+            vec![("warn".to_string(), "warning found".to_string())]
+        );
     }
 
     #[test]
@@ -327,10 +345,8 @@ mod tests {
 
     #[test]
     fn parse_multiple_params() {
-        let (handling, timeout) = parse_opener_params(
-            "::shell-block when_error=\"fallback\" timeout=10",
-            1,
-        ).unwrap();
+        let (handling, timeout) =
+            parse_opener_params("::shell-block when_error=\"fallback\" timeout=10", 1).unwrap();
         assert_eq!(handling.when_error, Some("fallback".to_string()));
         assert_eq!(timeout, Some(Duration::from_secs(10)));
     }
@@ -404,25 +420,32 @@ mod tests {
 
     #[test]
     fn parse_except_exit_code() {
-        let (handling, _) = parse_opener_params("::shell-block except_exit_code=\"2,skip\"", 1).unwrap();
+        let (handling, _) =
+            parse_opener_params("::shell-block except_exit_code=\"2,skip\"", 1).unwrap();
         assert_eq!(handling.except_exit_code, vec![(2, "skip".to_string())]);
     }
 
     #[test]
     fn parse_stderr_lacks() {
-        let (handling, _) = parse_opener_params("::shell-block stderr_lacks=\"error,clean\"", 1).unwrap();
-        assert_eq!(handling.stderr_lacks, vec![("error".to_string(), "clean".to_string())]);
+        let (handling, _) =
+            parse_opener_params("::shell-block stderr_lacks=\"error,clean\"", 1).unwrap();
+        assert_eq!(
+            handling.stderr_lacks,
+            vec![("error".to_string(), "clean".to_string())]
+        );
     }
 
     #[test]
     fn parse_enrich_error() {
-        let (handling, _) = parse_opener_params("::shell-block enrich_error=\"details\"", 1).unwrap();
+        let (handling, _) =
+            parse_opener_params("::shell-block enrich_error=\"details\"", 1).unwrap();
         assert_eq!(handling.enrich_error, Some("details".to_string()));
     }
 
     #[test]
     fn parse_enrich_error_on() {
-        let (handling, _) = parse_opener_params("::shell-block enrich_error_on=\"1,info\"", 1).unwrap();
+        let (handling, _) =
+            parse_opener_params("::shell-block enrich_error_on=\"1,info\"", 1).unwrap();
         assert_eq!(handling.enrich_error_on, vec![(1, "info".to_string())]);
     }
 
@@ -449,8 +472,14 @@ mod tests {
         assert_eq!(handling.when_error, Some("fallback".to_string()));
         assert_eq!(handling.when_exit_code, vec![(1, "oops".to_string())]);
         assert_eq!(handling.except_exit_code, vec![(2, "skip".to_string())]);
-        assert_eq!(handling.stderr_contains, vec![("warn".to_string(), "w".to_string())]);
-        assert_eq!(handling.stderr_lacks, vec![("err".to_string(), "c".to_string())]);
+        assert_eq!(
+            handling.stderr_contains,
+            vec![("warn".to_string(), "w".to_string())]
+        );
+        assert_eq!(
+            handling.stderr_lacks,
+            vec![("err".to_string(), "c".to_string())]
+        );
         assert_eq!(handling.enrich_error, Some("details".to_string()));
         assert_eq!(handling.enrich_error_on, vec![(3, "info".to_string())]);
         assert_eq!(timeout, Some(Duration::from_secs(30)));

@@ -11,7 +11,6 @@ use super::parse_utils::{find_code_regions, is_in_code_region};
 
 /// Which kind of block opened a pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum BlockOpenKind {
     /// A `::block` page-block opener.
     Page,
@@ -25,7 +24,6 @@ pub(crate) enum BlockOpenKind {
 /// `Page` and `Shell` kinds are mixed in the same vector; callers filter
 /// by `kind` when they only need one family.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) struct BlockPair {
     /// Which kind of block opened this pair.
     pub kind: BlockOpenKind,
@@ -67,7 +65,6 @@ pub(crate) struct BlockPair {
 /// assert_eq!(pairs.len(), 1);
 /// assert!(matches!(pairs[0].kind, BlockOpenKind::Shell));
 /// ```
-#[allow(dead_code)]
 pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPairError> {
     let code_regions = find_code_regions(content);
     let bytes = content.as_bytes();
@@ -86,8 +83,13 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
         }
 
         let line_end = i;
+        let text_line_end = if line_end > line_start && bytes[line_end - 1] == b'\r' {
+            line_end - 1
+        } else {
+            line_end
+        };
         let span_end = if i < bytes.len() { i + 1 } else { i };
-        let line = &content[line_start..line_end];
+        let line = &content[line_start..text_line_end];
         let trimmed = line.trim();
 
         if !trimmed.is_empty() {
@@ -97,7 +99,7 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
                     // Make sure it's not ::blockquote or similar
                     if after.is_empty() || after.starts_with(char::is_whitespace) {
                         let body_start = span_end;
-                        let opening_text = content[line_start..line_end].to_string();
+                        let opening_text = content[line_start..text_line_end].to_string();
                         stack.push((
                             line_start,
                             body_start,
@@ -110,7 +112,7 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
                     // Make sure it's not a longer prefix like ::shell-blocker
                     if after.is_empty() || after.starts_with(char::is_whitespace) {
                         let body_start = span_end;
-                        let opening_text = content[line_start..line_end].to_string();
+                        let opening_text = content[line_start..text_line_end].to_string();
                         stack.push((
                             line_start,
                             body_start,
@@ -169,7 +171,6 @@ pub(crate) fn scan_block_pairs(content: &str) -> Result<Vec<BlockPair>, BlockPai
 
 /// Errors that can occur while scanning block pairs.
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub(crate) enum BlockPairError {
     /// `::end-block` appeared without a matching opener.
     #[error("Unmatched ::end-block at line {line}")]
@@ -225,7 +226,10 @@ mod tests {
     fn unmatched_end_block() {
         let content = "::end-block\n";
         let result = scan_block_pairs(content);
-        assert!(matches!(result, Err(BlockPairError::UnmatchedEnd { line: 1 })));
+        assert!(matches!(
+            result,
+            Err(BlockPairError::UnmatchedEnd { line: 1 })
+        ));
     }
 
     #[test]
@@ -276,6 +280,16 @@ mod tests {
         let pairs = scan_block_pairs(content).unwrap();
         assert_eq!(pairs.len(), 1);
         assert_eq!(&content[pairs[0].body_span.clone()], "");
+    }
+
+    #[test]
+    fn crlf_spans_include_actual_line_endings_without_polluting_opening_text() {
+        let content = "::shell-block\r\necho hi\r\n::end-block\r\n";
+        let pairs = scan_block_pairs(content).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].span, 0..content.len());
+        assert_eq!(&content[pairs[0].body_span.clone()], "echo hi\r\n");
+        assert_eq!(pairs[0].opening_text, "::shell-block");
     }
 
     #[test]

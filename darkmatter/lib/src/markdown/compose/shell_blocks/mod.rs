@@ -11,12 +11,13 @@ pub mod types;
 
 pub use types::ShellBlockError;
 
-use super::shell_expansion::types::{
-    ShellCommandOrigin, ShellDirective, ShellExpansionRuntime,
-};
-use super::shell_expansion::{apply_replacements_in_reverse, execute_prepared_directive, prepare_directive, resolve_policy_paths};
-use super::types::ComposeReport;
 use super::ComposeOptions;
+use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionRuntime};
+use super::shell_expansion::{
+    apply_replacements_in_reverse, execute_prepared_directive, prepare_directive,
+    resolve_policy_paths,
+};
+use super::types::ComposeReport;
 use crate::markdown::MarkdownResult;
 use std::path::PathBuf;
 use types::{ShellBlockCommandResult, SourceExcerpt};
@@ -67,23 +68,22 @@ pub(crate) fn run_shell_blocks_stage(
 
     // Resolve policy paths once
     let shell_opts = options.shell_options();
-    let policy_paths = resolve_policy_paths(&shell_opts,
-        &options.source
-    ).map_err(|e| ShellBlockError::Parse {
-        line: 0,
-        message: format!("Policy path resolution failed: {e}"),
-        excerpt: SourceExcerpt::default(),
-        source_file: source_file.clone(),
-    })?;
+    let policy_paths =
+        resolve_policy_paths(&shell_opts, &options.source).map_err(|e| ShellBlockError::Parse {
+            line: 0,
+            message: format!("Policy path resolution failed: {e}"),
+            excerpt: SourceExcerpt::default(),
+            source_file: source_file.clone(),
+        })?;
 
-    runtime.ensure_loaded(&policy_paths).map_err(|e| {
-        ShellBlockError::Parse {
+    runtime
+        .ensure_loaded(&policy_paths)
+        .map_err(|e| ShellBlockError::Parse {
             line: 0,
             message: format!("Policy loading failed: {e}"),
             excerpt: SourceExcerpt::default(),
             source_file: source_file.clone(),
-        }
-    })?;
+        })?;
 
     let mut replacements = Vec::new();
     let mut report = ComposeReport::new();
@@ -116,11 +116,7 @@ pub(crate) fn run_shell_blocks_stage(
                 timeout_override: region.timeout_override,
             };
 
-            match prepare_directive(&directive,
-                options,
-                &policy_paths,
-                runtime
-            ) {
+            match prepare_directive(&directive, options, &policy_paths, runtime) {
                 Ok(p) => prepared.push((p, command.clone())),
                 Err(e) => {
                     return Err(ShellBlockError::Command {
@@ -144,13 +140,10 @@ pub(crate) fn run_shell_blocks_stage(
         let mut results = Vec::new();
 
         for (prep, command) in prepared {
-            match execute_prepared_directive(&prep,
-                options
-            ) {
+            match execute_prepared_directive(&prep, options) {
                 Ok(execution) => {
                     results.push(ShellBlockCommandResult {
                         output: execution.combined_output(),
-                        command: command.clone(),
                     });
                     report.warnings.extend(execution.warnings);
                 }
@@ -257,7 +250,9 @@ mod tests {
         }
     }
 
-    fn test_options_with_handler(handler: Arc<dyn ShellApprovalHandler>) -> (ComposeOptions, TempDir) {
+    fn test_options_with_handler(
+        handler: Arc<dyn ShellApprovalHandler>,
+    ) -> (ComposeOptions, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let options = ComposeOptions::new()
             .with_shell_approval_handler(handler)
@@ -348,7 +343,8 @@ mod tests {
 
     #[test]
     fn when_error_per_command() {
-        let content = "::shell-block when_error=\"fallback\"\necho hello\nfalse\necho world\n::end-block\n";
+        let content =
+            "::shell-block when_error=\"fallback\"\necho hello\nfalse\necho world\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
         let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
@@ -380,7 +376,10 @@ mod tests {
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
-        assert!(err.to_string().contains("timed out"), "Expected timeout error: {err}");
+        assert!(
+            err.to_string().contains("timed out"),
+            "Expected timeout error: {err}"
+        );
     }
 
     // ── Phase 4 edge-case tests ───────────────────────────────────────
@@ -392,7 +391,10 @@ mod tests {
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Unterminated") || msg.contains("parse error"), "Expected unterminated error: {msg}");
+        assert!(
+            msg.contains("Unterminated") || msg.contains("parse error"),
+            "Expected unterminated error: {msg}"
+        );
     }
 
     #[test]
@@ -402,7 +404,10 @@ mod tests {
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Unmatched") || msg.contains("parse error"), "Expected unmatched error: {msg}");
+        assert!(
+            msg.contains("Unmatched") || msg.contains("parse error"),
+            "Expected unmatched error: {msg}"
+        );
     }
 
     #[test]
@@ -413,7 +418,10 @@ mod tests {
         let mut runtime = ShellExpansionRuntime::new();
         let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
-        assert!(result.contains("nested"), "Expected nested output: {result}");
+        assert!(
+            result.contains("nested"),
+            "Expected nested output: {result}"
+        );
     }
 
     #[test]
@@ -434,7 +442,10 @@ mod tests {
         let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
         // Empty outputs should be omitted; non-empty should have blank line between
-        assert_eq!(result, "hello\n\nworld\n", "Expected mixed output: {result}");
+        assert_eq!(
+            result, "hello\n\nworld\n",
+            "Expected mixed output: {result}"
+        );
     }
 
     #[test]

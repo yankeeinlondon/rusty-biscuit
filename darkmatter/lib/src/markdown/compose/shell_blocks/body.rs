@@ -19,34 +19,28 @@ pub(crate) fn split_logical_commands(
     body: &str,
     body_start_line: usize,
 ) -> Result<Vec<ShellBlockCommand>, ShellBlockError> {
-    let lines: Vec<&str> = body.lines().collect();
     let mut commands = Vec::new();
     let mut current_lines: Vec<String> = Vec::new();
     let mut current_start_line: Option<usize> = None;
     let mut current_start_byte: Option<usize> = None;
     let mut in_continuation = false;
 
-    let mut byte_offset = 0usize;
-
-    for (i, line) in lines.iter().enumerate() {
+    for (i, (line, line_start)) in physical_lines(body).into_iter().enumerate() {
         let line_number = body_start_line + i;
         let trimmed = line.trim();
 
         if trimmed.is_empty() {
-            // Blank line: ignore, but track byte offset
-            byte_offset += line.len() + 1; // +1 for newline
             continue;
         }
 
         // Check for continuation: last non-whitespace char is backslash
         // and it's NOT preceded by another backslash.
         let trimmed_right = line.trim_end();
-        let is_continuation = trimmed_right.ends_with('\\')
-            && !trimmed_right.ends_with("\\\\");
+        let is_continuation = trimmed_right.ends_with('\\') && !trimmed_right.ends_with("\\\\");
 
         if current_start_line.is_none() {
             current_start_line = Some(line_number);
-            current_start_byte = Some(byte_offset);
+            current_start_byte = Some(line_start);
         }
 
         if is_continuation {
@@ -61,18 +55,17 @@ pub(crate) fn split_logical_commands(
             // End of command
             let raw = current_lines.join(" ");
             let start_line = current_start_line.unwrap();
-            let end_line = line_number;
             let start_byte = current_start_byte.unwrap();
-            let end_byte = byte_offset + line.len();
+            let end_byte = line_start + line.len();
 
             // Tokenize
-            let tokens = crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw
-            ).map_err(|e| ShellBlockError::Parse {
-                line: start_line,
-                message: format!("Command tokenization failed: {e}"),
-                excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
-                source_file: None,
-            })?;
+            let tokens = crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw)
+                .map_err(|e| ShellBlockError::Parse {
+                    line: start_line,
+                    message: format!("Command tokenization failed: {e}"),
+                    excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                    source_file: None,
+                })?;
 
             if tokens.is_empty() {
                 return Err(ShellBlockError::Parse {
@@ -92,15 +85,12 @@ pub(crate) fn split_logical_commands(
                 args,
                 physical_span: start_byte..end_byte,
                 start_line,
-                end_line,
             });
 
             current_lines.clear();
             current_start_line = None;
             current_start_byte = None;
         }
-
-        byte_offset += line.len() + 1; // +1 for newline
     }
 
     // Handle unterminated continuation
@@ -117,6 +107,19 @@ pub(crate) fn split_logical_commands(
     Ok(commands)
 }
 
+fn physical_lines(input: &str) -> Vec<(&str, usize)> {
+    let mut lines = Vec::new();
+    let mut offset = 0usize;
+    for segment in input.split_inclusive('\n') {
+        let start = offset;
+        offset += segment.len();
+        let without_lf = segment.strip_suffix('\n').unwrap_or(segment);
+        let line = without_lf.strip_suffix('\r').unwrap_or(without_lf);
+        lines.push((line, start));
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,7 +132,6 @@ mod tests {
         assert_eq!(cmds[0].executable, "echo");
         assert_eq!(cmds[0].args, vec!["hello"]);
         assert_eq!(cmds[0].start_line, 1);
-        assert_eq!(cmds[0].end_line, 1);
     }
 
     #[test]
@@ -138,6 +140,19 @@ mod tests {
         assert_eq!(cmds.len(), 2);
         assert_eq!(cmds[0].raw_command, "echo hello");
         assert_eq!(cmds[1].raw_command, "echo world");
+    }
+
+    #[test]
+    fn crlf_physical_spans_track_actual_bytes() {
+        let body = "echo hello\r\necho world\r\n";
+        let cmds = split_logical_commands(body, 10).unwrap();
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].physical_span, 0..10);
+        assert_eq!(cmds[1].physical_span, 12..22);
+        assert_eq!(&body[cmds[0].physical_span.clone()], "echo hello");
+        assert_eq!(&body[cmds[1].physical_span.clone()], "echo world");
+        assert_eq!(cmds[0].start_line, 10);
+        assert_eq!(cmds[1].start_line, 11);
     }
 
     #[test]
@@ -154,7 +169,6 @@ mod tests {
         assert_eq!(cmds[0].executable, "echo");
         assert_eq!(cmds[0].args, vec!["hello"]);
         assert_eq!(cmds[0].start_line, 1);
-        assert_eq!(cmds[0].end_line, 2);
     }
 
     #[test]
@@ -162,7 +176,6 @@ mod tests {
         let cmds = split_logical_commands("echo \\\n\n  hello", 1).unwrap();
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].raw_command, "echo   hello");
-        assert_eq!(cmds[0].end_line, 3);
     }
 
     #[test]
@@ -223,15 +236,17 @@ mod tests {
     fn double_ampersand_rejected() {
         let result = split_logical_commands("make && make install", 1);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Conditional execution"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Conditional execution")
+        );
     }
 
     #[test]
     fn mixed_empty_and_non_empty() {
-        let cmds = split_logical_commands(
-            "echo hello\n\necho world\n\necho done",
-            1,
-        ).unwrap();
+        let cmds = split_logical_commands("echo hello\n\necho world\n\necho done", 1).unwrap();
         assert_eq!(cmds.len(), 3);
         assert_eq!(cmds[0].raw_command, "echo hello");
         assert_eq!(cmds[1].raw_command, "echo world");

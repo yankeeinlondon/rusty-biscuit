@@ -8,27 +8,15 @@ use crate::markdown::compose::shell_expansion::types::{ErrorHandling, ShellExpan
 
 /// A discovered shell block region with parsed options.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ShellBlockRegion {
-    /// Full byte span including opener and closer lines.
-    pub span: Range<usize>,
-    /// Byte span of the body between opener and closer.
-    pub body_span: Range<usize>,
-    /// 1-based line number of the opening directive.
-    pub start_line: usize,
-    /// 1-based line number of the closing directive.
-    pub end_line: usize,
     /// Parsed error handling options from the opener line.
     pub options: ErrorHandling,
     /// Optional timeout override for all commands in this block.
     pub timeout_override: Option<Duration>,
-    /// Source excerpt for diagnostics.
-    pub excerpt: SourceExcerpt,
 }
 
 /// A single logical command within a shell block.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ShellBlockCommand {
     /// The raw command string after continuation folding.
     pub raw_command: String,
@@ -40,18 +28,13 @@ pub(crate) struct ShellBlockCommand {
     pub physical_span: Range<usize>,
     /// 1-based line number where this command starts.
     pub start_line: usize,
-    /// 1-based line number where this command ends.
-    pub end_line: usize,
 }
 
 /// Result of executing a single logical command.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ShellBlockCommandResult {
     /// The rendered output for this command.
     pub output: String,
-    /// The command that produced this output.
-    pub command: ShellBlockCommand,
 }
 
 /// Compact owned structure containing surrounding body lines for diagnostics.
@@ -68,7 +51,12 @@ impl SourceExcerpt {
     ///
     /// `highlight_line` is an absolute 1-based line number.
     /// `body_start_line` is the absolute line number where `text` starts.
-    pub fn from_text(text: &str, highlight_line: usize, body_start_line: usize, context_lines: usize) -> Self {
+    pub fn from_text(
+        text: &str,
+        highlight_line: usize,
+        body_start_line: usize,
+        context_lines: usize,
+    ) -> Self {
         let all_lines: Vec<(usize, &str)> = text
             .lines()
             .enumerate()
@@ -84,7 +72,10 @@ impl SourceExcerpt {
             .map(|(n, line)| (*n, line.to_string()))
             .collect();
 
-        Self { lines, highlight_line }
+        Self {
+            lines,
+            highlight_line,
+        }
     }
 }
 
@@ -131,19 +122,36 @@ impl ShellBlockError {
     /// Returns a new error with `source_file` set; consumes `self`.
     pub fn with_source_file(self, path: Option<PathBuf>) -> Self {
         match self {
-            Self::Parse { line, message, excerpt, .. } => Self::Parse {
+            Self::Parse {
+                line,
+                message,
+                excerpt,
+                ..
+            } => Self::Parse {
                 line,
                 message,
                 excerpt,
                 source_file: path,
             },
-            Self::Unterminated { line, opening_text, excerpt, .. } => Self::Unterminated {
+            Self::Unterminated {
+                line,
+                opening_text,
+                excerpt,
+                ..
+            } => Self::Unterminated {
                 line,
                 opening_text,
                 excerpt,
                 source_file: path,
             },
-            Self::Command { block_start_line, command_line, partial_output, excerpt, source, .. } => Self::Command {
+            Self::Command {
+                block_start_line,
+                command_line,
+                partial_output,
+                excerpt,
+                source,
+                ..
+            } => Self::Command {
                 block_start_line,
                 command_line,
                 partial_output,
@@ -165,12 +173,19 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            ShellBlockError::Parse { line, message, excerpt, source_file } => {
+            ShellBlockError::Parse {
+                line,
+                message,
+                excerpt,
+                source_file,
+            } => {
                 let mut body = String::new();
                 if let Some(path) = source_file {
                     body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
                 }
-                body.push_str(&format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"));
+                body.push_str(&format!(
+                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ));
                 if !excerpt.lines.is_empty() {
                     body.push_str("\n<dim>Context:</dim>\n");
                     for (ln, text) in &excerpt.lines {
@@ -187,7 +202,12 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     .hint("Shell block parameters use <cyan>key=\"value\"</cyan> syntax, not <cyan>--flag</cyan> syntax.")
             }
 
-            ShellBlockError::Unterminated { line, opening_text, excerpt, source_file } => {
+            ShellBlockError::Unterminated {
+                line,
+                opening_text,
+                excerpt,
+                source_file,
+            } => {
                 let mut body = String::new();
                 if let Some(path) = source_file {
                     body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
@@ -209,7 +229,14 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     .hint("Add <cyan>::end-block</cyan> to close the block.")
             }
 
-            ShellBlockError::Command { block_start_line, command_line, partial_output, excerpt, source, source_file } => {
+            ShellBlockError::Command {
+                block_start_line,
+                command_line,
+                partial_output,
+                excerpt,
+                source,
+                source_file,
+            } => {
                 let mut body = String::new();
                 if let Some(path) = source_file {
                     body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
@@ -238,12 +265,24 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
 
                 let hint = match source.as_ref() {
                     ShellExpansionError::ParseDirective { .. } => "Check the command syntax.",
-                    ShellExpansionError::CommandNotFound { .. } => "Install the binary or update <cyan>$PATH</cyan>.",
-                    ShellExpansionError::Blacklisted { .. } => "Remove the entry from your blacklist file if you trust this command.",
-                    ShellExpansionError::ApprovalRequired { .. } => "Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist.",
-                    ShellExpansionError::Denied { .. } => "The user declined to approve this shell command.",
-                    ShellExpansionError::Timeout { .. } => "Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail.",
-                    ShellExpansionError::ExecutionFailed { .. } => "Run the command directly to reproduce the failure.",
+                    ShellExpansionError::CommandNotFound { .. } => {
+                        "Install the binary or update <cyan>$PATH</cyan>."
+                    }
+                    ShellExpansionError::Blacklisted { .. } => {
+                        "Remove the entry from your blacklist file if you trust this command."
+                    }
+                    ShellExpansionError::ApprovalRequired { .. } => {
+                        "Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."
+                    }
+                    ShellExpansionError::Denied { .. } => {
+                        "The user declined to approve this shell command."
+                    }
+                    ShellExpansionError::Timeout { .. } => {
+                        "Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."
+                    }
+                    ShellExpansionError::ExecutionFailed { .. } => {
+                        "Run the command directly to reproduce the failure."
+                    }
                     _ => "Check the command and its error handling options.",
                 };
                 block = block.hint(hint);
@@ -263,7 +302,12 @@ fn truncate_output(text: &str) -> String {
     const MAX_BYTES: usize = 1024;
 
     let truncated = if text.len() > MAX_BYTES {
-        let cut = text.char_indices().map(|(i, _)| i).take_while(|&i| i <= MAX_BYTES).last().unwrap_or(0);
+        let cut = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= MAX_BYTES)
+            .last()
+            .unwrap_or(0);
         format!("{}\n<dim>... output truncated</dim>", &text[..cut])
     } else {
         text.to_string()
@@ -272,7 +316,10 @@ fn truncate_output(text: &str) -> String {
     let lines: Vec<&str> = truncated.lines().collect();
     if lines.len() > MAX_LINES {
         let head = lines[..MAX_LINES].join("\n");
-        format!("{head}\n<dim>... {} more lines</dim>", lines.len() - MAX_LINES)
+        format!(
+            "{head}\n<dim>... {} more lines</dim>",
+            lines.len() - MAX_LINES
+        )
     } else {
         truncated
     }

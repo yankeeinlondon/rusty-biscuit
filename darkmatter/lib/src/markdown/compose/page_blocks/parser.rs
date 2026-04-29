@@ -22,27 +22,26 @@ struct UnfinishedRegion {
 /// a matching `::block`, and `PageBlockError::UnterminatedBlock` if EOF is
 /// reached with an open block.
 pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBlockError> {
-    let pairs = super::super::block_pairs::scan_block_pairs(content)
-        .map_err(|e| match e {
-            super::super::block_pairs::BlockPairError::UnmatchedEnd { line } => {
-                PageBlockError::UnmatchedEnd { line }
-            }
-            super::super::block_pairs::BlockPairError::UnterminatedBlock {
+    let pairs = super::super::block_pairs::scan_block_pairs(content).map_err(|e| match e {
+        super::super::block_pairs::BlockPairError::UnmatchedEnd { line } => {
+            PageBlockError::UnmatchedEnd { line }
+        }
+        super::super::block_pairs::BlockPairError::UnterminatedBlock {
+            line,
+            opening_text,
+            file_ends_at_line,
+        } => PageBlockError::UnterminatedBlock {
+            line,
+            opening_text,
+            file_ends_at_line,
+        },
+        super::super::block_pairs::BlockPairError::TrailingContent { line, content } => {
+            PageBlockError::ParseDirective {
                 line,
-                opening_text,
-                file_ends_at_line,
-            } => PageBlockError::UnterminatedBlock {
-                line,
-                opening_text,
-                file_ends_at_line,
-            },
-            super::super::block_pairs::BlockPairError::TrailingContent { line, content } => {
-                PageBlockError::ParseDirective {
-                    line,
-                    message: format!("Unexpected content after ::end-block: '{content}'"),
-                }
+                message: format!("Unexpected content after ::end-block: '{content}'"),
             }
-        })?;
+        }
+    })?;
 
     // Filter to page blocks only and sort by start line (document order).
     let mut page_pairs: Vec<_> = pairs

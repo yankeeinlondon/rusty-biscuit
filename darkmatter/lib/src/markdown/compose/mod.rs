@@ -502,9 +502,7 @@ impl Markdown {
                                 ComposeOperation::ShellExpansion => {
                                     perf::PerfMetricKind::ShellExpansion
                                 }
-                                ComposeOperation::ShellBlocks => {
-                                    perf::PerfMetricKind::ShellBlocks
-                                }
+                                ComposeOperation::ShellBlocks => perf::PerfMetricKind::ShellBlocks,
                                 _ => unreachable!(),
                             };
                             perf.record(kind, start.elapsed());
@@ -589,14 +587,12 @@ impl Markdown {
             ComposeOperation::ShellExpansion => {
                 self.run_shell_expansion_stage(options, runtime, report)
             }
-            ComposeOperation::ShellBlocks => {
-                shell_blocks::run_shell_blocks_stage_for_markdown(
-                    &mut self.content,
-                    options,
-                    &mut runtime.shell,
-                    report,
-                )
-            }
+            ComposeOperation::ShellBlocks => shell_blocks::run_shell_blocks_stage_for_markdown(
+                &mut self.content,
+                options,
+                &mut runtime.shell,
+                report,
+            ),
             _ => Ok(()),
         }
     }
@@ -2411,8 +2407,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_code_blocks_via_frontmatter() {
-        let content =
-            "---\nname: Alice\ninterpolate_code_blocks: true\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
+        let content = "---\nname: Alice\ninterpolate_code_blocks: true\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);

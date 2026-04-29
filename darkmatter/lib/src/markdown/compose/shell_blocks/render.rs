@@ -40,20 +40,10 @@ pub(crate) fn render_block_output(results: &[ShellBlockCommandResult]) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::types::ShellBlockCommand;
-    use std::ops::Range;
 
     fn make_result(output: &str) -> ShellBlockCommandResult {
         ShellBlockCommandResult {
             output: output.to_string(),
-            command: ShellBlockCommand {
-                raw_command: "cmd".to_string(),
-                executable: "cmd".to_string(),
-                args: Vec::new(),
-                physical_span: Range { start: 0, end: 0 },
-                start_line: 1,
-                end_line: 1,
-            },
         }
     }
 
@@ -70,39 +60,25 @@ mod tests {
 
     #[test]
     fn multiple_outputs() {
-        let results = vec![
-            make_result("hello"),
-            make_result("world"),
-        ];
+        let results = vec![make_result("hello"), make_result("world")];
         assert_eq!(render_block_output(&results), "hello\n\nworld\n");
     }
 
     #[test]
     fn empty_output_omitted() {
-        let results = vec![
-            make_result("hello"),
-            make_result(""),
-            make_result("world"),
-        ];
+        let results = vec![make_result("hello"), make_result(""), make_result("world")];
         assert_eq!(render_block_output(&results), "hello\n\nworld\n");
     }
 
     #[test]
     fn all_empty() {
-        let results = vec![
-            make_result(""),
-            make_result("  "),
-            make_result(""),
-        ];
+        let results = vec![make_result(""), make_result("  "), make_result("")];
         assert_eq!(render_block_output(&results), "");
     }
 
     #[test]
     fn trimmed_output() {
-        let results = vec![
-            make_result("  hello  "),
-            make_result("world\n"),
-        ];
+        let results = vec![make_result("  hello  "), make_result("world\n")];
         assert_eq!(render_block_output(&results), "hello\n\nworld\n");
     }
 
@@ -121,11 +97,7 @@ mod tests {
 
     #[test]
     fn single_empty_amidst_empty() {
-        let results = vec![
-            make_result(""),
-            make_result("only"),
-            make_result(""),
-        ];
+        let results = vec![make_result(""), make_result("only"), make_result("")];
         assert_eq!(render_block_output(&results), "only\n");
     }
 }
