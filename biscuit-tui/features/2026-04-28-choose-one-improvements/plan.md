@@ -20,6 +20,12 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2:
   - .claude/skills/biscuit-tui/SKILL.md
+source_files_during_phase_3:
+  - biscuit-tui/cli/src/commands/common_choose.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3:
+  - .opencode/skill/biscuit-tui/SKILL.md
 packages:
   - tui-chrome
   - tui-chrome-cli
