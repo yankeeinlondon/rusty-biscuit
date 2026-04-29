@@ -31,5 +31,6 @@ pub use core::{
     FrameChromeConfig, FuzzyFilter, HandleEvent, HeightSpec, KeyBindings, Label, LabelPosition,
     LoopExit, Margin, NerdFontStatus, OptionSort, Padding, SortOrder, StandaloneState,
     TerminalBackground, TerminalStyle, ValidationState, drive_event_loop,
-    drive_event_loop_with_chrome, render_with_label, run_standalone, run_standalone_with_chrome,
+    drive_event_loop_with_chrome, render_with_label, resolve_active_style, run_standalone,
+    run_standalone_with_chrome,
 };

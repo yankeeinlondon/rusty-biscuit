@@ -37,6 +37,6 @@ pub use standalone::{
     ABORTED_KIND, CANCELLED_KIND, HandleEvent, LoopExit, StandaloneState, drive_event_loop,
     drive_event_loop_with_chrome, run_standalone, run_standalone_with_chrome,
 };
-pub use terminal_style::{NerdFontStatus, TerminalBackground, TerminalStyle};
+pub use terminal_style::{NerdFontStatus, TerminalBackground, TerminalStyle, resolve_active_style};
 pub use theme::ComponentTheme;
 pub use validation::ValidationState;

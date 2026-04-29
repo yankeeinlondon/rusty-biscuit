@@ -8,6 +8,10 @@
 
 use std::env;
 
+use ratatui::style::{Color, Modifier, Style};
+
+use crate::components::ActiveChoiceColor;
+
 /// Detected background luminance of the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TerminalBackground {
@@ -84,6 +88,70 @@ fn detect_background() -> TerminalBackground {
     TerminalBackground::Unknown
 }
 
+/// Resolves the active-row [`Style`] for a [`ChooseOne`] /
+/// [`ChooseMany`] hovered item.
+///
+/// The choice renderer applies the returned style to the prefix +
+/// label + one trailing blank cell of the active row only — never to
+/// the rest of the row width — so the highlight visibly tracks the
+/// item content rather than the entire viewport.
+///
+/// ## Returns
+///
+/// A [`Style`] with:
+///
+/// - a faint background colour drawn from a small per-`ActiveChoiceColor`
+///   palette tuned for the detected [`TerminalBackground`];
+/// - a foreground colour that meets the spec's contrast rule (white on
+///   `Dark` and `Unknown`, black on `Light`);
+/// - the bold modifier set; underline left off.
+///
+/// ## Notes
+///
+/// The palette uses 256-colour indices to maximise portability across
+/// terminals that do not advertise truecolour:
+///
+/// | `ActiveChoiceColor` | `Dark` / `Unknown` bg | `Light` bg |
+/// | --- | --- | --- |
+/// | `Grey` | 238 (faint dark grey) | 252 (faint light grey) |
+/// | `Green` | 22 (deep green) | 194 (pale mint) |
+/// | `Yellow` | 58 (deep ochre) | 230 (pale cream) |
+/// | `Red` | 52 (deep maroon) | 224 (pale pink) |
+///
+/// Foregrounds are [`Color::White`] on `Dark`/`Unknown` and
+/// [`Color::Black`] on `Light`. The `Unknown` branch defers to the
+/// dark-safe palette so that mistakenly-light terminals still produce
+/// legible (if slightly low-contrast) output.
+///
+/// [`ChooseOne`]: crate::components::ChooseOne
+/// [`ChooseMany`]: crate::components::ChooseMany
+pub fn resolve_active_style(color: ActiveChoiceColor, background: TerminalBackground) -> Style {
+    let (bg_index, fg) = match background {
+        TerminalBackground::Light => {
+            let idx = match color {
+                ActiveChoiceColor::Grey => 252,
+                ActiveChoiceColor::Green => 194,
+                ActiveChoiceColor::Yellow => 230,
+                ActiveChoiceColor::Red => 224,
+            };
+            (idx, Color::Black)
+        }
+        TerminalBackground::Dark | TerminalBackground::Unknown => {
+            let idx = match color {
+                ActiveChoiceColor::Grey => 238,
+                ActiveChoiceColor::Green => 22,
+                ActiveChoiceColor::Yellow => 58,
+                ActiveChoiceColor::Red => 52,
+            };
+            (idx, Color::White)
+        }
+    };
+    Style::default()
+        .bg(Color::Indexed(bg_index))
+        .fg(fg)
+        .add_modifier(Modifier::BOLD)
+}
+
 fn detect_nerd_font() -> NerdFontStatus {
     if env::var("NERD_FONT").is_ok_and(|v| !v.is_empty()) {
         return NerdFontStatus::Likely;
@@ -130,6 +198,49 @@ mod tests {
     fn detect_nerd_font_from_env_var() {
         let _guard = env_guard("NERD_FONT", "1");
         assert_eq!(detect_nerd_font(), NerdFontStatus::Likely);
+    }
+
+    #[test]
+    fn resolve_active_style_dark_grey_default() {
+        let style = resolve_active_style(ActiveChoiceColor::Grey, TerminalBackground::Dark);
+        assert_eq!(style.bg, Some(Color::Indexed(238)));
+        assert_eq!(style.fg, Some(Color::White));
+        assert!(style.add_modifier.contains(Modifier::BOLD));
+        assert!(!style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn resolve_active_style_light_grey() {
+        let style = resolve_active_style(ActiveChoiceColor::Grey, TerminalBackground::Light);
+        assert_eq!(style.bg, Some(Color::Indexed(252)));
+        assert_eq!(style.fg, Some(Color::Black));
+    }
+
+    #[test]
+    fn resolve_active_style_unknown_uses_dark_palette() {
+        let dark = resolve_active_style(ActiveChoiceColor::Grey, TerminalBackground::Dark);
+        let unknown = resolve_active_style(ActiveChoiceColor::Grey, TerminalBackground::Unknown);
+        assert_eq!(dark, unknown);
+    }
+
+    #[test]
+    fn resolve_active_style_green_dark_uses_deep_green_index() {
+        let style = resolve_active_style(ActiveChoiceColor::Green, TerminalBackground::Dark);
+        assert_eq!(style.bg, Some(Color::Indexed(22)));
+        assert_eq!(style.fg, Some(Color::White));
+    }
+
+    #[test]
+    fn resolve_active_style_yellow_dark_uses_deep_ochre_index() {
+        let style = resolve_active_style(ActiveChoiceColor::Yellow, TerminalBackground::Dark);
+        assert_eq!(style.bg, Some(Color::Indexed(58)));
+    }
+
+    #[test]
+    fn resolve_active_style_red_light_uses_pale_pink_index() {
+        let style = resolve_active_style(ActiveChoiceColor::Red, TerminalBackground::Light);
+        assert_eq!(style.bg, Some(Color::Indexed(224)));
+        assert_eq!(style.fg, Some(Color::Black));
     }
 
     #[test]

@@ -193,6 +193,13 @@ pub struct ChoiceInput<V = String> {
     /// Optional ordering applied to the option list before state
     /// construction.
     pub sort: Option<crate::core::SortOrder>,
+    /// Background colour used for the actively hovered option.
+    ///
+    /// Defaults to [`ActiveChoiceColor::Grey`]. The renderer combines
+    /// this colour with the detected terminal background to pick a
+    /// foreground that meets the spec's contrast requirements (see
+    /// [`crate::core::resolve_active_style`]).
+    pub active_color: ActiveChoiceColor,
 }
 
 impl<V> ChoiceInput<V> {
@@ -211,6 +218,7 @@ impl<V> ChoiceInput<V> {
             filter_enabled: false,
             orientation: Orientation::default(),
             sort: None,
+            active_color: ActiveChoiceColor::default(),
         }
     }
 
@@ -281,6 +289,35 @@ impl<V> ChoiceInput<V> {
         self.sort = Some(sort);
         self
     }
+
+    /// Sets the [`ActiveChoiceColor`] used for the actively hovered
+    /// option's background.
+    pub fn with_active_color(mut self, color: ActiveChoiceColor) -> Self {
+        self.active_color = color;
+        self
+    }
+
+    /// Applies the configured [`crate::core::SortOrder`] (if any) to
+    /// `self.options` in place.
+    ///
+    /// Library state constructors call this before building the hotkey
+    /// map and `cached_labels` so that `ChoiceInput` is the single
+    /// authority on option ordering. CLI callers used to invoke a
+    /// duplicate `apply_sort` helper; that helper now delegates to the
+    /// configured `with_sort` builder via this method.
+    ///
+    /// ## Notes
+    ///
+    /// - Sorts by `option.label` for `Asc`/`Desc`, reverses for
+    ///   `Reverse`, and is a no-op for `Natural` or when `sort` is
+    ///   `None`.
+    /// - The standard library's `slice::sort_by` is stable, so options
+    ///   with equal labels keep their relative input order.
+    pub(crate) fn sort_options_in_place(&mut self) {
+        if let Some(order) = self.sort {
+            order.apply(&mut self.options);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -348,6 +385,14 @@ mod tests {
         assert!(!input.filter_enabled);
         assert_eq!(input.orientation, Orientation::Vertical);
         assert!(input.sort.is_none());
+        assert_eq!(input.active_color, ActiveChoiceColor::Grey);
+    }
+
+    #[test]
+    fn with_active_color_sets_the_color() {
+        let input: ChoiceInput =
+            ChoiceInput::new("c", "Pick one").with_active_color(ActiveChoiceColor::Green);
+        assert_eq!(input.active_color, ActiveChoiceColor::Green);
     }
 
     #[test]

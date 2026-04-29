@@ -67,8 +67,19 @@ impl ChoiceLayout {
     /// `item_widths` must have the same length as `visible_indices` and
     /// contains the rendered width of each option (including indicator,
     /// separator, label, trailing blank, and badge).
-    pub fn horizontal(visible_indices: &[usize], item_widths: &[u16], area: Rect) -> Self {
+    ///
+    /// `row_height` is the vertical increment between layout rows. Pass `1`
+    /// when hotkey badges are hidden; pass `2` (or more) when badges
+    /// occupy a sub-row below each option so that successive option rows
+    /// do not collide with the badge row.
+    pub fn horizontal(
+        visible_indices: &[usize],
+        item_widths: &[u16],
+        area: Rect,
+        row_height: u16,
+    ) -> Self {
         assert_eq!(visible_indices.len(), item_widths.len());
+        assert!(row_height >= 1);
 
         let mut item_rects = Vec::with_capacity(visible_indices.len());
         let mut row_ranges = Vec::new();
@@ -84,14 +95,14 @@ impl ChoiceLayout {
                 row_ranges.push((current_row_start, i.saturating_sub(1)));
                 current_row_start = i;
                 x = area.x;
-                y += 1;
+                y += row_height;
             }
 
             item_rects.push(ChoiceItemRect {
                 x,
                 y,
                 width,
-                height: 1,
+                height: row_height,
                 option_index: idx,
             });
 
@@ -270,7 +281,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // Widths: 6, 8, 7 -> row 0: 0,1 (6+8=14 <= 20), row 1: 2 (14+7=21 > 20)
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
 
         assert_eq!(layout.row_count(), 2);
         assert_eq!(layout.row_ranges, vec![(0, 1), (2, 2)]);
@@ -294,7 +305,7 @@ mod tests {
         let visible = vec![0, 1, 2, 3];
         // Widths: 6, 6, 6, 6 -> each row fits one item
         let widths = vec![6, 6, 6, 6];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
 
         assert_eq!(layout.row_count(), 4);
         for i in 0..4 {
@@ -310,7 +321,7 @@ mod tests {
         let visible = vec![0, 1];
         // Widths: 10, 3 -> first item wider than row but still placed
         let widths = vec![10, 3];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
 
         assert_eq!(layout.row_count(), 2);
         assert_eq!(layout.item_rects[0].x, 0);
@@ -325,7 +336,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 wraps to row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
 
         assert_eq!(layout.row_of(0), Some(0));
         assert_eq!(layout.row_of(1), Some(0));
@@ -339,7 +350,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1 at x=0
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
 
         // Row 1 has only option 2 at x=0. Closest to any column is option 2.
         assert_eq!(layout.closest_in_row(1, 5), Some(2));
@@ -354,7 +365,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
         let options: Vec<ChoiceOption<String>> = vec![
             ChoiceOption::new("a", "Alpha", "alpha"),
             ChoiceOption::new("b", "Beta", "beta"),
@@ -375,7 +386,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
         let options: Vec<ChoiceOption<String>> = vec![
             ChoiceOption::new("a", "Alpha", "alpha"),
             ChoiceOption::new("b", "Beta", "beta"),
@@ -389,6 +400,40 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_layout_navigation_does_not_visit_badge_rows() {
+        // Phase 6 invariant: hotkey badges in horizontal mode are
+        // rendered on the screen row immediately below the option, but
+        // the layout itself only contains option rows. Up/Down
+        // navigation reads from `layout.row_ranges` and therefore must
+        // skip the badge sub-rows entirely. This fixture pins that
+        // navigation rolls option-row → option-row even when several
+        // option rows would visually share screen space with badge
+        // bands.
+        use crate::components::choose::ChoiceOption;
+
+        let area = Rect::new(0, 0, 30, 6);
+        let visible = vec![0, 1, 2, 3];
+        // Each option is 12 cells wide; row width 30 ⇒ two options per
+        // row, two rows total. row_height=2 to reserve badge sub-rows.
+        let widths = vec![12, 12, 12, 12];
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 2);
+        assert_eq!(layout.row_count(), 2);
+
+        let options: Vec<ChoiceOption<String>> = (0..4)
+            .map(|i| ChoiceOption::new(format!("o{i}"), format!("Opt {i}"), format!("v{i}")))
+            .collect();
+
+        // Down-arrow from the first row drops to row 1 (option 2 or
+        // 3), never to a badge row that doesn't exist in the layout.
+        let next = navigate_row(&layout, &options, 0, 1).expect("next row");
+        assert!(next == 2 || next == 3);
+        // Up-arrow from row 1 goes back to row 0, again never to a
+        // badge sub-row.
+        let prev = navigate_row(&layout, &options, next, -1).expect("prev row");
+        assert!(prev == 0 || prev == 1);
+    }
+
+    #[test]
     fn navigate_row_skips_disabled() {
         use crate::components::choose::ChoiceOption;
 
@@ -396,7 +441,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
         let mut options: Vec<ChoiceOption<String>> = vec![
             ChoiceOption::new("a", "Alpha", "alpha"),
             ChoiceOption::new("b", "Beta", "beta"),
@@ -406,5 +451,41 @@ mod tests {
 
         // Target row has only disabled option -> None.
         assert_eq!(navigate_row(&layout, &options, 0, 1), None);
+    }
+
+    #[test]
+    fn horizontal_layout_with_row_height_2_reserves_badge_space() {
+        let area = Rect::new(0, 0, 20, 10);
+        let visible = vec![0, 1, 2];
+        // Widths: 6, 8, 7 -> row 0: items 0,1 (6+8=14 ≤ 20), row 1: item 2
+        let widths = vec![6, 8, 7];
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 2);
+
+        assert_eq!(layout.row_count(), 2);
+
+        // Row 0 items at y=0.
+        assert_eq!(layout.item_rects[0].y, 0);
+        assert_eq!(layout.item_rects[0].height, 2);
+        assert_eq!(layout.item_rects[1].y, 0);
+        assert_eq!(layout.item_rects[1].height, 2);
+
+        // Row 1 item at y=2 (skipping y=1 badge sub-row).
+        assert_eq!(layout.item_rects[2].y, 2);
+        assert_eq!(layout.item_rects[2].height, 2);
+    }
+
+    #[test]
+    fn horizontal_layout_three_rows_with_row_height_2() {
+        let area = Rect::new(0, 0, 10, 10);
+        let visible = vec![0, 1, 2, 3];
+        // Widths: 6,6,6,6 → each row fits one item, 4 rows total.
+        let widths = vec![6, 6, 6, 6];
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area, 2);
+
+        assert_eq!(layout.row_count(), 4);
+        assert_eq!(layout.item_rects[0].y, 0);
+        assert_eq!(layout.item_rects[1].y, 2);
+        assert_eq!(layout.item_rects[2].y, 4);
+        assert_eq!(layout.item_rects[3].y, 6);
     }
 }

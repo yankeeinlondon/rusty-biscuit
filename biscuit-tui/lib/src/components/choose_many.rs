@@ -23,8 +23,9 @@
 //! ```
 
 use std::collections::HashMap;
+use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::seq::SliceRandom;
 use ratatui::{
     buffer::Buffer,
@@ -40,8 +41,11 @@ use crate::core::{
 
 use super::choice_layout::{ChoiceLayout, navigate_row};
 use super::choice_render::ChoiceRenderContext;
-use super::choose::{ChoiceInput, ChoiceOption, Orientation, SelectionMode};
-use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
+use super::choose::{ChoiceInput, ChoiceOption, HotkeyDisplayMode, Orientation, SelectionMode};
+use super::choose_one::{
+    HOTKEY_DISPLAY_FALLBACK, build_hotkeys, first_enabled_index, last_enabled_index,
+    modifier_only_mode,
+};
 
 /// Mutable state for a [`ChooseMany`] widget.
 ///
@@ -67,6 +71,8 @@ pub struct ChooseManyState<V = String> {
     filter_visible: bool,
     cached_labels: Vec<String>,
     layout_cache: ChoiceLayout,
+    hotkey_display: HotkeyDisplayMode,
+    hotkey_display_deadline: Option<Instant>,
 }
 
 impl<V: Clone + PartialEq> ChooseManyState<V> {
@@ -75,6 +81,11 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     /// The selection mode is forced to [`SelectionMode::Multiple`].
     pub fn new(mut input: ChoiceInput<V>) -> Self {
         input.selection_mode = SelectionMode::Multiple;
+        // Sort first (per the configured `with_sort`), then optionally
+        // shuffle, then allocate per-option selection state. Library
+        // consumers and CLI consumers see the same ordering because
+        // `ChoiceInput` is the single authority on option ordering.
+        input.sort_options_in_place();
         if input.shuffle_options {
             input.options.shuffle(&mut rand::rng());
         }
@@ -98,6 +109,8 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             filter_visible: false,
             cached_labels,
             layout_cache: ChoiceLayout::default(),
+            hotkey_display: HotkeyDisplayMode::Hidden,
+            hotkey_display_deadline: None,
         }
     }
 
@@ -122,6 +135,38 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
         self.bindings = bindings;
         self
+    }
+
+    /// Sets the [`ActiveChoiceColor`] used for the actively hovered
+    /// option. Sugar over mutating the underlying [`ChoiceInput`].
+    pub fn with_active_color(mut self, color: super::choose::ActiveChoiceColor) -> Self {
+        self.input.active_color = color;
+        self
+    }
+
+    /// Forces the hotkey badge display mode for the lifetime of this
+    /// state. See [`ChooseOneState::with_hotkey_display`] for details.
+    pub fn with_hotkey_display(mut self, mode: HotkeyDisplayMode) -> Self {
+        self.hotkey_display = mode;
+        self.hotkey_display_deadline = None;
+        self
+    }
+
+    /// Returns the raw stored [`HotkeyDisplayMode`] without consulting
+    /// the fallback deadline.
+    pub fn hotkey_display(&self) -> HotkeyDisplayMode {
+        self.hotkey_display
+    }
+
+    /// Resolves the effective [`HotkeyDisplayMode`] at `now` against
+    /// the fallback deadline. See
+    /// [`ChooseOneState::current_hotkey_display`] for details.
+    pub fn current_hotkey_display(&self, now: Instant) -> HotkeyDisplayMode {
+        match self.hotkey_display_deadline {
+            Some(deadline) if now < deadline => self.hotkey_display,
+            Some(_) => HotkeyDisplayMode::Hidden,
+            None => self.hotkey_display,
+        }
     }
 
     /// Pre-selects options by their stable identifiers.
@@ -377,13 +422,16 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
             };
             let visible = body_rows as usize;
 
+            let hotkey_display = state.current_hotkey_display(Instant::now());
             let layout = {
                 let theme = state.theme.clone();
                 let ctx = ChoiceRenderContext::for_multiple(
                     &theme,
                     TerminalStyle::default(),
                     state.input.orientation,
-                );
+                )
+                .with_active_color(state.input.active_color)
+                .with_hotkey_display(hotkey_display);
                 ctx.compute_layout(list_area, &state.input.options, &visible_indices, |idx| {
                     state.selected.get(idx).copied().unwrap_or(false)
                 })
@@ -395,7 +443,9 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
                 &state.theme,
                 TerminalStyle::default(),
                 state.input.orientation,
-            );
+            )
+            .with_active_color(state.input.active_color)
+            .with_hotkey_display(hotkey_display);
             ctx.render(
                 list_area,
                 b,
@@ -433,6 +483,33 @@ fn draw_search_prompt<V: Clone + PartialEq>(
 
 impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
+        // Modifier-only key events drive hotkey badge display
+        // directly. See `ChooseOne::handle_event` for details.
+        if let Some(mode) = modifier_only_mode(&event) {
+            match event.kind {
+                KeyEventKind::Press | KeyEventKind::Repeat => {
+                    state.hotkey_display = mode;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+                KeyEventKind::Release => {
+                    state.hotkey_display = HotkeyDisplayMode::Hidden;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+            }
+        }
+
+        // Chord fallback for terminals that never emit modifier-only
+        // events.
+        if event.modifiers.contains(KeyModifiers::CONTROL) {
+            state.hotkey_display = HotkeyDisplayMode::CtrlHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        } else if event.modifiers.contains(KeyModifiers::ALT) {
+            state.hotkey_display = HotkeyDisplayMode::AltHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        }
+
         // Cancel binding: when the fuzzy filter is visible, the first
         // press clears + hides it; subsequent presses fall through to
         // abort.
@@ -443,6 +520,9 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
                 snap_hover_to_visible(state);
                 return EventOutcome::Consumed;
             }
+            // Spec: "The default key-bindings for ChooseMany should stay as they
+            // are." ESC returns Cancelled (exit code 1) — unlike ChooseOne which
+            // restores and submits.
             return EventOutcome::Cancelled;
         }
 
@@ -1599,5 +1679,81 @@ mod tests {
         state.layout_cache = ChoiceLayout::default();
         ChooseMany::new().handle_event(&mut state, press(KeyCode::Up));
         assert_eq!(state.hover(), Some(0));
+    }
+
+    fn unsorted_input_many() -> ChoiceInput<String> {
+        ChoiceInput::new("fruit", "Pick").with_options(vec![
+            ChoiceOption::new("b", "Berry", "berry"),
+            ChoiceOption::new("a", "Apple", "apple"),
+            ChoiceOption::new("c", "Cherry", "cherry"),
+        ])
+    }
+
+    fn labels_many(state: &ChooseManyState) -> Vec<&str> {
+        state.options().iter().map(|o| o.label.as_str()).collect()
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_asc_orders_by_label() {
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Asc);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Apple", "Berry", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_desc_orders_by_label() {
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Desc);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Cherry", "Berry", "Apple"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_inverse_reverses_natural() {
+        // `SortOrder::Inverse` is the canonical reversing ordering used
+        // by both the library and the CLI `--sort inverse` surface.
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Inverse);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Cherry", "Apple", "Berry"]);
+    }
+
+    #[test]
+    fn state_new_with_sort_natural_is_no_op() {
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Natural);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_without_sort_preserves_input_order() {
+        // `with_sort` is never called, so the configured order is
+        // preserved exactly as given.
+        let state = ChooseManyState::new(unsorted_input_many());
+        assert_eq!(labels_many(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_sort_allocates_selection_vec_with_correct_length() {
+        // The per-option `selected` vec must match the post-sort options
+        // list exactly. A stale length here would index out of bounds
+        // when toggling.
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Asc);
+        let state = ChooseManyState::new(input);
+        assert_eq!(state.options().len(), 3);
+        assert!(!state.is_selected(0));
+        assert!(!state.is_selected(1));
+        assert!(!state.is_selected(2));
+    }
+
+    #[test]
+    fn state_new_sort_then_shuffle_does_not_panic() {
+        // Sorting and shuffling are independent: the constructor sorts
+        // first, then shuffles. Either ordering must be acceptable as a
+        // post-condition; this test pins that the combination simply
+        // does not panic and yields the same number of options.
+        let input = unsorted_input_many()
+            .with_sort(crate::core::SortOrder::Asc)
+            .with_shuffle_options(true);
+        let state = ChooseManyState::new(input);
+        assert_eq!(state.options().len(), 3);
     }
 }

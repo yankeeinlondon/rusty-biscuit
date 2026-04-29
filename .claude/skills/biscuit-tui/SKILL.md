@@ -57,7 +57,7 @@ let state = BooleanSwitchState::new()
 ```
 
 #### ChooseOne
-Single-selection list with fuzzy filter, hotkeys, vim navigation, scrolling. Auto-selects hovered item on Enter if none selected.
+Single-selection list with fuzzy filter, hotkeys, vim navigation, scrolling. Enter selects the active item and submits; Esc restores the initial selection and submits (exit 0). Ctrl/Alt hotkeys select and submit.
 
 ```rust
 let input = ChoiceInput::new("colour", "Pick a colour")
@@ -70,7 +70,7 @@ let state = ChooseOneState::new(input);
 ```
 
 #### ChooseMany
-Multi-selection with `min_selections` / `max_selections`, `Ctrl+A` select all, `Ctrl+D` clear. Auto-selects hovered item on Enter if none selected.
+Multi-selection with `min_selections` / `max_selections`, `Ctrl+A` select all, `Ctrl+D` clear. Enter submits the current selection exactly as-is; Space toggles the active item.
 
 ```rust
 let input = ChoiceInput::new("toppings", "Pick toppings")
@@ -130,6 +130,12 @@ let state = InputTableState::new(columns, vec![]);
 | `Margin` | Four-sided margin outside the border |
 | `HeightSpec` | Parsed `--height` flag (absolute cells or percentage of terminal) |
 | `SortOrder` | Ordering for choice options (Natural, Reverse, Asc, Desc) |
+| `OptionSort` | Preferred ordering vocabulary (Natural, Inverse, Asc, Desc) with `From` conversions to `SortOrder` |
+| `Orientation` | Choice list layout direction (`Vertical`, `Horizontal`) |
+| `HotkeySpec` / `HotkeyDisplayMode` | Keyboard shortcuts for choice options and when to render badges |
+| `ActiveChoiceColor` | Background colour for the actively hovered option |
+| `Padding` | Four-sided interior padding inside the border |
+| `TerminalStyle` / `TerminalBackground` / `NerdFontStatus` | Conservative terminal capability detection |
 | `FuzzyFilter` | Fuzzy search via `nucleo-matcher` |
 | `ValidationState` | Uniform validation error read access |
 | `Label` / `LabelPosition` | Shared label placement (Above, Below, Left, Right) |
@@ -151,28 +157,39 @@ question boolean-switch --labels "YES,NO" --initial true
 question choose-one Red Green Blue
 question choose-many --options "Red,Green,Blue" --min-selections 1
 question input-table --columns '[{"type":"text","id":"name"}]'
+question completions zsh
 ```
 
 **Global flags:** `--output {raw|json|null}`, `--height <N|P%>`
 
-**Exit codes:** `0` = submitted, `1` = Esc cancelled, `130` = Ctrl-C interrupted
+**Exit codes:** `0` = submitted (ChooseOne Esc also exits `0` by restoring the initial selection), `1` = Esc cancelled (non-ChooseOne components), `130` = Ctrl-C interrupted
 
 ### Choose-specific Flags (`choose-one`, `choose-many`)
 
 **Option sources (mutually exclusive):**
 - Positional args: `question choose-one Alpha Beta Gamma`
-- `--options "Red,Green,Blue"` — comma-separated list
-- `--options-from-file <PATH>` — markdown bullet/numbered list
-- `--options-from-dictionary <PATH>` — YAML/JSON `label: value` map
+- `--csv "Red,Green,Blue"` — comma-separated list
+- `--list "a\nb\nc"` — newline-separated list
+- `--rows "a::1\nb::2"` — newline-separated `label::value` pairs
+- `--file <PATH>` — JSON/YAML/TOML/CSV array, or JSONL/NDJSON lines
+- `--md <PATH> <PROP>` — YAML frontmatter array property from Markdown file
+- `--options <TEXT>` — hidden alias for `--csv` (backward compatibility)
 - Piped stdin (automatic when stdin is not a TTY)
 
 **Selection & filtering:**
 - `--selected <VALUE>` — pre-select by value (repeatable for `choose-many`)
 - `--required` — fail if nothing selected
 - `--min-selections <N>` / `--max-selections <N>` — choose-many limits
-- `--delimiter <CHAR>` — split each option into `label<CHAR>value`
+- `--delimiter <CHAR>` — split each option into `label<CHAR>value` (legacy)
 - `--no-filter` — disable fuzzy search (use hotkey shortcuts instead)
 - `--sort <natural|reverse|asc|desc>` — reorder options before display
+
+**Hotkeys & normalization:**
+- `[CTRL+X]` / `[ALT+X]` / `[OPT+X]` prefix in option text — explicit hotkey
+- `--numeric-hot-keys` — auto-assign Ctrl+1..0, then Alt+1..0
+- `--label-convention <caps|lowercase|camel-case|pascal-case|kebab-case|snake-case|title-case>`
+- `--value-convention <caps|lowercase|camel-case|pascal-case|kebab-case|snake-case|title-case>`
+- `::` delimiter — split `label::value` (takes precedence over conventions)
 
 **Chrome (FrameChrome wrapping):**
 - `--border` — draw a border (defaults to rounded)
@@ -180,6 +197,8 @@ question input-table --columns '[{"type":"text","id":"name"}]'
 - `--border-style <STYLE>` — glyph style (implies `--border` unless `none`)
 - `--margin <CELLS>` — uniform margin outside border
 - `--mt` / `--mb` / `--ml` / `--mr` — per-side margin overrides
+- `--padding <CELLS>` / `-p <CELLS>` — uniform padding inside the border
+- `--pt` / `--pb` / `--pl` / `--pr` — per-side padding overrides
 
 ## Key Design Principles
 
@@ -202,16 +221,17 @@ lib/src/
 │   ├── standalone.rs   # run_standalone, run_standalone_with_chrome, drive_event_loop, StandaloneState, HandleEvent
 │   ├── keybindings.rs  # KeyBindings
 │   ├── theme.rs        # ComponentTheme
-│   ├── frame.rs        # FrameChrome, FrameChromeConfig, BorderStyle, Margin, HeightSpec
+│   ├── frame.rs        # FrameChrome, FrameChromeConfig, BorderStyle, Margin, Padding, HeightSpec
 │   ├── fuzzy.rs        # FuzzyFilter
 │   ├── validation.rs   # ValidationState
 │   ├── label.rs        # Label, LabelPosition, render_with_label
-│   └── sort.rs         # SortOrder (Natural, Reverse, Asc, Desc)
+│   ├── sort.rs         # SortOrder, OptionSort
+│   └── terminal_style.rs # TerminalStyle, TerminalBackground, NerdFontStatus
 ├── components/
 │   ├── text_input.rs
 │   ├── text_area_input.rs
 │   ├── boolean_switch.rs
-│   ├── choose.rs           # ChoiceInput, ChoiceOption, SelectionMode
+│   ├── choose.rs           # ChoiceInput, ChoiceOption, SelectionMode, Orientation, HotkeySpec, HotkeyDisplayMode, ActiveChoiceColor
 │   ├── choose_one.rs
 │   ├── choose_many.rs
 │   └── input_table/
@@ -223,8 +243,10 @@ lib/src/
     └── choice_builders.rs
 
 cli/src/
-├── main.rs         # Clap CLI, dispatch
-├── output.rs       # OutputMode (raw/json/null)
+├── main.rs              # Clap CLI, dispatch
+├── output.rs            # OutputMode (raw/json/null)
+├── option_sources.rs    # Source resolution: --csv, --list, --rows, --file, --md, stdin
+├── choice_normalize.rs  # Hotkey parsing, naming conventions, delimiter splitting
 └── commands/
     ├── mod.rs
     ├── text_input.rs

@@ -2,6 +2,8 @@
 dir: ""
 spec: ""
 design: ""
+start: 
+    message: "🏃‍♂️ starting the implementation of the feature review '{{area}}/{{dir}}/review-{{iteration}}.md' with agent {{env.AGENT}}"
 iteration: 1
 area: "{{ctx.current_package_area}}"
 success:

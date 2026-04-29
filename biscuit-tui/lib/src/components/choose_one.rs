@@ -21,8 +21,9 @@
 //! ```
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::seq::SliceRandom;
 use ratatui::{
     buffer::Buffer,
@@ -40,7 +41,20 @@ use super::choice_layout::ChoiceLayout;
 use super::choice_layout::navigate_row;
 use super::choice_render::ChoiceRenderContext;
 
-use super::choose::{ChoiceInput, ChoiceOption, HotkeySpec, Orientation, SelectionMode};
+use super::choose::{
+    ChoiceInput, ChoiceOption, HotkeyDisplayMode, HotkeySpec, Orientation, SelectionMode,
+};
+
+/// Duration that hotkey badges remain visible after a Ctrl/Alt chord on
+/// terminals that do not emit modifier-only key events.
+///
+/// Crossterm's modifier-only key events (`KeyEventKind::Press` with a
+/// `KeyCode::Modifier`) are not portable: most terminals only deliver
+/// the modifier alongside a chord (`Ctrl+R`), never on its own. To make
+/// badges discoverable in those environments, every Ctrl/Alt chord
+/// arms a deadline. While `Instant::now() < deadline` the badges
+/// remain visible; once it expires they hide again.
+pub(crate) const HOTKEY_DISPLAY_FALLBACK: Duration = Duration::from_millis(300);
 
 /// Mutable state for a [`ChooseOne`] widget.
 ///
@@ -68,6 +82,8 @@ pub struct ChooseOneState<V = String> {
     filter_visible: bool,
     cached_labels: Vec<String>,
     layout_cache: ChoiceLayout,
+    hotkey_display: HotkeyDisplayMode,
+    hotkey_display_deadline: Option<Instant>,
 }
 
 impl<V: Clone + PartialEq> ChooseOneState<V> {
@@ -78,6 +94,11 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
     /// single-select component.
     pub fn new(mut input: ChoiceInput<V>) -> Self {
         input.selection_mode = SelectionMode::Single;
+        // Sort first (per the configured `with_sort`), then optionally
+        // shuffle, then build the hotkey map and cached labels. Library
+        // consumers and CLI consumers see the same ordering because
+        // `ChoiceInput` is the single authority on option ordering.
+        input.sort_options_in_place();
         if input.shuffle_options {
             input.options.shuffle(&mut rand::rng());
         }
@@ -104,6 +125,8 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             filter_visible: false,
             cached_labels,
             layout_cache: ChoiceLayout::default(),
+            hotkey_display: HotkeyDisplayMode::Hidden,
+            hotkey_display_deadline: None,
         }
     }
 
@@ -128,6 +151,54 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
     pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
         self.bindings = bindings;
         self
+    }
+
+    /// Sets the [`ActiveChoiceColor`] used for the actively hovered
+    /// option. Sugar over mutating the underlying [`ChoiceInput`].
+    pub fn with_active_color(mut self, color: super::choose::ActiveChoiceColor) -> Self {
+        self.input.active_color = color;
+        self
+    }
+
+    /// Forces the hotkey badge display mode for the lifetime of this
+    /// state.
+    ///
+    /// Library callers and CLI front-ends use this to bypass the
+    /// modifier-detection + deadline-fallback path. Passing
+    /// [`HotkeyDisplayMode::Hidden`] disables badges entirely;
+    /// [`HotkeyDisplayMode::CtrlHeld`] and
+    /// [`HotkeyDisplayMode::AltHeld`] always render the matching
+    /// badge style. The forced value also clears any pending fallback
+    /// deadline so the override is unambiguous.
+    pub fn with_hotkey_display(mut self, mode: HotkeyDisplayMode) -> Self {
+        self.hotkey_display = mode;
+        self.hotkey_display_deadline = None;
+        self
+    }
+
+    /// Returns the raw stored [`HotkeyDisplayMode`] without consulting
+    /// the fallback deadline. Tests use this to verify modifier-only
+    /// transitions; the renderer uses
+    /// [`current_hotkey_display`](Self::current_hotkey_display) so the
+    /// deadline can decay it back to [`HotkeyDisplayMode::Hidden`].
+    pub fn hotkey_display(&self) -> HotkeyDisplayMode {
+        self.hotkey_display
+    }
+
+    /// Resolves the effective [`HotkeyDisplayMode`] at `now` against
+    /// the fallback deadline.
+    ///
+    /// When `hotkey_display` is non-`Hidden` and no deadline is set
+    /// (modifier-only events were observed), the stored mode is
+    /// returned verbatim. When a deadline is set, the mode is returned
+    /// only while `now` precedes it; otherwise the resolver collapses
+    /// to [`HotkeyDisplayMode::Hidden`].
+    pub fn current_hotkey_display(&self, now: Instant) -> HotkeyDisplayMode {
+        match self.hotkey_display_deadline {
+            Some(deadline) if now < deadline => self.hotkey_display,
+            Some(_) => HotkeyDisplayMode::Hidden,
+            None => self.hotkey_display,
+        }
     }
 
     /// Pre-selects an option by its stable identifier.
@@ -339,13 +410,16 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
             };
             let visible = body_rows as usize;
 
+            let hotkey_display = state.current_hotkey_display(Instant::now());
             let layout = {
                 let theme = state.theme.clone();
                 let ctx = ChoiceRenderContext::for_single(
                     &theme,
                     TerminalStyle::default(),
                     state.input.orientation,
-                );
+                )
+                .with_active_color(state.input.active_color)
+                .with_hotkey_display(hotkey_display);
                 ctx.compute_layout(list_area, &state.input.options, &visible_indices, |idx| {
                     Some(idx) == state.selected
                 })
@@ -357,7 +431,9 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
                 &state.theme,
                 TerminalStyle::default(),
                 state.input.orientation,
-            );
+            )
+            .with_active_color(state.input.active_color)
+            .with_hotkey_display(hotkey_display);
             ctx.render(
                 list_area,
                 b,
@@ -395,6 +471,37 @@ fn draw_search_prompt<V: Clone + PartialEq>(
 
 impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
+        // Modifier-only key events: terminals that emit explicit
+        // KeyCode::Modifier press/release events drive
+        // `hotkey_display` directly, bypassing the chord-fallback
+        // deadline path. We only consume the event if the modifier
+        // matched something; otherwise it falls through.
+        if let Some(mode) = modifier_only_mode(&event) {
+            match event.kind {
+                KeyEventKind::Press | KeyEventKind::Repeat => {
+                    state.hotkey_display = mode;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+                KeyEventKind::Release => {
+                    state.hotkey_display = HotkeyDisplayMode::Hidden;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+            }
+        }
+
+        // Chord fallback: any key event carrying Ctrl or Alt arms a
+        // brief deadline so badges become visible on terminals that
+        // never emit modifier-only events.
+        if event.modifiers.contains(KeyModifiers::CONTROL) {
+            state.hotkey_display = HotkeyDisplayMode::CtrlHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        } else if event.modifiers.contains(KeyModifiers::ALT) {
+            state.hotkey_display = HotkeyDisplayMode::AltHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        }
+
         // Cancel binding: when a fuzzy filter is active, the first
         // press clears it; subsequent presses restore the initial
         // selection and submit.
@@ -659,6 +766,35 @@ pub(super) fn build_hotkeys<V>(options: &[ChoiceOption<V>]) -> HashMap<char, usi
         }
     }
     map
+}
+
+/// Detects whether `event` is a "modifier-only" key press for `Ctrl`
+/// or `Alt`.
+///
+/// Crossterm reports modifier-only key presses with
+/// [`KeyCode::Modifier`] (or, on some terminals, a bare modifier code
+/// arriving as a chord with itself). When such an event is observed
+/// we can drive the hotkey badges directly without the deadline-based
+/// fallback.
+///
+/// Returns `Some(CtrlHeld)` for Ctrl presses, `Some(AltHeld)` for Alt
+/// presses, and `None` for everything else.
+pub(super) fn modifier_only_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> {
+    match event.code {
+        KeyCode::Modifier(mod_key) => {
+            use crossterm::event::ModifierKeyCode;
+            match mod_key {
+                ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl => {
+                    Some(HotkeyDisplayMode::CtrlHeld)
+                }
+                ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt => {
+                    Some(HotkeyDisplayMode::AltHeld)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Builds separate maps for explicit Ctrl and Alt hotkeys declared on
@@ -1707,5 +1843,177 @@ mod tests {
         state.layout_cache = ChoiceLayout::default();
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Up));
         assert_eq!(state.hover(), Some(0));
+    }
+
+    fn unsorted_input() -> ChoiceInput<String> {
+        ChoiceInput::new("fruit", "Pick").with_options(vec![
+            ChoiceOption::new("b", "Berry", "berry"),
+            ChoiceOption::new("a", "Apple", "apple"),
+            ChoiceOption::new("c", "Cherry", "cherry"),
+        ])
+    }
+
+    fn labels(state: &ChooseOneState) -> Vec<&str> {
+        state.options().iter().map(|o| o.label.as_str()).collect()
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_asc_orders_by_label() {
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Asc);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Apple", "Berry", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_desc_orders_by_label() {
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Desc);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Cherry", "Berry", "Apple"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_inverse_reverses_natural() {
+        // `SortOrder::Inverse` is the canonical reversing ordering used
+        // by both the library and the CLI `--sort inverse` surface.
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Inverse);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Cherry", "Apple", "Berry"]);
+    }
+
+    #[test]
+    fn state_new_with_sort_natural_is_no_op() {
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Natural);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_without_sort_preserves_input_order() {
+        // `with_sort` is never called, so the configured order is
+        // preserved exactly as given.
+        let state = ChooseOneState::new(unsorted_input());
+        assert_eq!(labels(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_sort_then_shuffle_does_not_panic() {
+        // Sorting and shuffling are independent: the constructor sorts
+        // first, then shuffles. Either ordering must be acceptable as a
+        // post-condition; this test pins that the combination simply
+        // does not panic and yields the same number of options.
+        let input = unsorted_input()
+            .with_sort(crate::core::SortOrder::Asc)
+            .with_shuffle_options(true);
+        let state = ChooseOneState::new(input);
+        assert_eq!(state.options().len(), 3);
+    }
+
+    // --- Phase 6: hotkey badge display state ---------------------------
+
+    fn ctrl_press(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn alt_press(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+    }
+
+    fn modifier_press(mod_key: crossterm::event::ModifierKeyCode) -> KeyEvent {
+        KeyEvent::new(KeyCode::Modifier(mod_key), KeyModifiers::NONE)
+    }
+
+    fn modifier_release(mod_key: crossterm::event::ModifierKeyCode) -> KeyEvent {
+        let mut event = KeyEvent::new(KeyCode::Modifier(mod_key), KeyModifiers::NONE);
+        event.kind = KeyEventKind::Release;
+        event
+    }
+
+    #[test]
+    fn hotkey_display_initially_hidden() {
+        let state = ChooseOneState::new(fixture_input());
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+    }
+
+    #[test]
+    fn hotkey_display_transitions_to_ctrl_held_on_ctrl_modifier_press() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state = ChooseOneState::new(fixture_input());
+        let outcome =
+            ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+    }
+
+    #[test]
+    fn hotkey_display_returns_to_hidden_on_ctrl_modifier_release() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        ChooseOne::new().handle_event(&mut state, modifier_release(ModifierKeyCode::LeftControl));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+    }
+
+    #[test]
+    fn hotkey_display_alt_modifier_transition_is_symmetric() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftAlt));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::AltHeld);
+        ChooseOne::new().handle_event(&mut state, modifier_release(ModifierKeyCode::LeftAlt));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+    }
+
+    #[test]
+    fn hotkey_display_briefly_visible_after_ctrl_chord_via_deadline() {
+        // Even on terminals that never emit modifier-only events, a
+        // Ctrl chord must arm the deadline so badges become discoverable.
+        let mut state = ChooseOneState::new(fixture_input());
+        let outcome = ChooseOne::new().handle_event(&mut state, ctrl_press('z'));
+        // The chord itself is unmapped (no Ctrl+Z hotkey is set on
+        // any option), but the modifier still arms the deadline.
+        assert!(outcome == EventOutcome::Ignored || outcome == EventOutcome::Consumed);
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        // Resolved at "now": still inside the fallback window.
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::CtrlHeld
+        );
+        // Resolved well past the fallback window: collapses to Hidden.
+        assert_eq!(
+            state.current_hotkey_display(
+                Instant::now() + HOTKEY_DISPLAY_FALLBACK + Duration::from_millis(50)
+            ),
+            HotkeyDisplayMode::Hidden
+        );
+    }
+
+    #[test]
+    fn hotkey_display_alt_chord_arms_deadline() {
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new().handle_event(&mut state, alt_press('q'));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::AltHeld);
+    }
+
+    #[test]
+    fn with_hotkey_display_forces_mode_and_clears_deadline() {
+        let state =
+            ChooseOneState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        // No deadline set → resolver returns the forced mode at any time.
+        assert_eq!(
+            state.current_hotkey_display(Instant::now() + Duration::from_secs(60)),
+            HotkeyDisplayMode::CtrlHeld
+        );
+    }
+
+    #[test]
+    fn current_hotkey_display_with_no_deadline_returns_stored_mode() {
+        let state = ChooseOneState::new(fixture_input());
+        // Default is Hidden / None → Hidden at any time.
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::Hidden
+        );
     }
 }

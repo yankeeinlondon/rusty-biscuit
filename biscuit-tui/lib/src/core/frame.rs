@@ -165,7 +165,12 @@ impl Margin {
 /// Padding is applied inside the border (or directly inside the margin
 /// when no border is drawn). It shrinks the area available to the
 /// inner widget after the border has claimed its perimeter.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+///
+/// Defaults to `1` cell on all sides (matches the spec) so widgets do
+/// not visually touch the border. Use [`Padding::zero`] (or its
+/// [`Padding::none`] alias) when chrome should have no interior
+/// spacing at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Padding {
     /// Cells of padding on the top edge.
     pub top: u16,
@@ -177,6 +182,18 @@ pub struct Padding {
     pub right: u16,
 }
 
+impl Default for Padding {
+    /// Returns `Padding::uniform(1)`.
+    ///
+    /// This matches the spec's library-level default: chrome adds one
+    /// cell of interior padding on every side so widgets do not bump
+    /// against the border. Use [`Padding::zero`] for no padding at
+    /// all.
+    fn default() -> Self {
+        Self::uniform(1)
+    }
+}
+
 impl Padding {
     /// Constructs padding with the same value on all four sides.
     pub const fn uniform(n: u16) -> Self {
@@ -186,6 +203,23 @@ impl Padding {
             left: n,
             right: n,
         }
+    }
+
+    /// Constructs padding with `0` on every side.
+    ///
+    /// Prefer this over `Padding { top: 0, .. }` when expressing
+    /// "no interior spacing" — it documents the intent and decouples
+    /// the call site from the [`Default`] impl, which is `uniform(1)`.
+    pub const fn zero() -> Self {
+        Self::uniform(0)
+    }
+
+    /// Alias for [`Padding::zero`].
+    ///
+    /// Reads naturally at call sites that want to opt out of any
+    /// padding entirely (`Padding::none()`).
+    pub const fn none() -> Self {
+        Self::zero()
     }
 
     /// Shrinks `area` by the padding on each side, using saturating
@@ -269,6 +303,14 @@ pub struct FrameChromeConfig {
 }
 
 impl Default for FrameChromeConfig {
+    /// The library-default config: no border, no margin, padding of
+    /// `1` cell on every side.
+    ///
+    /// Padding is written as `Padding::uniform(1)` even though it
+    /// matches `Padding::default()` — the explicit value documents the
+    /// invariant at the call site so a reader does not have to follow
+    /// the [`Default`] impl on [`Padding`] to understand the chrome's
+    /// resting state.
     fn default() -> Self {
         Self {
             border: BorderStyle::default(),
@@ -284,10 +326,15 @@ impl FrameChromeConfig {
     /// Returns `true` when neither the border, margin, nor padding
     /// would affect layout. Callers can use this to skip wrapping a
     /// widget in [`FrameChrome`] entirely.
+    ///
+    /// Padding is compared against [`Padding::zero`] rather than
+    /// [`Padding::default`] because the library default is
+    /// `uniform(1)` — a configuration with the default padding still
+    /// affects layout and must not be treated as empty.
     pub fn is_empty(&self) -> bool {
         !self.border.is_visible()
             && self.margin == Margin::default()
-            && self.padding == Padding::default()
+            && self.padding == Padding::zero()
     }
 }
 
@@ -318,13 +365,17 @@ impl<'a, W> FrameChrome<'a, W> {
     /// zero). Used as the no-op fallback when
     /// `FrameChromeConfig::is_empty()` returns true but the caller
     /// still wants to go through the wrapper for type uniformity.
+    ///
+    /// Note: padding is set to [`Padding::zero`] (not
+    /// [`Padding::default`], which is `uniform(1)`) so the bare
+    /// wrapper truly applies no chrome.
     pub fn bare(inner: W) -> Self {
         Self {
             inner,
             border: None,
             margin: Margin::default(),
             border_style: Style::default(),
-            padding: Padding::default(),
+            padding: Padding::zero(),
         }
     }
 
@@ -500,12 +551,28 @@ mod tests {
     }
 
     #[test]
-    fn frame_chrome_config_is_empty_when_all_defaults() {
-        let config = FrameChromeConfig {
-            padding: Padding::default(),
+    fn frame_chrome_config_is_empty_only_when_padding_is_zero() {
+        // The library-level default padding is now `uniform(1)`, so a
+        // config built from `Default::default()` is *not* empty — the
+        // padding alone affects layout. Explicit `Padding::zero()`
+        // restores the empty state.
+        let default_config = FrameChromeConfig::default();
+        assert!(!default_config.is_empty());
+
+        let zeroed = FrameChromeConfig {
+            padding: Padding::zero(),
             ..Default::default()
         };
-        assert!(config.is_empty());
+        assert!(zeroed.is_empty());
+    }
+
+    #[test]
+    fn frame_chrome_config_is_empty_uses_padding_none_alias() {
+        let zeroed = FrameChromeConfig {
+            padding: Padding::none(),
+            ..Default::default()
+        };
+        assert!(zeroed.is_empty());
     }
 
     #[test]
@@ -553,7 +620,7 @@ mod tests {
             border_label: Some("Title".to_string()),
             margin: Margin::uniform(1),
             border_style: Style::default().fg(Color::Cyan),
-            padding: Padding::default(),
+            padding: Padding::zero(),
         };
         let frame = FrameChrome::from_config(Marker, &config);
 
@@ -587,7 +654,7 @@ mod tests {
     fn frame_chrome_margin_only_still_renders_inner() {
         let config = FrameChromeConfig {
             margin: Margin::uniform(1),
-            padding: Padding::default(),
+            padding: Padding::zero(),
             ..Default::default()
         };
         let frame = FrameChrome::from_config(Marker, &config);
@@ -613,7 +680,7 @@ mod tests {
         let config = FrameChromeConfig {
             border: BorderStyle::Rounded,
             border_label: Some("A very long title indeed".to_string()),
-            padding: Padding::default(),
+            padding: Padding::zero(),
             ..Default::default()
         };
         let frame = FrameChrome::from_config(Marker, &config);
@@ -698,5 +765,46 @@ mod tests {
         let shrunk = Padding::uniform(10).shrink(area);
         assert_eq!(shrunk.width, 0);
         assert_eq!(shrunk.height, 0);
+    }
+
+    #[test]
+    fn padding_default_is_uniform_one() {
+        // Phase 2 of the choose-one improvements feature: the
+        // library-level default for `Padding` is `uniform(1)` so
+        // chrome-bearing widgets never visually touch the border.
+        assert_eq!(Padding::default(), Padding::uniform(1));
+        let p = Padding::default();
+        assert_eq!(p.top, 1);
+        assert_eq!(p.bottom, 1);
+        assert_eq!(p.left, 1);
+        assert_eq!(p.right, 1);
+    }
+
+    #[test]
+    fn padding_zero_is_all_zeros() {
+        let p = Padding::zero();
+        assert_eq!(p.top, 0);
+        assert_eq!(p.bottom, 0);
+        assert_eq!(p.left, 0);
+        assert_eq!(p.right, 0);
+        assert_eq!(p, Padding::uniform(0));
+        // Confirms the Default impl is *not* zero: Padding::default()
+        // and Padding::zero() must now diverge.
+        assert_ne!(Padding::default(), Padding::zero());
+    }
+
+    #[test]
+    fn padding_none_alias_matches_zero() {
+        assert_eq!(Padding::none(), Padding::zero());
+    }
+
+    #[test]
+    fn padding_default_shrinks_rect_by_one_on_each_side() {
+        let area = Rect::new(0, 0, 10, 6);
+        let shrunk = Padding::default().shrink(area);
+        assert_eq!(shrunk.x, 1);
+        assert_eq!(shrunk.y, 1);
+        assert_eq!(shrunk.width, 8);
+        assert_eq!(shrunk.height, 4);
     }
 }
