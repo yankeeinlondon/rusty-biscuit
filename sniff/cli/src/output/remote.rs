@@ -373,6 +373,135 @@ fn pr_state_display(pr: &PullRequestInfo) -> String {
     }
 }
 
+/// Render a list of pull requests as a compact table for `sniff repo pr`.
+///
+/// Columns: ID, Title, Author, State.
+pub fn render_pull_requests_table(prs: &[PullRequestInfo]) -> String {
+    if prs.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let mut out = String::new();
+
+    let heading = format!("<b><u>Pull Requests</u></b> <dim>({})</dim>", prs.len());
+    write!(out, "{}", Prose::new(&heading).display(&term)).unwrap();
+
+    let columns = vec![
+        TableColumn::new("#").with_min_width(4),
+        TableColumn::new("Title"),
+        TableColumn::new("State").with_min_width(6),
+        TableColumn::new("Author").with_min_width(8),
+    ];
+
+    let mut table = Table::new().with_columns(columns);
+
+    for pr in prs.iter().take(50) {
+        let state_display = pr_state_display(pr);
+        let title = if pr.draft {
+            format!("{} <dim>[draft]</dim>", pr.title)
+        } else {
+            pr.title.clone()
+        };
+
+        table.add_row(vec![
+            format!("#{}", pr.number).into(),
+            title.into(),
+            state_display.into(),
+            pr.author.clone().into(),
+        ]);
+    }
+
+    write!(out, "{}", table.display(&term)).unwrap();
+    out
+}
+
+/// Render a list of pull requests as verbose blocks for `sniff repo pr -v`.
+///
+/// Each PR is rendered as a block with number/title, author, normalized status
+/// with draft marker, source and target branches, labels, created date, URL,
+/// and description body when present.
+pub fn render_pull_requests_verbose(prs: &[PullRequestInfo]) -> String {
+    if prs.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let mut out = String::new();
+
+    let heading = format!("<b><u>Pull Requests</u></b> <dim>({})</dim>", prs.len());
+    write!(out, "{}", Prose::new(&heading).display(&term)).unwrap();
+
+    for pr in prs.iter().take(50) {
+        writeln!(out).unwrap();
+
+        // Title line
+        let draft_marker = if pr.draft { " <dim>[draft]</dim>" } else { "" };
+        let title_line = format!("<b>#{}</b> {}{}", pr.number, pr.title, draft_marker);
+        write!(out, "{}", Prose::new(&title_line).display(&term)).unwrap();
+
+        // Meta line
+        let state_display = pr_state_display(pr);
+        let mut meta_parts = vec![
+            format!("<dim>by</dim> <b>{}</b>", pr.author),
+            format!("<dim>{}</dim>", state_display),
+        ];
+
+        if let Some(ref src) = pr.source_branch
+            && let Some(ref tgt) = pr.target_branch
+        {
+            meta_parts.push(format!("<dim>{} → {}</dim>", src, tgt));
+        }
+
+        meta_parts.push(format!("<dim>{}</dim>", pr.created_at));
+        write!(out, "{}", Prose::new(meta_parts.join("  ")).display(&term)).unwrap();
+
+        // Labels (omitted entirely when empty, mirroring how the body is handled)
+        if !pr.labels.is_empty() {
+            let labels_str = pr
+                .labels
+                .iter()
+                .map(|l| format!("<cyan>{l}</cyan>"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let labels_line = format!("<b>Labels:</b> {labels_str}");
+            write!(out, "{}", Prose::new(&labels_line).display(&term)).unwrap();
+        }
+
+        // URL
+        write!(
+            out,
+            "{}",
+            Prose::new(format!("<a href=\"{}\">{}</a>", pr.html_url, pr.html_url)).display(&term)
+        )
+        .unwrap();
+
+        // Body
+        if let Some(ref body) = pr.body
+            && !body.trim().is_empty()
+        {
+            let preview: String = body
+                .lines()
+                .take(10)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let md: Markdown = preview.into();
+            let mut buffer = Vec::new();
+            let _ = write_terminal(&mut buffer, &md, TerminalOptions::default());
+            out.push_str(&String::from_utf8_lossy(&buffer));
+        }
+    }
+
+    out
+}
+
+/// Render a clear message when no pull requests match the filter.
+pub fn render_pull_requests_empty(state: sniff::remote::PullRequestState) -> String {
+    let term = Terminal::default();
+    let msg = format!("No {} pull requests found", state.as_str());
+    Prose::new(&msg).render(&term)
+}
+
 /// Print remote report as JSON.
 pub fn print_remote_json(report: &RemoteReport) -> serde_json::Result<()> {
     println!("{}", serde_json::to_string_pretty(report)?);
@@ -382,7 +511,7 @@ pub fn print_remote_json(report: &RemoteReport) -> serde_json::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sniff::remote::{GitProvider, KeyUrls, RepoMetadata, TagsAndReleases};
+    use sniff::remote::{GitProvider, KeyUrls, PullRequestState, RepoMetadata, TagsAndReleases};
 
     fn make_test_report() -> RemoteReport {
         RemoteReport {
@@ -430,10 +559,196 @@ mod tests {
         }
     }
 
+    fn make_test_pr(number: u64, state: &str, draft: bool, merged_at: Option<String>) -> PullRequestInfo {
+        PullRequestInfo {
+            number,
+            title: format!("PR #{number}"),
+            state: state.to_string(),
+            author: "testuser".to_string(),
+            draft,
+            source_branch: Some("feature-branch".to_string()),
+            target_branch: Some("main".to_string()),
+            labels: vec![],
+            body: None,
+            created_at: "2024-01-15T10:00:00Z".to_string(),
+            updated_at: None,
+            merged_at,
+            html_url: format!("https://github.com/owner/repo/pull/{number}"),
+        }
+    }
+
+    fn make_test_pr_with_labels_and_body(number: u64) -> PullRequestInfo {
+        PullRequestInfo {
+            number,
+            title: format!("PR #{number}"),
+            state: "open".to_string(),
+            author: "testuser".to_string(),
+            draft: false,
+            source_branch: Some("feature-branch".to_string()),
+            target_branch: Some("main".to_string()),
+            labels: vec!["bug".to_string(), "urgent".to_string()],
+            body: Some("This is the PR description.\nIt has multiple lines.".to_string()),
+            created_at: "2024-01-15T10:00:00Z".to_string(),
+            updated_at: None,
+            merged_at: None,
+            html_url: format!("https://github.com/owner/repo/pull/{number}"),
+        }
+    }
+
     #[test]
     fn test_print_remote_json_succeeds() {
         let report = make_test_report();
         let result = print_remote_json(&report);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_empty() {
+        let prs: Vec<PullRequestInfo> = vec![];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.is_empty());
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_basic() {
+        let prs = vec![
+            make_test_pr(1, "open", false, None),
+            make_test_pr(2, "closed", false, None),
+        ];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("Pull Requests"));
+        assert!(rendered.contains("#1"));
+        assert!(rendered.contains("PR #1"));
+        assert!(rendered.contains("open"));
+        assert!(rendered.contains("testuser"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_draft_marker() {
+        let prs = vec![make_test_pr(1, "open", true, None)];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("[draft]"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_merged_state() {
+        let prs = vec![make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()))];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("merged"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_table_closed_state() {
+        let prs = vec![make_test_pr(1, "closed", false, None)];
+        let rendered = render_pull_requests_table(&prs);
+        assert!(rendered.contains("closed"));
+        assert!(!rendered.contains("merged"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_empty() {
+        let prs: Vec<PullRequestInfo> = vec![];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.is_empty());
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_basic() {
+        let prs = vec![make_test_pr(1, "open", false, None)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("Pull Requests"));
+        assert!(rendered.contains("#1"));
+        assert!(rendered.contains("PR #1"));
+        assert!(rendered.contains("testuser"));
+        assert!(rendered.contains("open"));
+        assert!(rendered.contains("feature-branch"));
+        assert!(rendered.contains("main"));
+        assert!(rendered.contains("2024-01-15"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_with_labels_and_body() {
+        let prs = vec![make_test_pr_with_labels_and_body(42)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("#42"));
+        assert!(
+            rendered.contains("Labels:"),
+            "verbose output should include the 'Labels:' row"
+        );
+        assert!(rendered.contains("bug"));
+        assert!(rendered.contains("urgent"));
+        // Body is rendered through markdown terminal renderer which wraps words
+        // in ANSI escape codes, so we check for individual words rather than phrases.
+        assert!(rendered.contains("description"));
+        assert!(rendered.contains("multiple"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_omits_labels_when_empty() {
+        // PR with no labels and no body — Labels: row should be absent (consistent
+        // with how Option fields like body are omitted entirely when missing).
+        let prs = vec![make_test_pr(7, "open", false, None)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("#7"));
+        assert!(
+            !rendered.contains("Labels:"),
+            "verbose output should omit 'Labels:' row when labels are empty"
+        );
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_draft_marker() {
+        let prs = vec![make_test_pr(1, "open", true, None)];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("[draft]"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_verbose_merged_state() {
+        let prs = vec![make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()))];
+        let rendered = render_pull_requests_verbose(&prs);
+        assert!(rendered.contains("merged"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_empty_message_open() {
+        let rendered = render_pull_requests_empty(PullRequestState::Open);
+        assert!(rendered.contains("No open pull requests found"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_empty_message_merged() {
+        let rendered = render_pull_requests_empty(PullRequestState::Merged);
+        assert!(rendered.contains("No merged pull requests found"));
+    }
+
+    #[test]
+    fn test_render_pull_requests_empty_message_all() {
+        let rendered = render_pull_requests_empty(PullRequestState::All);
+        assert!(rendered.contains("No all pull requests found"));
+    }
+
+    #[test]
+    fn test_pr_state_display_open() {
+        let pr = make_test_pr(1, "open", false, None);
+        assert_eq!(pr_state_display(&pr), "open");
+    }
+
+    #[test]
+    fn test_pr_state_display_closed() {
+        let pr = make_test_pr(1, "closed", false, None);
+        assert_eq!(pr_state_display(&pr), "closed");
+    }
+
+    #[test]
+    fn test_pr_state_display_merged() {
+        let pr = make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()));
+        assert_eq!(pr_state_display(&pr), "merged");
+    }
+
+    #[test]
+    fn test_pr_state_display_unknown() {
+        let pr = make_test_pr(1, "unknown", false, None);
+        assert_eq!(pr_state_display(&pr), "unknown");
     }
 }

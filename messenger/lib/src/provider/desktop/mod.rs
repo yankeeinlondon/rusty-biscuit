@@ -8,6 +8,7 @@
 //! public provider API with a swappable in-memory backend.
 
 mod backend;
+pub(crate) mod helpers;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -28,6 +29,7 @@ use crate::receipt::{DesktopPlatform, MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
 
 pub(crate) use backend::DesktopBackend;
+pub use helpers::HelperName;
 pub use request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// Portable configuration for the desktop provider.
@@ -89,6 +91,12 @@ pub struct WindowsDesktopConfig {
     /// `messenger setup desktop`; unset sends on Windows must fail with
     /// [`MessengerError::MissingConfiguration`].
     pub app_id: Option<String>,
+    /// Caller-supplied helper preference order.
+    ///
+    /// Helpers named here win score ties during election. Names that do
+    /// not apply on Windows (e.g. `dunstify`) are silently ignored. Empty
+    /// means "use the library default order".
+    pub prefer_helpers: Vec<helpers::HelperName>,
 }
 
 /// macOS-specific desktop configuration.
@@ -99,6 +107,12 @@ pub struct MacOsDesktopConfig {
     /// How the macOS backend should pick between AppleScript and native
     /// `UserNotifications.framework` delivery.
     pub strategy: MacOsNotificationStrategy,
+    /// Caller-supplied helper preference order.
+    ///
+    /// Helpers named here win score ties during election. Names that do
+    /// not apply on macOS (e.g. `dunstify`) are silently ignored. Empty
+    /// means "use the library default order".
+    pub prefer_helpers: Vec<helpers::HelperName>,
 }
 
 /// macOS notification delivery strategy.
@@ -123,6 +137,12 @@ pub enum MacOsNotificationStrategy {
 pub struct LinuxDesktopConfig {
     /// Optional desktop entry name used as the `desktop-entry` D-Bus hint.
     pub desktop_entry: Option<String>,
+    /// Caller-supplied helper preference order.
+    ///
+    /// Helpers named here win score ties during election. Names that do
+    /// not apply on Linux (e.g. `terminal-notifier`) are silently ignored.
+    /// Empty means "use the library default order".
+    pub prefer_helpers: Vec<helpers::HelperName>,
 }
 
 /// Cross-platform desktop notification provider.
@@ -189,7 +209,11 @@ impl DesktopNotificationProvider {
         let platform = self.backend.platform();
         tracing::Span::current().record("platform", tracing::field::display(platform));
 
-        let request = build_request(&self.config, dispatch, message)?;
+        let mut request = build_request(&self.config, dispatch, message)?;
+        request.replace_helper_hint = receipt
+            .metadata
+            .get("helper_used")
+            .and_then(|s| s.parse().ok());
         let backend_receipt = self.backend.replace(&receipt.raw_id, request).await?;
 
         let mut metadata = backend_receipt.metadata;
@@ -381,6 +405,7 @@ pub(crate) fn build_request(
         actions,
         progress,
         badge_count,
+        replace_helper_hint: None,
     })
 }
 
@@ -415,10 +440,7 @@ fn select_backend(config: &DesktopConfig) -> Arc<dyn DesktopBackend> {
     }
     #[cfg(target_os = "macos")]
     {
-        Arc::new(macos::MacOsBackend::new(
-            config.macos.strategy,
-            config.macos.bundle_id.clone(),
-        ))
+        Arc::new(macos::MacOsBackend::new(config.macos.clone()))
     }
     #[cfg(target_os = "windows")]
     {

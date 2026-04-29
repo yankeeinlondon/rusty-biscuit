@@ -9,8 +9,8 @@ pub mod categories;
 pub mod metadata;
 
 pub use categories::{
-    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
-    TerminalApp, TtsClient, Utility,
+    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
+    OsPackageManager, TerminalApp, TtsClient, Utility,
 };
 
 #[cfg(test)]
@@ -60,6 +60,11 @@ mod tests {
     #[test]
     fn test_headless_audio_count_matches_info() {
         assert_eq!(HeadlessAudio::COUNT, metadata::HEADLESS_AUDIO_INFO.len());
+    }
+
+    #[test]
+    fn test_notification_helper_count_matches_info() {
+        assert_eq!(NotificationHelper::COUNT, metadata::NOTIFICATION_HELPER_INFO.len());
     }
 
     #[test]

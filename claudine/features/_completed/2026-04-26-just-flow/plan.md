@@ -3,7 +3,8 @@ phases: 5
 created: 2026-04-26
 start_phase: 1
 source_files_during_phase_1: []
-docs_updated_during_phase_1: []
+docs_updated_during_phase_1:
+    - claudine/features/2026-04-26-just-flow/plan.md
 docs_created_during_phase_1:
     - claudine/prompts/design.md
     - claudine/prompts/plan.md
@@ -13,6 +14,32 @@ docs_created_during_phase_1:
     - claudine/prompts/implement-feature-review-suggestions.md
 skills_files_updated_during_phase1:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_2:
+    - just/flow.just
+docs_updated_during_phase_2:
+    - claudine/features/2026-04-26-just-flow/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+    - just/flow.just
+docs_updated_during_phase_3:
+    - claudine/features/2026-04-26-just-flow/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
+source_files_during_phase_4:
+    - just/flow.just
+docs_updated_during_phase_4:
+    - claudine/features/2026-04-26-just-flow/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
+source_files_during_phase_5:
+    - claudine/justfile
+    - just/flow.just
+docs_updated_during_phase_5:
+    - claudine/just.md
+    - claudine/features/2026-04-26-just-flow/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
     - claudine
 ---

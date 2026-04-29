@@ -1,28 +1,38 @@
 //! macOS desktop notification backend.
 //!
-//! Two delivery strategies are wired behind a single backend:
+//! Three delivery strategies are wired behind a single backend:
 //!
-//! - **AppleScript** (`osascript display notification`) — the v1 default. Works
-//!   from any process (including `cargo install`ed CLI binaries) and does not
-//!   trigger a notification authorization prompt. Limited feature surface.
+//! - **Helpers** (`terminal-notifier`, `alerter`) — opportunistic layer
+//!   probed via `sniff` at construction time. Helpers ship interactive
+//!   actions and inline replies that AppleScript cannot, and they remain
+//!   available even when the host has no bundle identity.
+//! - **AppleScript** (`osascript display notification`) — the v1 default.
+//!   Works from any process (including `cargo install`ed CLI binaries) and
+//!   does not trigger a notification authorization prompt. Limited feature
+//!   surface.
 //! - **Native `UserNotifications.framework`** via [`objc2-user-notifications`]
 //!   — opt-in path for bundled/signed apps that want access to richer
 //!   notification features (subtitles, body, categories, interruption level).
 //!   Requires bundle identity; the system silently drops the notification
 //!   otherwise.
 //!
-//! Backend selection happens per-request from [`MacOsDesktopConfig::strategy`]:
+//! Backend selection happens per-request:
 //!
 //! | Strategy | Delivery |
 //! |----------|----------|
-//! | `Auto` (default) | AppleScript |
-//! | `AppleScript` | AppleScript |
-//! | `NativeUserNotifications` | Native |
+//! | `Auto` (default) | helpers → AppleScript |
+//! | `AppleScript` | helpers → AppleScript |
+//! | `NativeUserNotifications` | helpers → Native |
 //!
-//! Both paths generate a UUID for the `notification_id` (AppleScript does not
-//! return a handle; native could, but the crate's submit path is fire-and-forget
-//! without a completion handler). Receipt metadata distinguishes the delivery
-//! path with `delivery=applescript` or `delivery=native`.
+//! Helpers are always tried first when the dispatch shape suits one
+//! (`elect_helpers` filters them by score). Native and AppleScript paths
+//! both generate a UUID for the `notification_id` (AppleScript does not
+//! return a handle; the native submit path is fire-and-forget without a
+//! completion handler). Receipt metadata records which path served the
+//! notification: `helper_used` for helpers, `delivery=applescript` or
+//! `delivery=native` for the native backends.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use std::process::Command;
@@ -30,8 +40,14 @@ use std::process::Command;
 use crate::error::MessengerError;
 use crate::receipt::{DesktopPlatform, ProviderKind};
 
+use super::MacOsDesktopConfig;
 use super::MacOsNotificationStrategy;
 use super::backend::DesktopBackend;
+use super::helpers::alerter::AlerterHelper;
+use super::helpers::terminal_notifier::TerminalNotifierHelper;
+use super::helpers::{
+    HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers,
+};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// macOS notification backend.
@@ -39,14 +55,33 @@ pub(crate) struct MacOsBackend {
     strategy: MacOsNotificationStrategy,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     bundle_id: Option<String>,
+    prefer_helpers: Vec<HelperName>,
+    helpers: Vec<Arc<dyn HelperBackend>>,
 }
 
 impl MacOsBackend {
     /// Build a backend with the supplied macOS-specific configuration.
-    pub(crate) fn new(strategy: MacOsNotificationStrategy, bundle_id: Option<String>) -> Self {
+    ///
+    /// Detects available notification helpers via `sniff` and constructs
+    /// the corresponding [`HelperBackend`] adapters once.
+    pub(crate) fn new(config: MacOsDesktopConfig) -> Self {
+        let helpers = detect_macos_helpers();
+        Self::with_helpers(config, helpers)
+    }
+
+    /// Test seam: build a backend with explicitly provided helpers.
+    ///
+    /// Skips sniff detection so unit tests can wire fake helpers without
+    /// touching the host filesystem.
+    pub(crate) fn with_helpers(
+        config: MacOsDesktopConfig,
+        helpers: Vec<Arc<dyn HelperBackend>>,
+    ) -> Self {
         Self {
-            strategy,
-            bundle_id,
+            strategy: config.strategy,
+            bundle_id: config.bundle_id,
+            prefer_helpers: config.prefer_helpers,
+            helpers,
         }
     }
 
@@ -61,6 +96,20 @@ impl MacOsBackend {
             other => other,
         }
     }
+
+    async fn native_send(
+        &self,
+        request: &DesktopNotificationRequest,
+    ) -> Result<DesktopNotificationReceipt, MessengerError> {
+        match self.resolved_strategy() {
+            MacOsNotificationStrategy::AppleScript | MacOsNotificationStrategy::Auto => {
+                send_applescript(request)
+            }
+            MacOsNotificationStrategy::NativeUserNotifications => {
+                send_native(request, self.bundle_id.as_deref())
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -73,14 +122,32 @@ impl DesktopBackend for MacOsBackend {
         &self,
         request: DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, MessengerError> {
-        match self.resolved_strategy() {
-            MacOsNotificationStrategy::AppleScript | MacOsNotificationStrategy::Auto => {
-                send_applescript(&request)
-            }
-            MacOsNotificationStrategy::NativeUserNotifications => {
-                send_native(&request, self.bundle_id.as_deref())
+        let mut attempts: Vec<HelperAttempt> = Vec::new();
+        let elected = elect_helpers(&self.helpers, &request, &self.prefer_helpers);
+
+        for helper in elected {
+            match helper.send(&request).await {
+                Ok(mut receipt) => {
+                    annotate_receipt_helper(&mut receipt, helper.name(), &attempts);
+                    return Ok(receipt);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        helper = %helper.name(),
+                        %error,
+                        "macos helper send failed; trying next attempt",
+                    );
+                    if !error.is_fallback_eligible() {
+                        return Err(helper_error_to_messenger(helper.name(), error));
+                    }
+                    attempts.push(HelperAttempt::from_error(helper.name(), &error));
+                }
             }
         }
+
+        let mut receipt = self.native_send(&request).await?;
+        annotate_native_receipt(&mut receipt, &attempts);
+        Ok(receipt)
     }
 
     async fn replace(
@@ -88,6 +155,31 @@ impl DesktopBackend for MacOsBackend {
         id: &str,
         request: DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, MessengerError> {
+        if let Some(hint) = request.replace_helper_hint
+            && hint == HelperName::TerminalNotifier
+            && let Some(helper) = self.helpers.iter().find(|helper| helper.name() == hint)
+        {
+            match helper.replace(id, &request).await {
+                Ok(mut receipt) => {
+                    receipt
+                        .metadata
+                        .entry("helper_used".to_string())
+                        .or_insert_with(|| helper.name().to_string());
+                    return Ok(receipt);
+                }
+                Err(error) => {
+                    if !error.is_fallback_eligible() {
+                        return Err(helper_error_to_messenger(helper.name(), error));
+                    }
+                    tracing::warn!(
+                        helper = %helper.name(),
+                        %error,
+                        "macos helper replace failed; falling back to native",
+                    );
+                }
+            }
+        }
+
         match self.resolved_strategy() {
             MacOsNotificationStrategy::AppleScript | MacOsNotificationStrategy::Auto => {
                 Err(MessengerError::UnsupportedFeature {
@@ -277,10 +369,149 @@ fn dismiss_native(_id: &str) -> Result<(), MessengerError> {
     })
 }
 
+fn annotate_receipt_helper(
+    receipt: &mut DesktopNotificationReceipt,
+    helper: HelperName,
+    attempts: &[HelperAttempt],
+) {
+    receipt
+        .metadata
+        .insert("helper_used".to_string(), helper.to_string());
+    if !attempts.is_empty() {
+        receipt
+            .metadata
+            .insert("helper_fallbacks".to_string(), summarize(attempts));
+    }
+}
+
+fn annotate_native_receipt(
+    receipt: &mut DesktopNotificationReceipt,
+    attempts: &[HelperAttempt],
+) {
+    receipt
+        .metadata
+        .insert("helper_used".to_string(), "native".to_string());
+    if !attempts.is_empty() {
+        receipt
+            .metadata
+            .insert("helper_fallbacks".to_string(), summarize(attempts));
+    }
+}
+
+fn summarize(attempts: &[HelperAttempt]) -> String {
+    attempts
+        .iter()
+        .map(|attempt| attempt.summary())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn helper_error_to_messenger(name: HelperName, error: HelperError) -> MessengerError {
+    match error {
+        HelperError::Unsupported(feature) => MessengerError::UnsupportedFeature {
+            provider: ProviderKind::Desktop,
+            feature,
+        },
+        other => MessengerError::Provider {
+            provider: ProviderKind::Desktop,
+            code: Some(other.summary_tag().to_string()),
+            message: format!("{name}: {other}"),
+        },
+    }
+}
+
+/// Probe sniff for macOS notification helpers and turn them into
+/// [`HelperBackend`] adapters.
+fn detect_macos_helpers() -> Vec<Arc<dyn HelperBackend>> {
+    let info = sniff::programs::InstalledNotificationHelpers::new();
+
+    let mut helpers: Vec<Arc<dyn HelperBackend>> = Vec::new();
+
+    if let Some(path) = info.path(sniff::programs::NotificationHelper::TerminalNotifier) {
+        helpers.push(Arc::new(TerminalNotifierHelper::new(path)));
+    }
+
+    if let Some(path) = info.path(sniff::programs::NotificationHelper::Alerter) {
+        helpers.push(Arc::new(AlerterHelper::new(path)));
+    }
+
+    helpers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dispatch::NotificationUrgency;
+    use crate::dispatch::{NotificationAction, NotificationUrgency};
+    use crate::provider::desktop::helpers::HelperCapabilities;
+    use std::sync::Mutex;
+
+    struct FakeHelper {
+        helper_name: HelperName,
+        score_for: u8,
+        outcome: Mutex<Vec<Result<DesktopNotificationReceipt, HelperError>>>,
+    }
+
+    impl FakeHelper {
+        #[allow(clippy::new_ret_no_self)]
+        fn new(
+            name: HelperName,
+            score: u8,
+            outcomes: Vec<Result<DesktopNotificationReceipt, HelperError>>,
+        ) -> Arc<dyn HelperBackend> {
+            Arc::new(Self {
+                helper_name: name,
+                score_for: score,
+                outcome: Mutex::new(outcomes),
+            })
+        }
+
+        fn next_outcome(&self) -> Result<DesktopNotificationReceipt, HelperError> {
+            let mut queue = self.outcome.lock().unwrap();
+            if queue.is_empty() {
+                Err(HelperError::NotPresent)
+            } else {
+                queue.remove(0)
+            }
+        }
+    }
+
+    #[async_trait]
+    impl HelperBackend for FakeHelper {
+        fn name(&self) -> HelperName {
+            self.helper_name
+        }
+
+        fn capabilities(&self) -> HelperCapabilities {
+            HelperCapabilities {
+                actions: true,
+                reply: true,
+                image: true,
+                sound: true,
+                replace: true,
+                group: true,
+                blocking: false,
+            }
+        }
+
+        fn score(&self, _request: &DesktopNotificationRequest) -> u8 {
+            self.score_for
+        }
+
+        async fn send(
+            &self,
+            _request: &DesktopNotificationRequest,
+        ) -> Result<DesktopNotificationReceipt, HelperError> {
+            self.next_outcome()
+        }
+
+        async fn replace(
+            &self,
+            _id: &str,
+            _request: &DesktopNotificationRequest,
+        ) -> Result<DesktopNotificationReceipt, HelperError> {
+            self.next_outcome()
+        }
+    }
 
     fn request(title: &str, body: Option<&str>) -> DesktopNotificationRequest {
         DesktopNotificationRequest {
@@ -299,6 +530,7 @@ mod tests {
             actions: Vec::new(),
             progress: None,
             badge_count: None,
+            replace_helper_hint: None,
         }
     }
 
@@ -327,7 +559,7 @@ mod tests {
 
     #[test]
     fn resolved_strategy_maps_auto_to_applescript() {
-        let backend = MacOsBackend::new(MacOsNotificationStrategy::Auto, None);
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), Vec::new());
         assert_eq!(
             backend.resolved_strategy(),
             MacOsNotificationStrategy::AppleScript
@@ -336,12 +568,24 @@ mod tests {
 
     #[test]
     fn resolved_strategy_preserves_explicit_choices() {
-        let backend = MacOsBackend::new(MacOsNotificationStrategy::AppleScript, None);
+        let backend = MacOsBackend::with_helpers(
+            MacOsDesktopConfig {
+                strategy: MacOsNotificationStrategy::AppleScript,
+                ..MacOsDesktopConfig::default()
+            },
+            Vec::new(),
+        );
         assert_eq!(
             backend.resolved_strategy(),
             MacOsNotificationStrategy::AppleScript
         );
-        let backend = MacOsBackend::new(MacOsNotificationStrategy::NativeUserNotifications, None);
+        let backend = MacOsBackend::with_helpers(
+            MacOsDesktopConfig {
+                strategy: MacOsNotificationStrategy::NativeUserNotifications,
+                ..MacOsDesktopConfig::default()
+            },
+            Vec::new(),
+        );
         assert_eq!(
             backend.resolved_strategy(),
             MacOsNotificationStrategy::NativeUserNotifications
@@ -350,7 +594,154 @@ mod tests {
 
     #[test]
     fn backend_reports_macos_platform() {
-        let backend = MacOsBackend::new(MacOsNotificationStrategy::Auto, None);
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), Vec::new());
         assert_eq!(backend.platform(), DesktopPlatform::MacOS);
+    }
+
+    #[tokio::test]
+    async fn elected_helper_success_annotates_metadata() {
+        let helper = FakeHelper::new(
+            HelperName::TerminalNotifier,
+            80,
+            vec![Ok(DesktopNotificationReceipt::new("tn-1"))],
+        );
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), vec![helper]);
+        let receipt = backend.send(request("hi", Some("body"))).await.unwrap();
+        assert_eq!(receipt.notification_id, "tn-1");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("TerminalNotifier"),
+        );
+        assert!(!receipt.metadata.contains_key("helper_fallbacks"));
+    }
+
+    #[tokio::test]
+    async fn helper_failure_falls_through_to_next() {
+        let failing = FakeHelper::new(
+            HelperName::Alerter,
+            90,
+            vec![Err(HelperError::Exited {
+                status: 1,
+                stderr: "boom".into(),
+            })],
+        );
+        let working = FakeHelper::new(
+            HelperName::TerminalNotifier,
+            80,
+            vec![Ok(DesktopNotificationReceipt::new("tn-1"))],
+        );
+        let backend = MacOsBackend::with_helpers(
+            MacOsDesktopConfig::default(),
+            vec![failing, working],
+        );
+        let mut req = request("hi", Some("body"));
+        req.actions.push(NotificationAction {
+            id: "ok".into(),
+            label: "OK".into(),
+        });
+        let receipt = backend.send(req).await.unwrap();
+        assert_eq!(receipt.notification_id, "tn-1");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("TerminalNotifier"),
+        );
+        let fallbacks = receipt
+            .metadata
+            .get("helper_fallbacks")
+            .map(String::as_str)
+            .unwrap_or("");
+        assert!(fallbacks.contains("Alerter:exited"), "got `{fallbacks}`");
+    }
+
+    #[tokio::test]
+    async fn parse_error_propagates_without_fallback() {
+        let parse_failing = FakeHelper::new(
+            HelperName::Alerter,
+            90,
+            vec![Err(HelperError::Parse("bad".into()))],
+        );
+        let working = FakeHelper::new(
+            HelperName::TerminalNotifier,
+            80,
+            vec![Ok(DesktopNotificationReceipt::new("ignored"))],
+        );
+        let backend = MacOsBackend::with_helpers(
+            MacOsDesktopConfig::default(),
+            vec![parse_failing, working],
+        );
+        let mut req = request("hi", Some("body"));
+        req.actions.push(NotificationAction {
+            id: "ok".into(),
+            label: "OK".into(),
+        });
+        let result = backend.send(req).await;
+        assert!(matches!(result, Err(MessengerError::Provider { .. })));
+    }
+
+    #[tokio::test]
+    async fn replace_routes_to_terminal_notifier_hint() {
+        let working = FakeHelper::new(
+            HelperName::TerminalNotifier,
+            80,
+            vec![Ok(DesktopNotificationReceipt::new("tn-1"))],
+        );
+        let backend =
+            MacOsBackend::with_helpers(MacOsDesktopConfig::default(), vec![working]);
+        let mut req = request("hi", Some("body"));
+        req.replace_helper_hint = Some(HelperName::TerminalNotifier);
+        let receipt = backend.replace("99", req).await.unwrap();
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("TerminalNotifier"),
+        );
+    }
+
+    #[tokio::test]
+    async fn replace_alerter_hint_falls_through_to_native() {
+        // Alerter does not support replace; without a replaceable helper
+        // the AppleScript strategy should report the operation as
+        // unsupported.
+        let alerter = FakeHelper::new(
+            HelperName::Alerter,
+            90,
+            vec![Ok(DesktopNotificationReceipt::new("ignored"))],
+        );
+        let backend = MacOsBackend::with_helpers(
+            MacOsDesktopConfig::default(),
+            vec![alerter],
+        );
+        let mut req = request("hi", Some("body"));
+        req.replace_helper_hint = Some(HelperName::Alerter);
+        let result = backend.replace("99", req).await;
+        assert!(matches!(
+            result,
+            Err(MessengerError::UnsupportedFeature { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn empty_helpers_falls_through_to_applescript_path() {
+        // No helpers registered: AppleScript dispatch is attempted next.
+        // We can't actually exec osascript in a unit test, but we can
+        // assert the strategy path is taken — the call returns a transport
+        // error specifically about osascript.
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), Vec::new());
+        let result = backend.send(request("hi", Some("body"))).await;
+        // Test environments without /usr/bin/osascript will fail with
+        // a transport error; environments with osascript will succeed.
+        // Either way, the call routes through native_send, not a helper.
+        match result {
+            Ok(receipt) => {
+                assert_eq!(
+                    receipt.metadata.get("helper_used").map(String::as_str),
+                    Some("native"),
+                );
+            }
+            Err(MessengerError::Provider { .. }) => {
+                // osascript not available in this environment — expected
+                // outside macOS.
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
     }
 }

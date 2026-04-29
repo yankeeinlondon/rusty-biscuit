@@ -19,6 +19,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring"], opti
 twilight-http = { version = "0.17", optional = true }
 twilight-model = { version = "0.17", optional = true }
 jsonwebtoken = { version = "9", optional = true }
+sniff = { path = "../../sniff/lib", optional = true }
+tokio = { version = "1", features = ["process", "time"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = { version = "4", optional = true }
@@ -49,6 +51,8 @@ desktop = [
     "dep:winrt-notification",
     "dep:objc2-foundation",
     "dep:objc2-user-notifications",
+    "dep:sniff",
+    "dep:tokio",
 ]
 apns = ["dep:reqwest", "dep:jsonwebtoken"]
 fcm = ["dep:reqwest"]

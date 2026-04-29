@@ -77,6 +77,10 @@ pub enum MarkdownError {
     #[error("Page block error: {0}")]
     PageBlock(#[from] crate::markdown::compose::page_blocks::PageBlockError),
 
+    /// Shell block pipeline error.
+    #[error("Shell block error: {0}")]
+    ShellBlock(#[from] Box<crate::markdown::compose::ShellBlockError>),
+
     /// Reference analysis error.
     #[error("Reference error: {0}")]
     Reference(#[from] crate::markdown::reference::ReferenceError),
@@ -84,6 +88,12 @@ pub enum MarkdownError {
     /// Context merge error (invalid user ctx).
     #[error("Context error: {0}")]
     CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
+}
+
+impl From<crate::markdown::compose::ShellBlockError> for MarkdownError {
+    fn from(err: crate::markdown::compose::ShellBlockError) -> Self {
+        MarkdownError::ShellBlock(Box::new(err))
+    }
 }
 
 /// Result type for markdown operations.
@@ -96,6 +106,7 @@ impl BlockError for MarkdownError {
             MarkdownError::Transclusion(inner) => inner.status_block(term),
             MarkdownError::ShellExpansion(inner) => inner.status_block(term),
             MarkdownError::PageBlock(inner) => inner.status_block(term),
+            MarkdownError::ShellBlock(inner) => inner.status_block(term),
             MarkdownError::TocLinking(inner) => inner.status_block(term),
             MarkdownError::Reference(inner) => inner.status_block(term),
             MarkdownError::CtxMerge(inner) => inner.status_block(term),

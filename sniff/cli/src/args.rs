@@ -108,6 +108,10 @@ pub enum RepoAction {
         no_error: bool,
         on_error: Option<String>,
     },
+    Pr {
+        status: sniff::remote::PullRequestState,
+        verbose: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -535,6 +539,9 @@ pub enum Commands {
         action: Option<AgentAction>,
     },
 
+    /// Show only desktop notification helpers
+    NotificationHelpers,
+
     /// Show only system services (init system and service list)
     Services {
         /// Filter services by state
@@ -826,6 +833,12 @@ pub enum RepoSubcommand {
         #[arg(long, value_name = "MESSAGE")]
         on_error: Option<String>,
     },
+    /// List pull requests for the current repository's remote
+    Pr {
+        /// Filter pull requests by state (note: 'draft' returns no results on Bitbucket — drafts are not a Bitbucket Cloud feature)
+        #[arg(long, default_value = "open")]
+        status: sniff::remote::PullRequestState,
+    },
 }
 
 impl Commands {
@@ -855,6 +868,7 @@ impl Commands {
             Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
             Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
+            Commands::NotificationHelpers => OutputFilter::NotificationHelpers,
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
             Commands::Just { .. } => OutputFilter::Just,
@@ -1267,6 +1281,10 @@ impl Commands {
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
+                Some(RepoSubcommand::Pr { status }) => RepoAction::Pr {
+                    status: *status,
+                    verbose: false,
+                },
             }),
             _ => None,
         }
@@ -1403,6 +1421,7 @@ Commands:
     sniff editors                         Show editors (supports 'install' and 'install-plan')
     sniff utilities                       Show utilities
     sniff agents                          Show AI agent CLI tools
+    sniff notification-helpers            Show desktop notification helpers
 
   Services:
     sniff services        Show running services
@@ -1439,6 +1458,9 @@ Git:
   sniff repo staged-source-code       List staged source code files
   sniff repo dirty-files              List all dirty files
   sniff repo remote origin            Inspect the 'origin' remote
+  sniff repo pr                       List open pull requests
+  sniff repo pr --status merged       List merged pull requests
+  sniff repo pr -v                    Verbose PR block output
 
 Recent Commits:
   sniff repo recent-commits           Show commits from last 3 days
@@ -1766,6 +1788,80 @@ mod tests {
                     ..
                 }) if actions == vec![RecentCommitActionArg::Chore]
             ));
+        }
+
+        #[test]
+        fn repo_pr_default_status_open() {
+            let cli = parse_args(&["repo", "pr"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Open,
+                    }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_pr_status_merged() {
+            let cli = parse_args(&["repo", "pr", "--status", "merged"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Merged,
+                    }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_pr_status_draft_with_json() {
+            let cli = parse_args(&["repo", "pr", "--status", "draft", "--json"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Draft,
+                    }),
+                    ..
+                })
+            ));
+            assert!(cli.json);
+        }
+
+        #[test]
+        fn repo_pr_verbose_global_flag() {
+            let cli = parse_args(&["repo", "pr", "-v"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Open,
+                    }),
+                    ..
+                })
+            ));
+            assert_eq!(cli.verbose, 1);
+        }
+
+        #[test]
+        fn repo_pr_invalid_status_shows_valid_values() {
+            match parse_args(&["repo", "pr", "--status", "invalid"]) {
+                Ok(_) => panic!("Expected parsing to fail for invalid status"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("invalid PR state 'invalid'"), "Error should mention invalid state: {msg}");
+                    assert!(msg.contains("open"), "Error should mention 'open': {msg}");
+                    assert!(msg.contains("closed"), "Error should mention 'closed': {msg}");
+                    assert!(msg.contains("merged"), "Error should mention 'merged': {msg}");
+                    assert!(msg.contains("draft"), "Error should mention 'draft': {msg}");
+                    assert!(msg.contains("all"), "Error should mention 'all': {msg}");
+                }
+            }
         }
 
         #[test]
@@ -2296,6 +2392,24 @@ mod tests {
                     assert_eq!(package.as_deref(), Some("homelab"));
                 }
                 _ => panic!("Expected GitStatus action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_pr() {
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: vec![],
+                repo_subcommand: Some(RepoSubcommand::Pr {
+                    status: sniff::remote::PullRequestState::Merged,
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Pr { status, verbose }) => {
+                    assert_eq!(status, sniff::remote::PullRequestState::Merged);
+                    assert!(!verbose);
+                }
+                _ => panic!("Expected Pr action"),
             }
         }
     }

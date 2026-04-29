@@ -1,0 +1,557 @@
+//! End-to-end integration tests for shell blocks in the compose pipeline.
+//!
+//! Validates that `::shell-block` / `::end-block` directives execute correctly
+//! through the full `Markdown::compose_with()` pipeline, including interaction
+//! with page blocks, transclusion, and other compose stages.
+
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{
+    ComposeOptions,
+    shell_expansion::types::{ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest},
+};
+use std::sync::Arc;
+use tempfile::TempDir;
+
+fn write_files(dir: &TempDir, files: &[(&str, &str)]) {
+    for (name, content) in files {
+        let path = dir.path().join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, content).unwrap();
+    }
+}
+
+// ── Approval handlers ──────────────────────────────────────────────
+
+struct AllowAllHandler;
+
+impl ShellApprovalHandler for AllowAllHandler {
+    fn approve(
+        &self,
+        _request: ShellApprovalRequest,
+    ) -> Result<ShellApprovalDecision, darkmatter::markdown::compose::ShellExpansionError> {
+        Ok(ShellApprovalDecision::AllowOnce)
+    }
+}
+
+struct DenyAllHandler;
+
+impl ShellApprovalHandler for DenyAllHandler {
+    fn approve(
+        &self,
+        _request: ShellApprovalRequest,
+    ) -> Result<ShellApprovalDecision, darkmatter::markdown::compose::ShellExpansionError> {
+        Ok(ShellApprovalDecision::Deny)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Basic end-to-end compose tests
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn compose_single_shell_block() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "# Test\n\n::shell-block\necho hello\n::end-block\n\nDone.\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("hello"),
+        "Expected shell output in composed content, got: {output}"
+    );
+    assert!(
+        !output.contains("::shell-block"),
+        "Shell block directive should be replaced, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 1);
+}
+
+#[test]
+fn compose_multiple_shell_blocks() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "::shell-block\necho first\n::end-block\n\n::shell-block\necho second\n::end-block\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("first"),
+        "Expected first block output, got: {output}"
+    );
+    assert!(
+        output.contains("second"),
+        "Expected second block output, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 2);
+}
+
+#[test]
+fn compose_shell_block_with_multiple_commands() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[("doc.md", "::shell-block\necho a\necho b\n::end-block\n")],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, _) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("a\n\nb\n"),
+        "Expected blank line between command outputs, got: {output:?}"
+    );
+}
+
+#[test]
+fn compose_shell_block_with_empty_output_commands() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "::shell-block\necho -n\necho hello\necho -n\n::end-block\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, _) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert_eq!(
+        output.trim(),
+        "hello",
+        "Empty outputs should be omitted, got: {output:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Interaction with page blocks
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn shell_block_inside_true_page_block_executes() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "---\nshow_shell: true\n---\n\n::block when=\"show_shell\"\n::shell-block\necho inside\n::end-block\n::end-block\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("inside"),
+        "Shell block inside true page block should execute, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 1);
+}
+
+#[test]
+fn shell_block_inside_false_page_block_is_removed() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "---\nshow_shell: false\n---\n\n::block when=\"show_shell\"\n::shell-block\necho inside\n::end-block\n::end-block\n\nDone.\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        !output.contains("inside"),
+        "Shell block inside false page block should be removed, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 0);
+    assert!(
+        output.contains("Done."),
+        "Remaining content should be preserved"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Interaction with transclusion
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn shell_block_in_transcluded_document_executes() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            ("parent.md", "# Parent\n\n::file child.md\n"),
+            ("child.md", "::shell-block\necho from-child\n::end-block\n"),
+        ],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("parent.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("parent.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("from-child"),
+        "Shell block in transcluded document should execute, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 1);
+}
+
+#[test]
+fn shell_block_with_conditional_transclusion() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "parent.md",
+                "---\ninclude_child: true\n---\n\n::file child.md when=\"include_child\"\n",
+            ),
+            ("child.md", "::shell-block\necho conditional\n::end-block\n"),
+        ],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("parent.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("parent.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("conditional"),
+        "Conditional transclusion should include shell block, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 1);
+}
+
+#[test]
+fn shell_block_skipped_when_transclusion_condition_false() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[
+            (
+                "parent.md",
+                "---\ninclude_child: false\n---\n\n::file child.md when=\"include_child\"\n",
+            ),
+            ("child.md", "::shell-block\necho hidden\n::end-block\n"),
+        ],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("parent.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("parent.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        !output.contains("hidden"),
+        "Shell block in skipped transclusion should not execute, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Error handling in compose pipeline
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn compose_fails_when_shell_block_command_denied() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "# Test\n\n::shell-block\necho hello\n::end-block\n\nDone.\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(DenyAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let result = md.compose_with(options);
+
+    assert!(
+        result.is_err(),
+        "Expected compose to fail when shell command is denied"
+    );
+}
+
+#[test]
+fn compose_fails_on_unterminated_shell_block() {
+    let dir = TempDir::new().unwrap();
+    write_files(&dir, &[("doc.md", "# Test\n\n::shell-block\necho hello\n")]);
+
+    let options = ComposeOptions::new().with_source_file(dir.path().join("doc.md"));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let result = md.compose_with(options);
+
+    assert!(
+        result.is_err(),
+        "Expected compose to fail on unterminated shell block"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("Unterminated") || err.contains("parse error"),
+        "Expected unterminated error, got: {err}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Shell blocks with interpolation
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn shell_block_after_interpolation() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "---\nmessage: hello\n---\n\n::shell-block\necho {{message}}\n::end-block\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, _) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("hello"),
+        "Shell block should see interpolated frontmatter value, got: {output}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Performance: linear parsing
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn linear_parsing_performance() {
+    use std::time::Instant;
+
+    let dir = TempDir::new().unwrap();
+
+    // Build a document with many shell blocks
+    let block_count = 100;
+    let mut content = String::new();
+    for i in 0..block_count {
+        content.push_str(&format!("::shell-block\necho block-{i}\n::end-block\n\n"));
+    }
+    write_files(&dir, &[("doc.md", &content)]);
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+
+    let start = Instant::now();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let elapsed = start.elapsed();
+
+    let output = composed.content();
+
+    // All blocks should have been processed
+    assert_eq!(
+        report.shell_blocks_applied, block_count,
+        "Expected all {block_count} shell blocks to be applied"
+    );
+
+    // Verify a few outputs
+    assert!(output.contains("block-0"), "Expected block-0 in output");
+    assert!(output.contains("block-99"), "Expected block-99 in output");
+
+    // Performance assertion: should complete in under 5 seconds for 100 blocks
+    // (This is generous; actual time should be much less)
+    assert!(
+        elapsed.as_secs() < 5,
+        "Processing {block_count} shell blocks took too long: {elapsed:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Shell block with error handling options
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn compose_shell_block_with_when_error() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "::shell-block when_error=\"fallback\"\necho hello\nfalse\n::end-block\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, _) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("hello"),
+        "Expected 'hello' output, got: {output}"
+    );
+    assert!(
+        output.contains("fallback"),
+        "Expected 'fallback' for failed command, got: {output}"
+    );
+}
+
+#[test]
+fn compose_shell_block_with_timeout() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[("doc.md", "::shell-block timeout=1\nsleep 5\n::end-block\n")],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let result = md.compose_with(options);
+
+    assert!(result.is_err(), "Expected timeout error");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("timed out") || err.contains("timeout"),
+        "Expected timeout error, got: {err}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Mixed shell directives and shell blocks
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn compose_mixed_shell_directive_and_shell_block() {
+    let dir = TempDir::new().unwrap();
+    write_files(
+        &dir,
+        &[(
+            "doc.md",
+            "::shell echo standalone\n\n::shell-block\necho block-a\necho block-b\n::end-block\n",
+        )],
+    );
+
+    let options = ComposeOptions::new()
+        .with_source_file(dir.path().join("doc.md"))
+        .with_shell_policy_root(dir.path())
+        .with_shell_working_directory(std::env::current_dir().unwrap())
+        .with_shell_approval_handler(Arc::new(AllowAllHandler));
+
+    let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
+    let (composed, report) = md.compose_with(options).unwrap();
+    let output = composed.content();
+
+    assert!(
+        output.contains("standalone"),
+        "Expected standalone shell output, got: {output}"
+    );
+    assert!(
+        output.contains("block-a"),
+        "Expected shell block output a, got: {output}"
+    );
+    assert!(
+        output.contains("block-b"),
+        "Expected shell block output b, got: {output}"
+    );
+    assert_eq!(report.shell_blocks_applied, 1);
+}

@@ -9,6 +9,7 @@ mod filesystem;
 mod hardware;
 mod just;
 mod network;
+mod notification_helpers;
 mod os;
 mod programs;
 pub(crate) mod recent_commits;
@@ -33,8 +34,14 @@ pub use filesystem::{
     render_hash_section, render_path_list,
 };
 pub use just::{filter_justfiles_for_json, render_just_text};
+pub use notification_helpers::{
+    print_notification_helpers_json, render_notification_helpers_markdown,
+};
 pub use programs::{print_programs_json, render_programs_markdown};
-pub use remote::{print_remote_json, render_remote_text};
+pub use remote::{
+    print_remote_json, render_pull_requests_empty, render_pull_requests_table,
+    render_pull_requests_verbose, render_remote_text,
+};
 pub use services::{print_services_json, render_services_text};
 pub use topics::render_topics_table;
 
@@ -110,6 +117,8 @@ pub enum OutputFilter {
     HeadlessAudio,
     /// Show only AI CLI tools (programs subsection)
     AiClients,
+    /// Show only desktop notification helpers (programs subsection)
+    NotificationHelpers,
     /// Show only system services (init system and service list)
     Services,
     /// Show justfiles and their recipes
@@ -602,6 +611,7 @@ pub fn render_text(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -753,6 +763,7 @@ fn apply_filter_to_json(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {

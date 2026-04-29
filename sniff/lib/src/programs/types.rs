@@ -548,14 +548,17 @@ impl<E: CategoryEnum> CategoryDetector<E> {
 
     /// Returns the version of the specified program if available.
     ///
+    /// Uses the executable path discovered during detection so version probing
+    /// does not re-scan PATH.
+    ///
     /// ## Errors
     ///
     /// Returns an error if the program is not installed or version detection fails.
     pub fn version(&self, program: E) -> Result<String, ProgramError> {
-        if !self.is_installed(program) {
-            return Err(ProgramError::NotFound(program.binary_name().to_string()));
-        }
-        program.version()
+        let (path, _) = self
+            .path_with_source(program)
+            .ok_or_else(|| ProgramError::NotFound(program.binary_name().to_string()))?;
+        program.version_from_path(&path)
     }
 
     /// Returns the official website URL for the specified program.

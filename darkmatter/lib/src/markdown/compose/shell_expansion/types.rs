@@ -18,6 +18,15 @@ pub enum ShellCommandOrigin {
     Body { line: usize },
     /// Frontmatter property with a `$(...)` shell expression.
     Frontmatter { key: String },
+    /// Command inside a `::shell-block` / `::end-block` region.
+    ///
+    /// `start_line` is the 1-indexed line of the `::shell-block` opener.
+    /// `command_line` is the 1-indexed line of the specific command within
+    /// the block that would execute.
+    ShellBlock {
+        start_line: usize,
+        command_line: usize,
+    },
 }
 
 impl fmt::Display for ShellCommandOrigin {
@@ -25,16 +34,25 @@ impl fmt::Display for ShellCommandOrigin {
         match self {
             Self::Body { line } => write!(f, "line {line}"),
             Self::Frontmatter { key } => write!(f, "frontmatter.{key}"),
+            Self::ShellBlock {
+                start_line,
+                command_line,
+            } => write!(
+                f,
+                "shell block starting at line {start_line}, command at line {command_line}"
+            ),
         }
     }
 }
 
 impl ShellCommandOrigin {
-    /// Returns the line number if this is a body origin, or 0 for frontmatter.
+    /// Returns the line number if this is a body or shell-block origin,
+    /// or 0 for frontmatter.
     pub fn line_number(&self) -> usize {
         match self {
             Self::Body { line } => *line,
             Self::Frontmatter { .. } => 0,
+            Self::ShellBlock { command_line, .. } => *command_line,
         }
     }
 }
@@ -545,6 +563,7 @@ pub struct ShellExpansionRuntime {
 #[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
     allow_once: HashSet<String>,
+    pending_allow_once: HashSet<String>,
     whitelist: ShellRuleSet,
     user_blacklist: ShellRuleSet,
     policy_paths: Option<ShellPolicyPaths>,
@@ -608,10 +627,29 @@ impl ShellExpansionRuntime {
         }
     }
 
-    pub(crate) fn allow_once(&mut self, normalized: String) {
+    /// Attempts to reserve a command for allow-once approval.
+    ///
+    /// Returns `true` if the reservation succeeded (caller should proceed with
+    /// the approval handler), or `false` if the command is already allowed or
+    /// another thread is already handling it.
+    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> bool {
         let mut shared = self.shared.lock().unwrap();
-        shared.allow_once.insert(normalized);
-        self.approvals_used += 1;
+        if shared.allow_once.contains(normalized) {
+            return false;
+        }
+        shared.pending_allow_once.insert(normalized.to_string())
+    }
+
+    /// Completes an allow-once reservation.
+    ///
+    /// Removes the command from the pending set. If `approved` is `true`, also
+    /// inserts it into the allow-once set.
+    pub(crate) fn complete_allow_once(&mut self, normalized: &str, approved: bool) {
+        let mut shared = self.shared.lock().unwrap();
+        shared.pending_allow_once.remove(normalized);
+        if approved {
+            shared.allow_once.insert(normalized.to_string());
+        }
     }
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
@@ -950,6 +988,18 @@ mod tests {
     }
 
     #[test]
+    fn shell_command_origin_shell_block_display() {
+        let origin = ShellCommandOrigin::ShellBlock {
+            start_line: 10,
+            command_line: 12,
+        };
+        assert_eq!(
+            format!("{origin}"),
+            "shell block starting at line 10, command at line 12"
+        );
+    }
+
+    #[test]
     fn shell_command_origin_line_number_body() {
         let origin = ShellCommandOrigin::Body { line: 42 };
         assert_eq!(origin.line_number(), 42);
@@ -961,5 +1011,14 @@ mod tests {
             key: "x".to_string(),
         };
         assert_eq!(origin.line_number(), 0);
+    }
+
+    #[test]
+    fn shell_command_origin_line_number_shell_block() {
+        let origin = ShellCommandOrigin::ShellBlock {
+            start_line: 10,
+            command_line: 12,
+        };
+        assert_eq!(origin.line_number(), 12);
     }
 }

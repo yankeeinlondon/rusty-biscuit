@@ -129,6 +129,8 @@ sniff just                 # Justfiles and recipes
 sniff repo                 # Repository/monorepo structure
 sniff repo git-status      # Git status with commit history
 sniff repo remote origin   # Inspect remote repository
+sniff repo pr              # List open pull requests
+sniff repo pr --status merged  # List merged pull requests
 sniff repo recent-commits 1w  # Commits from last week
 sniff repo source-code-changes today  # Today's source changes
 sniff blast-radius         # Docs affected by dirty changes

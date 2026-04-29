@@ -79,6 +79,7 @@ pub enum LogClassification {
         provider_id: Option<String>,
         model_id: Option<String>,
         provider_error: String,
+        is_fatal: bool,
     },
     MalformedAsset {
         asset_type: AssetType,
@@ -89,6 +90,7 @@ pub enum LogClassification {
         status_code: Option<u16>,
         error_name: String,
         message: String,
+        is_fatal: bool,
     },
     AuthFailure {
         message: String,
@@ -282,7 +284,7 @@ fn is_tag_boundary(bytes: &[u8], mut idx: usize) -> bool {
 }
 
 fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'.' || b == b'-'
 }
 
 fn find_json_end(s: &str) -> Option<usize> {
@@ -445,14 +447,25 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
         });
     }
 
-    if is_rate_limit(haystack) {
-        let status_code = extract_status_code(haystack).unwrap_or(429);
-        let error_name = if haystack.contains("AI_RetryError") {
+    let status_code = extract_status_code(haystack);
+    let is_fatal = haystack.contains("AI_RetryError") || haystack.contains("maxRetriesExceeded");
+
+    // It's a rate limit if it has explicit 429/1308 or known substrings,
+    // OR if it's a fatal retry failure specifically for a 429.
+    let is_rate_limit = status_code == Some(429)
+        || haystack.contains("\"code\":\"1308\"")
+        || haystack.contains("Usage limit reached")
+        || (is_fatal && status_code == Some(429));
+
+    if is_rate_limit {
+        let status_code = status_code.unwrap_or(429);
+        let error_name = if is_fatal {
             "AI_RetryError"
         } else {
             "AI_APICallError"
         }
         .to_string();
+
         let reset_at = extract_reset_at(haystack);
         let provider_id = record.tags.get("providerID").cloned();
         let model_id = record.tags.get("modelID").cloned();
@@ -461,6 +474,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             .get("error")
             .cloned()
             .unwrap_or_else(|| haystack.to_string());
+
         return Some(LogClassification::RateLimit {
             status_code,
             error_name,
@@ -468,35 +482,25 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
             provider_id,
             model_id,
             provider_error,
+            is_fatal,
         });
     }
 
-    if haystack.contains("AI_APICallError") {
+    if haystack.contains("AI_APICallError") || is_fatal {
         return Some(LogClassification::ApiFailure {
-            status_code: extract_status_code(haystack),
-            error_name: "AI_APICallError".to_string(),
+            status_code,
+            error_name: if is_fatal {
+                "AI_RetryError"
+            } else {
+                "AI_APICallError"
+            }
+            .to_string(),
             message: summarize_error_json(record),
+            is_fatal,
         });
     }
 
     None
-}
-
-fn is_rate_limit(haystack: &str) -> bool {
-    contains_any(
-        haystack,
-        &[
-            "AI_RetryError",
-            "maxRetriesExceeded",
-            "\"statusCode\":429",
-            "statusCode=429",
-            "\"code\":\"1308\"",
-        ],
-    )
-}
-
-fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|n| haystack.contains(n))
 }
 
 fn contains_any_ci(haystack: &str, needles: &[&str]) -> bool {
@@ -695,6 +699,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 ref provider_id,
                 ref model_id,
                 ref provider_error,
+                is_fatal,
             } => self.on_rate_limit(
                 &record,
                 status_code,
@@ -703,6 +708,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 provider_id.clone(),
                 model_id.clone(),
                 provider_error.clone(),
+                is_fatal,
             ),
             LogClassification::MalformedAsset {
                 asset_type,
@@ -713,7 +719,8 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 status_code,
                 ref error_name,
                 ref message,
-            } => self.on_api_failure(&record, status_code, error_name.clone(), message.clone()),
+                is_fatal,
+            } => self.on_api_failure(&record, status_code, error_name.clone(), message.clone(), is_fatal),
             LogClassification::AuthFailure { ref message } => {
                 self.on_auth_failure(&record, message.clone())
             }
@@ -741,6 +748,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         provider_id: Option<String>,
         model_id: Option<String>,
         provider_error: String,
+        is_fatal: bool,
     ) -> StderrIngestOutcome {
         let stdout_seen = self.stdout_event_seen.load(Ordering::SeqCst);
         let rendered_message = render_rate_limit_message(provider_id, model_id, reset_at);
@@ -765,6 +773,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         let mut extra_map = base_extra(record, "rate_limit");
         extra_map.insert("status_code".into(), json!(status_code));
         extra_map.insert("error_name".into(), Value::String(error_name.clone()));
+        extra_map.insert("is_fatal".into(), json!(is_fatal));
         if let Some(reset) = reset_at {
             extra_map.insert(
                 "reset_at".into(),
@@ -775,12 +784,13 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             extra_map.insert("provider_error".into(), Value::String(provider_error));
         }
 
-        if stdout_seen {
+        if stdout_seen || !is_fatal {
             debug!(
                 status_code,
                 error_name = %error_name,
                 reset_at = ?reset_at,
-                "opencode rate-limit classified after stdout activity; emitting warning",
+                is_fatal,
+                "opencode rate-limit classified after stdout activity or non-fatal; emitting warning",
             );
             self.sink.on_semantic_event(SemanticEvent::Warning {
                 message: rendered_message,
@@ -791,7 +801,8 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 status_code,
                 error_name = %error_name,
                 reset_at = ?reset_at,
-                "opencode rate-limit classified before any stdout activity; requesting early termination",
+                is_fatal,
+                "opencode rate-limit classified before any stdout activity and fatal; requesting early termination",
             );
             self.sink.on_semantic_event(SemanticEvent::Error {
                 message: rendered_message.clone(),
@@ -848,6 +859,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         status_code: Option<u16>,
         error_name: String,
         message: String,
+        is_fatal: bool,
     ) -> StderrIngestOutcome {
         {
             let mut state = self.state.lock().expect("stderr state poisoned");
@@ -856,6 +868,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 
         let mut extra_map = base_extra(record, "api_failure");
         extra_map.insert("error_name".into(), Value::String(error_name.clone()));
+        extra_map.insert("is_fatal".into(), json!(is_fatal));
         if let Some(code) = status_code {
             extra_map.insert("status_code".into(), json!(code));
         }
@@ -869,12 +882,19 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             format!("OpenCode API failure ({error_name})")
         };
 
-        self.sink.on_semantic_event(SemanticEvent::Error {
-            message: rendered,
-            terminal: true,
-            kind: SemanticErrorKind::ApiRemote,
-            extra: Value::Object(extra_map),
-        });
+        if is_fatal {
+            self.sink.on_semantic_event(SemanticEvent::Error {
+                message: rendered,
+                terminal: true,
+                kind: SemanticErrorKind::ApiRemote,
+                extra: Value::Object(extra_map),
+            });
+        } else {
+            self.sink.on_semantic_event(SemanticEvent::Warning {
+                message: rendered,
+                extra: Value::Object(extra_map),
+            });
+        }
 
         StderrIngestOutcome::Consumed
     }
@@ -1284,6 +1304,7 @@ mod tests {
                 status_code,
                 error_name,
                 message,
+                ..
             } => {
                 assert_eq!(status_code, Some(500));
                 assert_eq!(error_name, "AI_APICallError");
@@ -1304,6 +1325,7 @@ mod tests {
                 status_code,
                 error_name,
                 message,
+                ..
             } => {
                 assert_eq!(status_code, Some(400));
                 assert_eq!(error_name, "AI_APICallError");
@@ -1451,10 +1473,10 @@ mod tests {
             panic!("expected Structured");
         };
         match classify(&record) {
-            LogClassification::RateLimit { reset_at, .. } => {
-                assert!(reset_at.is_none());
+            LogClassification::ApiFailure { is_fatal, .. } => {
+                assert!(is_fatal);
             }
-            other => panic!("expected RateLimit, got {other:?}"),
+            other => panic!("expected ApiFailure, got {other:?}"),
         }
     }
 
@@ -1701,7 +1723,7 @@ mod tests {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
         let mut bridge =
             OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
-        let line = r#"ERROR 2026-04-15T19:26:02 +10ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[]}}"#;
+        let line = r#"ERROR 2026-04-15T19:26:02 +10ms service=llm error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert!(rx.try_recv().is_ok(), "first rate-limit fires channel");
@@ -1735,25 +1757,18 @@ mod tests {
     }
 
     #[test]
-    fn api_failure_emits_terminal_error_with_status_code() {
+    fn api_failure_emits_warning_if_not_fatal() {
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
         let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","message":"upstream boom","statusCode":500}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
-            SemanticEvent::Error {
-                terminal,
-                kind,
-                message,
-                extra,
-            } => {
-                assert!(*terminal);
-                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+            SemanticEvent::Warning { message, extra } => {
                 assert_string(extra, "classification", "api_failure");
                 assert_string(extra, "error_name", "AI_APICallError");
                 assert_eq!(extra.get("status_code"), Some(&json!(500)));
                 assert_eq!(message, "AI_APICallError (500): upstream boom");
             }
-            other => panic!("expected Error, got {other:?}"),
+            other => panic!("expected Warning, got {other:?}"),
         }
         let state = bridge.state.lock().unwrap();
         assert_eq!(state.diagnostics.api_failures, 1);
@@ -1942,5 +1957,41 @@ mod tests {
         assert!(summary.stderr_diagnostics.is_none());
         assert!(summary.rate_limit.is_none());
         assert!(summary.badges.is_empty());
+    }
+
+    #[test]
+    fn parses_tags_with_dots_and_hyphens() {
+        let line = "ERROR 2026-04-15T21:28:30 +33ms service=llm provider-id=zai session.id=s1 model=k2p6 message";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        assert_eq!(record.tags.get("provider-id").unwrap(), "zai");
+        assert_eq!(record.tags.get("session.id").unwrap(), "s1");
+        assert_eq!(record.tags.get("model").unwrap(), "k2p6 message");
+        assert_eq!(record.message, "");
+    }
+
+    #[test]
+    fn rate_limit_without_retry_error_is_warning_even_before_stdout() {
+        let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
+        let mut bridge =
+            OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), Some(tx));
+
+        // This is a 1308 but NOT wrapped in AI_RetryError
+        let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached.\"}}"}}"#;
+
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, .. } => {
+                assert!(message.to_lowercase().contains("usage limit"), "{message}");
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+
+        assert!(
+            rx.try_recv().is_err(),
+            "early-termination signal NOT expected for non-fatal rate limit",
+        );
     }
 }

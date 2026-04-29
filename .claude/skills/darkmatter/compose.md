@@ -152,13 +152,19 @@ Numeric strings auto-convert for comparisons.
 
 ### Code Region Protection
 
-Expressions inside code spans and fenced code blocks are NOT processed:
+Inline code spans (single backticks) ARE interpolated — the common
+templating pattern `` `var_{{ phase }}` `` works without any opt-in.
+
+Fenced and indented code blocks are skipped by default to preserve
+literal code samples. Set `interpolate_code_blocks: true` (frontmatter)
+or call `ComposeOptions::with_interpolate_code_blocks(true)` to opt
+fenced blocks back into the scan.
 
 ```markdown
-Inline: `{{ not_evaluated }}`
+Inline: `{{ evaluated }}`             # always interpolated
 
 ```
-{{ also_not_evaluated }}
+{{ not_evaluated_by_default }}        # skipped unless opted in
 ```
 ```
 

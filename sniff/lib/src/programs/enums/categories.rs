@@ -385,3 +385,33 @@ pub enum AiCli {
     KimiCli,
     QwenCli,
 }
+
+// ============================================================================
+// Notification Helper Enum
+// ============================================================================
+
+/// Desktop notification helper utilities.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    EnumIter,
+    EnumCount,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum NotificationHelper {
+    TerminalNotifier,
+    Alerter,
+    SnoreToast,
+    BurntToast,
+    Dunstify,
+    NotifySend,
+}

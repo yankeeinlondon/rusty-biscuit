@@ -276,11 +276,8 @@ impl<'a> ShortcutLookup<'a> {
 
     /// Captures a single context group and merges its values into the cache.
     fn capture_group(&self, group: super::context::capture::ContextGroup) {
-        let mut groups = HashSet::new();
-        groups.insert(group);
-
         let (values, _diagnostics, _timings) =
-            super::context::capture::capture_runtime_context_for_groups(self.work_dir, &groups);
+            super::context::capture::capture_runtime_context_for_groups(self.work_dir, &[group]);
 
         let mut cache = self.ctx_cache.borrow_mut();
         let mut captured = self.captured_groups.borrow_mut();
@@ -832,6 +829,50 @@ mod tests {
         assert!(
             captured.contains(&ContextGroup::DateTime),
             "DateTime group should be in captured set"
+        );
+    }
+
+    #[test]
+    fn shortcut_ternary_short_circuits_then_branch() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "false_flag": false });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        // Condition is false, so `ctx.repo` (then-branch) should NOT be evaluated or captured
+        let parsed = expression::parse_condition("false_flag ? ctx.repo : 'default'").unwrap();
+        let result = expression::evaluate(&parsed, &lookup).unwrap();
+        let captured = lookup.captured_groups();
+        assert_eq!(
+            result,
+            serde_json::Value::String("default".to_string()),
+            "Ternary should return else-branch when condition is false"
+        );
+        assert!(
+            captured.is_empty(),
+            "Repo context should NOT be captured when ternary short-circuits then-branch: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_ternary_short_circuits_else_branch() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "true_flag": true });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        // Condition is true, so `ctx.repo` (else-branch) should NOT be evaluated or captured
+        let parsed = expression::parse_condition("true_flag ? 'default' : ctx.repo").unwrap();
+        let result = expression::evaluate(&parsed, &lookup).unwrap();
+        let captured = lookup.captured_groups();
+        assert_eq!(
+            result,
+            serde_json::Value::String("default".to_string()),
+            "Ternary should return then-branch when condition is true"
+        );
+        assert!(
+            captured.is_empty(),
+            "Repo context should NOT be captured when ternary short-circuits else-branch: captured {:?}",
+            captured
         );
     }
 }

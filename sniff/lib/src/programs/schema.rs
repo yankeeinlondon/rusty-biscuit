@@ -299,13 +299,27 @@ pub trait ProgramMetadata: Sized {
     /// - The version output cannot be parsed
     fn version(&self) -> Result<String, ProgramError> {
         let info = self.info();
-
-        // Check if program exists first
         let path = self
             .path()
             .ok_or_else(|| ProgramError::NotFound(info.binary_name.to_string()))?;
+        self.version_from_path(&path)
+    }
 
-        // Get version flag arguments
+    /// Returns the version of this program by invoking the binary at `path`.
+    ///
+    /// Skips the PATH lookup performed by [`ProgramMetadata::version`], which is
+    /// useful when the caller has already resolved the executable (e.g. through
+    /// a [`crate::programs::find_program::ExecutableIndex`] or a
+    /// [`crate::programs::types::CategoryDetector`]) and wants to avoid a
+    /// redundant `which`-style scan.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the version command cannot be spawned, times out, or
+    /// the output cannot be parsed under the program's `parse_strategy`.
+    fn version_from_path(&self, path: &std::path::Path) -> Result<String, ProgramError> {
+        let info = self.info();
+
         let args = info.version_flag.as_args();
         if args.is_empty() {
             return Err(ProgramError::ParseFailed {
@@ -314,24 +328,19 @@ pub trait ProgramMetadata: Sized {
             });
         }
 
-        // Execute version command
         let output =
-            run_command_with_timeout(&path, args).map_err(|e| ProgramError::ExecutionFailed {
+            run_command_with_timeout(path, args).map_err(|e| ProgramError::ExecutionFailed {
                 program: info.binary_name.to_string(),
                 source: e,
             })?;
 
-        // Check exit code (some programs return non-zero for --version)
-        // We'll be lenient and accept any output
-
-        // Get stdout, falling back to stderr if empty
+        // Some programs print --version to stderr — fall back when stdout is empty.
         let text = if output.stdout.is_empty() {
             String::from_utf8_lossy(&output.stderr).to_string()
         } else {
             String::from_utf8_lossy(&output.stdout).to_string()
         };
 
-        // Parse version based on strategy
         parse_version(&text, info)
     }
 }

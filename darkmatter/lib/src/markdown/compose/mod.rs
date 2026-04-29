@@ -10,16 +10,17 @@
 //! 4. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
 //! 5. **Interpolation** - Expand `{{variable}}` expressions in body content
 //! 6. **Shell Expansion** - Execute `::shell` directives with security controls
+//! 7. **Shell Blocks** - Execute `::shell-block` directives with security controls
 //!
 //! **Transclusion** (concurrent execution after serial preparation):
-//! 7. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 8. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 9. **Code Transclusion** - Include `::code` file content as fenced blocks
-//! 10. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 8. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 9. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 10. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 11. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
-//! 11. **Cleanup** - Normalize markdown formatting
-//! 12. **Normalization** - Adjust heading levels
+//! 12. **Cleanup** - Normalize markdown formatting
+//! 13. **Normalization** - Adjust heading levels
 //!
 //! ## Examples
 //!
@@ -50,10 +51,12 @@ pub(crate) mod perf;
 mod state;
 mod types;
 
+pub mod block_pairs;
 pub mod expression;
 pub mod interpolation;
 pub mod page_blocks;
 pub mod replacement;
+pub mod shell_blocks;
 pub mod shell_expansion;
 pub mod toc_linking;
 pub mod transclusion;
@@ -61,6 +64,7 @@ pub mod transclusion;
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
+pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
@@ -318,7 +322,7 @@ impl Markdown {
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
     /// Executes operations in three phases:
-    /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion
+    /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
     ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
     /// 3. **Inline Post** (serial): Cleanup, Normalization
@@ -498,6 +502,7 @@ impl Markdown {
                                 ComposeOperation::ShellExpansion => {
                                     perf::PerfMetricKind::ShellExpansion
                                 }
+                                ComposeOperation::ShellBlocks => perf::PerfMetricKind::ShellBlocks,
                                 _ => unreachable!(),
                             };
                             perf.record(kind, start.elapsed());
@@ -582,6 +587,12 @@ impl Markdown {
             ComposeOperation::ShellExpansion => {
                 self.run_shell_expansion_stage(options, runtime, report)
             }
+            ComposeOperation::ShellBlocks => shell_blocks::run_shell_blocks_stage_for_markdown(
+                &mut self.content,
+                options,
+                &mut runtime.shell,
+                report,
+            ),
             _ => Ok(()),
         }
     }
@@ -912,10 +923,10 @@ impl Markdown {
     /// Runs the interpolation stage.
     ///
     /// Finds `{{ expression }}` patterns in content and evaluates them
-    /// against the effective state. By default, expressions inside code
-    /// spans and fenced code blocks are skipped. When
-    /// `interpolate_code_spans` is enabled (via options or frontmatter),
-    /// all expressions are processed regardless of surrounding code markup.
+    /// against the effective state. Inline code spans (single backticks)
+    /// are always scanned. Fenced and indented code blocks are skipped
+    /// by default; set `interpolate_code_blocks` (via options or
+    /// frontmatter) to scan them too.
     fn run_interpolation_stage(
         &mut self,
         state: &EffectiveState,
@@ -923,7 +934,7 @@ impl Markdown {
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
 
-        let scan_mode = if self.resolve_interpolate_code_spans(options) {
+        let scan_mode = if self.resolve_interpolate_code_blocks(options) {
             ScanMode::Plain
         } else {
             ScanMode::MarkdownAware
@@ -1822,17 +1833,20 @@ impl Markdown {
             .unwrap_or(false)
     }
 
-    /// Resolves whether interpolation should process code spans.
+    /// Resolves whether interpolation should process fenced/indented code blocks.
+    ///
+    /// Inline code spans are always interpolated; this only governs
+    /// fenced and indented code blocks.
     ///
     /// Checks (in priority order):
-    /// 1. `ComposeOptions::interpolate_code_spans`
-    /// 2. Frontmatter `interpolate_code_spans` key
-    fn resolve_interpolate_code_spans(&self, options: &ComposeOptions) -> bool {
-        if options.interpolate_code_spans {
+    /// 1. `ComposeOptions::interpolate_code_blocks`
+    /// 2. Frontmatter `interpolate_code_blocks` key
+    fn resolve_interpolate_code_blocks(&self, options: &ComposeOptions) -> bool {
+        if options.interpolate_code_blocks {
             return true;
         }
 
-        if let Ok(Some(value)) = self.fm_get::<bool>("interpolate_code_spans") {
+        if let Ok(Some(value)) = self.fm_get::<bool>("interpolate_code_blocks") {
             return value;
         }
 
@@ -2359,7 +2373,9 @@ mod tests {
     }
 
     #[test]
-    fn test_interpolation_skips_code_span() {
+    fn test_interpolation_scans_inline_code_spans() {
+        // Inline code spans (single backticks) are interpolated by default —
+        // common templating pattern e.g. `var_{{ phase }}`.
         let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
         let md: Markdown = content.into();
 
@@ -2367,30 +2383,31 @@ mod tests {
 
         let (composed, report) = md.compose_with(options).unwrap();
 
-        // Only the first expression is expanded, code span preserved
-        assert_eq!(composed.content(), "Hello Alice! Code: `{{ name }}`");
-        assert_eq!(report.interpolations_applied, 1);
-    }
-
-    #[test]
-    fn test_interpolation_code_spans_via_option() {
-        let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
-        let md: Markdown = content.into();
-
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::Interpolation])
-            .with_interpolate_code_spans(true);
-
-        let (composed, report) = md.compose_with(options).unwrap();
-
-        // Both expressions expanded when interpolate_code_spans is enabled
         assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
         assert_eq!(report.interpolations_applied, 2);
     }
 
     #[test]
-    fn test_interpolation_code_spans_via_frontmatter() {
-        let content = "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
+    fn test_interpolation_code_blocks_via_option() {
+        // Fenced code blocks are skipped unless explicitly opted in.
+        let content = "---\nname: Alice\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_interpolate_code_blocks(true);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both expressions expanded when interpolate_code_blocks is enabled
+        assert!(composed.content().contains("Hello Alice!"));
+        assert!(composed.content().contains("```\nAlice\n```"));
+        assert_eq!(report.interpolations_applied, 2);
+    }
+
+    #[test]
+    fn test_interpolation_code_blocks_via_frontmatter() {
+        let content = "---\nname: Alice\ninterpolate_code_blocks: true\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2398,7 +2415,8 @@ mod tests {
         let (composed, report) = md.compose_with(options).unwrap();
 
         // Both expressions expanded when frontmatter flag is set
-        assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
+        assert!(composed.content().contains("Hello Alice!"));
+        assert!(composed.content().contains("```\nAlice\n```"));
         assert_eq!(report.interpolations_applied, 2);
     }
 
@@ -2411,7 +2429,7 @@ mod tests {
 
         let (composed, report) = md.compose_with(options).unwrap();
 
-        // Only the first expression is expanded, code block preserved
+        // Only the first expression is expanded, fenced block preserved
         assert!(composed.content().contains("Hello Alice!"));
         assert!(composed.content().contains("```\n{{ name }}\n```"));
         assert_eq!(report.interpolations_applied, 1);
@@ -3719,8 +3737,11 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
-    fn test_frontmatter_interpolation_body_still_skips_code() {
-        let content = "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`";
+    fn test_frontmatter_interpolation_body_still_skips_fenced_code() {
+        // Inline code spans interpolate, but fenced blocks remain untouched
+        // unless `interpolate_code_blocks` is set.
+        let content =
+            "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`\n\n```\n{{ name }}\n```";
         let md: Markdown = content.into();
         let (composed, _) = md
             .compose_with(ComposeOptions::new().only(&[
@@ -3730,7 +3751,8 @@ Rounded: {{ round(pi) }}"#;
             .unwrap();
 
         assert!(composed.content().contains("Hello World!"));
-        assert!(composed.content().contains("`{{ name }}`"));
+        assert!(composed.content().contains("Code: `World`"));
+        assert!(composed.content().contains("```\n{{ name }}\n```"));
     }
 
     #[test]

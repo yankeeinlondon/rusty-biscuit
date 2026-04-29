@@ -1869,14 +1869,19 @@ fn prompt_delivery_append_flags(
     non_interactive_flag: &str,
     interactive_flag: &str,
 ) -> PromptDelivery {
-    PromptDelivery::AppendArgs(vec![
-        if non_interactive {
-            non_interactive_flag.to_string()
-        } else {
-            interactive_flag.to_string()
-        },
-        prompt.to_string(),
-    ])
+    let flag = if non_interactive {
+        non_interactive_flag
+    } else {
+        interactive_flag
+    };
+    // When the prompt starts with '-' some CLI parsers (notably yargs,
+    // used by Gemini) interpret the value as a flag or end-of-options
+    // marker. Using '--flag=value' syntax is unambiguous.
+    if prompt.starts_with('-') {
+        PromptDelivery::AppendArgs(vec![format!("{flag}={prompt}")])
+    } else {
+        PromptDelivery::AppendArgs(vec![flag.to_string(), prompt.to_string()])
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2222,6 +2227,41 @@ mod tests {
         let mut args = vec!["-i".to_string()];
         let err = p.apply_non_interactive_flags(&mut args).unwrap_err();
         assert!(err.to_string().contains("conflicts"));
+    }
+
+    /// When a prompt starts with '-' some CLI parsers (notably yargs,
+    /// used by Gemini) interpret the value as a flag or end-of-options
+    /// marker, causing '--prompt ---...' to fail with "Not enough
+    /// arguments following: prompt". The fix uses '--prompt=---...'
+    /// syntax when the prompt starts with '-'.
+    #[test]
+    fn gemini_prompt_delivery_uses_equals_syntax_when_prompt_starts_with_dash() {
+        let p = profile(Provider::Gemini);
+        let args = Vec::new();
+        let delivery = p.prompt_delivery(&args, "---\nfoo", true).unwrap();
+        let mut applied = Vec::new();
+        delivery.apply_to(&mut applied);
+        assert_eq!(applied, vec!["--prompt=---\nfoo"]);
+    }
+
+    #[test]
+    fn gemini_prompt_delivery_uses_space_syntax_for_normal_prompt() {
+        let p = profile(Provider::Gemini);
+        let args = Vec::new();
+        let delivery = p.prompt_delivery(&args, "hello world", true).unwrap();
+        let mut applied = Vec::new();
+        delivery.apply_to(&mut applied);
+        assert_eq!(applied, vec!["--prompt", "hello world"]);
+    }
+
+    #[test]
+    fn qwen_prompt_delivery_uses_equals_syntax_when_prompt_starts_with_dash() {
+        let p = profile(Provider::QwenCode);
+        let args = Vec::new();
+        let delivery = p.prompt_delivery(&args, "---\nfoo", true).unwrap();
+        let mut applied = Vec::new();
+        delivery.apply_to(&mut applied);
+        assert_eq!(applied, vec!["--prompt=---\nfoo"]);
     }
 
     #[test]
