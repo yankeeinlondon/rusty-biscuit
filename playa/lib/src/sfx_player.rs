@@ -155,6 +155,14 @@ pub enum SfxPlaybackError {
     Timeout(u64),
 }
 
+impl SfxPlaybackError {
+    /// Whether callers should fall back to a host player instead of reporting
+    /// the native failure directly.
+    pub(crate) fn should_fallback_to_host(&self) -> bool {
+        matches!(self, Self::Decode(_))
+    }
+}
+
 /// Play sound effect bytes using native audio (rodio).
 ///
 /// Supports volume and speed control via `PlaybackOptions`. On macOS with
@@ -827,7 +835,7 @@ mod linux {
     pub(crate) enum PulsePlaybackOutcome {
         /// PulseAudio setup (context/stream connection) failed before audio was
         /// written to the server. Safe to fall back to another playback path.
-        SetupFailed(Box<dyn std::error::Error>),
+        SetupFailed(#[allow(dead_code)] Box<dyn std::error::Error>),
         /// Audio was written to PulseAudio and the drain completed. Fully done.
         PlaybackCompleted,
         /// Audio was written to PulseAudio but the drain timed out or failed.
