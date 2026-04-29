@@ -104,6 +104,10 @@ If a command fails with no matching error handler:
 - The error includes the failing command's source excerpt
 - The block is not partially rendered into the document
 
+In terminal error output, preserved partial output is visually demoted with
+Prose `<dim>` styling. If shell-block error output gains a dedicated HTML
+renderer, use a matching CSS treatment for that demoted partial output.
+
 ## Security
 
 Shell blocks share the same security infrastructure as `::shell` directives:
