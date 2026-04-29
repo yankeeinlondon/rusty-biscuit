@@ -9,8 +9,8 @@
 | [3. Text Replacement 🏁](./inline/text-replacement.md)          | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
 | [4. Page Blocks 🏁](./inline/page-blocks.md)                    | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
 | [5. Interpolation 🏁](./inline/interpolation.md)                | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
-| [6. Shell Expansion 🏁](./inline/shell-expansion.md)       | [AI Summarization](./transclusion/summarization.md)               |                                                                 |
-|                                                                  | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 |
+| [6. Shell Expansion 🏁](./inline/shell-expansion.md)        | [AI Summarization](./transclusion/summarization.md)               | |
+| [7. Shell Blocks 🏁](./inline/shell-blocks.md)              | [AI Consolidation](./transclusion/consolidation.md)               | |
 
 > **Note:** items marked with `🏁` are implemented
 
@@ -44,6 +44,7 @@ into the most valid form we can deterministically reach.
 - [Page Blocks](./inline/page-blocks.md) - allow for blocks in the page to be defined, often with _conditional_ logic to determine whether the block should be rendered or removed
 - [Interpolation](./inline/interpolation.md) - looks for handlebars template markers in the page's body and replaces the template markers with data from frontmatter, ENV variables, or [context variables](./topics/context-variables.md).
 - [Shell Expansion](./inline/shell-expansion.md) - allows _approved_ commands to be run and have the STDOUT replace the directive
+- [Shell Blocks](./inline/shell-blocks.md) - `::shell-block` / `::end-block` directives that execute multiple approved commands sequentially and render their combined output
 - Link Validation is deferred and not part of the shipped compose pipeline yet.
 
 > **Note on parent-side interpolation passthrough:** The parent's interpolation stage (step 5 above) runs **before** the transclusion stage. This means expressions like `::file child.md set={{dictionary}}` or `set.x="{{ env.X }}"` are resolved to literal JSON5 values by the parent's pipeline before the `::file` directive is dispatched to transclusion. "Interpolation on the set RHS" is therefore not a distinct transclusion feature — it is automatic parent-side behavior.

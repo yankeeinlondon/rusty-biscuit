@@ -48,6 +48,10 @@ pub enum ComposeOperation {
     /// with the command's stdout output.
     ShellExpansion,
 
+    /// Executes approved `::shell-block` directives and replaces them
+    /// with the combined output of the block's commands.
+    ShellBlocks,
+
     /// Resolves `::file` and `::url` directives by including the
     /// referenced markdown document (recursively composed).
     BlockTransclusion,
@@ -151,7 +155,7 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 13;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
@@ -162,12 +166,13 @@ impl ComposeOperation {
             Self::PageBlocks => 3,
             Self::Interpolation => 4,
             Self::ShellExpansion => 5,
-            Self::BlockTransclusion => 6,
-            Self::FrontmatterTransclusion => 7,
-            Self::CodeTransclusion => 8,
-            Self::TocLinking => 9,
-            Self::Cleanup => 10,
-            Self::Normalization => 11,
+            Self::ShellBlocks => 6,
+            Self::BlockTransclusion => 7,
+            Self::FrontmatterTransclusion => 8,
+            Self::CodeTransclusion => 9,
+            Self::TocLinking => 10,
+            Self::Cleanup => 11,
+            Self::Normalization => 12,
         }
     }
 
@@ -179,7 +184,8 @@ impl ComposeOperation {
             | Self::TextReplacement
             | Self::PageBlocks
             | Self::Interpolation
-            | Self::ShellExpansion => ComposePhase::InlinePre,
+            | Self::ShellExpansion
+            | Self::ShellBlocks => ComposePhase::InlinePre,
 
             Self::BlockTransclusion
             | Self::FrontmatterTransclusion
@@ -200,6 +206,7 @@ impl ComposeOperation {
             Self::PageBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
+            Self::ShellBlocks,
             // Transclusion (concurrent)
             Self::BlockTransclusion,
             Self::FrontmatterTransclusion,
@@ -226,6 +233,7 @@ impl std::fmt::Display for ComposeOperation {
             Self::PageBlocks => write!(f, "PageBlocks"),
             Self::Interpolation => write!(f, "Interpolation"),
             Self::ShellExpansion => write!(f, "ShellExpansion"),
+            Self::ShellBlocks => write!(f, "ShellBlocks"),
             Self::BlockTransclusion => write!(f, "BlockTransclusion"),
             Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
             Self::CodeTransclusion => write!(f, "CodeTransclusion"),
@@ -1358,6 +1366,7 @@ pub enum ComposeStage {
     PageBlocks,
     Interpolation,
     ShellExpansion,
+    ShellBlocks,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
@@ -1376,6 +1385,7 @@ impl std::fmt::Display for ComposeStage {
             Self::PageBlocks => "page blocks",
             Self::Interpolation => "interpolation",
             Self::ShellExpansion => "shell expansion",
+            Self::ShellBlocks => "shell blocks",
             Self::TransclusionParse => "transclusion parse",
             Self::TransclusionPrepare => "transclusion prepare",
             Self::TransclusionResolve => "transclusion resolve",
@@ -1445,6 +1455,9 @@ pub struct ComposeReport {
     /// Number of shell expansions applied.
     pub shell_expansions_applied: usize,
 
+    /// Number of shell blocks applied.
+    pub shell_blocks_applied: usize,
+
     /// Number of shell approvals used.
     pub shell_approvals_used: usize,
 
@@ -1512,6 +1525,7 @@ impl ComposeReport {
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
             || self.shell_expansions_applied > 0
+            || self.shell_blocks_applied > 0
             || self.cleanup_changed
             || self.page_blocks_rendered > 0
             || self.transclusions_applied > 0
@@ -1560,6 +1574,10 @@ impl ComposeReport {
                 "{} shell expansion(s)",
                 self.shell_expansions_applied
             ));
+        }
+
+        if self.shell_blocks_applied > 0 {
+            parts.push(format!("{} shell block(s)", self.shell_blocks_applied));
         }
 
         if self.shell_approvals_used > 0 {
@@ -1626,6 +1644,7 @@ impl ComposeReport {
         self.interpolations_applied += other.interpolations_applied;
         self.toc_links_generated += other.toc_links_generated;
         self.shell_expansions_applied += other.shell_expansions_applied;
+        self.shell_blocks_applied += other.shell_blocks_applied;
         self.shell_approvals_used += other.shell_approvals_used;
         self.cleanup_changed |= other.cleanup_changed;
         self.page_blocks_rendered += other.page_blocks_rendered;
@@ -1783,6 +1802,7 @@ mod tests {
                 ComposeOperation::PageBlocks,
                 ComposeOperation::Interpolation,
                 ComposeOperation::ShellExpansion,
+                ComposeOperation::ShellBlocks,
                 ComposeOperation::BlockTransclusion,
                 ComposeOperation::FrontmatterTransclusion,
                 ComposeOperation::CodeTransclusion,
@@ -1808,6 +1828,7 @@ mod tests {
             (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
             (ComposeOperation::Interpolation, ComposePhase::InlinePre),
             (ComposeOperation::ShellExpansion, ComposePhase::InlinePre),
+            (ComposeOperation::ShellBlocks, ComposePhase::InlinePre),
             (
                 ComposeOperation::BlockTransclusion,
                 ComposePhase::Transclusion,
@@ -2234,7 +2255,7 @@ mod tests {
     }
 
     #[test]
-    fn default_order_has_twelve_operations() {
-        assert_eq!(ComposeOperation::default_order().len(), 12);
+    fn default_order_has_thirteen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 13);
     }
 }
