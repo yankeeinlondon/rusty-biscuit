@@ -267,29 +267,65 @@ fn play_source(
     }
 
     player.append(source);
-    wait_with_timeout(&player, PLAYBACK_TIMEOUT)?;
+    wait_with_progress(
+        &player,
+        PLAYBACK_TIMEOUT,
+        resolved_stall_window(),
+        Duration::from_millis(50),
+    )?;
 
     Ok(())
 }
 
-/// Wait for the player to finish, but give up after `timeout`.
+/// Wait for the player to drain, abandoning the device if no playback
+/// progress occurs for the stall window.
 ///
-/// Polls `player.empty()` every 50 ms. If the deadline is exceeded the
-/// player is stopped and a `Timeout` error is returned so the caller can
-/// fall back to a host player or report the failure.
-fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), NativePlaybackError> {
-    let deadline = Instant::now() + timeout;
+/// `absolute_timeout` is the wall-clock backstop (existing 300 s
+/// behavior). `stall_window` is the maximum gap between advances of
+/// `Player::get_pos()`. `poll_interval` is the loop sleep cadence.
+///
+/// On stall, calls `player.stop()`, trips the native breaker, and
+/// returns [`NativePlaybackError::Timeout`] so subsequent native
+/// attempts in this process route directly to host playback.
+fn wait_with_progress<P: PlayerProgress>(
+    player: &P,
+    absolute_timeout: Duration,
+    stall_window: Duration,
+    poll_interval: Duration,
+) -> Result<(), NativePlaybackError> {
+    let start = Instant::now();
+    let mut last_pos = player.get_pos();
+    let mut last_progress_at = Instant::now();
+
     while !player.empty() {
-        if Instant::now() >= deadline {
+        let now = Instant::now();
+        if now.duration_since(start) >= absolute_timeout {
             player.stop();
+            trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
             eprintln!(
                 "playa: audio playback timed out after {}s — audio device may be unresponsive",
-                timeout.as_secs()
+                absolute_timeout.as_secs()
             );
-            return Err(NativePlaybackError::Timeout(timeout.as_secs()));
+            return Err(NativePlaybackError::Timeout(absolute_timeout.as_secs()));
         }
-        std::thread::sleep(Duration::from_millis(50));
+
+        let pos = player.get_pos();
+        if pos != last_pos {
+            last_pos = pos;
+            last_progress_at = now;
+        } else if now.duration_since(last_progress_at) >= stall_window {
+            player.stop();
+            trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+            eprintln!(
+                "playa: audio playback stalled — no progress for {}s, treating device as unresponsive",
+                stall_window.as_secs()
+            );
+            return Err(NativePlaybackError::Timeout(stall_window.as_secs()));
+        }
+
+        std::thread::sleep(poll_interval);
     }
+
     Ok(())
 }
 
@@ -443,5 +479,122 @@ mod tests {
 
         assert!(matches!(result, Err(NativePlaybackError::Decode(_))));
         assert!(crate::native_audio::native_audio_available());
+    }
+
+    mod progress_wait {
+        use super::*;
+        use std::sync::Mutex;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+        struct FakePlayer {
+            empty: AtomicBool,
+            pos_micros: AtomicU64,
+            stop_count: Mutex<u32>,
+        }
+
+        impl FakePlayer {
+            fn new() -> Self {
+                Self {
+                    empty: AtomicBool::new(false),
+                    pos_micros: AtomicU64::new(0),
+                    stop_count: Mutex::new(0),
+                }
+            }
+            fn set_empty(&self) {
+                self.empty.store(true, Ordering::SeqCst);
+            }
+            fn advance_pos(&self, by: Duration) {
+                self.pos_micros
+                    .fetch_add(by.as_micros() as u64, Ordering::SeqCst);
+            }
+            fn stops(&self) -> u32 {
+                *self.stop_count.lock().unwrap()
+            }
+        }
+
+        impl PlayerProgress for FakePlayer {
+            fn empty(&self) -> bool {
+                self.empty.load(Ordering::SeqCst)
+            }
+            fn get_pos(&self) -> Duration {
+                Duration::from_micros(self.pos_micros.load(Ordering::SeqCst))
+            }
+            fn stop(&self) {
+                *self.stop_count.lock().unwrap() += 1;
+            }
+        }
+
+        #[test]
+        fn returns_ok_when_player_empties() {
+            let _guard = crate::native_audio::lock_native_audio_test_state();
+            let fake = FakePlayer::new();
+            fake.set_empty();
+            let result = wait_with_progress(
+                &fake,
+                Duration::from_secs(60),
+                Duration::from_millis(100),
+                Duration::from_millis(1),
+            );
+            assert!(result.is_ok());
+            assert_eq!(fake.stops(), 0);
+            assert!(crate::native_audio::native_audio_available());
+        }
+
+        #[test]
+        fn trips_breaker_on_stall() {
+            let _guard = crate::native_audio::lock_native_audio_test_state();
+            let fake = FakePlayer::new();
+            // Position never advances and player never empties.
+            let result = wait_with_progress(
+                &fake,
+                Duration::from_secs(60),
+                Duration::from_millis(50),
+                Duration::from_millis(1),
+            );
+            assert!(matches!(result, Err(NativePlaybackError::Timeout(_))));
+            assert_eq!(fake.stops(), 1);
+            assert!(!crate::native_audio::native_audio_available());
+        }
+
+        #[test]
+        fn absolute_deadline_takes_precedence() {
+            let _guard = crate::native_audio::lock_native_audio_test_state();
+            let fake = FakePlayer::new();
+            // Stall window > absolute timeout, so the absolute deadline fires first.
+            let result = wait_with_progress(
+                &fake,
+                Duration::from_millis(30),
+                Duration::from_secs(60),
+                Duration::from_millis(1),
+            );
+            assert!(matches!(result, Err(NativePlaybackError::Timeout(_))));
+            assert_eq!(fake.stops(), 1);
+            assert!(!crate::native_audio::native_audio_available());
+        }
+
+        #[test]
+        fn progress_resets_stall_clock() {
+            let _guard = crate::native_audio::lock_native_audio_test_state();
+            let fake = std::sync::Arc::new(FakePlayer::new());
+            // Spawn a thread that advances pos, then sets empty before stall fires.
+            let fake_clone = fake.clone();
+            let handle = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(20));
+                fake_clone.advance_pos(Duration::from_millis(10));
+                std::thread::sleep(Duration::from_millis(20));
+                fake_clone.advance_pos(Duration::from_millis(10));
+                std::thread::sleep(Duration::from_millis(20));
+                fake_clone.set_empty();
+            });
+            let result = wait_with_progress(
+                fake.as_ref(),
+                Duration::from_secs(5),
+                Duration::from_millis(40),
+                Duration::from_millis(1),
+            );
+            handle.join().unwrap();
+            assert!(result.is_ok(), "expected ok, got {result:?}");
+            assert!(crate::native_audio::native_audio_available());
+        }
     }
 }
