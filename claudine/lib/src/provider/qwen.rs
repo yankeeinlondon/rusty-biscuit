@@ -199,7 +199,7 @@ const QWEN_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
 
 const QWEN_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
     subcommand: None,
-    required_flags: &["-p"],
+    required_flags: &[],
     mode: EntrypointMode::NonInteractive,
 }];
 

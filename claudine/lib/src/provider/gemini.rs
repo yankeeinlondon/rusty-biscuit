@@ -257,18 +257,11 @@ const GEMINI_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
     },
 ];
 
-const GEMINI_ENTRYPOINTS: &[EntrypointSpec] = &[
-    EntrypointSpec {
-        subcommand: None,
-        required_flags: &["-p"],
-        mode: EntrypointMode::NonInteractive,
-    },
-    EntrypointSpec {
-        subcommand: None,
-        required_flags: &["--prompt"],
-        mode: EntrypointMode::NonInteractive,
-    },
-];
+const GEMINI_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
+    subcommand: None,
+    required_flags: &[],
+    mode: EntrypointMode::NonInteractive,
+}];
 
 static GEMINI_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
     append: SystemPromptDeliveryByMode {
