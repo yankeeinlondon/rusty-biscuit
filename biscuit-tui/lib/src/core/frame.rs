@@ -160,6 +160,59 @@ impl Margin {
     }
 }
 
+/// Four-sided interior padding in terminal cells.
+///
+/// Padding is applied inside the border (or directly inside the margin
+/// when no border is drawn). It shrinks the area available to the
+/// inner widget after the border has claimed its perimeter.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Padding {
+    /// Cells of padding on the top edge.
+    pub top: u16,
+    /// Cells of padding on the bottom edge.
+    pub bottom: u16,
+    /// Cells of padding on the left edge.
+    pub left: u16,
+    /// Cells of padding on the right edge.
+    pub right: u16,
+}
+
+impl Padding {
+    /// Constructs padding with the same value on all four sides.
+    pub const fn uniform(n: u16) -> Self {
+        Self {
+            top: n,
+            bottom: n,
+            left: n,
+            right: n,
+        }
+    }
+
+    /// Shrinks `area` by the padding on each side, using saturating
+    /// subtraction so overly large padding collapses the rect rather
+    /// than wrapping.
+    pub fn shrink(self, area: Rect) -> Rect {
+        let dx = self.left.min(area.width);
+        let dy = self.top.min(area.height);
+        let x = area.x.saturating_add(dx);
+        let y = area.y.saturating_add(dy);
+        let width = area
+            .width
+            .saturating_sub(dx)
+            .saturating_sub(self.right.min(area.width.saturating_sub(dx)));
+        let height = area
+            .height
+            .saturating_sub(dy)
+            .saturating_sub(self.bottom.min(area.height.saturating_sub(dy)));
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
 /// The parsed form of the CLI `--height` flag.
 ///
 /// ## Variants
@@ -200,7 +253,7 @@ impl HeightSpec {
 /// Produced by the CLI layer from the shared `ChooseChromeArgs`
 /// struct. Later phases will flesh out parsing; Phase 1 just fixes
 /// the shape so other call sites can be written against it.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FrameChromeConfig {
     /// Border style; [`BorderStyle::None`] draws no border.
     pub border: BorderStyle,
@@ -210,14 +263,31 @@ pub struct FrameChromeConfig {
     pub margin: Margin,
     /// Style applied to the border glyphs.
     pub border_style: Style,
+    /// Interior padding applied inside the border (or directly inside
+    /// the margin when no border is drawn).
+    pub padding: Padding,
+}
+
+impl Default for FrameChromeConfig {
+    fn default() -> Self {
+        Self {
+            border: BorderStyle::default(),
+            border_label: None,
+            margin: Margin::default(),
+            border_style: Style::default(),
+            padding: Padding::uniform(1),
+        }
+    }
 }
 
 impl FrameChromeConfig {
-    /// Returns `true` when neither the border nor any margin would
-    /// affect layout. Callers can use this to skip wrapping a widget
-    /// in [`FrameChrome`] entirely.
+    /// Returns `true` when neither the border, margin, nor padding
+    /// would affect layout. Callers can use this to skip wrapping a
+    /// widget in [`FrameChrome`] entirely.
     pub fn is_empty(&self) -> bool {
-        !self.border.is_visible() && self.margin == Margin::default()
+        !self.border.is_visible()
+            && self.margin == Margin::default()
+            && self.padding == Padding::default()
     }
 }
 
@@ -227,8 +297,9 @@ impl FrameChromeConfig {
 /// [`FrameChrome`] implements [`StatefulWidget`], forwarding to the
 /// inner widget's [`StatefulWidget::State`] unchanged. The inner
 /// widget renders inside the rectangle that remains after the margin
-/// has been subtracted and (if any) the border has claimed its own
-/// single-cell perimeter.
+/// has been subtracted, (if any) the border has claimed its own
+/// single-cell perimeter, and padding has been applied inside the
+/// border.
 pub struct FrameChrome<'a, W> {
     /// The widget drawn inside the frame.
     pub inner: W,
@@ -238,19 +309,22 @@ pub struct FrameChrome<'a, W> {
     pub margin: Margin,
     /// Style applied to the border glyphs.
     pub border_style: Style,
+    /// Interior padding applied inside the border.
+    pub padding: Padding,
 }
 
 impl<'a, W> FrameChrome<'a, W> {
-    /// Wraps `inner` with no chrome (margin zero, border none). Used
-    /// as the no-op fallback when `FrameChromeConfig::is_empty()`
-    /// returns true but the caller still wants to go through the
-    /// wrapper for type uniformity.
+    /// Wraps `inner` with no chrome (margin zero, border none, padding
+    /// zero). Used as the no-op fallback when
+    /// `FrameChromeConfig::is_empty()` returns true but the caller
+    /// still wants to go through the wrapper for type uniformity.
     pub fn bare(inner: W) -> Self {
         Self {
             inner,
             border: None,
             margin: Margin::default(),
             border_style: Style::default(),
+            padding: Padding::default(),
         }
     }
 
@@ -270,6 +344,7 @@ impl<'a, W> FrameChrome<'a, W> {
             border,
             margin: config.margin,
             border_style: config.border_style,
+            padding: config.padding,
         }
     }
 }
@@ -292,9 +367,9 @@ where
             }
             let inner = block.inner(area);
             block.render(area, buf);
-            inner
+            self.padding.shrink(inner)
         } else {
-            area
+            self.padding.shrink(area)
         };
         self.inner.render(inner_area, buf, state);
     }
@@ -419,8 +494,17 @@ mod tests {
     }
 
     #[test]
-    fn frame_chrome_config_is_empty_by_default() {
+    fn frame_chrome_config_default_padding_is_uniform_one() {
         let config = FrameChromeConfig::default();
+        assert_eq!(config.padding, Padding::uniform(1));
+    }
+
+    #[test]
+    fn frame_chrome_config_is_empty_when_all_defaults() {
+        let config = FrameChromeConfig {
+            padding: Padding::default(),
+            ..Default::default()
+        };
         assert!(config.is_empty());
     }
 
@@ -469,6 +553,7 @@ mod tests {
             border_label: Some("Title".to_string()),
             margin: Margin::uniform(1),
             border_style: Style::default().fg(Color::Cyan),
+            padding: Padding::default(),
         };
         let frame = FrameChrome::from_config(Marker, &config);
 
@@ -502,6 +587,7 @@ mod tests {
     fn frame_chrome_margin_only_still_renders_inner() {
         let config = FrameChromeConfig {
             margin: Margin::uniform(1),
+            padding: Padding::default(),
             ..Default::default()
         };
         let frame = FrameChrome::from_config(Marker, &config);
@@ -527,6 +613,7 @@ mod tests {
         let config = FrameChromeConfig {
             border: BorderStyle::Rounded,
             border_label: Some("A very long title indeed".to_string()),
+            padding: Padding::default(),
             ..Default::default()
         };
         let frame = FrameChrome::from_config(Marker, &config);
@@ -542,5 +629,74 @@ mod tests {
         assert_eq!(inner.y, 1);
         assert_eq!(inner.width, 6);
         assert_eq!(inner.height, 2);
+    }
+
+    #[test]
+    fn frame_chrome_padding_shrinks_inner_even_without_border() {
+        let config = FrameChromeConfig {
+            padding: Padding::uniform(2),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 10, 6);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let inner = state.last_area.expect("inner widget rendered");
+        assert_eq!(inner.x, 2);
+        assert_eq!(inner.y, 2);
+        assert_eq!(inner.width, 6);
+        assert_eq!(inner.height, 2);
+    }
+
+    #[test]
+    fn frame_chrome_border_plus_padding_shrinks_inner() {
+        let config = FrameChromeConfig {
+            border: BorderStyle::Rounded,
+            padding: Padding::uniform(1),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 10, 6);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let inner = state.last_area.expect("inner widget rendered");
+        // margin 0 + border 1 + padding 1 = 2 on each side
+        assert_eq!(inner.x, 2);
+        assert_eq!(inner.y, 2);
+        assert_eq!(inner.width, 6);
+        assert_eq!(inner.height, 2);
+    }
+
+    #[test]
+    fn padding_uniform() {
+        let p = Padding::uniform(3);
+        assert_eq!(p.top, 3);
+        assert_eq!(p.bottom, 3);
+        assert_eq!(p.left, 3);
+        assert_eq!(p.right, 3);
+    }
+
+    #[test]
+    fn padding_shrink_subtracts_each_side() {
+        let area = Rect::new(0, 0, 20, 10);
+        let shrunk = Padding::uniform(2).shrink(area);
+        assert_eq!(shrunk.x, 2);
+        assert_eq!(shrunk.y, 2);
+        assert_eq!(shrunk.width, 16);
+        assert_eq!(shrunk.height, 6);
+    }
+
+    #[test]
+    fn padding_shrink_saturates_when_too_large() {
+        let area = Rect::new(0, 0, 4, 2);
+        let shrunk = Padding::uniform(10).shrink(area);
+        assert_eq!(shrunk.width, 0);
+        assert_eq!(shrunk.height, 0);
     }
 }
