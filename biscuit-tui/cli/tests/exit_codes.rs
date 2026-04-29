@@ -56,13 +56,7 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
         ),
         (
             "choose-one",
-            vec![
-                "choose-one",
-                "--csv",
-                "Red,Green,Blue",
-                "--initial",
-                "Red",
-            ],
+            vec!["choose-one", "--csv", "Red,Green,Blue", "--initial", "Red"],
         ),
         (
             "choose-many",

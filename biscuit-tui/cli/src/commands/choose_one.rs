@@ -14,9 +14,7 @@ use tui_chrome::{
 };
 
 use crate::choice_normalize::normalize_options;
-use crate::commands::common_choose::{
-    ChooseChromeArgs, apply_sort, build_chrome,
-};
+use crate::commands::common_choose::{ChooseChromeArgs, apply_sort, build_chrome};
 use crate::commands::text_input::LabelPositionArg;
 use crate::option_sources::resolve_raw_options;
 use crate::output::{OutputMode, write_scalar};

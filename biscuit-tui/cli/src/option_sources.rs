@@ -12,7 +12,9 @@ use serde_json::Value as JsonValue;
 /// Errors that can occur while resolving options from a source.
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
-    #[error("no options provided: pass options as positional args, via stdin, or use a source flag")]
+    #[error(
+        "no options provided: pass options as positional args, via stdin, or use a source flag"
+    )]
     NoSource,
     #[error("multiple option sources provided: sources are mutually exclusive")]
     MultipleSources,
@@ -38,24 +40,50 @@ pub fn resolve_raw_options(
     positional: Vec<String>,
 ) -> Result<Vec<String>, SourceError> {
     let mut source_count = 0;
-    if csv.is_some() { source_count += 1; }
-    if list.is_some() { source_count += 1; }
-    if rows.is_some() { source_count += 1; }
-    if file.is_some() { source_count += 1; }
-    if md.is_some() { source_count += 1; }
-    if options_from_file.is_some() { source_count += 1; }
-    if options_from_dictionary.is_some() { source_count += 1; }
-    if !positional.is_empty() { source_count += 1; }
+    if csv.is_some() {
+        source_count += 1;
+    }
+    if list.is_some() {
+        source_count += 1;
+    }
+    if rows.is_some() {
+        source_count += 1;
+    }
+    if file.is_some() {
+        source_count += 1;
+    }
+    if md.is_some() {
+        source_count += 1;
+    }
+    if options_from_file.is_some() {
+        source_count += 1;
+    }
+    if options_from_dictionary.is_some() {
+        source_count += 1;
+    }
+    if !positional.is_empty() {
+        source_count += 1;
+    }
 
     if source_count > 1 {
         return Err(SourceError::MultipleSources);
     }
 
-    if let Some(csv) = csv { return Ok(parse_csv(csv)); }
-    if let Some(list) = list { return Ok(parse_list(list)); }
-    if let Some(rows) = rows { return Ok(parse_rows(rows)); }
-    if let Some(file) = file { return parse_file(file); }
-    if let Some((path, prop)) = md { return parse_md(path, prop); }
+    if let Some(csv) = csv {
+        return Ok(parse_csv(csv));
+    }
+    if let Some(list) = list {
+        return Ok(parse_list(list));
+    }
+    if let Some(rows) = rows {
+        return Ok(parse_rows(rows));
+    }
+    if let Some(file) = file {
+        return parse_file(file);
+    }
+    if let Some((path, prop)) = md {
+        return parse_md(path, prop);
+    }
     if let Some(path) = options_from_file {
         let body = fs::read_to_string(path)?;
         return Ok(parse_markdown_list(&body));
@@ -64,7 +92,9 @@ pub fn resolve_raw_options(
         let body = fs::read_to_string(path)?;
         return parse_dictionary(&body);
     }
-    if !positional.is_empty() { return Ok(positional); }
+    if !positional.is_empty() {
+        return Ok(positional);
+    }
 
     if io::stdin().is_terminal() {
         return Err(SourceError::NoSource);
@@ -72,7 +102,9 @@ pub fn resolve_raw_options(
     let mut buf = String::new();
     io::stdin().read_to_string(&mut buf)?;
     let lines = parse_list(&buf);
-    if lines.is_empty() { return Err(SourceError::NoSource); }
+    if lines.is_empty() {
+        return Err(SourceError::NoSource);
+    }
     Ok(lines)
 }
 
@@ -133,7 +165,9 @@ fn parse_jsonl(body: &str) -> Result<Vec<String>, SourceError> {
     let mut results = Vec::new();
     for line in body.lines() {
         let line = line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
         let value: JsonValue =
             serde_json::from_str(line).map_err(|e| SourceError::Parse(e.to_string()))?;
         match value {
@@ -166,8 +200,7 @@ fn parse_yaml(body: &str) -> Result<Vec<String>, SourceError> {
 }
 
 fn parse_toml(body: &str) -> Result<Vec<String>, SourceError> {
-    let value: toml::Value =
-        toml::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
+    let value: toml::Value = toml::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
     extract_toml_string_array(&value)
 }
 
@@ -217,9 +250,13 @@ fn extract_yaml_string_array(value: &serde_yaml_ng::Value) -> Result<Vec<String>
         match item {
             serde_yaml_ng::Value::String(s) => results.push(s.clone()),
             serde_yaml_ng::Value::Mapping(map) => {
-                if let Some(serde_yaml_ng::Value::String(label)) = map.get(serde_yaml_ng::Value::String("label".into())) {
+                if let Some(serde_yaml_ng::Value::String(label)) =
+                    map.get(serde_yaml_ng::Value::String("label".into()))
+                {
                     results.push(label.clone());
-                } else if let Some(serde_yaml_ng::Value::String(value)) = map.get(serde_yaml_ng::Value::String("value".into())) {
+                } else if let Some(serde_yaml_ng::Value::String(value)) =
+                    map.get(serde_yaml_ng::Value::String("value".into()))
+                {
                     results.push(value.clone());
                 } else {
                     return Err(SourceError::Parse(
@@ -265,12 +302,16 @@ fn parse_markdown_list(body: &str) -> Vec<String> {
             let trimmed = line.trim_start();
             if let Some(rest) = strip_bullet_prefix(trimmed) {
                 let value = rest.trim();
-                if value.is_empty() { return None; }
+                if value.is_empty() {
+                    return None;
+                }
                 return Some(value.to_string());
             }
             if let Some(rest) = strip_numbered_prefix(trimmed) {
                 let value = rest.trim();
-                if value.is_empty() { return None; }
+                if value.is_empty() {
+                    return None;
+                }
                 return Some(value.to_string());
             }
             None
@@ -289,7 +330,9 @@ fn strip_bullet_prefix(line: &str) -> Option<&str> {
 
 fn strip_numbered_prefix(line: &str) -> Option<&str> {
     let digit_count = line.chars().take_while(char::is_ascii_digit).count();
-    if digit_count == 0 { return None; }
+    if digit_count == 0 {
+        return None;
+    }
     let (digits, rest) = line.split_at(digit_count);
     let _: u32 = digits.parse().ok()?;
     let rest = rest.strip_prefix('.').or_else(|| rest.strip_prefix(')'))?;
@@ -302,7 +345,11 @@ fn parse_dictionary(body: &str) -> Result<Vec<String>, SourceError> {
         serde_yaml_ng::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
     let mapping = match value {
         serde_yaml_ng::Value::Mapping(m) => m,
-        _ => return Err(SourceError::Parse("dictionary input must be a mapping/object".into())),
+        _ => {
+            return Err(SourceError::Parse(
+                "dictionary input must be a mapping/object".into(),
+            ));
+        }
     };
     Ok(mapping
         .into_iter()
@@ -339,20 +386,29 @@ fn parse_md(path: &Path, prop: &str) -> Result<Vec<String>, SourceError> {
         SourceError::Parse("markdown file must have frontmatter delimited by ---".into())
     })?;
     let Some(end_idx) = after_first.find("\n---") else {
-        return Err(SourceError::Parse("markdown frontmatter not properly closed".into()));
+        return Err(SourceError::Parse(
+            "markdown frontmatter not properly closed".into(),
+        ));
     };
     let frontmatter = &after_first[..end_idx];
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(frontmatter).map_err(|e| SourceError::Parse(e.to_string()))?;
     let mapping = match value {
         serde_yaml_ng::Value::Mapping(m) => m,
-        _ => return Err(SourceError::Parse("frontmatter must be a YAML mapping".into())),
+        _ => {
+            return Err(SourceError::Parse(
+                "frontmatter must be a YAML mapping".into(),
+            ));
+        }
     };
     let prop_value = mapping
         .get(serde_yaml_ng::Value::String(prop.into()))
-        .ok_or_else(|| SourceError::MdPropNotArray { prop: prop.to_string() })?;
-    extract_yaml_string_array(prop_value)
-        .map_err(|_| SourceError::MdPropNotArray { prop: prop.to_string() })
+        .ok_or_else(|| SourceError::MdPropNotArray {
+            prop: prop.to_string(),
+        })?;
+    extract_yaml_string_array(prop_value).map_err(|_| SourceError::MdPropNotArray {
+        prop: prop.to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -411,11 +467,8 @@ mod tests {
 
     #[test]
     fn resolve_raw_options_csv_source() {
-        let result = resolve_raw_options(
-            Some("a,b,c"),
-            None, None, None, None, None, None,
-            vec![],
-        ).unwrap();
+        let result =
+            resolve_raw_options(Some("a,b,c"), None, None, None, None, None, None, vec![]).unwrap();
         assert_eq!(result, vec!["a", "b", "c"]);
     }
 
@@ -424,7 +477,11 @@ mod tests {
         let result = resolve_raw_options(
             Some("a,b"),
             Some("c\nd"),
-            None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
             vec![],
         );
         assert!(matches!(result, Err(SourceError::MultipleSources)));

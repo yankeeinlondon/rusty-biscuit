@@ -531,14 +531,7 @@ mod pty {
         // only exercises the resolver; this smoke test proves the full
         // CLI wiring composes a runnable prompt at the terminal's row
         // count and accepts a fallback-submit-on-active Enter.
-        let mut p = spawn_question(&[
-            "choose-one",
-            "alpha",
-            "beta",
-            "gamma",
-            "--height",
-            "100%",
-        ]);
+        let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma", "--height", "100%"]);
         std::thread::sleep(Duration::from_millis(200));
         p.write_all(b"\r").expect("send Enter");
         assert_eq!(

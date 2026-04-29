@@ -9,7 +9,11 @@ use tui_chrome::{ChoiceOption, HotkeySpec};
 #[derive(Debug, thiserror::Error)]
 pub enum NormalizeError {
     #[error("duplicate hotkey '{hotkey}' on options: '{first}' and '{second}'")]
-    DuplicateHotkey { hotkey: String, first: String, second: String },
+    DuplicateHotkey {
+        hotkey: String,
+        first: String,
+        second: String,
+    },
 }
 
 /// A convention for transforming strings into labels or values.
@@ -44,7 +48,7 @@ pub struct ParsedOption {
 pub fn parse_option(raw: &str) -> ParsedOption {
     let (hotkey, rest) = extract_hotkey(raw);
     let rest = rest.trim();
-    
+
     // Split on :: delimiter
     if let Some((label, value)) = rest.split_once("::") {
         let label = label.trim();
@@ -112,7 +116,9 @@ pub fn apply_convention(s: &str, convention: NamingConvention) -> String {
 
 fn to_camel_case(s: &str) -> String {
     let words: Vec<&str> = s.split_whitespace().collect();
-    if words.is_empty() { return String::new(); }
+    if words.is_empty() {
+        return String::new();
+    }
     let mut result = words[0].to_lowercase();
     for word in &words[1..] {
         let mut chars = word.chars();
@@ -182,10 +188,18 @@ pub fn assign_numeric_hotkeys(options: &mut [ParsedOption]) {
             continue;
         }
         if idx < 10 {
-            let ch = if idx == 9 { '0' } else { (b'1' + idx as u8) as char };
+            let ch = if idx == 9 {
+                '0'
+            } else {
+                (b'1' + idx as u8) as char
+            };
             option.hotkey = Some(HotkeySpec::Ctrl(ch));
         } else if idx < 20 {
-            let ch = if idx == 19 { '0' } else { (b'1' + (idx - 10) as u8) as char };
+            let ch = if idx == 19 {
+                '0'
+            } else {
+                (b'1' + (idx - 10) as u8) as char
+            };
             option.hotkey = Some(HotkeySpec::Alt(ch));
         }
     }
@@ -324,27 +338,42 @@ mod tests {
 
     #[test]
     fn apply_convention_kebab_case() {
-        assert_eq!(apply_convention("Hello World", NamingConvention::KebabCase), "hello-world");
+        assert_eq!(
+            apply_convention("Hello World", NamingConvention::KebabCase),
+            "hello-world"
+        );
     }
 
     #[test]
     fn apply_convention_snake_case() {
-        assert_eq!(apply_convention("Hello World", NamingConvention::SnakeCase), "hello_world");
+        assert_eq!(
+            apply_convention("Hello World", NamingConvention::SnakeCase),
+            "hello_world"
+        );
     }
 
     #[test]
     fn apply_convention_camel_case() {
-        assert_eq!(apply_convention("hello world", NamingConvention::CamelCase), "helloWorld");
+        assert_eq!(
+            apply_convention("hello world", NamingConvention::CamelCase),
+            "helloWorld"
+        );
     }
 
     #[test]
     fn apply_convention_pascal_case() {
-        assert_eq!(apply_convention("hello world", NamingConvention::PascalCase), "HelloWorld");
+        assert_eq!(
+            apply_convention("hello world", NamingConvention::PascalCase),
+            "HelloWorld"
+        );
     }
 
     #[test]
     fn apply_convention_title_case() {
-        assert_eq!(apply_convention("hello world", NamingConvention::TitleCase), "Hello World");
+        assert_eq!(
+            apply_convention("hello world", NamingConvention::TitleCase),
+            "Hello World"
+        );
     }
 
     #[test]
@@ -354,14 +383,27 @@ mod tests {
 
     #[test]
     fn apply_convention_lowercase() {
-        assert_eq!(apply_convention("HELLO", NamingConvention::Lowercase), "hello");
+        assert_eq!(
+            apply_convention("HELLO", NamingConvention::Lowercase),
+            "hello"
+        );
     }
 
     #[test]
     fn numeric_hotkeys_first_ten_ctrl() {
         let mut options = vec![
-            ParsedOption { raw: "a".into(), label: "a".into(), value: "a".into(), hotkey: None },
-            ParsedOption { raw: "b".into(), label: "b".into(), value: "b".into(), hotkey: None },
+            ParsedOption {
+                raw: "a".into(),
+                label: "a".into(),
+                value: "a".into(),
+                hotkey: None,
+            },
+            ParsedOption {
+                raw: "b".into(),
+                label: "b".into(),
+                value: "b".into(),
+                hotkey: None,
+            },
         ];
         assign_numeric_hotkeys(&mut options);
         assert_eq!(options[0].hotkey, Some(HotkeySpec::Ctrl('1')));
@@ -370,9 +412,12 @@ mod tests {
 
     #[test]
     fn numeric_hotkeys_tenth_is_ctrl_zero() {
-        let mut options = vec![
-            ParsedOption { raw: "a".into(), label: "a".into(), value: "a".into(), hotkey: None },
-        ];
+        let mut options = vec![ParsedOption {
+            raw: "a".into(),
+            label: "a".into(),
+            value: "a".into(),
+            hotkey: None,
+        }];
         assign_numeric_hotkeys(&mut options);
         assert_eq!(options[0].hotkey, Some(HotkeySpec::Ctrl('1')));
     }
@@ -393,14 +438,12 @@ mod tests {
 
     #[test]
     fn numeric_hotkeys_does_not_override_explicit() {
-        let mut options = vec![
-            ParsedOption {
-                raw: "a".into(),
-                label: "a".into(),
-                value: "a".into(),
-                hotkey: Some(HotkeySpec::Ctrl('x')),
-            },
-        ];
+        let mut options = vec![ParsedOption {
+            raw: "a".into(),
+            label: "a".into(),
+            value: "a".into(),
+            hotkey: Some(HotkeySpec::Ctrl('x')),
+        }];
         assign_numeric_hotkeys(&mut options);
         assert_eq!(options[0].hotkey, Some(HotkeySpec::Ctrl('x')));
     }
@@ -414,7 +457,8 @@ mod tests {
             NamingConvention::None,
             false,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].label, "Apple");
         assert_eq!(result[0].value, "Apple");
@@ -429,7 +473,8 @@ mod tests {
             NamingConvention::KebabCase,
             false,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result[0].label, "Hello World");
         assert_eq!(result[0].value, "hello-world");
     }
@@ -456,7 +501,8 @@ mod tests {
             NamingConvention::None,
             false,
             Some(':'),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result[0].label, "Apple");
         assert_eq!(result[0].value, "1");
         assert_eq!(result[1].label, "Berry");
@@ -472,7 +518,8 @@ mod tests {
             NamingConvention::None,
             false,
             Some(':'),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result[0].label, "Red");
         assert_eq!(result[0].value, "apple");
     }

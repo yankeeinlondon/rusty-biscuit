@@ -19,7 +19,9 @@
 //! and returns an error if none are available.
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, Padding, SortOrder};
+use tui_chrome::{
+    BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, Padding, SortOrder,
+};
 
 use crate::choice_normalize::NamingConvention;
 

@@ -78,34 +78,52 @@ question choose-one Red Green Blue
 printf "%s\n" "Red" "Green" "Blue" | question choose-one
 ```
 
-**Options:**
+**Option sources (mutually exclusive):**
 
-- Positional arguments — option strings, used when no `--options*` flag is set
-- `--options <CSV>` — comma-separated list of option values
-- `--options-from-file <PATH>` — read options from a markdown list (ordered or unordered)
-- `--options-from-dictionary <PATH>` — read from YAML/JSON file (keys = labels, values = values)
+- Positional arguments — used when no explicit source flag is set
+- `--csv <TEXT>` — comma-separated list (alias: `--options` for backward compatibility)
+- `--list <TEXT>` — newline-separated list
+- `--rows <TEXT>` — newline-separated `label::value` pairs
+- `--file <PATH>` — JSON, JSONL, NDJSON, YAML, TOML, or CSV file containing an array
+- `--md <PATH> <PROP>` — YAML frontmatter array property from a Markdown file
+- Piped stdin (automatic when stdin is not a TTY)
+
+**Selection & filtering:**
+
 - `--delimiter <CHAR>` — split each option on the first delimiter into `label` and returned `value`
 - `--label <TEXT>` — label text
+- `--label-position {above|below|left|right}` — where the label renders (default: `above`)
 - `--selected <VALUE>` — pre-select the option whose value matches
 - `--required` — submission is blocked if no selection made
 - `--no-filter` — disable the default fuzzy filter and use legacy first-letter shortcuts
-- `--sort {natural|reverse|asc|desc}` — order options before rendering
+- `--sort {natural|inverse|asc|desc}` — order options before rendering (`reverse` is a hidden alias for `inverse`)
+
+**Hotkeys & normalization:**
+
+- `--numeric-hot-keys` — auto-assign Ctrl+1..9,0 then Alt+1..9,0 to the first 20 options
+- `--label-convention <caps|lowercase|camel-case|pascal-case|kebab-case|snake-case|title-case>` — transform option labels
+- `--value-convention <caps|lowercase|camel-case|pascal-case|kebab-case|snake-case|title-case>` — transform option values
+- `::` delimiter in option text splits `label::value` (takes precedence over conventions)
+- `[CTRL+X]`, `[ALT+X]`, `[OPT+X]` prefixes in option text assign explicit hotkeys
+
+**Chrome:**
+
 - `--border`, `--border-label <TEXT>`, `--border-style <STYLE>` — add border chrome
-- `--margin <N>`, `--mt <N>`, `--mb <N>`, `--ml <N>`, `--mr <N>` — add outer spacing
+- `--margin <N>`, `--mt <N>`, `--mb <N>`, `--ml <N>`, `--mr <N>` — outer margin
+- `--padding <N>` / `-p <N>`, `--pt <N>`, `--pb <N>`, `--pl <N>`, `--pr <N>` — inner padding
 
 **Output:** the selected value (raw string).
 
-When neither `--options`, `--options-from-file`, nor
-`--options-from-dictionary` is provided, `choose-one` reads options
+When no explicit source flag is provided, `choose-one` reads options
 from positional arguments first, then from piped stdin. Without
 `--delimiter`, each option's label and value are the same. With
 `--delimiter ":"`, `question choose-one "Apple:1"` displays `Apple`
 and returns `1`.
 
 Typing alphanumeric characters opens the fuzzy filter by default. Use
-Up/Down to move the active row, Space to select, and Enter to submit.
-If Enter is pressed before an explicit Space selection, the active row
-is submitted.
+Up/Down (or j/k) to move the active row, Space to select, and Enter to
+submit. `Esc` restores the initial selection and submits (exit `0`).
+Ctrl/Alt hotkeys select and submit immediately.
 
 `--height` accepts a percentage suffix — see **Global Flags**.
 
@@ -118,12 +136,19 @@ question choose-many Red Green Blue --min-selections 1 --max-selections 2
 printf "%s\n" "Red" "Green" "Blue" | question choose-many
 ```
 
-**Options:**
+**Option sources:** Same set as `choose-one` (positional, `--csv`, `--list`, `--rows`, `--file`, `--md`, stdin).
 
-- Same as `choose-one`, plus:
+**Selection & filtering:**
+
 - `--selected <VALUE>` — pre-select values; repeat the flag to pre-select multiple (`--selected foo --selected bar`). Comma-splitting is **not** applied — if you need CSV semantics, use the deprecated `--initial` flag.
+- `--required` — fail if no items are selected.
 - `--min-selections <N>` — minimum number of selections required (submit-time validation)
 - `--max-selections <N>` — maximum number of selections allowed (keystroke-time cap)
+- `--delimiter <CHAR>` — split each option on the first delimiter into `label` and `value`
+- `--no-filter` — disable fuzzy filter
+- `--sort {natural|inverse|asc|desc}` — order options before rendering
+
+**Hotkeys, normalization, and chrome:** Same flags as `choose-one`.
 
 **Output (raw mode):** one value per line (newline-separated, matches `grep` and `sort` conventions).
 
@@ -132,11 +157,24 @@ printf "%s\n" "Red" "Green" "Blue" | question choose-many
 **Output (null mode):** NUL-separated list (for `xargs -0`).
 
 Use Up/Down to move the active row, Space to toggle it, Enter to
-submit, `Ctrl+A` to select all enabled options, and `Ctrl+D` to clear
-the selection. Like `choose-one`, the active row is submitted if Enter
-is pressed before any explicit selection.
+submit the current selection exactly as-is, `Ctrl+A` to select all
+enabled options, and `Ctrl+D` to clear the selection.
 
 `--height` accepts a percentage suffix — see **Global Flags**.
+
+### completions
+
+Generate shell completion scripts.
+
+```bash
+question completions bash > /usr/share/bash-completion/completions/question
+question completions zsh > /usr/share/zsh/site-functions/_question
+question completions fish > ~/.config/fish/completions/question.fish
+```
+
+**Options:**
+
+- `bash`, `zsh`, `fish`, `elvish`, `powershell` — target shell
 
 ### input-table
 
@@ -225,8 +263,8 @@ Note that boolean cells emit JSON booleans (`true`/`false`), and `choose-many` c
 
 ## Exit Codes
 
-- `0` — user submitted a value (stdout contains the result)
-- `1` — user pressed Esc (no output written to stdout)
+- `0` — user submitted a value (stdout contains the result). For `choose-one`, pressing `Esc` restores the initial selection and also exits `0`.
+- `1` — user pressed Esc to abort (all components except `choose-one`), or a terminal I/O error occurred. No output written to stdout on abort.
 - `130` — user pressed Ctrl-C / SIGINT (no output written to stdout)
 - Non-zero (other) — argument parsing error or invalid configuration
 
@@ -237,13 +275,13 @@ Note that boolean cells emit JSON booleans (`true`/`false`), and `choose-many` c
 ```bash
 NAME=$(question text-input --label "Name")
 ACTIVE=$(question boolean-switch --labels "Yes,No")
-ROLE=$(question choose-one --options "Admin,User,Guest")
+ROLE=$(question choose-one Admin User Guest)
 ```
 
 ### Process multi-selection list
 
 ```bash
-question choose-many --options "Red,Green,Blue" | while read -r color; do
+question choose-many Red Green Blue | while read -r color; do
   echo "Selected: $color"
 done
 ```
