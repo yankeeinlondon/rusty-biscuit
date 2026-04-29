@@ -59,12 +59,18 @@ All components share these cross-cutting primitives from `tui_chrome::core`:
 
   Validation failures do not produce a separate variant. A component that receives a submit keystroke while its value is invalid returns `Consumed` and populates its internal validation error (retrievable via `state.validation_error()`).
 - **`run_standalone`** / **`drive_event_loop`** — helpers for running a single component in a dedicated terminal session
+- **`Padding`** — four-sided interior padding inside the border
+- **`TerminalStyle`** / **`TerminalBackground`** / **`NerdFontStatus`** — conservative terminal capability detection
 
 The choice components (`ChooseOne`, `ChooseMany`) also share:
 
-- **`ChoiceOption<V>`** — individual option with `id`, `label`, `value`, and `disabled` flag.
-- **`ChoiceInput<V>`** — configuration struct for the option list, selection limits, and filter settings. Defaults to `SelectionMode::Single`; `ChooseManyState::new` implicitly sets it to `Multiple`.
+- **`ChoiceOption<V>`** — individual option with `id`, `label`, `value`, `disabled` flag, and optional `hotkey`.
+- **`ChoiceInput<V>`** — configuration struct for the option list, selection limits, filter settings, `orientation`, and `sort`. Defaults to `SelectionMode::Single`; `ChooseManyState::new` implicitly sets it to `Multiple`.
 - **`SelectionMode`** — `Single` or `Multiple`.
+- **`Orientation`** — `Vertical` (one item per row) or `Horizontal` (left-to-right, wrapping).
+- **`HotkeySpec`** / **`HotkeyDisplayMode`** — explicit keyboard shortcuts (`Ctrl`/`Alt`) and when to render badges.
+- **`ActiveChoiceColor`** — background colour for the actively hovered option.
+- **`SortOrder`** / **`OptionSort`** — option ordering (`Natural`, `Inverse`/`Reverse`, `Asc`, `Desc`).
 
 The `tui_chrome::helpers` module provides builder functions for constructing choice inputs from CSV, Markdown lists, and dictionaries (`choose_one_from_csv`, `choose_many_from_markdown_list`, etc.).
 
@@ -75,6 +81,6 @@ The `question` CLI exposes each component as a subcommand. All subcommands share
 - **`--output <raw|json|null>`** — serialisation format for the submitted value (`raw` is the default).
 - **`--height <CELLS_OR_PERCENT>`** — render inline at an explicit height instead of fullscreen.
 
-Exit codes: `0` on successful submission, `130` on Ctrl-C (SIGINT), `1` on abort (Esc).
+Exit codes: `0` on successful submission, `130` on Ctrl-C (SIGINT). For `ChooseOne`, `Esc` restores the initial selection and also exits `0`; for other components, `Esc` exits `1`.
 
 See the [CLI Reference](../cli-reference.md) for full details on global flags, exit codes, and subcommand listings.

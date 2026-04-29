@@ -77,6 +77,18 @@ docs_updated_during_phase_8: []
 docs_created_during_phase_8: []
 skills_files_updated_during_phase8:
   - .opencode/skill/biscuit-tui/SKILL.md
+source_files_during_phase_9: []
+docs_updated_during_phase_9:
+  - biscuit-tui/docs/components/choose_one.md
+  - biscuit-tui/docs/components/choose_many.md
+  - biscuit-tui/docs/components/frame_chrome.md
+  - biscuit-tui/docs/components/index.md
+  - biscuit-tui/docs/cli-reference.md
+  - biscuit-tui/cli/README.md
+  - biscuit-tui/lib/README.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase9:
+  - .opencode/skill/biscuit-tui/SKILL.md
 packages:
   - tui-chrome
   - tui-chrome-cli

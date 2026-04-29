@@ -1,10 +1,10 @@
 # Choose One
 
-The `choose_one` component is a TUI widget that provides a vertical single-selection list. It allows users to pick exactly one item from a set of options using a list-based interface with radio-button style indicators.
+The `choose_one` component is a TUI widget that provides a single-selection list. It allows users to pick exactly one item from a set of options using a list-based interface with radio-button style indicators. Options can be arranged vertically (one per row) or horizontally (left-to-right, wrapping).
 
 ## Description
 
-The `choose_one` component is designed for scenarios where a user must make a single choice from a predefined list. It renders each option with a selection indicator (`●` for selected, `○` for unselected) and a focus marker (`▶`) on the currently hovered row. It supports advanced features like fuzzy filtering (search-on-type), hotkey navigation, and automatic scrolling.
+The `choose_one` component is designed for scenarios where a user must make a single choice from a predefined list. It renders each option with a selection indicator (Nerd Font `󰐱`/`󰄱` when detected, otherwise `●`/`○`) and a focus marker (`▶`) on the currently hovered row in vertical mode. In horizontal mode the active option is highlighted with a background colour instead. It supports advanced features like fuzzy filtering (search-on-type), explicit Ctrl/Alt hotkeys, first-letter shortcuts, and automatic scrolling.
 
 The component is split into two parts:
 - **`ChooseOne`**: A zero-sized `StatefulWidget` responsible for rendering.
@@ -27,6 +27,8 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 | `required` | `bool` | If `true`, submitting with no selection fails validation. | `false` |
 | `shuffle_options` | `bool` | If `true`, randomizes option order on initialization. | `false` |
 | `filter_enabled` | `bool` | Enables inline fuzzy filtering on alphanumeric input. | `false` |
+| `orientation` | `Orientation` | Layout direction (`Vertical` or `Horizontal`). | `Vertical` |
+| `sort` | `Option<SortOrder>` | Optional ordering applied before state construction. | `None` |
 
 ### ChooseOneState Extensions
 
@@ -40,20 +42,26 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 
 ### Key Bindings (Default)
 
-- **`Space`**: Selects the currently hovered item.
-- **`Enter`**: Submits the selection and exits.
-- **`Esc`**: Cancels/Aborts the interaction. (If filtering, first `Esc` closes the filter).
-- **`Up` / `k`**: Moves the hover cursor up.
-- **`Down` / `j`**: Moves the hover cursor down.
+- **`Space`**: Selects the currently hovered item (without submitting).
+- **`Enter`**: Selects the currently hovered enabled item and submits.
+- **`Esc`**: Restores the initial selection and submits. (If filtering, first `Esc` closes the filter; second `Esc` restores and submits).
+- **`Up` / `k`**: Moves the hover cursor up (vertical) or to the closest column in the row above (horizontal).
+- **`Down` / `j`**: Moves the hover cursor down (vertical) or to the closest column in the row below (horizontal).
+- **`Left` / `h`**: Moves to the previous option.
+- **`Right` / `l`**: Moves to the next option.
 - **`Home` / `g`**: Jumps to the first enabled option.
 - **`End` / `G`**: Jumps to the last enabled option.
-- **`Alphanumeric`**: If `filter_enabled` is true, starts a fuzzy search. Otherwise, jumps to and selects the option with the matching hotkey.
+- **`Ctrl+<char>`**: Selects the option with the matching explicit `Ctrl` hotkey and submits.
+- **`Alt+<char>`**: Selects the option with the matching explicit `Alt` hotkey and submits.
+- **`Alphanumeric`**: If `filter_enabled` is true, starts a fuzzy search. Otherwise, jumps to and selects the option with the matching first-letter hotkey.
 
 ## Behavioral Notes
 
-- **Auto-Selection on Submit**: If `Enter` is pressed when no item is selected, the component automatically selects the currently hovered item before submitting (provided it is enabled and visible).
+- **Enter Behavior**: `Enter` always selects the currently hovered enabled item and submits. There is no automatic selection of the hovered item on submit; the user must explicitly select with `Space` or `Enter`.
+- **Esc Behavior**: `Esc` restores the selection to whatever it was when the component started (the `initial_selected` value) and then submits with exit code `0`. If the user navigated or changed the selection with `Space`, those changes are discarded. This makes `Esc` a "reset and submit" action, not a cancel.
 - **Fuzzy Filtering**: When active, only options matching the pattern are displayed. The hover cursor is snapped to the first visible result, and matching characters are highlighted in the labels.
-- **Hotkeys**: When filtering is inactive, pressing the first character of a label (case-insensitive) jumps focus to that option and selects it immediately.
+- **First-Letter Hotkeys**: When filtering is inactive, pressing the first character of a label (case-insensitive) jumps focus to that option and selects it immediately.
+- **Explicit Hotkeys**: Options can carry explicit `Ctrl` or `Alt` hotkeys (e.g., `[CTRL+R]`). These are parsed from option text and select + submit when pressed.
 - **Disabled Options**: Options can be marked as `disabled`. They are rendered dimmed, cannot be hovered or selected, and are skipped by navigation.
 
 ## Helper Functions
@@ -121,13 +129,34 @@ The `choose_one` component is exposed via the `question choose-one` command. It 
 
 ### Common Flags
 
-- `--options <LIST>`: Comma-separated list of simple option strings (legacy; positional args are preferred).
-- `--options-from-file <PATH>`: Load options from a markdown list file.
-- `--options-from-dictionary <PATH>`: Load options from a YAML/JSON mapping file.
+**Option sources (mutually exclusive):**
+- Positional arguments — `question choose-one Apple Banana Cherry`
+- `--csv <TEXT>` — comma-separated list
+- `--list <TEXT>` — newline-separated list
+- `--rows <TEXT>` — newline-separated `label::value` pairs
+- `--file <PATH>` — JSON, JSONL, NDJSON, YAML, TOML, or CSV file containing an array
+- `--md <PATH> <PROP>` — YAML frontmatter array property from a Markdown file
+- `--options <TEXT>` — hidden alias for `--csv` (backward compatibility)
+- Piped stdin (automatic when stdin is not a TTY)
+
+**Selection & filtering:**
 - `--selected <VALUE>`: Pre-select a specific value.
 - `--required`: Fail if no item is selected.
 - `--delimiter <CHAR>`: Split each option string into `label<CHAR>value`.
-- `--no-filter`: Disable the fuzzy search prompt (uses hotkeys instead).
+- `--no-filter`: Disable fuzzy search (use hotkey shortcuts instead).
+- `--sort <natural|inverse|asc|desc>`: Reorder options before display. `reverse` is a hidden alias for `inverse`.
+
+**Hotkeys & normalization:**
+- `--numeric-hot-keys`: Auto-assign Ctrl+1..9,0 then Alt+1..9,0 to the first 20 options.
+- `--label-convention <caps|lowercase|camel-case|pascal-case|kebab-case|snake-case|title-case>`: Transform option labels.
+- `--value-convention <caps|lowercase|camel-case|pascal-case|kebab-case|snake-case|title-case>`: Transform option values.
+- `::` delimiter in option text splits `label::value` (takes precedence over conventions).
+- `[CTRL+X]`, `[ALT+X]`, `[OPT+X]` prefixes in option text assign explicit hotkeys.
+
+**Chrome:**
+- `--border`, `--border-label <TEXT>`, `--border-style <STYLE>`: Border chrome.
+- `--margin <N>`, `--mt <N>`, `--mb <N>`, `--ml <N>`, `--mr <N>`: Outer margin.
+- `--padding <N>` / `-p <N>`, `--pt <N>`, `--pb <N>`, `--pl <N>`, `--pr <N>`: Inner padding.
 
 ### Global Flags
 
@@ -138,23 +167,22 @@ The `choose_one` component is exposed via the `question choose-one` command. It 
 
 | Code | Meaning |
 | :--- | :--- |
-| `0` | Value submitted successfully. |
+| `0` | Value submitted successfully (including `Esc`, which restores the initial selection). |
 | `130` | User pressed `Ctrl-C` (SIGINT). |
-| `1` | User pressed `Esc` to abort. |
 
-### Positional vs `--options`
+### Positional vs `--csv`
 
-Both syntaxes are valid. When no `--options*` flag is provided, trailing positional arguments become the option list. Positional args are the modern default; `--options` exists for backward compatibility.
+Positional arguments are the modern default. `--options` is a hidden backward-compatibility alias for `--csv`.
 
 ```bash
 # Positional args (preferred)
 question choose-one Apple Banana Cherry
 
-# Legacy comma-separated flag
-question choose-one --options "Apple,Banana,Cherry"
+# Comma-separated flag
+question choose-one --csv "Apple,Banana,Cherry"
 ```
 
-### Example CLI Command
+### Example CLI Commands
 
 ```bash
 # Select a server from a list
@@ -164,6 +192,15 @@ question choose-one \
   "Production:prod-01" \
   "Staging:stg-01" \
   "Development:dev-01"
+
+# Fuzzy search with inverse sort and numeric hotkeys
+question choose-one --csv "Apple,Banana,Cherry" --sort inverse --numeric-hot-keys
+
+# Load options from a file with padding
+question choose-one --file options.json --padding 2 --border
+
+# Label::value pairs with convention transforms
+question choose-one --rows $'Red::apple\nGreen::pear' --label-convention title-case
 ```
 
 ## Enhancement Suggestions

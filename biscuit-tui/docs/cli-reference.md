@@ -30,13 +30,11 @@ When `--height` is omitted, the component runs fullscreen.
 
 ## Exit Codes
 
-All subcommands return the same exit codes:
-
 | Code | Meaning |
 | :--- | :--- |
-| `0` | The user submitted a value successfully. The value was written to `stdout` according to the `--output` flag. |
+| `0` | The user submitted a value successfully. For `choose-one`, pressing `Esc` restores the initial selection and also exits `0`. |
 | `130` | The user pressed `Ctrl-C` (SIGINT). Nothing is written to `stdout`. |
-| `1` | The user pressed `Esc` to abort, or a terminal I/O error occurred. Nothing is written to `stdout` on abort. |
+| `1` | The user pressed `Esc` to abort (all components except `choose-one`), or a terminal I/O error occurred. Nothing is written to `stdout` on abort. |
 
 These conventions make `question` safe to use in shell pipelines and `$(...)` command substitution:
 
@@ -60,3 +58,4 @@ fi
 | `choose-one` | [`ChooseOne`](components/choose_one.md) | Single-selection list. |
 | `choose-many` | [`ChooseMany`](components/choose_many.md) | Multi-selection list. |
 | `input-table` | [`InputTable`](components/input_table.md) | Grid of heterogeneous editable cells. |
+| `completions` | — | Generate shell completion scripts (bash, zsh, fish, etc.). |

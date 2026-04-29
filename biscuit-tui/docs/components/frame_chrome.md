@@ -4,7 +4,7 @@ The `FrameChrome` is a stateful wrapper widget that draws an optional border, ti
 
 ## Description
 
-`FrameChrome<'a, W>` is a generic `StatefulWidget` that wraps an inner widget `W`. On render, it first shrinks the allocated area by the margin, then (if a visible border is configured) draws a ratatui `Block` with the requested sides and style, and finally renders the inner widget into the remaining interior rectangle.
+`FrameChrome<'a, W>` is a generic `StatefulWidget` that wraps an inner widget `W`. On render, it first shrinks the allocated area by the margin, then (if a visible border is configured) draws a ratatui `Block` with the requested sides and style, then applies interior padding, and finally renders the inner widget into the remaining interior rectangle.
 
 It is not a user-input component itself — it has no `HandleEvent` implementation and no value. It is a **container** that adds visual chrome around a real input widget.
 
@@ -19,6 +19,7 @@ The companion `FrameChromeConfig` struct is a plain data configuration object us
 | `border` | `BorderStyle` | `BorderStyle::None` | Which sides and glyph style to draw. |
 | `border_label` | `Option<String>` | `None` | Title rendered in the top-left of the border. |
 | `margin` | `Margin` | `Margin::default()` (all zeros) | Cells of margin on each side outside the border. |
+| `padding` | `Padding` | `Padding::uniform(1)` | Cells of padding on each side inside the border. |
 | `border_style` | `Style` | `Style::default()` | ratatui style applied to the border glyphs. |
 
 ### BorderStyle Variants
@@ -52,6 +53,19 @@ Four-sided margin with per-side overrides. Margins are applied **outside** the b
 | `right` | `u16` | `0` | Cells of margin to the right |
 
 Use `Margin::uniform(n)` for equal sides, then override individual fields as needed.
+
+### Padding
+
+Four-sided padding with per-side overrides. Padding is applied **inside** the border — it shrinks the area available to the inner widget after the border is drawn. The default `FrameChromeConfig` uses `Padding::uniform(1)` so widgets do not touch the border.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `top` | `u16` | `1` | Cells of padding above |
+| `bottom` | `u16` | `1` | Cells of padding below |
+| `left` | `u16` | `1` | Cells of padding to the left |
+| `right` | `u16` | `1` | Cells of padding to the right |
+
+Use `Padding::uniform(n)` for equal sides, then override individual fields as needed. Setting all sides to `0` removes interior spacing entirely.
 
 ## Usage Examples
 
@@ -102,6 +116,8 @@ The `FrameChrome` is not exposed as its own subcommand. Instead, it is implicitl
 - `--border-style <STYLE>`: Border glyph style (see `BorderStyle` variants above). Any non-`none` value implies `--border`. Explicit `none` suppresses the border even if `--border` is set.
 - `--margin <CELLS>`: Uniform margin on all four sides.
 - `--mt`, `--mb`, `--ml`, `--mr`: Per-side margin overrides that take precedence over `--margin`.
+- `--padding <CELLS>` / `-p <CELLS>`: Uniform padding on all four sides inside the border.
+- `--pt`, `--pb`, `--pl`, `--pr`: Per-side padding overrides that take precedence over `--padding`.
 
 ### Example CLI Commands
 
@@ -112,13 +128,15 @@ question choose-one --border --border-label "Server" Alpha Beta Gamma
 # Double border with 1-cell margin
 question choose-many --border-style double --margin 1 Red Green Blue
 
-# Thick border, custom margin (zero top, 2 on other sides)
-question choose-one --border-style bold --margin 2 --mt 0 One Two Three
+# Thick border with custom margin and padding
+question choose-one --border-style bold --margin 2 --mt 0 --padding 1 One Two Three
+
+# No border, only padding
+question choose-many --border-style none --padding 2 Red Green Blue
 ```
 
 ## Enhancement Suggestions
 
 1. **Custom Title Position**: Support rendering the border label at different positions (center, right) via a `title_position` field on `FrameChromeConfig`.
 2. **Footer/Subtitle**: Add a second label rendered at the bottom of the border for status text or contextual hints.
-3. **Padding (Inner Margin)**: Add an inner margin applied between the border and the inner widget, distinct from the outer margin applied outside the border.
-4. **Styled Title**: Allow the border label to have its own `Style` independent of the border glyph style, so titles can be highlighted without affecting the border color.
+3. **Styled Title**: Allow the border label to have its own `Style` independent of the border glyph style, so titles can be highlighted without affecting the border color.
