@@ -674,6 +674,8 @@ pub(crate) fn run_kimi_wire_session(
     let runtime_context_for_reader = wiring.runtime_context.clone();
     let stream_span = Span::current();
     let stream_output = wiring.stream_output.clone();
+    let prompt_finished = Arc::new(AtomicBool::new(false));
+    let prompt_finished_for_reader = Arc::clone(&prompt_finished);
     let stdout_handle: thread::JoinHandle<Box<dyn SemanticStreamParser>> = {
         let build_parser = wiring.build_parser;
         thread::spawn(move || {
@@ -725,14 +727,15 @@ pub(crate) fn run_kimi_wire_session(
                     debug!(?error, "failed to feed synthetic warning envelope");
                 }
 
-                // Close stdin once the prompt response arrives so kimi
-                // sees EOF and exits its read loop. Without this, the
-                // wire session hangs after `Prompt status: finished`
-                // because kimi keeps the JSON-RPC channel open waiting
-                // for further commands.
+                // Signal the wait loop the moment the prompt response
+                // arrives. `close_stdin` is the graceful path (Kimi exits
+                // on EOF), and `prompt_finished` is the hard fallback so
+                // the wait loop forces exit if Kimi keeps the channel
+                // open after responding.
                 if is_prompt_response_line(trimmed) {
                     info!("kimi prompt response received; closing wire stdin");
                     writer_for_reader.close_stdin();
+                    prompt_finished_for_reader.store(true, Ordering::SeqCst);
                 }
             }
 
@@ -775,6 +778,7 @@ pub(crate) fn run_kimi_wire_session(
         &mut child,
         config.timeout.map(Duration::from_secs),
         &cancel_requested,
+        &prompt_finished,
         &writer,
     ) {
         Ok(code) => code,
@@ -953,18 +957,30 @@ fn install_sigint_forwarder(_flag: Arc<AtomicBool>) -> Option<()> {
     None
 }
 
+/// Grace period after the `prompt-2` response arrives before SIGKILL.
+///
+/// Kimi's wire session is persistent — it does not exit on its own when a
+/// prompt completes. Stdin is already closed (EOF) at this point so a
+/// well-behaved Kimi build will quit promptly; the grace period covers
+/// any final stderr flush or async cleanup. After the grace period
+/// elapses, the child is killed unconditionally.
+const PROMPT_FINISHED_GRACE: Duration = Duration::from_millis(750);
+
 /// Poll the child for exit, sending `cancel` when the cancel flag is set
-/// or the wall-clock timeout elapses. After cancel is sent the child has
-/// up to 5 s to terminate before SIGKILL is used as a hard fallback.
+/// or the wall-clock timeout elapses, and forcibly terminating the child
+/// shortly after the prompt response arrives so the non-interactive
+/// wrapper does not hang on Kimi's persistent JSON-RPC session.
 fn wait_for_child_exit(
     child: &mut Child,
     timeout: Option<Duration>,
     cancel_flag: &Arc<AtomicBool>,
+    prompt_finished: &Arc<AtomicBool>,
     writer: &WireWriter,
 ) -> std::io::Result<i32> {
     let deadline = timeout.map(|d| Instant::now() + d);
     let mut cancel_sent = false;
     let mut cancel_sent_at: Option<Instant> = None;
+    let mut prompt_finished_at: Option<Instant> = None;
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -973,6 +989,27 @@ fn wait_for_child_exit(
 
         let timeout_elapsed = deadline.is_some_and(|d| Instant::now() >= d);
         let user_canceled = cancel_flag.load(Ordering::SeqCst);
+        let prompt_done = prompt_finished.load(Ordering::SeqCst);
+
+        if prompt_done && prompt_finished_at.is_none() {
+            prompt_finished_at = Some(Instant::now());
+        }
+
+        // Hard-stop fallback: Kimi's wire mode does not terminate when a
+        // prompt completes — stdin EOF is the expected signal but some
+        // builds keep async tasks alive. Once the grace period elapses,
+        // kill the child directly. Report exit code 0 because the prompt
+        // already completed; the semantic parser surfaces real errors
+        // (auth-expired, cancelled, etc.) from the response payload, not
+        // from the synthetic SIGKILL exit code.
+        if let Some(at) = prompt_finished_at
+            && Instant::now() >= at + PROMPT_FINISHED_GRACE
+        {
+            info!("kimi prompt finished; terminating child after grace period");
+            let _ = child.kill();
+            let _ = child.wait()?;
+            return Ok(0);
+        }
 
         if !cancel_sent && (timeout_elapsed || user_canceled) {
             let _cancel_span = info_span!("kimi_wire_cancel").entered();

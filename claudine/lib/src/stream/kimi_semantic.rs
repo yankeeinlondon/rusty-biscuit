@@ -72,6 +72,16 @@ pub struct KimiSemanticStreamParser<S: SemanticEventSink> {
     tool_uses: HashMap<String, String>,
     pending_tool_call: Option<PendingToolCall>,
     next_pending_slot: u64,
+    /// Accumulator for consecutive `think` ContentPart deltas. Kimi streams
+    /// thinking prose token-by-token; emitting a `Reasoning` event per
+    /// token would render each token as its own one-line `BlockQuote`.
+    /// Tokens accumulate here and flush as one `Reasoning` event when a
+    /// non-think part, tool call, turn boundary, or finish arrives.
+    pending_thinking: String,
+    /// `raw_kind` to attach to the flushed `Reasoning` event. Captured
+    /// from the first chunk of the current run so the emitted event
+    /// preserves the originating envelope kind (e.g. `content_part`).
+    pending_thinking_kind: Option<String>,
     /// Toggles to `true` once the parser observes a `prompt` response so the
     /// summary's `provider_status` reflects the canonical status string
     /// (`finished` / `cancelled` / `max_steps_reached` / `steered`).
@@ -100,6 +110,8 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             tool_uses: HashMap::new(),
             pending_tool_call: None,
             next_pending_slot: 0,
+            pending_thinking: String::new(),
+            pending_thinking_kind: None,
             prompt_status_seen: false,
         }
     }
@@ -278,6 +290,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
         match event {
             KimiWireEvent::TurnBegin(turn) => {
                 self.flush_pending_tool_call(raw_kind);
+                self.flush_pending_thinking();
                 let mut extra = self.base_extra(raw_kind);
                 if let Some(text) = turn.user_input_text() {
                     extra.insert("user_input".into(), Value::from(text));
@@ -288,6 +301,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             }
             KimiWireEvent::TurnEnd(_) => {
                 self.flush_pending_tool_call(raw_kind);
+                self.flush_pending_thinking();
                 self.flush_pending_text();
                 self.num_turns = self.num_turns.saturating_add(1);
                 let mut extra = self.base_extra(raw_kind);
@@ -717,12 +731,12 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             if text.is_empty() {
                 return;
             }
-            let extra = self.base_extra(raw_kind);
-            self.sink.on_semantic_event(SemanticEvent::Reasoning {
-                text: text.to_string(),
-                extra: Value::Object(extra),
-            });
+            self.pending_thinking.push_str(text);
+            if self.pending_thinking_kind.is_none() {
+                self.pending_thinking_kind = Some(raw_kind.to_string());
+            }
         } else if part.is_text() {
+            self.flush_pending_thinking();
             let Some(text) = part.resolved_text() else {
                 return;
             };
@@ -737,6 +751,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 extra: Value::Object(extra),
             });
         } else {
+            self.flush_pending_thinking();
             let mut extra = self.info_extra_with_kind(raw_kind, "content_media");
             extra.insert("part_type".into(), Value::from(part.part_type.as_str()));
             self.sink.on_semantic_event(SemanticEvent::Info {
@@ -756,10 +771,36 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
         self.pending_text.clear();
     }
 
+    /// Emit accumulated thinking tokens as a single `Reasoning` event.
+    ///
+    /// Kimi's wire protocol streams thinking prose token-by-token; the
+    /// live sink renders each `Reasoning` event as its own `BlockQuote`,
+    /// so emitting per-token would produce one tiny BlockQuote per token.
+    /// The parser instead accumulates consecutive `think` parts into
+    /// `pending_thinking` and flushes them as one event whenever the
+    /// thinking run ends — i.e. when a `text` part, tool call, turn
+    /// boundary, or finish arrives.
+    fn flush_pending_thinking(&mut self) {
+        if self.pending_thinking.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.pending_thinking);
+        let raw_kind = self
+            .pending_thinking_kind
+            .take()
+            .unwrap_or_else(|| "content_part".to_string());
+        let extra = self.base_extra(&raw_kind);
+        self.sink.on_semantic_event(SemanticEvent::Reasoning {
+            text,
+            extra: Value::Object(extra),
+        });
+    }
+
     fn handle_tool_call(&mut self, mut call: KimiToolCall, raw_kind: &str) {
         // A new ToolCall envelope flushes any in-flight call so accumulated
         // arguments don't leak across tools.
         self.flush_pending_tool_call(raw_kind);
+        self.flush_pending_thinking();
         let id = call.resolved_tool_id().map(str::to_owned);
         let name = call.resolved_tool_name().map(str::to_owned);
         let initial = call.take_arguments_string().unwrap_or_default();
@@ -904,6 +945,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
         // between messages, and the trailing assistant message at end-of-run
         // should not gain a trailing newline.
         self.flush_pending_tool_call("finish");
+        self.flush_pending_thinking();
         self.pending_text.clear();
         super::trace_parser_finish(
             Provider::KimiCode,
@@ -1113,8 +1155,71 @@ mod tests {
                 r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"pondering"}}}"#,
             )
             .unwrap();
+        // Thinking tokens are accumulated; a turn boundary triggers the flush.
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
+            )
+            .unwrap();
         assert!(events.lock().unwrap().iter().any(|e| matches!(e,
                 SemanticEvent::Reasoning { text, .. } if text == "pondering")));
+    }
+
+    #[test]
+    fn content_part_think_chunks_coalesce_into_one_reasoning_event() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        for chunk in ["The", " user", " said", " hi"] {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","method":"event","params":{{"type":"ContentPart","payload":{{"type":"think","think":"{chunk}"}}}}}}"#,
+            );
+            parser.feed_line(&line).unwrap();
+        }
+        // No flush yet — accumulator still buffering.
+        let mid = events.lock().unwrap().clone();
+        assert!(
+            !mid.iter().any(|e| matches!(e, SemanticEvent::Reasoning { .. })),
+            "thinking tokens must not emit per-token Reasoning events; got {mid:?}"
+        );
+        // A non-think content part flushes the accumulator.
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"Hi!"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let reasoning_texts: Vec<&str> = collected
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::Reasoning { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reasoning_texts,
+            vec!["The user said hi"],
+            "consecutive think chunks must coalesce into a single Reasoning event"
+        );
+    }
+
+    #[test]
+    fn pending_thinking_flushes_on_finish() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"trailing thoughts"}}}"#,
+            )
+            .unwrap();
+        let _ = parser.finish(0);
+        assert!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "trailing thoughts")),
+            "finish must flush any pending thinking accumulator"
+        );
     }
 
     #[test]
