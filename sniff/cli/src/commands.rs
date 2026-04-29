@@ -347,9 +347,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             crate::args::RepoAction::Pr { status, .. } => {
-                let result =
-                    handle_pr_command(*status, cli.json, cli.plain, cli.verbose, base_dir.as_deref(),
-                    &perf).await;
+                let result = handle_pr_command(
+                    *status,
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    base_dir.as_deref(),
+                    &perf,
+                )
+                .await;
                 perf.emit_stdout(None);
                 return result;
             }
@@ -502,16 +508,26 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let repo = git2::Repository::discover(dir)
                     .map_err(|e| format!("Not a git repository: {}", e))?;
                 let conflicted = sniff::filesystem::git::detect_merge_conflicts(&repo);
+                let has_conflict = !conflicted.is_empty();
+                // Verbose conflict listing goes to stderr in BOTH json and
+                // text modes — it's diagnostic, not part of the contract
+                // shape consumers parse.
                 if cli.verbose > 0 {
                     for path in &conflicted {
                         eprintln!("{}", path.display());
                     }
                 }
-                perf.emit_stderr(None);
-                if conflicted.is_empty() {
-                    std::process::exit(1);
+                if cli.json {
+                    let outcome = output::repo_json::has_merge_conflict_outcome(has_conflict);
+                    println!("{}", serde_json::to_string_pretty(&outcome.value)?);
+                    perf.emit_stdout(None);
+                    std::process::exit(outcome.exit_code.unwrap_or(0));
                 }
-                std::process::exit(0);
+                perf.emit_stderr(None);
+                if has_conflict {
+                    std::process::exit(0);
+                }
+                std::process::exit(1);
             }
             crate::args::RepoAction::RecentCommits { .. }
             | crate::args::RepoAction::SourceCodeChanges { .. }
@@ -787,11 +803,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref action) = repo_action {
         match action {
             crate::args::RepoAction::Package { no_error, on_error } => {
-                let rendered =
-                    output::render_repo_package(&result, base_dir.as_deref(), cli.verbose);
-                if rendered.is_empty() {
+                // Resolve plain name for both modes; verbose styling is a
+                // text-only concern, JSON consumers only want the bare name.
+                let plain_name = output::render_repo_package(&result, base_dir.as_deref(), 0);
+                if plain_name.is_empty() {
                     return handle_no_results(*no_error, on_error, cli.plain, &perf);
                 }
+                if cli.json {
+                    let outcome = output::repo_json::name_outcome(plain_name);
+                    println!("{}", serde_json::to_string_pretty(&outcome.value)?);
+                    perf.emit_stdout(result.performance.as_ref());
+                    return Ok(());
+                }
+                let rendered = if cli.verbose > 0 {
+                    output::render_repo_package(&result, base_dir.as_deref(), cli.verbose)
+                } else {
+                    plain_name
+                };
                 println!("{rendered}");
                 perf.emit_stderr(result.performance.as_ref());
                 return Ok(());
@@ -800,6 +828,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let rendered = output::render_repo_package_area(&result, base_dir.as_deref());
                 if rendered.is_empty() {
                     return handle_no_results(*no_error, on_error, cli.plain, &perf);
+                }
+                if cli.json {
+                    let outcome = output::repo_json::name_outcome(rendered);
+                    println!("{}", serde_json::to_string_pretty(&outcome.value)?);
+                    perf.emit_stdout(result.performance.as_ref());
+                    return Ok(());
                 }
                 println!("{rendered}");
                 perf.emit_stderr(result.performance.as_ref());
@@ -841,8 +875,29 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let is_scriptable_text = !use_json && is_scriptable_repo_action(repo_action.as_ref());
 
     if use_json {
-        output::print_json(&result, output_filter, &docs_filter, &files_filter)?;
-        perf.emit_stdout(result.performance.as_ref());
+        let exit_code = output::print_json(
+            &result,
+            output_filter,
+            &docs_filter,
+            &files_filter,
+            repo_action.as_ref(),
+            base_dir.as_deref(),
+        )?;
+        // When `--perf` was set, `attach_performance` already injected the
+        // `performance` field into the JSON object (or wrapped non-objects
+        // as `{ data, performance }`). Emitting an additional Markdown
+        // `## Performance` block to stdout would corrupt the JSON output,
+        // so we route the human-readable text to stderr instead — keeping
+        // stdout strictly machine-parseable while preserving the legacy
+        // verbose-style perf section for terminals.
+        if result.performance.is_some() {
+            perf.emit_stderr(result.performance.as_ref());
+        } else {
+            perf.emit_stdout(result.performance.as_ref());
+        }
+        if let Some(code) = exit_code {
+            std::process::exit(code);
+        }
     } else {
         let text = output::render_text(
             &result,
@@ -978,19 +1033,28 @@ async fn handle_pr_command(
         .map_err(|_| format!("No git repository found from {}", dir.display()))?;
 
     // 2. Resolve preferred remote URL (origin first, then first configured remote)
-    let remote_url = resolve_origin_or_first_remote(&repo)
-        .ok_or("No git remotes found for this repository")?;
+    let remote_url =
+        resolve_origin_or_first_remote(&repo).ok_or("No git remotes found for this repository")?;
 
     // 3. Parse the remote URL and construct the provider
     let parsed = GitRemote::parse_url(&remote_url).map_err(|e| {
-        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+        format!(
+            "Unsupported provider for remote URL '{}': {}",
+            remote_url, e
+        )
     })?;
     let remote = GitRemote::from_url(&remote_url).map_err(|e| {
-        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+        format!(
+            "Unsupported provider for remote URL '{}': {}",
+            remote_url, e
+        )
     })?;
 
     // 4. Fetch pull requests
-    let prs = match remote.list_pull_requests(&parsed.owner, &parsed.repo, status).await {
+    let prs = match remote
+        .list_pull_requests(&parsed.owner, &parsed.repo, status)
+        .await
+    {
         Ok(prs) => prs,
         Err(sniff::SniffError::MissingCredentials { provider, env_var }) => {
             return Err(format!(
@@ -1006,22 +1070,21 @@ async fn handle_pr_command(
             )
             .into());
         }
-        Err(sniff::SniffError::RateLimited { provider, retry_after }) => {
+        Err(sniff::SniffError::RateLimited {
+            provider,
+            retry_after,
+        }) => {
             let retry_msg = retry_after
                 .map(|s| format!(", retry after {}s", s))
                 .unwrap_or_default();
-            return Err(format!(
-                "Rate limited by {} API{}",
-                provider, retry_msg
-            )
-            .into());
+            return Err(format!("Rate limited by {} API{}", provider, retry_msg).into());
         }
-        Err(sniff::SniffError::RemoteApi { status, provider, message }) => {
-            return Err(format!(
-                "{} API error (HTTP {}): {}",
-                provider, status, message
-            )
-            .into());
+        Err(sniff::SniffError::RemoteApi {
+            status,
+            provider,
+            message,
+        }) => {
+            return Err(format!("{} API error (HTTP {}): {}", provider, status, message).into());
         }
         Err(sniff::SniffError::RemoteInit { provider, message }) => {
             return Err(format!(
@@ -1033,7 +1096,8 @@ async fn handle_pr_command(
         Err(e) => {
             return Err(format!(
                 "Failed to list pull requests from {}: {}",
-                parsed.provider.display_name(), e
+                parsed.provider.display_name(),
+                e
             )
             .into());
         }
