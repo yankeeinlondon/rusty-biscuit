@@ -94,7 +94,10 @@ pub(crate) fn run_shell_blocks_stage(
                 executable: command.executable.clone(),
                 args: command.args.clone(),
                 span: command.physical_span.clone(),
-                origin: ShellCommandOrigin::Body { line: command.start_line },
+                origin: ShellCommandOrigin::ShellBlock {
+                    start_line: pair.start_line,
+                    command_line: command.start_line,
+                },
                 error_handling: region.options.clone(),
                 timeout_override: region.timeout_override,
             };
@@ -109,14 +112,14 @@ pub(crate) fn run_shell_blocks_stage(
                     return Err(ShellBlockError::Command {
                         block_start_line: pair.start_line,
                         command_line: command.start_line,
-                        partial_output: Vec::new(),
+                        partial_output: Box::new(Vec::new()),
                         excerpt: SourceExcerpt::from_text(
                             body_text,
                             command.start_line,
                             pair.start_line + 1,
                             2,
                         ),
-                        source: e,
+                        source: Box::new(e),
                     });
                 }
             }
@@ -145,14 +148,14 @@ pub(crate) fn run_shell_blocks_stage(
                     return Err(ShellBlockError::Command {
                         block_start_line: pair.start_line,
                         command_line: command.start_line,
-                        partial_output: partial,
+                        partial_output: Box::new(partial),
                         excerpt: SourceExcerpt::from_text(
                             body_text,
                             command.start_line,
                             pair.start_line + 1,
                             2,
                         ),
-                        source: e,
+                        source: Box::new(e),
                     });
                 }
             }

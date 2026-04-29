@@ -1,15 +1,20 @@
 //! Parser for `::block` / `::end-block` paired directives.
 
 use super::types::{PageBlockError, PageBlockOptions, PageBlockRegion};
-use crate::markdown::compose::parse_utils::{
-    Cursor, CursorError, find_code_regions, is_in_code_region,
-};
+use crate::markdown::compose::parse_utils::{Cursor, CursorError};
+
+/// Internal helper for building the region tree.
+struct UnfinishedRegion {
+    end_line: usize,
+    region: PageBlockRegion,
+    children: Vec<PageBlockRegion>,
+}
 
 /// Parses page block directives from markdown content into a nested region tree.
 ///
-/// Scans the document line by line, skipping fenced code regions, and builds
-/// a tree of `PageBlockRegion` with exact byte spans for the full block
-/// (including directive lines) and the body (excluding directive lines).
+/// Delegates the low-level block pairing to [`scan_block_pairs`](super::super::block_pairs::scan_block_pairs)
+/// so that `::shell-block` regions are handled correctly and do not interfere with
+/// page-block parsing.
 ///
 /// ## Errors
 ///
@@ -17,94 +22,114 @@ use crate::markdown::compose::parse_utils::{
 /// a matching `::block`, and `PageBlockError::UnterminatedBlock` if EOF is
 /// reached with an open block.
 pub fn parse_page_blocks(content: &str) -> Result<Vec<PageBlockRegion>, PageBlockError> {
-    let code_regions = find_code_regions(content);
-    let bytes = content.as_bytes();
-
-    // Stack entries: (block_start_byte, body_start_byte, start_line, options, children)
-    let mut stack: Vec<(usize, usize, usize, PageBlockOptions, Vec<PageBlockRegion>)> = Vec::new();
-    let mut top_level: Vec<PageBlockRegion> = Vec::new();
-
-    let mut line_start = 0usize;
-    let mut line_number = 1usize;
-
-    for i in 0..=bytes.len() {
-        let is_eol = i == bytes.len() || bytes[i] == b'\n';
-        if !is_eol {
-            continue;
-        }
-
-        let line_end = i;
-        let span_end = if i < bytes.len() { i + 1 } else { i }; // include the newline
-        let line = &content[line_start..line_end];
-        let trimmed = line.trim();
-
-        if !trimmed.is_empty() {
-            let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
-            if !is_in_code_region(first_non_ws, &code_regions) {
-                if let Some(after) = trimmed.strip_prefix("::block") {
-                    // Check it's actually `::block` and not `::blockquote` etc.
-                    if after.is_empty() || after.starts_with(char::is_whitespace) {
-                        let options = parse_block_options(after.trim(), line_number)?;
-                        let body_start = span_end; // body starts after the ::block line
-                        stack.push((line_start, body_start, line_number, options, Vec::new()));
-                    }
-                } else if let Some(after) = trimmed.strip_prefix("::end-block") {
-                    // Validate no trailing non-whitespace content
-                    let trailing = after.trim();
-                    if !trailing.is_empty() {
-                        return Err(PageBlockError::ParseDirective {
-                            line: line_number,
-                            message: format!(
-                                "Unexpected content after ::end-block: '{}'",
-                                trailing
-                            ),
-                        });
-                    }
-
-                    let Some((block_start, body_start, start_line, options, children)) =
-                        stack.pop()
-                    else {
-                        return Err(PageBlockError::UnmatchedEnd { line: line_number });
-                    };
-
-                    let region = PageBlockRegion {
-                        span: block_start..span_end,
-                        body_span: body_start..line_start, // body ends at start of ::end-block line
-                        start_line,
-                        end_line: line_number,
-                        options,
-                        children,
-                    };
-
-                    if let Some(parent) = stack.last_mut() {
-                        parent.4.push(region);
-                    } else {
-                        top_level.push(region);
-                    }
+    let pairs = super::super::block_pairs::scan_block_pairs(content)
+        .map_err(|e| match e {
+            super::super::block_pairs::BlockPairError::UnmatchedEnd { line } => {
+                PageBlockError::UnmatchedEnd { line }
+            }
+            super::super::block_pairs::BlockPairError::UnterminatedBlock {
+                line,
+                opening_text,
+                file_ends_at_line,
+            } => PageBlockError::UnterminatedBlock {
+                line,
+                opening_text,
+                file_ends_at_line,
+            },
+            super::super::block_pairs::BlockPairError::TrailingContent { line, content } => {
+                PageBlockError::ParseDirective {
+                    line,
+                    message: format!("Unexpected content after ::end-block: '{content}'"),
                 }
+            }
+        })?;
+
+    // Filter to page blocks only and sort by start line (document order).
+    let mut page_pairs: Vec<_> = pairs
+        .into_iter()
+        .filter(|p| matches!(p.kind, super::super::block_pairs::BlockOpenKind::Page))
+        .collect();
+    page_pairs.sort_by_key(|p| p.start_line);
+
+    let mut top_level: Vec<PageBlockRegion> = Vec::new();
+    let mut unfinished: Vec<Option<UnfinishedRegion>> = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+
+    for pair in page_pairs {
+        let options = parse_block_options_from_opener(&pair.opening_text, pair.start_line)?;
+        let region = PageBlockRegion {
+            span: pair.span.clone(),
+            body_span: pair.body_span.clone(),
+            start_line: pair.start_line,
+            end_line: pair.end_line,
+            options,
+            children: Vec::new(),
+        };
+
+        // Pop regions that ended before the current one starts (siblings, not ancestors).
+        while let Some(&top_idx) = stack.last() {
+            let top = unfinished[top_idx].as_ref().unwrap();
+            if pair.start_line > top.end_line {
+                stack.pop();
+                let finished = unfinished[top_idx].take().unwrap();
+                let final_region = PageBlockRegion {
+                    children: finished.children,
+                    ..finished.region
+                };
+                if let Some(&parent_idx) = stack.last() {
+                    unfinished[parent_idx]
+                        .as_mut()
+                        .unwrap()
+                        .children
+                        .push(final_region);
+                } else {
+                    top_level.push(final_region);
+                }
+            } else {
+                break;
             }
         }
 
-        line_start = i.saturating_add(1);
-        line_number += 1;
+        unfinished.push(Some(UnfinishedRegion {
+            end_line: pair.end_line,
+            region,
+            children: Vec::new(),
+        }));
+        stack.push(unfinished.len() - 1);
     }
 
-    // Check for unterminated blocks (report the deepest open one)
-    if let Some((block_start, _, start_line, _, _)) = stack.last() {
-        // Extract the opening directive line
-        let opening_end = content[*block_start..]
-            .find('\n')
-            .map(|pos| block_start + pos)
-            .unwrap_or(content.len());
-        let opening_text = content[*block_start..opening_end].to_string();
-        return Err(PageBlockError::UnterminatedBlock {
-            line: *start_line,
-            opening_text,
-            file_ends_at_line: line_number.saturating_sub(1),
-        });
+    // Drain any remaining regions on the stack.
+    while let Some(top_idx) = stack.pop() {
+        let finished = unfinished[top_idx].take().unwrap();
+        let final_region = PageBlockRegion {
+            children: finished.children,
+            ..finished.region
+        };
+        if let Some(&parent_idx) = stack.last() {
+            unfinished[parent_idx]
+                .as_mut()
+                .unwrap()
+                .children
+                .push(final_region);
+        } else {
+            top_level.push(final_region);
+        }
     }
 
     Ok(top_level)
+}
+
+/// Parses options from the raw opening text of a `BlockPair`.
+fn parse_block_options_from_opener(
+    opener: &str,
+    line: usize,
+) -> Result<PageBlockOptions, PageBlockError> {
+    let after = opener
+        .find("::block")
+        .map(|idx| &opener[idx + "::block".len()..])
+        .unwrap_or(opener)
+        .trim_start();
+    parse_block_options(after, line)
 }
 
 /// Parses the option part of a `::block` directive line (everything after `::block`).

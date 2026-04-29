@@ -590,8 +590,12 @@ impl Markdown {
                 self.run_shell_expansion_stage(options, runtime, report)
             }
             ComposeOperation::ShellBlocks => {
-                // Placeholder: shell blocks stage will be implemented in Phase 2
-                Ok(())
+                shell_blocks::run_shell_blocks_stage_for_markdown(
+                    &mut self.content,
+                    options,
+                    &mut runtime.shell,
+                    report,
+                )
             }
             _ => Ok(()),
         }

@@ -50,26 +50,24 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
         }
 
         // Detect wrong-style flags
-        if let Some(ch) = cursor.current() {
-            if ch == '-' {
-                // Read the flag text for the error message
-                let mut flag = String::new();
+        if let Some(ch) = cursor.current() && ch == '-' {
+            // Read the flag text for the error message
+            let mut flag = String::new();
+            flag.push(ch);
+            cursor.advance();
+            while let Some(ch) = cursor.current() {
+                if ch.is_whitespace() || ch == '=' {
+                    break;
+                }
                 flag.push(ch);
                 cursor.advance();
-                while let Some(ch) = cursor.current() {
-                    if ch.is_whitespace() || ch == '=' {
-                        break;
-                    }
-                    flag.push(ch);
-                    cursor.advance();
-                }
-                let hint = wrong_style_hint(&flag);
-                return Err(ShellBlockError::Parse {
-                    line,
-                    message: format!("Invalid flag syntax '{flag}'. {hint}"),
-                    excerpt: SourceExcerpt::from_text(opener, line, line, 0),
-                });
             }
+            let hint = wrong_style_hint(&flag);
+            return Err(ShellBlockError::Parse {
+                line,
+                message: format!("Invalid flag syntax '{flag}'. {hint}"),
+                excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+            });
         }
 
         // Read key

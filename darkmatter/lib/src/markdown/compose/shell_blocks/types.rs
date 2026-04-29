@@ -7,6 +7,7 @@ use crate::markdown::compose::shell_expansion::types::{ErrorHandling, ShellExpan
 
 /// A discovered shell block region with parsed options.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct ShellBlockRegion {
     /// Full byte span including opener and closer lines.
     pub span: Range<usize>,
@@ -26,6 +27,7 @@ pub(crate) struct ShellBlockRegion {
 
 /// A single logical command within a shell block.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct ShellBlockCommand {
     /// The raw command string after continuation folding.
     pub raw_command: String,
@@ -43,6 +45,7 @@ pub(crate) struct ShellBlockCommand {
 
 /// Result of executing a single logical command.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct ShellBlockCommandResult {
     /// The rendered output for this command.
     pub output: String,
@@ -108,10 +111,10 @@ pub enum ShellBlockError {
     Command {
         block_start_line: usize,
         command_line: usize,
-        partial_output: Vec<String>,
+        partial_output: Box<Vec<String>>,
         excerpt: SourceExcerpt,
         #[source]
-        source: ShellExpansionError,
+        source: Box<ShellExpansionError>,
     },
 }
 
@@ -165,7 +168,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                 let mut body = format!("<dim>Block opened at line:</dim> {block_start_line}\n<dim>Command at line:</dim> {command_line}");
                 if !partial_output.is_empty() {
                     body.push_str("\n<dim>Partial output from earlier commands:</dim>\n");
-                    for output in partial_output {
+                    for output in partial_output.iter() {
                         body.push_str(&format!("<dim>---</dim>\n{}\n", truncate_output(output)));
                     }
                 }
@@ -183,7 +186,7 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     .error_header(ErrorHeader::new("ShellBlockError", "command failed"))
                     .body(body);
 
-                let hint = match source {
+                let hint = match source.as_ref() {
                     ShellExpansionError::ParseDirective { .. } => "Check the command syntax.",
                     ShellExpansionError::CommandNotFound { .. } => "Install the binary or update <cyan>$PATH</cyan>.",
                     ShellExpansionError::Blacklisted { .. } => "Remove the entry from your blacklist file if you trust this command.",

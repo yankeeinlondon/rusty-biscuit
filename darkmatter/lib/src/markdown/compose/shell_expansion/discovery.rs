@@ -24,6 +24,9 @@ use crate::markdown::compose::transclusion;
 use crate::markdown::compose::types::SourceRange;
 use crate::markdown::types::MarkdownResult;
 
+use super::super::block_pairs;
+use super::super::shell_blocks::body::split_logical_commands;
+
 /// Looks up the originating source file for a byte position in composed output.
 ///
 /// Checks the source map for a range containing `byte_pos`. If found, computes
@@ -161,6 +164,64 @@ pub fn collect_shell_commands(
                 source_file,
                 origin: ShellCommandOrigin::Body { line },
             });
+        }
+    }
+
+    // Discover shell-block commands from the fully-resolved content.
+    let block_pairs = block_pairs::scan_block_pairs(composed.content())
+        .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
+
+    for pair in block_pairs {
+        if !matches!(pair.kind, block_pairs::BlockOpenKind::Shell) {
+            continue;
+        }
+
+        let body_text = &composed.content()[pair.body_span.clone()];
+        let commands = split_logical_commands(body_text, pair.start_line + 1)
+            .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
+
+        for command in commands {
+            let (executable, args) = if which::which(&command.executable).is_ok() {
+                (command.executable.clone(), command.args.clone())
+            } else if let Some(resolved) = resolve_alias(&command.executable) {
+                let mut merged_args = resolved.args;
+                merged_args.extend_from_slice(&command.args);
+                (resolved.executable, merged_args)
+            } else {
+                (command.executable.clone(), command.args.clone())
+            };
+
+            let normalized = normalize_command(&executable, &args);
+
+            if seen.insert(normalized.clone()) {
+                let (source_file, command_line) = lookup_provenance(
+                    pair.body_span.start + command.physical_span.start,
+                    command.start_line,
+                    &report.source_map,
+                    composed.content(),
+                    &default_source,
+                );
+
+                let (_, start_line) = lookup_provenance(
+                    pair.span.start,
+                    pair.start_line,
+                    &report.source_map,
+                    composed.content(),
+                    &default_source,
+                );
+
+                entries.push(ShellCommandEntry {
+                    raw_command: command.raw_command,
+                    executable,
+                    args,
+                    normalized,
+                    source_file,
+                    origin: ShellCommandOrigin::ShellBlock {
+                        start_line,
+                        command_line,
+                    },
+                });
+            }
         }
     }
 
@@ -683,5 +744,139 @@ replace:
             err.to_string()
                 .contains("Frontmatter shell executable may not come from interpolation")
         );
+    }
+
+    #[test]
+    fn discovers_shell_block_commands() {
+        let content = "::shell-block\necho hello\necho world\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].raw_command, "echo hello");
+        assert_eq!(entries[1].raw_command, "echo world");
+        assert_eq!(
+            entries[0].origin,
+            ShellCommandOrigin::ShellBlock {
+                start_line: 1,
+                command_line: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn discovers_mixed_shell_and_shell_block_commands() {
+        let content = "::shell echo standalone\n::shell-block\necho block\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        let standalones: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.origin, ShellCommandOrigin::Body { .. }))
+            .collect();
+        let blocks: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.origin, ShellCommandOrigin::ShellBlock { .. }))
+            .collect();
+        assert_eq!(standalones.len(), 1);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(standalones[0].raw_command, "echo standalone");
+        assert_eq!(blocks[0].raw_command, "echo block");
+    }
+
+    #[test]
+    fn shell_block_commands_deduplicate_with_shell_directives() {
+        // Same command in both ::shell and ::shell-block — should only appear once
+        let content = "::shell echo hello\n::shell-block\necho hello\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        // Deduplicated by normalized form
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn excludes_shell_block_commands_inside_false_page_blocks() {
+        let content = "\
+---
+include_shell: false
+---
+::shell echo always
+::block when=\"include_shell\"
+::shell-block
+::shell echo conditional
+::end-block
+::end-block
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo always");
+    }
+
+    #[test]
+    fn discovers_shell_block_commands_in_transcluded_files() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Child document with a shell block
+        let child_path = temp_dir.path().join("child.md");
+        let mut child_file = std::fs::File::create(&child_path).unwrap();
+        writeln!(child_file, "# Child").unwrap();
+        writeln!(child_file, "::shell-block").unwrap();
+        writeln!(child_file, "echo from-child").unwrap();
+        writeln!(child_file, "::end-block").unwrap();
+
+        // Root document with its own directive and a transclusion
+        let root_path = temp_dir.path().join("root.md");
+        let mut root_file = std::fs::File::create(&root_path).unwrap();
+        writeln!(root_file, "::shell echo from-root").unwrap();
+        writeln!(root_file, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+        let options = ComposeOptions::new().with_source_file(&root_path);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2);
+
+        let root_entry = entries
+            .iter()
+            .find(|e| e.raw_command == "echo from-root")
+            .unwrap();
+        assert_eq!(
+            root_entry.source_file.canonicalize().unwrap(),
+            root_path.canonicalize().unwrap()
+        );
+
+        let child_entry = entries
+            .iter()
+            .find(|e| e.raw_command == "echo from-child")
+            .unwrap();
+        assert_eq!(
+            child_entry.source_file.canonicalize().unwrap(),
+            child_path.canonicalize().unwrap()
+        );
+        match &child_entry.origin {
+            ShellCommandOrigin::ShellBlock {
+                start_line,
+                command_line,
+            } => {
+                // In child.md: line 2 is "::shell-block", line 3 is "echo from-child"
+                assert_eq!(*start_line, 2);
+                assert_eq!(*command_line, 3);
+            }
+            other => panic!("Expected ShellBlock origin, got: {:?}", other),
+        }
     }
 }

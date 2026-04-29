@@ -79,7 +79,7 @@ pub enum MarkdownError {
 
     /// Shell block pipeline error.
     #[error("Shell block error: {0}")]
-    ShellBlock(#[from] crate::markdown::compose::ShellBlockError),
+    ShellBlock(#[from] Box<crate::markdown::compose::ShellBlockError>),
 
     /// Reference analysis error.
     #[error("Reference error: {0}")]
@@ -88,6 +88,12 @@ pub enum MarkdownError {
     /// Context merge error (invalid user ctx).
     #[error("Context error: {0}")]
     CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
+}
+
+impl From<crate::markdown::compose::ShellBlockError> for MarkdownError {
+    fn from(err: crate::markdown::compose::ShellBlockError) -> Self {
+        MarkdownError::ShellBlock(Box::new(err))
+    }
 }
 
 /// Result type for markdown operations.

@@ -310,6 +310,7 @@ pub(crate) fn execute_prepared_directive(
         warnings.push(match prepared.effective.origin {
             ShellCommandOrigin::Body { line } => warning.at_line(line),
             ShellCommandOrigin::Frontmatter { .. } => warning,
+            ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(command_line),
         });
     }
 
