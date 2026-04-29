@@ -73,7 +73,41 @@ For all the _synchronized_ features described in the last section all you would 
 
 Ok so now you _what_ you're supposed to do and if you're good at "instruction following" (just like you expect your LLM to be) then that's all you need. Sadly, us humans have this annoying tendency to know _why_ they should do things. Well ok, princess ... here's **why** you should wrap your agent execution:
 
-- instead of dealing with the 
+- **Consistent CLI interface**
+    
+    Instead of dealing with the variations in CLI parameters/switches you now have a _standardized_ set of CLI switch
+    which do the same thing regardless of the agent you are using:
+
+    ```sh
+    -y, --yolo               Enable provider-specific YOLO/auto-approval mode
+        --include <ENV_NAME>  Preserve this env var even when it matches sensitive-name filters
+    -i, --interactive         Force interactive mode even when a prompt string is provided
+        --edit                Open the prompt in an external editor before launching the provider
+    -m, --model <MODEL>       Override the model used by the provider
+    -o, --output <FORMAT>     Set the output format (json, text, stream)
+        --asp <FILE>             Append a system prompt from a file
+        --rsp <FILE>             Replace the providers system prompt with contents from a file
+    -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)
+        --dry-run             Show what would be executed without launching the child
+    -q, --quiet              Suppress env details and info; still show the system prompt when set
+        --silent              Suppress all Claudine preflight output
+        --operation <OP>      Set the OPERATION env var for the wrapped session
+        --sandbox             Enable provider-specific sandboxing
+    ```
+
+    > **Note:** if a more exotic feature that is not found across Agents is used, it will passed through to the agent 
+    > so that you'll loose access to any features.
+
+- **Remove Secrets from ENV**
+
+    - Claudine will scan your host's ENV variables and remove any which appear to contain secrets
+    - You don't want share secrets with agent's unless they _need_ them
+    - You can override this behavior for API Keys you actually want with `--include <ENV_NAME>` 
+    - Some "auto" behavior is also leveraged
+        - If you are using the Qwen Agent then Qwen API Keys will be preserved
+            - The same is true for Kimi Code and Codex
+            - We do NOT do this for Anthropic keys with Claude Code because most people use it with a subscription and might have an API Key for other use cases. Including an API Key when claude starts makes it **skip** your subscription so we play it safe and remove it by default. You can _include_ it with `--include` if you want to
+- 
 
 ### Leveling up with Composition
 
