@@ -12,8 +12,8 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::core::{ComponentTheme, FuzzyFilter, NerdFontStatus, TerminalStyle};
 use super::choose::{ChoiceOption, HotkeyDisplayMode, Orientation};
+use crate::core::{ComponentTheme, FuzzyFilter, NerdFontStatus, TerminalStyle};
 
 /// Minimum label width (in cells) at which the fuzzy filter renders
 /// per-character match highlighting. Narrower labels fall back to a
@@ -476,7 +476,6 @@ impl<'a> ChoiceRenderContext<'a> {
                 .set_style(overflow_style);
         }
     }
-
 }
 
 /// Splits `label` into `Span`s that highlight char-indexed matches
@@ -528,7 +527,11 @@ pub fn build_highlighted_spans(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{buffer::Buffer, layout::Rect, style::{Color, Modifier}};
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        style::{Color, Modifier},
+    };
 
     fn default_theme() -> ComponentTheme {
         ComponentTheme::default()
@@ -732,7 +735,13 @@ mod tests {
             Orientation::Vertical,
         );
         let options: Vec<ChoiceOption> = (0..5)
-            .map(|i| ChoiceOption::<String>::new(format!("id{i}"), format!("Option {i}"), format!("val{i}")))
+            .map(|i| {
+                ChoiceOption::<String>::new(
+                    format!("id{i}"),
+                    format!("Option {i}"),
+                    format!("val{i}"),
+                )
+            })
             .collect();
         let area = Rect::new(0, 0, 20, 2);
         let mut buf = Buffer::empty(area);
@@ -841,7 +850,10 @@ mod tests {
         );
 
         let row = buffer_row(&buf, 0);
-        assert!(row.contains("●"), "expected fallback filled radio ●, got: {row}");
+        assert!(
+            row.contains("●"),
+            "expected fallback filled radio ●, got: {row}"
+        );
     }
 
     #[test]
@@ -906,7 +918,10 @@ mod tests {
         );
 
         let row = buffer_row(&buf, 0);
-        assert!(row.contains("☑"), "expected fallback checked box ☑, got: {row}");
+        assert!(
+            row.contains("☑"),
+            "expected fallback checked box ☑, got: {row}"
+        );
     }
 
     #[test]

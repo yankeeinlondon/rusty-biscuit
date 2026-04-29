@@ -811,7 +811,10 @@ mod tests {
         // (a) Border glyphs in the expected corners.
         let top_left = buf[(0, 0)].symbol().to_string();
         let bottom_right = buf[(29, 7)].symbol().to_string();
-        assert_ne!(top_left, " ", "top-left corner should contain a border glyph");
+        assert_ne!(
+            top_left, " ",
+            "top-left corner should contain a border glyph"
+        );
         assert_ne!(
             bottom_right, " ",
             "bottom-right corner should contain a border glyph"

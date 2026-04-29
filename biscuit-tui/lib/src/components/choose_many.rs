@@ -38,10 +38,10 @@ use crate::core::{
     TerminalStyle, ValidationState, render_with_label,
 };
 
-use super::choose::{ChoiceInput, ChoiceOption, Orientation, SelectionMode};
-use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
 use super::choice_layout::{ChoiceLayout, navigate_row};
 use super::choice_render::ChoiceRenderContext;
+use super::choose::{ChoiceInput, ChoiceOption, Orientation, SelectionMode};
+use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
 
 /// Mutable state for a [`ChooseMany`] widget.
 ///
@@ -384,12 +384,9 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
                     TerminalStyle::default(),
                     state.input.orientation,
                 );
-                ctx.compute_layout(
-                    list_area,
-                    &state.input.options,
-                    &visible_indices,
-                    |idx| state.selected.get(idx).copied().unwrap_or(false),
-                )
+                ctx.compute_layout(list_area, &state.input.options, &visible_indices, |idx| {
+                    state.selected.get(idx).copied().unwrap_or(false)
+                })
             };
             state.layout_cache = layout.clone();
             adjust_scroll(state, visible, &visible_indices, &layout);
@@ -627,9 +624,12 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, delta: i32) 
 }
 
 fn move_hover_row<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, delta: i32) {
-    if let Some(new_hover) =
-        navigate_row(&state.layout_cache, &state.input.options, state.hover, delta)
-    {
+    if let Some(new_hover) = navigate_row(
+        &state.layout_cache,
+        &state.input.options,
+        state.hover,
+        delta,
+    ) {
         state.hover = new_hover;
     } else {
         move_hover(state, delta);
@@ -1533,8 +1533,14 @@ mod tests {
         ChooseMany::new().render(area, &mut buf, &mut state);
 
         let row0 = buffer_row(&buf, 0);
-        assert!(row0.contains("Pepperoni"), "expected Pepperoni on row 0: {row0}");
-        assert!(row0.contains("Mushrooms"), "expected Mushrooms on row 0: {row0}");
+        assert!(
+            row0.contains("Pepperoni"),
+            "expected Pepperoni on row 0: {row0}"
+        );
+        assert!(
+            row0.contains("Mushrooms"),
+            "expected Mushrooms on row 0: {row0}"
+        );
     }
 
     #[test]
@@ -1594,5 +1600,4 @@ mod tests {
         ChooseMany::new().handle_event(&mut state, press(KeyCode::Up));
         assert_eq!(state.hover(), Some(0));
     }
-
 }

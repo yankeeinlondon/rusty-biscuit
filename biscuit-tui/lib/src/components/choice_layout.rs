@@ -270,8 +270,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // Widths: 6, 8, 7 -> row 0: 0,1 (6+8=14 <= 20), row 1: 2 (14+7=21 > 20)
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(
-            &visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
 
         assert_eq!(layout.row_count(), 2);
         assert_eq!(layout.row_ranges, vec![(0, 1), (2, 2)]);
@@ -326,8 +325,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 wraps to row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(
-            &visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
 
         assert_eq!(layout.row_of(0), Some(0));
         assert_eq!(layout.row_of(1), Some(0));
@@ -341,8 +339,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1 at x=0
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(
-            &visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
 
         // Row 1 has only option 2 at x=0. Closest to any column is option 2.
         assert_eq!(layout.closest_in_row(1, 5), Some(2));
@@ -357,8 +354,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(
-            &visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
         let options: Vec<ChoiceOption<String>> = vec![
             ChoiceOption::new("a", "Alpha", "alpha"),
             ChoiceOption::new("b", "Beta", "beta"),
@@ -379,8 +375,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(
-            &visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
         let options: Vec<ChoiceOption<String>> = vec![
             ChoiceOption::new("a", "Alpha", "alpha"),
             ChoiceOption::new("b", "Beta", "beta"),
@@ -401,8 +396,7 @@ mod tests {
         let visible = vec![0, 1, 2];
         // 6+8=14, 14+7=21 > 20 -> option 2 on row 1
         let widths = vec![6, 8, 7];
-        let layout = ChoiceLayout::horizontal(
-            &visible, &widths, area);
+        let layout = ChoiceLayout::horizontal(&visible, &widths, area);
         let mut options: Vec<ChoiceOption<String>> = vec![
             ChoiceOption::new("a", "Alpha", "alpha"),
             ChoiceOption::new("b", "Beta", "beta"),

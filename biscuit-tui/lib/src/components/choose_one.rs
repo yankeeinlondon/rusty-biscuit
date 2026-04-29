@@ -36,8 +36,8 @@ use crate::core::{
     TerminalStyle, ValidationState, render_with_label,
 };
 
-use super::choice_layout::navigate_row;
 use super::choice_layout::ChoiceLayout;
+use super::choice_layout::navigate_row;
 use super::choice_render::ChoiceRenderContext;
 
 use super::choose::{ChoiceInput, ChoiceOption, HotkeySpec, Orientation, SelectionMode};
@@ -346,12 +346,9 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
                     TerminalStyle::default(),
                     state.input.orientation,
                 );
-                ctx.compute_layout(
-                    list_area,
-                    &state.input.options,
-                    &visible_indices,
-                    |idx| Some(idx) == state.selected,
-                )
+                ctx.compute_layout(list_area, &state.input.options, &visible_indices, |idx| {
+                    Some(idx) == state.selected
+                })
             };
             state.layout_cache = layout.clone();
             adjust_scroll(state, visible, &visible_indices, &layout);
@@ -598,9 +595,12 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
 }
 
 fn move_hover_row<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
-    if let Some(new_hover) =
-        navigate_row(&state.layout_cache, &state.input.options, state.hover, delta)
-    {
+    if let Some(new_hover) = navigate_row(
+        &state.layout_cache,
+        &state.input.options,
+        state.hover,
+        delta,
+    ) {
         state.hover = new_hover;
     } else {
         move_hover(state, delta);
@@ -1708,5 +1708,4 @@ mod tests {
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Up));
         assert_eq!(state.hover(), Some(0));
     }
-
 }
