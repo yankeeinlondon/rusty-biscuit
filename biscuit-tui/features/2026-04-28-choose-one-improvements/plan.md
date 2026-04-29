@@ -68,6 +68,15 @@ docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
 skills_files_updated_during_phase7:
   - .opencode/skill/biscuit-tui/SKILL.md
+source_files_during_phase_8:
+  - biscuit-tui/cli/Cargo.toml
+  - biscuit-tui/cli/src/main.rs
+  - biscuit-tui/cli/tests/help_contract.rs
+  - biscuit-tui/cli/tests/completions.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase8:
+  - .opencode/skill/biscuit-tui/SKILL.md
 packages:
   - tui-chrome
   - tui-chrome-cli
