@@ -9,16 +9,16 @@ use std::process::Stdio;
 
 use tokio::process::Command;
 
-use crate::provider::Provider;
+use crate::provider::{ModelCatalogSource, Provider, provider_info};
 /// Return a static catalog for providers with known model enums.
 ///
 /// These lists are derived from the generated enums in `unchained-ai/lib`.
 pub fn static_catalog_for_provider(provider: Provider) -> Vec<String> {
-    match provider {
-        Provider::Codex => openai_models(),
-        Provider::Claude => anthropic_models(),
-        _ => Vec::new(),
-    }
+    provider_info(provider)
+        .static_models
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Fetch a dynamic catalog for the given provider.
@@ -26,14 +26,11 @@ pub fn static_catalog_for_provider(provider: Provider) -> Vec<String> {
 /// Returns `Ok(models)` on success, `Err` if the source is unavailable.
 /// For OpenCode and Qwen this shells out to `opencode models`.
 pub async fn fetch_provider_catalog(provider: Provider) -> Result<Vec<String>, CatalogFetchError> {
-    match provider {
-        Provider::OpenCode => fetch_opencode_models().await,
-        Provider::QwenCode => fetch_qwen_models().await,
-        // Static sources are handled by `static_catalog_for_provider`;
-        // dynamic fetch for them is a no-op success.
-        Provider::Codex | Provider::Claude => Ok(static_catalog_for_provider(provider)),
-        // No dynamic source in v1.
-        _ => Ok(Vec::new()),
+    match provider_info(provider).dynamic_source {
+        ModelCatalogSource::None => Ok(Vec::new()),
+        ModelCatalogSource::Static => Ok(static_catalog_for_provider(provider)),
+        ModelCatalogSource::OpencodeCli => fetch_opencode_models().await,
+        ModelCatalogSource::OpencodeCliQwenFiltered => fetch_qwen_models().await,
     }
 }
 
@@ -73,6 +70,7 @@ impl std::error::Error for CatalogFetchError {}
 // Static sources
 // ============================================================================
 
+#[allow(dead_code)]
 fn openai_models() -> Vec<String> {
     vec![
         "gpt-3.5-turbo".into(),
@@ -87,6 +85,7 @@ fn openai_models() -> Vec<String> {
     ]
 }
 
+#[allow(dead_code)]
 fn anthropic_models() -> Vec<String> {
     vec![
         "claude-3-5-haiku-20241022".into(),
