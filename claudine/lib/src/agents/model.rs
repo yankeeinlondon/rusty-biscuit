@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
+use serde::Serialize;
+
 use crate::provider::Provider;
 /// Canonical capability model for a supported agentic CLI.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentCapabilities {
     pub meta: AgentMeta,
     pub docs: AgentDocs,
@@ -17,14 +19,14 @@ pub struct AgentCapabilities {
     pub confidence: ConfidenceProfile,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentMeta {
     pub id: Provider,
     pub display_name: &'static str,
     pub binary: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentDocs {
     pub homepage: Option<&'static str>,
     pub docs: Option<&'static str>,
@@ -34,7 +36,7 @@ pub struct AgentDocs {
     pub scripts_docs: Option<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfigCapabilities {
     pub user_files: Vec<PathBuf>,
     pub project_files: Vec<PathBuf>,
@@ -42,7 +44,7 @@ pub struct ConfigCapabilities {
     pub format: Option<ConfigFormat>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ConfigFormat {
     Json,
     Jsonc,
@@ -51,7 +53,7 @@ pub enum ConfigFormat {
     Mixed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuntimeCapabilities {
     pub model: ModelCapabilities,
     pub non_interactive: NonInteractiveCapabilities,
@@ -62,7 +64,7 @@ pub struct RuntimeCapabilities {
     pub billing: BillingCapabilities,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModelCapabilities {
     pub cli_flags: Vec<&'static str>,
     pub session_switch_commands: Vec<&'static str>,
@@ -71,7 +73,7 @@ pub struct ModelCapabilities {
     pub notes: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NonInteractiveCapabilities {
     pub supported: bool,
     pub entrypoints: Vec<&'static str>,
@@ -82,7 +84,7 @@ pub struct NonInteractiveCapabilities {
     pub limitations: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SystemPromptCapabilities {
     pub supplement_sources: Vec<&'static str>,
     pub full_replacement_supported: bool,
@@ -90,7 +92,7 @@ pub struct SystemPromptCapabilities {
     pub memory_files: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PermissionCapabilities {
     pub modes: Vec<&'static str>,
     pub yolo_equivalent: Option<&'static str>,
@@ -99,14 +101,14 @@ pub struct PermissionCapabilities {
     pub tool_denylist_controls: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReasoningCapabilities {
     pub style: ReasoningStyle,
     pub levels_or_controls: Vec<&'static str>,
     pub notes: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ReasoningStyle {
     NamedLevels,
     NumericBudget,
@@ -115,7 +117,7 @@ pub enum ReasoningStyle {
     NotDocumented,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LoggingCapabilities {
     pub session_locations: Vec<&'static str>,
     pub log_locations: Vec<&'static str>,
@@ -123,13 +125,13 @@ pub struct LoggingCapabilities {
     pub telemetry_controls: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BillingCapabilities {
     pub models: Vec<BillingModel>,
     pub notes: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum BillingModel {
     Subscription,
     PerToken,
@@ -137,7 +139,7 @@ pub enum BillingModel {
     ProviderOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkillsCapabilities {
     pub status: CapabilityStatus,
     pub activation: ActivationStyle,
@@ -150,7 +152,7 @@ pub struct SkillsCapabilities {
     pub notes: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SlashCommandCapabilities {
     pub status: CapabilityStatus,
     pub built_in_supported: bool,
@@ -164,7 +166,7 @@ pub struct SlashCommandCapabilities {
     pub notes: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SubagentCapabilities {
     pub status: CapabilityStatus,
     pub definition_format: AgentDefinitionFormat,
@@ -178,7 +180,7 @@ pub struct SubagentCapabilities {
     pub notes: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ScriptCapabilities {
     pub status: CapabilityStatus,
     pub dedicated_script_dirs: Vec<PathBuf>,
@@ -190,7 +192,7 @@ pub struct ScriptCapabilities {
     pub notes: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CapabilityStatus {
     Supported,
     Partial,
@@ -200,7 +202,7 @@ pub enum CapabilityStatus {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ActivationStyle {
     AutoMatch,
     ToolInvocation,
@@ -209,7 +211,7 @@ pub enum ActivationStyle {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum InvocationStyle {
     ToolDelegation,
     OrchestratorMode,
@@ -218,7 +220,7 @@ pub enum InvocationStyle {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum AgentDefinitionFormat {
     MarkdownFrontmatter,
     Yaml,
@@ -228,7 +230,7 @@ pub enum AgentDefinitionFormat {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CommandFormat {
     Markdown,
     Toml,
@@ -238,13 +240,13 @@ pub enum CommandFormat {
     None,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FrontmatterContract {
     pub required_fields: Vec<&'static str>,
     pub optional_fields: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PathDiscovery {
     pub user_paths: Vec<PathBuf>,
     pub project_paths: Vec<PathBuf>,
@@ -253,20 +255,20 @@ pub struct PathDiscovery {
     pub precedence_rules: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfidenceProfile {
     pub overall: Confidence,
     pub by_area: Vec<AreaConfidence>,
     pub gaps: Vec<&'static str>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AreaConfidence {
     pub area: &'static str,
     pub confidence: Confidence,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Confidence {
     High,
     Medium,

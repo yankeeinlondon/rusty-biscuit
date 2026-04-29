@@ -282,7 +282,7 @@ fn snapshot_goose_paths_formats_and_permissions() {
                 "approve".to_string(),
                 "chat".to_string(),
             ],
-            yolo_equivalent: Some("auto mode".to_string()),
+            yolo_equivalent: Some("GOOSE_MODE=auto".to_string()),
             sandbox_modes: vec![],
         }
     );
@@ -334,7 +334,7 @@ fn snapshot_opencode_paths_formats_and_permissions() {
             subagent_status: CapabilityStatus::Supported,
             subagent_format: AgentDefinitionFormat::MarkdownFrontmatter,
             permission_modes: vec!["allow".to_string(), "ask".to_string(), "deny".to_string()],
-            yolo_equivalent: None,
+            yolo_equivalent: Some("--dangerously-skip-permissions".to_string()),
             sandbox_modes: vec![],
         }
     );
@@ -387,7 +387,7 @@ fn snapshot_roo_paths_formats_and_permissions() {
                 "auto-approve (default)".to_string(),
                 "manual approval (--require-approval)".to_string(),
             ],
-            yolo_equivalent: Some("default auto-approve behavior".to_string()),
+            yolo_equivalent: None,
             sandbox_modes: vec![],
         }
     );

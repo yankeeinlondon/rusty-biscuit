@@ -11,11 +11,13 @@
 //! - **Agents**: Subagent/persona definitions for task delegation
 //! - **Scripts**: Executable scripts that can be invoked by skills/agents
 
+use serde::Serialize;
+
 use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use std::path::PathBuf;
 
 /// Types of linkable resources across providers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum LinkableResource {
     /// Skills (SKILL.md directories)
     Skill,
@@ -64,7 +66,7 @@ impl std::fmt::Display for LinkableResource {
 }
 
 /// File format used for a resource type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ResourceFormat {
     /// Markdown files with YAML frontmatter (most common)
     Markdown,
@@ -113,7 +115,7 @@ impl std::fmt::Display for ResourceFormat {
 }
 
 /// Level of support for a resource type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum SupportLevel {
     /// Full support with custom file creation
     Full,
@@ -158,7 +160,7 @@ impl SupportLevel {
 }
 
 /// Compatibility metadata for resource frontmatter/config fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ResourcePropertySchema {
     /// Properties required by the provider for this resource type.
     pub required: &'static [&'static str],
@@ -184,7 +186,7 @@ impl ResourcePropertySchema {
 }
 
 /// Support details for a specific resource type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ResourceSupport {
     /// Level of support
     pub level: SupportLevel,
@@ -290,7 +292,7 @@ impl ResourceSupport {
 }
 
 /// Skill frontmatter fields supported by a provider.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SkillFrontmatter {
     /// `name` field (skill identifier)
     pub name: bool,
@@ -356,7 +358,7 @@ impl SkillFrontmatter {
 }
 
 /// Complete capability set for a provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderCapabilities {
     /// The provider these capabilities describe
     pub provider: Provider,
