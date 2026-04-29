@@ -27,22 +27,18 @@ use rand::seq::SliceRandom;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Style,
     text::{Line, Span},
     widgets::StatefulWidget,
 };
 
 use crate::core::{
     ComponentTheme, EventOutcome, FuzzyFilter, HandleEvent, KeyBindings, Label, StandaloneState,
-    ValidationState, render_with_label,
+    TerminalStyle, ValidationState, render_with_label,
 };
 
-use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
+use super::choice_render::ChoiceRenderContext;
 
-/// Minimum label width (in cells) at which the fuzzy filter renders
-/// per-character match highlighting. Narrower labels fall back to a
-/// single plain span so the row stays readable.
-const HIGHLIGHT_MIN_WIDTH: u16 = 12;
+use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
 
 /// Mutable state for a [`ChooseOne`] widget.
 ///
@@ -311,7 +307,32 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
             } else {
                 rect
             };
-            draw_list(list_area, b, state);
+
+            let visible_indices: Vec<usize> = state.filter.visible().to_vec();
+            let body_rows = if state.validation_error.is_some() && list_area.height > 1 {
+                list_area.height - 1
+            } else {
+                list_area.height
+            };
+            let visible = body_rows as usize;
+            adjust_scroll(state, visible, &visible_indices);
+
+            let ctx = ChoiceRenderContext::for_single(
+                &state.theme,
+                TerminalStyle::default(),
+                state.input.orientation,
+            );
+            ctx.render(
+                list_area,
+                b,
+                &state.input.options,
+                &visible_indices,
+                state.scroll_offset,
+                state.hover,
+                |idx| Some(idx) == state.selected,
+                Some(&mut state.filter),
+                state.validation_error.as_deref(),
+            );
         });
 
         if let Some(message) = state.validation_error.as_deref()
@@ -574,174 +595,6 @@ fn error_row_y<V: Clone + PartialEq>(
     } else {
         None
     }
-}
-
-fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut ChooseOneState<V>) {
-    use unicode_width::UnicodeWidthStr;
-
-    if area.width == 0 || area.height == 0 || state.input.options.is_empty() {
-        return;
-    }
-
-    // Reserve one row for a validation error when present.
-    let body_rows = if state.validation_error.is_some() && area.height > 1 {
-        area.height - 1
-    } else {
-        area.height
-    };
-    let visible = body_rows as usize;
-
-    // When filter is active and matches nothing, show a single dim
-    // "(no matches)" row instead of the list body.
-    if state.filter_visible && state.filter.visible().is_empty() {
-        let no_matches = Line::from(Span::styled(
-            state.theme.no_matches_text.clone(),
-            state.theme.no_matches_style,
-        ));
-        buf.set_line(area.x, area.y, &no_matches, area.width);
-        return;
-    }
-
-    let visible_indices: Vec<usize> = state.filter.visible().to_vec();
-    adjust_scroll(state, visible, &visible_indices);
-
-    let selected_indicator = state.theme.selected_indicator.clone();
-    let unselected_indicator = state.theme.unselected_indicator.clone();
-    let hover_style = state.theme.selected_style;
-    let disabled_style = state.theme.disabled_style;
-    let match_style = state.theme.search_match_style;
-    let filter_active = state.filter.is_active();
-
-    // Compute focus prefix width: indicator + 1 space, or collapse to single space if empty/whitespace
-    let focus_prefix_width = if state.theme.focus_indicator.trim().is_empty() {
-        1
-    } else {
-        state.theme.focus_indicator.width() + 1
-    };
-
-    for (row, &idx) in visible_indices
-        .iter()
-        .skip(state.scroll_offset)
-        .take(visible)
-        .enumerate()
-    {
-        let option_disabled = state.input.options[idx].disabled;
-        let option_label = state.input.options[idx].label.clone();
-        let indicator = if Some(idx) == state.selected {
-            &selected_indicator
-        } else {
-            &unselected_indicator
-        };
-
-        // Focus indicator prefix on hovered row, blank padding otherwise
-        let focus_prefix = if idx == state.hover {
-            if state.theme.focus_indicator.trim().is_empty() {
-                " ".to_string()
-            } else {
-                format!("{} ", state.theme.focus_indicator)
-            }
-        } else {
-            " ".repeat(focus_prefix_width)
-        };
-
-        let prefix = format!("{focus_prefix}{indicator} ");
-        let label_style = if option_disabled {
-            disabled_style
-        } else if idx == state.hover {
-            hover_style
-        } else if Some(idx) == state.selected {
-            state.theme.selected_label_style
-        } else {
-            Style::default()
-        };
-
-        let mut spans: Vec<Span<'static>> = vec![Span::raw(prefix)];
-        if filter_active && area.width >= HIGHLIGHT_MIN_WIDTH {
-            let highlights = state.filter.highlight_indices(&option_label);
-            spans.extend(build_highlighted_spans(
-                &option_label,
-                &highlights,
-                label_style,
-                match_style,
-            ));
-        } else {
-            spans.push(Span::styled(option_label, label_style));
-        }
-
-        let line = Line::from(spans);
-        let y = area.y + row as u16;
-        buf.set_line(area.x, y, &line, area.width);
-    }
-
-    // Paint overflow indicators at top-right / bottom-right when scrollable
-    let overflow_style = state
-        .theme
-        .selected_style
-        .add_modifier(ratatui::style::Modifier::DIM);
-
-    if state.scroll_offset > 0 && area.width > 0 {
-        // Top overflow indicator
-        let x = area.x + area.width - 1;
-        let y = area.y;
-        buf[(x, y)]
-            .set_symbol(&state.theme.overflow_up_indicator)
-            .set_style(overflow_style);
-    }
-
-    if state.scroll_offset + visible < visible_indices.len() && area.width > 0 && visible > 0 {
-        // Bottom overflow indicator
-        let x = area.x + area.width - 1;
-        let y = area.y + (visible - 1) as u16;
-        buf[(x, y)]
-            .set_symbol(&state.theme.overflow_down_indicator)
-            .set_style(overflow_style);
-    }
-}
-
-/// Splits `label` into `Span`s that highlight char-indexed matches
-/// with `match_style` and renders the remaining text with
-/// `base_style`. `highlights` must be sorted-ascending char offsets.
-fn build_highlighted_spans(
-    label: &str,
-    highlights: &[u32],
-    base_style: Style,
-    match_style: Style,
-) -> Vec<Span<'static>> {
-    if highlights.is_empty() {
-        return vec![Span::styled(label.to_string(), base_style)];
-    }
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut current = String::new();
-    let mut current_is_match = false;
-    for (char_idx, ch) in label.chars().enumerate() {
-        let is_match = highlights.binary_search(&(char_idx as u32)).is_ok();
-        if current.is_empty() {
-            current_is_match = is_match;
-            current.push(ch);
-            continue;
-        }
-        if is_match == current_is_match {
-            current.push(ch);
-        } else {
-            let style = if current_is_match {
-                match_style
-            } else {
-                base_style
-            };
-            spans.push(Span::styled(std::mem::take(&mut current), style));
-            current_is_match = is_match;
-            current.push(ch);
-        }
-    }
-    if !current.is_empty() {
-        let style = if current_is_match {
-            match_style
-        } else {
-            base_style
-        };
-        spans.push(Span::styled(current, style));
-    }
-    spans
 }
 
 fn adjust_scroll<V: Clone + PartialEq>(
@@ -1548,23 +1401,4 @@ mod tests {
         assert_eq!(state.selected_index(), Some(hovered));
     }
 
-    #[test]
-    fn build_highlighted_spans_styles_matched_chars_in_multibyte_label() {
-        // "Café" has a multi-byte 'é'. Char indices 0 and 1 (the 'C'
-        // and 'a') must be styled with `match_style` and the remainder
-        // ("fé") with `base_style`. This regression-tests that the
-        // char-index iteration on line ~716 does not slip into byte
-        // indexing when the suffix contains multi-byte chars.
-        use ratatui::style::{Color, Modifier};
-        let base_style = Style::default().fg(Color::White);
-        let match_style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
-        let spans = build_highlighted_spans("Café", &[0, 1], base_style, match_style);
-        assert_eq!(spans.len(), 2, "expected two spans, got {spans:?}");
-        assert_eq!(spans[0].content, "Ca");
-        assert_eq!(spans[0].style, match_style);
-        assert_eq!(spans[1].content, "fé");
-        assert_eq!(spans[1].style, base_style);
-    }
 }

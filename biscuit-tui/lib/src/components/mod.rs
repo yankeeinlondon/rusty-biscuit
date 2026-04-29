@@ -10,6 +10,8 @@ pub mod boolean_switch;
 pub mod choose;
 pub mod choose_many;
 pub mod choose_one;
+pub mod choice_layout;
+pub mod choice_render;
 pub mod input_table;
 pub mod text_area_input;
 pub mod text_input;
