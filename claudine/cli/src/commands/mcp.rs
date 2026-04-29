@@ -8,7 +8,6 @@ use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::terminal::Terminal;
 use chrono::Utc;
 use clap::{Args, Subcommand, ValueEnum};
-use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::linking::resolve_repo_root;
 use claudine::mcp::catalog::McpCatalogStore;
 use claudine::mcp::defaults::{
@@ -22,6 +21,7 @@ use claudine::mcp::types::{
     repo_defaults_path,
 };
 use claudine::mcp::validation::{ValidationSeverity, validate_state};
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use color_eyre::eyre::{Result, eyre};
 use inquire::{Confirm, MultiSelect, Select, Text};
 use serde_json::{Value, json};

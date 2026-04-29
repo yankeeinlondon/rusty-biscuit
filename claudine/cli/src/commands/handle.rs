@@ -8,9 +8,9 @@ use tracing::{debug, info_span};
 
 use claudine::events::detect_environment_fast;
 
-use claudine::provider::Provider;
 use crate::cli_utils::parse_provider;
 use crate::provider_values::provider_value_parser;
+use claudine::provider::Provider;
 
 /// Default overall execution deadline for a single `claudine handle` invocation.
 ///

@@ -39,9 +39,9 @@
 use std::ffi::OsString;
 use std::sync::LazyLock;
 
-use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use crate::commands::compose::ComposeArgs;
 use crate::commands::sequence::SequenceArgs;
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 /// Wrapper subcommands that hand off to an external agent CLI.
 pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
