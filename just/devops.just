@@ -199,3 +199,10 @@ status subject="":
     matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
     eza "${matched}" -lga --hyperlink
 
+
+_coverage pkg *args="":
+    @echo
+    @echo "🏃‍♂️ running coverage tests for {{bold}}{{pkg}}{{reset}} package"
+    @echo
+    @cargo llvm-cov -p "{{pkg}}" {{args}}
+    @echo

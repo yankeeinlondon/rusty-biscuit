@@ -17,6 +17,8 @@ cyan := '\033[36m'
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
+[arg("spec", long="spec")]
+[arg("design", long="design")]
 review feat="" agent="" spec="" design="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -185,7 +187,13 @@ review feat="" agent="" spec="" design="":
         echo
         exit 0
     fi
-    just implement-feature-review review="${review}" spec="${spec_file}" design="${design_file}"
+    echo -e "Running the {{bold}}implement-feature-review{{reset}} recipe for:"
+    echo -e "  - Review: {{blue}}$(just _link "${review}"){{reset}}"
+    echo -e "  - Specification File: {{blue}}$(just _link "${spec_file}"){{reset}}"
+    if [[ ! -z "${design_file}" ]]; then
+        echo -e "  - Design File: {{blue}}$(just _link "${design_file}"){{reset}}"
+    fi
+    just implement-feature-review --review="${review}" --spec="${spec_file}" --design="${design_file}"
 
 
 # implement a review that was conducted (not a feature review)
@@ -210,7 +218,10 @@ implement-review filter="":
 
 
 # implements the suggestions from a review of a feature or fix
-implement-feature-review review="" filter="" spec="" design="" agent="":
+[arg("review", long="review")]
+[arg("spec", long="spec")]
+[arg("design", long="design")]
+implement-feature-review filter="" review="" spec="" design="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo -e "Preparing to {{italic}}implement{{reset}} all of suggestions from a review."
@@ -297,7 +308,11 @@ implement-feature-review review="" filter="" spec="" design="" agent="":
             echo -e "Ok bye"
             exit 0
         fi
-        just review
+        echo -e "Starting the {{bold}}review{{reset}} recipe with:"
+        echo -e "  - Specification: $(just _link "${spec_file}")"
+        if [[ ! -z "${design_file}" ]]; then
+            echo -e "  - Design: $(just _link "${design_file}")"
+        just review --spec="${spec_file}" --design="${design_file}"
 
     else
         echo
@@ -306,7 +321,6 @@ implement-feature-review review="" filter="" spec="" design="" agent="":
         just _speak "An implementation of review suggestions in "$(sniff repo package-area)" package area has failed!"
         exit 1
     fi
-
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.
