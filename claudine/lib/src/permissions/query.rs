@@ -1,6 +1,5 @@
 use std::path::{Component, Path, PathBuf};
 
-use crate::provider::Provider;
 use super::canonical::{
     CanonicalPolicy, MappingFidelity, PolicyCertainty, PolicyEffect, PolicyWarning, TernaryState,
 };
@@ -9,6 +8,7 @@ use super::explain::{ExplanationReason, PolicyExplanation};
 use super::matchers;
 use super::matchers::PathClassification;
 use super::native::{NativeEffectivePolicy, ProviderCliOverrides};
+use crate::provider::{Provider, provider_info};
 
 // --- Query types ---
 
@@ -1077,30 +1077,18 @@ fn finalize_result(policy: &CanonicalPolicy, mut result: QueryResult) -> QueryRe
 /// - **Qwen**: `--allowed-mcp-server-names`, `--allowed-tools`, `--excluded-tools`,
 ///   `--sandbox` affect MCP, commands, and runtime.
 fn is_cli_sensitive(provider: Provider, query: &PolicyQuery) -> bool {
-    match provider {
-        Provider::Claude => true,
-        Provider::Codex => matches!(
-            query,
-            PolicyQuery::ReadPath(_)
-                | PolicyQuery::WritePath(_)
-                | PolicyQuery::TraversePath(_)
-                | PolicyQuery::ExecuteCommand(_)
-                | PolicyQuery::AccessDomain(_)
-                | PolicyQuery::ModifyProviderConfig
-        ),
-        Provider::Gemini => matches!(
-            query,
-            PolicyQuery::ExecuteCommand(_) | PolicyQuery::ModifyProviderConfig
-        ),
-        Provider::OpenCode => matches!(query, PolicyQuery::ModifyProviderConfig),
-        Provider::QwenCode => matches!(
-            query,
-            PolicyQuery::ExecuteCommand(_)
-                | PolicyQuery::UseMcpServer { .. }
-                | PolicyQuery::UseMcpTool { .. }
-                | PolicyQuery::ModifyProviderConfig
-        ),
-        _ => false,
+    let axes = provider_info(provider).cli_sensitive_axes;
+    match query {
+        PolicyQuery::ReadPath(_) => axes.read_path,
+        PolicyQuery::WritePath(_) => axes.write_path,
+        PolicyQuery::TraversePath(_) => axes.traverse_path,
+        PolicyQuery::ExecuteCommand(_) => axes.execute_command,
+        PolicyQuery::AccessDomain(_) => axes.access_domain,
+        PolicyQuery::UseMcpServer { .. } => axes.use_mcp_server,
+        PolicyQuery::UseMcpTool { .. } => axes.use_mcp_tool,
+        PolicyQuery::SpawnSubagent { .. } => axes.spawn_subagent,
+        PolicyQuery::SwitchMode { .. } => axes.switch_mode,
+        PolicyQuery::ModifyProviderConfig => axes.modify_provider_config,
     }
 }
 

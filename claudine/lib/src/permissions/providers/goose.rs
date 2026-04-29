@@ -3,7 +3,6 @@ use std::fs;
 use biscuit_file::serde_yaml_ng;
 
 use crate::error::{ClaudineError, Result};
-use crate::provider::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalPolicy, CanonicalRuleProvenance, PathProtectionRule, PolicyMode, PolicyWarning,
@@ -14,6 +13,7 @@ use crate::permissions::mutation::PolicyMutationPlan;
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone)]
 enum GooseLayerData {

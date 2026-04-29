@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 use tracing::info_span;
 
-use crate::error::{ClaudineError, Result};
-use crate::provider::Provider;
 use super::backend::{BackendCapabilities, ProviderPolicyBackend};
 use super::change::PolicyChange;
 use super::context::{CliPolicyInput, PolicyContext};
@@ -13,6 +11,8 @@ use super::providers::{
     KimiPolicyBackend, OpenCodePolicyBackend, QwenPolicyBackend, RooPolicyBackend,
 };
 use super::query::{ConfiguredPolicySnapshot, EffectivePolicySnapshot};
+use crate::error::{ClaudineError, Result};
+use crate::provider::Provider;
 
 /// Cross-provider permission policy engine.
 ///

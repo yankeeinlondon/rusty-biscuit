@@ -1,10 +1,10 @@
-use crate::error::Result;
-use crate::provider::Provider;
 use super::canonical::CanonicalPolicy;
 use super::change::PolicyChange;
 use super::context::{CliPolicyInput, PolicyContext};
 use super::mutation::PolicyMutationPlan;
 use super::native::{NativeEffectivePolicy, NativePolicyLayer, PolicySource, ProviderCliOverrides};
+use crate::error::Result;
+use crate::provider::Provider;
 
 /// Trait implemented by provider-specific policy backends.
 ///

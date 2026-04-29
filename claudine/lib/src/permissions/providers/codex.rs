@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use toml_edit::{Array, DocumentMut, Item, value};
 
 use crate::error::{ClaudineError, Result};
-use crate::provider::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
@@ -22,6 +21,7 @@ use crate::permissions::mutation::{
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone, Default)]
 struct CodexProfile {

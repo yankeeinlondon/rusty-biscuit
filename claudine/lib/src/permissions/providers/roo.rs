@@ -7,7 +7,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::error::{ClaudineError, Result};
-use crate::provider::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CommandAccessRule,
@@ -23,6 +22,7 @@ use crate::permissions::mutation::{
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 const ROO_PROTECTED_PATTERNS: &[&str] = &[
     ".rooignore",
