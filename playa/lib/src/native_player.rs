@@ -32,6 +32,56 @@ use crate::types::{AudioFileFormat, AudioFormat, Codec, PlaybackOptions};
 /// should use a host player (mpv, ffplay, etc.).
 const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Default time without forward playback progress before the device is
+/// considered wedged.
+const DEFAULT_STALL_WINDOW: Duration = Duration::from_secs(5);
+
+/// Reads `PLAYA_PLAYBACK_STALL_SECONDS` from the environment.
+///
+/// Returns the parsed duration, or [`DEFAULT_STALL_WINDOW`] if the var
+/// is unset, empty, or invalid.  Invalid values emit a single
+/// `tracing::warn!`.
+fn resolved_stall_window() -> Duration {
+    match std::env::var("PLAYA_PLAYBACK_STALL_SECONDS") {
+        Ok(raw) if !raw.is_empty() => match raw.parse::<u64>() {
+            Ok(secs) if secs > 0 => Duration::from_secs(secs),
+            _ => {
+                tracing::warn!(
+                    raw = %raw,
+                    "PLAYA_PLAYBACK_STALL_SECONDS is not a positive integer; using default"
+                );
+                DEFAULT_STALL_WINDOW
+            }
+        },
+        _ => DEFAULT_STALL_WINDOW,
+    }
+}
+
+/// Minimal player surface used by the progress-aware wait loop.
+///
+/// Extracted as a trait so the wait logic can be tested with a fake
+/// player whose progress and emptiness are scriptable.
+trait PlayerProgress {
+    /// Returns true once all queued audio has finished playing.
+    fn empty(&self) -> bool;
+    /// Returns the current playback position.
+    fn get_pos(&self) -> Duration;
+    /// Stops playback and clears the queue.
+    fn stop(&self);
+}
+
+impl PlayerProgress for Player {
+    fn empty(&self) -> bool {
+        Player::empty(self)
+    }
+    fn get_pos(&self) -> Duration {
+        Player::get_pos(self)
+    }
+    fn stop(&self) {
+        Player::stop(self);
+    }
+}
+
 /// Open an audio output stream with a timeout.
 ///
 /// Resolves an optional requested channel and opens the requested or default
