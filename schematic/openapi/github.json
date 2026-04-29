@@ -1003,6 +1003,17 @@
             "description": "API URL for issue resource.",
             "type": "string"
           },
+          "labels": {
+            "description": "Labels applied to the PR.\n\nGitHub returns labels on PRs through the same `labels` array shape\nused by issues. The list endpoint includes this field by default,\nbut `#[serde(default)]` keeps older fixtures (or alternative APIs\nthat omit it) deserializable.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/IssueLabel"
+                }
+              ]
+            }
+          },
           "merged_at": {
             "description": "Merge timestamp (if merged).",
             "type": "string"

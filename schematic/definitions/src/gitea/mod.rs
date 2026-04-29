@@ -92,6 +92,7 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<Vec<IssueComment>>("Vec<IssueComment>")
         .register::<TimelineEvent>("TimelineEvent")
         .register::<Vec<TimelineEvent>>("Vec<TimelineEvent>")
+        .register::<Label>("Label")
         .register::<RepoTag>("RepoTag")
         .register::<Vec<RepoTag>>("Vec<RepoTag>")
         .register::<Release>("Release")
@@ -446,9 +447,10 @@ mod tests {
         assert!(registry.get("Vec<PullRequestSummary>").is_some());
         assert!(registry.get("IssueSummary").is_some());
         assert!(registry.get("Vec<IssueSummary>").is_some());
+        assert!(registry.get("Label").is_some());
         assert!(registry.get("RepoTag").is_some());
         assert!(registry.get("Release").is_some());
-        assert_eq!(registry.len(), 20);
+        assert_eq!(registry.len(), 21);
     }
 
     #[test]
@@ -465,11 +467,12 @@ mod tests {
         let registry = openapi_registry();
         let openapi_schemas = registry.to_openapi_schemas();
 
-        assert_eq!(openapi_schemas.len(), 20);
+        assert_eq!(openapi_schemas.len(), 21);
         assert!(openapi_schemas.contains_key("RepositoryInfo"));
         assert!(openapi_schemas.contains_key("PullRequestSummary"));
         assert!(openapi_schemas.contains_key("Vec<PullRequestSummary>"));
         assert!(openapi_schemas.contains_key("IssueSummary"));
+        assert!(openapi_schemas.contains_key("Label"));
     }
 
     // =============================================

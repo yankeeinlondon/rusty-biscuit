@@ -3066,3 +3066,20 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
         "stderr should contain performance timing text, got:\n{stderr}"
     );
 }
+
+// ============================================================================
+// `repo pr` Subcommand Tests
+// ============================================================================
+
+#[test]
+fn test_repo_pr_help_documents_bitbucket_draft_limitation() {
+    // The --status flag's help text must call out the Bitbucket draft
+    // limitation so users know `--status draft` returns nothing for
+    // Bitbucket-hosted repositories.
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "pr", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--status"))
+        .stdout(predicate::str::contains("Bitbucket"));
+}
