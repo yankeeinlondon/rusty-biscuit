@@ -1,7 +1,12 @@
-//! Source resolution for choice option strings.
+//! Source resolution for choice options.
 //!
 //! This module turns the various CLI source flags into a flat
-//! `Vec<String>` of raw option strings, ready for normalization.
+//! `Vec<RawOption>` of typed records, ready for normalization. Each
+//! `RawOption` preserves the structured fields that object-shaped
+//! sources (JSON/YAML/TOML/CSV/markdown frontmatter object arrays) can
+//! supply, so downstream normalization sees the original `label`,
+//! `value`, `hotkey`, and `disabled` fields without lossy
+//! re-encoding through `format!("{}::{}", ...)`.
 
 use std::fs;
 use std::io::{self, IsTerminal, Read};
@@ -28,6 +33,56 @@ pub enum SourceError {
     MdPropNotArray { prop: String },
 }
 
+/// Typed raw option record produced by source resolution.
+///
+/// String-shaped sources (positional args, `--csv`, `--list`, plain
+/// string array entries) populate only `label`. Object-shaped sources
+/// (JSON/YAML/TOML object arrays, multi-column CSV rows, markdown
+/// frontmatter object arrays) preserve `value`, `hotkey`, and the
+/// optional `disabled` flag end-to-end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawOption {
+    /// Display text for the option.
+    pub label: String,
+    /// Optional explicit value. When `None`, downstream normalization
+    /// derives the value from the label (after applying `::` splitting
+    /// and value conventions).
+    pub value: Option<String>,
+    /// Optional explicit hotkey, encoded as a string such as
+    /// `"CTRL+R"`, `"ALT+B"`, or `"OPT+B"`. When `None`, the prefix
+    /// parser in `choice_normalize` may still extract a hotkey from a
+    /// `[CTRL+X]` prefix on the label.
+    pub hotkey: Option<String>,
+    /// Optional disabled flag. When `Some(true)`, the option is
+    /// rendered as disabled.
+    pub disabled: Option<bool>,
+}
+
+impl RawOption {
+    /// Constructs a `RawOption` carrying only a label (the common case
+    /// for string-shaped sources).
+    pub fn from_label(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: None,
+            hotkey: None,
+            disabled: None,
+        }
+    }
+}
+
+impl From<String> for RawOption {
+    fn from(label: String) -> Self {
+        Self::from_label(label)
+    }
+}
+
+impl From<&str> for RawOption {
+    fn from(label: &str) -> Self {
+        Self::from_label(label.to_string())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn resolve_raw_options(
     csv: Option<&str>,
@@ -38,7 +93,7 @@ pub fn resolve_raw_options(
     options_from_file: Option<&Path>,
     options_from_dictionary: Option<&Path>,
     positional: Vec<String>,
-) -> Result<Vec<String>, SourceError> {
+) -> Result<Vec<RawOption>, SourceError> {
     let mut source_count = 0;
     if csv.is_some() {
         source_count += 1;
@@ -93,7 +148,7 @@ pub fn resolve_raw_options(
         return parse_dictionary(&body);
     }
     if !positional.is_empty() {
-        return Ok(positional);
+        return Ok(positional.into_iter().map(RawOption::from).collect());
     }
 
     if io::stdin().is_terminal() {
@@ -108,27 +163,27 @@ pub fn resolve_raw_options(
     Ok(lines)
 }
 
-fn parse_csv(csv: &str) -> Vec<String> {
+fn parse_csv(csv: &str) -> Vec<RawOption> {
     csv.split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(str::to_string)
+        .map(RawOption::from)
         .collect()
 }
 
-fn parse_list(text: &str) -> Vec<String> {
+fn parse_list(text: &str) -> Vec<RawOption> {
     text.lines()
         .map(|line| line.trim_end_matches('\r'))
         .filter(|line| !line.is_empty())
-        .map(str::to_string)
+        .map(RawOption::from)
         .collect()
 }
 
-fn parse_rows(text: &str) -> Vec<String> {
+fn parse_rows(text: &str) -> Vec<RawOption> {
     parse_list(text)
 }
 
-fn parse_file(path: &Path) -> Result<Vec<String>, SourceError> {
+fn parse_file(path: &Path) -> Result<Vec<RawOption>, SourceError> {
     let body = fs::read_to_string(path)?;
     let ext = path
         .extension()
@@ -155,13 +210,13 @@ fn parse_file(path: &Path) -> Result<Vec<String>, SourceError> {
     }
 }
 
-fn parse_json(body: &str) -> Result<Vec<String>, SourceError> {
+fn parse_json(body: &str) -> Result<Vec<RawOption>, SourceError> {
     let value: JsonValue =
         serde_json::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
     extract_string_array(&value)
 }
 
-fn parse_jsonl(body: &str) -> Result<Vec<String>, SourceError> {
+fn parse_jsonl(body: &str) -> Result<Vec<RawOption>, SourceError> {
     let mut results = Vec::new();
     for line in body.lines() {
         let line = line.trim();
@@ -171,17 +226,9 @@ fn parse_jsonl(body: &str) -> Result<Vec<String>, SourceError> {
         let value: JsonValue =
             serde_json::from_str(line).map_err(|e| SourceError::Parse(e.to_string()))?;
         match value {
-            JsonValue::String(s) => results.push(s),
-            JsonValue::Object(mut map) => {
-                if let Some(JsonValue::String(label)) = map.remove("label") {
-                    results.push(label);
-                } else if let Some(JsonValue::String(value)) = map.remove("value") {
-                    results.push(value);
-                } else {
-                    return Err(SourceError::Parse(
-                        "JSONL object must have a 'label' or 'value' field".into(),
-                    ));
-                }
+            JsonValue::String(s) => results.push(RawOption::from(s)),
+            JsonValue::Object(map) => {
+                results.push(json_object_to_raw_option(&map)?);
             }
             _ => {
                 return Err(SourceError::Parse(
@@ -193,110 +240,202 @@ fn parse_jsonl(body: &str) -> Result<Vec<String>, SourceError> {
     Ok(results)
 }
 
-fn parse_yaml(body: &str) -> Result<Vec<String>, SourceError> {
+fn parse_yaml(body: &str) -> Result<Vec<RawOption>, SourceError> {
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
     extract_yaml_string_array(&value)
 }
 
-fn parse_toml(body: &str) -> Result<Vec<String>, SourceError> {
+fn parse_toml(body: &str) -> Result<Vec<RawOption>, SourceError> {
     let value: toml::Value = toml::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
     extract_toml_string_array(&value)
 }
 
-fn parse_csv_file(body: &str) -> Result<Vec<String>, SourceError> {
+fn parse_csv_file(body: &str) -> Result<Vec<RawOption>, SourceError> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(false)
         .from_reader(body.as_bytes());
     let mut results = Vec::new();
     for record in reader.records() {
         let record = record.map_err(|e| SourceError::Parse(e.to_string()))?;
-        if record.len() >= 2 {
-            results.push(format!("{}::{}", record[0].trim(), record[1].trim()));
-        } else if record.len() == 1 {
-            results.push(record[0].trim().to_string());
+        match record.len() {
+            0 => {}
+            1 => results.push(RawOption::from_label(record[0].trim())),
+            2 => results.push(RawOption {
+                label: record[0].trim().to_string(),
+                value: Some(record[1].trim().to_string()),
+                hotkey: None,
+                disabled: None,
+            }),
+            _ => {
+                let hotkey = record[2].trim();
+                results.push(RawOption {
+                    label: record[0].trim().to_string(),
+                    value: Some(record[1].trim().to_string()),
+                    hotkey: if hotkey.is_empty() {
+                        None
+                    } else {
+                        Some(hotkey.to_string())
+                    },
+                    disabled: None,
+                });
+            }
         }
     }
     Ok(results)
 }
 
-fn extract_string_array(value: &JsonValue) -> Result<Vec<String>, SourceError> {
+fn extract_string_array(value: &JsonValue) -> Result<Vec<RawOption>, SourceError> {
     let arr = value.as_array().ok_or(SourceError::NotAnArray)?;
     let mut results = Vec::new();
     for item in arr {
         match item {
-            JsonValue::String(s) => results.push(s.clone()),
+            JsonValue::String(s) => results.push(RawOption::from(s.clone())),
             JsonValue::Object(map) => {
-                if let Some(JsonValue::String(label)) = map.get("label") {
-                    results.push(label.clone());
-                } else if let Some(JsonValue::String(value)) = map.get("value") {
-                    results.push(value.clone());
-                } else {
-                    return Err(SourceError::Parse(
-                        "JSON object must have a 'label' or 'value' field".into(),
-                    ));
-                }
+                results.push(json_object_to_raw_option(map)?);
             }
-            other => results.push(other.to_string()),
+            other => results.push(RawOption::from(other.to_string())),
         }
     }
     Ok(results)
 }
 
-fn extract_yaml_string_array(value: &serde_yaml_ng::Value) -> Result<Vec<String>, SourceError> {
+fn json_object_to_raw_option(
+    map: &serde_json::Map<String, JsonValue>,
+) -> Result<RawOption, SourceError> {
+    let label = match (map.get("label"), map.get("value")) {
+        (Some(JsonValue::String(label)), _) => label.clone(),
+        (None, Some(JsonValue::String(value))) => value.clone(),
+        _ => {
+            return Err(SourceError::Parse(
+                "JSON object must have a 'label' or 'value' field".into(),
+            ));
+        }
+    };
+    let value = match map.get("value") {
+        Some(JsonValue::String(s)) => Some(s.clone()),
+        Some(JsonValue::Null) | None => None,
+        Some(other) => Some(other.to_string()),
+    };
+    let hotkey = match map.get("hotkey") {
+        Some(JsonValue::String(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    };
+    let disabled = match map.get("disabled") {
+        Some(JsonValue::Bool(b)) => Some(*b),
+        _ => None,
+    };
+    Ok(RawOption {
+        label,
+        value,
+        hotkey,
+        disabled,
+    })
+}
+
+fn extract_yaml_string_array(value: &serde_yaml_ng::Value) -> Result<Vec<RawOption>, SourceError> {
     let arr = value.as_sequence().ok_or(SourceError::NotAnArray)?;
     let mut results = Vec::new();
     for item in arr {
         match item {
-            serde_yaml_ng::Value::String(s) => results.push(s.clone()),
+            serde_yaml_ng::Value::String(s) => results.push(RawOption::from(s.clone())),
             serde_yaml_ng::Value::Mapping(map) => {
-                if let Some(serde_yaml_ng::Value::String(label)) =
-                    map.get(serde_yaml_ng::Value::String("label".into()))
-                {
-                    results.push(label.clone());
-                } else if let Some(serde_yaml_ng::Value::String(value)) =
-                    map.get(serde_yaml_ng::Value::String("value".into()))
-                {
-                    results.push(value.clone());
-                } else {
-                    return Err(SourceError::Parse(
-                        "YAML object must have a 'label' or 'value' field".into(),
-                    ));
-                }
+                results.push(yaml_mapping_to_raw_option(map)?);
             }
             other => {
                 let s = serde_yaml_ng::to_string(other).unwrap_or_default();
-                results.push(s.trim().to_string());
+                results.push(RawOption::from(s.trim().to_string()));
             }
         }
     }
     Ok(results)
 }
 
-fn extract_toml_string_array(value: &toml::Value) -> Result<Vec<String>, SourceError> {
+fn yaml_mapping_to_raw_option(map: &serde_yaml_ng::Mapping) -> Result<RawOption, SourceError> {
+    let label_key = serde_yaml_ng::Value::String("label".into());
+    let value_key = serde_yaml_ng::Value::String("value".into());
+    let hotkey_key = serde_yaml_ng::Value::String("hotkey".into());
+    let disabled_key = serde_yaml_ng::Value::String("disabled".into());
+
+    let label = match (map.get(&label_key), map.get(&value_key)) {
+        (Some(serde_yaml_ng::Value::String(label)), _) => label.clone(),
+        (None, Some(serde_yaml_ng::Value::String(value))) => value.clone(),
+        _ => {
+            return Err(SourceError::Parse(
+                "YAML object must have a 'label' or 'value' field".into(),
+            ));
+        }
+    };
+    let value = match map.get(&value_key) {
+        Some(serde_yaml_ng::Value::String(s)) => Some(s.clone()),
+        Some(serde_yaml_ng::Value::Null) | None => None,
+        Some(other) => Some(yaml_value_to_string(other)),
+    };
+    let hotkey = match map.get(&hotkey_key) {
+        Some(serde_yaml_ng::Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    };
+    let disabled = match map.get(&disabled_key) {
+        Some(serde_yaml_ng::Value::Bool(b)) => Some(*b),
+        _ => None,
+    };
+    Ok(RawOption {
+        label,
+        value,
+        hotkey,
+        disabled,
+    })
+}
+
+fn extract_toml_string_array(value: &toml::Value) -> Result<Vec<RawOption>, SourceError> {
     let arr = value.as_array().ok_or(SourceError::NotAnArray)?;
     let mut results = Vec::new();
     for item in arr {
         match item {
-            toml::Value::String(s) => results.push(s.clone()),
+            toml::Value::String(s) => results.push(RawOption::from(s.clone())),
             toml::Value::Table(map) => {
-                if let Some(toml::Value::String(label)) = map.get("label") {
-                    results.push(label.clone());
-                } else if let Some(toml::Value::String(value)) = map.get("value") {
-                    results.push(value.clone());
-                } else {
-                    return Err(SourceError::Parse(
-                        "TOML object must have a 'label' or 'value' field".into(),
-                    ));
-                }
+                results.push(toml_table_to_raw_option(map)?);
             }
-            other => results.push(other.to_string()),
+            other => results.push(RawOption::from(other.to_string())),
         }
     }
     Ok(results)
 }
 
-fn parse_markdown_list(body: &str) -> Vec<String> {
+fn toml_table_to_raw_option(
+    map: &toml::map::Map<String, toml::Value>,
+) -> Result<RawOption, SourceError> {
+    let label = match (map.get("label"), map.get("value")) {
+        (Some(toml::Value::String(label)), _) => label.clone(),
+        (None, Some(toml::Value::String(value))) => value.clone(),
+        _ => {
+            return Err(SourceError::Parse(
+                "TOML object must have a 'label' or 'value' field".into(),
+            ));
+        }
+    };
+    let value = match map.get("value") {
+        Some(toml::Value::String(s)) => Some(s.clone()),
+        None => None,
+        Some(other) => Some(other.to_string()),
+    };
+    let hotkey = match map.get("hotkey") {
+        Some(toml::Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    };
+    let disabled = match map.get("disabled") {
+        Some(toml::Value::Boolean(b)) => Some(*b),
+        _ => None,
+    };
+    Ok(RawOption {
+        label,
+        value,
+        hotkey,
+        disabled,
+    })
+}
+
+fn parse_markdown_list(body: &str) -> Vec<RawOption> {
     body.lines()
         .filter_map(|line| {
             let trimmed = line.trim_start();
@@ -305,14 +444,14 @@ fn parse_markdown_list(body: &str) -> Vec<String> {
                 if value.is_empty() {
                     return None;
                 }
-                return Some(value.to_string());
+                return Some(RawOption::from(value.to_string()));
             }
             if let Some(rest) = strip_numbered_prefix(trimmed) {
                 let value = rest.trim();
                 if value.is_empty() {
                     return None;
                 }
-                return Some(value.to_string());
+                return Some(RawOption::from(value.to_string()));
             }
             None
         })
@@ -340,7 +479,7 @@ fn strip_numbered_prefix(line: &str) -> Option<&str> {
     Some(rest)
 }
 
-fn parse_dictionary(body: &str) -> Result<Vec<String>, SourceError> {
+fn parse_dictionary(body: &str) -> Result<Vec<RawOption>, SourceError> {
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
     let mapping = match value {
@@ -357,9 +496,14 @@ fn parse_dictionary(body: &str) -> Result<Vec<String>, SourceError> {
             let label = yaml_value_to_string(&key);
             let val = yaml_value_to_string(&value);
             if label == val {
-                label
+                RawOption::from_label(label)
             } else {
-                format!("{}::{}", label, val)
+                RawOption {
+                    label,
+                    value: Some(val),
+                    hotkey: None,
+                    disabled: None,
+                }
             }
         })
         .collect())
@@ -378,7 +522,7 @@ fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {
     }
 }
 
-fn parse_md(path: &Path, prop: &str) -> Result<Vec<String>, SourceError> {
+fn parse_md(path: &Path, prop: &str) -> Result<Vec<RawOption>, SourceError> {
     let body = fs::read_to_string(path)?;
     // Extract frontmatter between --- delimiters
     let trimmed = body.trim_start();
@@ -415,22 +559,27 @@ fn parse_md(path: &Path, prop: &str) -> Result<Vec<String>, SourceError> {
 mod tests {
     use super::*;
 
+    fn labels(items: &[RawOption]) -> Vec<&str> {
+        items.iter().map(|o| o.label.as_str()).collect()
+    }
+
     #[test]
     fn parse_csv_splits_and_trims() {
         let result = parse_csv("Red, Green , Blue");
-        assert_eq!(result, vec!["Red", "Green", "Blue"]);
+        assert_eq!(labels(&result), vec!["Red", "Green", "Blue"]);
+        assert!(result.iter().all(|o| o.value.is_none()));
     }
 
     #[test]
     fn parse_csv_drops_empty() {
         let result = parse_csv("a, ,b,");
-        assert_eq!(result, vec!["a", "b"]);
+        assert_eq!(labels(&result), vec!["a", "b"]);
     }
 
     #[test]
     fn parse_list_splits_lines() {
         let result = parse_list("alpha\nbeta\n\ngamma\n");
-        assert_eq!(result, vec!["alpha", "beta", "gamma"]);
+        assert_eq!(labels(&result), vec!["alpha", "beta", "gamma"]);
     }
 
     #[test]
@@ -439,7 +588,7 @@ mod tests {
         let path = dir.join("test_options.json");
         std::fs::write(&path, r#"["Red", "Green", "Blue"]"#).unwrap();
         let result = parse_file(&path).unwrap();
-        assert_eq!(result, vec!["Red", "Green", "Blue"]);
+        assert_eq!(labels(&result), vec!["Red", "Green", "Blue"]);
         std::fs::remove_file(&path).unwrap();
     }
 
@@ -449,12 +598,12 @@ mod tests {
         let path = dir.join("test_options.yaml");
         std::fs::write(&path, "- Red\n- Green\n- Blue\n").unwrap();
         let result = parse_file(&path).unwrap();
-        assert_eq!(result, vec!["Red", "Green", "Blue"]);
+        assert_eq!(labels(&result), vec!["Red", "Green", "Blue"]);
         std::fs::remove_file(&path).unwrap();
     }
 
     #[test]
-    fn parse_file_toml_array() {
+    fn parse_file_toml_array_top_level_must_be_table() {
         let dir = std::env::temp_dir();
         let path = dir.join("test_options.toml");
         std::fs::write(&path, "options = [\"Red\", \"Green\", \"Blue\"]\n").unwrap();
@@ -469,7 +618,7 @@ mod tests {
     fn resolve_raw_options_csv_source() {
         let result =
             resolve_raw_options(Some("a,b,c"), None, None, None, None, None, None, vec![]).unwrap();
-        assert_eq!(result, vec!["a", "b", "c"]);
+        assert_eq!(labels(&result), vec!["a", "b", "c"]);
     }
 
     #[test]
@@ -488,12 +637,195 @@ mod tests {
     }
 
     #[test]
-    fn parse_md_frontmatter() {
+    fn parse_md_frontmatter_string_array() {
         let dir = std::env::temp_dir();
-        let path = dir.join("test_options.md");
+        let path = dir.join("test_options_string.md");
         std::fs::write(&path, "---\nitems:\n  - Red\n  - Green\n---\n# Hello\n").unwrap();
         let result = parse_md(&path, "items").unwrap();
-        assert_eq!(result, vec!["Red", "Green"]);
+        assert_eq!(labels(&result), vec!["Red", "Green"]);
         std::fs::remove_file(&path).unwrap();
+    }
+
+    // --- Phase 3: object-record preservation tests ----------------
+
+    #[test]
+    fn json_array_of_objects_preserves_label_value_hotkey() {
+        let body = r#"[{"label":"Red","value":"apple","hotkey":"CTRL+R"}]"#;
+        let result = parse_json(body).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+    }
+
+    #[test]
+    fn json_array_of_objects_preserves_disabled_flag() {
+        let body = r#"[{"label":"Red","value":"r","disabled":true}]"#;
+        let result = parse_json(body).unwrap();
+        assert_eq!(result[0].disabled, Some(true));
+    }
+
+    #[test]
+    fn json_string_array_yields_label_only_options() {
+        let body = r#"["Red","Green"]"#;
+        let result = parse_json(body).unwrap();
+        assert_eq!(labels(&result), vec!["Red", "Green"]);
+        assert!(result.iter().all(|o| o.value.is_none()));
+        assert!(result.iter().all(|o| o.hotkey.is_none()));
+    }
+
+    #[test]
+    fn json_object_with_only_value_uses_value_as_label() {
+        let body = r#"[{"value":"apple"}]"#;
+        let result = parse_json(body).unwrap();
+        assert_eq!(result[0].label, "apple");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+    }
+
+    #[test]
+    fn jsonl_object_preserves_value_and_hotkey() {
+        let body = "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n{\"label\":\"Blue\",\"value\":\"sky\",\"hotkey\":\"ALT+B\"}\n";
+        let result = parse_jsonl(body).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert_eq!(result[1].hotkey.as_deref(), Some("ALT+B"));
+    }
+
+    #[test]
+    fn ndjson_object_preserves_value_and_hotkey() {
+        // NDJSON is the same wire format as JSONL for our purposes.
+        let body = "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n";
+        let result = parse_jsonl(body).unwrap();
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+    }
+
+    #[test]
+    fn yaml_array_of_mappings_preserves_value_and_hotkey() {
+        let body = "- label: Red\n  value: apple\n  hotkey: CTRL+R\n- label: Blue\n  value: sky\n  hotkey: ALT+B\n";
+        let result = parse_yaml(body).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert_eq!(result[1].hotkey.as_deref(), Some("ALT+B"));
+    }
+
+    #[test]
+    fn yaml_array_of_mappings_preserves_disabled() {
+        let body = "- label: Red\n  value: r\n  disabled: true\n";
+        let result = parse_yaml(body).unwrap();
+        assert_eq!(result[0].disabled, Some(true));
+    }
+
+    #[test]
+    fn toml_table_preserves_value_and_hotkey() {
+        let body = "[[options]]\nlabel = \"Red\"\nvalue = \"apple\"\nhotkey = \"CTRL+R\"\n[[options]]\nlabel = \"Blue\"\nvalue = \"sky\"\nhotkey = \"ALT+B\"\n";
+        // Full TOML is wrapped under `options`; tests for this go via `parse_file` with extension dispatch,
+        // but `parse_toml` itself takes the raw `Value`. Provide a minimal table-of-options under a key.
+        // For this test we instead use a direct array under a key and access via a wrapper file.
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_options_objects.toml");
+        std::fs::write(&path, body).unwrap();
+        // top-level is a table containing `options` array; calling parse_toml on the wrapper fails because
+        // we want an array. Instead use parse_file with custom call: it returns NotAnArray since the top-level
+        // of TOML files cannot be a bare array. We must encode the array under a known top-level vector.
+        // For this test, we wrap by reading body directly and stripping the table header to get an array.
+        let _ = std::fs::remove_file(&path);
+
+        // Direct test: wrap the array as a TOML array of inline tables.
+        let body2 = "options = [{ label = \"Red\", value = \"apple\", hotkey = \"CTRL+R\" }, { label = \"Blue\", value = \"sky\", hotkey = \"ALT+B\" }]\n";
+        let value: toml::Value = toml::from_str(body2).unwrap();
+        let arr = value.get("options").unwrap();
+        let result = extract_toml_string_array(arr).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert_eq!(result[1].hotkey.as_deref(), Some("ALT+B"));
+    }
+
+    #[test]
+    fn csv_three_columns_preserves_value_and_hotkey() {
+        let body = "Red,apple,CTRL+R\nBlue,sky,ALT+B\n";
+        let result = parse_csv_file(body).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert_eq!(result[1].hotkey.as_deref(), Some("ALT+B"));
+    }
+
+    #[test]
+    fn csv_two_columns_preserves_value_no_hotkey() {
+        let body = "Red,apple\nBlue,sky\n";
+        let result = parse_csv_file(body).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert!(result[0].hotkey.is_none());
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert!(result[1].hotkey.is_none());
+    }
+
+    #[test]
+    fn csv_one_column_yields_label_only() {
+        let body = "Red\nBlue\n";
+        let result = parse_csv_file(body).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert!(result[0].value.is_none());
+    }
+
+    #[test]
+    fn non_array_top_level_returns_invalid_source_shape() {
+        // JSON top-level object (not an array) must fail with NotAnArray.
+        let body = r#"{"label":"Red"}"#;
+        let result = parse_json(body);
+        assert!(matches!(result, Err(SourceError::NotAnArray)));
+    }
+
+    #[test]
+    fn markdown_frontmatter_object_array_preserves_value_and_hotkey() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_options_object_array.md");
+        let body = "---\nitems:\n  - label: Red\n    value: apple\n    hotkey: CTRL+R\n  - label: Blue\n    value: sky\n    hotkey: ALT+B\n---\n# Hello\n";
+        std::fs::write(&path, body).unwrap();
+        let result = parse_md(&path, "items").unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert_eq!(result[1].hotkey.as_deref(), Some("ALT+B"));
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn raw_option_from_string_label_only() {
+        let opt: RawOption = "Red".to_string().into();
+        assert_eq!(opt.label, "Red");
+        assert!(opt.value.is_none());
+        assert!(opt.hotkey.is_none());
+        assert!(opt.disabled.is_none());
+    }
+
+    #[test]
+    fn raw_option_from_str_label_only() {
+        let opt: RawOption = "Green".into();
+        assert_eq!(opt.label, "Green");
+        assert!(opt.value.is_none());
     }
 }

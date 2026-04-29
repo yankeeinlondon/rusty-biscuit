@@ -1,9 +1,14 @@
-//! Normalization of raw option strings into [`ChoiceOption`] values.
+//! Normalization of typed [`RawOption`] records into [`ChoiceOption`] values.
 //!
 //! Handles hotkey prefix parsing, label/value convention transforms,
-//! `::` delimiter splitting, and numeric hotkey assignment.
+//! `::` delimiter splitting, and numeric hotkey assignment. Object
+//! sources (JSON/YAML/TOML/CSV/markdown frontmatter object arrays)
+//! flow through with their `value` and `hotkey` preserved; string
+//! sources fall back to the legacy prefix/delimiter parsing.
 
 use tui_chrome::{ChoiceOption, HotkeySpec};
+
+use crate::option_sources::RawOption;
 
 /// Errors that can occur during option normalization.
 #[derive(Debug, thiserror::Error)]
@@ -14,6 +19,8 @@ pub enum NormalizeError {
         first: String,
         second: String,
     },
+    #[error("invalid hotkey '{spec}' on option '{option}'")]
+    InvalidHotkey { spec: String, option: String },
 }
 
 /// A convention for transforming strings into labels or values.
@@ -37,14 +44,18 @@ pub struct ParsedOption {
     pub label: String,
     pub value: String,
     pub hotkey: Option<HotkeySpec>,
+    pub disabled: bool,
 }
 
 /// Parses a raw option string, extracting any hotkey prefix and splitting
 /// on `::` if present.
 ///
+/// ## Examples
+///
 /// Hotkey prefixes:
 /// - `[CTRL+X]` → `HotkeySpec::Ctrl('x')`
 /// - `[ALT+X]` or `[OPT+X]` → `HotkeySpec::Alt('x')`
+#[allow(dead_code)]
 pub fn parse_option(raw: &str) -> ParsedOption {
     let (hotkey, rest) = extract_hotkey(raw);
     let rest = rest.trim();
@@ -58,6 +69,7 @@ pub fn parse_option(raw: &str) -> ParsedOption {
             label: label.to_string(),
             value: value.to_string(),
             hotkey,
+            disabled: false,
         }
     } else {
         ParsedOption {
@@ -65,6 +77,7 @@ pub fn parse_option(raw: &str) -> ParsedOption {
             label: rest.to_string(),
             value: rest.to_string(),
             hotkey,
+            disabled: false,
         }
     }
 }
@@ -83,18 +96,26 @@ fn extract_hotkey(s: &str) -> (Option<HotkeySpec>, &str) {
     (None, s)
 }
 
-fn parse_hotkey_spec(spec: &str) -> Option<HotkeySpec> {
+/// Parses a canonical hotkey string such as `"CTRL+R"`, `"ALT+B"`, or
+/// `"OPT+B"` (case-insensitive) into a [`HotkeySpec`].
+///
+/// Returns `None` when the input does not match a supported modifier
+/// prefix. Object sources that supply a `hotkey` field route through
+/// this same parser so the wire format matches the bracketed prefix
+/// form (`[CTRL+R]`).
+pub fn parse_hotkey_spec(spec: &str) -> Option<HotkeySpec> {
     let spec = spec.trim();
-    if spec.to_uppercase().starts_with("CTRL+") {
-        let ch = spec.chars().nth(5)?;
+    let upper = spec.to_uppercase();
+    if let Some(rest) = upper.strip_prefix("CTRL+") {
+        let ch = rest.chars().next()?;
         return Some(HotkeySpec::Ctrl(ch.to_ascii_lowercase()));
     }
-    if spec.to_uppercase().starts_with("ALT+") {
-        let ch = spec.chars().nth(4)?;
+    if let Some(rest) = upper.strip_prefix("ALT+") {
+        let ch = rest.chars().next()?;
         return Some(HotkeySpec::Alt(ch.to_ascii_lowercase()));
     }
-    if spec.to_uppercase().starts_with("OPT+") {
-        let ch = spec.chars().nth(4)?;
+    if let Some(rest) = upper.strip_prefix("OPT+") {
+        let ch = rest.chars().next()?;
         return Some(HotkeySpec::Alt(ch.to_ascii_lowercase()));
     }
     None
@@ -205,21 +226,33 @@ pub fn assign_numeric_hotkeys(options: &mut [ParsedOption]) {
     }
 }
 
-/// Normalizes a list of raw option strings into [`ChoiceOption`] values.
+/// Normalizes a list of typed [`RawOption`] records into
+/// [`ChoiceOption`] values.
 ///
-/// ## Arguments
+/// ## Pipeline
 ///
-/// * `raw_options` - The raw strings from source resolution.
-/// * `label_convention` - Optional convention to apply to labels.
-/// * `value_convention` - Optional convention to apply to values.
-/// * `numeric_hotkeys` - Whether to assign numeric hotkeys.
-/// * `delimiter` - Legacy delimiter for splitting (ignored if `::` is present).
+/// 1. For each `RawOption`, start from `label` / `value` / `hotkey` /
+///    `disabled` as supplied.
+/// 2. When `hotkey` is `None`, strip a `[CTRL+X]` / `[ALT+X]` /
+///    `[OPT+X]` prefix from the label and use it as the hotkey.
+///    Object-supplied hotkey strings parse via [`parse_hotkey_spec`].
+/// 3. When `value` is `None`, split the (post-prefix) label on the
+///    first `::` to produce `(label, value)`. The legacy `--delimiter`
+///    char is consulted as a fallback when `::` is not present.
+/// 4. Apply `--label-convention` and `--value-convention` transforms
+///    to the resulting label and value.
+/// 5. When `--numeric-hot-keys` is set, fill in any remaining
+///    `hotkey == None` slots with `Ctrl+1..0` then `Alt+1..0`.
 ///
 /// ## Errors
 ///
-/// Returns an error if duplicate hotkeys are detected.
+/// - [`NormalizeError::DuplicateHotkey`] when two options share the
+///   same hotkey.
+/// - [`NormalizeError::InvalidHotkey`] when an object source supplies
+///   a `hotkey` string that does not parse via
+///   [`parse_hotkey_spec`].
 pub fn normalize_options(
-    raw_options: Vec<String>,
+    raw_options: Vec<RawOption>,
     label_convention: NamingConvention,
     value_convention: NamingConvention,
     numeric_hotkeys: bool,
@@ -227,31 +260,14 @@ pub fn normalize_options(
 ) -> Result<Vec<ChoiceOption<String>>, NormalizeError> {
     let mut parsed: Vec<ParsedOption> = raw_options
         .into_iter()
-        .map(|raw| {
-            if raw.contains("::") {
-                parse_option(&raw)
-            } else if let Some(delim) = delimiter {
-                if let Some((label, value)) = raw.split_once(delim) {
-                    ParsedOption {
-                        raw: raw.clone(),
-                        label: label.trim().to_string(),
-                        value: value.trim().to_string(),
-                        hotkey: None,
-                    }
-                } else {
-                    parse_option(&raw)
-                }
-            } else {
-                parse_option(&raw)
-            }
-        })
-        .collect();
+        .map(|raw| raw_option_to_parsed(raw, delimiter))
+        .collect::<Result<Vec<_>, _>>()?;
 
     if numeric_hotkeys {
         assign_numeric_hotkeys(&mut parsed);
     }
 
-    // Check for duplicate hotkeys
+    // Check for duplicate hotkeys.
     let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for option in &parsed {
         if let Some(hotkey) = option.hotkey {
@@ -270,12 +286,81 @@ pub fn normalize_options(
     Ok(parsed
         .into_iter()
         .map(|opt| {
-            let id = apply_convention(&opt.value, value_convention);
             let label = apply_convention(&opt.label, label_convention);
             let value = apply_convention(&opt.value, value_convention);
-            ChoiceOption::new(id, label, value).with_hotkey_option(opt.hotkey)
+            // The id mirrors the (post-convention) value so callers
+            // resolve `--selected` against the same string they will
+            // see written back on submit.
+            let id = value.clone();
+            let mut choice = ChoiceOption::new(id, label, value).with_hotkey_option(opt.hotkey);
+            if opt.disabled {
+                choice = choice.disabled();
+            }
+            choice
         })
         .collect())
+}
+
+/// Lowers a [`RawOption`] into a [`ParsedOption`] applying the prefix
+/// and delimiter rules with object-supplied fields taking precedence.
+fn raw_option_to_parsed(
+    raw: RawOption,
+    delimiter: Option<char>,
+) -> Result<ParsedOption, NormalizeError> {
+    let raw_repr = render_raw_repr(&raw);
+
+    // Hotkey: object-supplied wins outright; otherwise try to strip
+    // a bracketed prefix from the label.
+    let (hotkey, label_after_prefix) = if let Some(spec) = raw.hotkey.as_deref() {
+        match parse_hotkey_spec(spec) {
+            Some(h) => (Some(h), raw.label.clone()),
+            None => {
+                return Err(NormalizeError::InvalidHotkey {
+                    spec: spec.to_string(),
+                    option: raw.label.clone(),
+                });
+            }
+        }
+    } else {
+        let (hotkey, rest) = extract_hotkey(&raw.label);
+        (hotkey, rest.trim().to_string())
+    };
+
+    // Value: object-supplied wins outright; otherwise honour `::`,
+    // then the legacy `--delimiter`. When neither is present the
+    // value mirrors the label.
+    let (label, value) = if let Some(value) = raw.value {
+        (label_after_prefix, value)
+    } else if let Some((lbl, val)) = label_after_prefix.split_once("::") {
+        (lbl.trim().to_string(), val.trim().to_string())
+    } else if let Some(delim) = delimiter {
+        if let Some((lbl, val)) = label_after_prefix.split_once(delim) {
+            (lbl.trim().to_string(), val.trim().to_string())
+        } else {
+            (label_after_prefix.clone(), label_after_prefix)
+        }
+    } else {
+        (label_after_prefix.clone(), label_after_prefix)
+    };
+
+    Ok(ParsedOption {
+        raw: raw_repr,
+        label,
+        value,
+        hotkey,
+        disabled: raw.disabled.unwrap_or(false),
+    })
+}
+
+/// Builds a human-readable representation of a [`RawOption`] for use
+/// in error messages (the `raw` field of [`ParsedOption`]).
+fn render_raw_repr(raw: &RawOption) -> String {
+    match (&raw.value, &raw.hotkey) {
+        (Some(value), Some(hotkey)) => format!("[{}] {}::{}", hotkey, raw.label, value),
+        (Some(value), None) => format!("{}::{}", raw.label, value),
+        (None, Some(hotkey)) => format!("[{}] {}", hotkey, raw.label),
+        (None, None) => raw.label.clone(),
+    }
 }
 
 trait WithHotkeyOption {
@@ -294,6 +379,10 @@ impl WithHotkeyOption for ChoiceOption<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn raw(label: &str) -> RawOption {
+        RawOption::from_label(label)
+    }
 
     #[test]
     fn parse_option_without_hotkey_or_delimiter() {
@@ -334,6 +423,15 @@ mod tests {
     fn hotkey_normalization_lowercases() {
         let parsed = parse_option("[CTRL+R] Red");
         assert_eq!(parsed.hotkey, Some(HotkeySpec::Ctrl('r')));
+    }
+
+    #[test]
+    fn parse_hotkey_spec_canonical_forms() {
+        assert_eq!(parse_hotkey_spec("CTRL+R"), Some(HotkeySpec::Ctrl('r')));
+        assert_eq!(parse_hotkey_spec("ALT+B"), Some(HotkeySpec::Alt('b')));
+        assert_eq!(parse_hotkey_spec("OPT+B"), Some(HotkeySpec::Alt('b')));
+        assert_eq!(parse_hotkey_spec("ctrl+x"), Some(HotkeySpec::Ctrl('x')));
+        assert_eq!(parse_hotkey_spec("nope"), None);
     }
 
     #[test]
@@ -397,12 +495,14 @@ mod tests {
                 label: "a".into(),
                 value: "a".into(),
                 hotkey: None,
+                disabled: false,
             },
             ParsedOption {
                 raw: "b".into(),
                 label: "b".into(),
                 value: "b".into(),
                 hotkey: None,
+                disabled: false,
             },
         ];
         assign_numeric_hotkeys(&mut options);
@@ -411,12 +511,13 @@ mod tests {
     }
 
     #[test]
-    fn numeric_hotkeys_tenth_is_ctrl_zero() {
+    fn numeric_hotkeys_tenth_is_ctrl_one() {
         let mut options = vec![ParsedOption {
             raw: "a".into(),
             label: "a".into(),
             value: "a".into(),
             hotkey: None,
+            disabled: false,
         }];
         assign_numeric_hotkeys(&mut options);
         assert_eq!(options[0].hotkey, Some(HotkeySpec::Ctrl('1')));
@@ -430,6 +531,7 @@ mod tests {
                 label: format!("{}", i),
                 value: format!("{}", i),
                 hotkey: None,
+                disabled: false,
             })
             .collect();
         assign_numeric_hotkeys(&mut options);
@@ -443,6 +545,7 @@ mod tests {
             label: "a".into(),
             value: "a".into(),
             hotkey: Some(HotkeySpec::Ctrl('x')),
+            disabled: false,
         }];
         assign_numeric_hotkeys(&mut options);
         assert_eq!(options[0].hotkey, Some(HotkeySpec::Ctrl('x')));
@@ -450,7 +553,7 @@ mod tests {
 
     #[test]
     fn normalize_options_basic() {
-        let options = vec!["Apple".into(), "Berry".into()];
+        let options = vec![raw("Apple"), raw("Berry")];
         let result = normalize_options(
             options,
             NamingConvention::None,
@@ -466,7 +569,7 @@ mod tests {
 
     #[test]
     fn normalize_options_with_conventions() {
-        let options = vec!["hello world".into()];
+        let options = vec![raw("hello world")];
         let result = normalize_options(
             options,
             NamingConvention::TitleCase,
@@ -481,7 +584,7 @@ mod tests {
 
     #[test]
     fn normalize_options_detects_duplicate_hotkeys() {
-        let options = vec!["[CTRL+x] A".into(), "[CTRL+x] B".into()];
+        let options = vec![raw("[CTRL+x] A"), raw("[CTRL+x] B")];
         let result = normalize_options(
             options,
             NamingConvention::None,
@@ -494,7 +597,7 @@ mod tests {
 
     #[test]
     fn normalize_options_with_legacy_delimiter() {
-        let options = vec!["Apple:1".into(), "Berry:2".into()];
+        let options = vec![raw("Apple:1"), raw("Berry:2")];
         let result = normalize_options(
             options,
             NamingConvention::None,
@@ -511,7 +614,7 @@ mod tests {
 
     #[test]
     fn normalize_options_explicit_delimiter_takes_precedence() {
-        let options = vec!["Red::apple".into()];
+        let options = vec![raw("Red::apple")];
         let result = normalize_options(
             options,
             NamingConvention::None,
@@ -522,5 +625,159 @@ mod tests {
         .unwrap();
         assert_eq!(result[0].label, "Red");
         assert_eq!(result[0].value, "apple");
+    }
+
+    // --- Phase 3: object-record propagation tests --------------------
+
+    #[test]
+    fn normalize_options_preserves_object_value() {
+        let options = vec![RawOption {
+            label: "Red".into(),
+            value: Some("apple".into()),
+            hotkey: None,
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value, "apple");
+        assert_eq!(result[0].id, "apple");
+    }
+
+    #[test]
+    fn normalize_options_preserves_object_hotkey() {
+        let options = vec![RawOption {
+            label: "Red".into(),
+            value: Some("apple".into()),
+            hotkey: Some("CTRL+R".into()),
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].hotkey, Some(HotkeySpec::Ctrl('r')));
+    }
+
+    #[test]
+    fn normalize_options_preserves_object_disabled() {
+        let options = vec![RawOption {
+            label: "Red".into(),
+            value: Some("apple".into()),
+            hotkey: None,
+            disabled: Some(true),
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert!(result[0].disabled);
+    }
+
+    #[test]
+    fn prefix_hotkey_does_not_overwrite_explicit_object_hotkey() {
+        // Object supplies hotkey CTRL+R; the bracketed prefix in the
+        // label must NOT take precedence (and must not be stripped
+        // either, since the object author chose to embed brackets in
+        // their label).
+        let options = vec![RawOption {
+            label: "[CTRL+x] Red".into(),
+            value: Some("apple".into()),
+            hotkey: Some("CTRL+R".into()),
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].hotkey, Some(HotkeySpec::Ctrl('r')));
+        // The bracketed prefix stays in the label because the object's
+        // explicit hotkey field wins, which means the prefix parser is
+        // never consulted.
+        assert_eq!(result[0].label, "[CTRL+x] Red");
+    }
+
+    #[test]
+    fn delimiter_split_does_not_overwrite_explicit_object_value() {
+        // Object supplies value=apple; even though the label contains
+        // `::`, the object value wins and the label is not split.
+        let options = vec![RawOption {
+            label: "Red::not-this".into(),
+            value: Some("apple".into()),
+            hotkey: None,
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            Some(':'),
+        )
+        .unwrap();
+        assert_eq!(result[0].label, "Red::not-this");
+        assert_eq!(result[0].value, "apple");
+    }
+
+    #[test]
+    fn numeric_hot_keys_skips_options_with_explicit_hotkey() {
+        let options = vec![
+            RawOption {
+                label: "Red".into(),
+                value: Some("r".into()),
+                hotkey: Some("CTRL+R".into()),
+                disabled: None,
+            },
+            RawOption::from_label("Blue"),
+        ];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            true,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].hotkey, Some(HotkeySpec::Ctrl('r')));
+        // Second option gets numeric Ctrl+1 (not Ctrl+2) because we
+        // assign numerically by index, then skip filled slots — so
+        // index 1 lands on Ctrl+2.
+        assert_eq!(result[1].hotkey, Some(HotkeySpec::Ctrl('2')));
+    }
+
+    #[test]
+    fn invalid_object_hotkey_returns_error() {
+        let options = vec![RawOption {
+            label: "Red".into(),
+            value: None,
+            hotkey: Some("not-a-hotkey".into()),
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        );
+        assert!(matches!(result, Err(NormalizeError::InvalidHotkey { .. })));
     }
 }

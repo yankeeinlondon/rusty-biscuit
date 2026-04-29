@@ -14,7 +14,7 @@ use tui_chrome::{
 };
 
 use crate::choice_normalize::normalize_options;
-use crate::commands::common_choose::{ChooseChromeArgs, apply_sort, build_chrome};
+use crate::commands::common_choose::{ChooseChromeArgs, build_chrome, resolve_hotkey_badges};
 use crate::commands::text_input::LabelPositionArg;
 use crate::option_sources::resolve_raw_options;
 use crate::output::{OutputMode, write_list};
@@ -137,6 +137,7 @@ where
     }
 
     let values = effective_selected(&args);
+    let hotkey_override = resolve_hotkey_badges(args.chrome.hotkey_badges);
     let mut state = ChooseManyState::new(input);
     if let Some(text) = args.label {
         state = state.with_label(Label::new(text, args.label_position.into()));
@@ -144,6 +145,9 @@ where
     if !values.is_empty() {
         let refs: Vec<&str> = values.iter().map(String::as_str).collect();
         state = state.with_initial_values(&refs);
+    }
+    if let Some(mode) = hotkey_override {
+        state = state.with_hotkey_display(mode);
     }
 
     match run_prompt(state, height) {
@@ -208,10 +212,11 @@ fn build_choice_input(args: &ChooseManyArgs) -> io::Result<ChoiceInput<String>> 
     )
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
 
-    let mut input = ChoiceInput::new("choice", "")
+    let input = ChoiceInput::new("choice", "")
         .with_selection_mode(SelectionMode::Multiple)
-        .with_options(options);
-    apply_sort(&mut input.options, args.chrome.sort.into());
+        .with_options(options)
+        .with_sort(args.chrome.sort.into())
+        .with_active_color(args.chrome.active_color.into());
     Ok(input.with_filter_enabled(!args.chrome.no_filter))
 }
 
@@ -268,6 +273,31 @@ mod tests {
         let input = build_choice_input(&args).unwrap();
         assert_eq!(input.options.len(), 2);
         assert_eq!(input.selection_mode, SelectionMode::Multiple);
+    }
+
+    #[test]
+    fn build_choice_input_active_color_default_is_grey() {
+        let args = ChooseManyArgs {
+            csv: Some("a,b".into()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.active_color, tui_chrome::ActiveChoiceColor::Grey);
+    }
+
+    #[test]
+    fn build_choice_input_active_color_yellow_propagates_to_input() {
+        use crate::commands::common_choose::ActiveColorArg;
+        let args = ChooseManyArgs {
+            csv: Some("a,b".into()),
+            chrome: ChooseChromeArgs {
+                active_color: ActiveColorArg::Yellow,
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.active_color, tui_chrome::ActiveChoiceColor::Yellow);
     }
 
     #[test]
@@ -444,18 +474,24 @@ mod tests {
     }
 
     #[test]
-    fn build_choice_input_applies_sort_reverse_across_positional_source() {
+    fn build_choice_input_applies_sort_inverse_across_positional_source() {
+        // Sorting now happens inside `ChooseManyState::new`, driven by
+        // `ChoiceInput::with_sort`. The CLI builder must therefore
+        // configure `sort` so that constructing a state yields the
+        // expected order.
         use crate::commands::common_choose::SortOrderArg;
         let args = ChooseManyArgs {
             positional: vec!["a".into(), "b".into(), "c".into()],
             chrome: ChooseChromeArgs {
-                sort: SortOrderArg::Reverse,
+                sort: SortOrderArg::Inverse,
                 ..ChooseChromeArgs::default()
             },
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
-        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(input.sort, Some(tui_chrome::SortOrder::Inverse));
+        let state = ChooseManyState::new(input);
+        let labels: Vec<&str> = state.options().iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["c", "b", "a"]);
     }
 
@@ -753,6 +789,102 @@ mod tests {
 
         assert_eq!(status, 130);
         assert!(output.is_empty());
+    }
+
+    // --- Phase 3: object-record source preservation ---------------------
+
+    fn write_temp_file(name: &str, body: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    #[test]
+    fn build_choice_input_from_json_object_array_preserves_value_and_hotkey() {
+        let path = write_temp_file(
+            "choose_many_phase3_objects.json",
+            r#"[{"label":"Red","value":"apple","hotkey":"CTRL+R"},{"label":"Blue","value":"sky"}]"#,
+        );
+        let args = ChooseManyArgs {
+            file: Some(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        assert_eq!(input.options[1].value, "sky");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_from_yaml_object_array_preserves_value_and_hotkey() {
+        let body = "- label: Red\n  value: apple\n  hotkey: CTRL+R\n- label: Blue\n  value: sky\n";
+        let path = write_temp_file("choose_many_phase3_objects.yaml", body);
+        let args = ChooseManyArgs {
+            file: Some(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_from_csv_three_columns_preserves_value_and_hotkey() {
+        let body = "Red,apple,CTRL+R\nBlue,sky,ALT+B\n";
+        let path = write_temp_file("choose_many_phase3_objects.csv", body);
+        let args = ChooseManyArgs {
+            file: Some(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        assert_eq!(input.options[1].value, "sky");
+        assert_eq!(
+            input.options[1].hotkey,
+            Some(tui_chrome::HotkeySpec::Alt('b'))
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn run_emits_object_values_not_labels_for_json_source() {
+        let path = write_temp_file(
+            "choose_many_phase3_value_emit.json",
+            r#"[{"label":"Red","value":"apple"},{"label":"Blue","value":"sky"}]"#,
+        );
+        let args = ChooseManyArgs {
+            file: Some(path.clone()),
+            selected: vec!["apple".into(), "sky".into()],
+            ..default_args()
+        };
+        let mut output = Vec::new();
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.selected_ids(), vec!["apple", "sky"]);
+                Ok(state.selected_values().into_iter().cloned().collect())
+            },
+        )
+        .unwrap();
+        assert_eq!(status, 0);
+        assert_eq!(output, b"apple\nsky\n");
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]

@@ -20,7 +20,8 @@
 
 use clap::{Args, ValueEnum};
 use tui_chrome::{
-    BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, Padding, SortOrder,
+    ActiveChoiceColor, BorderStyle, FrameChromeConfig, HeightSpec, HotkeyDisplayMode, Margin,
+    Padding, SortOrder,
 };
 
 use crate::choice_normalize::NamingConvention;
@@ -146,6 +147,94 @@ pub struct ChooseChromeArgs {
     /// Naming convention applied to option values.
     #[arg(long, value_enum, default_value_t = NamingConvention::None)]
     pub value_convention: NamingConvention,
+
+    /// Background colour applied to the actively hovered option.
+    ///
+    /// The renderer resolves this against the detected terminal
+    /// background (light/dark/unknown) to pick a palette that meets the
+    /// spec's contrast rules.
+    #[arg(long, value_enum, value_name = "COLOR", default_value_t = ActiveColorArg::Grey)]
+    pub active_color: ActiveColorArg,
+
+    /// When to render hotkey badges next to options that carry an
+    /// explicit `Ctrl+X` / `Alt+X` shortcut.
+    ///
+    /// `auto` (the default) shows badges while the matching modifier
+    /// is held — using a brief deadline-based fallback on terminals
+    /// that do not emit modifier-only key events. `always` keeps
+    /// badges visible for the lifetime of the prompt; `never` hides
+    /// them entirely.
+    #[arg(long, value_enum, value_name = "MODE", default_value_t = HotkeyBadgesArg::Auto)]
+    pub hotkey_badges: HotkeyBadgesArg,
+}
+
+/// CLI-facing hotkey badge mode.
+///
+/// Mirrors [`HotkeyDisplayMode`] for the optional `--hotkey-badges`
+/// flag while keeping the CLI free of clap-specific dependencies on
+/// the library side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum HotkeyBadgesArg {
+    /// Show badges only while the matching modifier is held (with a
+    /// brief deadline fallback on unsupported terminals).
+    #[default]
+    Auto,
+    /// Always show Ctrl badges (Alt badges render dim).
+    Always,
+    /// Never show badges, regardless of modifier state.
+    #[clap(alias = "hidden")]
+    Never,
+    /// Force-show Ctrl badges for the lifetime of the prompt.
+    Ctrl,
+    /// Force-show Alt badges for the lifetime of the prompt.
+    Alt,
+}
+
+/// Resolved hotkey badge override, if any.
+///
+/// Returns `None` for the default `auto` mode (so the state's
+/// dynamic detection drives display). For `always` and `never` the
+/// caller forces the corresponding [`HotkeyDisplayMode`] on the
+/// state via `with_hotkey_display`.
+pub fn resolve_hotkey_badges(arg: HotkeyBadgesArg) -> Option<HotkeyDisplayMode> {
+    match arg {
+        HotkeyBadgesArg::Auto => None,
+        HotkeyBadgesArg::Always => Some(HotkeyDisplayMode::CtrlHeld),
+        HotkeyBadgesArg::Never => Some(HotkeyDisplayMode::Hidden),
+        HotkeyBadgesArg::Ctrl => Some(HotkeyDisplayMode::CtrlHeld),
+        HotkeyBadgesArg::Alt => Some(HotkeyDisplayMode::AltHeld),
+    }
+}
+
+/// CLI-facing active-colour mirror.
+///
+/// Kept separate from [`ActiveChoiceColor`] so clap can render
+/// kebab-case help values without forcing the library to depend on
+/// clap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum ActiveColorArg {
+    /// Neutral grey (the default; safe on light and dark terminals).
+    #[default]
+    Grey,
+    /// Green accent.
+    Green,
+    /// Yellow accent.
+    Yellow,
+    /// Red accent.
+    Red,
+}
+
+impl From<ActiveColorArg> for ActiveChoiceColor {
+    fn from(value: ActiveColorArg) -> Self {
+        match value {
+            ActiveColorArg::Grey => ActiveChoiceColor::Grey,
+            ActiveColorArg::Green => ActiveChoiceColor::Green,
+            ActiveColorArg::Yellow => ActiveChoiceColor::Yellow,
+            ActiveColorArg::Red => ActiveChoiceColor::Red,
+        }
+    }
 }
 
 /// CLI-facing sort-order mirror.
@@ -153,6 +242,14 @@ pub struct ChooseChromeArgs {
 /// Kept separate from [`SortOrder`] so that clap's derive can render
 /// kebab-case help values without the library having to depend on
 /// clap.
+///
+/// ## Notes
+///
+/// `Inverse` is the canonical clap value. The legacy spelling
+/// `reverse` remains accepted as a hidden alias on the same variant
+/// for backward compatibility but is deliberately omitted from
+/// `--help` output and shell completions so that `inverse` is the
+/// only documented choice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 #[clap(rename_all = "kebab-case")]
 pub enum SortOrderArg {
@@ -160,7 +257,13 @@ pub enum SortOrderArg {
     #[default]
     Natural,
     /// Reverse source order.
-    Reverse,
+    //
+    // The `reverse` clap alias is intentional and kept hidden from
+    // `--help` and shell completions for backward compatibility — see
+    // the type-level rustdoc above. We use a non-doc comment here so
+    // the alias does not leak into clap's rendered help text.
+    #[clap(alias = "reverse")]
+    Inverse,
     /// Sort lexically by label (ascending).
     Asc,
     /// Sort lexically by label (descending).
@@ -171,7 +274,7 @@ impl From<SortOrderArg> for SortOrder {
     fn from(value: SortOrderArg) -> Self {
         match value {
             SortOrderArg::Natural => SortOrder::Natural,
-            SortOrderArg::Reverse => SortOrder::Reverse,
+            SortOrderArg::Inverse => SortOrder::Inverse,
             SortOrderArg::Asc => SortOrder::Asc,
             SortOrderArg::Desc => SortOrder::Desc,
         }
@@ -236,16 +339,6 @@ impl From<BorderStyleArg> for BorderStyle {
             BorderStyleArg::Right => BorderStyle::Right,
         }
     }
-}
-
-/// Applies the caller's [`SortOrder`] to `options` in place.
-///
-/// Sort runs after `--delimiter` parsing so users sort on labels, not
-/// on raw input strings. Invoked uniformly for every source (legacy
-/// `--options*`, positional, and STDIN) so the CLI's ordering is
-/// independent of source precedence.
-pub fn apply_sort(options: &mut [ChoiceOption<String>], order: SortOrder) {
-    order.apply(options);
 }
 
 /// Builds a [`FrameChromeConfig`] from the shared CLI args.
@@ -323,8 +416,9 @@ fn resolve_margin(args: &ChooseChromeArgs) -> Margin {
 ///
 /// `--padding` seeds every side; each per-side flag (`--pt`, `--pb`,
 /// `--pl`, `--pr`) overrides the matching side when set. When no
-/// padding flag is set, the default `Padding::uniform(1)` from
-/// [`FrameChromeConfig::default`] is used.
+/// padding flag is set, the library default — [`Padding::default`],
+/// equivalent to `Padding::uniform(1)` — is used. Explicit
+/// `--padding 0` produces [`Padding::zero`] (no interior spacing).
 fn resolve_padding(args: &ChooseChromeArgs) -> Padding {
     let base = args.padding;
     let has_any_padding_flag = base.is_some()
@@ -333,7 +427,7 @@ fn resolve_padding(args: &ChooseChromeArgs) -> Padding {
         || args.pl.is_some()
         || args.pr.is_some();
     if !has_any_padding_flag {
-        return Padding::uniform(1);
+        return Padding::default();
     }
     let base = base.unwrap_or(0);
     Padding {
@@ -482,7 +576,7 @@ mod tests {
     #[test]
     fn sort_order_arg_maps_to_library_enum() {
         assert_eq!(SortOrder::from(SortOrderArg::Natural), SortOrder::Natural);
-        assert_eq!(SortOrder::from(SortOrderArg::Reverse), SortOrder::Reverse);
+        assert_eq!(SortOrder::from(SortOrderArg::Inverse), SortOrder::Inverse);
         assert_eq!(SortOrder::from(SortOrderArg::Asc), SortOrder::Asc);
         assert_eq!(SortOrder::from(SortOrderArg::Desc), SortOrder::Desc);
     }
@@ -584,46 +678,6 @@ mod tests {
         let chrome = build_chrome(&args);
         assert_eq!(chrome.border, BorderStyle::Rounded);
         assert_eq!(chrome.margin, Margin::uniform(2));
-    }
-
-    #[test]
-    fn apply_sort_reorders_labels_lexically_when_asc() {
-        let mut options = vec![
-            ChoiceOption::new("Berry", "Berry", "Berry"),
-            ChoiceOption::new("Apple", "Apple", "Apple"),
-            ChoiceOption::new("Cherry", "Cherry", "Cherry"),
-        ];
-        apply_sort(&mut options, SortOrder::Asc);
-        let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
-        assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
-    }
-
-    #[test]
-    fn apply_sort_on_labels_not_raw_strings_when_delimiter_present() {
-        // With `--delimiter :` the label is the part before the colon.
-        // Sorting ascending should order by label ("Apple" < "Berry"),
-        // not by raw string ("Apple:zzz" vs "Berry:aaa").
-        let mut options = vec![
-            ChoiceOption::new("aaa", "Berry", "aaa"),
-            ChoiceOption::new("zzz", "Apple", "zzz"),
-        ];
-        apply_sort(&mut options, SortOrder::Asc);
-        assert_eq!(options[0].label, "Apple");
-        assert_eq!(options[0].value, "zzz");
-        assert_eq!(options[1].label, "Berry");
-        assert_eq!(options[1].value, "aaa");
-    }
-
-    #[test]
-    fn apply_sort_natural_is_no_op() {
-        let mut options = vec![
-            ChoiceOption::new("Berry", "Berry", "Berry"),
-            ChoiceOption::new("Apple", "Apple", "Apple"),
-            ChoiceOption::new("Cherry", "Cherry", "Cherry"),
-        ];
-        apply_sort(&mut options, SortOrder::Natural);
-        let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
-        assert_eq!(labels, vec!["Berry", "Apple", "Cherry"]);
     }
 
     #[test]
@@ -731,6 +785,79 @@ mod tests {
                 left: 3,
                 right: 4,
             }
+        );
+    }
+
+    #[test]
+    fn build_chrome_no_padding_flag_uses_library_default_uniform_one() {
+        // Phase 2: when no --padding/--pt/--pb/--pl/--pr is supplied,
+        // the resolver should return the library default
+        // (Padding::uniform(1)) — *not* Padding::zero(). This
+        // exercises the "unset flags use library default" rule and
+        // mirrors the new `Padding::default()` behaviour.
+        let args = ChooseChromeArgs::default();
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.padding, Padding::uniform(1));
+        assert_eq!(chrome.padding, Padding::default());
+        // Default padding alone makes the chrome non-empty because
+        // padding affects layout; only Padding::zero() is "empty".
+        assert!(!chrome.is_empty());
+    }
+
+    #[test]
+    fn build_chrome_explicit_padding_zero_produces_zero_padding() {
+        // Phase 2: --padding 0 must produce Padding::zero(), even
+        // though the library default is now uniform(1). Combined with
+        // no border/margin, this restores the FrameChromeConfig to
+        // its empty state.
+        let args = ChooseChromeArgs {
+            padding: Some(0),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.padding, Padding::zero());
+        assert!(chrome.is_empty());
+    }
+
+    #[test]
+    fn hotkey_badges_arg_default_is_auto() {
+        assert_eq!(HotkeyBadgesArg::default(), HotkeyBadgesArg::Auto);
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_auto_returns_none() {
+        assert!(resolve_hotkey_badges(HotkeyBadgesArg::Auto).is_none());
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_always_forces_ctrl_held() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Always),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_never_forces_hidden() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Never),
+            Some(HotkeyDisplayMode::Hidden)
+        );
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_ctrl_forces_ctrl_held() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Ctrl),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_alt_forces_alt_held() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Alt),
+            Some(HotkeyDisplayMode::AltHeld)
         );
     }
 
