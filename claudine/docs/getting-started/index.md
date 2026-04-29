@@ -1,6 +1,24 @@
 # Getting Started with Claudine
+![claudine](../../../assets/claudine-512.png)
+> Claude Code's ex-girlfriend who knows Claude's inner secretes but is now dating other Agents
+
+## Intro
 
 **Claudine** was born out of the desire to be able to move fluidly between different agentic CLI's without having to go through a deep learning curve for each. With these humble beginnings we **Claudine** has become a full featured "meta-agent" which allows users to treat Markdown as a _compositional_ primitive for building prompts all the way to long running multi-agent workflows.
+
+## Installation
+
+- Currently you'll need to have Rust installed on your computer and install it
+
+    ```sh
+    # clone repo
+    git clone https://github.com/yankeeinlondon/rusty-biscuit.git
+    # install just runner on your OS, run initializer to compile for your host
+    just init
+    ```
+
+- This is obviously cumbersome for _users_ rather then developer who want to contribute
+- A packaged version will be deployed to **cargo** first and soon afterward to **npm**
 
 ## Provider Coverage
 
@@ -21,7 +39,7 @@
 
 ## Creating a Level Playing Field
 
-Let's start with **Claudine**'s origins: creating a platform that allows _use_ of many of the most popular agentic CLI's without requiring a mastery of each one. Let's break down what **Claudine** how achieves this goal:
+**Claudine**'s original purpose was to create a platform that allows _use_ of many of the most popular agentic CLI's without requiring a mastery of each one. Let's break down how **Claudine** achieves this goal:
 
 1. **Agent Skills**
 
@@ -38,4 +56,27 @@ Let's start with **Claudine**'s origins: creating a platform that allows _use_ o
 
 1. **MCP Services**
 
-1. **CLI Switches**
+1. **Hooks and Events**
+
+
+## Wrapped Execution
+
+For all the _synchronized_ features described in the last section all you would need to use **Claudine** is run `claudine sync` once in a while to keep everything in sync between your providers. That is a starting point for what **Claudine** can do for you but to get more out of it you'll want to leverage the _wrapped execution_ features of **Claudine**:
+
+- instead of running `claude`, `codex`, `opencode`, etc. to start your CLI put **claudine** in front:
+    - `claudine claude` - executes Claude Code in wrapped execution mode
+    - `claudine codex` - executes Codex in wrapped execution mode
+    - `claudine opencode` - executes Opencode in wrapped execution mode
+    - `claudine kimi` - executes Kimi Code CLI in wrapped execution mode
+    - `claudine qwen` - executes Qwen CLI in wrapped execution mode
+    - `claudine goose` - executes Goose CLI in wrapped execution mode
+
+Ok so now you _what_ you're supposed to do and if you're good at "instruction following" (just like you expect your LLM to be) then that's all you need. Sadly, us humans have this annoying tendency to know _why_ they should do things. Well ok, princess ... here's **why** you should wrap your agent execution:
+
+- instead of dealing with the 
+
+### Leveling up with Composition
+
+**Claudine** leverages the **Darkmatter** library to provide 1st class _composition_ features. What is composition you say? Composition in this context means:
+
+- 
