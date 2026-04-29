@@ -36,9 +36,11 @@ use crate::core::{
     TerminalStyle, ValidationState, render_with_label,
 };
 
+use super::choice_layout::navigate_row;
+use super::choice_layout::ChoiceLayout;
 use super::choice_render::ChoiceRenderContext;
 
-use super::choose::{ChoiceInput, ChoiceOption, HotkeySpec, SelectionMode};
+use super::choose::{ChoiceInput, ChoiceOption, HotkeySpec, Orientation, SelectionMode};
 
 /// Mutable state for a [`ChooseOne`] widget.
 ///
@@ -65,6 +67,7 @@ pub struct ChooseOneState<V = String> {
     filter: FuzzyFilter,
     filter_visible: bool,
     cached_labels: Vec<String>,
+    layout_cache: ChoiceLayout,
 }
 
 impl<V: Clone + PartialEq> ChooseOneState<V> {
@@ -100,6 +103,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             filter,
             filter_visible: false,
             cached_labels,
+            layout_cache: ChoiceLayout::default(),
         }
     }
 
@@ -334,7 +338,23 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
                 list_area.height
             };
             let visible = body_rows as usize;
-            adjust_scroll(state, visible, &visible_indices);
+
+            let layout = {
+                let theme = state.theme.clone();
+                let ctx = ChoiceRenderContext::for_single(
+                    &theme,
+                    TerminalStyle::default(),
+                    state.input.orientation,
+                );
+                ctx.compute_layout(
+                    list_area,
+                    &state.input.options,
+                    &visible_indices,
+                    |idx| Some(idx) == state.selected,
+                )
+            };
+            state.layout_cache = layout.clone();
+            adjust_scroll(state, visible, &visible_indices, &layout);
 
             let ctx = ChoiceRenderContext::for_single(
                 &state.theme,
@@ -428,10 +448,24 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.up, &event) {
-            move_hover(state, -1);
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, -1),
+                Orientation::Horizontal => move_hover_row(state, -1),
+            }
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.down, &event) {
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, 1),
+                Orientation::Horizontal => move_hover_row(state, 1),
+            }
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.left, &event) {
+            move_hover(state, -1);
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.right, &event) {
             move_hover(state, 1);
             return EventOutcome::Consumed;
         }
@@ -563,6 +597,16 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
     }
 }
 
+fn move_hover_row<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
+    if let Some(new_hover) =
+        navigate_row(&state.layout_cache, &state.input.options, state.hover, delta)
+    {
+        state.hover = new_hover;
+    } else {
+        move_hover(state, delta);
+    }
+}
+
 /// Snaps `state.hover` to the first enabled index in `filter.visible()`
 /// when the current hover is no longer visible. Leaves the hover
 /// unchanged when every visible option is disabled or when the current
@@ -667,28 +711,25 @@ fn error_row_y<V: Clone + PartialEq>(
 
 fn adjust_scroll<V: Clone + PartialEq>(
     state: &mut ChooseOneState<V>,
-    visible: usize,
-    visible_indices: &[usize],
+    visible_rows: usize,
+    _visible_indices: &[usize],
+    layout: &ChoiceLayout,
 ) {
-    let visible_len = visible_indices.len();
-    if visible == 0 || visible_len == 0 {
+    let total_rows = layout.row_count();
+    if visible_rows == 0 || total_rows == 0 {
         state.scroll_offset = 0;
         return;
     }
-    // Translate `state.hover` into its position inside the filtered list
-    // so scroll tracking works whether or not a filter is active.
-    let hover_pos = visible_indices
-        .iter()
-        .position(|&i| i == state.hover)
-        .unwrap_or(0);
 
-    if hover_pos < state.scroll_offset {
-        state.scroll_offset = hover_pos;
-    } else if hover_pos >= state.scroll_offset + visible {
-        state.scroll_offset = hover_pos + 1 - visible;
+    let hover_row = layout.row_of(state.hover).unwrap_or(0);
+
+    if hover_row < state.scroll_offset {
+        state.scroll_offset = hover_row;
+    } else if hover_row >= state.scroll_offset + visible_rows {
+        state.scroll_offset = hover_row + 1 - visible_rows;
     }
-    if state.scroll_offset + visible > visible_len {
-        state.scroll_offset = visible_len.saturating_sub(visible);
+    if state.scroll_offset + visible_rows > total_rows {
+        state.scroll_offset = total_rows.saturating_sub(visible_rows);
     }
 }
 
@@ -1543,6 +1584,129 @@ mod tests {
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Enter));
         assert_eq!(outcome, EventOutcome::Submitted);
         assert_eq!(state.selected_index(), Some(hovered));
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 6 — Horizontal Layout & Navigation
+    // -----------------------------------------------------------------
+
+    fn horizontal_fixture_input() -> ChoiceInput<String> {
+        ChoiceInput::new("color", "Pick a color")
+            .with_orientation(Orientation::Horizontal)
+            .with_options(vec![
+                ChoiceOption::new("r", "Red", "red"),
+                ChoiceOption::new("g", "Green", "green"),
+                ChoiceOption::new("b", "Blue", "blue"),
+                ChoiceOption::new("y", "Yellow", "yellow"),
+            ])
+    }
+
+    #[test]
+    fn horizontal_render_packs_items_left_to_right() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Wide area: all 4 items should fit on one row.
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        // All options should be on row 0.
+        let row0 = buffer_row(&buf, 0);
+        assert!(row0.contains("Red"), "expected Red on row 0: {row0}");
+        assert!(row0.contains("Green"), "expected Green on row 0: {row0}");
+        assert!(row0.contains("Blue"), "expected Blue on row 0: {row0}");
+        assert!(row0.contains("Yellow"), "expected Yellow on row 0: {row0}");
+    }
+
+    #[test]
+    fn horizontal_render_no_triangular_pointer() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        // No ▶ pointer in horizontal mode.
+        let row0 = buffer_row(&buf, 0);
+        assert!(
+            !row0.contains('▶'),
+            "horizontal mode should not show triangular pointer: {row0}"
+        );
+    }
+
+    #[test]
+    fn horizontal_render_wraps_to_new_rows() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Narrow area: items should wrap to multiple rows.
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        // At least one option should be on row 1 due to wrapping.
+        let row1 = buffer_row(&buf, 1);
+        assert!(
+            row1.contains("Green") || row1.contains("Blue") || row1.contains("Yellow"),
+            "expected wrapped options on row 1: {row1}"
+        );
+    }
+
+    #[test]
+    fn horizontal_left_moves_to_previous_option() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Move to option 1.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+
+        // Left moves back to option 0.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Left));
+        assert_eq!(state.hover(), Some(0));
+    }
+
+    #[test]
+    fn horizontal_right_moves_to_next_option() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(2));
+    }
+
+    #[test]
+    fn horizontal_up_moves_to_closest_column_above() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Navigate to an option likely on row 1 after wrapping.
+        for _ in 0..3 {
+            ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        }
+        let hover_before = state.hover().unwrap();
+
+        // Up should move to the closest column in the row above.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Up));
+        let hover_after = state.hover().unwrap();
+        assert_ne!(hover_after, hover_before, "up should change hover");
+    }
+
+    #[test]
+    fn horizontal_down_moves_to_closest_column_below() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Start on row 0, move down to row 1.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        let hover_after = state.hover().unwrap();
+        assert_ne!(hover_after, 0, "down should change hover from 0");
+    }
+
+    #[test]
+    fn horizontal_stale_cache_fallback_to_sequential() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Clear layout cache to simulate stale state.
+        state.layout_cache = ChoiceLayout::default();
+
+        // Up/Down should fallback to sequential movement when cache is empty.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(1));
+
+        state.layout_cache = ChoiceLayout::default();
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Up));
+        assert_eq!(state.hover(), Some(0));
     }
 
 }

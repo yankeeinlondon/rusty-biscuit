@@ -38,8 +38,9 @@ use crate::core::{
     TerminalStyle, ValidationState, render_with_label,
 };
 
-use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
+use super::choose::{ChoiceInput, ChoiceOption, Orientation, SelectionMode};
 use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
+use super::choice_layout::{ChoiceLayout, navigate_row};
 use super::choice_render::ChoiceRenderContext;
 
 /// Mutable state for a [`ChooseMany`] widget.
@@ -65,6 +66,7 @@ pub struct ChooseManyState<V = String> {
     filter: FuzzyFilter,
     filter_visible: bool,
     cached_labels: Vec<String>,
+    layout_cache: ChoiceLayout,
 }
 
 impl<V: Clone + PartialEq> ChooseManyState<V> {
@@ -95,6 +97,7 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             filter,
             filter_visible: false,
             cached_labels,
+            layout_cache: ChoiceLayout::default(),
         }
     }
 
@@ -373,7 +376,23 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
                 list_area.height
             };
             let visible = body_rows as usize;
-            adjust_scroll(state, visible, &visible_indices);
+
+            let layout = {
+                let theme = state.theme.clone();
+                let ctx = ChoiceRenderContext::for_multiple(
+                    &theme,
+                    TerminalStyle::default(),
+                    state.input.orientation,
+                );
+                ctx.compute_layout(
+                    list_area,
+                    &state.input.options,
+                    &visible_indices,
+                    |idx| state.selected.get(idx).copied().unwrap_or(false),
+                )
+            };
+            state.layout_cache = layout.clone();
+            adjust_scroll(state, visible, &visible_indices, &layout);
 
             let ctx = ChoiceRenderContext::for_multiple(
                 &state.theme,
@@ -459,10 +478,24 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.up, &event) {
-            move_hover(state, -1);
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, -1),
+                Orientation::Horizontal => move_hover_row(state, -1),
+            }
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.down, &event) {
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, 1),
+                Orientation::Horizontal => move_hover_row(state, 1),
+            }
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.left, &event) {
+            move_hover(state, -1);
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.right, &event) {
             move_hover(state, 1);
             return EventOutcome::Consumed;
         }
@@ -593,6 +626,16 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, delta: i32) 
     }
 }
 
+fn move_hover_row<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, delta: i32) {
+    if let Some(new_hover) =
+        navigate_row(&state.layout_cache, &state.input.options, state.hover, delta)
+    {
+        state.hover = new_hover;
+    } else {
+        move_hover(state, delta);
+    }
+}
+
 /// Snaps `state.hover` to the first enabled index in `filter.visible()`
 /// when the current hover is no longer visible. Leaves the hover
 /// unchanged when every visible option is disabled or when the current
@@ -650,26 +693,25 @@ fn error_row_y<V: Clone + PartialEq>(
 
 fn adjust_scroll<V: Clone + PartialEq>(
     state: &mut ChooseManyState<V>,
-    visible: usize,
-    visible_indices: &[usize],
+    visible_rows: usize,
+    _visible_indices: &[usize],
+    layout: &ChoiceLayout,
 ) {
-    let visible_len = visible_indices.len();
-    if visible == 0 || visible_len == 0 {
+    let total_rows = layout.row_count();
+    if visible_rows == 0 || total_rows == 0 {
         state.scroll_offset = 0;
         return;
     }
-    let hover_pos = visible_indices
-        .iter()
-        .position(|&i| i == state.hover)
-        .unwrap_or(0);
 
-    if hover_pos < state.scroll_offset {
-        state.scroll_offset = hover_pos;
-    } else if hover_pos >= state.scroll_offset + visible {
-        state.scroll_offset = hover_pos + 1 - visible;
+    let hover_row = layout.row_of(state.hover).unwrap_or(0);
+
+    if hover_row < state.scroll_offset {
+        state.scroll_offset = hover_row;
+    } else if hover_row >= state.scroll_offset + visible_rows {
+        state.scroll_offset = hover_row + 1 - visible_rows;
     }
-    if state.scroll_offset + visible > visible_len {
-        state.scroll_offset = visible_len.saturating_sub(visible);
+    if state.scroll_offset + visible_rows > total_rows {
+        state.scroll_offset = total_rows.saturating_sub(visible_rows);
     }
 }
 
@@ -1466,6 +1508,91 @@ mod tests {
         let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
         ChooseMany::new().handle_event(&mut state, ctrl_a);
         assert!(state.selected_count() > 0);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 6 — Horizontal Layout & Navigation
+    // -----------------------------------------------------------------
+
+    fn horizontal_fixture_input_many() -> ChoiceInput<String> {
+        ChoiceInput::new("toppings", "Pick toppings")
+            .with_orientation(Orientation::Horizontal)
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+                ChoiceOption::new("m", "Mushrooms", "mushrooms"),
+                ChoiceOption::new("o", "Olives", "olives"),
+                ChoiceOption::new("e", "Extra", "extra"),
+            ])
+    }
+
+    #[test]
+    fn horizontal_many_render_packs_items_left_to_right() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+
+        let row0 = buffer_row(&buf, 0);
+        assert!(row0.contains("Pepperoni"), "expected Pepperoni on row 0: {row0}");
+        assert!(row0.contains("Mushrooms"), "expected Mushrooms on row 0: {row0}");
+    }
+
+    #[test]
+    fn horizontal_many_render_no_triangular_pointer() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+
+        let row0 = buffer_row(&buf, 0);
+        assert!(
+            !row0.contains('▶'),
+            "horizontal mode should not show triangular pointer: {row0}"
+        );
+    }
+
+    #[test]
+    fn horizontal_many_left_moves_to_previous_option() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Left));
+        assert_eq!(state.hover(), Some(0));
+    }
+
+    #[test]
+    fn horizontal_many_right_moves_to_next_option() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+    }
+
+    #[test]
+    fn horizontal_many_up_down_use_row_navigation() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        // Move to option likely on a different row.
+        for _ in 0..3 {
+            ChooseMany::new().handle_event(&mut state, press(KeyCode::Right));
+        }
+        let hover_before = state.hover().unwrap();
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Up));
+        let hover_after = state.hover().unwrap();
+        assert_ne!(hover_after, hover_before, "up should change hover");
+    }
+
+    #[test]
+    fn horizontal_many_stale_cache_fallback_to_sequential() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        state.layout_cache = ChoiceLayout::default();
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(1));
+
+        state.layout_cache = ChoiceLayout::default();
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Up));
+        assert_eq!(state.hover(), Some(0));
     }
 
 }

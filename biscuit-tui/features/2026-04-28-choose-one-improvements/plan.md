@@ -44,6 +44,14 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase5:
   - .opencode/skill/biscuit-tui/SKILL.md
+source_files_during_phase_6:
+  - biscuit-tui/lib/src/components/choice_layout.rs
+  - biscuit-tui/lib/src/components/choice_render.rs
+  - biscuit-tui/lib/src/components/choose_one.rs
+  - biscuit-tui/lib/src/components/choose_many.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase6: []
 packages:
   - tui-chrome
   - tui-chrome-cli

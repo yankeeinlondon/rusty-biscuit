@@ -103,6 +103,43 @@ impl<'a> ChoiceRenderContext<'a> {
         }
     }
 
+    /// Computes the layout for the given visible options.
+    ///
+    /// The layout is used by the renderer to place items and by
+    /// event handlers for row-based navigation in horizontal mode.
+    pub fn compute_layout<V, F>(
+        &self,
+        area: Rect,
+        options: &[ChoiceOption<V>],
+        visible_indices: &[usize],
+        _is_selected: F,
+    ) -> super::choice_layout::ChoiceLayout
+    where
+        V: Clone + PartialEq,
+        F: Fn(usize) -> bool,
+    {
+        use super::choice_layout::ChoiceLayout;
+        match self.orientation {
+            Orientation::Vertical => ChoiceLayout::vertical(visible_indices, area),
+            Orientation::Horizontal => {
+                let indicator_width = std::cmp::max(
+                    self.selected_indicator.width(),
+                    self.unselected_indicator.width(),
+                );
+                let widths: Vec<u16> = visible_indices
+                    .iter()
+                    .map(|&idx| {
+                        let label_width = options[idx].label.width();
+                        // Phase 7: add hotkey badge width when visible
+                        let badge_width = 0u16;
+                        (indicator_width + 1 + label_width + 1 + badge_width as usize) as u16
+                    })
+                    .collect();
+                ChoiceLayout::horizontal(visible_indices, &widths, area)
+            }
+        }
+    }
+
     /// Renders a choice list into `buf` within `area`.
     ///
     /// `is_selected` is called for every visible option index to
@@ -117,7 +154,7 @@ impl<'a> ChoiceRenderContext<'a> {
         scroll_offset: usize,
         hover: usize,
         is_selected: F,
-        mut filter: Option<&mut FuzzyFilter>,
+        filter: Option<&mut FuzzyFilter>,
         validation_error: Option<&str>,
     ) where
         V: Clone + PartialEq,
@@ -149,6 +186,48 @@ impl<'a> ChoiceRenderContext<'a> {
             return;
         }
 
+        match self.orientation {
+            Orientation::Vertical => self.render_vertical(
+                area,
+                buf,
+                options,
+                visible_indices,
+                scroll_offset,
+                hover,
+                is_selected,
+                filter,
+                visible_count,
+            ),
+            Orientation::Horizontal => self.render_horizontal(
+                area,
+                buf,
+                options,
+                visible_indices,
+                scroll_offset,
+                hover,
+                is_selected,
+                filter,
+                visible_count,
+            ),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_vertical<V, F>(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        options: &[ChoiceOption<V>],
+        visible_indices: &[usize],
+        scroll_offset: usize,
+        hover: usize,
+        is_selected: F,
+        mut filter: Option<&mut FuzzyFilter>,
+        visible_count: usize,
+    ) where
+        V: Clone + PartialEq,
+        F: Fn(usize) -> bool,
+    {
         let hover_style = self.theme.selected_style;
         let disabled_style = self.theme.disabled_style;
         let match_style = self.theme.search_match_style;
@@ -182,8 +261,6 @@ impl<'a> ChoiceRenderContext<'a> {
             };
 
             // Focus indicator prefix on hovered row, blank padding otherwise.
-            // In vertical mode the triangular pointer is preserved;
-            // horizontal mode (Phase 6) will omit it.
             let focus_prefix = if is_hovered {
                 if self.theme.focus_indicator.trim().is_empty() {
                     " ".to_string()
@@ -263,6 +340,137 @@ impl<'a> ChoiceRenderContext<'a> {
         {
             let x = area.x + area.width - 1;
             let y = area.y + (visible_count - 1) as u16;
+            buf[(x, y)]
+                .set_symbol(&self.theme.overflow_down_indicator)
+                .set_style(overflow_style);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_horizontal<V, F>(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        options: &[ChoiceOption<V>],
+        visible_indices: &[usize],
+        scroll_offset: usize,
+        hover: usize,
+        is_selected: F,
+        mut filter: Option<&mut FuzzyFilter>,
+        visible_count: usize,
+    ) where
+        V: Clone + PartialEq,
+        F: Fn(usize) -> bool,
+    {
+        use super::choice_layout::ChoiceLayout;
+
+        let hover_style = self.theme.selected_style;
+        let disabled_style = self.theme.disabled_style;
+        let match_style = self.theme.search_match_style;
+        let filter_active = filter.as_ref().map(|f| f.is_active()).unwrap_or(false);
+
+        let indicator_width = std::cmp::max(
+            self.selected_indicator.width(),
+            self.unselected_indicator.width(),
+        );
+        let widths: Vec<u16> = visible_indices
+            .iter()
+            .map(|&idx| {
+                let label_width = options[idx].label.width();
+                let badge_width = 0u16;
+                (indicator_width + 1 + label_width + 1 + badge_width as usize) as u16
+            })
+            .collect();
+        let layout = ChoiceLayout::horizontal(visible_indices, &widths, area);
+
+        // scroll_offset is row offset in horizontal mode
+        let start_row = scroll_offset.min(layout.row_count());
+        let end_row = (start_row + visible_count).min(layout.row_count());
+        let shown_rows = end_row.saturating_sub(start_row);
+
+        for row_idx in start_row..end_row {
+            let (range_start, range_end) = layout.row_ranges[row_idx];
+            for item_idx in range_start..=range_end {
+                let rect = &layout.item_rects[item_idx];
+                let idx = rect.option_index;
+                let option = &options[idx];
+                let option_disabled = option.disabled;
+                let option_label = &option.label;
+                let is_hovered = idx == hover;
+                let is_sel = is_selected(idx);
+
+                // Determine indicator glyph.
+                let indicator = if is_sel {
+                    self.selected_indicator
+                } else {
+                    self.unselected_indicator
+                };
+
+                // No triangular pointer in horizontal mode.
+                let prefix = format!("{indicator} ");
+
+                // Determine label style.
+                let label_style = if option_disabled {
+                    disabled_style
+                } else if is_hovered {
+                    hover_style
+                } else if is_sel {
+                    self.theme.selected_label_style
+                } else {
+                    Style::default()
+                };
+
+                let mut spans: Vec<Span<'static>> = Vec::new();
+
+                let prefix_style = if is_hovered && !option_disabled {
+                    hover_style
+                } else {
+                    Style::default()
+                };
+                spans.push(Span::styled(prefix.clone(), prefix_style));
+
+                if filter_active && area.width >= HIGHLIGHT_MIN_WIDTH {
+                    if let Some(ref mut f) = filter {
+                        let highlights = f.highlight_indices(option_label);
+                        spans.extend(build_highlighted_spans(
+                            option_label,
+                            &highlights,
+                            label_style,
+                            match_style,
+                        ));
+                    } else {
+                        spans.push(Span::styled(option_label.to_string(), label_style));
+                    }
+                } else {
+                    spans.push(Span::styled(option_label.to_string(), label_style));
+                }
+
+                // Render active background over the visible item width plus
+                // one blank cell.
+                if is_hovered && !option_disabled {
+                    spans.push(Span::styled(" ", hover_style));
+                }
+
+                let line = Line::from(spans);
+                let screen_y = area.y + (row_idx - start_row) as u16;
+                buf.set_line(rect.x, screen_y, &line, rect.width);
+            }
+        }
+
+        // Paint overflow indicators at top-right / bottom-right when scrollable.
+        let overflow_style = hover_style.add_modifier(ratatui::style::Modifier::DIM);
+
+        if start_row > 0 && area.width > 0 {
+            let x = area.x + area.width - 1;
+            let y = area.y;
+            buf[(x, y)]
+                .set_symbol(&self.theme.overflow_up_indicator)
+                .set_style(overflow_style);
+        }
+
+        if end_row < layout.row_count() && area.width > 0 && shown_rows > 0 {
+            let x = area.x + area.width - 1;
+            let y = area.y + (shown_rows - 1) as u16;
             buf[(x, y)]
                 .set_symbol(&self.theme.overflow_down_indicator)
                 .set_style(overflow_style);
