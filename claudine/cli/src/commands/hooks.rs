@@ -476,12 +476,18 @@ fn run_provider_detail(provider: Provider, config: Option<&ClaudineConfig>) -> R
     for (event, actions) in &event_rows {
         let support_level = provider.event_support_level(event);
         let support_cell: TableCellContent = match support_level {
-            EventSupportLevel::Hook => "hook".into(),
-            EventSupportLevel::NonHook => {
+            EventSupportLevel::Hook { .. } => "hook".into(),
+            EventSupportLevel::StreamParse { .. }
+            | EventSupportLevel::WireProxy { .. }
+            | EventSupportLevel::Wrapper { .. } => {
                 Prose::new("{{dim}}non-hook{{reset}}").render(&term).into()
             }
-            EventSupportLevel::Acp => Prose::new("{{cyan}}acp{{reset}}").render(&term).into(),
-            EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}").render(&term).into(),
+            EventSupportLevel::Acp { .. } => {
+                Prose::new("{{cyan}}acp{{reset}}").render(&term).into()
+            }
+            EventSupportLevel::NotSupported => {
+                Prose::new("{{dim}}-{{reset}}").render(&term).into()
+            }
         };
 
         let actions_cell: TableCellContent = match actions {
@@ -911,9 +917,11 @@ fn run_support() -> Result<()> {
 
         for cell in matrix_row.cells {
             let rendered = match cell.level {
-                EventSupportLevel::Hook => HOOK_SUPPORT.into(),
-                EventSupportLevel::NonHook => NON_HOOK_SUPPORT.into(),
-                EventSupportLevel::Acp => ACP_SUPPORT.into(),
+                EventSupportLevel::Hook { .. } => HOOK_SUPPORT.into(),
+                EventSupportLevel::StreamParse { .. }
+                | EventSupportLevel::WireProxy { .. }
+                | EventSupportLevel::Wrapper { .. } => NON_HOOK_SUPPORT.into(),
+                EventSupportLevel::Acp { .. } => ACP_SUPPORT.into(),
                 EventSupportLevel::NotSupported => NO_SUPPORT.into(),
             };
             row.push(rendered);
@@ -971,9 +979,17 @@ fn run_capture_method() -> Result<()> {
 
         for cell in matrix_row.cells {
             let rendered: TableCellContent = match cell.level {
-                EventSupportLevel::Hook => "hook".into(),
-                EventSupportLevel::NonHook => "non-hook".into(),
-                EventSupportLevel::Acp => Prose::new("{{cyan}}acp{{reset}}").render(&term).into(),
+                EventSupportLevel::Hook { .. } => "hook".into(),
+                EventSupportLevel::StreamParse { protocol, .. } => {
+                    format!("stream-parse ({protocol:?})").into()
+                }
+                EventSupportLevel::WireProxy { mode, .. } => {
+                    format!("wire-proxy ({mode:?})").into()
+                }
+                EventSupportLevel::Wrapper { .. } => "wrapper".into(),
+                EventSupportLevel::Acp { .. } => {
+                    Prose::new("{{cyan}}acp{{reset}}").render(&term).into()
+                }
                 EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}")
                     .render(&term)
                     .into(),
@@ -989,7 +1005,7 @@ fn run_capture_method() -> Result<()> {
 
     log::data("");
     let legend = Prose::new(
-        "{{dim}}Legend: {{reset}}hook{{dim}} = config-file hook, {{reset}}non-hook{{dim}} = wrapper/wire-mode/stream parsing, {{reset}}{{cyan}}acp{{reset}}{{dim}} = Agent Client Protocol, {{reset}}-{{dim}} = not supported{{reset}}",
+        "{{dim}}Legend: {{reset}}hook{{dim}} = config-file hook, {{reset}}stream-parse{{dim}} = stream parsing, {{reset}}wire-proxy{{dim}} = wire-mode proxy, {{reset}}wrapper{{dim}} = wrapper script, {{reset}}{{cyan}}acp{{reset}}{{dim}} = Agent Client Protocol, {{reset}}-{{dim}} = not supported{{reset}}",
     );
     log::data(&format!(" {}", legend.render(&term)));
 

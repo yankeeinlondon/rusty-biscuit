@@ -2,7 +2,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use claudine::provider::Provider;
-use claudine::provider::{PromptArgConventions, provider_info};
+use claudine::provider::{
+    EntrypointMode, PROVIDER_COUNT, PromptArgConventions, YoloSupport, provider_info,
+};
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail, eyre};
@@ -294,11 +296,48 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Apply YOLO/auto-approve mode to `args` and `env_overrides`.
     ///
     /// Returns `Ok(Some(warning))` when YOLO is unsupported for this provider.
+    ///
+    /// Default implementation derives behavior from the central provider
+    /// catalog's [`YoloSupport`] descriptor.
     fn apply_yolo(
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>>;
+    ) -> Result<Option<String>> {
+        match provider_info(self.provider()).yolo {
+            YoloSupport::DirectFlag { native_flag } => {
+                if !has_flag(args, native_flag) {
+                    args.push(native_flag.to_string());
+                }
+                Ok(None)
+            }
+            YoloSupport::DirectFlagWithAlias { native_flag, aliases } => {
+                if !has_any_flag(args, native_flag, aliases) {
+                    args.push(native_flag.to_string());
+                }
+                Ok(None)
+            }
+            YoloSupport::EnvVar { env_var, value } => {
+                if !env_overrides.iter().any(|(k, v)| k == env_var && v == value) {
+                    env_overrides.push((env_var.to_string(), value.to_string()));
+                }
+                Ok(None)
+            }
+            YoloSupport::NonInteractiveOnly { non_interactive_flag } => {
+                if !has_flag(args, non_interactive_flag) {
+                    args.push(non_interactive_flag.to_string());
+                }
+                Ok(Some(format!(
+                    "{} YOLO mode is non-interactive only",
+                    self.provider()
+                )))
+            }
+            YoloSupport::None => Ok(Some(format!(
+                "{} does not support YOLO mode",
+                self.provider()
+            ))),
+        }
+    }
 
     /// Apply YOLO handling with awareness of interactive vs non-interactive
     /// mode. Default delegates to the mode-unaware [`apply_yolo`]; overriders
@@ -317,12 +356,44 @@ pub(crate) trait WrapperProfile: Send + Sync {
     }
 
     /// Whether this provider supports YOLO mode at all.
-    fn has_supported_yolo(&self) -> bool;
+    ///
+    /// Defaults to `provider_info(self.provider()).yolo != YoloSupport::None`.
+    fn has_supported_yolo(&self) -> bool {
+        !matches!(provider_info(self.provider()).yolo, YoloSupport::None)
+    }
 
     /// Reject native YOLO flags passed directly in passthrough args.
     ///
     /// Error messages may contain `<blue>` Prose tags for styled rendering.
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()>;
+    ///
+    /// Default implementation rejects [`YoloSupport::DirectFlag`] and
+    /// [`YoloSupport::DirectFlagWithAlias`] native flags.
+    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
+        match provider_info(self.provider()).yolo {
+            YoloSupport::DirectFlag { native_flag }
+                if has_flag(args, native_flag) =>
+            {
+                bail!(
+                    "do not pass <blue>{native_flag}</blue> directly to claudine {}; \
+                     use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
+                     Claudine uses this CLI convention for all agents it provides a wrapper to.",
+                    self.provider()
+                );
+            }
+            YoloSupport::DirectFlagWithAlias { native_flag, aliases }
+                if has_any_flag(args, native_flag, aliases) =>
+            {
+                bail!(
+                    "do not pass <blue>{native_flag}</blue> directly to claudine {}; \
+                     use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
+                     Claudine uses this CLI convention for all agents it provides a wrapper to.",
+                    self.provider()
+                );
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 
     // -- Non-interactive mode -----------------------------------------------
 
@@ -336,8 +407,30 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// conditional on the mode (Claude: `--print`; Kimi: `--print`) can
     /// decide here.
     ///
-    /// Default: no-op.
-    fn apply_entrypoint(&self, _args: &mut Vec<String>, _non_interactive: bool) {}
+    /// Default implementation reads from the central catalog's
+    /// [`EntrypointSpec`] list.
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        let info = provider_info(self.provider());
+        let target_mode = if non_interactive {
+            EntrypointMode::NonInteractive
+        } else {
+            EntrypointMode::Interactive
+        };
+        if let Some(ep) = info.entrypoints.iter().find(|ep| {
+            matches!(ep.mode, EntrypointMode::Both) || ep.mode == target_mode
+        }) {
+            if let Some(sub) = ep.subcommand
+                && args.first().is_none_or(|first| first != sub)
+            {
+                args.insert(0, sub.to_string());
+            }
+            for flag in ep.required_flags {
+                if !has_flag(args, flag) {
+                    args.push(flag.to_string());
+                }
+            }
+        }
+    }
 
     /// Reject mode-conflict flags (e.g. `-i` / `--prompt-interactive`)
     /// when the pipeline is running in non-interactive mode. Runs only
@@ -374,12 +467,33 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     /// Map the universal `--output <format>` to provider-specific flags.
     ///
-    /// Default: returns a warning that the provider doesn't support it.
-    fn apply_output_format(&self, _args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        Some(format!(
-            "{} does not support --output {format}; this flag was skipped",
-            self.provider()
-        ))
+    /// Default implementation reads from the central catalog's
+    /// [`OutputFormatSupport`] list.
+    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
+        let info = provider_info(self.provider());
+        let provider_format = match format {
+            OutputFormat::Json => claudine::provider::OutputFormat::Json,
+            OutputFormat::Text => claudine::provider::OutputFormat::Text,
+            OutputFormat::Stream => claudine::provider::OutputFormat::Stream,
+        };
+        let Some(support) = info.output_formats.iter().find(|s| s.format == provider_format) else {
+            return Some(format!(
+                "{} does not support --output {format}; this flag was skipped",
+                self.provider()
+            ));
+        };
+
+        if let Some(flag) = support.cli_flag {
+            if !has_flag(args, flag) {
+                args.push(flag.to_string());
+                if !flag.contains('=') && !flag.ends_with(support.native_name) {
+                    args.push(support.native_name.to_string());
+                }
+            }
+            None
+        } else {
+            None
+        }
     }
 
     // -- Universal --system-prompt flag --------------------------------------
@@ -534,8 +648,14 @@ pub(crate) trait WrapperProfile: Send + Sync {
     }
 
     /// Whether this provider supports resuming sessions.
+    ///
+    /// Defaults to `provider_info(self.provider()).agent_capabilities().runtime.non_interactive.resume_supported`.
     fn supports_resume(&self) -> bool {
-        false
+        provider_info(self.provider())
+            .agent_capabilities()
+            .runtime
+            .non_interactive
+            .resume_supported
     }
 
     // -- Structured stream support -------------------------------------------
@@ -586,23 +706,39 @@ static QWEN: QwenWrapper = QwenWrapper;
 static OPENCODE: OpencodeWrapper = OpencodeWrapper;
 static GOOSE: GooseWrapper = GooseWrapper;
 
+/// Wrapper registry indexed by `Provider as usize`.
+///
+/// The array length is tied to [`PROVIDER_COUNT`], so adding a new
+/// [`Provider`] variant forces a compile error here until the slot is
+/// addressed. There is intentionally no wildcard fallback.
+///
+/// ## Documented "no wrapper" exceptions
+///
+/// - [`Provider::RooCode`] — Roo Code runs exclusively as a VS Code
+///   extension, so there is no standalone CLI binary to wrap. Any future
+///   provider that is intentionally unwrapped must be added to this table
+///   *and* to the `NO_WRAPPER` allow-list referenced by
+///   `wrapper_registry_covers_every_provider_and_documents_exceptions`.
+///
+/// Slot order MUST match `Provider as usize` — see
+/// `claudine::provider::identity::PROVIDERS_DISPLAY_ORDER`.
+static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] = [
+    /* 0: Claude   */ Some(&CLAUDE),
+    /* 1: Codex    */ Some(&CODEX),
+    /* 2: Gemini   */ Some(&GEMINI),
+    /* 3: Goose    */ Some(&GOOSE),
+    /* 4: KimiCode */ Some(&KIMI),
+    /* 5: OpenCode */ Some(&OPENCODE),
+    /* 6: QwenCode */ Some(&QWEN),
+    /* 7: RooCode  */ None,
+];
+
 /// Look up the wrapper profile for a given provider.
 ///
-/// Returns `None` for `Provider::RooCode` because Roo Code is a VS Code
-/// extension that cannot be wrapped as a standalone CLI process.
+/// Returns `None` only for the documented "no wrapper" exceptions listed on
+/// [`WRAPPER_REGISTRY`].
 pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn WrapperProfile> {
-    match provider {
-        Provider::Claude => Some(&CLAUDE),
-        Provider::Codex => Some(&CODEX),
-        Provider::Gemini => Some(&GEMINI),
-        Provider::KimiCode => Some(&KIMI),
-        Provider::QwenCode => Some(&QWEN),
-        Provider::OpenCode => Some(&OPENCODE),
-        Provider::Goose => Some(&GOOSE),
-        // Roo Code runs exclusively as a VS Code extension; there is no
-        // standalone CLI binary to wrap.
-        Provider::RooCode | _ => None,
-    }
+    WRAPPER_REGISTRY[provider as usize]
 }
 
 // ---------------------------------------------------------------------------
@@ -612,53 +748,6 @@ pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn Wr
 impl WrapperProfile for ClaudeWrapper {
     fn provider(&self) -> Provider {
         Provider::Claude
-    }
-
-    fn apply_yolo(
-        &self,
-        args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        let flag = "--dangerously-skip-permissions";
-        if !has_flag(args, flag) {
-            args.push(flag.to_string());
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
-        let flag = "--dangerously-skip-permissions";
-        if has_flag(args, flag) {
-            bail!(
-                "do not pass <blue>{flag}</blue> directly to claudine claude; \
-                 use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
-                 Claudine uses this CLI convention for all agents it provides a wrapper to."
-            );
-        }
-        Ok(())
-    }
-
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if non_interactive && !has_flag(args, "--print") {
-            args.push("--print".to_string());
-        }
-    }
-
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        let value = match format {
-            OutputFormat::Json => "json",
-            OutputFormat::Text => "text",
-            OutputFormat::Stream => "stream-json",
-        };
-        if !has_flag(args, "--output-format") {
-            args.push("--output-format".to_string());
-            args.push(value.to_string());
-        }
-        None
     }
 
     fn apply_system_prompt(
@@ -722,10 +811,6 @@ impl WrapperProfile for ClaudeWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         push_stream_json_flags(args, &["--print", "--verbose"]);
     }
@@ -738,36 +823,6 @@ impl WrapperProfile for ClaudeWrapper {
 impl WrapperProfile for CodexWrapper {
     fn provider(&self) -> Provider {
         Provider::Codex
-    }
-
-    fn apply_yolo(
-        &self,
-        args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        let flag = "--dangerously-bypass-approvals-and-sandbox";
-        let aliases: &[&str] = &["--yolo"];
-        if !has_any_flag(args, flag, aliases) {
-            args.push(flag.to_string());
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
-        let flag = "--dangerously-bypass-approvals-and-sandbox";
-        let aliases: &[&str] = &["--yolo"];
-        if has_any_flag(args, flag, aliases) {
-            bail!(
-                "do not pass <blue>{flag}</blue> directly to claudine codex; \
-                 use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
-                 Claudine uses this CLI convention for all agents it provides a wrapper to."
-            );
-        }
-        Ok(())
     }
 
     fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
@@ -784,20 +839,6 @@ impl WrapperProfile for CodexWrapper {
             .is_some_and(|first| first == entrypoint || aliases.contains(&first.as_str()))
         {
             args.insert(0, entrypoint.to_string());
-        }
-    }
-
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        match format {
-            OutputFormat::Json => {
-                if !has_flag(args, "--json") {
-                    args.push("--json".to_string());
-                }
-                None
-            }
-            _ => Some(format!(
-                "Codex only supports --output json; {format} was skipped"
-            )),
         }
     }
 
@@ -881,10 +922,6 @@ impl WrapperProfile for CodexWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Codex uses `exec --json` for structured output.
         // The `exec` subcommand is expected to already be present.
@@ -932,10 +969,6 @@ impl WrapperProfile for GeminiWrapper {
         args.push(flag.to_string());
         args.push(value.to_string());
         Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
@@ -1099,29 +1132,6 @@ impl WrapperProfile for KimiWrapper {
         Provider::KimiCode
     }
 
-    fn apply_yolo(
-        &self,
-        args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        if !has_flag(args, "--yolo") {
-            args.push("--yolo".to_string());
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
-        // Kimi's native YOLO flag is also `--yolo`, which is extracted by
-        // Claudine's flag extraction before reaching here. No additional
-        // rejection needed.
-        let _ = args;
-        Ok(())
-    }
-
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["KIMI_API_KEY"]
     }
@@ -1200,10 +1210,6 @@ impl WrapperProfile for KimiWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Wire mode is the structured-stream channel for Kimi: a single
         // `--wire` flag selects the JSON-RPC line protocol on stdin/stdout
@@ -1239,10 +1245,6 @@ impl WrapperProfile for QwenWrapper {
             args.push("--yolo".to_string());
         }
         Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
@@ -1334,10 +1336,6 @@ impl WrapperProfile for QwenWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         push_stream_json_flags(args, &[]);
     }
@@ -1381,14 +1379,6 @@ impl WrapperProfile for OpencodeWrapper {
         Ok(None)
     }
 
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
-        Ok(())
-    }
-
     fn apply_system_prompt(
         &self,
         prompt: &PreparedSystemPrompt,
@@ -1421,16 +1411,6 @@ impl WrapperProfile for OpencodeWrapper {
             }
         }
         Ok(app)
-    }
-
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if !non_interactive {
-            return;
-        }
-        let entrypoint = "run";
-        if args.first().is_none_or(|first| first != entrypoint) {
-            args.insert(0, entrypoint.to_string());
-        }
     }
 
     fn apply_model(
@@ -1550,28 +1530,6 @@ pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
 impl WrapperProfile for GooseWrapper {
     fn provider(&self) -> Provider {
         Provider::Goose
-    }
-
-    fn apply_yolo(
-        &self,
-        _args: &mut Vec<String>,
-        env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        let key = "GOOSE_MODE";
-        let value = "auto";
-        if !env_overrides.iter().any(|(k, v)| k == key && v == value) {
-            env_overrides.push((key.to_string(), value.to_string()));
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
-        // Goose YOLO is via env var, not a CLI flag. Nothing to reject.
-        Ok(())
     }
 
     fn apply_system_prompt(
@@ -2481,59 +2439,54 @@ mod tests {
         assert!(message.contains("--yolo"));
     }
 
+    /// Documented "no wrapper" providers. Must stay in lock-step with the
+    /// `None` slots in [`WRAPPER_REGISTRY`].
+    const NO_WRAPPER: &[Provider] = &[Provider::RooCode];
+
     #[test]
     fn roo_code_has_no_wrapper_profile() {
         assert!(profile_for_provider(Provider::RooCode).is_none());
     }
 
+    /// Phase 3 invariant: the array-backed [`WRAPPER_REGISTRY`] either
+    /// returns a wrapper whose `provider()` matches the lookup key, or
+    /// returns `None` for a provider explicitly listed in [`NO_WRAPPER`].
+    /// A future [`Provider`] variant fails compilation at the array
+    /// declaration; this test then guards the `None`/`Some` decision.
     #[test]
-    fn all_wrapped_providers_have_profiles() {
-        let wrapped = [
-            Provider::Claude,
-            Provider::Codex,
-            Provider::Gemini,
-            Provider::KimiCode,
-            Provider::QwenCode,
-            Provider::OpenCode,
-            Provider::Goose,
-        ];
-        for provider in wrapped {
-            assert!(
-                profile_for_provider(provider).is_some(),
-                "Missing profile for {provider:?}"
-            );
+    fn wrapper_registry_covers_every_provider_and_documents_exceptions() {
+        use claudine::provider::PROVIDERS_DISPLAY_ORDER;
+
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            let result = profile_for_provider(provider);
+            if NO_WRAPPER.contains(&provider) {
+                assert!(
+                    result.is_none(),
+                    "{provider:?}: documented as no-wrapper but registry returned Some"
+                );
+            } else {
+                let profile = result.unwrap_or_else(|| {
+                    panic!(
+                        "{provider:?}: registry must provide a wrapper unless explicitly \
+                         listed in NO_WRAPPER"
+                    )
+                });
+                assert_eq!(
+                    profile.provider(),
+                    provider,
+                    "{provider:?}: registry slot returned a profile for the wrong provider"
+                );
+            }
         }
     }
 
-    /// Phase 1 invariant 4: every wrapped provider's `WrapperProfile` reports
-    /// the same [`Provider`] it was looked up under, and `RooCode` is the
-    /// only variant without a wrapper. Mirrors the lib-side
-    /// `provider_info(p).provider == p` registry round-trip on the parallel
-    /// CLI-side `wrapper_for` registry.
+    /// The registry array length is wired to [`PROVIDER_COUNT`], so adding
+    /// a new [`Provider`] variant forces a compile error at the declaration.
+    /// This runtime assertion documents the invariant for readers and
+    /// catches accidental drift if the static is ever rebuilt by hand.
     #[test]
-    fn wrapper_registry_is_exhaustive_and_self_consistent() {
-        use claudine::provider::PROVIDERS_DISPLAY_ORDER;
-        for provider in PROVIDERS_DISPLAY_ORDER {
-            match profile_for_provider(provider) {
-                Some(profile) => {
-                    assert_eq!(
-                        profile.provider(),
-                        provider,
-                        "{provider:?}: wrapper_for returned a profile for the wrong provider \
-                         (got {:?})",
-                        profile.provider()
-                    );
-                }
-                None => {
-                    assert_eq!(
-                        provider,
-                        Provider::RooCode,
-                        "{provider:?}: wrapper_for returned None but only RooCode is allowed \
-                         to lack a wrapper"
-                    );
-                }
-            }
-        }
+    fn wrapper_registry_length_matches_provider_count() {
+        assert_eq!(WRAPPER_REGISTRY.len(), PROVIDER_COUNT);
     }
 
     #[test]

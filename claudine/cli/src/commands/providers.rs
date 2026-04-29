@@ -217,6 +217,21 @@ mod tests {
                 entry.get("docs_url").is_some(),
                 "entry {index} missing docs_url"
             );
+            // Typed catalog half — these are the keys that closed Finding 1.
+            for key in [
+                "event_mapping",
+                "system_prompt",
+                "yolo",
+                "acp",
+                "output_formats",
+                "entrypoints",
+                "prompt_arg_conventions",
+            ] {
+                assert!(
+                    entry.get(key).is_some(),
+                    "entry {index} ({provider:?}) missing typed catalog field {key:?}"
+                );
+            }
         }
     }
 }
