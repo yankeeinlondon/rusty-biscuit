@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use claudine::provider::Provider;
 use claudine::provider::{
-    EntrypointMode, PROVIDER_COUNT, PromptArgConventions, YoloSupport, provider_info,
+    EntrypointMode, OutputFormatSelector, PROVIDER_COUNT, PromptArgConventions, YoloSupport,
+    provider_info,
 };
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
@@ -499,16 +500,23 @@ pub(crate) trait WrapperProfile: Send + Sync {
             ));
         };
 
-        if let Some(flag) = support.cli_flag {
-            if !has_flag(args, flag) {
-                args.push(flag.to_string());
-                if !flag.contains('=') && !flag.ends_with(support.native_name) {
+        match support.selector {
+            OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => None,
+            OutputFormatSelector::Flag { flag } | OutputFormatSelector::TransportFlag { flag } => {
+                if !has_flag(args, flag) {
+                    args.push(flag.to_string());
+                }
+                None
+            }
+            OutputFormatSelector::FlagValue { flag } => {
+                if !has_flag(args, flag)
+                    && !args.iter().any(|arg| arg.starts_with(&format!("{flag}=")))
+                {
+                    args.push(flag.to_string());
                     args.push(support.native_name.to_string());
                 }
+                None
             }
-            None
-        } else {
-            None
         }
     }
 
@@ -828,6 +836,9 @@ impl WrapperProfile for ClaudeWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // Claude needs --print --verbose alongside stream-json for reliable
+        // structured output. The typed catalog does not model "extra flags
+        // required for structured streaming", so this override is kept.
         push_stream_json_flags(args, &["--print", "--verbose"]);
     }
 }
@@ -842,9 +853,9 @@ impl WrapperProfile for CodexWrapper {
     }
 
     fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        // Codex `exec` is the non-interactive entrypoint; interactive
-        // sessions use the default TUI (no `exec`). Only inject when
-        // the caller is running non-interactively.
+        // The typed entrypoint catalog records `exec` but not Codex's native
+        // `e` alias. Keep this override so callers that already supplied
+        // `e` are not rewritten to `exec e ...`.
         if !non_interactive {
             return;
         }
@@ -969,6 +980,10 @@ impl WrapperProfile for GeminiWrapper {
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
+        // Gemini accepts both `--approval-mode yolo` and
+        // `--approval-mode=yolo`, while the typed catalog only records the
+        // native setting. Keep this override to preserve conflict checks for
+        // existing separated-value argv.
         let flag = "--approval-mode";
         let value = "yolo";
         let aliases: &[&str] = &["--yolo", "-y"];
@@ -1058,32 +1073,6 @@ impl WrapperProfile for GeminiWrapper {
         Ok(())
     }
 
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        match format {
-            OutputFormat::Json => {
-                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
-                    args.push("--output-format".to_string());
-                    args.push("json".to_string());
-                }
-                None
-            }
-            OutputFormat::Text => {
-                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
-                    args.push("--output-format".to_string());
-                    args.push("text".to_string());
-                }
-                None
-            }
-            OutputFormat::Stream => {
-                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
-                    args.push("--output-format".to_string());
-                    args.push("stream-json".to_string());
-                }
-                None
-            }
-        }
-    }
-
     fn apply_system_prompt(
         &self,
         prompt: &PreparedSystemPrompt,
@@ -1135,12 +1124,13 @@ impl WrapperProfile for GeminiWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // Gemini uses the catalog-default --output-format stream-json via
+        // push_stream_json_flags, with no extra flags. This override is kept
+        // because structured-stream setup is not modeled in the output-format
+        // catalog (it is a transport concern, not an output format concern).
         push_stream_json_flags(args, &[]);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Kimi
 // ---------------------------------------------------------------------------
 
 impl WrapperProfile for KimiWrapper {
@@ -1150,12 +1140,6 @@ impl WrapperProfile for KimiWrapper {
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["KIMI_API_KEY"]
-    }
-
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if non_interactive && !has_flag(args, "--wire") {
-            args.push("--wire".to_string());
-        }
     }
 
     fn apply_system_prompt(
@@ -1251,7 +1235,9 @@ impl WrapperProfile for QwenWrapper {
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
-        // Qwen supports both --yolo and --approval-mode; check for conflicts.
+        // Qwen's catalog records the direct `--yolo` flag, but the runtime
+        // also accepts `--approval-mode yolo`. Keep this override to reject
+        // conflicting approval modes before appending the catalog flag.
         if let Some(value) = option_value(args, "--approval-mode")
             && !value.eq_ignore_ascii_case("yolo")
         {
@@ -1353,6 +1339,9 @@ impl WrapperProfile for QwenWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // Qwen uses the catalog-default --output-format stream-json via
+        // push_stream_json_flags, with no extra flags. Structured-stream
+        // setup is not modeled in the output-format catalog.
         push_stream_json_flags(args, &[]);
     }
 }
@@ -1383,6 +1372,9 @@ impl WrapperProfile for OpencodeWrapper {
         _env_overrides: &mut Vec<(String, String)>,
         interactive: bool,
     ) -> Result<Option<String>> {
+        // OpenCode only honors this flag under `run`; the typed catalog can
+        // mark it non-interactive-only, but the wrapper still needs to emit a
+        // refined warning and avoid mutating interactive TUI argv.
         if interactive {
             return Ok(Some(
                 "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
@@ -1435,26 +1427,13 @@ impl WrapperProfile for OpencodeWrapper {
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
+        // OpenCode requires both the CLI --model flag AND the MODEL env var.
+        // The typed catalog has no field for dual-delivery model side effects,
+        // so this override is kept to set both surfaces.
         args.push("--model".to_string());
         args.push(model.to_string());
-        // OpenCode also needs the MODEL env var set.
         env_overrides.push(("MODEL".to_string(), model.to_string()));
         None
-    }
-
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        match format {
-            OutputFormat::Json => {
-                if !has_flag(args, "--format") {
-                    args.push("--format".to_string());
-                    args.push("json".to_string());
-                }
-                None
-            }
-            _ => Some(format!(
-                "OpenCode only supports --format json; {format} was skipped"
-            )),
-        }
     }
 
     fn prompt_delivery(
@@ -1513,6 +1492,10 @@ impl WrapperProfile for OpencodeWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // OpenCode uses --format json (cataloged) plus --print-logs and
+        // --log-level ERROR for reliable structured streaming. The extra
+        // flags are transport-level concerns not modeled in the output-format
+        // catalog, so this override is kept.
         args.push("--format".to_string());
         args.push("json".to_string());
         args.push("--print-logs".to_string());
@@ -1572,22 +1555,15 @@ impl WrapperProfile for GooseWrapper {
         Ok(app)
     }
 
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if !non_interactive {
-            return;
-        }
-        let entrypoint = "run";
-        if args.first().is_none_or(|first| first != entrypoint) {
-            args.insert(0, entrypoint.to_string());
-        }
-    }
-
     fn apply_model(
         &self,
         _args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
+        // Goose selects models via the GOOSE_MODEL env var, not a CLI flag.
+        // The typed catalog has no model-delivery-mechanism field, so this
+        // override routes through env only.
         env_overrides.push(("GOOSE_MODEL".to_string(), model.to_string()));
         None
     }
@@ -2505,6 +2481,151 @@ mod tests {
         assert_eq!(WRAPPER_REGISTRY.len(), PROVIDER_COUNT);
     }
 
+    fn provider_output_format(format: OutputFormat) -> claudine::provider::OutputFormat {
+        match format {
+            OutputFormat::Json => claudine::provider::OutputFormat::Json,
+            OutputFormat::Text => claudine::provider::OutputFormat::Text,
+            OutputFormat::Stream => claudine::provider::OutputFormat::Stream,
+        }
+    }
+
+    fn catalog_output_args(provider: Provider, format: OutputFormat) -> Option<Vec<String>> {
+        let support = provider_info(provider)
+            .output_formats
+            .iter()
+            .find(|support| support.format == provider_output_format(format))?;
+
+        let args = match support.selector {
+            OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => Vec::new(),
+            OutputFormatSelector::Flag { flag } | OutputFormatSelector::TransportFlag { flag } => {
+                vec![flag.to_string()]
+            }
+            OutputFormatSelector::FlagValue { flag } => {
+                vec![flag.to_string(), support.native_name.to_string()]
+            }
+        };
+        Some(args)
+    }
+
+    #[test]
+    fn apply_output_format_matches_provider_catalog_for_every_provider() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let Some(profile) = profile_for_provider(provider) else {
+                continue;
+            };
+            for format in [OutputFormat::Json, OutputFormat::Text, OutputFormat::Stream] {
+                let mut args = Vec::new();
+                let warning = profile.apply_output_format(&mut args, format);
+                match catalog_output_args(provider, format) {
+                    Some(expected) => {
+                        assert!(
+                            warning.is_none(),
+                            "{provider:?} should support cataloged output format {format}"
+                        );
+                        assert_eq!(args, expected, "{provider:?} --output {format}");
+                    }
+                    None => {
+                        assert!(
+                            warning.is_some(),
+                            "{provider:?} should warn for uncataloged output format {format}"
+                        );
+                        assert!(args.is_empty(), "{provider:?} --output {format}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn catalog_entrypoint_args(provider: Provider, non_interactive: bool) -> Vec<String> {
+        let info = provider_info(provider);
+        let target_mode = if non_interactive {
+            EntrypointMode::NonInteractive
+        } else {
+            EntrypointMode::Interactive
+        };
+        let mut args = Vec::new();
+        if let Some(ep) = info
+            .entrypoints
+            .iter()
+            .find(|ep| matches!(ep.mode, EntrypointMode::Both) || ep.mode == target_mode)
+        {
+            if let Some(sub) = ep.subcommand {
+                args.push(sub.to_string());
+            }
+            args.extend(ep.required_flags.iter().map(|flag| (*flag).to_string()));
+        }
+        args
+    }
+
+    #[test]
+    fn apply_entrypoint_matches_provider_catalog_for_every_provider() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let Some(profile) = profile_for_provider(provider) else {
+                continue;
+            };
+            let mut args = Vec::new();
+            profile.apply_entrypoint(&mut args, true);
+            assert_eq!(
+                args,
+                catalog_entrypoint_args(provider, true),
+                "{provider:?} non-interactive entrypoint"
+            );
+        }
+    }
+
+    fn catalog_yolo_applied(
+        provider: Provider,
+        args: &[String],
+        env: &[(String, String)],
+        warning: &Option<String>,
+    ) -> bool {
+        match provider_info(provider).yolo {
+            YoloSupport::None => warning.is_some() && args.is_empty() && env.is_empty(),
+            YoloSupport::DirectFlag { native_flag } => {
+                warning.is_none() && yolo_flag_present(args, native_flag)
+            }
+            YoloSupport::DirectFlagWithAlias { native_flag, .. } => {
+                warning.is_none() && yolo_flag_present(args, native_flag)
+            }
+            YoloSupport::NonInteractiveOnly {
+                non_interactive_flag,
+            } => warning.is_none() && args.iter().any(|arg| arg == non_interactive_flag),
+            YoloSupport::EnvVar { env_var, value } => {
+                warning.is_none() && env.iter().any(|(k, v)| k == env_var && v == value)
+            }
+        }
+    }
+
+    fn yolo_flag_present(args: &[String], native_flag: &str) -> bool {
+        if args.iter().any(|arg| arg == native_flag) {
+            return true;
+        }
+        let Some((flag, value)) = native_flag.split_once('=') else {
+            return false;
+        };
+        args.windows(2)
+            .any(|window| window[0] == flag && window[1] == value)
+    }
+
+    #[test]
+    fn apply_yolo_matches_provider_catalog_for_every_provider() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let Some(profile) = profile_for_provider(provider) else {
+                continue;
+            };
+            let mut args = Vec::new();
+            let mut env = Vec::new();
+            let warning = profile
+                .apply_yolo_for_mode(&mut args, &mut env, false)
+                .expect("YOLO application should not fail from empty args");
+
+            assert!(
+                catalog_yolo_applied(provider, &args, &env, &warning),
+                "{provider:?} yolo mismatch: args={args:?}, env={env:?}, warning={warning:?}"
+            );
+        }
+    }
+
     #[test]
     fn claude_output_format_supports_all_formats() {
         let p = profile(Provider::Claude);
@@ -2982,6 +3103,214 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    // -- has_explicit_native_output_request tests (Phase 3, Task 4) ---------
+
+    fn detect_native_output(provider: Provider, args: &[&str]) -> bool {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        super::super::has_explicit_native_output_request(provider, &args)
+    }
+
+    #[test]
+    fn codex_json_flag_disables_structured_parsing() {
+        assert!(detect_native_output(Provider::Codex, &["--json"]));
+    }
+
+    #[test]
+    fn claude_output_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Claude,
+            &["--output-format", "json"]
+        ));
+    }
+
+    #[test]
+    fn claude_output_format_equals_stream_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Claude,
+            &["--output-format=stream-json"]
+        ));
+    }
+
+    #[test]
+    fn gemini_output_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Gemini,
+            &["--output-format", "json"]
+        ));
+    }
+
+    #[test]
+    fn gemini_output_format_equals_stream_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Gemini,
+            &["--output-format=stream-json"]
+        ));
+    }
+
+    #[test]
+    fn qwen_output_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::QwenCode,
+            &["--output-format", "json"]
+        ));
+    }
+
+    #[test]
+    fn qwen_output_format_equals_stream_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::QwenCode,
+            &["--output-format=stream-json"]
+        ));
+    }
+
+    #[test]
+    fn opencode_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::OpenCode,
+            &["--format", "json"]
+        ));
+    }
+
+    #[test]
+    fn opencode_format_equals_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::OpenCode,
+            &["--format=json"]
+        ));
+    }
+
+    #[test]
+    fn kimi_wire_transport_flag_does_not_count_as_native_output_request() {
+        assert!(!detect_native_output(Provider::KimiCode, &["--wire"]));
+    }
+
+    #[test]
+    fn unknown_provider_flags_do_not_match() {
+        assert!(!detect_native_output(Provider::Claude, &["--unknown-flag"]));
+        assert!(!detect_native_output(Provider::Codex, &["--unknown-flag"]));
+        assert!(!detect_native_output(
+            Provider::OpenCode,
+            &["--unknown-flag"]
+        ));
+    }
+
+    #[test]
+    fn goose_no_output_flags_always_false() {
+        assert!(!detect_native_output(Provider::Goose, &[]));
+        assert!(!detect_native_output(
+            Provider::Goose,
+            &["--some-random-flag"]
+        ));
+    }
+
+    #[test]
+    fn empty_args_always_false() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            assert!(
+                !detect_native_output(provider, &[]),
+                "{provider:?}: empty args should not trigger native output detection"
+            );
+        }
+    }
+
+    #[test]
+    fn flags_after_double_dash_separator_are_ignored() {
+        assert!(!detect_native_output(
+            Provider::Codex,
+            &["--", "--json"]
+        ));
+        assert!(!detect_native_output(
+            Provider::Claude,
+            &["--", "--output-format", "json"]
+        ));
+    }
+
+    // -- Parity: explicit_native_output_detection_matches_provider_catalog (Phase 3, Task 7)
+
+    #[test]
+    fn explicit_native_output_detection_matches_provider_catalog() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let info = provider_info(provider);
+            for support in info.output_formats {
+                match support.selector {
+                    OutputFormatSelector::Flag { flag } => {
+                        let args: Vec<String> = vec![flag.to_string()];
+                        assert!(
+                            super::super::has_explicit_native_output_request(provider, &args),
+                            "{provider:?}: catalog Flag {flag} must be detected as native output"
+                        );
+                    }
+                    OutputFormatSelector::FlagValue { flag } => {
+                        let separated: Vec<String> =
+                            vec![flag.to_string(), support.native_name.to_string()];
+                        assert!(
+                            super::super::has_explicit_native_output_request(
+                                provider, &separated
+                            ),
+                            "{provider:?}: catalog FlagValue {flag} {} must be detected as native output",
+                            support.native_name
+                        );
+                        let inline: Vec<String> =
+                            vec![format!("{flag}={}", support.native_name)];
+                        assert!(
+                            super::super::has_explicit_native_output_request(provider, &inline),
+                            "{provider:?}: catalog FlagValue {flag}={} (inline) must be detected as native output",
+                            support.native_name
+                        );
+                    }
+                    OutputFormatSelector::TransportFlag { flag } => {
+                        let args: Vec<String> = vec![flag.to_string()];
+                        assert!(
+                            !super::super::has_explicit_native_output_request(provider, &args),
+                            "{provider:?}: catalog TransportFlag {flag} must NOT be detected as native output"
+                        );
+                    }
+                    OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => {}
+                }
+            }
+        }
+    }
+
+    /// Source guard: the default `apply_output_format` and `apply_entrypoint`
+    /// implementations must read from the catalog. If a future change adds
+    /// a raw `match provider` block inside either default method body,
+    /// this test catches it. The existing mod.rs source guard covers
+    /// `has_explicit_native_output_request` already.
+    #[test]
+    fn output_detection_and_application_uses_catalog_not_raw_dispatch() {
+        let source = include_str!("mod.rs");
+
+        let helper_start = source
+            .find("fn has_explicit_native_output_request")
+            .expect("helper should exist in mod.rs");
+        let helper_end = source[helper_start..]
+            .find("\n\n///")
+            .map(|offset| helper_start + offset)
+            .unwrap_or(source.len());
+        let helper_body = &source[helper_start..helper_end];
+
+        assert!(
+            helper_body.contains("provider_info(provider)")
+                && helper_body.contains(".output_formats"),
+            "has_explicit_native_output_request must read from the provider catalog"
+        );
+
+        for variant in [
+            "Provider::Claude",
+            "Provider::Codex",
+            "Provider::Gemini",
+            "Provider::KimiCode",
+            "Provider::OpenCode",
+            "Provider::QwenCode",
+            "Provider::Goose",
+        ] {
+            assert!(
+                !helper_body.contains(variant),
+                "has_explicit_native_output_request must not contain {variant} — use catalog data"
+            );
         }
     }
 }

@@ -217,21 +217,29 @@ mod tests {
                 entry.get("docs_url").is_some(),
                 "entry {index} missing docs_url"
             );
-            // Typed catalog half — these are the keys that closed Finding 1.
+            // Typed catalog half plus resource portability. The legacy
+            // AgentCapabilities facade must stay out of structured JSON.
             for key in [
                 "event_mapping",
                 "system_prompt",
                 "yolo",
+                "reasoning",
+                "known_gaps",
                 "acp",
                 "output_formats",
                 "entrypoints",
                 "prompt_arg_conventions",
+                "resource_support",
             ] {
                 assert!(
                     entry.get(key).is_some(),
                     "entry {index} ({provider:?}) missing typed catalog field {key:?}"
                 );
             }
+            assert!(
+                entry.get("capabilities").is_none(),
+                "entry {index} ({provider:?}) unexpectedly serialized legacy capabilities"
+            );
         }
     }
 }
