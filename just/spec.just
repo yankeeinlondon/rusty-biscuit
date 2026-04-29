@@ -237,6 +237,8 @@ fix name="":
     fi
 
 # adds a complimentary tech design to the specification file
+[arg("spec", long="spec")]
+[arg("dir", long="dir")]
 design filter="" spec="" dir="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -244,6 +246,7 @@ design filter="" spec="" dir="":
     file="{{spec}}"
     use_dir="{{dir}}"
 
+    # ensure that `file` is set
     if [[ -z "${file}" ]]; then
         if [[ -z "{{ filter }}" ]]; then
             file="$(just _choose_spec)"
@@ -309,7 +312,7 @@ clarify filter="" agent="":
     if [[ "${file}" == *spec* ]]; then
         spec_dir="$(dirname "${file}")"
         if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} for this spec?")" == "y" ]]; then
-            just design spec="${file}" dir="${spec_dir}"
+            just design --spec="${file}" --dir="${spec_dir}"
         fi
     fi
 
