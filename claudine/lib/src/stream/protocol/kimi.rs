@@ -75,9 +75,7 @@ impl KimiEnvelope {
             (None, Some(id), Some(result), None) => {
                 Some(KimiEnvelope::SuccessResponse { id, result })
             }
-            (None, Some(id), None, Some(error)) => {
-                Some(KimiEnvelope::ErrorResponse { id, error })
-            }
+            (None, Some(id), None, Some(error)) => Some(KimiEnvelope::ErrorResponse { id, error }),
             _ => None,
         }
     }
@@ -938,7 +936,10 @@ mod tests {
         };
         assert_eq!(id.as_str(), Some("prompt-2"));
         let parsed: KimiPromptResult = serde_json::from_value(result).unwrap();
-        assert_eq!(parsed.status.as_deref(), Some(KimiPromptResult::STATUS_FINISHED));
+        assert_eq!(
+            parsed.status.as_deref(),
+            Some(KimiPromptResult::STATUS_FINISHED)
+        );
     }
 
     #[test]
@@ -1370,7 +1371,10 @@ mod tests {
             }
         }
         assert!(notif > 0, "expected at least one notification");
-        assert!(success >= 2, "expected initialize and prompt success responses, got {success}");
+        assert!(
+            success >= 2,
+            "expected initialize and prompt success responses, got {success}"
+        );
         assert_eq!(requests, 0, "greet fixture should have no server requests");
         assert_eq!(errors, 0, "greet fixture should have no error responses");
     }
@@ -1424,7 +1428,10 @@ mod tests {
                 last_prompt_status = parsed.status;
             }
         }
-        assert_eq!(last_prompt_status.as_deref(), Some(KimiPromptResult::STATUS_FINISHED));
+        assert_eq!(
+            last_prompt_status.as_deref(),
+            Some(KimiPromptResult::STATUS_FINISHED)
+        );
     }
 
     #[test]

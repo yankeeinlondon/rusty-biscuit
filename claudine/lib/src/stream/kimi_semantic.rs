@@ -283,8 +283,9 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 if let Some(text) = turn.user_input_text() {
                     extra.insert("user_input".into(), Value::from(text));
                 }
-                self.sink
-                    .on_semantic_event(SemanticEvent::TurnStart { extra: Value::Object(extra) });
+                self.sink.on_semantic_event(SemanticEvent::TurnStart {
+                    extra: Value::Object(extra),
+                });
             }
             KimiWireEvent::TurnEnd(_) => {
                 self.flush_pending_tool_call(raw_kind);
@@ -478,19 +479,13 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 self.flush_pending_tool_call(raw_kind);
                 let mut extra = self.info_extra_with_kind(raw_kind, "subagent_event");
                 if let Some(parent) = &sub.parent_tool_call_id {
-                    extra.insert(
-                        "parent_tool_call_id".into(),
-                        Value::from(parent.as_str()),
-                    );
+                    extra.insert("parent_tool_call_id".into(), Value::from(parent.as_str()));
                 }
                 if let Some(agent_id) = &sub.agent_id {
                     extra.insert("agent_id".into(), Value::from(agent_id.as_str()));
                 }
                 if let Some(subagent_type) = &sub.subagent_type {
-                    extra.insert(
-                        "subagent_type".into(),
-                        Value::from(subagent_type.as_str()),
-                    );
+                    extra.insert("subagent_type".into(), Value::from(subagent_type.as_str()));
                 }
                 if let Some(nested) = sub.event.clone() {
                     extra.insert("event".into(), nested);
@@ -581,16 +576,10 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 let mut extra = self.info_extra_with_kind(raw_kind, "auto_approved");
                 extra.insert("request_id".into(), id);
                 if let Some(req_id) = &approval.id {
-                    extra.insert(
-                        "approval_id".into(),
-                        Value::from(req_id.as_str()),
-                    );
+                    extra.insert("approval_id".into(), Value::from(req_id.as_str()));
                 }
                 if let Some(tool_call_id) = &approval.tool_call_id {
-                    extra.insert(
-                        "tool_call_id".into(),
-                        Value::from(tool_call_id.as_str()),
-                    );
+                    extra.insert("tool_call_id".into(), Value::from(tool_call_id.as_str()));
                 }
                 if let Some(sender) = &approval.sender {
                     extra.insert("sender".into(), Value::from(sender.as_str()));
@@ -599,10 +588,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                     extra.insert("action".into(), Value::from(action.as_str()));
                 }
                 if let Some(description) = &approval.description {
-                    extra.insert(
-                        "description".into(),
-                        Value::from(description.as_str()),
-                    );
+                    extra.insert("description".into(), Value::from(description.as_str()));
                 }
                 if let Some(shell) = approval.shell_command() {
                     extra.insert("shell_command".into(), Value::from(shell));
@@ -798,9 +784,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
 
     fn handle_tool_result(&mut self, mut result: KimiToolResult, raw_kind: &str) {
         let tool_id = result.resolved_tool_id().map(str::to_owned);
-        let tool_name = tool_id
-            .as_ref()
-            .and_then(|id| self.tool_uses.remove(id));
+        let tool_name = tool_id.as_ref().and_then(|id| self.tool_uses.remove(id));
         let status = result.derived_status().to_string();
         let is_error = result.is_error();
         let output = result.take_output();
@@ -1087,7 +1071,11 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(collected.iter().any(|e| matches!(e, SemanticEvent::TurnStart { .. })));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::TurnStart { .. }))
+        );
     }
 
     #[test]
@@ -1159,7 +1147,11 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(!collected.iter().any(|e| matches!(e, SemanticEvent::Warning { .. })));
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Warning { .. }))
+        );
     }
 
     #[test]
@@ -1186,7 +1178,9 @@ mod tests {
         let tool_call = collected
             .iter()
             .find_map(|e| match e {
-                SemanticEvent::ToolCall { name, id, input, .. } => Some((name.clone(), id.clone(), input.clone())),
+                SemanticEvent::ToolCall {
+                    name, id, input, ..
+                } => Some((name.clone(), id.clone(), input.clone())),
                 _ => None,
             })
             .expect("tool_call");
@@ -1194,7 +1188,11 @@ mod tests {
         assert_eq!(tool_call.1.as_deref(), Some("tool_1"));
         let input = tool_call.2.expect("input");
         assert_eq!(input.get("command").and_then(Value::as_str), Some("ls"));
-        assert!(collected.iter().any(|e| matches!(e, SemanticEvent::ToolResult { .. })));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+        );
     }
 
     #[test]
@@ -1240,8 +1238,14 @@ mod tests {
             })
             .expect("info");
         assert!(info.0.contains("Auto-approved"));
-        assert_eq!(info.1.get("kind").and_then(Value::as_str), Some("auto_approved"));
-        assert_eq!(info.1.get("shell_command").and_then(Value::as_str), Some("ls"));
+        assert_eq!(
+            info.1.get("kind").and_then(Value::as_str),
+            Some("auto_approved")
+        );
+        assert_eq!(
+            info.1.get("shell_command").and_then(Value::as_str),
+            Some("ls")
+        );
     }
 
     #[test]
@@ -1254,8 +1258,10 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(collected.iter().any(|e| matches!(e,
-                SemanticEvent::Warning { message, .. } if message.contains("Unexpected question"))));
+        assert!(
+            collected.iter().any(|e| matches!(e,
+                SemanticEvent::Warning { message, .. } if message.contains("Unexpected question")))
+        );
     }
 
     #[test]
@@ -1290,7 +1296,10 @@ mod tests {
             })
             .expect("info");
         assert!(info.0.contains("Hook request"));
-        assert_eq!(info.1.get("event").and_then(Value::as_str), Some("PreToolUse"));
+        assert_eq!(
+            info.1.get("event").and_then(Value::as_str),
+            Some("PreToolUse")
+        );
     }
 
     #[test]
@@ -1319,9 +1328,12 @@ mod tests {
         let err = collected
             .iter()
             .find_map(|e| match e {
-                SemanticEvent::Error { message, kind, terminal, .. } => {
-                    Some((message.clone(), *kind, *terminal))
-                }
+                SemanticEvent::Error {
+                    message,
+                    kind,
+                    terminal,
+                    ..
+                } => Some((message.clone(), *kind, *terminal)),
                 _ => None,
             })
             .expect("error");
@@ -1442,7 +1454,9 @@ mod tests {
         assert!(collected.iter().any(|e| matches!(e,
                 SemanticEvent::Info { message, .. } if message.contains("Hello"))));
         assert!(
-            !collected.iter().any(|e| matches!(e, SemanticEvent::Warning { .. })),
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Warning { .. })),
             "info-level notification must not surface as Warning"
         );
     }
@@ -1543,7 +1557,11 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(collected.iter().any(|e| matches!(e, SemanticEvent::TurnComplete { .. })));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::TurnComplete { .. }))
+        );
         let summary = parser.finish(0);
         assert_eq!(summary.num_turns, Some(1));
     }

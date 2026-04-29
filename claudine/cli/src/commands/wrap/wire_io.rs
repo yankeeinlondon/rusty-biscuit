@@ -538,7 +538,10 @@ impl std::fmt::Display for WireInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingProtocolVersion => {
-                write!(f, "kimi initialize response did not include protocol_version")
+                write!(
+                    f,
+                    "kimi initialize response did not include protocol_version"
+                )
             }
             Self::UnsupportedProtocolVersion {
                 negotiated,
@@ -1116,8 +1119,14 @@ mod tests {
         let text = String::from_utf8(captured).unwrap();
         let lines: Vec<&str> = text.split_terminator('\n').collect();
         assert_eq!(lines.len(), 2);
-        assert_eq!(serde_json::from_str::<Value>(lines[0]).unwrap(), json!({"a": 1}));
-        assert_eq!(serde_json::from_str::<Value>(lines[1]).unwrap(), json!({"b": 2}));
+        assert_eq!(
+            serde_json::from_str::<Value>(lines[0]).unwrap(),
+            json!({"a": 1})
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(lines[1]).unwrap(),
+            json!({"b": 2})
+        );
     }
 
     #[test]
@@ -1168,10 +1177,22 @@ mod tests {
 
     #[test]
     fn map_kimi_hook_event_covers_canonical_aliases() {
-        assert_eq!(map_kimi_hook_event("PreToolUse"), Some(AgenticEvent::BeforeTool));
-        assert_eq!(map_kimi_hook_event("PostToolUse"), Some(AgenticEvent::AfterTool));
-        assert_eq!(map_kimi_hook_event("Stop"), Some(AgenticEvent::TurnComplete));
-        assert_eq!(map_kimi_hook_event("UserPromptSubmit"), Some(AgenticEvent::BeforePrompt));
+        assert_eq!(
+            map_kimi_hook_event("PreToolUse"),
+            Some(AgenticEvent::BeforeTool)
+        );
+        assert_eq!(
+            map_kimi_hook_event("PostToolUse"),
+            Some(AgenticEvent::AfterTool)
+        );
+        assert_eq!(
+            map_kimi_hook_event("Stop"),
+            Some(AgenticEvent::TurnComplete)
+        );
+        assert_eq!(
+            map_kimi_hook_event("UserPromptSubmit"),
+            Some(AgenticEvent::BeforePrompt)
+        );
         assert!(map_kimi_hook_event("UnknownEvent").is_none());
     }
 
@@ -1363,7 +1384,10 @@ mod tests {
         });
         let trimmed = serde_json::to_string(&line).unwrap();
         let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
-        assert!(synthetic.is_none(), "notifications produce no synthetic envelopes");
+        assert!(
+            synthetic.is_none(),
+            "notifications produce no synthetic envelopes"
+        );
         assert!(buf.lock().unwrap().is_empty());
     }
 
@@ -1390,12 +1414,18 @@ mod tests {
         });
         let trimmed = serde_json::to_string(&line).unwrap();
         let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
-        assert!(synthetic.is_none(), "tool call rejections are not diagnostics");
+        assert!(
+            synthetic.is_none(),
+            "tool call rejections are not diagnostics"
+        );
         let captured = buf.lock().unwrap().clone();
         let text = String::from_utf8(captured).unwrap();
         let response: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(response["id"], "req-tool");
-        assert_eq!(response["error"]["code"], KimiJsonRpcError::METHOD_NOT_FOUND);
+        assert_eq!(
+            response["error"]["code"],
+            KimiJsonRpcError::METHOD_NOT_FOUND
+        );
     }
 
     #[test]
