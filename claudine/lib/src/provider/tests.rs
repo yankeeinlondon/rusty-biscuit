@@ -142,6 +142,7 @@ fn provider_info_serializes_round_trip() {
         // central catalog without information loss.
         for key in [
             "event_mapping",
+            "resource_support",
             "output_formats",
             "entrypoints",
             "system_prompt",
@@ -168,6 +169,7 @@ fn provider_info_serializes_round_trip() {
             "mcp",
             "adapter",
             "configurator",
+            "capabilities",
             "agent_capabilities_fn",
             "resource_support_fn",
         ] {
@@ -294,6 +296,325 @@ fn agent_capabilities_id_matches_provider() {
     }
 }
 
+fn path_templates_raw(paths: &[super::PathTemplate]) -> Vec<&'static str> {
+    paths.iter().map(super::PathTemplate::raw).collect()
+}
+
+fn path_bufs_raw(paths: &[std::path::PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
+fn assert_legacy_paths_in_catalog(
+    provider: Provider,
+    label: &str,
+    legacy_paths: &[std::path::PathBuf],
+    catalog_paths: &[super::PathTemplate],
+) {
+    let catalog_raw = path_templates_raw(catalog_paths);
+    for path in path_bufs_raw(legacy_paths) {
+        assert!(
+            catalog_raw.iter().any(|raw| *raw == path),
+            "{provider:?}: legacy {label} path {path:?} missing from typed catalog {catalog_raw:?}"
+        );
+    }
+}
+
+fn delivery_supported(delivery: super::SystemPromptDelivery) -> bool {
+    !matches!(delivery, super::SystemPromptDelivery::Unsupported)
+}
+
+fn replacement_supported(info: &super::ProviderInfo) -> bool {
+    delivery_supported(info.system_prompt.replace.interactive)
+        || delivery_supported(info.system_prompt.replace.non_interactive)
+}
+
+fn yolo_matches_legacy(legacy: Option<&str>, yolo: super::YoloSupport) -> bool {
+    let Some(legacy) = legacy else {
+        return matches!(yolo, super::YoloSupport::None);
+    };
+    let normalized = legacy.replace(' ', "=");
+    match yolo {
+        super::YoloSupport::None => false,
+        super::YoloSupport::DirectFlag { native_flag } => {
+            legacy == native_flag || normalized == native_flag
+        }
+        super::YoloSupport::DirectFlagWithAlias {
+            native_flag,
+            aliases,
+        } => {
+            legacy == native_flag
+                || normalized == native_flag
+                || aliases
+                    .iter()
+                    .any(|alias| legacy == *alias || normalized == *alias)
+        }
+        super::YoloSupport::NonInteractiveOnly {
+            non_interactive_flag,
+        } => legacy == non_interactive_flag || normalized == non_interactive_flag,
+        super::YoloSupport::EnvVar { env_var, value } => {
+            legacy.contains(env_var) && legacy.contains(value)
+        }
+    }
+}
+
+fn has_catalog_resume_entrypoint(info: &super::ProviderInfo) -> bool {
+    info.entrypoints.iter().any(|entrypoint| {
+        entrypoint.required_flags.iter().any(|flag| {
+            matches!(
+                *flag,
+                "-c" | "--continue" | "-r" | "--resume" | "resume" | "--resume-session"
+            )
+        }) || entrypoint.subcommand == Some("resume")
+    })
+}
+
+#[test]
+fn agent_capabilities_identity_and_docs_match_typed_catalog() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let caps = info.agent_capabilities();
+
+        assert_eq!(caps.meta.id, info.provider, "{provider:?}: id mismatch");
+        assert!(
+            caps.meta.display_name == info.display_name
+                || caps.meta.display_name.contains(info.display_name),
+            "{provider:?}: legacy display name {:?} does not follow typed display policy {:?}",
+            caps.meta.display_name,
+            info.display_name
+        );
+        assert_eq!(
+            caps.meta.binary, info.binary,
+            "{provider:?}: binary mismatch"
+        );
+        assert!(
+            caps.docs.homepage.is_some()
+                || caps.docs.docs.is_some()
+                || caps.docs.skills_docs.is_some()
+                || caps.docs.slash_docs.is_some()
+                || caps.docs.subagents_docs.is_some()
+                || caps.docs.scripts_docs.is_some(),
+            "{provider:?}: legacy docs surface is empty while typed docs_url is {:?}",
+            info.docs_url
+        );
+    }
+}
+
+#[test]
+fn agent_capabilities_config_paths_match_typed_catalog() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let caps = info.agent_capabilities();
+
+        assert_legacy_paths_in_catalog(
+            provider,
+            "user config",
+            &caps.config.user_files,
+            info.config_paths,
+        );
+        assert_legacy_paths_in_catalog(
+            provider,
+            "project config",
+            &caps.config.project_files,
+            info.config_paths,
+        );
+        assert_legacy_paths_in_catalog(
+            provider,
+            "local config",
+            &caps.config.local_files,
+            info.config_paths,
+        );
+    }
+}
+
+#[test]
+fn agent_capabilities_runtime_matches_typed_catalog() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let caps = info.agent_capabilities();
+        let non_interactive = &caps.runtime.non_interactive;
+
+        assert_eq!(
+            non_interactive.supported,
+            !info.entrypoints.is_empty(),
+            "{provider:?}: non-interactive support drifted"
+        );
+        assert_eq!(
+            non_interactive.structured_output_supported,
+            info.stream_protocol.is_some()
+                || info
+                    .output_formats
+                    .iter()
+                    .any(|format| !matches!(format.format, super::OutputFormat::Text)),
+            "{provider:?}: structured output support drifted"
+        );
+        if has_catalog_resume_entrypoint(info) || !non_interactive.resume_supported {
+            assert_eq!(
+                non_interactive.resume_supported,
+                has_catalog_resume_entrypoint(info),
+                "{provider:?}: resume support drifted where the typed catalog can represent it"
+            );
+        }
+
+        for entrypoint in info.entrypoints {
+            let mut fragments = vec![info.binary];
+            if let Some(subcommand) = entrypoint.subcommand {
+                fragments.push(subcommand);
+            }
+            fragments.extend(entrypoint.required_flags.iter().copied());
+            assert!(
+                non_interactive
+                    .entrypoints
+                    .iter()
+                    .any(|legacy| { fragments.iter().all(|fragment| legacy.contains(fragment)) }),
+                "{provider:?}: typed entrypoint fragments {fragments:?} missing from legacy entrypoints {:?}",
+                non_interactive.entrypoints
+            );
+        }
+
+        for output_format in info.output_formats {
+            assert!(
+                non_interactive
+                    .output_formats
+                    .iter()
+                    .any(|legacy| legacy.contains(output_format.native_name)),
+                "{provider:?}: typed output format {:?} missing from legacy output formats {:?}",
+                output_format.native_name,
+                non_interactive.output_formats
+            );
+        }
+    }
+}
+
+#[test]
+fn agent_capabilities_system_prompt_permissions_and_reasoning_match_typed_catalog() {
+    use crate::agents::ReasoningStyle;
+
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let caps = info.agent_capabilities();
+
+        let legacy_memory = &caps.runtime.system_prompt.memory_files;
+        for memory_file in info.memory_files {
+            assert!(
+                legacy_memory.contains(&memory_file.raw()),
+                "{provider:?}: typed memory file {:?} missing from legacy system prompt memory files {:?}",
+                memory_file.raw(),
+                legacy_memory
+            );
+        }
+        assert_eq!(
+            caps.runtime.system_prompt.full_replacement_supported,
+            replacement_supported(info),
+            "{provider:?}: system prompt replacement support drifted"
+        );
+
+        assert!(
+            yolo_matches_legacy(caps.runtime.permissions.yolo_equivalent, info.yolo),
+            "{provider:?}: legacy YOLO {:?} does not match typed {:?}",
+            caps.runtime.permissions.yolo_equivalent,
+            info.yolo
+        );
+
+        let reasoning = &caps.runtime.reasoning;
+        match info.reasoning {
+            super::ReasoningSupport::NotSupported | super::ReasoningSupport::NotDocumented => {
+                assert!(
+                    matches!(reasoning.style, ReasoningStyle::NotDocumented)
+                        || reasoning.levels_or_controls.is_empty(),
+                    "{provider:?}: legacy reasoning should be unsupported/undocumented, got {:?}",
+                    reasoning
+                );
+            }
+            super::ReasoningSupport::NamedLevels { levels, .. } => {
+                assert_eq!(
+                    reasoning.style,
+                    ReasoningStyle::NamedLevels,
+                    "{provider:?}: reasoning style drifted"
+                );
+                for level in levels {
+                    assert!(
+                        reasoning.levels_or_controls.contains(level),
+                        "{provider:?}: typed reasoning level {level:?} missing from legacy {:?}",
+                        reasoning.levels_or_controls
+                    );
+                }
+            }
+            super::ReasoningSupport::NumericBudget { flag, .. } => {
+                assert_eq!(
+                    reasoning.style,
+                    ReasoningStyle::NumericBudget,
+                    "{provider:?}: reasoning style drifted"
+                );
+                assert!(
+                    reasoning.levels_or_controls.contains(&flag),
+                    "{provider:?}: typed reasoning flag {flag:?} missing from legacy {:?}",
+                    reasoning.levels_or_controls
+                );
+            }
+            super::ReasoningSupport::BinaryToggle { on, off, .. } => {
+                assert_eq!(
+                    reasoning.style,
+                    ReasoningStyle::BinaryToggle,
+                    "{provider:?}: reasoning style drifted"
+                );
+                for control in [on, off] {
+                    assert!(
+                        reasoning.levels_or_controls.contains(&control),
+                        "{provider:?}: typed reasoning control {control:?} missing from legacy {:?}",
+                        reasoning.levels_or_controls
+                    );
+                }
+            }
+            super::ReasoningSupport::ProviderSpecific(_) => {
+                assert!(
+                    !matches!(reasoning.style, ReasoningStyle::NotDocumented)
+                        && !reasoning.levels_or_controls.is_empty(),
+                    "{provider:?}: provider-specific typed reasoning should retain legacy controls, got {:?}",
+                    reasoning
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn agent_capabilities_logging_and_known_gaps_match_typed_catalog() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let caps = info.agent_capabilities();
+        let logging = &caps.runtime.logging;
+
+        let session_log_paths = path_templates_raw(info.session_log_paths);
+        for legacy in &logging.session_locations {
+            assert!(
+                session_log_paths.contains(legacy),
+                "{provider:?}: legacy session log location {legacy:?} missing from typed session_log_paths {session_log_paths:?}"
+            );
+        }
+
+        let legacy_log_locations = &logging.log_locations;
+        for typed in path_templates_raw(info.session_locations) {
+            assert!(
+                legacy_log_locations.contains(&typed),
+                "{provider:?}: typed session location {typed:?} missing from legacy log_locations {legacy_log_locations:?}"
+            );
+        }
+
+        for legacy_gap in &caps.confidence.gaps {
+            assert!(
+                info.known_gaps
+                    .iter()
+                    .any(|gap| { gap.note == *legacy_gap || gap.tracker == Some(*legacy_gap) }),
+                "{provider:?}: legacy confidence gap {legacy_gap:?} missing from typed known_gaps {:?}",
+                info.known_gaps
+            );
+        }
+    }
+}
+
 #[test]
 fn resource_support_provider_matches_provider() {
     for provider in PROVIDERS_DISPLAY_ORDER {
@@ -329,6 +650,35 @@ fn resource_support_provider_matches_provider() {
 /// The allow-list is intentionally narrow. Positive invariant tests
 /// (catalog round-trip, wrapper registry coverage, agent discovery, etc.)
 /// are the primary safety net; this scan is a defense-in-depth backstop.
+/// Strip Rust `//` line comments and `/* ... */` block comments from
+/// `src` so commented-out examples don't trip source-scan tests. Does NOT
+/// attempt to handle Rust strings containing `//` — false positives from
+/// string literals are rare enough to allow-list explicitly.
+fn strip_comments(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let bytes = src.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            // Line comment: skip to newline.
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+        } else if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            // Block comment: skip to closing */.
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
 #[test]
 fn no_unauthorized_match_provider_in_lib() {
     use regex::Regex;
@@ -347,35 +697,6 @@ fn no_unauthorized_match_provider_in_lib() {
                 out.push(path);
             }
         }
-    }
-
-    /// Strip Rust `//` line comments and `/* ... */` block comments from
-    /// `src` so commented-out examples don't trip the scan. Does NOT
-    /// attempt to handle Rust strings containing `//` — false positives
-    /// from string literals are rare enough to allow-list explicitly.
-    fn strip_comments(src: &str) -> String {
-        let mut out = String::with_capacity(src.len());
-        let bytes = src.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
-                // Line comment: skip to newline.
-                while i < bytes.len() && bytes[i] != b'\n' {
-                    i += 1;
-                }
-            } else if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
-                // Block comment: skip to closing */.
-                i += 2;
-                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                    i += 1;
-                }
-                i = (i + 2).min(bytes.len());
-            } else {
-                out.push(bytes[i] as char);
-                i += 1;
-            }
-        }
-        out
     }
 
     let lib_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -709,25 +1030,65 @@ fn registry_array_length_matches_variant_count() {
     assert_eq!(registry.len(), super::PROVIDER_COUNT);
 }
 
+/// Returns a representative payload that the named provider's adapter
+/// must recognize. Used by the strengthened detection tests below.
+fn representative_payload_for(provider: Provider) -> Option<serde_json::Value> {
+    Some(match provider {
+        Provider::Claude => serde_json::json!({"hook_event_name": "Stop"}),
+        Provider::Codex => {
+            serde_json::json!({"type": "turn.completed", "thread_id": "t-1"})
+        }
+        Provider::Gemini => serde_json::json!({"hook_event_name": "BeforeAgent"}),
+        Provider::OpenCode => serde_json::json!({"event_type": "session.idle"}),
+        Provider::KimiCode => serde_json::json!({"method": "notification"}),
+        // Goose, Qwen, and Roo do not detect via raw payload shape today.
+        Provider::Goose | Provider::QwenCode | Provider::RooCode => return None,
+    })
+}
+
 /// Every provider's [`ProviderBehavior::detect_from_payload`] can be
-/// exercised with an empty payload without panicking.
+/// exercised with an empty payload without panicking, and providers that
+/// expose payload-shape detection on this surface recognize their
+/// representative payloads. Public provider detection must route through
+/// the same behavior surface and return the provider for those payloads.
 #[test]
 fn detect_from_payload_exercise_all_providers() {
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         let empty = serde_json::Value::Object(Default::default());
         let _ = info.behavior.detect_from_payload(&empty);
+
+        if let Some(payload) = representative_payload_for(provider) {
+            assert!(
+                info.behavior.detect_from_payload(&payload),
+                "{provider:?}: behavior.detect_from_payload must recognize representative payload {payload}"
+            );
+            assert_eq!(
+                Provider::detect_from_payload(&payload),
+                Some(provider),
+                "{provider:?}: public detection must return the representative payload's provider"
+            );
+        }
     }
 }
 
 /// Every provider's [`AdapterBehavior::detect`] can be exercised with an
-/// empty payload without panicking.
+/// empty payload without panicking, and providers that have a payload
+/// shape rule recognize their representative payload — exercising the
+/// per-provider detection move that closed Finding 2.
 #[test]
 fn adapter_detect_exercise_all_providers() {
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         let empty = serde_json::Value::Object(Default::default());
         let _ = info.adapter.detect(&empty);
+
+        if let Some(payload) = representative_payload_for(provider) {
+            assert!(
+                info.adapter.detect(&payload),
+                "{provider:?}: adapter.detect must recognize representative payload {payload}"
+            );
+        }
     }
 }
 
@@ -743,4 +1104,278 @@ fn config_paths_have_primary_user_entry() {
             "{provider:?}: config_paths must contain at least one entry"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Review 4 / Phase 1: serializable catalog half (Finding 1)
+// ---------------------------------------------------------------------------
+
+/// Every provider's JSON describe surface includes typed resource
+/// portability data and excludes the legacy `AgentCapabilities` tree.
+#[test]
+fn provider_info_json_includes_resource_support_not_capabilities() {
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let json = serde_json::to_value(info).expect("provider_info serializes");
+        assert!(
+            json.get("capabilities").is_none(),
+            "{provider:?}: serialized JSON must not expose legacy `capabilities`"
+        );
+        assert!(
+            json.get("resource_support").is_some(),
+            "{provider:?}: serialized JSON missing `resource_support`"
+        );
+        assert!(
+            json["resource_support"].is_object(),
+            "{provider:?}: `resource_support` must be a JSON object, got {:?}",
+            json["resource_support"]
+        );
+    }
+}
+
+/// The serialized `resource_support` for Claude includes objects for each
+/// resource type (skills, commands, agents, scripts) with the canonical
+/// `level` key from [`crate::linking::capabilities::ResourceSupport`].
+/// Closes Finding 1.
+#[test]
+fn provider_info_json_resource_support_includes_skills_commands_agents_scripts() {
+    let info = provider_info(Provider::Claude);
+    let json = serde_json::to_value(info).expect("provider_info serializes");
+    let resource_support = &json["resource_support"];
+
+    for key in ["skills", "commands", "agents", "scripts"] {
+        let entry = &resource_support[key];
+        assert!(
+            entry.is_object(),
+            "Claude resource_support.{key} must be a JSON object, got {entry:?}"
+        );
+        assert!(
+            entry.get("level").is_some(),
+            "Claude resource_support.{key} must expose a `level` field"
+        );
+        assert!(
+            entry["level"].is_string(),
+            "Claude resource_support.{key}.level must serialize as a string, got {:?}",
+            entry["level"]
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Review 4 / Phase 1: per-provider payload detection (Finding 2)
+// ---------------------------------------------------------------------------
+
+/// Claude's adapter recognizes every Claude-native `hook_event_name` value
+/// and rejects names that are exclusively Gemini's. Locks the per-provider
+/// detection move that closed Finding 2.
+#[test]
+fn adapter_detects_known_claude_payloads() {
+    let claude = provider_info(Provider::Claude);
+    for name in [
+        "Stop",
+        "PreToolUse",
+        "UserPromptSubmit",
+        "SessionStart",
+        "Notification",
+    ] {
+        let payload = serde_json::json!({"hook_event_name": name});
+        assert!(
+            claude.adapter.detect(&payload),
+            "Claude adapter should recognize hook_event_name={name:?}"
+        );
+    }
+
+    // BeforeAgent is exclusively Gemini.
+    let gemini_only = serde_json::json!({"hook_event_name": "BeforeAgent"});
+    assert!(
+        !claude.adapter.detect(&gemini_only),
+        "Claude adapter must not claim Gemini-only hook_event_name=BeforeAgent"
+    );
+}
+
+/// Gemini's adapter recognizes every Gemini-native `hook_event_name` value
+/// (and the legacy `event_name` shape) without claiming names shared with
+/// Claude. Locks the per-provider detection move that closed Finding 2.
+#[test]
+fn adapter_detects_known_gemini_payloads() {
+    let gemini = provider_info(Provider::Gemini);
+    for name in [
+        "BeforeAgent",
+        "AfterAgent",
+        "BeforeModel",
+        "BeforeTool",
+        "AfterTool",
+    ] {
+        let payload = serde_json::json!({"hook_event_name": name});
+        assert!(
+            gemini.adapter.detect(&payload),
+            "Gemini adapter should recognize hook_event_name={name:?}"
+        );
+    }
+
+    // Legacy `event_name` shape.
+    assert!(
+        gemini
+            .adapter
+            .detect(&serde_json::json!({"event_name": "BeforeAgent"})),
+        "Gemini adapter should recognize legacy event_name shape"
+    );
+
+    // Stop is shared with Claude — Gemini must not claim it.
+    let claude_shared = serde_json::json!({"hook_event_name": "Stop"});
+    assert!(
+        !gemini.adapter.detect(&claude_shared),
+        "Gemini adapter must not claim Claude-shared hook_event_name=Stop"
+    );
+}
+
+/// Codex's adapter recognizes every Codex-shape payload (top-level
+/// `type`, nested `hook_event.event_type`, and thread-id keys). Locks the
+/// per-provider detection move that closed Finding 2.
+#[test]
+fn adapter_detects_known_codex_payloads() {
+    let codex = provider_info(Provider::Codex);
+
+    let cases = [
+        serde_json::json!({"type": "turn.completed", "thread_id": "t-1"}),
+        serde_json::json!({"type": "agent-turn-complete", "thread-id": "t-1"}),
+        serde_json::json!({
+            "session_id": "ses_123",
+            "hook_event": {"event_type": "after_tool_use"}
+        }),
+    ];
+
+    for payload in cases {
+        assert!(
+            codex.adapter.detect(&payload),
+            "Codex adapter should recognize payload {payload}"
+        );
+    }
+}
+
+/// OpenCode's adapter recognizes both the snake_case `event_type` and
+/// camelCase `eventType` payload shapes. Locks the per-provider detection
+/// move that closed Finding 2.
+#[test]
+fn adapter_detects_known_opencode_payloads() {
+    let opencode = provider_info(Provider::OpenCode);
+    assert!(
+        opencode
+            .adapter
+            .detect(&serde_json::json!({"event_type": "session.idle"})),
+        "OpenCode adapter should recognize event_type"
+    );
+    assert!(
+        opencode
+            .adapter
+            .detect(&serde_json::json!({"eventType": "session.idle"})),
+        "OpenCode adapter should recognize eventType"
+    );
+}
+
+/// Kimi's adapter recognizes the JSON-RPC `method` payload shape. Locks
+/// the per-provider detection move that closed Finding 2.
+#[test]
+fn adapter_detects_known_kimi_payloads() {
+    let kimi = provider_info(Provider::KimiCode);
+    assert!(
+        kimi.adapter
+            .detect(&serde_json::json!({"method": "notification"})),
+        "Kimi adapter should recognize method-bearing payload"
+    );
+}
+
+/// Source guard: `Provider::detect_from_payload` in
+/// `claudine/lib/src/provider/methods.rs` must remain a pure walk over
+/// `PROVIDERS_DISPLAY_ORDER` and must not contain any provider-specific
+/// dispatch (no `Provider::<Variant>` literals, no payload-shape string
+/// literals, no helper-function names from the legacy implementation).
+/// Closes Finding 2 with an explicit drift backstop.
+#[test]
+fn detect_from_payload_has_no_provider_specific_branches() {
+    use std::fs;
+    use std::path::Path;
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provider/methods.rs");
+    let source = fs::read_to_string(&path).expect("methods.rs is readable");
+    let stripped = strip_comments(&source);
+
+    let needle = "pub fn detect_from_payload(";
+    let start = stripped
+        .find(needle)
+        .expect("methods.rs declares pub fn detect_from_payload");
+
+    // Locate the function body braces. A simple brace counter is enough
+    // because the body is short and the source is comment-stripped.
+    let after_signature = stripped[start..]
+        .find('{')
+        .expect("detect_from_payload has a body opening brace")
+        + start;
+    let body_bytes = stripped.as_bytes();
+    let mut depth = 0i32;
+    let mut end = after_signature;
+    for (offset, byte) in body_bytes[after_signature..].iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = after_signature + offset;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let body = &stripped[after_signature..=end];
+
+    // The body must reference the canonical registry walk.
+    assert!(
+        body.contains("PROVIDERS_DISPLAY_ORDER"),
+        "detect_from_payload body must walk PROVIDERS_DISPLAY_ORDER, got:\n{body}"
+    );
+    assert!(
+        body.contains(".behavior.detect_from_payload(raw)"),
+        "detect_from_payload body must call ProviderBehavior::detect_from_payload, got:\n{body}"
+    );
+    assert!(
+        !body.contains(".adapter.detect(raw)"),
+        "detect_from_payload body must not call AdapterBehavior::detect directly; \
+         ProviderBehavior is the authoritative detection surface. Body:\n{body}"
+    );
+
+    // The body must NOT contain any of these forbidden tokens. Each one
+    // would represent a regression to provider-specific dispatch in the
+    // central method.
+    let forbidden_substrings: &[&str] = &[
+        "Provider::Claude",
+        "Provider::Gemini",
+        "Provider::Codex",
+        "Provider::OpenCode",
+        "Provider::KimiCode",
+        "Provider::Goose",
+        "Provider::QwenCode",
+        "Provider::RooCode",
+        "looks_like_codex_payload",
+        "hook_event_name",
+        "event_type",
+        "eventType",
+        "event_name",
+    ];
+    for needle in forbidden_substrings {
+        assert!(
+            !body.contains(needle),
+            "detect_from_payload body must not contain {needle:?}; per-provider dispatch \
+             belongs behind `ProviderBehavior::detect_from_payload`. Body:\n{body}"
+        );
+    }
+
+    // String-form `method` literal (the legacy Kimi shape rule). Match
+    // explicitly with surrounding quotes so we don't trip on the trait
+    // `detect` method name itself.
+    assert!(
+        !body.contains("\"method\""),
+        "detect_from_payload body must not contain literal \"method\"; \
+         per-provider dispatch belongs behind `ProviderBehavior::detect_from_payload`. Body:\n{body}"
+    );
 }

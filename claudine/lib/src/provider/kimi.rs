@@ -14,7 +14,9 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
@@ -49,6 +51,10 @@ pub(super) struct KimiProvider;
 pub(super) static KIMI_PROVIDER: KimiProvider = KimiProvider;
 
 impl ProviderBehavior for KimiProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        <Self as AdapterBehavior>::detect(self, raw)
+    }
+
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
@@ -63,6 +69,13 @@ impl McpBehavior for KimiProvider {
     }
 }
 impl AdapterBehavior for KimiProvider {
+    fn detect(&self, raw: &serde_json::Value) -> bool {
+        // Kimi's payloads are JSON-RPC framed and always carry a `method`
+        // field. No other provider in the catalog uses the same shape, so
+        // detection is the simple field-presence check.
+        raw.get("method").is_some()
+    }
+
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
         &crate::adapters::KIMI_ADAPTER
     }
@@ -165,18 +178,20 @@ const KIMI_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
         native_name: "text",
         cli_flag: None,
         stdin_supported: true,
+        selector: OutputFormatSelector::Default,
     },
     OutputFormatSupport {
         format: OutputFormat::Stream,
         native_name: "stream-json",
-        cli_flag: Some("--print"),
+        cli_flag: Some("--wire"),
         stdin_supported: true,
+        selector: OutputFormatSelector::TransportFlag { flag: "--wire" },
     },
 ];
 
 const KIMI_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
     subcommand: None,
-    required_flags: &["--print"],
+    required_flags: &["--wire"],
     mode: EntrypointMode::NonInteractive,
 }];
 
@@ -375,6 +390,8 @@ fn build_kimi_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_kimi_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
@@ -413,17 +430,12 @@ fn build_kimi_agent_capabilities() -> AgentCapabilities {
             },
             non_interactive: NonInteractiveCapabilities {
                 supported: true,
-                entrypoints: vec![
-                    "kimi --print",
-                    "kimi --quiet",
-                    "kimi --print --input-format stream-json --output-format stream-json",
-                    "kimi --wire",
-                ],
+                entrypoints: vec!["kimi --wire"],
                 stdin_supported: true,
                 output_formats: vec!["text", "stream-json"],
                 structured_output_supported: true,
                 resume_supported: true,
-                limitations: vec!["--print implies --yolo"],
+                limitations: vec!["--wire uses JSON-RPC prompt delivery"],
             },
             system_prompt: SystemPromptCapabilities {
                 supplement_sources: vec!["AGENTS.md via /init"],

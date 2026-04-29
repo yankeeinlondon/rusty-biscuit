@@ -15,7 +15,9 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::{KnownGap, KnownGapArea};
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
@@ -53,6 +55,10 @@ pub(super) struct ClaudeProvider;
 pub(super) static CLAUDE_PROVIDER: ClaudeProvider = ClaudeProvider;
 
 impl ProviderBehavior for ClaudeProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        <Self as AdapterBehavior>::detect(self, raw)
+    }
+
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
@@ -100,6 +106,19 @@ impl McpBehavior for ClaudeProvider {
     }
 }
 impl AdapterBehavior for ClaudeProvider {
+    fn detect(&self, raw: &serde_json::Value) -> bool {
+        // Claude payloads always carry a `hook_event_name` whose value is one
+        // of the native hook names in the Claude event mapping table. The
+        // `PROVIDERS_DISPLAY_ORDER` walk in `Provider::detect_from_payload`
+        // visits Claude before Gemini, so any name shared with Gemini is
+        // attributed to Claude — Gemini's `detect` guards against the
+        // shared names explicitly.
+        let Some(name) = raw.get("hook_event_name").and_then(|v| v.as_str()) else {
+            return false;
+        };
+        CLAUDE_EVENT_MAPPING.event_from_native_name(name).is_some()
+    }
+
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
         &crate::adapters::CLAUDE_ADAPTER
     }
@@ -213,18 +232,27 @@ const CLAUDE_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
         native_name: "text",
         cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
     OutputFormatSupport {
         format: OutputFormat::Json,
         native_name: "json",
         cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
     OutputFormatSupport {
         format: OutputFormat::Stream,
         native_name: "stream-json",
         cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
 ];
 
@@ -465,6 +493,8 @@ fn build_claude_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_claude_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {

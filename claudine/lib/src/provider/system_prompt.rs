@@ -58,6 +58,8 @@ pub enum SystemPromptCustomTag {
     GooseRecipe,
     /// Codex: `model_instructions_file` config setting in `config.toml`.
     CodexInstructionsFile,
+    /// Roo Code: per-mode system prompt files under `.roo/`.
+    RooModePromptFile,
 }
 
 /// System-prompt delivery split by entrypoint mode.

@@ -12,7 +12,9 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
@@ -42,7 +44,13 @@ pub(super) struct GooseProvider;
 
 pub(super) static GOOSE_PROVIDER: GooseProvider = GooseProvider;
 
-impl ProviderBehavior for GooseProvider {}
+impl ProviderBehavior for GooseProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        let _ = raw;
+        // Goose has no representative raw hook payload shape in the catalog yet.
+        false
+    }
+}
 impl McpBehavior for GooseProvider {
     fn provider_for_error(&self) -> Provider {
         Provider::Goose
@@ -146,38 +154,29 @@ const GOOSE_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
         native_name: "text",
         cli_flag: None,
         stdin_supported: true,
+        selector: OutputFormatSelector::Default,
     },
     OutputFormatSupport {
         format: OutputFormat::Json,
         native_name: "json",
         cli_flag: None,
         stdin_supported: true,
+        selector: OutputFormatSelector::Default,
     },
     OutputFormatSupport {
         format: OutputFormat::Stream,
         native_name: "stream-json",
         cli_flag: None,
         stdin_supported: true,
+        selector: OutputFormatSelector::Default,
     },
 ];
 
-const GOOSE_ENTRYPOINTS: &[EntrypointSpec] = &[
-    EntrypointSpec {
-        subcommand: Some("run"),
-        required_flags: &["-t"],
-        mode: EntrypointMode::NonInteractive,
-    },
-    EntrypointSpec {
-        subcommand: Some("run"),
-        required_flags: &["-i"],
-        mode: EntrypointMode::NonInteractive,
-    },
-    EntrypointSpec {
-        subcommand: Some("run"),
-        required_flags: &["--recipe"],
-        mode: EntrypointMode::NonInteractive,
-    },
-];
+const GOOSE_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
+    subcommand: Some("run"),
+    required_flags: &[],
+    mode: EntrypointMode::NonInteractive,
+}];
 
 static GOOSE_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
     append: SystemPromptDeliveryByMode {
@@ -354,6 +353,8 @@ fn build_goose_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_goose_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
@@ -423,7 +424,7 @@ fn build_goose_agent_capabilities() -> AgentCapabilities {
             },
             permissions: PermissionCapabilities {
                 modes: vec!["auto", "smart_approve", "approve", "chat"],
-                yolo_equivalent: Some("auto mode"),
+                yolo_equivalent: Some("GOOSE_MODE=auto"),
                 sandbox_modes: vec![],
                 tool_allowlist_controls: vec!["~/.config/goose/permission.yaml"],
                 tool_denylist_controls: vec!["~/.config/goose/permissions/tool_permissions.json"],

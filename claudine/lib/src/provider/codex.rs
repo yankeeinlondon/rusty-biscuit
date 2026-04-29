@@ -15,7 +15,9 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
@@ -54,6 +56,10 @@ pub(super) struct CodexProvider;
 pub(super) static CODEX_PROVIDER: CodexProvider = CodexProvider;
 
 impl ProviderBehavior for CodexProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        <Self as AdapterBehavior>::detect(self, raw)
+    }
+
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
@@ -105,9 +111,55 @@ impl McpBehavior for CodexProvider {
     }
 }
 impl AdapterBehavior for CodexProvider {
+    fn detect(&self, raw: &serde_json::Value) -> bool {
+        looks_like_codex_payload(raw)
+    }
+
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
         &crate::adapters::CODEX_ADAPTER
     }
+}
+
+/// Recognize Codex payloads by their characteristic shape.
+///
+/// Codex emits several shapes that no other provider produces: a
+/// thread-id key (`thread_id` or `thread-id`), a nested `hook_event` block
+/// with `event_type: after_tool_use`, a top-level `event_type` of
+/// `after_tool_use`, or one of Codex's tagged stream events under the
+/// `type` field.
+fn looks_like_codex_payload(raw: &serde_json::Value) -> bool {
+    use serde_json::Value;
+
+    if raw.get("thread_id").is_some() || raw.get("thread-id").is_some() {
+        return true;
+    }
+
+    if raw
+        .get("hook_event")
+        .and_then(|value| value.get("event_type"))
+        .and_then(Value::as_str)
+        .is_some_and(|kind| matches!(kind, "after_tool_use"))
+    {
+        return true;
+    }
+
+    raw.get("event_type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| matches!(kind, "after_tool_use"))
+        || raw.get("type").and_then(Value::as_str).is_some_and(|kind| {
+            matches!(
+                kind,
+                "agent-turn-complete"
+                    | "thread.started"
+                    | "turn.started"
+                    | "turn.completed"
+                    | "turn.failed"
+                    | "item.started"
+                    | "item.updated"
+                    | "item.completed"
+                    | "error"
+            )
+        })
 }
 impl ConfiguratorBehavior for CodexProvider {
     fn hooks_supported(&self) -> bool {
@@ -229,18 +281,23 @@ const CODEX_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
         native_name: "text",
         cli_flag: None,
         stdin_supported: true,
+        selector: OutputFormatSelector::Default,
     },
     OutputFormatSupport {
         format: OutputFormat::Json,
         native_name: "jsonl",
         cli_flag: Some("--json"),
         stdin_supported: true,
+        selector: OutputFormatSelector::Flag { flag: "--json" },
     },
     OutputFormatSupport {
         format: OutputFormat::Stream,
         native_name: "schema-json",
         cli_flag: Some("--output-schema"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-schema",
+        },
     },
 ];
 
@@ -445,6 +502,8 @@ fn build_codex_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_codex_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
@@ -498,11 +557,7 @@ fn build_codex_agent_capabilities() -> AgentCapabilities {
                     "codex exec resume",
                 ],
                 stdin_supported: true,
-                output_formats: vec![
-                    "text",
-                    "jsonl (--json)",
-                    "schema-constrained json (--output-schema)",
-                ],
+                output_formats: vec!["text", "jsonl (--json)", "schema-json (--output-schema)"],
                 structured_output_supported: true,
                 resume_supported: true,
                 limitations: vec![

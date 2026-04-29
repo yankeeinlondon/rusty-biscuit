@@ -15,7 +15,9 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
@@ -52,6 +54,10 @@ pub(super) struct GeminiProvider;
 pub(super) static GEMINI_PROVIDER: GeminiProvider = GeminiProvider;
 
 impl ProviderBehavior for GeminiProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        <Self as AdapterBehavior>::detect(self, raw)
+    }
+
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
@@ -103,6 +109,19 @@ impl McpBehavior for GeminiProvider {
     }
 }
 impl AdapterBehavior for GeminiProvider {
+    fn detect(&self, raw: &serde_json::Value) -> bool {
+        // Gemini emits two payload shapes: the standard `hook_event_name`
+        // shape (where the name must be Gemini-only — Claude already owns
+        // shared names like `Stop`/`PreToolUse` via display order) and a
+        // legacy `event_name` field used by some Gemini integrations.
+        if let Some(name) = raw.get("hook_event_name").and_then(|v| v.as_str()) {
+            let claude_table = &super::claude::CLAUDE_EVENT_MAPPING;
+            return GEMINI_EVENT_MAPPING.event_from_native_name(name).is_some()
+                && claude_table.event_from_native_name(name).is_none();
+        }
+        raw.get("event_name").is_some()
+    }
+
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
         &crate::adapters::GEMINI_ADAPTER
     }
@@ -210,20 +229,29 @@ const GEMINI_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
     OutputFormatSupport {
         format: OutputFormat::Text,
         native_name: "text",
-        cli_flag: None,
+        cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
     OutputFormatSupport {
         format: OutputFormat::Json,
         native_name: "json",
         cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
     OutputFormatSupport {
         format: OutputFormat::Stream,
         native_name: "stream-json",
         cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
 ];
 
@@ -431,6 +459,8 @@ fn build_gemini_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_gemini_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
@@ -473,6 +503,7 @@ fn build_gemini_agent_capabilities() -> AgentCapabilities {
                 entrypoints: vec![
                     "gemini <prompt>",
                     "gemini -p <prompt>",
+                    "gemini --prompt <prompt>",
                     "gemini -i <prompt>",
                     "stdin piping",
                 ],

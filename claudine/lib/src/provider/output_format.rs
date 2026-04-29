@@ -58,6 +58,41 @@ pub struct OutputFormatSupport {
     pub cli_flag: Option<&'static str>,
     /// Whether this format also accepts the prompt over stdin.
     pub stdin_supported: bool,
+    /// How the provider CLI selects this output format.
+    pub selector: OutputFormatSelector,
+}
+
+/// Typed selector metadata for provider-native output formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum OutputFormatSelector {
+    /// The provider default; no flag or positional token is needed.
+    Default,
+    /// A flag-only selector such as Codex `--json`.
+    Flag {
+        /// Native CLI flag.
+        flag: &'static str,
+    },
+    /// A flag plus value selector such as `--output-format json`.
+    ///
+    /// Detection accepts both `--flag value` and `--flag=value`.
+    FlagValue {
+        /// Native CLI flag.
+        flag: &'static str,
+    },
+    /// A positional token selector.
+    Positional {
+        /// Native positional token.
+        token: &'static str,
+    },
+    /// A transport selector used by Claudine to get structured events, not a
+    /// user-requested provider output format. Kimi `--wire` is the current
+    /// example: it enables the JSON-RPC transport and must not disable
+    /// Claudine's internal structured parsing by itself.
+    TransportFlag {
+        /// Native CLI flag.
+        flag: &'static str,
+    },
 }
 
 /// Whether an entrypoint is available in interactive mode, non-interactive

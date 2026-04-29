@@ -13,11 +13,15 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
-use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
+use super::system_prompt::{
+    SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+};
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
 use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
@@ -45,7 +49,13 @@ pub(super) struct RooProvider;
 
 pub(super) static ROO_PROVIDER: RooProvider = RooProvider;
 
-impl ProviderBehavior for RooProvider {}
+impl ProviderBehavior for RooProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        let _ = raw;
+        // Roo has no representative raw hook payload shape in the catalog yet.
+        false
+    }
+}
 impl McpBehavior for RooProvider {
     fn supported(&self) -> bool {
         true
@@ -145,7 +155,9 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     cli_sensitive_axes: CliSensitiveAxes::NONE,
 };
 
-const ROO_SESSION_LOG_PATHS: &[PathTemplate] = &[];
+const ROO_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(
+    "VS Code globalStorage/rooveterinaryinc.roo-cline/",
+)];
 
 const ROO_SESSION_LOCATIONS: &[PathTemplate] =
     &[PathTemplate::Static("@roo-code/core debug-log output")];
@@ -159,6 +171,9 @@ const ROO_CONFIG_PATHS: &[PathTemplate] = &[
     PathTemplate::Static("~/.roo/settings.json"),
     PathTemplate::Static("~/.roo/custom_modes.yaml"),
     PathTemplate::Static("~/.roo/custom_modes.json"),
+    PathTemplate::Static(".roo/custom_modes.yaml"),
+    PathTemplate::Static(".roo/custom_modes.json"),
+    PathTemplate::Static(".roomodes"),
 ];
 
 const ROO_MEMORY_FILES: &[PathTemplate] = &[
@@ -172,22 +187,51 @@ const ROO_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
         native_name: "text",
         cli_flag: None,
         stdin_supported: false,
+        selector: OutputFormatSelector::Default,
     },
     OutputFormatSupport {
         format: OutputFormat::Json,
         native_name: "json",
         cli_flag: None,
         stdin_supported: false,
+        selector: OutputFormatSelector::Default,
     },
     OutputFormatSupport {
         format: OutputFormat::Stream,
         native_name: "stream-json",
         cli_flag: None,
         stdin_supported: false,
+        selector: OutputFormatSelector::Default,
     },
 ];
 
-const ROO_ENTRYPOINTS: &[EntrypointSpec] = &[];
+const ROO_ENTRYPOINTS: &[EntrypointSpec] = &[
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["--print"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["--print", "--prompt-file"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["--print", "--stdin-prompt-stream"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["--oneshot"],
+        mode: EntrypointMode::NonInteractive,
+    },
+    EntrypointSpec {
+        subcommand: None,
+        required_flags: &["--ephemeral"],
+        mode: EntrypointMode::NonInteractive,
+    },
+];
 
 static ROO_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
     append: SystemPromptDeliveryByMode {
@@ -195,8 +239,8 @@ static ROO_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
         non_interactive: SystemPromptDelivery::Unsupported,
     },
     replace: SystemPromptDeliveryByMode {
-        interactive: SystemPromptDelivery::Unsupported,
-        non_interactive: SystemPromptDelivery::Unsupported,
+        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::RooModePromptFile),
+        non_interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::RooModePromptFile),
     },
     memory_files: ROO_MEMORY_FILES,
 };
@@ -366,6 +410,8 @@ fn build_roo_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_roo_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
@@ -441,7 +487,7 @@ fn build_roo_agent_capabilities() -> AgentCapabilities {
                     "auto-approve (default)",
                     "manual approval (--require-approval)",
                 ],
-                yolo_equivalent: Some("default auto-approve behavior"),
+                yolo_equivalent: None,
                 sandbox_modes: vec![],
                 tool_allowlist_controls: vec!["VS Code auto-approve categories"],
                 tool_denylist_controls: vec!["VS Code category toggles"],
@@ -461,10 +507,7 @@ fn build_roo_agent_capabilities() -> AgentCapabilities {
                 notes: vec!["Configured through --reasoning-effort on CLI"],
             },
             logging: LoggingCapabilities {
-                session_locations: vec![
-                    "VS Code globalStorage/rooveterinaryinc.roo-cline/",
-                    "custom roo-cline storage path",
-                ],
+                session_locations: vec!["VS Code globalStorage/rooveterinaryinc.roo-cline/"],
                 log_locations: vec!["@roo-code/core debug-log output"],
                 debug_controls: vec!["--debug"],
                 telemetry_controls: vec![],

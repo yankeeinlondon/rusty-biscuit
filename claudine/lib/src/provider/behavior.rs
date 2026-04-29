@@ -41,11 +41,8 @@ pub type BoxedSemanticEventSink = Box<dyn SemanticEventSink + Send + 'static>;
 /// adapter / configurator surfaces.
 pub trait ProviderBehavior: Send + Sync + std::fmt::Debug + 'static {
     /// Whether the given raw JSON payload is recognized as originating from
-    /// this provider. Defaults to `false`.
-    fn detect_from_payload(&self, raw: &Value) -> bool {
-        let _ = raw;
-        false
-    }
+    /// this provider.
+    fn detect_from_payload(&self, raw: &Value) -> bool;
 
     /// Construct a [`SemanticStreamParser`] for this provider's structured
     /// output stream. Providers without a native semantic parser fall back

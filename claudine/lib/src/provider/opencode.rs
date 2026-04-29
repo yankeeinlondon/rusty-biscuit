@@ -15,7 +15,9 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::{KnownGap, KnownGapArea};
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
@@ -52,6 +54,10 @@ pub(super) struct OpenCodeProvider;
 pub(super) static OPENCODE_PROVIDER: OpenCodeProvider = OpenCodeProvider;
 
 impl ProviderBehavior for OpenCodeProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        <Self as AdapterBehavior>::detect(self, raw)
+    }
+
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
@@ -103,6 +109,14 @@ impl McpBehavior for OpenCodeProvider {
     }
 }
 impl AdapterBehavior for OpenCodeProvider {
+    fn detect(&self, raw: &serde_json::Value) -> bool {
+        // OpenCode payloads always include either snake_case `event_type`
+        // or camelCase `eventType` at the top level. Codex's `event_type`
+        // is constrained to a small set of Codex-specific values which it
+        // claims first via `PROVIDERS_DISPLAY_ORDER` ordering.
+        raw.get("event_type").is_some() || raw.get("eventType").is_some()
+    }
+
     fn provider_adapter(&self) -> &'static dyn ProviderAdapter {
         &crate::adapters::OPENCODE_ADAPTER
     }
@@ -192,7 +206,13 @@ const OPENCODE_CONFIG_PATHS: &[PathTemplate] = &[
 
 const OPENCODE_MEMORY_FILES: &[PathTemplate] = &[PathTemplate::Static("AGENTS.md")];
 
-const OPENCODE_OUTPUT_FORMATS: &[OutputFormatSupport] = &[];
+const OPENCODE_OUTPUT_FORMATS: &[OutputFormatSupport] = &[OutputFormatSupport {
+    format: OutputFormat::Json,
+    native_name: "json",
+    cli_flag: Some("--format"),
+    stdin_supported: false,
+    selector: OutputFormatSelector::FlagValue { flag: "--format" },
+}];
 
 const OPENCODE_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
     subcommand: Some("run"),
@@ -417,6 +437,8 @@ fn build_opencode_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_opencode_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
@@ -452,8 +474,8 @@ fn build_opencode_agent_capabilities() -> AgentCapabilities {
                 supported: true,
                 entrypoints: vec!["opencode run"],
                 stdin_supported: true,
-                output_formats: vec![],
-                structured_output_supported: false,
+                output_formats: vec!["json (--format json)"],
+                structured_output_supported: true,
                 resume_supported: false,
                 limitations: vec![
                     "Slash commands are TUI-only",
@@ -468,7 +490,7 @@ fn build_opencode_agent_capabilities() -> AgentCapabilities {
             },
             permissions: PermissionCapabilities {
                 modes: vec!["allow", "ask", "deny"],
-                yolo_equivalent: None,
+                yolo_equivalent: Some("--dangerously-skip-permissions"),
                 sandbox_modes: vec![],
                 tool_allowlist_controls: vec![
                     "permission.skill patterns",

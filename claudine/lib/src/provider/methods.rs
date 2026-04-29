@@ -135,45 +135,17 @@ impl Provider {
     /// Detect a provider from raw payload shape.
     ///
     /// Walks providers in canonical display order and asks each provider's
-    /// adapter behavior to recognize the payload. The first hit wins; this
+    /// central behavior to recognize the payload. The first hit wins; this
     /// keeps detection table-driven rather than re-implementing payload
-    /// shape rules in a per-variant `match` here.
+    /// shape rules in a per-variant `match` here. Provider-specific shape
+    /// rules live behind each provider's `ProviderBehavior::detect_from_payload`
+    /// override (see `provider/<name>.rs`); the source guard
+    /// `detect_from_payload_has_no_provider_specific_branches` enforces that
+    /// this function stays a pure registry walk.
     pub fn detect_from_payload(raw: &Value) -> Option<Self> {
-        // Provider adapters get first refusal — they own the most specific
-        // shape detection (e.g. Codex's payload-shape heuristics).
-        for provider in PROVIDERS_DISPLAY_ORDER {
-            if provider_info(provider).adapter.detect(raw) {
-                return Some(provider);
-            }
-        }
-
-        // Cross-cutting fallbacks for ambiguous shapes that match multiple
-        // providers (e.g. Claude vs. Gemini both use `hook_event_name`).
-        // These are JSON-shape checks, not provider-typed dispatch.
-        if let Some(name) = raw.get("hook_event_name").and_then(Value::as_str) {
-            let gemini_table = provider_info(Provider::Gemini).event_mapping;
-            let claude_table = provider_info(Provider::Claude).event_mapping;
-            let is_gemini = gemini_table.event_from_native_name(name).is_some()
-                && claude_table.event_from_native_name(name).is_none();
-            return Some(if is_gemini {
-                Provider::Gemini
-            } else {
-                Provider::Claude
-            });
-        }
-        if looks_like_codex_payload(raw) {
-            return Some(Provider::Codex);
-        }
-        if raw.get("event_type").is_some() || raw.get("eventType").is_some() {
-            return Some(Provider::OpenCode);
-        }
-        if raw.get("event_name").is_some() {
-            return Some(Provider::Gemini);
-        }
-        if raw.get("method").is_some() {
-            return Some(Provider::KimiCode);
-        }
-        None
+        PROVIDERS_DISPLAY_ORDER
+            .into_iter()
+            .find(|provider| provider_info(*provider).behavior.detect_from_payload(raw))
     }
 
     /// Returns a snake_case identifier suitable for file paths and JSON keys.
@@ -240,39 +212,6 @@ impl Provider {
     pub fn agent_offset(&self) -> &'static str {
         provider_info(*self).agent_offset
     }
-}
-
-fn looks_like_codex_payload(raw: &Value) -> bool {
-    if raw.get("thread_id").is_some() || raw.get("thread-id").is_some() {
-        return true;
-    }
-
-    if raw
-        .get("hook_event")
-        .and_then(|value| value.get("event_type"))
-        .and_then(Value::as_str)
-        .is_some_and(|kind| matches!(kind, "after_tool_use"))
-    {
-        return true;
-    }
-
-    raw.get("event_type")
-        .and_then(Value::as_str)
-        .is_some_and(|kind| matches!(kind, "after_tool_use"))
-        || raw.get("type").and_then(Value::as_str).is_some_and(|kind| {
-            matches!(
-                kind,
-                "agent-turn-complete"
-                    | "thread.started"
-                    | "turn.started"
-                    | "turn.completed"
-                    | "turn.failed"
-                    | "item.started"
-                    | "item.updated"
-                    | "item.completed"
-                    | "error"
-            )
-        })
 }
 
 fn normalize_provider_input(input: &str) -> String {

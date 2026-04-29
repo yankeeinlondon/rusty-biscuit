@@ -14,7 +14,9 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
+use super::output_format::{
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
@@ -46,6 +48,12 @@ pub(super) struct QwenProvider;
 pub(super) static QWEN_PROVIDER: QwenProvider = QwenProvider;
 
 impl ProviderBehavior for QwenProvider {
+    fn detect_from_payload(&self, raw: &serde_json::Value) -> bool {
+        let _ = raw;
+        // Qwen has no representative raw hook payload shape in the catalog yet.
+        false
+    }
+
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
@@ -114,7 +122,7 @@ pub(super) static QWEN_INFO: ProviderInfo = ProviderInfo {
         native_flag: "--yolo",
     },
     reasoning: ReasoningSupport::NumericBudget {
-        flag: "thinkingBudget",
+        flag: "thinking_budget",
         min: 0,
         max: 32_768,
         default: None,
@@ -165,18 +173,25 @@ const QWEN_OUTPUT_FORMATS: &[OutputFormatSupport] = &[
         native_name: "text",
         cli_flag: None,
         stdin_supported: true,
+        selector: OutputFormatSelector::Default,
     },
     OutputFormatSupport {
         format: OutputFormat::Json,
         native_name: "json",
         cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
     OutputFormatSupport {
         format: OutputFormat::Stream,
         native_name: "stream-json",
         cli_flag: Some("--output-format"),
         stdin_supported: true,
+        selector: OutputFormatSelector::FlagValue {
+            flag: "--output-format",
+        },
     },
 ];
 
@@ -360,6 +375,8 @@ fn build_qwen_resource_support() -> ProviderCapabilities {
     }
 }
 
+// Compatibility facade for the legacy `agents::Agent` surface. The typed
+// `ProviderInfo` fields above are authoritative for structured provider data.
 fn build_qwen_agent_capabilities() -> AgentCapabilities {
     AgentCapabilities {
         meta: AgentMeta {
