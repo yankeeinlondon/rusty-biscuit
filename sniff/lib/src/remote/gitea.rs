@@ -8,6 +8,7 @@
 //! access [Codeberg](https://codeberg.org), a popular public Gitea instance.
 
 use async_trait::async_trait;
+use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::gitea::*;
 use schematic_schema::shared::SchematicError;
 
@@ -15,7 +16,8 @@ use super::{
     provider::RemoteRepoProvider,
     types::{
         CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-        OrgRepoRef, PullRequestInfo, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
+        OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
+        TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -135,6 +137,28 @@ impl GiteaRemote {
             .trim_end_matches("/api/v1/")
             .to_string()
     }
+
+    /// Build a Gitea API client variant that performs no authentication.
+    ///
+    /// The client is constructed by overriding both the env-fallback list
+    /// (so no credentials can be picked up from `GITEA_TOKEN`,
+    /// `CODEBERG_TOKEN`, etc.) **and** the auth strategy itself (so the
+    /// schematic runtime does not pre-flight-reject the request for missing
+    /// credentials). The combination produces a truly anonymous client
+    /// whose request passes through to the wire and is judged by the API
+    /// alone.
+    ///
+    /// This supports the "attempt unauthenticated" fallback: when an
+    /// authenticated request fails because no credentials are configured,
+    /// we retry once with this anonymous client before surfacing a
+    /// `MissingCredentials` error to the user.
+    fn unauthenticated_client(&self) -> Gitea {
+        self.client
+            .variant()
+            .env_auth(Vec::new())
+            .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
+            .build()
+    }
 }
 
 /// Normalize a base URL to ensure it ends with `/api/v1`.
@@ -153,15 +177,32 @@ fn normalize_base_url(url: &str) -> String {
 /// Map a [`SchematicError`] to a [`SniffError`].
 ///
 /// Handles special cases:
-/// - 401 -> `MissingCredentials`
+/// - `MissingCredential` / `AuthenticationRequired` -> `MissingCredentials`
+/// - 401 -> `MissingCredentials` (anonymous request rejected)
 /// - 403 with rate limit info -> `RateLimited`
 /// - 404 -> `RemoteApi` with "Not found"
 /// - Other HTTP errors -> `RemoteApi`
+///
+/// ## Notes
+///
+/// `MissingCredentials` is only emitted *after* the anonymous retry has
+/// failed (see [`GiteaRemote::unauthenticated_client`]) or when the API
+/// explicitly demands credentials for a private resource (a real 401
+/// response). Call sites that want the "attempt unauthenticated"
+/// behaviour must wrap the initial request in a
+/// `MissingCredential`/`AuthenticationRequired` retry rather than mapping
+/// the first failure directly through this function.
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
         SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
             provider: "Gitea".to_string(),
             env_var: env_vars.join(" or "),
+        },
+        SchematicError::AuthenticationRequired {
+            env_fallback_vars, ..
+        } => SniffError::MissingCredentials {
+            provider: "Gitea".to_string(),
+            env_var: env_fallback_vars.join(" or "),
         },
         SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
             provider: "Gitea".to_string(),
@@ -377,15 +418,39 @@ impl RemoteRepoProvider for GiteaRemote {
         &self,
         owner: &str,
         repo: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let request = ListPullRequestsRequest::new(owner, repo);
-        let prs: Vec<PullRequestSummary> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let mut request = ListPullRequestsRequest::new(owner, repo);
 
-        Ok(prs
+        // Map PullRequestState to Gitea API state parameter
+        match state {
+            PullRequestState::Open => {
+                request = request.with_state("open".to_string());
+            }
+            PullRequestState::Closed => {
+                request = request.with_state("closed".to_string());
+            }
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => {
+                request = request.with_state("all".to_string());
+            }
+        }
+
+        // Attempt the request with the configured client first. If it fails
+        // because no credentials are available, retry once with an explicitly
+        // unauthenticated client. Only after the anonymous retry also fails
+        // (or on a real 401/403) do we surface a credentials error.
+        let prs: Vec<PullRequestSummary> = match self.client.request(request.clone()).await {
+            Ok(prs) => prs,
+            Err(SchematicError::MissingCredential { .. })
+            | Err(SchematicError::AuthenticationRequired { .. }) => self
+                .unauthenticated_client()
+                .request(request)
+                .await
+                .map_err(map_schematic_error)?,
+            Err(err) => return Err(map_schematic_error(err)),
+        };
+
+        let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
             .filter_map(|pr| {
                 // Skip PRs without essential fields
@@ -407,13 +472,33 @@ impl RemoteRepoProvider for GiteaRemote {
                     draft: pr.draft.unwrap_or(false),
                     source_branch: pr.head.and_then(|h| h.ref_name),
                     target_branch: pr.base.and_then(|b| b.ref_name),
+                    labels: pr
+                        .labels
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|l| l.name)
+                        .collect(),
+                    body: pr.body,
                     created_at,
                     updated_at: pr.updated_at,
                     merged_at: pr.merged_at,
                     html_url,
                 })
             })
-            .collect())
+            .collect();
+
+        // Post-filter for states Gitea API doesn't support directly
+        match state {
+            PullRequestState::Merged => {
+                prs.retain(|pr| pr.merged_at.is_some());
+            }
+            PullRequestState::Draft => {
+                prs.retain(|pr| pr.draft);
+            }
+            _ => {}
+        }
+
+        Ok(prs)
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {

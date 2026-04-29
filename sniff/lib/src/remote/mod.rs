@@ -314,12 +314,13 @@ impl RemoteRepoProvider for GitRemote {
         &self,
         owner: &str,
         repo: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
         match self {
-            Self::GitHub(p) => p.list_pull_requests(owner, repo).await,
-            Self::GitLab(p) => p.list_pull_requests(owner, repo).await,
-            Self::Gitea(p) => p.list_pull_requests(owner, repo).await,
-            Self::Bitbucket(p) => p.list_pull_requests(owner, repo).await,
+            Self::GitHub(p) => p.list_pull_requests(owner, repo, state).await,
+            Self::GitLab(p) => p.list_pull_requests(owner, repo, state).await,
+            Self::Gitea(p) => p.list_pull_requests(owner, repo, state).await,
+            Self::Bitbucket(p) => p.list_pull_requests(owner, repo, state).await,
         }
     }
 

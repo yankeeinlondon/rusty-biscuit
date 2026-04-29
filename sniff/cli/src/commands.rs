@@ -346,6 +346,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return result;
                 }
             }
+            crate::args::RepoAction::Pr { status, .. } => {
+                let result =
+                    handle_pr_command(*status, cli.json, cli.plain, cli.verbose, base_dir.as_deref(),
+                    &perf).await;
+                perf.emit_stdout(None);
+                return result;
+            }
             crate::args::RepoAction::Hash { sha } => {
                 let dir = base_dir
                     .as_deref()
@@ -950,6 +957,125 @@ async fn handle_remote_url(
     }
 
     Ok(())
+}
+
+/// Handle `sniff repo pr` — list pull requests for the current repo's remote.
+///
+/// Discovers the git repo, resolves the preferred remote, fetches PRs, and
+/// renders them as JSON or text (table / verbose block).
+async fn handle_pr_command(
+    status: sniff::remote::PullRequestState,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+    base_dir: Option<&std::path::Path>,
+    perf: &CliPerf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
+
+    // 1. Discover the git repository
+    let repo = git2::Repository::discover(dir)
+        .map_err(|_| format!("No git repository found from {}", dir.display()))?;
+
+    // 2. Resolve preferred remote URL (origin first, then first configured remote)
+    let remote_url = resolve_origin_or_first_remote(&repo)
+        .ok_or("No git remotes found for this repository")?;
+
+    // 3. Parse the remote URL and construct the provider
+    let parsed = GitRemote::parse_url(&remote_url).map_err(|e| {
+        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+    })?;
+    let remote = GitRemote::from_url(&remote_url).map_err(|e| {
+        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+    })?;
+
+    // 4. Fetch pull requests
+    let prs = match remote.list_pull_requests(&parsed.owner, &parsed.repo, status).await {
+        Ok(prs) => prs,
+        Err(sniff::SniffError::MissingCredentials { provider, env_var }) => {
+            return Err(format!(
+                "{} requires credentials for this resource: set the {} environment variable",
+                provider, env_var
+            )
+            .into());
+        }
+        Err(sniff::SniffError::InvalidCredentials { provider, message }) => {
+            return Err(format!(
+                "{} rejected credentials: {} (check your token environment variable)",
+                provider, message
+            )
+            .into());
+        }
+        Err(sniff::SniffError::RateLimited { provider, retry_after }) => {
+            let retry_msg = retry_after
+                .map(|s| format!(", retry after {}s", s))
+                .unwrap_or_default();
+            return Err(format!(
+                "Rate limited by {} API{}",
+                provider, retry_msg
+            )
+            .into());
+        }
+        Err(sniff::SniffError::RemoteApi { status, provider, message }) => {
+            return Err(format!(
+                "{} API error (HTTP {}): {}",
+                provider, status, message
+            )
+            .into());
+        }
+        Err(sniff::SniffError::RemoteInit { provider, message }) => {
+            return Err(format!(
+                "Failed to initialize {} remote provider: {}",
+                provider, message
+            )
+            .into());
+        }
+        Err(e) => {
+            return Err(format!(
+                "Failed to list pull requests from {}: {}",
+                parsed.provider.display_name(), e
+            )
+            .into());
+        }
+    };
+
+    // 5. Output
+    if json {
+        println!("{}", serde_json::to_string_pretty(&prs)?);
+    } else {
+        if prs.is_empty() {
+            let rendered = output::render_pull_requests_empty(status);
+            output::emit_text(&rendered, plain);
+        } else if verbose > 0 {
+            let rendered = output::render_pull_requests_verbose(&prs);
+            output::emit_text(&rendered, plain);
+        } else {
+            let rendered = output::render_pull_requests_table(&prs);
+            output::emit_text(&rendered, plain);
+        }
+    }
+
+    perf.emit_stdout(None);
+    Ok(())
+}
+
+/// Resolve the origin remote URL, or fall back to the first configured remote.
+fn resolve_origin_or_first_remote(repo: &git2::Repository) -> Option<String> {
+    if let Ok(remote) = repo.find_remote("origin")
+        && let Some(url) = remote.url()
+    {
+        return Some(url.to_string());
+    }
+
+    for remote_name in repo.remotes().ok()?.iter().flatten() {
+        if let Ok(remote) = repo.find_remote(remote_name)
+            && let Some(url) = remote.url()
+        {
+            return Some(url.to_string());
+        }
+    }
+
+    None
 }
 
 /// Fetch the README content when verbose mode is enabled.

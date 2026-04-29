@@ -38,7 +38,10 @@ pub use notification_helpers::{
     print_notification_helpers_json, render_notification_helpers_markdown,
 };
 pub use programs::{print_programs_json, render_programs_markdown};
-pub use remote::{print_remote_json, render_remote_text};
+pub use remote::{
+    print_remote_json, render_pull_requests_empty, render_pull_requests_table,
+    render_pull_requests_verbose, render_remote_text,
+};
 pub use services::{print_services_json, render_services_text};
 pub use topics::render_topics_table;
 

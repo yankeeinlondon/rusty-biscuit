@@ -22,6 +22,7 @@ metrics = { version = "0.24", optional = true }
 rayon = "1.11.0"
 regex = "1.11"
 reqwest = { version = "0.13", features = ["json", "blocking"], default-features = false, optional = true }
+schematic-define = { path = "../../schematic/define" }
 schematic-schema = { path = "../../schematic/schema" }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
@@ -59,6 +60,7 @@ winreg = "0.55"
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
+serial_test = "3"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
 wiremock = "0.6"
