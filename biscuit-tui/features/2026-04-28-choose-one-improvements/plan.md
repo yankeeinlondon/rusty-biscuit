@@ -52,6 +52,22 @@ source_files_during_phase_6:
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase6: []
+source_files_during_phase_7:
+  - biscuit-tui/cli/src/option_sources.rs
+  - biscuit-tui/cli/src/choice_normalize.rs
+  - biscuit-tui/cli/src/commands/common_choose.rs
+  - biscuit-tui/cli/src/commands/choose_one.rs
+  - biscuit-tui/cli/src/commands/choose_many.rs
+  - biscuit-tui/cli/src/main.rs
+  - biscuit-tui/cli/Cargo.toml
+  - biscuit-tui/cli/tests/choose_cli.rs
+  - biscuit-tui/cli/tests/choose_one_output.rs
+  - biscuit-tui/cli/tests/choose_many_output.rs
+  - biscuit-tui/cli/tests/exit_codes.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase7:
+  - .opencode/skill/biscuit-tui/SKILL.md
 packages:
   - tui-chrome
   - tui-chrome-cli
