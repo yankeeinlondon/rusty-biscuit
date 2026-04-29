@@ -563,6 +563,7 @@ pub struct ShellExpansionRuntime {
 #[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
     allow_once: HashSet<String>,
+    pending_allow_once: HashSet<String>,
     whitelist: ShellRuleSet,
     user_blacklist: ShellRuleSet,
     policy_paths: Option<ShellPolicyPaths>,
@@ -626,10 +627,29 @@ impl ShellExpansionRuntime {
         }
     }
 
-    pub(crate) fn allow_once(&mut self, normalized: String) {
+    /// Attempts to reserve a command for allow-once approval.
+    ///
+    /// Returns `true` if the reservation succeeded (caller should proceed with
+    /// the approval handler), or `false` if the command is already allowed or
+    /// another thread is already handling it.
+    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> bool {
         let mut shared = self.shared.lock().unwrap();
-        shared.allow_once.insert(normalized);
-        self.approvals_used += 1;
+        if shared.allow_once.contains(normalized) {
+            return false;
+        }
+        shared.pending_allow_once.insert(normalized.to_string())
+    }
+
+    /// Completes an allow-once reservation.
+    ///
+    /// Removes the command from the pending set. If `approved` is `true`, also
+    /// inserts it into the allow-once set.
+    pub(crate) fn complete_allow_once(&mut self, normalized: &str, approved: bool) {
+        let mut shared = self.shared.lock().unwrap();
+        shared.pending_allow_once.remove(normalized);
+        if approved {
+            shared.allow_once.insert(normalized.to_string());
+        }
     }
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
