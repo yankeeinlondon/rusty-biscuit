@@ -5,25 +5,23 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
+use super::acp::{AcpEvent, AcpServerMode, AcpSupport};
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::cli_sensitivity::CliSensitiveAxes;
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
-use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use super::model_catalog_source::ModelCatalogSource;
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
-use super::acp::{AcpEvent, AcpServerMode, AcpSupport};
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
-use crate::config::AgentConfigurator;
-use crate::events::AgenticEvent;
-use crate::provider::EventSupportLevel;
+use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -32,11 +30,12 @@ use crate::agents::{
     ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
     SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities,
 };
-use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
+use crate::config::AgentConfigurator;
+use crate::events::AgenticEvent;
 use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter,
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter,
 };
+use crate::provider::EventSupportLevel;
 
 #[derive(Debug)]
 pub(super) struct GooseProvider;
@@ -116,12 +115,17 @@ pub(super) static GOOSE_INFO: ProviderInfo = ProviderInfo {
         entrypoint: Some("run"),
         value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
     },
+    static_models: &[],
+    dynamic_source: ModelCatalogSource::None,
+    model_env_vars: &["GOOSE_MODEL"],
+    cli_sensitive_axes: CliSensitiveAxes::NONE,
 };
 
 const GOOSE_ACP_EVENTS: &[AcpEvent] = &[AcpEvent::RequestPermission];
 
-const GOOSE_SESSION_LOG_PATHS: &[PathTemplate] =
-    &[PathTemplate::Static("~/.local/share/goose/sessions/sessions.db")];
+const GOOSE_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(
+    "~/.local/share/goose/sessions/sessions.db",
+)];
 
 const GOOSE_SESSION_LOCATIONS: &[PathTemplate] = &[
     PathTemplate::Static("~/.local/state/goose/logs/cli/"),
@@ -194,112 +198,101 @@ pub(super) static GOOSE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         EventMapping {
             event: AgenticEvent::SessionStart,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::Acp,
-            native_name: "request_permission",
+            support_level: EventSupportLevel::Acp {
+                event: AcpEvent::RequestPermission,
+                native_name: "request_permission",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "complete",
+            support_level: EventSupportLevel::Wrapper { native_name: "complete" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "error",
+            support_level: EventSupportLevel::Wrapper { native_name: "error" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "subagent_tool_request",
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "subagent_tool_request",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "tasks_complete",
+            support_level: EventSupportLevel::Wrapper { native_name: "tasks_complete" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "message",
+            support_level: EventSupportLevel::Wrapper { native_name: "message" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "notification",
+            support_level: EventSupportLevel::Wrapper { native_name: "notification" },
             parse_aliases: &[],
             registration_target: false,
         },

@@ -6,31 +6,23 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
+use super::acp::AcpSupport;
 use super::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
+use super::cli_sensitivity::CliSensitiveAxes;
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::{KnownGap, KnownGapArea};
+use super::model_catalog_source::ModelCatalogSource;
 use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
-use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
-use crate::config::AgentConfigurator;
-use crate::error::Result;
-use crate::mcp::export::ExportServer;
-use crate::mcp::inject::{McpInjector, OpenCodeInjector};
-use crate::mcp::state::Scope;
-use crate::mcp::types::McpServer;
-use crate::stream::opencode_semantic::OpenCodeSemanticStreamParser;
-use crate::stream::parser::SemanticStreamParser;
-use crate::stream::{ParserConfig, StreamProtocol};
-use crate::events::AgenticEvent;
-use crate::provider::EventSupportLevel;
+use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -39,11 +31,20 @@ use crate::agents::{
     ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
     SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities,
 };
-use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::events::AgenticEvent;
 use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter,
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter,
 };
+use crate::mcp::export::ExportServer;
+use crate::mcp::inject::{McpInjector, OpenCodeInjector};
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::provider::EventSupportLevel;
+use crate::stream::opencode_semantic::OpenCodeSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
+use crate::stream::{ParserConfig, StreamProtocol};
 
 #[derive(Debug)]
 pub(super) struct OpenCodeProvider;
@@ -163,6 +164,21 @@ pub(super) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     known_gaps: OPENCODE_KNOWN_GAPS,
     acp: AcpSupport::NOT_SUPPORTED,
     prompt_arg_conventions: PromptArgConventions::positional_after("run"),
+    static_models: &[],
+    dynamic_source: ModelCatalogSource::OpencodeCli,
+    model_env_vars: &["OPENCODE_MODEL"],
+    cli_sensitive_axes: CliSensitiveAxes {
+        read_path: false,
+        write_path: false,
+        traverse_path: false,
+        execute_command: false,
+        access_domain: false,
+        use_mcp_server: false,
+        use_mcp_tool: false,
+        spawn_subagent: false,
+        switch_mode: false,
+        modify_provider_config: true,
+    },
 };
 
 const OPENCODE_SESSION_LOG_PATHS: &[PathTemplate] = &[];
@@ -206,92 +222,79 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::Hook,
-            native_name: "session.created",
+            support_level: EventSupportLevel::Hook { native_name: "session.created" },
             parse_aliases: &["session.created"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::Hook,
-            native_name: "session.deleted",
+            support_level: EventSupportLevel::Hook { native_name: "session.deleted" },
             parse_aliases: &["session.deleted"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
-            support_level: EventSupportLevel::Hook,
-            native_name: "chat.message",
+            support_level: EventSupportLevel::Hook { native_name: "chat.message" },
             parse_aliases: &["chat.message"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::Hook,
-            native_name: "tool.execute.before",
+            support_level: EventSupportLevel::Hook { native_name: "tool.execute.before" },
             parse_aliases: &["tool.execute.before"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::Hook,
-            native_name: "tool.execute.after",
+            support_level: EventSupportLevel::Hook { native_name: "tool.execute.after" },
             parse_aliases: &["tool.execute.after"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
-            support_level: EventSupportLevel::Hook,
-            native_name: "permission.ask",
+            support_level: EventSupportLevel::Hook { native_name: "permission.ask" },
             parse_aliases: &["permission.ask"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::Hook,
-            native_name: "permission.asked",
+            support_level: EventSupportLevel::Hook { native_name: "permission.asked" },
             parse_aliases: &["permission.asked"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Hook,
-            native_name: "session.idle",
+            support_level: EventSupportLevel::Hook { native_name: "session.idle" },
             parse_aliases: &["session.idle"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::Hook,
-            native_name: "session.error",
+            support_level: EventSupportLevel::Hook { native_name: "session.error" },
             parse_aliases: &["session.error"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
-            support_level: EventSupportLevel::Hook,
-            native_name: "chat.params",
+            support_level: EventSupportLevel::Hook { native_name: "chat.params" },
             parse_aliases: &[
                 "chat.params",
                 "chat.headers",
@@ -302,8 +305,7 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::Hook,
-            native_name: "message.updated",
+            support_level: EventSupportLevel::Hook { native_name: "message.updated" },
             parse_aliases: &[
                 "message.updated",
                 "message.part.updated",
@@ -313,8 +315,7 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
-            support_level: EventSupportLevel::Hook,
-            native_name: "session.compacted",
+            support_level: EventSupportLevel::Hook { native_name: "session.compacted" },
             parse_aliases: &[
                 "session.compacted",
                 "session.compacting",
@@ -324,8 +325,7 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Hook,
-            native_name: "tui.toast.show",
+            support_level: EventSupportLevel::Hook { native_name: "tui.toast.show" },
             parse_aliases: &["tui.toast.show", "event"],
             registration_target: true,
         },

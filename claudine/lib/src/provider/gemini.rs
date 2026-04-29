@@ -6,33 +6,23 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
+use super::acp::AcpSupport;
 use super::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
+use super::cli_sensitivity::CliSensitiveAxes;
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
-use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use super::model_catalog_source::ModelCatalogSource;
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
-use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
-use crate::config::AgentConfigurator;
-use crate::error::Result;
-use crate::mcp::export::ExportServer;
-use crate::mcp::inject::{GeminiInjector, McpInjector};
-use crate::mcp::state::Scope;
-use crate::mcp::types::McpServer;
-use crate::stream::{ParserConfig, StreamProtocol};
-use crate::stream::gemini_semantic::GeminiSemanticStreamParser;
-use crate::stream::parser::SemanticStreamParser;
-use crate::events::AgenticEvent;
-use crate::provider::EventSupportLevel;
+use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -41,11 +31,20 @@ use crate::agents::{
     ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
     SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities,
 };
-use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::events::AgenticEvent;
 use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter,
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter,
 };
+use crate::mcp::export::ExportServer;
+use crate::mcp::inject::{GeminiInjector, McpInjector};
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::provider::EventSupportLevel;
+use crate::stream::gemini_semantic::GeminiSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
+use crate::stream::{ParserConfig, StreamProtocol};
 
 #[derive(Debug)]
 pub(super) struct GeminiProvider;
@@ -174,6 +173,21 @@ pub(super) static GEMINI_INFO: ProviderInfo = ProviderInfo {
         entrypoint: None,
         value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
     },
+    static_models: &[],
+    dynamic_source: ModelCatalogSource::None,
+    model_env_vars: &["GEMINI_MODEL"],
+    cli_sensitive_axes: CliSensitiveAxes {
+        read_path: false,
+        write_path: false,
+        traverse_path: false,
+        execute_command: true,
+        access_domain: false,
+        use_mcp_server: false,
+        use_mcp_tool: false,
+        spawn_subagent: false,
+        switch_mode: false,
+        modify_provider_config: true,
+    },
 };
 
 const GEMINI_SESSION_LOG_PATHS: &[PathTemplate] =
@@ -252,113 +266,97 @@ pub(super) static GEMINI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::Hook,
-            native_name: "SessionStart",
+            support_level: EventSupportLevel::Hook { native_name: "SessionStart" },
             parse_aliases: &["SessionStart"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::Hook,
-            native_name: "SessionEnd",
+            support_level: EventSupportLevel::Hook { native_name: "SessionEnd" },
             parse_aliases: &["SessionEnd"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
-            support_level: EventSupportLevel::Hook,
-            native_name: "BeforeAgent",
+            support_level: EventSupportLevel::Hook { native_name: "BeforeAgent" },
             parse_aliases: &["BeforeAgent"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::Hook,
-            native_name: "BeforeTool",
+            support_level: EventSupportLevel::Hook { native_name: "BeforeTool" },
             parse_aliases: &["BeforeTool"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::Hook,
-            native_name: "AfterTool",
+            support_level: EventSupportLevel::Hook { native_name: "AfterTool" },
             parse_aliases: &["AfterTool"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Hook,
-            native_name: "AfterAgent",
+            support_level: EventSupportLevel::Hook { native_name: "AfterAgent" },
             parse_aliases: &["AfterAgent"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
-            support_level: EventSupportLevel::Hook,
-            native_name: "BeforeModel",
+            support_level: EventSupportLevel::Hook { native_name: "BeforeModel" },
             parse_aliases: &["BeforeModel", "BeforeToolSelection"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::Hook,
-            native_name: "AfterModel",
+            support_level: EventSupportLevel::Hook { native_name: "AfterModel" },
             parse_aliases: &["AfterModel"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
-            support_level: EventSupportLevel::Hook,
-            native_name: "PreCompress",
+            support_level: EventSupportLevel::Hook { native_name: "PreCompress" },
             parse_aliases: &["PreCompress"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Hook,
-            native_name: "Notification",
+            support_level: EventSupportLevel::Hook { native_name: "Notification" },
             parse_aliases: &["Notification"],
             registration_target: true,
         },

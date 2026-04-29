@@ -6,25 +6,21 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
+use super::acp::AcpSupport;
 use super::behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+use super::cli_sensitivity::CliSensitiveAxes;
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
+use super::model_catalog_source::ModelCatalogSource;
 use super::output_format::{EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
-use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
-use crate::config::AgentConfigurator;
-use crate::error::Result;
-use crate::mcp::export::ExportServer;
-use crate::mcp::state::Scope;
-use crate::mcp::types::McpServer;
-use crate::events::AgenticEvent;
-use crate::provider::EventSupportLevel;
+use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -33,11 +29,16 @@ use crate::agents::{
     ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
     SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities,
 };
-use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::events::AgenticEvent;
 use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter,
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter,
 };
+use crate::mcp::export::ExportServer;
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::provider::EventSupportLevel;
 
 #[derive(Debug)]
 pub(super) struct RooProvider;
@@ -138,15 +139,24 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     known_gaps: ROO_KNOWN_GAPS,
     acp: AcpSupport::NOT_SUPPORTED,
     prompt_arg_conventions: PromptArgConventions::positional_only(),
+    static_models: &[],
+    dynamic_source: ModelCatalogSource::None,
+    model_env_vars: &["ROO_MODEL"],
+    cli_sensitive_axes: CliSensitiveAxes::NONE,
 };
 
 const ROO_SESSION_LOG_PATHS: &[PathTemplate] = &[];
 
-const ROO_SESSION_LOCATIONS: &[PathTemplate] = &[PathTemplate::Static(
-    "@roo-code/core debug-log output",
-)];
+const ROO_SESSION_LOCATIONS: &[PathTemplate] =
+    &[PathTemplate::Static("@roo-code/core debug-log output")];
 
 const ROO_CONFIG_PATHS: &[PathTemplate] = &[
+    // First element is the primary user-level config path consumed by
+    // `config::discover_agents_full`. Roo Code is a VS Code extension
+    // whose primary settings file is the JSON document below; the
+    // custom-modes templates remain in subsequent slots so other
+    // catalog consumers can still discover them.
+    PathTemplate::Static("~/.roo/settings.json"),
     PathTemplate::Static("~/.roo/custom_modes.yaml"),
     PathTemplate::Static("~/.roo/custom_modes.json"),
 ];
@@ -197,113 +207,97 @@ pub(super) static ROO_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "TaskCreated",
+            support_level: EventSupportLevel::Wrapper { native_name: "TaskCreated" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "TaskAborted",
+            support_level: EventSupportLevel::Wrapper { native_name: "TaskAborted" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "ToolUseOutput",
+            support_level: EventSupportLevel::Wrapper { native_name: "ToolUseOutput" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "ToolResultOutput",
+            support_level: EventSupportLevel::Wrapper { native_name: "ToolResultOutput" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "TaskToolFailed",
+            support_level: EventSupportLevel::Wrapper { native_name: "TaskToolFailed" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "WaitingForInput",
+            support_level: EventSupportLevel::Wrapper { native_name: "WaitingForInput" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "TaskCompleted",
+            support_level: EventSupportLevel::Wrapper { native_name: "TaskCompleted" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "Error",
+            support_level: EventSupportLevel::Wrapper { native_name: "Error" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "TaskSpawned",
+            support_level: EventSupportLevel::Wrapper { native_name: "TaskSpawned" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "TaskDelegationCompleted",
+            support_level: EventSupportLevel::Wrapper { native_name: "TaskDelegationCompleted" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "StreamingStarted",
+            support_level: EventSupportLevel::Wrapper { native_name: "StreamingStarted" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "StreamingEnded",
+            support_level: EventSupportLevel::Wrapper { native_name: "StreamingEnded" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "ModeChanged",
+            support_level: EventSupportLevel::Wrapper { native_name: "ModeChanged" },
             parse_aliases: &[],
             registration_target: false,
         },

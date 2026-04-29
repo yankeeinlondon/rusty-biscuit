@@ -6,32 +6,23 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
+use super::acp::AcpSupport;
 use super::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
+use super::cli_sensitivity::CliSensitiveAxes;
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::{KnownGap, KnownGapArea};
-use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use super::model_catalog_source::ModelCatalogSource;
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
-use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
-use crate::config::AgentConfigurator;
-use crate::error::Result;
-use crate::mcp::export::ExportServer;
-use crate::mcp::state::Scope;
-use crate::mcp::types::McpServer;
-use crate::stream::{ParserConfig, StreamProtocol};
-use crate::stream::claude_semantic::ClaudeSemanticStreamParser;
-use crate::stream::parser::SemanticStreamParser;
-use crate::events::AgenticEvent;
-use crate::provider::EventSupportLevel;
+use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -40,11 +31,19 @@ use crate::agents::{
     ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
     SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities,
 };
-use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::events::AgenticEvent;
 use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter,
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter,
 };
+use crate::mcp::export::ExportServer;
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::provider::EventSupportLevel;
+use crate::stream::claude_semantic::ClaudeSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
+use crate::stream::{ParserConfig, StreamProtocol};
 
 /// Zero-sized provider behavior implementor used as the trait-object value
 /// for all four behavior trait fields on `CLAUDE_INFO`.
@@ -165,14 +164,33 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     known_gaps: CLAUDE_KNOWN_GAPS,
     acp: AcpSupport::NOT_SUPPORTED,
     prompt_arg_conventions: PromptArgConventions::positional_only(),
+    static_models: CLAUDE_STATIC_MODELS,
+    dynamic_source: ModelCatalogSource::Static,
+    model_env_vars: &["CLAUDE_MODEL", "ANTHROPIC_MODEL"],
+    cli_sensitive_axes: CliSensitiveAxes::ALL,
 };
+
+/// Static, compiled-in Anthropic model catalog.
+///
+/// Sourced from the generated enums in `unchained-ai/lib`. The list mirrors
+/// the previous body of `model_catalog::provider_sources::anthropic_models`.
+const CLAUDE_STATIC_MODELS: &[&str] = &[
+    "claude-3-5-haiku-20241022",
+    "claude-3-7-sonnet-20250219",
+    "claude-3-haiku-20240307",
+    "claude-haiku-4-5-20251001",
+    "claude-opus-4-1-20250805",
+    "claude-opus-4-20250514",
+    "claude-opus-4-5-20251101",
+    "claude-sonnet-4-20250514",
+    "claude-sonnet-4-5-20250929",
+];
 
 const CLAUDE_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(
     "~/.claude/projects/<encoded-directory>/<session-uuid>.jsonl",
 )];
 
-const CLAUDE_SESSION_LOCATIONS: &[PathTemplate] =
-    &[PathTemplate::Static("~/.claude/projects/")];
+const CLAUDE_SESSION_LOCATIONS: &[PathTemplate] = &[PathTemplate::Static("~/.claude/projects/")];
 
 const CLAUDE_CONFIG_PATHS: &[PathTemplate] = &[
     PathTemplate::Static("~/.claude/settings.json"),
@@ -258,113 +276,97 @@ pub(super) static CLAUDE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::Hook,
-            native_name: "SessionStart",
+            support_level: EventSupportLevel::Hook { native_name: "SessionStart" },
             parse_aliases: &["SessionStart"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::Hook,
-            native_name: "SessionEnd",
+            support_level: EventSupportLevel::Hook { native_name: "SessionEnd" },
             parse_aliases: &["SessionEnd"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
-            support_level: EventSupportLevel::Hook,
-            native_name: "UserPromptSubmit",
+            support_level: EventSupportLevel::Hook { native_name: "UserPromptSubmit" },
             parse_aliases: &["UserPromptSubmit"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::Hook,
-            native_name: "PreToolUse",
+            support_level: EventSupportLevel::Hook { native_name: "PreToolUse" },
             parse_aliases: &["PreToolUse"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::Hook,
-            native_name: "PostToolUse",
+            support_level: EventSupportLevel::Hook { native_name: "PostToolUse" },
             parse_aliases: &["PostToolUse"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
-            support_level: EventSupportLevel::Hook,
-            native_name: "PostToolUseFailure",
+            support_level: EventSupportLevel::Hook { native_name: "PostToolUseFailure" },
             parse_aliases: &["PostToolUseFailure"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
-            support_level: EventSupportLevel::Hook,
-            native_name: "PermissionRequest",
+            support_level: EventSupportLevel::Hook { native_name: "PermissionRequest" },
             parse_aliases: &["PermissionRequest"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::Hook,
-            native_name: "PreToolUse",
+            support_level: EventSupportLevel::Hook { native_name: "PreToolUse" },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Hook,
-            native_name: "Stop",
+            support_level: EventSupportLevel::Hook { native_name: "Stop" },
             parse_aliases: &["Stop", "TeammateIdle", "TaskCompleted"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
-            support_level: EventSupportLevel::Hook,
-            native_name: "SubagentStart",
+            support_level: EventSupportLevel::Hook { native_name: "SubagentStart" },
             parse_aliases: &["SubagentStart"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
-            support_level: EventSupportLevel::Hook,
-            native_name: "SubagentStop",
+            support_level: EventSupportLevel::Hook { native_name: "SubagentStop" },
             parse_aliases: &["SubagentStop"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
-            support_level: EventSupportLevel::Hook,
-            native_name: "PreCompact",
+            support_level: EventSupportLevel::Hook { native_name: "PreCompact" },
             parse_aliases: &["PreCompact"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Hook,
-            native_name: "Notification",
+            support_level: EventSupportLevel::Hook { native_name: "Notification" },
             parse_aliases: &["Notification"],
             registration_target: true,
         },

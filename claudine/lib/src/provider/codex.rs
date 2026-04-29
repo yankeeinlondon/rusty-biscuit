@@ -6,35 +6,25 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
+use super::acp::AcpSupport;
 use super::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
+use super::cli_sensitivity::CliSensitiveAxes;
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
-use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use super::model_catalog_source::ModelCatalogSource;
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{
     SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
-use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
-use crate::config::AgentConfigurator;
-use crate::error::Result;
-use crate::mcp::export::ExportServer;
-use crate::mcp::inject::{CodexInjector, McpInjector};
-use crate::mcp::state::Scope;
-use crate::mcp::types::McpServer;
-use crate::stream::{ParserConfig, StreamProtocol};
-use crate::stream::codex_semantic::CodexSemanticStreamParser;
-use crate::stream::parser::SemanticStreamParser;
-use crate::events::AgenticEvent;
-use crate::provider::EventSupportLevel;
+use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -43,11 +33,20 @@ use crate::agents::{
     ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
     SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities,
 };
-use crate::agents::model::{area_confidence, frontmatter, paths, path_vec};
+use crate::config::AgentConfigurator;
+use crate::error::Result;
+use crate::events::AgenticEvent;
 use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter,
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter,
 };
+use crate::mcp::export::ExportServer;
+use crate::mcp::inject::{CodexInjector, McpInjector};
+use crate::mcp::state::Scope;
+use crate::mcp::types::McpServer;
+use crate::provider::EventSupportLevel;
+use crate::stream::codex_semantic::CodexSemanticStreamParser;
+use crate::stream::parser::SemanticStreamParser;
+use crate::stream::{ParserConfig, StreamProtocol};
 
 #[derive(Debug)]
 pub(super) struct CodexProvider;
@@ -170,7 +169,38 @@ pub(super) static CODEX_INFO: ProviderInfo = ProviderInfo {
     known_gaps: CODEX_KNOWN_GAPS,
     acp: AcpSupport::NOT_SUPPORTED,
     prompt_arg_conventions: PromptArgConventions::positional_after("exec"),
+    static_models: CODEX_STATIC_MODELS,
+    dynamic_source: ModelCatalogSource::Static,
+    model_env_vars: &["CODEX_MODEL", "OPENAI_MODEL"],
+    cli_sensitive_axes: CliSensitiveAxes {
+        read_path: true,
+        write_path: true,
+        traverse_path: true,
+        execute_command: true,
+        access_domain: true,
+        use_mcp_server: false,
+        use_mcp_tool: false,
+        spawn_subagent: false,
+        switch_mode: false,
+        modify_provider_config: true,
+    },
 };
+
+/// Static, compiled-in OpenAI model catalog.
+///
+/// Sourced from the generated enums in `unchained-ai/lib`. The list mirrors
+/// the previous body of `model_catalog::provider_sources::openai_models`.
+const CODEX_STATIC_MODELS: &[&str] = &[
+    "gpt-3.5-turbo",
+    "gpt-5-search-api",
+    "gpt-5.1-codex",
+    "gpt-5.2",
+    "gpt-5.2-chat-latest",
+    "o3",
+    "o3-mini",
+    "o3-mini-2025-01-31",
+    "o4-mini",
+];
 
 const CODEX_SESSION_LOG_PATHS: &[PathTemplate] = &[
     PathTemplate::Static("~/.codex/sessions/YYYY/MM/DD/<session-id>/"),
@@ -255,113 +285,126 @@ pub(super) static CODEX_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "thread.started",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "thread.started",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "turn.started",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "turn.started",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "item.started",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "item.started",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "item.completed",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "item.completed",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "error",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "error",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "tool/requestUserInput",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "tool/requestUserInput",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Hook,
-            native_name: "turn.completed",
+            support_level: EventSupportLevel::Hook {
+                native_name: "turn.completed",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "turn.failed",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "turn.failed",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "agent_message",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "agent_message",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "reasoning",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::Jsonl,
+                native_name: "reasoning",
+            },
             parse_aliases: &[],
             registration_target: false,
         },

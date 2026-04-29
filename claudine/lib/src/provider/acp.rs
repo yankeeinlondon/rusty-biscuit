@@ -12,8 +12,11 @@
 //! `EventSupportLevel::Acp` row reports a non-`NotSupported` ACP server
 //! mode.
 
+use serde::Serialize;
+
 /// ACP server posture for a provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AcpServerMode {
     /// The provider does not expose an ACP server surface.
     NotSupported,
@@ -28,7 +31,8 @@ pub enum AcpServerMode {
 ///
 /// `Custom` is reserved for provider-specific extensions that do not yet
 /// have a canonical mapping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AcpEvent {
     /// `session/request_permission` — agent requests a tool-call approval.
     RequestPermission,
@@ -45,7 +49,7 @@ pub enum AcpEvent {
 }
 
 /// Provider ACP capability descriptor.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct AcpSupport {
     /// ACP server mode for this provider.
     pub server_mode: AcpServerMode,

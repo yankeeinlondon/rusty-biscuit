@@ -5,28 +5,23 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use super::ProviderInfo;
+use super::acp::AcpSupport;
 use super::behavior::{
     AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior,
 };
+use super::cli_sensitivity::CliSensitiveAxes;
 use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
-use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use super::model_catalog_source::ModelCatalogSource;
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
-use super::acp::AcpSupport;
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
-use crate::config::AgentConfigurator;
-use crate::stream::parser::SemanticStreamParser;
-use crate::stream::qwen_semantic::QwenSemanticStreamParser;
-use crate::stream::{ParserConfig, StreamProtocol};
-use crate::events::AgenticEvent;
-use crate::provider::EventSupportLevel;
+use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
 use crate::agents::{
     ActivationStyle, AgentCapabilities, AgentDefinitionFormat, AgentDocs, AgentMeta,
     BillingCapabilities, BillingModel, CapabilityStatus, CommandFormat, Confidence,
@@ -35,11 +30,15 @@ use crate::agents::{
     ReasoningStyle, RuntimeCapabilities, ScriptCapabilities, SkillsCapabilities,
     SlashCommandCapabilities, SubagentCapabilities, SystemPromptCapabilities,
 };
-use crate::agents::model::{area_confidence, frontmatter, path_vec, paths};
+use crate::config::AgentConfigurator;
+use crate::events::AgenticEvent;
 use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter,
+    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter,
 };
+use crate::provider::EventSupportLevel;
+use crate::stream::parser::SemanticStreamParser;
+use crate::stream::qwen_semantic::QwenSemanticStreamParser;
+use crate::stream::{ParserConfig, StreamProtocol};
 
 #[derive(Debug)]
 pub(super) struct QwenProvider;
@@ -127,10 +126,26 @@ pub(super) static QWEN_INFO: ProviderInfo = ProviderInfo {
         entrypoint: None,
         value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
     },
+    static_models: &[],
+    dynamic_source: ModelCatalogSource::OpencodeCliQwenFiltered,
+    model_env_vars: &["QWEN_MODEL"],
+    cli_sensitive_axes: CliSensitiveAxes {
+        read_path: false,
+        write_path: false,
+        traverse_path: false,
+        execute_command: true,
+        access_domain: false,
+        use_mcp_server: true,
+        use_mcp_tool: true,
+        spawn_subagent: false,
+        switch_mode: false,
+        modify_provider_config: true,
+    },
 };
 
-const QWEN_SESSION_LOG_PATHS: &[PathTemplate] =
-    &[PathTemplate::Static("~/.qwen/projects/<sanitized-cwd>/chats/")];
+const QWEN_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(
+    "~/.qwen/projects/<sanitized-cwd>/chats/",
+)];
 
 const QWEN_SESSION_LOCATIONS: &[PathTemplate] = &[PathTemplate::Static("logs/openai")];
 
@@ -194,112 +209,111 @@ pub(super) static QWEN_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         EventMapping {
             event: AgenticEvent::SessionStart,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "CanUseTool",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::StreamJson,
+                native_name: "CanUseTool",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "result",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::StreamJson,
+                native_name: "result",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "result",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::StreamJson,
+                native_name: "result",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "assistant",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::StreamJson,
+                native_name: "assistant",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
             support_level: EventSupportLevel::NotSupported,
-            native_name: "",
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::NonHook,
-            native_name: "system",
+            support_level: EventSupportLevel::StreamParse {
+                protocol: StreamProtocol::StreamJson,
+                native_name: "system",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
