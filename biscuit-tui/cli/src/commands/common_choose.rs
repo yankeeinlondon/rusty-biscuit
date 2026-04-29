@@ -21,7 +21,7 @@
 use std::io::{self, IsTerminal, Read};
 
 use clap::{Args, ValueEnum};
-use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, SortOrder};
+use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, Padding, SortOrder};
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
@@ -103,6 +103,34 @@ pub struct ChooseChromeArgs {
     /// `--margin` for the right side only.
     #[arg(long, value_name = "CELLS")]
     pub mr: Option<u16>,
+
+    /// Padding (in cells) applied to all four sides inside the border.
+    ///
+    /// Per-side flags (`--pt`, `--pb`, `--pl`, `--pr`) override the
+    /// umbrella value for that side only — `--padding 2 --pt 0` yields
+    /// `Padding { top: 0, bottom: 2, left: 2, right: 2 }`.
+    #[arg(short = 'p', long, value_name = "CELLS")]
+    pub padding: Option<u16>,
+
+    /// Override the top padding (cells). Takes precedence over
+    /// `--padding` for the top side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pt: Option<u16>,
+
+    /// Override the bottom padding (cells). Takes precedence over
+    /// `--padding` for the bottom side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pb: Option<u16>,
+
+    /// Override the left padding (cells). Takes precedence over
+    /// `--padding` for the left side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pl: Option<u16>,
+
+    /// Override the right padding (cells). Takes precedence over
+    /// `--padding` for the right side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pr: Option<u16>,
 }
 
 /// CLI-facing sort-order mirror.
@@ -331,6 +359,7 @@ pub fn build_chrome(args: &ChooseChromeArgs) -> FrameChromeConfig {
         border,
         border_label: args.border_label.clone(),
         margin: resolve_margin(args),
+        padding: resolve_padding(args),
         ..Default::default()
     }
 }
@@ -384,6 +413,31 @@ fn resolve_margin(args: &ChooseChromeArgs) -> Margin {
         bottom: args.mb.unwrap_or(base),
         left: args.ml.unwrap_or(base),
         right: args.mr.unwrap_or(base),
+    }
+}
+
+/// Resolves the effective [`Padding`] from the supplied args.
+///
+/// `--padding` seeds every side; each per-side flag (`--pt`, `--pb`,
+/// `--pl`, `--pr`) overrides the matching side when set. When no
+/// padding flag is set, the default `Padding::uniform(1)` from
+/// [`FrameChromeConfig::default`] is used.
+fn resolve_padding(args: &ChooseChromeArgs) -> Padding {
+    let base = args.padding;
+    let has_any_padding_flag = base.is_some()
+        || args.pt.is_some()
+        || args.pb.is_some()
+        || args.pl.is_some()
+        || args.pr.is_some();
+    if !has_any_padding_flag {
+        return Padding::uniform(1);
+    }
+    let base = base.unwrap_or(0);
+    Padding {
+        top: args.pt.unwrap_or(base),
+        bottom: args.pb.unwrap_or(base),
+        left: args.pl.unwrap_or(base),
+        right: args.pr.unwrap_or(base),
     }
 }
 
@@ -789,5 +843,89 @@ mod tests {
     fn parse_height_spec_rejects_non_numeric_input() {
         assert!(parse_height_spec("tall").is_err());
         assert!(parse_height_spec("twenty%").is_err());
+    }
+
+    #[test]
+    fn build_chrome_padding_sets_all_sides() {
+        let args = ChooseChromeArgs {
+            padding: Some(2),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.padding, Padding::uniform(2));
+    }
+
+    #[test]
+    fn build_chrome_per_side_overrides_umbrella_padding() {
+        let args = ChooseChromeArgs {
+            padding: Some(2),
+            pt: Some(0),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.padding,
+            Padding {
+                top: 0,
+                bottom: 2,
+                left: 2,
+                right: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_per_side_only_padding_defaults_other_sides_to_zero() {
+        let args = ChooseChromeArgs {
+            pl: Some(3),
+            pr: Some(4),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.padding,
+            Padding {
+                top: 0,
+                bottom: 0,
+                left: 3,
+                right: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_all_per_side_padding_overrides_applied() {
+        let args = ChooseChromeArgs {
+            padding: Some(5),
+            pt: Some(1),
+            pb: Some(2),
+            pl: Some(3),
+            pr: Some(4),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.padding,
+            Padding {
+                top: 1,
+                bottom: 2,
+                left: 3,
+                right: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_padding_combined_with_border_and_margin() {
+        let args = ChooseChromeArgs {
+            border: true,
+            margin: Some(2),
+            padding: Some(1),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::Rounded);
+        assert_eq!(chrome.margin, Margin::uniform(2));
+        assert_eq!(chrome.padding, Padding::uniform(1));
     }
 }
