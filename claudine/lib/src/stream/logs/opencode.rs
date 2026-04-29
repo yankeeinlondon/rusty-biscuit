@@ -720,7 +720,13 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 ref error_name,
                 ref message,
                 is_fatal,
-            } => self.on_api_failure(&record, status_code, error_name.clone(), message.clone(), is_fatal),
+            } => self.on_api_failure(
+                &record,
+                status_code,
+                error_name.clone(),
+                message.clone(),
+                is_fatal,
+            ),
             LogClassification::AuthFailure { ref message } => {
                 self.on_auth_failure(&record, message.clone())
             }

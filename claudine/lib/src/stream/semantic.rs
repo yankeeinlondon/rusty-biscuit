@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::provider::Provider;
 use super::token_usage::NormalizedTokenUsage;
+use crate::provider::Provider;
 
 /// Typed classification of an error surfaced through [`SemanticEvent::Error`].
 ///
