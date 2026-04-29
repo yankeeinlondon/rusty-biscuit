@@ -16,8 +16,10 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;
 use color_eyre::eyre::Result;
 use serde::Serialize;
-use sniff::os::{OsType, detect_os_type};
+use sniff::os::OsType;
 use sniff::programs::ProgramMetadata;
+use sniff::programs::find_program::ExecutableIndex;
+use sniff::programs::host_capability::HostCapabilities;
 use sniff::programs::install_plan::build_install_plan;
 use sniff::programs::notification_helpers::InstalledNotificationHelpers;
 use sniff::programs::types::InstallationMethod;
@@ -67,13 +69,27 @@ pub struct RouteRecord {
 ///
 /// `config_helpers` is the per-OS `prefer_helpers` list for the current
 /// host (after env-var merge); empty means use the library default order.
+///
+/// Builds an [`ExecutableIndex`] once and reuses it for both
+/// [`HostCapabilities`] detection and notification-helper detection so PATH is
+/// scanned only once across the whole report. [`HostCapabilities`] is loaded
+/// once and threaded through helper rendering so the on-disk cache is read at
+/// most once per invocation. Helper records are rendered in parallel because
+/// each one may spawn a `--version` subprocess.
 pub fn build_report(config: &Config, config_helpers: &[String]) -> InfoReport {
-    let os_type = detect_os_type();
-    let helpers_info = InstalledNotificationHelpers::new();
+    let index = ExecutableIndex::build();
+    let host = HostCapabilities::load_or_detect_with_index(&index);
+    let os_type = host.os_type;
+    let helpers_info = InstalledNotificationHelpers::new_with_index(&index);
 
-    let helpers: Vec<HelperRecord> = sniff::programs::NotificationHelper::iter()
-        .map(|helper| helper_record(&helpers_info, helper, os_type))
-        .collect();
+    let helper_variants: Vec<sniff::programs::NotificationHelper> =
+        sniff::programs::NotificationHelper::iter().collect();
+    let helpers: Vec<HelperRecord> = render_helpers_in_parallel(
+        &helper_variants,
+        &helpers_info,
+        os_type,
+        &host,
+    );
 
     let election_order = compute_election_order(&helpers_info, os_type, config_helpers);
 
@@ -116,16 +132,47 @@ pub fn build_report(config: &Config, config_helpers: &[String]) -> InfoReport {
     }
 }
 
+/// Render every helper record in parallel.
+///
+/// Version detection spawns a per-helper subprocess with up to a 3-second
+/// timeout. Running the helpers serially (originally: a 6-element `map`)
+/// pessimised wall time to `sum(per-helper probe time)`; parallelising drops
+/// it to `max(per-helper probe time)`, which is a meaningful win on cold
+/// macOS where `terminal-notifier --version` and `alerter --version` each
+/// pay app-bundle startup costs.
+fn render_helpers_in_parallel(
+    helpers: &[sniff::programs::NotificationHelper],
+    info: &InstalledNotificationHelpers,
+    os_type: OsType,
+    host: &HostCapabilities,
+) -> Vec<HelperRecord> {
+    let mut records: Vec<Option<HelperRecord>> = (0..helpers.len()).map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(helpers.len());
+        for (i, slot) in records.iter_mut().enumerate() {
+            let helper = helpers[i];
+            handles.push(scope.spawn(move || {
+                *slot = Some(helper_record(info, helper, os_type, host));
+            }));
+        }
+        for handle in handles {
+            let _ = handle.join();
+        }
+    });
+    records.into_iter().map(|r| r.expect("helper record set")).collect()
+}
+
 fn helper_record(
     info: &InstalledNotificationHelpers,
     helper: sniff::programs::NotificationHelper,
     os_type: OsType,
+    host: &HostCapabilities,
 ) -> HelperRecord {
     let path_info = info.path_with_source(helper);
     let installed = path_info.is_some();
     let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
     let version = if installed { info.version(helper).ok() } else { None };
-    let install_hint = best_install_hint(helper, os_type);
+    let install_hint = best_install_hint(helper, os_type, host);
 
     HelperRecord {
         name: helper.display_name().to_string(),
@@ -141,13 +188,16 @@ fn helper_record(
 
 /// Best-effort install hint string for a helper, preferring methods whose
 /// package manager is actually present on the host.
-fn best_install_hint(helper: sniff::programs::NotificationHelper, os_type: OsType) -> Option<String> {
+fn best_install_hint(
+    helper: sniff::programs::NotificationHelper,
+    os_type: OsType,
+    host: &HostCapabilities,
+) -> Option<String> {
     let info = helper.info();
     if !info.os_availability.is_empty() && !info.os_availability.contains(&os_type) {
         return None;
     }
-    let host = sniff::programs::host_capability::HostCapabilities::load_or_detect();
-    let plan = build_install_plan(&helper, &host);
+    let plan = build_install_plan(&helper, host);
     plan.chosen()
         .map(|option| option.kind.clone())
         .or_else(|| info.installation_methods.first().cloned())
@@ -325,8 +375,10 @@ pub fn render_json(report: &InfoReport) -> Result<String> {
 /// Picks the per-OS `prefer_helpers` slice from the first desktop route
 /// found in the loaded config (the desktop route is targetless and unique
 /// per host, so picking the first match is fine for the info renderer).
-pub fn config_helpers_for_host(config: &Config) -> Vec<String> {
-    let os_type = detect_os_type();
+///
+/// Takes `os_type` explicitly so the caller can compute it once per
+/// invocation and reuse it.
+pub fn config_helpers_for_host(config: &Config, os_type: OsType) -> Vec<String> {
     config
         .routes
         .values()
@@ -350,7 +402,8 @@ pub fn config_helpers_for_host(config: &Config) -> Vec<String> {
 /// Run the `messenger info` command.
 pub fn run(json: bool) -> Result<()> {
     let config = Config::load()?;
-    let helpers = config_helpers_for_host(&config);
+    let os_type = sniff::os::detect_os_type();
+    let helpers = config_helpers_for_host(&config, os_type);
     let report = build_report(&config, &helpers);
     if json {
         println!("{}", render_json(&report)?);
@@ -424,6 +477,6 @@ mod tests {
     #[test]
     fn config_helpers_for_host_returns_empty_when_no_desktop_route() {
         let config = Config::default();
-        assert!(config_helpers_for_host(&config).is_empty());
+        assert!(config_helpers_for_host(&config, OsType::MacOS).is_empty());
     }
 }

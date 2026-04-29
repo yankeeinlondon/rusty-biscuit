@@ -64,7 +64,7 @@ lint-fix:
 # Install the CLI (enables native playback on macOS/Windows; Linux requires libasound2-dev)
 install *args="":
     @just build
-    @just _install "./cli" "Claudine" "{{ args }}"
+    @just _install "./cli" "Messenger" "{{ args }}"
 
 # stages all files in package area and then commits and pushes
 cp:

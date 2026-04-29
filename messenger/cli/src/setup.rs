@@ -108,7 +108,7 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
 /// desktop setup. Shows helpers detected on the host and the resulting
 /// election order so the user immediately sees what they gained.
 fn print_desktop_info_section(config: &Config) {
-    let helpers = crate::info::config_helpers_for_host(config);
+    let helpers = crate::info::config_helpers_for_host(config, sniff::os::detect_os_type());
     let report = crate::info::build_report(config, &helpers);
     println!();
     println!(
