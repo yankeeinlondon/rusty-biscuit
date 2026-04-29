@@ -2,16 +2,22 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+mod install_ui;
+
 use clap::builder::PossibleValue;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use sniff::programs::InstalledHeadlessAudio;
+use strum::IntoEnumIterator;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
-use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
+use playa::{
+    AudioFileFormat, AudioPlayer, Codec, OutputChannel, PLAYER_LOOKUP, Playa, SampleRateRange,
+    SoundEffect, all_players,
+};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
@@ -90,8 +96,9 @@ enum Command {
         filter: Option<String>,
     },
 
-    /// Show a table of available audio players
-    Players,
+    /// Show a table of available audio players, or install missing ones
+    #[command(subcommand)]
+    Players(PlayersCommand),
 
     /// Show available native output channels (audio devices)
     #[cfg(feature = "sfx-native")]
@@ -100,6 +107,15 @@ enum Command {
     /// Show audio ducking backend info
     #[cfg(feature = "audio-ducking")]
     DuckInfo,
+}
+
+#[derive(Subcommand)]
+enum PlayersCommand {
+    /// Show a table of available audio players (default)
+    List,
+
+    /// Interactively install missing headless audio players
+    Install,
 }
 
 /// Value parser that provides sound effect names for shell completion
@@ -167,7 +183,7 @@ impl clap::builder::TypedValueParser for AudioFileParser {
         }
 
         let mut values = Vec::new();
-        
+
         if let Ok(entries) = std::fs::read_dir(&dir_path) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -190,7 +206,6 @@ impl clap::builder::TypedValueParser for AudioFileParser {
 
         Some(Box::new(values.into_iter()))
     }
-
 }
 
 /// Value parser that suggests common volume levels for shell completion
@@ -252,6 +267,9 @@ impl clap::builder::TypedValueParser for ChannelParser {
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
         #[cfg(feature = "sfx-native")]
         {
+            // Avoid probing the audio subsystem during normal `--help` rendering.
+            // Dynamic candidates are only useful for shell completion.
+            std::env::var_os("COMPLETE")?;
             if let Ok(channels) = playa::get_output_channels() {
                 let values = channels.into_iter().map(|c| {
                     let mut help = c.name;
@@ -466,10 +484,15 @@ async fn run_cli() {
         Some(Command::ListEffects { filter }) => {
             list_sound_effects(filter.as_deref());
         }
-        Some(Command::Players) => {
-            let (markdown, missing) = build_metadata_markdown();
-            render_markdown(&markdown, &missing);
-        }
+        Some(Command::Players(players_cmd)) => match players_cmd {
+            PlayersCommand::List => {
+                let (markdown, missing) = build_metadata_markdown();
+                render_markdown(&markdown, &missing);
+            }
+            PlayersCommand::Install => {
+                install_players();
+            }
+        },
         #[cfg(feature = "sfx-native")]
         Some(Command::OutputChannels) => {
             list_output_channels();
@@ -512,10 +535,15 @@ fn run_cli_sync() {
         Some(Command::ListEffects { filter }) => {
             list_sound_effects(filter.as_deref());
         }
-        Some(Command::Players) => {
-            let (markdown, missing) = build_metadata_markdown();
-            render_markdown(&markdown, &missing);
-        }
+        Some(Command::Players(players_cmd)) => match players_cmd {
+            PlayersCommand::List => {
+                let (markdown, missing) = build_metadata_markdown();
+                render_markdown(&markdown, &missing);
+            }
+            PlayersCommand::Install => {
+                install_players();
+            }
+        },
         #[cfg(feature = "sfx-native")]
         Some(Command::OutputChannels) => {
             list_output_channels();
@@ -860,8 +888,7 @@ async fn print_duck_info() {
                     } else {
                         println!("Sessions that would be ducked ({}):", snap.len());
                         for entry in &snap.entries {
-                            if let playa::ducking::SessionId::WasapiSession { pid, key } =
-                                &entry.id
+                            if let playa::ducking::SessionId::WasapiSession { pid, key } = &entry.id
                             {
                                 let vol = entry.channels.first().copied().unwrap_or(0.0) * 100.0;
                                 println!("  PID {} [{}] - {:.0}%", pid, key, vol);
@@ -883,6 +910,104 @@ async fn print_duck_info() {
         }
         _ => {
             println!("Strategy: {}", name);
+        }
+    }
+}
+
+fn install_players() {
+    use sniff::programs::{
+        HeadlessAudio, HostCapabilities, InstallInterviewInput, InstallInterviewOptions,
+        ProgramDetector, ProgramMetadata, build_install_plan, run_install_interview,
+    };
+
+    let detector = InstalledHeadlessAudio::new();
+    let all_players_list = HeadlessAudio::iter().collect::<Vec<_>>();
+
+    let installed: Vec<_> = all_players_list
+        .iter()
+        .filter(|p| detector.is_installed(**p))
+        .collect();
+
+    if !installed.is_empty() {
+        let names: Vec<_> = installed.iter().map(|p| p.display_name()).collect();
+        println!("\x1b[2mAlready installed: {}\x1b[2m\n", names.join(", "));
+    }
+
+    let not_installed: Vec<_> = all_players_list
+        .iter()
+        .filter(|p| !detector.is_installed(**p))
+        .collect();
+
+    if not_installed.is_empty() {
+        let styled = Prose::new("All supported audio players are already installed.");
+        println!("{}", styled.render(&Terminal::default()));
+        return;
+    }
+
+    let installable: Vec<(&HeadlessAudio, String)> = not_installed
+        .iter()
+        .filter_map(|p| {
+            if !detector.installable(**p) {
+                return None;
+            }
+            let binary = p.binary_name();
+            let display = p.display_name();
+            let label = if binary == display {
+                binary.to_string()
+            } else {
+                format!("{} ({})", display, binary)
+            };
+            Some((*p, label))
+        })
+        .collect();
+
+    if installable.is_empty() {
+        let styled = Prose::new(
+            "No installable audio players found for this OS. \
+             Install a package manager (e.g., Homebrew on macOS) and try again.",
+        );
+        println!("{}", styled.render(&Terminal::default()));
+        return;
+    }
+
+    let options: Vec<String> = installable.iter().map(|(_, label)| label.clone()).collect();
+
+    let selected =
+        match inquire::MultiSelect::new("Select audio players to install:", options.clone())
+            .with_help_message("Space to toggle, Enter to confirm, Esc to skip")
+            .prompt()
+        {
+            Ok(sel) => sel,
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => return,
+            Err(e) => {
+                error_exit(&format!("selection failed: {e}"), 1);
+            }
+        };
+
+    if selected.is_empty() {
+        return;
+    }
+
+    let host = HostCapabilities::load_or_detect_with_verification(false);
+    let terminal = Terminal::new();
+    let mut ui = install_ui::CliInstallUi::new(terminal, false);
+
+    for label in &selected {
+        let idx = options.iter().position(|o| o == label).unwrap();
+        let program = installable[idx].0;
+
+        let plan = build_install_plan(program, &host);
+        let input = InstallInterviewInput {
+            program: plan.program.clone(),
+            website: plan.website,
+            plan,
+        };
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.timeout_secs = 120;
+
+        if let Err(e) = run_install_interview(&input, &opts, &mut ui) {
+            error_exit(&format!("installation failed: {e}"), 1);
         }
     }
 }
@@ -1145,49 +1270,97 @@ fn list_output_channels() {
                 return;
             }
 
-            println!("Available Output Channels");
-            println!("=========================");
-            println!();
-
-            let mut list = UnorderedList::empty();
-            for channel in channels {
-                let mut styled_name = channel.name.clone();
-                let mut markers = Vec::new();
-
-                if channel.is_default_audio && channel.is_default_sfx {
-                    styled_name = format!("<bold><italic>{}</italic></bold>", styled_name);
-                } else if channel.is_default_audio {
-                    styled_name = format!("<bold>{}</bold>", styled_name);
-                } else if channel.is_default_sfx {
-                    styled_name = format!("<italic>{}</italic>", styled_name);
-                }
-
-                if channel.is_default_audio {
-                    markers.push("default audio");
-                }
-                if channel.is_default_sfx {
-                    markers.push("default sfx");
-                }
-
-                let text = if markers.is_empty() {
-                    format!("{} <dim>[{}]</dim>", styled_name, channel.id)
-                } else {
-                    format!(
-                        "{} <dim>[{}] ({})</dim>",
-                        styled_name,
-                        channel.id,
-                        markers.join(", ")
-                    )
-                };
-
-                list.add(Prose::new(text));
-            }
-            let output = list.render_optimistic(None);
-            print!("{}", output);
+            let terminal = Terminal::new();
+            print!("{}", render_output_channels(&channels, &terminal));
         }
         Err(e) => {
             error_exit(&format!("failed to get output channels: {e}"), 1);
         }
+    }
+}
+
+#[cfg(feature = "sfx-native")]
+fn render_output_channels(channels: &[OutputChannel], terminal: &Terminal) -> String {
+    let mut output = String::from("Available Output Channels\n");
+    output.push_str("=========================\n\n");
+
+    let mut list = UnorderedList::empty();
+    for channel in channels {
+        list.add(Prose::new(format_output_channel(channel)));
+    }
+
+    output.push_str(&list.display(terminal));
+    output
+}
+
+#[cfg(feature = "sfx-native")]
+fn format_output_channel(channel: &OutputChannel) -> String {
+    let mut styled_name = channel.name.clone();
+    let mut markers = Vec::new();
+
+    if channel.is_default_audio && channel.is_default_sfx {
+        styled_name = format!("<bold><italic>{}</italic></bold>", styled_name);
+    } else if channel.is_default_audio {
+        styled_name = format!("<bold>{}</bold>", styled_name);
+    } else if channel.is_default_sfx {
+        styled_name = format!("<italic>{}</italic>", styled_name);
+    }
+
+    if channel.is_default_audio {
+        markers.push("default audio");
+    }
+    if channel.is_default_sfx {
+        markers.push("default sfx");
+    }
+
+    let mut text = if markers.is_empty() {
+        format!("{} <dim>[{}]</dim>", styled_name, channel.id)
+    } else {
+        format!(
+            "{} <dim>[{}] ({})</dim>",
+            styled_name,
+            channel.id,
+            markers.join(", ")
+        )
+    };
+
+    if !channel.sample_rates.is_empty() {
+        text.push_str(&format!(
+            "\n  <dim>sample rates: {}</dim>",
+            format_sample_rate_ranges(&channel.sample_rates)
+        ));
+    }
+
+    text
+}
+
+#[cfg(feature = "sfx-native")]
+fn format_sample_rate_ranges(ranges: &[SampleRateRange]) -> String {
+    ranges
+        .iter()
+        .map(|range| {
+            if range.min_hz == range.max_hz {
+                format_sample_rate(range.min_hz)
+            } else {
+                format!(
+                    "{}-{}",
+                    format_sample_rate(range.min_hz),
+                    format_sample_rate(range.max_hz)
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[cfg(feature = "sfx-native")]
+fn format_sample_rate(rate_hz: u32) -> String {
+    if rate_hz % 1000 == 0 {
+        format!("{} kHz", rate_hz / 1000)
+    } else if rate_hz % 100 == 0 {
+        format!("{:.1} kHz", rate_hz as f64 / 1000.0)
+    } else {
+        format!("{rate_hz} Hz")
     }
 }
 
@@ -1326,7 +1499,7 @@ mod tests {
     #[test]
     fn background_flag_rejected_without_playback_target() {
         let cli = Cli {
-            command: Some(Command::Players),
+            command: Some(Command::Players(PlayersCommand::List)),
             audio_file: None,
             playback: PlaybackOptions {
                 background: true,
@@ -1337,5 +1510,77 @@ mod tests {
 
         assert!(background_requested(&cli));
         assert!(!has_playback_target(&cli));
+    }
+
+    #[test]
+    fn help_generation_does_not_probe_output_channels() {
+        let help = Cli::command().render_help().to_string();
+
+        assert!(help.contains("--channel <CHANNEL>"));
+        assert!(!help.contains("default audio"));
+        assert!(!help.contains("default sfx"));
+    }
+
+    #[test]
+    fn help_shows_players_subcommands() {
+        let help = Cli::command().render_help().to_string();
+        assert!(help.contains("players"));
+        assert!(help.contains("install"));
+    }
+
+    #[cfg(feature = "sfx-native")]
+    #[test]
+    fn output_channels_render_with_terminal_width() {
+        let channels = vec![OutputChannel {
+            name: "Schiit Bifrost 2 Unison USB".to_string(),
+            id: "schiit-bifrost-2-unison-usb".to_string(),
+            is_default_audio: true,
+            is_default_sfx: true,
+            sample_rates: vec![
+                SampleRateRange {
+                    min_hz: 44_100,
+                    max_hz: 44_100,
+                },
+                SampleRateRange {
+                    min_hz: 48_000,
+                    max_hz: 192_000,
+                },
+            ],
+        }];
+        let terminal = Terminal::new_optimistic(160);
+
+        let rendered = strip_ansi_codes(&render_output_channels(&channels, &terminal));
+
+        assert!(
+            rendered.contains(
+                "- Schiit Bifrost 2 Unison USB [schiit-bifrost-2-unison-usb] \
+                 (default audio, default sfx)\n"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("sample rates: 44.1 kHz, 48 kHz-192 kHz"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn players_list_parses() {
+        let cli = Cli::try_parse_from(["playa", "players", "list"]);
+        assert!(cli.is_ok());
+        assert!(matches!(
+            cli.unwrap().command,
+            Some(Command::Players(PlayersCommand::List))
+        ));
+    }
+
+    #[test]
+    fn players_install_parses() {
+        let cli = Cli::try_parse_from(["playa", "players", "install"]);
+        assert!(cli.is_ok());
+        assert!(matches!(
+            cli.unwrap().command,
+            Some(Command::Players(PlayersCommand::Install))
+        ));
     }
 }
