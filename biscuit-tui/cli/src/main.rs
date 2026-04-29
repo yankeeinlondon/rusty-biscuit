@@ -9,7 +9,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use tui_chrome::HeightSpec;
 
+mod choice_normalize;
 mod commands;
+mod option_sources;
 mod output;
 
 use commands::boolean_switch::{BooleanSwitchArgs, run as run_boolean_switch};

@@ -4,44 +4,58 @@
 //! component via [`tui_chrome::run_standalone`], and writes the
 //! captured option value according to the current [`OutputMode`].
 
-use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 use clap::Args;
-use tui_chrome::helpers::choice_builders::{
-    choose_one_from_csv, choose_one_from_dictionary, choose_one_from_markdown_list,
-};
 use tui_chrome::{
     ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseOne, ChooseOneState, HeightSpec, Label,
     run_standalone_with_chrome,
 };
 
+use crate::choice_normalize::normalize_options;
 use crate::commands::common_choose::{
-    ChooseChromeArgs, apply_sort, build_chrome, build_options, resolve_option_strings,
+    ChooseChromeArgs, apply_sort, build_chrome,
 };
 use crate::commands::text_input::LabelPositionArg;
+use crate::option_sources::resolve_raw_options;
 use crate::output::{OutputMode, write_scalar};
 
 /// Arguments accepted by the `choose-one` subcommand.
 #[derive(Debug, Args)]
 pub struct ChooseOneArgs {
     /// Option strings. Trailing positional arguments become the list
-    /// of options when no legacy `--options*` flag is set.
+    /// of options when no explicit source flag is set.
     #[arg(value_name = "OPTIONS")]
     pub positional: Vec<String>,
 
     /// Comma-separated list of option values.
-    #[arg(long, conflicts_with_all = ["options_from_file", "options_from_dictionary"])]
-    pub options: Option<String>,
+    #[arg(long = "csv", alias = "options", value_name = "TEXT")]
+    pub csv: Option<String>,
 
-    /// Path to a markdown file containing a bullet/numbered list of
-    /// options.
-    #[arg(long, conflicts_with_all = ["options", "options_from_dictionary"])]
+    /// Newline-separated list of option values.
+    #[arg(long, value_name = "TEXT")]
+    pub list: Option<String>,
+
+    /// Newline-separated rows of options.
+    #[arg(long, value_name = "TEXT")]
+    pub rows: Option<String>,
+
+    /// Path to a file containing options (JSON, JSONL, YAML, TOML, or CSV).
+    #[arg(long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+
+    /// Path to a markdown file and frontmatter property name containing
+    /// an array of options.
+    #[arg(long, value_names = ["PATH", "PROP"], num_args = 2)]
+    pub md: Option<Vec<String>>,
+
+    /// Legacy: path to a markdown file containing a bullet/numbered list.
+    #[arg(long, hide = true)]
     pub options_from_file: Option<PathBuf>,
 
-    /// Path to a YAML/JSON file containing a mapping of label → value.
-    #[arg(long, conflicts_with_all = ["options", "options_from_file"])]
+    /// Legacy: path to a YAML/JSON file containing a mapping of label → value.
+    #[arg(long, hide = true)]
     pub options_from_dictionary: Option<PathBuf>,
 
     /// Label text rendered next to the list.
@@ -136,20 +150,36 @@ fn effective_selected(args: &ChooseOneArgs) -> Option<&str> {
 }
 
 fn build_choice_input(args: &ChooseOneArgs) -> io::Result<ChoiceInput<String>> {
-    let mut input = if let Some(csv) = args.options.as_deref() {
-        choose_one_from_csv("choice", "", csv)
-    } else if let Some(path) = args.options_from_file.as_ref() {
-        let body = fs::read_to_string(path)?;
-        choose_one_from_markdown_list("choice", "", &body)
-    } else if let Some(path) = args.options_from_dictionary.as_ref() {
-        let body = fs::read_to_string(path)?;
-        choose_one_from_dictionary("choice", "", &body)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
-    } else {
-        let resolved = resolve_option_strings(false, args.positional.clone())?
-            .expect("resolve_option_strings returns Some when no legacy source is set");
-        ChoiceInput::new("choice", "").with_options(build_options(resolved, args.chrome.delimiter))
-    };
+    let md = args.md.as_ref().and_then(|v| {
+        if v.len() >= 2 {
+            Some((std::path::Path::new(&v[0]), v[1].as_str()))
+        } else {
+            None
+        }
+    });
+
+    let raw_options = resolve_raw_options(
+        args.csv.as_deref(),
+        args.list.as_deref(),
+        args.rows.as_deref(),
+        args.file.as_deref(),
+        md,
+        args.options_from_file.as_deref(),
+        args.options_from_dictionary.as_deref(),
+        args.positional.clone(),
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+
+    let options = normalize_options(
+        raw_options,
+        args.chrome.label_convention,
+        args.chrome.value_convention,
+        args.chrome.numeric_hot_keys,
+        args.chrome.delimiter,
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+
+    let mut input = ChoiceInput::new("choice", "").with_options(options);
     apply_sort(&mut input.options, args.chrome.sort.into());
     Ok(input.with_filter_enabled(!args.chrome.no_filter))
 }
@@ -161,7 +191,11 @@ mod tests {
     fn default_args() -> ChooseOneArgs {
         ChooseOneArgs {
             positional: Vec::new(),
-            options: None,
+            csv: None,
+            list: None,
+            rows: None,
+            file: None,
+            md: None,
             options_from_file: None,
             options_from_dictionary: None,
             label: None,
@@ -176,7 +210,7 @@ mod tests {
     #[test]
     fn build_choice_input_from_csv_returns_options() {
         let args = ChooseOneArgs {
-            options: Some("Red,Green,Blue".into()),
+            csv: Some("Red,Green,Blue".into()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -208,7 +242,7 @@ mod tests {
     #[test]
     fn build_choice_input_enables_filter_for_legacy_csv_by_default() {
         let args = ChooseOneArgs {
-            options: Some("alpha,beta".into()),
+            csv: Some("alpha,beta".into()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -266,7 +300,7 @@ mod tests {
     fn build_choice_input_applies_sort_ascending_across_legacy_csv_source() {
         use crate::commands::common_choose::SortOrderArg;
         let args = ChooseOneArgs {
-            options: Some("Berry,Apple,Cherry".into()),
+            csv: Some("Berry,Apple,Cherry".into()),
             chrome: ChooseChromeArgs {
                 sort: SortOrderArg::Asc,
                 ..ChooseChromeArgs::default()
@@ -314,7 +348,7 @@ mod tests {
     #[test]
     fn run_writes_json_selected_value_from_initial_option() {
         let args = ChooseOneArgs {
-            options: Some("Red,Green,Blue".into()),
+            csv: Some("Red,Green,Blue".into()),
             selected: Some("Green".into()),
             required: true,
             ..default_args()
@@ -341,7 +375,7 @@ mod tests {
     #[test]
     fn run_propagates_percent_height_to_prompt() {
         let args = ChooseOneArgs {
-            options: Some("A,B,C".into()),
+            csv: Some("A,B,C".into()),
             selected: Some("B".into()),
             ..default_args()
         };
@@ -366,7 +400,7 @@ mod tests {
     #[test]
     fn run_writes_raw_selected_value_with_newline() {
         let args = ChooseOneArgs {
-            options: Some("Alpha,Beta,Gamma".into()),
+            csv: Some("Alpha,Beta,Gamma".into()),
             selected: Some("Beta".into()),
             ..default_args()
         };
@@ -501,7 +535,7 @@ mod tests {
     #[test]
     fn run_writes_null_output_with_nul_terminator() {
         let args = ChooseOneArgs {
-            options: Some("X,Y,Z".into()),
+            csv: Some("X,Y,Z".into()),
             selected: Some("Z".into()),
             ..default_args()
         };
@@ -523,7 +557,7 @@ mod tests {
     #[test]
     fn run_returns_130_without_output_on_ctrl_c() {
         let args = ChooseOneArgs {
-            options: Some("Red,Green".into()),
+            csv: Some("Red,Green".into()),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -546,7 +580,7 @@ mod tests {
         // Phase 5: ChooseOne Esc restores the initial selection and
         // submits, so the CLI exits 0 rather than 1.
         let args = ChooseOneArgs {
-            options: Some("Red,Green".into()),
+            csv: Some("Red,Green".into()),
             ..default_args()
         };
         let mut output = Vec::new();

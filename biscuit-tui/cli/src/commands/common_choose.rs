@@ -18,10 +18,10 @@
 //!
 //! and returns an error if none are available.
 
-use std::io::{self, IsTerminal, Read};
-
 use clap::{Args, ValueEnum};
 use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, Padding, SortOrder};
+
+use crate::choice_normalize::NamingConvention;
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
@@ -131,6 +131,19 @@ pub struct ChooseChromeArgs {
     /// `--padding` for the right side only.
     #[arg(long, value_name = "CELLS")]
     pub pr: Option<u16>,
+
+    /// Assign numeric hotkeys (Ctrl+1..9,0 then Alt+1..9,0) to the
+    /// first 20 options. Explicit hotkeys are never overwritten.
+    #[arg(long)]
+    pub numeric_hot_keys: bool,
+
+    /// Naming convention applied to option labels.
+    #[arg(long, value_enum, default_value_t = NamingConvention::None)]
+    pub label_convention: NamingConvention,
+
+    /// Naming convention applied to option values.
+    #[arg(long, value_enum, default_value_t = NamingConvention::None)]
+    pub value_convention: NamingConvention,
 }
 
 /// CLI-facing sort-order mirror.
@@ -221,118 +234,6 @@ impl From<BorderStyleArg> for BorderStyle {
             BorderStyleArg::Right => BorderStyle::Right,
         }
     }
-}
-
-/// Resolves the raw option strings from the CLI's source-precedence
-/// chain.
-///
-/// ## Returns
-///
-/// - `Ok(None)` when the caller is using a legacy source
-///   (`--options` / `--options-from-file` /
-///   `--options-from-dictionary`) and should build the choice input
-///   through the existing builder helpers.
-/// - `Ok(Some(strings))` when either positional args or piped STDIN
-///   supplied the option list.
-///
-/// ## Errors
-///
-/// Returns [`io::ErrorKind::InvalidInput`] when no source is
-/// available — no legacy flag, no positionals, and STDIN is a TTY —
-/// so the user is told which flag to set.
-pub fn resolve_option_strings(
-    has_legacy_source: bool,
-    positional: Vec<String>,
-) -> io::Result<Option<Vec<String>>> {
-    if has_legacy_source {
-        return Ok(None);
-    }
-    if !positional.is_empty() {
-        return Ok(Some(positional));
-    }
-    if io::stdin().is_terminal() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "no options provided: pass options as positional args, via stdin, or use one of \
-             --options, --options-from-file, --options-from-dictionary",
-        ));
-    }
-    let lines = read_option_strings_from(io::stdin().lock())?;
-    Ok(Some(lines))
-}
-
-/// Reads option strings from an arbitrary [`Read`] source.
-///
-/// Encapsulates the `read_to_string` → split lines → CR-trim →
-/// filter-empty → empty-check pipeline so the stdin branch of
-/// [`resolve_option_strings`] is reachable from unit tests via
-/// [`std::io::Cursor`] (or any in-memory reader).
-///
-/// ## Returns
-///
-/// `Ok(Vec<String>)` containing one option per non-empty input line,
-/// with any trailing `\r` stripped so Windows-style line endings
-/// round-trip cleanly.
-///
-/// ## Errors
-///
-/// Returns [`io::ErrorKind::InvalidInput`] when the resulting vec is
-/// empty (no non-blank lines), matching the message emitted by
-/// [`resolve_option_strings`] when its STDIN branch produces nothing.
-/// Propagates any [`io::Error`] raised by the underlying reader.
-pub(crate) fn read_option_strings_from<R: Read>(mut reader: R) -> io::Result<Vec<String>> {
-    let mut buf = String::new();
-    reader.read_to_string(&mut buf)?;
-    let lines: Vec<String> = buf
-        .lines()
-        .map(|line| line.trim_end_matches('\r'))
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect();
-    if lines.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "no options provided: pass options as positional args, via stdin, or use one of \
-             --options, --options-from-file, --options-from-dictionary",
-        ));
-    }
-    Ok(lines)
-}
-
-/// Splits an option string into `(label, value)` on the first
-/// occurrence of `delimiter`.
-///
-/// When `delimiter` is `None`, or the string does not contain the
-/// delimiter, both label and value are the original string. Trim is
-/// applied after the split so `"Apple : 1"` with `':'` yields
-/// `("Apple", "1")`.
-pub fn parse_label_value(s: &str, delimiter: Option<char>) -> (String, String) {
-    match delimiter {
-        Some(ch) => match s.split_once(ch) {
-            Some((label, value)) => (label.trim().to_string(), value.trim().to_string()),
-            None => (s.to_string(), s.to_string()),
-        },
-        None => (s.to_string(), s.to_string()),
-    }
-}
-
-/// Builds a list of [`ChoiceOption<String>`] from raw option strings.
-///
-/// The `id` field of each option is set to the **value** (not the
-/// label) so `--selected` matches by value. This is the behaviour
-/// change spec callers expect when a `--delimiter` splits a
-/// `label⟂value` pair.
-pub fn build_options(
-    raw_strings: Vec<String>,
-    delimiter: Option<char>,
-) -> Vec<ChoiceOption<String>> {
-    raw_strings
-        .into_iter()
-        .map(|s| {
-            let (label, value) = parse_label_value(&s, delimiter);
-            ChoiceOption::new(value.clone(), label, value)
-        })
-        .collect()
 }
 
 /// Applies the caller's [`SortOrder`] to `options` in place.
@@ -466,99 +367,6 @@ fn resolve_border_style(args: &ChooseChromeArgs) -> BorderStyle {
 mod tests {
     use super::*;
     use tui_chrome::Padding;
-
-    #[test]
-    fn parse_label_value_no_delimiter_returns_identity() {
-        let (label, value) = parse_label_value("Apple", None);
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "Apple");
-    }
-
-    #[test]
-    fn parse_label_value_splits_on_first_delimiter_only() {
-        let (label, value) = parse_label_value("Apple:1:2", Some(':'));
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "1:2");
-    }
-
-    #[test]
-    fn parse_label_value_trims_around_delimiter() {
-        let (label, value) = parse_label_value("Apple : 1", Some(':'));
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "1");
-    }
-
-    #[test]
-    fn parse_label_value_falls_back_to_identity_when_delimiter_missing() {
-        let (label, value) = parse_label_value("Apple", Some(':'));
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "Apple");
-    }
-
-    #[test]
-    fn build_options_sets_id_to_value() {
-        let opts = build_options(vec!["Apple:1".into(), "Berry:2".into()], Some(':'));
-        assert_eq!(opts.len(), 2);
-        assert_eq!(opts[0].id, "1");
-        assert_eq!(opts[0].label, "Apple");
-        assert_eq!(opts[0].value, "1");
-        assert_eq!(opts[1].id, "2");
-        assert_eq!(opts[1].label, "Berry");
-        assert_eq!(opts[1].value, "2");
-    }
-
-    #[test]
-    fn build_options_without_delimiter_sets_id_equal_to_label_equal_to_value() {
-        let opts = build_options(vec!["alpha".into(), "beta".into()], None);
-        assert_eq!(opts.len(), 2);
-        assert_eq!(opts[0].id, "alpha");
-        assert_eq!(opts[0].label, "alpha");
-        assert_eq!(opts[0].value, "alpha");
-    }
-
-    #[test]
-    fn resolve_option_strings_returns_none_for_legacy_source() {
-        let resolved = resolve_option_strings(true, vec![]).unwrap();
-        assert!(resolved.is_none());
-    }
-
-    #[test]
-    fn resolve_option_strings_prefers_positional_over_stdin() {
-        let resolved = resolve_option_strings(false, vec!["a".into(), "b".into()]).unwrap();
-        assert_eq!(resolved, Some(vec!["a".to_string(), "b".to_string()]));
-    }
-
-    #[test]
-    fn read_option_strings_strips_trailing_carriage_return() {
-        let cursor = std::io::Cursor::new(b"alpha\r\nbeta\r\n");
-        let lines = read_option_strings_from(cursor).unwrap();
-        assert_eq!(lines, vec!["alpha".to_string(), "beta".to_string()]);
-    }
-
-    #[test]
-    fn read_option_strings_filters_empty_lines() {
-        let cursor = std::io::Cursor::new(b"\nalpha\n\n\nbeta\n");
-        let lines = read_option_strings_from(cursor).unwrap();
-        assert_eq!(lines, vec!["alpha".to_string(), "beta".to_string()]);
-    }
-
-    #[test]
-    fn read_option_strings_empty_input_is_invalid_input() {
-        let cursor = std::io::Cursor::new(b"");
-        let err = read_option_strings_from(cursor).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-        assert!(err.to_string().contains("no options provided"));
-    }
-
-    #[test]
-    fn read_option_strings_whitespace_only_lines_are_kept_as_is() {
-        // Whitespace-only labels are preserved — the caller is
-        // responsible for trimming (via `parse_label_value`). Only
-        // wholly empty lines are dropped.
-        let cursor = std::io::Cursor::new(b"  alpha  \nbeta\n");
-        let lines = read_option_strings_from(cursor).unwrap();
-        assert_eq!(lines, vec!["  alpha  ".to_string(), "beta".to_string()]);
-    }
 
     #[test]
     fn build_chrome_returns_default_config_with_padding() {
@@ -778,8 +586,11 @@ mod tests {
 
     #[test]
     fn apply_sort_reorders_labels_lexically_when_asc() {
-        let mut options =
-            build_options(vec!["Berry".into(), "Apple".into(), "Cherry".into()], None);
+        let mut options = vec![
+            ChoiceOption::new("Berry", "Berry", "Berry"),
+            ChoiceOption::new("Apple", "Apple", "Apple"),
+            ChoiceOption::new("Cherry", "Cherry", "Cherry"),
+        ];
         apply_sort(&mut options, SortOrder::Asc);
         let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
@@ -790,7 +601,10 @@ mod tests {
         // With `--delimiter :` the label is the part before the colon.
         // Sorting ascending should order by label ("Apple" < "Berry"),
         // not by raw string ("Apple:zzz" vs "Berry:aaa").
-        let mut options = build_options(vec!["Berry:aaa".into(), "Apple:zzz".into()], Some(':'));
+        let mut options = vec![
+            ChoiceOption::new("aaa", "Berry", "aaa"),
+            ChoiceOption::new("zzz", "Apple", "zzz"),
+        ];
         apply_sort(&mut options, SortOrder::Asc);
         assert_eq!(options[0].label, "Apple");
         assert_eq!(options[0].value, "zzz");
@@ -800,8 +614,11 @@ mod tests {
 
     #[test]
     fn apply_sort_natural_is_no_op() {
-        let mut options =
-            build_options(vec!["Berry".into(), "Apple".into(), "Cherry".into()], None);
+        let mut options = vec![
+            ChoiceOption::new("Berry", "Berry", "Berry"),
+            ChoiceOption::new("Apple", "Apple", "Apple"),
+            ChoiceOption::new("Cherry", "Cherry", "Cherry"),
+        ];
         apply_sort(&mut options, SortOrder::Natural);
         let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Berry", "Apple", "Cherry"]);
