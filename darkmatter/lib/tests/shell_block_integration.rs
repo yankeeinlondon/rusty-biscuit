@@ -6,9 +6,8 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{
-    ComposeOptions, shell_expansion::types::{
-        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
-    },
+    ComposeOptions,
+    shell_expansion::types::{ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest},
 };
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -72,7 +71,10 @@ fn compose_single_shell_block() {
     let (composed, report) = md.compose_with(options).unwrap();
     let output = composed.content();
 
-    assert!(output.contains("hello"), "Expected shell output in composed content, got: {output}");
+    assert!(
+        output.contains("hello"),
+        "Expected shell output in composed content, got: {output}"
+    );
     assert!(
         !output.contains("::shell-block"),
         "Shell block directive should be replaced, got: {output}"
@@ -101,8 +103,14 @@ fn compose_multiple_shell_blocks() {
     let (composed, report) = md.compose_with(options).unwrap();
     let output = composed.content();
 
-    assert!(output.contains("first"), "Expected first block output, got: {output}");
-    assert!(output.contains("second"), "Expected second block output, got: {output}");
+    assert!(
+        output.contains("first"),
+        "Expected first block output, got: {output}"
+    );
+    assert!(
+        output.contains("second"),
+        "Expected second block output, got: {output}"
+    );
     assert_eq!(report.shell_blocks_applied, 2);
 }
 
@@ -111,10 +119,7 @@ fn compose_shell_block_with_multiple_commands() {
     let dir = TempDir::new().unwrap();
     write_files(
         &dir,
-        &[(
-            "doc.md",
-            "::shell-block\necho a\necho b\n::end-block\n",
-        )],
+        &[("doc.md", "::shell-block\necho a\necho b\n::end-block\n")],
     );
 
     let options = ComposeOptions::new()
@@ -127,7 +132,10 @@ fn compose_shell_block_with_multiple_commands() {
     let (composed, _) = md.compose_with(options).unwrap();
     let output = composed.content();
 
-    assert!(output.contains("a\n\nb\n"), "Expected blank line between command outputs, got: {output:?}");
+    assert!(
+        output.contains("a\n\nb\n"),
+        "Expected blank line between command outputs, got: {output:?}"
+    );
 }
 
 #[test]
@@ -151,7 +159,11 @@ fn compose_shell_block_with_empty_output_commands() {
     let (composed, _) = md.compose_with(options).unwrap();
     let output = composed.content();
 
-    assert_eq!(output.trim(), "hello", "Empty outputs should be omitted, got: {output:?}");
+    assert_eq!(
+        output.trim(),
+        "hello",
+        "Empty outputs should be omitted, got: {output:?}"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -179,7 +191,10 @@ fn shell_block_inside_true_page_block_executes() {
     let (composed, report) = md.compose_with(options).unwrap();
     let output = composed.content();
 
-    assert!(output.contains("inside"), "Shell block inside true page block should execute, got: {output}");
+    assert!(
+        output.contains("inside"),
+        "Shell block inside true page block should execute, got: {output}"
+    );
     assert_eq!(report.shell_blocks_applied, 1);
 }
 
@@ -209,7 +224,10 @@ fn shell_block_inside_false_page_block_is_removed() {
         "Shell block inside false page block should be removed, got: {output}"
     );
     assert_eq!(report.shell_blocks_applied, 0);
-    assert!(output.contains("Done."), "Remaining content should be preserved");
+    assert!(
+        output.contains("Done."),
+        "Remaining content should be preserved"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -250,7 +268,10 @@ fn shell_block_with_conditional_transclusion() {
     write_files(
         &dir,
         &[
-            ("parent.md", "---\ninclude_child: true\n---\n\n::file child.md when=\"include_child\"\n"),
+            (
+                "parent.md",
+                "---\ninclude_child: true\n---\n\n::file child.md when=\"include_child\"\n",
+            ),
             ("child.md", "::shell-block\necho conditional\n::end-block\n"),
         ],
     );
@@ -278,7 +299,10 @@ fn shell_block_skipped_when_transclusion_condition_false() {
     write_files(
         &dir,
         &[
-            ("parent.md", "---\ninclude_child: false\n---\n\n::file child.md when=\"include_child\"\n"),
+            (
+                "parent.md",
+                "---\ninclude_child: false\n---\n\n::file child.md when=\"include_child\"\n",
+            ),
             ("child.md", "::shell-block\necho hidden\n::end-block\n"),
         ],
     );
@@ -324,22 +348,18 @@ fn compose_fails_when_shell_block_command_denied() {
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let result = md.compose_with(options);
 
-    assert!(result.is_err(), "Expected compose to fail when shell command is denied");
+    assert!(
+        result.is_err(),
+        "Expected compose to fail when shell command is denied"
+    );
 }
 
 #[test]
 fn compose_fails_on_unterminated_shell_block() {
     let dir = TempDir::new().unwrap();
-    write_files(
-        &dir,
-        &[(
-            "doc.md",
-            "# Test\n\n::shell-block\necho hello\n",
-        )],
-    );
+    write_files(&dir, &[("doc.md", "# Test\n\n::shell-block\necho hello\n")]);
 
-    let options = ComposeOptions::new()
-        .with_source_file(dir.path().join("doc.md"));
+    let options = ComposeOptions::new().with_source_file(dir.path().join("doc.md"));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let result = md.compose_with(options);
@@ -461,8 +481,14 @@ fn compose_shell_block_with_when_error() {
     let (composed, _) = md.compose_with(options).unwrap();
     let output = composed.content();
 
-    assert!(output.contains("hello"), "Expected 'hello' output, got: {output}");
-    assert!(output.contains("fallback"), "Expected 'fallback' for failed command, got: {output}");
+    assert!(
+        output.contains("hello"),
+        "Expected 'hello' output, got: {output}"
+    );
+    assert!(
+        output.contains("fallback"),
+        "Expected 'fallback' for failed command, got: {output}"
+    );
 }
 
 #[test]
@@ -470,10 +496,7 @@ fn compose_shell_block_with_timeout() {
     let dir = TempDir::new().unwrap();
     write_files(
         &dir,
-        &[(
-            "doc.md",
-            "::shell-block timeout=1\nsleep 5\n::end-block\n",
-        )],
+        &[("doc.md", "::shell-block timeout=1\nsleep 5\n::end-block\n")],
     );
 
     let options = ComposeOptions::new()
@@ -518,8 +541,17 @@ fn compose_mixed_shell_directive_and_shell_block() {
     let (composed, report) = md.compose_with(options).unwrap();
     let output = composed.content();
 
-    assert!(output.contains("standalone"), "Expected standalone shell output, got: {output}");
-    assert!(output.contains("block-a"), "Expected shell block output a, got: {output}");
-    assert!(output.contains("block-b"), "Expected shell block output b, got: {output}");
+    assert!(
+        output.contains("standalone"),
+        "Expected standalone shell output, got: {output}"
+    );
+    assert!(
+        output.contains("block-a"),
+        "Expected shell block output a, got: {output}"
+    );
+    assert!(
+        output.contains("block-b"),
+        "Expected shell block output b, got: {output}"
+    );
     assert_eq!(report.shell_blocks_applied, 1);
 }
