@@ -248,13 +248,17 @@ pub(super) static GOOSE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Wrapper { native_name: "complete" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "complete",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::Wrapper { native_name: "error" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "error",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
@@ -268,7 +272,9 @@ pub(super) static GOOSE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
-            support_level: EventSupportLevel::Wrapper { native_name: "tasks_complete" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "tasks_complete",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
@@ -280,7 +286,9 @@ pub(super) static GOOSE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::Wrapper { native_name: "message" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "message",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
@@ -292,7 +300,9 @@ pub(super) static GOOSE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Wrapper { native_name: "notification" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "notification",
+            },
             parse_aliases: &[],
             registration_target: false,
         },

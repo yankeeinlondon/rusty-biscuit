@@ -26,10 +26,18 @@ pub(crate) static REGISTRY: OnceLock<[&'static ProviderInfo; PROVIDER_COUNT]> = 
 /// returned reference is `'static` since each `ProviderInfo` lives in the
 /// binary's read-only data segment.
 pub fn provider_info(provider: Provider) -> &'static ProviderInfo {
-    let registry = REGISTRY.get_or_init(|| [
-        &CLAUDE_INFO, &CODEX_INFO, &GEMINI_INFO, &GOOSE_INFO,
-        &KIMI_INFO, &OPENCODE_INFO, &QWEN_INFO, &ROO_INFO,
-    ]);
+    let registry = REGISTRY.get_or_init(|| {
+        [
+            &CLAUDE_INFO,
+            &CODEX_INFO,
+            &GEMINI_INFO,
+            &GOOSE_INFO,
+            &KIMI_INFO,
+            &OPENCODE_INFO,
+            &QWEN_INFO,
+            &ROO_INFO,
+        ]
+    });
     registry[provider as usize]
 }
 

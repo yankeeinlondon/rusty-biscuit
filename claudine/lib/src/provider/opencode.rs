@@ -222,31 +222,41 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::Hook { native_name: "session.created" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "session.created",
+            },
             parse_aliases: &["session.created"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::Hook { native_name: "session.deleted" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "session.deleted",
+            },
             parse_aliases: &["session.deleted"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
-            support_level: EventSupportLevel::Hook { native_name: "chat.message" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "chat.message",
+            },
             parse_aliases: &["chat.message"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::Hook { native_name: "tool.execute.before" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "tool.execute.before",
+            },
             parse_aliases: &["tool.execute.before"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::Hook { native_name: "tool.execute.after" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "tool.execute.after",
+            },
             parse_aliases: &["tool.execute.after"],
             registration_target: true,
         },
@@ -258,25 +268,33 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
-            support_level: EventSupportLevel::Hook { native_name: "permission.ask" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "permission.ask",
+            },
             parse_aliases: &["permission.ask"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::Hook { native_name: "permission.asked" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "permission.asked",
+            },
             parse_aliases: &["permission.asked"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Hook { native_name: "session.idle" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "session.idle",
+            },
             parse_aliases: &["session.idle"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::Hook { native_name: "session.error" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "session.error",
+            },
             parse_aliases: &["session.error"],
             registration_target: true,
         },
@@ -294,7 +312,9 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
-            support_level: EventSupportLevel::Hook { native_name: "chat.params" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "chat.params",
+            },
             parse_aliases: &[
                 "chat.params",
                 "chat.headers",
@@ -305,7 +325,9 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::Hook { native_name: "message.updated" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "message.updated",
+            },
             parse_aliases: &[
                 "message.updated",
                 "message.part.updated",
@@ -315,7 +337,9 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
-            support_level: EventSupportLevel::Hook { native_name: "session.compacted" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "session.compacted",
+            },
             parse_aliases: &[
                 "session.compacted",
                 "session.compacting",
@@ -325,7 +349,9 @@ pub(super) static OPENCODE_EVENT_MAPPING: EventMappingTable = EventMappingTable 
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Hook { native_name: "tui.toast.show" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "tui.toast.show",
+            },
             parse_aliases: &["tui.toast.show", "event"],
             registration_target: true,
         },

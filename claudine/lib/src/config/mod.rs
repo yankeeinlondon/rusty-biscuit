@@ -196,8 +196,7 @@ mod tests {
     fn discover_agents_full_covers_every_catalog_provider_exactly_once() {
         let agents = discover_agents_full();
         let observed: std::collections::HashSet<_> = agents.iter().map(|a| a.provider).collect();
-        let expected: std::collections::HashSet<_> =
-            PROVIDERS_DISPLAY_ORDER.into_iter().collect();
+        let expected: std::collections::HashSet<_> = PROVIDERS_DISPLAY_ORDER.into_iter().collect();
         assert_eq!(observed, expected);
         assert_eq!(agents.len(), crate::provider::PROVIDER_COUNT);
     }

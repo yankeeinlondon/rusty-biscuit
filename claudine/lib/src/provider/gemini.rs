@@ -266,31 +266,41 @@ pub(super) static GEMINI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::Hook { native_name: "SessionStart" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "SessionStart",
+            },
             parse_aliases: &["SessionStart"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::Hook { native_name: "SessionEnd" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "SessionEnd",
+            },
             parse_aliases: &["SessionEnd"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
-            support_level: EventSupportLevel::Hook { native_name: "BeforeAgent" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "BeforeAgent",
+            },
             parse_aliases: &["BeforeAgent"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::Hook { native_name: "BeforeTool" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "BeforeTool",
+            },
             parse_aliases: &["BeforeTool"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::Hook { native_name: "AfterTool" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "AfterTool",
+            },
             parse_aliases: &["AfterTool"],
             registration_target: true,
         },
@@ -314,7 +324,9 @@ pub(super) static GEMINI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Hook { native_name: "AfterAgent" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "AfterAgent",
+            },
             parse_aliases: &["AfterAgent"],
             registration_target: true,
         },
@@ -338,25 +350,33 @@ pub(super) static GEMINI_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
-            support_level: EventSupportLevel::Hook { native_name: "BeforeModel" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "BeforeModel",
+            },
             parse_aliases: &["BeforeModel", "BeforeToolSelection"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::Hook { native_name: "AfterModel" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "AfterModel",
+            },
             parse_aliases: &["AfterModel"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
-            support_level: EventSupportLevel::Hook { native_name: "PreCompress" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "PreCompress",
+            },
             parse_aliases: &["PreCompress"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Hook { native_name: "Notification" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "Notification",
+            },
             parse_aliases: &["Notification"],
             registration_target: true,
         },

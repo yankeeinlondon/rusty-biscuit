@@ -618,9 +618,9 @@ fn non_acp_providers_have_not_supported_acp() {
     use crate::events::AgenticEvent;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
-        let has_acp_event = AgenticEvent::ALL.iter().any(|event| {
-            info.event_mapping.support_level(*event).is_acp()
-        });
+        let has_acp_event = AgenticEvent::ALL
+            .iter()
+            .any(|event| info.event_mapping.support_level(*event).is_acp());
         if !has_acp_event {
             assert!(
                 matches!(info.acp.server_mode, AcpServerMode::NotSupported),
@@ -703,7 +703,9 @@ fn provider_field_matches_registry_key() {
 /// [`Provider`] variant.
 #[test]
 fn registry_array_length_matches_variant_count() {
-    let registry = super::registry::REGISTRY.get().expect("registry initialized");
+    let registry = super::registry::REGISTRY
+        .get()
+        .expect("registry initialized");
     assert_eq!(registry.len(), super::PROVIDER_COUNT);
 }
 

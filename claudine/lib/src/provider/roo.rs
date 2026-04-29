@@ -207,13 +207,17 @@ pub(super) static ROO_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::Wrapper { native_name: "TaskCreated" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "TaskCreated",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::Wrapper { native_name: "TaskAborted" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "TaskAborted",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
@@ -225,19 +229,25 @@ pub(super) static ROO_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::Wrapper { native_name: "ToolUseOutput" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "ToolUseOutput",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::Wrapper { native_name: "ToolResultOutput" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "ToolResultOutput",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
-            support_level: EventSupportLevel::Wrapper { native_name: "TaskToolFailed" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "TaskToolFailed",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
@@ -249,43 +259,57 @@ pub(super) static ROO_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::Wrapper { native_name: "WaitingForInput" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "WaitingForInput",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Wrapper { native_name: "TaskCompleted" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "TaskCompleted",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnError,
-            support_level: EventSupportLevel::Wrapper { native_name: "Error" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "Error",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
-            support_level: EventSupportLevel::Wrapper { native_name: "TaskSpawned" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "TaskSpawned",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
-            support_level: EventSupportLevel::Wrapper { native_name: "TaskDelegationCompleted" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "TaskDelegationCompleted",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::BeforeModel,
-            support_level: EventSupportLevel::Wrapper { native_name: "StreamingStarted" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "StreamingStarted",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::AfterModel,
-            support_level: EventSupportLevel::Wrapper { native_name: "StreamingEnded" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "StreamingEnded",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
@@ -297,7 +321,9 @@ pub(super) static ROO_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Wrapper { native_name: "ModeChanged" },
+            support_level: EventSupportLevel::Wrapper {
+                native_name: "ModeChanged",
+            },
             parse_aliases: &[],
             registration_target: false,
         },

@@ -276,55 +276,73 @@ pub(super) static CLAUDE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
     mappings: &[
         EventMapping {
             event: AgenticEvent::SessionStart,
-            support_level: EventSupportLevel::Hook { native_name: "SessionStart" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "SessionStart",
+            },
             parse_aliases: &["SessionStart"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SessionEnd,
-            support_level: EventSupportLevel::Hook { native_name: "SessionEnd" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "SessionEnd",
+            },
             parse_aliases: &["SessionEnd"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforePrompt,
-            support_level: EventSupportLevel::Hook { native_name: "UserPromptSubmit" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "UserPromptSubmit",
+            },
             parse_aliases: &["UserPromptSubmit"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::BeforeTool,
-            support_level: EventSupportLevel::Hook { native_name: "PreToolUse" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "PreToolUse",
+            },
             parse_aliases: &["PreToolUse"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::AfterTool,
-            support_level: EventSupportLevel::Hook { native_name: "PostToolUse" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "PostToolUse",
+            },
             parse_aliases: &["PostToolUse"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::ToolError,
-            support_level: EventSupportLevel::Hook { native_name: "PostToolUseFailure" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "PostToolUseFailure",
+            },
             parse_aliases: &["PostToolUseFailure"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::PermissionRequest,
-            support_level: EventSupportLevel::Hook { native_name: "PermissionRequest" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "PermissionRequest",
+            },
             parse_aliases: &["PermissionRequest"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::HumanInTheLoop,
-            support_level: EventSupportLevel::Hook { native_name: "PreToolUse" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "PreToolUse",
+            },
             parse_aliases: &[],
             registration_target: false,
         },
         EventMapping {
             event: AgenticEvent::TurnComplete,
-            support_level: EventSupportLevel::Hook { native_name: "Stop" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "Stop",
+            },
             parse_aliases: &["Stop", "TeammateIdle", "TaskCompleted"],
             registration_target: true,
         },
@@ -336,13 +354,17 @@ pub(super) static CLAUDE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::SubagentStart,
-            support_level: EventSupportLevel::Hook { native_name: "SubagentStart" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "SubagentStart",
+            },
             parse_aliases: &["SubagentStart"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::SubagentStop,
-            support_level: EventSupportLevel::Hook { native_name: "SubagentStop" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "SubagentStop",
+            },
             parse_aliases: &["SubagentStop"],
             registration_target: true,
         },
@@ -360,13 +382,17 @@ pub(super) static CLAUDE_EVENT_MAPPING: EventMappingTable = EventMappingTable {
         },
         EventMapping {
             event: AgenticEvent::BeforeCompact,
-            support_level: EventSupportLevel::Hook { native_name: "PreCompact" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "PreCompact",
+            },
             parse_aliases: &["PreCompact"],
             registration_target: true,
         },
         EventMapping {
             event: AgenticEvent::Notification,
-            support_level: EventSupportLevel::Hook { native_name: "Notification" },
+            support_level: EventSupportLevel::Hook {
+                native_name: "Notification",
+            },
             parse_aliases: &["Notification"],
             registration_target: true,
         },

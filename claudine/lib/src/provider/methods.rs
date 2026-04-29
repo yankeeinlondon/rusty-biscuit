@@ -514,10 +514,16 @@ mod tests {
     #[test]
     fn event_support_level_claude_all_hook() {
         use crate::events::AgenticEvent::*;
-        assert!(Provider::Claude.event_support_level(&TurnComplete).is_hook());
+        assert!(
+            Provider::Claude
+                .event_support_level(&TurnComplete)
+                .is_hook()
+        );
         assert!(Provider::Claude.event_support_level(&BeforeTool).is_hook());
         assert!(
-            !Provider::Claude.event_support_level(&BeforeModel).is_supported()
+            !Provider::Claude
+                .event_support_level(&BeforeModel)
+                .is_supported()
         );
     }
 
@@ -584,17 +590,23 @@ mod tests {
             Provider::KimiCode
                 .event_support_level(&TurnComplete)
                 .is_supported()
-                && !Provider::KimiCode.event_support_level(&TurnComplete).is_hook()
+                && !Provider::KimiCode
+                    .event_support_level(&TurnComplete)
+                    .is_hook()
         );
         assert!(
             Provider::KimiCode
                 .event_support_level(&BeforeTool)
                 .is_supported()
-                && !Provider::KimiCode.event_support_level(&BeforeTool).is_hook()
+                && !Provider::KimiCode
+                    .event_support_level(&BeforeTool)
+                    .is_hook()
         );
-        assert!(Provider::KimiCode
-            .event_support_level(&PermissionRequest)
-            .is_acp());
+        assert!(
+            Provider::KimiCode
+                .event_support_level(&PermissionRequest)
+                .is_acp()
+        );
         assert!(
             !Provider::KimiCode
                 .event_support_level(&SessionStart)
@@ -609,21 +621,25 @@ mod tests {
             Provider::QwenCode
                 .event_support_level(&TurnComplete)
                 .is_supported()
-                && !Provider::QwenCode.event_support_level(&TurnComplete).is_hook()
+                && !Provider::QwenCode
+                    .event_support_level(&TurnComplete)
+                    .is_hook()
         );
         assert!(
             Provider::QwenCode
                 .event_support_level(&AfterModel)
                 .is_supported()
-                && !Provider::QwenCode.event_support_level(&AfterModel).is_hook()
+                && !Provider::QwenCode
+                    .event_support_level(&AfterModel)
+                    .is_hook()
         );
         assert!(
             Provider::QwenCode
                 .event_support_level(&PermissionRequest)
                 .is_supported()
                 && !Provider::QwenCode
-                .event_support_level(&PermissionRequest)
-                .is_hook()
+                    .event_support_level(&PermissionRequest)
+                    .is_hook()
         );
         assert!(
             !Provider::QwenCode
@@ -640,7 +656,9 @@ mod tests {
             Provider::RooCode
                 .event_support_level(&TurnComplete)
                 .is_supported()
-                && !Provider::RooCode.event_support_level(&TurnComplete).is_hook()
+                && !Provider::RooCode
+                    .event_support_level(&TurnComplete)
+                    .is_hook()
         );
         assert!(
             Provider::RooCode
