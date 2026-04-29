@@ -34,6 +34,7 @@ The [`core`](src/core) module provides cross-cutting primitives shared by every 
 - **`Label`** / **`LabelPosition`** / **`render_with_label`** — shared label placement
 - **`Padding`** — four-sided interior padding inside the border
 - **`TerminalStyle`** / **`TerminalBackground`** / **`NerdFontStatus`** — conservative terminal capability detection
+- **`ActiveChoiceColor`** / **`resolve_active_style`** — choice-list active-row styling driven by spec-aligned palettes (Grey/Green/Yellow/Red) tuned per-background, returned as a `ratatui::style::Style` with bold + contrast-correct foreground
 
 The [`prelude`](src/prelude.rs) module re-exports the most commonly used types for convenient glob imports.
 

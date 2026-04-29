@@ -152,11 +152,13 @@ The `choose_one` component is exposed via the `question choose-one` command. It 
 - `--value-convention <caps|lowercase|camel-case|pascal-case|kebab-case|snake-case|title-case>`: Transform option values.
 - `::` delimiter in option text splits `label::value` (takes precedence over conventions).
 - `[CTRL+X]`, `[ALT+X]`, `[OPT+X]` prefixes in option text assign explicit hotkeys.
+- `--hotkey-badges <auto|always|never>`: When to render coloured hotkey badges next to options that carry an explicit `Ctrl+X`/`Alt+X` shortcut. `auto` (the default) shows badges while the matching modifier is held — using a brief deadline-based fallback (~300 ms) on terminals that do not emit modifier-only key events. `always` forces Ctrl badges on for the lifetime of the prompt; `never` hides them entirely. Vertical layouts render badges inline immediately after the option label; horizontal layouts drop them on the row directly below the option (Up/Down navigation skips that sub-row).
 
 **Chrome:**
 - `--border`, `--border-label <TEXT>`, `--border-style <STYLE>`: Border chrome.
 - `--margin <N>`, `--mt <N>`, `--mb <N>`, `--ml <N>`, `--mr <N>`: Outer margin.
 - `--padding <N>` / `-p <N>`, `--pt <N>`, `--pb <N>`, `--pl <N>`, `--pr <N>`: Inner padding.
+- `--active-color <grey|green|yellow|red>`: Background colour for the actively hovered option (default `grey`). The renderer combines this with the detected terminal background to pick a foreground that meets the spec's contrast rule (white text on dark/unknown, black text on light). The active highlight covers only the focus indicator + selection glyph + label + one trailing blank cell — never the full row width.
 
 ### Global Flags
 

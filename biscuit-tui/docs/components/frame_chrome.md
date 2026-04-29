@@ -56,7 +56,7 @@ Use `Margin::uniform(n)` for equal sides, then override individual fields as nee
 
 ### Padding
 
-Four-sided padding with per-side overrides. Padding is applied **inside** the border — it shrinks the area available to the inner widget after the border is drawn. The default `FrameChromeConfig` uses `Padding::uniform(1)` so widgets do not touch the border.
+Four-sided padding with per-side overrides. Padding is applied **inside** the border — it shrinks the area available to the inner widget after the border is drawn. `Padding::default()` is `Padding::uniform(1)` (matching the spec's library-level default) so widgets do not visually touch the border.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -65,7 +65,14 @@ Four-sided padding with per-side overrides. Padding is applied **inside** the bo
 | `left` | `u16` | `1` | Cells of padding to the left |
 | `right` | `u16` | `1` | Cells of padding to the right |
 
-Use `Padding::uniform(n)` for equal sides, then override individual fields as needed. Setting all sides to `0` removes interior spacing entirely.
+Constructors:
+
+- `Padding::default()` — `1` cell on every side (the library default).
+- `Padding::uniform(n)` — `n` cells on every side. Override individual fields after construction as needed.
+- `Padding::zero()` — `0` cells on every side. Use this to opt out of interior spacing entirely.
+- `Padding::none()` — alias for `Padding::zero()`. Reads naturally at call sites that want "no padding".
+
+Note: a `FrameChromeConfig` built from `Default::default()` is **not** empty — its padding alone (`uniform(1)`) affects layout. `FrameChromeConfig::is_empty()` only returns `true` when padding is `Padding::zero()` and there is no border or margin.
 
 ## Usage Examples
 

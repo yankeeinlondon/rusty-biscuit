@@ -111,6 +111,7 @@ printf "%s\n" "Red" "Green" "Blue" | question choose-one
 - `--border`, `--border-label <TEXT>`, `--border-style <STYLE>` — add border chrome
 - `--margin <N>`, `--mt <N>`, `--mb <N>`, `--ml <N>`, `--mr <N>` — outer margin
 - `--padding <N>` / `-p <N>`, `--pt <N>`, `--pb <N>`, `--pl <N>`, `--pr <N>` — inner padding
+- `--active-color {grey|green|yellow|red}` — background colour for the active row (default `grey`); the renderer picks a contrasting foreground based on the detected terminal background and only paints the focus indicator + label + one trailing blank cell
 
 **Output:** the selected value (raw string).
 
