@@ -1,13 +1,17 @@
 ---
 phases: 4
-start_phase: 3
-source_files_during_phase_3:
-  - lib/src/components/choose_many.rs
+start_phase: 4
+source_files_during_phase_3: []
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 packages:
   - tui-chrome
+  - tui-chrome-cli
 ---
 # Review-3 Fix Plan
 
