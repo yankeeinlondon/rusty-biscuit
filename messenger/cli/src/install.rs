@@ -102,7 +102,7 @@ pub fn run(args: InstallArgs) -> Result<()> {
     );
     println!();
     let config = Config::load().unwrap_or_default();
-    let host_helpers = info::config_helpers_for_host(&config);
+    let host_helpers = info::config_helpers_for_host(&config, sniff::os::detect_os_type());
     let report = info::build_report(&config, &host_helpers);
     print!("{}", info::render_text(&report));
 
