@@ -85,6 +85,7 @@ pub(super) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::Goose,
     display_name: "Goose",
     slug: "goose",
+    short_name: "goose",
     binary: "goose",
     agent_offset: ".goose",
     cli_aliases: &["goose"],
@@ -127,6 +128,7 @@ pub(super) static GOOSE_INFO: ProviderInfo = ProviderInfo {
     dynamic_source: ModelCatalogSource::None,
     model_env_vars: &["GOOSE_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes::NONE,
+    repo_home_root_files: &[],
 };
 
 const GOOSE_ACP_EVENTS: &[AcpEvent] = &[AcpEvent::RequestPermission];

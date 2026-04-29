@@ -189,6 +189,7 @@ pub(super) static CODEX_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::Codex,
     display_name: "Codex",
     slug: "codex",
+    short_name: "codex",
     binary: "codex",
     agent_offset: ".codex",
     cli_aliases: &["codex"],
@@ -236,6 +237,7 @@ pub(super) static CODEX_INFO: ProviderInfo = ProviderInfo {
         switch_mode: false,
         modify_provider_config: true,
     },
+    repo_home_root_files: &[],
 };
 
 /// Static, compiled-in OpenAI model catalog.

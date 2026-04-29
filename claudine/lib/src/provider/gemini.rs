@@ -154,6 +154,7 @@ pub(super) static GEMINI_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::Gemini,
     display_name: "Gemini",
     slug: "gemini",
+    short_name: "gemini",
     binary: "gemini",
     agent_offset: ".gemini",
     cli_aliases: &["gemini"],
@@ -207,6 +208,7 @@ pub(super) static GEMINI_INFO: ProviderInfo = ProviderInfo {
         switch_mode: false,
         modify_provider_config: true,
     },
+    repo_home_root_files: &[],
 };
 
 const GEMINI_SESSION_LOG_PATHS: &[PathTemplate] =

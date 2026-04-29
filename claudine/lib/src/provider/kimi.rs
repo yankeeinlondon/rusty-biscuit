@@ -104,6 +104,7 @@ pub(super) static KIMI_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::KimiCode,
     display_name: "Kimi Code",
     slug: "kimi_code",
+    short_name: "kimi",
     binary: "kimi",
     agent_offset: ".kimi",
     cli_aliases: &["kimi", "kimicode", "kimi_code", "kimi-code"],
@@ -149,6 +150,7 @@ pub(super) static KIMI_INFO: ProviderInfo = ProviderInfo {
     dynamic_source: ModelCatalogSource::None,
     model_env_vars: &["KIMI_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes::NONE,
+    repo_home_root_files: &[],
 };
 
 const KIMI_ACP_EVENTS: &[AcpEvent] = &[AcpEvent::ApprovalRequest];

@@ -111,6 +111,9 @@ pub struct ProviderInfo {
     /// Snake-case slug suitable for file paths and JSON keys (e.g. "claude").
     pub slug: &'static str,
 
+    /// Short display name used in event logs and CLI output (e.g. "claude", "kimi").
+    pub short_name: &'static str,
+
     /// Provider binary name on `$PATH` (e.g. "claude", "codex").
     pub binary: &'static str,
 
@@ -264,6 +267,10 @@ pub struct ProviderInfo {
     /// CLI override sensitivity axes. Consumed by `permissions::query` to
     /// flag results that may flip due to provider CLI flag overrides.
     pub cli_sensitive_axes: CliSensitiveAxes,
+
+    /// Root-level files in the repo home that must be preserved during
+    /// shadow-HOME isolation. Empty for providers without such files.
+    pub repo_home_root_files: &'static [&'static str],
 }
 
 impl ProviderInfo {

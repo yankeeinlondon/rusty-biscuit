@@ -96,6 +96,7 @@ pub(super) static QWEN_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::QwenCode,
     display_name: "Qwen Code",
     slug: "qwen_code",
+    short_name: "qwen",
     binary: "qwen",
     agent_offset: ".qwen",
     cli_aliases: &["qwen", "qwencode", "qwen_code", "qwen-code"],
@@ -149,6 +150,7 @@ pub(super) static QWEN_INFO: ProviderInfo = ProviderInfo {
         switch_mode: false,
         modify_provider_config: true,
     },
+    repo_home_root_files: &[],
 };
 
 const QWEN_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(

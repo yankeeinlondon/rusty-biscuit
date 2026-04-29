@@ -149,6 +149,7 @@ pub(super) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::OpenCode,
     display_name: "OpenCode",
     slug: "open_code",
+    short_name: "opencode",
     binary: "opencode",
     agent_offset: ".opencode",
     cli_aliases: &["opencode", "open_code", "open-code"],
@@ -193,6 +194,7 @@ pub(super) static OPENCODE_INFO: ProviderInfo = ProviderInfo {
         switch_mode: false,
         modify_provider_config: true,
     },
+    repo_home_root_files: &[],
 };
 
 const OPENCODE_SESSION_LOG_PATHS: &[PathTemplate] = &[];

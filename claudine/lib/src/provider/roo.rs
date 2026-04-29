@@ -122,6 +122,7 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::RooCode,
     display_name: "Roo Code",
     slug: "roo_code",
+    short_name: "roo",
     binary: "roo",
     agent_offset: ".roo",
     cli_aliases: &["roo", "roocode", "roo_code", "roo-code"],
@@ -153,6 +154,7 @@ pub(super) static ROO_INFO: ProviderInfo = ProviderInfo {
     dynamic_source: ModelCatalogSource::None,
     model_env_vars: &["ROO_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes::NONE,
+    repo_home_root_files: &[],
 };
 
 const ROO_SESSION_LOG_PATHS: &[PathTemplate] = &[PathTemplate::Static(

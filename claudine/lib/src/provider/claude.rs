@@ -151,6 +151,7 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     provider: Provider::Claude,
     display_name: "Claude",
     slug: "claude",
+    short_name: "claude",
     binary: "claude",
     agent_offset: ".claude",
     cli_aliases: &["claude"],
@@ -187,6 +188,7 @@ pub(super) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     dynamic_source: ModelCatalogSource::Static,
     model_env_vars: &["CLAUDE_MODEL", "ANTHROPIC_MODEL"],
     cli_sensitive_axes: CliSensitiveAxes::ALL,
+    repo_home_root_files: &[".claude.json"],
 };
 
 /// Static, compiled-in Anthropic model catalog.
