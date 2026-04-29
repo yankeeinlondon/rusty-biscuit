@@ -12,7 +12,10 @@ use claudine::config::claudine_config::ClaudineConfig;
 use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_claudine_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
-use claudine::events::{AgenticEvent, EventMeta, NativeEventName, detect_environment, event_native_mapping_matrix, event_support_matrix};
+use claudine::events::{
+    AgenticEvent, EventMeta, NativeEventName, detect_environment, event_native_mapping_matrix,
+    event_support_matrix,
+};
 use claudine::provider::{EventSupportLevel, PROVIDERS_DISPLAY_ORDER, Provider};
 use playa::SoundEffect;
 use sniff::programs::InstalledAiClients;
@@ -485,9 +488,7 @@ fn run_provider_detail(provider: Provider, config: Option<&ClaudineConfig>) -> R
             EventSupportLevel::Acp { .. } => {
                 Prose::new("{{cyan}}acp{{reset}}").render(&term).into()
             }
-            EventSupportLevel::NotSupported => {
-                Prose::new("{{dim}}-{{reset}}").render(&term).into()
-            }
+            EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}").render(&term).into(),
         };
 
         let actions_cell: TableCellContent = match actions {
@@ -990,9 +991,9 @@ fn run_capture_method() -> Result<()> {
                 EventSupportLevel::Acp { .. } => {
                     Prose::new("{{cyan}}acp{{reset}}").render(&term).into()
                 }
-                EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}")
-                    .render(&term)
-                    .into(),
+                EventSupportLevel::NotSupported => {
+                    Prose::new("{{dim}}-{{reset}}").render(&term).into()
+                }
             };
             row.push(rendered);
         }

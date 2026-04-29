@@ -7,15 +7,15 @@ use biscuit_terminal::utils::layout::Margin;
 use clap::Args;
 use color_eyre::eyre::Result;
 
+use crate::cli_utils::event_name_pascal;
+use crate::log;
+use crate::provider_values::provider_value_parser;
 use claudine::config::claudine_config::ClaudineConfig;
 use claudine::config::{
     ProviderHookPlan, RegistrationResult, SkipReason, detect_agents, get_configurator,
 };
 use claudine::dispatch::loader::load_claudine_config;
 use claudine::provider::Provider;
-use crate::cli_utils::event_name_pascal;
-use crate::log;
-use crate::provider_values::provider_value_parser;
 
 /// Arguments for the sync subcommand.
 #[derive(Args)]

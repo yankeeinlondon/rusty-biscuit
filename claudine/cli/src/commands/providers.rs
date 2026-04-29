@@ -6,8 +6,8 @@ use biscuit_terminal::components::table::table::{Table, TableCellContent, TableC
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use clap::{Args, ValueEnum};
 use claudine::events::AgenticEvent;
-use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::linking::{LinkableResource, capabilities_for};
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::provider::{all_providers, provider_info};
 
 use crate::cli_utils::bool_indicator;
