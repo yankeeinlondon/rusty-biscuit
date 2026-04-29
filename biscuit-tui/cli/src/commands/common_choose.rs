@@ -411,6 +411,7 @@ fn resolve_border_style(args: &ChooseChromeArgs) -> BorderStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tui_chrome::Padding;
 
     #[test]
     fn parse_label_value_no_delimiter_returns_identity() {
@@ -506,10 +507,12 @@ mod tests {
     }
 
     #[test]
-    fn build_chrome_returns_default_config() {
+    fn build_chrome_returns_default_config_with_padding() {
         let args = ChooseChromeArgs::default();
         let chrome = build_chrome(&args);
-        assert!(chrome.is_empty());
+        // Default padding is uniform(1), so the config is not empty.
+        assert!(!chrome.is_empty());
+        assert_eq!(chrome.padding, Padding::uniform(1));
     }
 
     #[test]

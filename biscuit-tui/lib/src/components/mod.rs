@@ -15,7 +15,10 @@ pub mod text_area_input;
 pub mod text_input;
 
 pub use boolean_switch::{BooleanSwitch, BooleanSwitchState};
-pub use choose::{ChoiceInput, ChoiceOption, SelectionMode};
+pub use choose::{
+    ActiveChoiceColor, ChoiceInput, ChoiceOption, HotkeyDisplayMode, HotkeySpec, Orientation,
+    SelectionMode,
+};
 pub use choose_many::{ChooseMany, ChooseManyState};
 pub use choose_one::{ChooseOne, ChooseOneState};
 pub use input_table::{

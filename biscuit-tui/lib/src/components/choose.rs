@@ -29,6 +29,53 @@ pub enum SelectionMode {
     Multiple,
 }
 
+/// Layout direction for a choice list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Orientation {
+    /// One item per row, stacked vertically (the default).
+    #[default]
+    Vertical,
+    /// Items packed left-to-right, wrapping to new rows.
+    Horizontal,
+}
+
+/// A keyboard shortcut that selects an option without moving the
+/// active cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HotkeySpec {
+    /// `Ctrl+<char>` shortcut.
+    Ctrl(char),
+    /// `Alt+<char>` shortcut.
+    Alt(char),
+}
+
+/// When (if ever) hotkey badges are rendered next to option labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum HotkeyDisplayMode {
+    /// Badges are never shown (the default).
+    #[default]
+    Hidden,
+    /// Badges shown only while `Ctrl` is held.
+    CtrlHeld,
+    /// Badges shown only while `Alt` is held.
+    AltHeld,
+}
+
+/// Background color used for the actively hovered option in a choice
+/// list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ActiveChoiceColor {
+    /// Neutral grey (safe on both light and dark terminals).
+    #[default]
+    Grey,
+    /// Green accent.
+    Green,
+    /// Yellow accent.
+    Yellow,
+    /// Red accent.
+    Red,
+}
+
 /// A single option rendered by `ChooseOne` or `ChooseMany`.
 ///
 /// `V` is the typed value associated with the option; defaults to
@@ -46,6 +93,8 @@ pub struct ChoiceOption<V = String> {
     /// When `true`, the option is rendered dimmed and cannot be
     /// selected.
     pub disabled: bool,
+    /// Optional keyboard shortcut that selects this option.
+    pub hotkey: Option<HotkeySpec>,
 }
 
 impl<V> ChoiceOption<V> {
@@ -65,12 +114,19 @@ impl<V> ChoiceOption<V> {
             label: label.into(),
             value: value.into(),
             disabled: false,
+            hotkey: None,
         }
     }
 
     /// Marks this option as disabled.
     pub fn disabled(mut self) -> Self {
         self.disabled = true;
+        self
+    }
+
+    /// Sets a keyboard shortcut for this option.
+    pub fn with_hotkey(mut self, hotkey: HotkeySpec) -> Self {
+        self.hotkey = Some(hotkey);
         self
     }
 
@@ -84,6 +140,7 @@ impl<V> ChoiceOption<V> {
             label: self.label,
             value: f(self.value),
             disabled: self.disabled,
+            hotkey: self.hotkey,
         }
     }
 }
@@ -131,6 +188,11 @@ pub struct ChoiceInput<V = String> {
     /// search-on-type behaviour by calling
     /// [`with_filter_enabled(true)`](ChoiceInput::with_filter_enabled).
     pub filter_enabled: bool,
+    /// Layout direction for the option list.
+    pub orientation: Orientation,
+    /// Optional ordering applied to the option list before state
+    /// construction.
+    pub sort: Option<crate::core::SortOrder>,
 }
 
 impl<V> ChoiceInput<V> {
@@ -147,6 +209,8 @@ impl<V> ChoiceInput<V> {
             max_selections: None,
             shuffle_options: false,
             filter_enabled: false,
+            orientation: Orientation::default(),
+            sort: None,
         }
     }
 
@@ -205,6 +269,18 @@ impl<V> ChoiceInput<V> {
         self.filter_enabled = enabled;
         self
     }
+
+    /// Sets the layout `orientation`.
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    /// Sets the `sort` order applied before state construction.
+    pub fn with_sort(mut self, sort: crate::core::SortOrder) -> Self {
+        self.sort = Some(sort);
+        self
+    }
 }
 
 #[cfg(test)]
@@ -218,6 +294,14 @@ mod tests {
         assert_eq!(option.label, "Red");
         assert_eq!(option.value, "red");
         assert!(!option.disabled);
+        assert!(option.hotkey.is_none());
+    }
+
+    #[test]
+    fn choice_option_with_hotkey_sets_hotkey() {
+        let option: ChoiceOption =
+            ChoiceOption::new("r", "Red", "red").with_hotkey(HotkeySpec::Ctrl('r'));
+        assert_eq!(option.hotkey, Some(HotkeySpec::Ctrl('r')));
     }
 
     #[test]
@@ -245,6 +329,14 @@ mod tests {
     }
 
     #[test]
+    fn map_value_preserves_hotkey() {
+        let option: ChoiceOption<String> =
+            ChoiceOption::new("one", "One", "1".to_string()).with_hotkey(HotkeySpec::Alt('o'));
+        let projected: ChoiceOption<u32> = option.map_value(|v| v.parse().unwrap());
+        assert_eq!(projected.hotkey, Some(HotkeySpec::Alt('o')));
+    }
+
+    #[test]
     fn choice_input_new_defaults_to_single_mode() {
         let input: ChoiceInput = ChoiceInput::new("c", "Pick one");
         assert_eq!(input.selection_mode, SelectionMode::Single);
@@ -254,6 +346,8 @@ mod tests {
         assert!(input.max_selections.is_none());
         assert!(!input.shuffle_options);
         assert!(!input.filter_enabled);
+        assert_eq!(input.orientation, Orientation::Vertical);
+        assert!(input.sort.is_none());
     }
 
     #[test]
@@ -273,6 +367,8 @@ mod tests {
             .with_max_selections(3)
             .with_help_text("Choose wisely")
             .with_shuffle_options(true)
+            .with_orientation(Orientation::Horizontal)
+            .with_sort(crate::core::SortOrder::Asc)
             .with_options(vec![ChoiceOption::new("r", "Red", "red")]);
         assert_eq!(input.selection_mode, SelectionMode::Multiple);
         assert!(input.required);
@@ -281,5 +377,7 @@ mod tests {
         assert_eq!(input.help_text.as_deref(), Some("Choose wisely"));
         assert_eq!(input.options.len(), 1);
         assert!(input.shuffle_options);
+        assert_eq!(input.orientation, Orientation::Horizontal);
+        assert_eq!(input.sort, Some(crate::core::SortOrder::Asc));
     }
 }
