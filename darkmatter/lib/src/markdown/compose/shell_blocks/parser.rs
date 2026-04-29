@@ -67,6 +67,7 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
                 line,
                 message: format!("Invalid flag syntax '{flag}'. {hint}"),
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                source_file: None,
             });
         }
 
@@ -78,6 +79,7 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
                     line,
                     message: e,
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                    source_file: None,
                 });
             }
         };
@@ -92,6 +94,7 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
                     line,
                     message: format!("Expected '=' after '{key}', found ':'. Use {key}=\"<value>\" syntax."),
                     excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                    source_file: None,
                 });
             }
             let hint = wrong_style_hint(&key);
@@ -99,6 +102,7 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
                 line,
                 message: format!("Expected '=' after '{key}'. {hint}"),
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                source_file: None,
             });
         }
 
@@ -108,11 +112,12 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
         let value = match cursor.read_value(line) {
             Ok(v) => v,
             Err(e) => {
-                return Err(ShellBlockError::Parse {
-                    line,
-                    message: e.message,
-                    excerpt: SourceExcerpt::from_text(opener, line, line, 0),
-                });
+            return Err(ShellBlockError::Parse {
+                line,
+                message: e.message,
+                excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                source_file: None,
+            });
             }
         };
 
@@ -125,6 +130,7 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
                     "Unknown shell block option: '{key}'. Did you mean '{underscore_version}'?"
                 ),
                 excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                source_file: None,
             });
         }
 
@@ -167,20 +173,22 @@ fn parse_opener_params(opener: &str, line: usize) -> Result<(ErrorHandling, Opti
                         timeout_override = Some(Duration::from_secs(secs));
                     }
                     Err(_) => {
-                        return Err(ShellBlockError::Parse {
-                            line,
-                            message: format!("Invalid timeout value '{value}'. Expected a number of seconds."),
-                            excerpt: SourceExcerpt::from_text(opener, line, line, 0),
-                        });
+                    return Err(ShellBlockError::Parse {
+                        line,
+                        message: format!("Invalid timeout value '{value}'. Expected a number of seconds."),
+                        excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                        source_file: None,
+                    });
                     }
                 }
             }
             _ => {
-                return Err(ShellBlockError::Parse {
-                    line,
-                    message: format!("Unknown shell block option: '{key}'"),
-                    excerpt: SourceExcerpt::from_text(opener, line, line, 0),
-                });
+            return Err(ShellBlockError::Parse {
+                line,
+                message: format!("Unknown shell block option: '{key}'"),
+                excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+                source_file: None,
+            });
             }
         }
     }
@@ -225,6 +233,7 @@ fn parse_code_pair(
             line,
             message: format!("{key} value must be in format \"N,text\" where N is an exit code"),
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+            source_file: None,
         });
     };
 
@@ -237,6 +246,7 @@ fn parse_code_pair(
             line,
             message: format!("Invalid exit code '{code_str}' in {key}. Expected an integer."),
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+            source_file: None,
         }),
     }
 }
@@ -253,6 +263,7 @@ fn parse_string_pair(
             line,
             message: format!("{key} value must be in format \"find,text\""),
             excerpt: SourceExcerpt::from_text(opener, line, line, 0),
+            source_file: None,
         });
     };
 

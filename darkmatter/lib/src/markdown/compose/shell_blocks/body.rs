@@ -71,6 +71,7 @@ pub(crate) fn split_logical_commands(
                 line: start_line,
                 message: format!("Command tokenization failed: {e}"),
                 excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                source_file: None,
             })?;
 
             if tokens.is_empty() {
@@ -78,6 +79,7 @@ pub(crate) fn split_logical_commands(
                     line: start_line,
                     message: "Empty command after tokenization".to_string(),
                     excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                    source_file: None,
                 });
             }
 
@@ -108,6 +110,7 @@ pub(crate) fn split_logical_commands(
             line: start_line,
             message: "Unterminated line continuation".to_string(),
             excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+            source_file: None,
         });
     }
 

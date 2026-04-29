@@ -18,7 +18,16 @@ use super::shell_expansion::{apply_replacements_in_reverse, execute_prepared_dir
 use super::types::ComposeReport;
 use super::ComposeOptions;
 use crate::markdown::MarkdownResult;
+use std::path::PathBuf;
 use types::{ShellBlockCommandResult, SourceExcerpt};
+
+/// Extract source file path from compose options.
+fn source_file_from_options(options: &ComposeOptions) -> Option<PathBuf> {
+    match &options.source {
+        super::ComposeSource::File(path) => Some(path.clone()),
+        _ => None,
+    }
+}
 
 /// Run the shell blocks stage on the given content.
 ///
@@ -28,6 +37,8 @@ pub(crate) fn run_shell_blocks_stage(
     options: &ComposeOptions,
     runtime: &mut ShellExpansionRuntime,
 ) -> Result<(String, ComposeReport), ShellBlockError> {
+    let source_file = source_file_from_options(options);
+
     // Scan for block pairs (both page and shell)
     let pairs = super::block_pairs::scan_block_pairs(content).map_err(|e| {
         // Extract line number from BlockPairError
@@ -40,6 +51,7 @@ pub(crate) fn run_shell_blocks_stage(
             line,
             message: e.to_string(),
             excerpt: SourceExcerpt::default(),
+            source_file: source_file.clone(),
         }
     })?;
 
@@ -61,6 +73,7 @@ pub(crate) fn run_shell_blocks_stage(
         line: 0,
         message: format!("Policy path resolution failed: {e}"),
         excerpt: SourceExcerpt::default(),
+        source_file: source_file.clone(),
     })?;
 
     runtime.ensure_loaded(&policy_paths).map_err(|e| {
@@ -68,6 +81,7 @@ pub(crate) fn run_shell_blocks_stage(
             line: 0,
             message: format!("Policy loading failed: {e}"),
             excerpt: SourceExcerpt::default(),
+            source_file: source_file.clone(),
         }
     })?;
 
@@ -120,6 +134,7 @@ pub(crate) fn run_shell_blocks_stage(
                             2,
                         ),
                         source: Box::new(e),
+                        source_file: source_file.clone(),
                     });
                 }
             }
@@ -156,6 +171,7 @@ pub(crate) fn run_shell_blocks_stage(
                             2,
                         ),
                         source: Box::new(e),
+                        source_file: source_file.clone(),
                     });
                 }
             }
@@ -327,5 +343,87 @@ mod tests {
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
         assert!(err.to_string().contains("timed out"), "Expected timeout error: {err}");
+    }
+
+    // ── Phase 4 edge-case tests ───────────────────────────────────────
+
+    #[test]
+    fn unterminated_shell_block() {
+        let content = "::shell-block\necho hello\n";
+        let options = ComposeOptions::new();
+        let mut runtime = ShellExpansionRuntime::new();
+        let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unterminated") || msg.contains("parse error"), "Expected unterminated error: {msg}");
+    }
+
+    #[test]
+    fn unmatched_end_block() {
+        let content = "::end-block\n";
+        let options = ComposeOptions::new();
+        let mut runtime = ShellExpansionRuntime::new();
+        let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unmatched") || msg.contains("parse error"), "Expected unmatched error: {msg}");
+    }
+
+    #[test]
+    fn nested_page_block_with_shell_block() {
+        // Page block evaluates to true, inner shell block should execute
+        let content = "::block\n::shell-block\necho nested\n::end-block\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("nested"), "Expected nested output: {result}");
+    }
+
+    #[test]
+    fn all_commands_empty_output() {
+        let content = "::shell-block\necho -n\necho -n\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert_eq!(result, "", "Expected empty output for all-empty commands");
+    }
+
+    #[test]
+    fn mixed_empty_and_non_empty_outputs() {
+        let content = "::shell-block\necho -n\necho hello\necho -n\necho world\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
+        assert_eq!(report.shell_blocks_applied, 1);
+        // Empty outputs should be omitted; non-empty should have blank line between
+        assert_eq!(result, "hello\n\nworld\n", "Expected mixed output: {result}");
+    }
+
+    #[test]
+    fn continuation_with_escaped_backslash() {
+        // echo \\ should produce a literal backslash, not continue
+        // Then echo hello is a separate command
+        let content = "::shell-block\necho \\\\\necho hello\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
+        assert_eq!(report.shell_blocks_applied, 1);
+        assert!(result.contains("\\"), "Expected backslash output: {result}");
+        assert!(result.contains("hello"), "Expected hello output: {result}");
+    }
+
+    #[test]
+    fn source_file_in_error() {
+        let content = "::shell-block\nfalse\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let options = options.with_source_file("/tmp/test.md");
+        let mut runtime = ShellExpansionRuntime::new();
+        let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
+        match err {
+            ShellBlockError::Command { source_file, .. } => {
+                assert_eq!(source_file, Some(std::path::PathBuf::from("/tmp/test.md")));
+            }
+            other => panic!("Expected Command error, got: {other:?}"),
+        }
     }
 }

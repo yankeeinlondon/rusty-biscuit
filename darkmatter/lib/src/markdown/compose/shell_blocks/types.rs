@@ -1,6 +1,7 @@
 //! Type definitions for shell blocks.
 
 use std::ops::Range;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::markdown::compose::shell_expansion::types::{ErrorHandling, ShellExpansionError};
@@ -96,6 +97,8 @@ pub enum ShellBlockError {
         line: usize,
         message: String,
         excerpt: SourceExcerpt,
+        /// Source file where the error occurred, if known.
+        source_file: Option<PathBuf>,
     },
 
     /// EOF reached with an unclosed shell block.
@@ -104,6 +107,8 @@ pub enum ShellBlockError {
         line: usize,
         opening_text: String,
         excerpt: SourceExcerpt,
+        /// Source file where the error occurred, if known.
+        source_file: Option<PathBuf>,
     },
 
     /// A command within a shell block failed with no matching error handler.
@@ -115,7 +120,39 @@ pub enum ShellBlockError {
         excerpt: SourceExcerpt,
         #[source]
         source: Box<ShellExpansionError>,
+        /// Source file where the error occurred, if known.
+        source_file: Option<PathBuf>,
     },
+}
+
+impl ShellBlockError {
+    /// Attach a source file path to this error.
+    ///
+    /// Returns a new error with `source_file` set; consumes `self`.
+    pub fn with_source_file(self, path: Option<PathBuf>) -> Self {
+        match self {
+            Self::Parse { line, message, excerpt, .. } => Self::Parse {
+                line,
+                message,
+                excerpt,
+                source_file: path,
+            },
+            Self::Unterminated { line, opening_text, excerpt, .. } => Self::Unterminated {
+                line,
+                opening_text,
+                excerpt,
+                source_file: path,
+            },
+            Self::Command { block_start_line, command_line, partial_output, excerpt, source, .. } => Self::Command {
+                block_start_line,
+                command_line,
+                partial_output,
+                excerpt,
+                source,
+                source_file: path,
+            },
+        }
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for ShellBlockError {
@@ -128,8 +165,12 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            ShellBlockError::Parse { line, message, excerpt } => {
-                let mut body = format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}");
+            ShellBlockError::Parse { line, message, excerpt, source_file } => {
+                let mut body = String::new();
+                if let Some(path) = source_file {
+                    body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
+                }
+                body.push_str(&format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"));
                 if !excerpt.lines.is_empty() {
                     body.push_str("\n<dim>Context:</dim>\n");
                     for (ln, text) in &excerpt.lines {
@@ -146,8 +187,12 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     .hint("Shell block parameters use <cyan>key=\"value\"</cyan> syntax, not <cyan>--flag</cyan> syntax.")
             }
 
-            ShellBlockError::Unterminated { line, opening_text, excerpt } => {
-                let mut body = format!("<dim>Opened at line:</dim> {line}\n<dim>Opener:</dim> <cyan>{opening_text}</cyan>");
+            ShellBlockError::Unterminated { line, opening_text, excerpt, source_file } => {
+                let mut body = String::new();
+                if let Some(path) = source_file {
+                    body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
+                }
+                body.push_str(&format!("<dim>Opened at line:</dim> {line}\n<dim>Opener:</dim> <cyan>{opening_text}</cyan>"));
                 if !excerpt.lines.is_empty() {
                     body.push_str("\n<dim>Context:</dim>\n");
                     for (ln, text) in &excerpt.lines {
@@ -164,12 +209,17 @@ impl biscuit_terminal::errors::BlockError for ShellBlockError {
                     .hint("Add <cyan>::end-block</cyan> to close the block.")
             }
 
-            ShellBlockError::Command { block_start_line, command_line, partial_output, excerpt, source } => {
-                let mut body = format!("<dim>Block opened at line:</dim> {block_start_line}\n<dim>Command at line:</dim> {command_line}");
+            ShellBlockError::Command { block_start_line, command_line, partial_output, excerpt, source, source_file } => {
+                let mut body = String::new();
+                if let Some(path) = source_file {
+                    body.push_str(&format!("<dim>Source:</dim> {}\n", path.display()));
+                }
+                body.push_str(&format!("<dim>Block opened at line:</dim> {block_start_line}\n<dim>Command at line:</dim> {command_line}"));
                 if !partial_output.is_empty() {
                     body.push_str("\n<dim>Partial output from earlier commands:</dim>\n");
                     for output in partial_output.iter() {
-                        body.push_str(&format!("<dim>---</dim>\n{}\n", truncate_output(output)));
+                        let dimmed = dim_output_for_error(output);
+                        body.push_str(&format!("<dim>---</dim>\n{dimmed}\n"));
                     }
                 }
                 if !excerpt.lines.is_empty() {
@@ -228,6 +278,17 @@ fn truncate_output(text: &str) -> String {
     }
 }
 
+/// Wrap each line of output with `<dim>` tags for visual demotion in error
+/// displays. Preserves the structure while making it visually secondary.
+fn dim_output_for_error(text: &str) -> String {
+    let truncated = truncate_output(text);
+    truncated
+        .lines()
+        .map(|line| format!("<dim>{line}</dim>"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +309,21 @@ mod tests {
         let text = "line1\nline2\nline3";
         let excerpt = SourceExcerpt::from_text(text, 1, 1, 5);
         assert_eq!(excerpt.lines.len(), 3);
+    }
+
+    #[test]
+    fn dim_output_wraps_lines() {
+        let output = "line1\nline2\nline3";
+        let dimmed = dim_output_for_error(output);
+        assert!(dimmed.contains("<dim>line1</dim>"));
+        assert!(dimmed.contains("<dim>line2</dim>"));
+        assert!(dimmed.contains("<dim>line3</dim>"));
+    }
+
+    #[test]
+    fn dim_output_truncates_long_output() {
+        let long = "x\n".repeat(20);
+        let dimmed = dim_output_for_error(&long);
+        assert!(dimmed.contains("more lines"));
     }
 }
