@@ -30,7 +30,7 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -330,6 +330,17 @@ impl WireWriter {
         guard.write_all(b"\n")?;
         guard.flush()?;
         Ok(serialized)
+    }
+
+    /// Close the underlying child stdin pipe by replacing the inner writer
+    /// with `io::sink()`. This drops the original `ChildStdin`, signalling
+    /// EOF to the Kimi child so it exits its read loop cleanly after the
+    /// prompt response has been received. Subsequent `send_value` calls
+    /// succeed silently (the bytes go to the sink), so any late cancel
+    /// path remains a no-op rather than a panic.
+    pub(crate) fn close_stdin(&self) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Box::new(io::sink());
     }
 }
 
@@ -713,6 +724,16 @@ pub(crate) fn run_kimi_wire_session(
                 {
                     debug!(?error, "failed to feed synthetic warning envelope");
                 }
+
+                // Close stdin once the prompt response arrives so kimi
+                // sees EOF and exits its read loop. Without this, the
+                // wire session hangs after `Prompt status: finished`
+                // because kimi keeps the JSON-RPC channel open waiting
+                // for further commands.
+                if is_prompt_response_line(trimmed) {
+                    info!("kimi prompt response received; closing wire stdin");
+                    writer_for_reader.close_stdin();
+                }
             }
 
             parser
@@ -863,6 +884,27 @@ fn handle_request_dispatch(
         warn!(error = %error, "failed to write Kimi wire auto-response");
     }
     synthetic
+}
+
+/// Return true when `line` is the JSON-RPC response (success or error) to
+/// the `prompt-2` request Claudine sent at session start.
+///
+/// The Kimi wire protocol is a persistent JSON-RPC channel: after the
+/// prompt response arrives, kimi sits idle waiting for further commands
+/// rather than exiting. For non-interactive Claudine sessions there are no
+/// further commands, so the reader thread closes stdin (signalling EOF)
+/// the moment this line is observed. Both `result` and `error` shapes are
+/// treated as terminal — an auth-expired error on `prompt-2`, for example,
+/// still ends the session.
+fn is_prompt_response_line(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    let id_matches = value.get("id").and_then(Value::as_str) == Some(PROMPT_REQUEST_ID);
+    if !id_matches {
+        return false;
+    }
+    value.get("result").is_some() || value.get("error").is_some()
 }
 
 /// Construct a synthetic `Notification` envelope with `level == "error"`
@@ -1462,5 +1504,71 @@ mod tests {
         let result = HookDispatchResult::allow_default();
         assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
         assert!(result.warning.is_none());
+    }
+
+    #[test]
+    fn is_prompt_response_line_matches_finished_status() {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","id":"{PROMPT_REQUEST_ID}","result":{{"status":"finished"}}}}"#
+        );
+        assert!(is_prompt_response_line(&line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_matches_error_response() {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","id":"{PROMPT_REQUEST_ID}","error":{{"code":-32004,"message":"auth"}}}}"#
+        );
+        assert!(is_prompt_response_line(&line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_rejects_other_ids() {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","id":"{INITIALIZE_REQUEST_ID}","result":{{"protocol_version":"1.9"}}}}"#
+        );
+        assert!(!is_prompt_response_line(&line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_rejects_event_envelopes() {
+        let line = r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#;
+        assert!(!is_prompt_response_line(line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_rejects_garbage() {
+        assert!(!is_prompt_response_line("not json"));
+    }
+
+    #[test]
+    fn close_stdin_drops_underlying_writer_and_redirects_to_sink() {
+        struct DropTracker(Arc<AtomicBool>);
+        impl Write for DropTracker {
+            fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+                Ok(data.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl Drop for DropTracker {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let writer = WireWriter::from_writer(Box::new(DropTracker(Arc::clone(&dropped))));
+        assert!(!dropped.load(Ordering::Relaxed));
+        writer.close_stdin();
+        assert!(
+            dropped.load(Ordering::Relaxed),
+            "close_stdin must drop the original ChildStdin so kimi sees EOF"
+        );
+        // Subsequent send_value calls succeed silently against the sink.
+        writer
+            .send_value(&json!({"after_close": true}))
+            .expect("send_value after close_stdin should succeed against sink");
     }
 }

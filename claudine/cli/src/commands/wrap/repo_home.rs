@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use color_eyre::eyre::{Context, Result, bail};
 
 use claudine::linking::resolve_repo_root;
-use claudine::provider::Provider;
+use claudine::provider::{Provider, provider_info};
 
 pub struct RepoHomeManager {
     agent_offset: String,
@@ -219,12 +219,7 @@ fn materialize_root_level_state(
 }
 
 fn root_level_state_files(provider: Provider) -> &'static [&'static str] {
-    match provider {
-        // Claude keeps global state such as onboarding/theme/auth outside
-        // `~/.claude/`, so repo isolation must preserve this root-level file.
-        Provider::Claude => &[".claude.json"],
-        _ => &[],
-    }
+    provider_info(provider).repo_home_root_files
 }
 
 fn codex_repo_prompts_source(repo_root: &Path) -> Option<PathBuf> {
