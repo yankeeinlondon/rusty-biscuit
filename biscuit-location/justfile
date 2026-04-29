@@ -1,4 +1,14 @@
+set dotenv-load
+set positional-arguments
+# set allow-duplicate-recipes
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -17,54 +27,31 @@ default:
     @echo
     @just --list | grep -v 'default'
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
 # build library and CLI
 build *args="":
-    @echo "Building {{BOLD}}biscuit-location{{RESET}} library..."
-    @cargo build -p biscuit-location {{args}}
-    @echo ""
-    @echo "Building {{BOLD}}biscuit-location-cli{{RESET}}..."
-    @cargo build -p biscuit-location-cli {{args}}
+    @just _build biscuit-location "Biscuit Location Library" {{args}}
+    @just _build biscuit-location-cli "Biscuit Location CLI" {{args}}
 
 
-# Open Opencode in yolo mode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
-
-# test library and CLI
+# Test both library and CLI.
 test *args="":
-    @echo "Testing {{BOLD}}biscuit-location{{RESET}} library"
-    @cargo test -p biscuit-location --all-features -- {{args}}
-    @echo ""
-    @echo "Testing {{BOLD}}biscuit-location-cli{{RESET}}"
-    @cargo test -p biscuit-location-cli -- {{args}}
+    @just _test biscuit-location {{args}}
+    @just _test biscuit-location-cli {{args}}
 
-# lint with clippy
-lint *args="":
-    @cargo clippy -p biscuit-location -p biscuit-location-cli -- {{args}}
+# Lint both the library and CLI
+lint:
+    @just _lint biscuit-location
+    @just _lint biscuit-location-cli
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint biscuit-location || just _fix_lint biscuit-location
+    @just _lint biscuit-location-cli || just _fix_lint biscuit-location-cli
 
 # install CLI binary
 install *args="":
-    @cargo install --path cli {{args}}
+    @just build --release
+    @just _install "./cli" "Biscuit Location" {{args}}
 
 # build and show the docs for the library code
 docs:
@@ -76,18 +63,6 @@ docs:
 cli *args="":
     @cargo run -p biscuit-location-cli -- {{args}}
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

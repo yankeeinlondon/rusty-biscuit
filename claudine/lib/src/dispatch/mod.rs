@@ -45,6 +45,10 @@ impl DispatchRuntimeContext {
     }
 
     /// Load and compile the canonical runtime config for a specific environment.
+    ///
+    /// Deprecated: use [`load_for_env`](Self::load_for_env) instead. This
+    /// method is an identical alias kept for API compatibility.
+    #[deprecated(note = "use load_for_env instead")]
     pub fn load_canonical_for_env(env: &EnvironmentContext) -> Result<Self> {
         let repo_root = runtime_repo_root(env);
         match loader::load_claudine_config(None, repo_root) {
@@ -92,12 +96,14 @@ pub async fn dispatch(
     provider: Provider,
     env: &EnvironmentContext,
 ) -> Result<DispatchOutcome> {
+    let _span = info_span!("dispatch_event", %provider).entered();
+
     let adapter = adapters::adapter_for(provider);
 
     let (event, mut meta) = match adapter.parse_event(raw) {
         Ok(parsed) => parsed,
-        Err(AdapterError::UnknownEvent(_)) => {
-            debug!(%provider, "Adapter returned unknown event, skipping dispatch");
+        Err(AdapterError::UnknownEvent(reason)) => {
+            debug!(%provider, %reason, "adapter returned unknown event, skipping dispatch");
             return Ok(DispatchOutcome::default());
         }
         Err(error) => return Err(error.into()),
@@ -165,29 +171,46 @@ pub async fn dispatch_canonical(
 ) -> Result<DispatchOutcome> {
     let adapter = adapters::adapter_for(provider);
 
-    let (event, mut meta) = match adapter.parse_event(raw) {
-        Ok(parsed) => parsed,
-        Err(AdapterError::UnknownEvent(_)) => {
-            debug!(%provider, "Adapter returned unknown event, skipping canonical dispatch");
-            return Ok(DispatchOutcome::default());
+    let (event, mut meta) = {
+        let _span = info_span!("dispatch_adapter_parse", %provider).entered();
+        match adapter.parse_event(raw) {
+            Ok(parsed) => parsed,
+            Err(AdapterError::UnknownEvent(_)) => {
+                debug!(%provider, "Adapter returned unknown event, skipping canonical dispatch");
+                return Ok(DispatchOutcome::default());
+            }
+            Err(error) => {
+                let _fail_span = info_span!(
+                    "dispatch_adapter_parse_failed",
+                    %provider,
+                    error = %error,
+                )
+                .entered();
+                return Err(error.into());
+            }
         }
-        Err(error) => return Err(error.into()),
     };
 
     prepare_meta_for_dispatch(&mut meta, env);
 
     let repo_root = runtime_repo_root(env);
 
-    let config = match loader::load_claudine_config(None, repo_root) {
-        Ok(config) => config,
-        Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
-            debug!("No .claudine config found, skipping canonical dispatch");
-            return Ok(DispatchOutcome::default());
+    let config = {
+        let _span = info_span!("dispatch_load_config").entered();
+        match loader::load_claudine_config(None, repo_root) {
+            Ok(config) => config,
+            Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
+                debug!("No .claudine config found, skipping canonical dispatch");
+                return Ok(DispatchOutcome::default());
+            }
+            Err(error) => return Err(error),
         }
-        Err(error) => return Err(error),
     };
 
-    let runtime = loader::compile_canonical_runtime(config, repo_root)?;
+    let runtime = {
+        let _span = info_span!("dispatch_compile_runtime").entered();
+        loader::compile_canonical_runtime(config, repo_root)?
+    };
     dispatch_canonical_with_runtime(provider, event, meta, &runtime).await
 }
 
@@ -233,15 +256,18 @@ pub async fn dispatch_canonical_with_runtime(
 
     // --- Protect pre-evaluation ---
     let protect_service = runtime.protect_service();
-    let protect_pre = protect_service.and_then(|service| {
-        let request = extract_protect_request(&event, &meta)?;
-        let decision = service.evaluate(&request);
-        if decision.is_blocked() {
-            Some(decision)
-        } else {
-            None
-        }
-    });
+    let protect_pre = {
+        let _span = info_span!("dispatch_protect_pre").entered();
+        protect_service.and_then(|service| {
+            let request = extract_protect_request(&event, &meta)?;
+            let decision = service.evaluate(&request);
+            if decision.is_blocked() {
+                Some(decision)
+            } else {
+                None
+            }
+        })
+    };
 
     if let Some(ref decision) = protect_pre {
         let response = map_protect_block(decision);
@@ -292,6 +318,11 @@ pub async fn dispatch_canonical_with_runtime(
                 "Executing resolved canonical hook"
             );
 
+            let _span = info_span!(
+                "dispatch_execute_actions",
+                action_count = resolved_hook.actions.len(),
+            )
+            .entered();
             runner::execute_actions(
                 &resolved_hook.actions,
                 Some(binding.compiled_mappers()),
@@ -310,25 +341,29 @@ pub async fn dispatch_canonical_with_runtime(
 
     // --- JSONL event logging (independent of binding) ---
     if runtime.config().logging {
+        let _span = info_span!("dispatch_log_event").entered();
         log_dispatch_event(&meta);
     }
 
     // --- Protect post-evaluation (independent of binding) ---
-    let protect_post = protect_service.and_then(|service| {
-        if !matches!(
-            event,
-            AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
-        ) {
-            return None;
-        }
-        let request = extract_protect_request(&event, &meta)?;
-        let decision = service.evaluate(&request);
-        if decision.is_blocked() {
-            Some(decision)
-        } else {
-            None
-        }
-    });
+    let protect_post = {
+        let _span = info_span!("dispatch_protect_post").entered();
+        protect_service.and_then(|service| {
+            if !matches!(
+                event,
+                AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
+            ) {
+                return None;
+            }
+            let request = extract_protect_request(&event, &meta)?;
+            let decision = service.evaluate(&request);
+            if decision.is_blocked() {
+                Some(decision)
+            } else {
+                None
+            }
+        })
+    };
 
     let action_response = if let Some(ref decision) = protect_post {
         Some(map_protect_block(decision))
@@ -338,7 +373,10 @@ pub async fn dispatch_canonical_with_runtime(
 
     // --- Default sounds ---
     let was_blocked = protect_pre.is_some() || protect_post.is_some();
-    runner::play_default_sound_for_event(&event, runtime.config(), was_blocked);
+    {
+        let _span = info_span!("dispatch_default_sound").entered();
+        runner::play_default_sound_for_event(&event, runtime.config(), was_blocked);
+    }
 
     finalize_response(
         adapter,
@@ -1001,10 +1039,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect should block rm -rf / even without a BeforeTool binding"
         );
     }
@@ -1031,10 +1066,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect_pre should block rm -rf /"
         );
         assert!(
@@ -1075,10 +1107,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect_pre should block dangerous MCP response on AfterTool"
         );
         assert!(
@@ -1267,10 +1296,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            outcome
-                .protect_pre
-                .as_ref()
-                .map_or(false, |d| d.is_blocked()),
+            outcome.protect_pre.as_ref().is_some_and(|d| d.is_blocked()),
             "protect should block rm -rf / in canonical dispatch"
         );
         assert!(

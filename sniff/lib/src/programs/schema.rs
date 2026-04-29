@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::os::OsType;
-use crate::programs::types::InstallationMethod;
+use crate::programs::types::{InstallationMethod, SystemPrerequisite};
 
 /// Errors that can occur during program version detection.
 #[derive(Debug, Error)]
@@ -133,6 +133,11 @@ pub struct ProgramInfo {
 
     /// Methods for installing this program (brew, apt, cargo, etc.).
     pub installation_methods: &'static [InstallationMethod],
+
+    /// System-level prerequisites required before the tool-level install runs.
+    /// Empty slice for most programs. Treated as required — all must resolve
+    /// on the host for the `FullInstallPlan` to be successful.
+    pub system_prerequisites: &'static [SystemPrerequisite],
 }
 
 impl ProgramInfo {
@@ -156,6 +161,7 @@ impl ProgramInfo {
             os_availability: &[],
             repo: None,
             installation_methods: &[],
+            system_prerequisites: &[],
         }
     }
 
@@ -180,6 +186,7 @@ impl ProgramInfo {
             os_availability: &[],
             repo: None,
             installation_methods: &[],
+            system_prerequisites: &[],
         }
     }
 
@@ -198,6 +205,7 @@ impl ProgramInfo {
         os_availability: &'static [OsType],
         repo: Option<&'static str>,
         installation_methods: &'static [InstallationMethod],
+        system_prerequisites: &'static [SystemPrerequisite],
     ) -> Self {
         Self {
             binary_name,
@@ -212,6 +220,7 @@ impl ProgramInfo {
             os_availability,
             repo,
             installation_methods,
+            system_prerequisites,
         }
     }
 }
@@ -290,13 +299,27 @@ pub trait ProgramMetadata: Sized {
     /// - The version output cannot be parsed
     fn version(&self) -> Result<String, ProgramError> {
         let info = self.info();
-
-        // Check if program exists first
         let path = self
             .path()
             .ok_or_else(|| ProgramError::NotFound(info.binary_name.to_string()))?;
+        self.version_from_path(&path)
+    }
 
-        // Get version flag arguments
+    /// Returns the version of this program by invoking the binary at `path`.
+    ///
+    /// Skips the PATH lookup performed by [`ProgramMetadata::version`], which is
+    /// useful when the caller has already resolved the executable (e.g. through
+    /// a [`crate::programs::find_program::ExecutableIndex`] or a
+    /// [`crate::programs::types::CategoryDetector`]) and wants to avoid a
+    /// redundant `which`-style scan.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the version command cannot be spawned, times out, or
+    /// the output cannot be parsed under the program's `parse_strategy`.
+    fn version_from_path(&self, path: &std::path::Path) -> Result<String, ProgramError> {
+        let info = self.info();
+
         let args = info.version_flag.as_args();
         if args.is_empty() {
             return Err(ProgramError::ParseFailed {
@@ -305,24 +328,19 @@ pub trait ProgramMetadata: Sized {
             });
         }
 
-        // Execute version command
         let output =
-            run_command_with_timeout(&path, args).map_err(|e| ProgramError::ExecutionFailed {
+            run_command_with_timeout(path, args).map_err(|e| ProgramError::ExecutionFailed {
                 program: info.binary_name.to_string(),
                 source: e,
             })?;
 
-        // Check exit code (some programs return non-zero for --version)
-        // We'll be lenient and accept any output
-
-        // Get stdout, falling back to stderr if empty
+        // Some programs print --version to stderr — fall back when stdout is empty.
         let text = if output.stdout.is_empty() {
             String::from_utf8_lossy(&output.stderr).to_string()
         } else {
             String::from_utf8_lossy(&output.stdout).to_string()
         };
 
-        // Parse version based on strategy
         parse_version(&text, info)
     }
 }
@@ -550,6 +568,7 @@ mod tests {
             os_availability: &[],
             repo: None,
             installation_methods: &[],
+            system_prerequisites: &[],
         };
         let output = "Some program version 1.23.456-beta+build.123";
         let result = parse_version(output, &info);

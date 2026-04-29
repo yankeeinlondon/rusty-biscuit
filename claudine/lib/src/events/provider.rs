@@ -921,7 +921,7 @@ mod tests {
     #[test]
     fn round_trip_json() {
         let provider = Provider::Claude;
-        let json = serde_json::to_value(&provider).unwrap();
+        let json = serde_json::to_value(provider).unwrap();
         assert_eq!(json, serde_json::json!("claude"));
         let back: Provider = serde_json::from_value(json).unwrap();
         assert_eq!(back, Provider::Claude);
@@ -940,7 +940,7 @@ mod tests {
             (Provider::RooCode, "roo_code"),
         ];
         for (variant, expected) in cases {
-            let json = serde_json::to_value(&variant).unwrap();
+            let json = serde_json::to_value(variant).unwrap();
             assert_eq!(json.as_str().unwrap(), expected, "Failed for {variant:?}");
         }
     }

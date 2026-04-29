@@ -30,6 +30,11 @@ impl PreparedMessage {
         &self.message
     }
 
+    /// Return the portable title, if any.
+    pub fn title(&self) -> Option<&str> {
+        self.message.title.as_deref()
+    }
+
     /// Return the message body, if any.
     pub fn body(&self) -> Option<&MessageBody> {
         self.message.body.as_ref()

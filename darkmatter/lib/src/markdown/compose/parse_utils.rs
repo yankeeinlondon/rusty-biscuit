@@ -15,6 +15,7 @@ pub(crate) struct Cursor<'a> {
 #[derive(Debug)]
 pub(crate) struct CursorError {
     pub line: usize,
+    pub column: usize,
     pub message: String,
 }
 
@@ -29,6 +30,10 @@ impl<'a> Cursor<'a> {
 
     pub fn current(&self) -> Option<char> {
         self.input[self.pos..].chars().next()
+    }
+
+    fn current_column(&self) -> usize {
+        self.input[..self.pos].chars().count() + 1
     }
 
     pub fn advance(&mut self) {
@@ -60,6 +65,7 @@ impl<'a> Cursor<'a> {
         } else {
             Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected '{}'", literal),
             })
         }
@@ -73,13 +79,59 @@ impl<'a> Cursor<'a> {
             }
             Some(ch) => Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected '{}', found '{}'", expected, ch),
             }),
             None => Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected '{}' at end of directive", expected),
             }),
         }
+    }
+
+    /// Consumes `expected` if it is the next character.
+    ///
+    /// ## Returns
+    ///
+    /// `true` if the character was present and consumed, `false` otherwise.
+    pub fn try_consume_char(&mut self, expected: char) -> bool {
+        if self.current() == Some(expected) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Attempts to read a `.NAME` suffix after an identifier.
+    ///
+    /// Returns `Ok(None)` when the next character is not `.`. When a `.`
+    /// is present, consumes it and reads a single identifier segment via
+    /// [`read_identifier`](Self::read_identifier). Nested dotted keys such
+    /// as `set.author.name` are explicitly rejected because the v1
+    /// property-form grammar only permits one segment after `set`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns a [`CursorError`] when the identifier segment is missing or
+    /// when a second `.` follows the consumed segment.
+    pub fn read_dotted_suffix(&mut self, line: usize) -> Result<Option<String>, CursorError> {
+        if !self.try_consume_char('.') {
+            return Ok(None);
+        }
+
+        let name = self.read_identifier(line)?;
+
+        if self.current() == Some('.') {
+            return Err(CursorError {
+                line,
+                column: self.current_column(),
+                message: "nested dotted keys are not supported in v1".to_string(),
+            });
+        }
+
+        Ok(Some(name))
     }
 
     pub fn read_identifier(&mut self, line: usize) -> Result<String, CursorError> {
@@ -87,6 +139,7 @@ impl<'a> Cursor<'a> {
         let Some(ch) = self.current() else {
             return Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: "Unexpected end of directive".to_string(),
             });
         };
@@ -94,6 +147,7 @@ impl<'a> Cursor<'a> {
         if !is_identifier_start(ch) {
             return Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: format!("Expected identifier, found '{}'", ch),
             });
         }
@@ -114,6 +168,7 @@ impl<'a> Cursor<'a> {
         let Some(ch) = self.current() else {
             return Err(CursorError {
                 line,
+                column: self.current_column(),
                 message: "Expected value, found end of directive".to_string(),
             });
         };
@@ -128,6 +183,7 @@ impl<'a> Cursor<'a> {
     fn read_quoted_value(&mut self, line: usize) -> Result<String, CursorError> {
         let quote = self.current().ok_or_else(|| CursorError {
             line,
+            column: self.current_column(),
             message: "Expected quote".to_string(),
         })?;
         self.advance();
@@ -138,6 +194,7 @@ impl<'a> Cursor<'a> {
                 None => {
                     return Err(CursorError {
                         line,
+                        column: self.current_column(),
                         message: "Unterminated quoted value".to_string(),
                     });
                 }
@@ -186,6 +243,7 @@ impl<'a> Cursor<'a> {
                         None => {
                             return Err(CursorError {
                                 line,
+                                column: self.current_column(),
                                 message: "Unterminated escape sequence".to_string(),
                             });
                         }
@@ -239,6 +297,7 @@ impl<'a> Cursor<'a> {
 
         Err(CursorError {
             line,
+            column: self.current_column(),
             message: "Unterminated JSON option value".to_string(),
         })
     }
@@ -281,11 +340,9 @@ pub(crate) fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
                 in_code_block = true;
                 code_block_start = range.start;
             }
-            Event::End(TagEnd::CodeBlock) => {
-                if in_code_block {
-                    regions.push((code_block_start, range.end));
-                    in_code_block = false;
-                }
+            Event::End(TagEnd::CodeBlock) if in_code_block => {
+                regions.push((code_block_start, range.end));
+                in_code_block = false;
             }
             _ => {}
         }

@@ -47,6 +47,7 @@ pub use skills::{
 pub use symlink::{LinkResult, category_link_target, relative_path};
 
 use crate::error::Result;
+use tracing::{debug, info_span};
 
 use conflict::build_also_reads_from;
 
@@ -56,6 +57,13 @@ pub fn link_skills(
     filter: Option<&str>,
     dry_run: bool,
 ) -> Result<LinkReport> {
+    let _span = info_span!(
+        "link_skills",
+        ?scope,
+        dry_run,
+        filter = filter.unwrap_or("")
+    )
+    .entered();
     link_skills_inner(&ProviderSkillPaths::new(), scope, filter, dry_run)
 }
 
@@ -73,6 +81,8 @@ fn link_skills_inner(
     if let Some(name_filter) = filter {
         skills.retain(|skill| skill.name == name_filter);
     }
+
+    debug!(skill_count = skills.len(), "discovered skills for linking");
 
     for skill in &mut skills {
         skill.hash = hashing::hash_skill_dir(&skill.path).ok();

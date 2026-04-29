@@ -407,6 +407,9 @@ fn interactive_install_all() -> Result<(), Box<dyn Error>> {
 mod tests {
     use super::*;
 
+    type InstallInterviewFn =
+        fn(&[ResolvedProgram], bool, bool) -> Result<(), Box<dyn std::error::Error>>;
+
     #[test]
     fn resolve_editor_by_snake_case() {
         let editor = resolve_editor("neovim").unwrap();
@@ -480,8 +483,7 @@ mod tests {
     #[test]
     fn install_selected_via_interview_fn_exists() {
         // Compile-level check that the entry point has the expected signature.
-        let _: fn(&[ResolvedProgram], bool, bool) -> Result<(), Box<dyn std::error::Error>> =
-            install_selected_via_interview;
+        let _: InstallInterviewFn = install_selected_via_interview;
     }
 
     #[test]

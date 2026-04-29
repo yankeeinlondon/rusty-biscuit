@@ -1,0 +1,12 @@
+YOLO mode is enabled. All tool calls will be automatically approved.
+YOLO mode is enabled. All tool calls will be automatically approved.
+Error executing tool list_directory: Error: Failed to list directory.
+Error executing tool read_file: File not found.
+Hook execution for AfterAgent: 0 succeeded, 1 failed (claudine-turn_complete), total duration: 30004ms
+Hook(s) [claudine-turn_complete] failed for event AfterAgent. Press F12 to see the debug drawer for more details.
+[WARNING] Hook(s) [claudine-turn_complete] failed for event AfterAgent. Press F12 to see the debug drawer for more details.
+
+Hook execution error: Hook timed out after 30000ms
+Hook execution for SessionEnd: 0 succeeded, 1 failed (claudine-session_end), total duration: 30004ms
+Hook(s) [claudine-session_end] failed for event SessionEnd. Press F12 to see the debug drawer for more details.
+Hook execution error: Hook timed out after 30000ms

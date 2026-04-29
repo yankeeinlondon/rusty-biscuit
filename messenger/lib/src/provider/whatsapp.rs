@@ -111,15 +111,14 @@ impl super::Provider for WhatsAppProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        const WHATSAPP_CAPABILITIES: CapabilitySet = CapabilitySet {
+        CapabilitySet {
             supports_markdown_rendering: false,
             supports_reply: true,
-            supports_attachments: false,
+            supported_attachment_kinds: std::collections::BTreeSet::new(),
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-        };
-        WHATSAPP_CAPABILITIES
+        }
     }
 
     #[tracing::instrument(skip_all, fields(provider = "whatsapp", recipient = tracing::field::Empty))]

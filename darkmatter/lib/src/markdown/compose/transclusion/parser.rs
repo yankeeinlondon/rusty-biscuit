@@ -1,7 +1,8 @@
 //! Block and frontmatter transclusion parsing.
 
 use super::types::{
-    BlockDirective, BlockOptions, DirectiveKind, FrontmatterRefs, ReplaceOption, TransclusionError,
+    BlockDirective, BlockOptions, DeferredSetError, DirectiveKind, FrontmatterRefs, ReplaceOption,
+    TransclusionError,
 };
 use crate::markdown::FrontmatterMap;
 use crate::markdown::compose::parse_utils::{
@@ -83,6 +84,7 @@ fn parse_reference_field(
                             "Frontmatter '{}' must be a string or array of strings",
                             field_name
                         ),
+                        caret_col: None,
                     });
                 };
                 refs.push(s.to_string());
@@ -95,6 +97,7 @@ fn parse_reference_field(
                 "Frontmatter '{}' must be a string or array of strings",
                 field_name
             ),
+            caret_col: None,
         }),
     }
 }
@@ -118,6 +121,7 @@ fn parse_directive_line(
                     "Unknown directive kind '{}': expected file/code/url",
                     kind_str
                 ),
+                caret_col: None,
             });
         }
     };
@@ -128,6 +132,7 @@ fn parse_directive_line(
         return Err(TransclusionError::ParseDirective {
             line,
             message: "Directive target cannot be empty".to_string(),
+            caret_col: None,
         });
     }
 
@@ -140,6 +145,12 @@ fn parse_directive_line(
         }
 
         let key = cursor.read_identifier(line)?;
+
+        if key == "set" {
+            parse_set_option(&mut cursor, &mut options, line)?;
+            continue;
+        }
+
         cursor.skip_ws();
         cursor.expect_char('=', line)?;
         cursor.skip_ws();
@@ -149,6 +160,137 @@ fn parse_directive_line(
     }
 
     Ok((kind, raw_target, options))
+}
+
+/// Parses a `set=<object>` or `set.NAME=<value>` clause.
+///
+/// The leading `set` identifier has already been consumed. This function
+/// consumes the optional `.NAME` suffix, the required `=`, and the JSON5
+/// RHS, then installs the parsed payload onto `options`.
+fn parse_set_option(
+    cursor: &mut Cursor<'_>,
+    options: &mut BlockOptions,
+    line: usize,
+) -> Result<(), TransclusionError> {
+    let dotted = cursor.read_dotted_suffix(line)?;
+    cursor.skip_ws();
+    cursor.expect_char('=', line)?;
+    cursor.skip_ws();
+
+    let was_quoted = matches!(cursor.current(), Some('\'') | Some('"'));
+    let raw = cursor.read_value(line)?;
+
+    if raw.is_empty() && !was_quoted {
+        return Err(TransclusionError::ParseDirective {
+            line,
+            message: match &dotted {
+                Some(name) => format!("'set.{}=' requires a JSON5 value", name),
+                None => "'set=' requires a JSON5 value".to_string(),
+            },
+            caret_col: None,
+        });
+    }
+
+    match dotted {
+        Some(name) => apply_set_property(options, name, &raw, was_quoted, line),
+        None => apply_set_object(options, &raw, was_quoted, line),
+    }
+}
+
+/// Applies a `set.NAME=<value>` property-form clause.
+///
+/// When the RHS was wrapped in shell-style quotes, the stripped content
+/// is taken as a literal string. Otherwise the content is parsed as a
+/// JSON5 value so numeric/boolean/null/array/object literals work.
+fn apply_set_property(
+    options: &mut BlockOptions,
+    name: String,
+    raw: &str,
+    was_quoted: bool,
+    line: usize,
+) -> Result<(), TransclusionError> {
+    let parsed = if was_quoted {
+        parse_json5_value(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
+    } else {
+        parse_json5_value(raw).map_err(|e| TransclusionError::ParseDirective {
+            line,
+            message: format!("'set.{}=' requires a JSON5 value: {}", name, e),
+            caret_col: None,
+        })?
+    };
+
+    if options.set_properties.iter().any(|(n, _)| n == &name) {
+        options
+            .deferred_set_errors
+            .push(DeferredSetError::ReassignedProperty { name: name.clone() });
+    }
+    options.set_properties.push((name, parsed));
+    Ok(())
+}
+
+/// Applies a `set=<value>` object-form clause.
+///
+/// The RHS must parse as a JSON5 object. Any other JSON5 value (scalar,
+/// array) is a grammar error even if it parses successfully. Duplicate
+/// `set=` on the same directive uses the `<object>` sentinel name.
+fn apply_set_object(
+    options: &mut BlockOptions,
+    raw: &str,
+    was_quoted: bool,
+    line: usize,
+) -> Result<(), TransclusionError> {
+    let parsed = match parse_json5_value(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            options
+                .deferred_set_errors
+                .push(DeferredSetError::InvalidAssignment {
+                    raw: format_raw_for_error(raw, was_quoted),
+                    reason: format!("failed to parse as JSON5: {}", e),
+                    line,
+                });
+            return Ok(());
+        }
+    };
+
+    let Value::Object(map) = parsed else {
+        options
+            .deferred_set_errors
+            .push(DeferredSetError::InvalidAssignment {
+                raw: format_raw_for_error(raw, was_quoted),
+                reason: "expected JSON5 object".to_string(),
+                line,
+            });
+        return Ok(());
+    };
+
+    if options.set_object.is_some() {
+        options
+            .deferred_set_errors
+            .push(DeferredSetError::ReassignedProperty {
+                name: "<object>".to_string(),
+            });
+        return Ok(());
+    }
+    options.set_object = Some(map);
+    Ok(())
+}
+
+/// Re-wraps a quoted RHS with single quotes for error messages so users
+/// see the original directive shape rather than the cursor-stripped form.
+fn format_raw_for_error(raw: &str, was_quoted: bool) -> String {
+    if was_quoted {
+        format!("'{}'", raw)
+    } else {
+        raw.to_string()
+    }
+}
+
+/// Parses `raw` as a JSON5 value, returning the underlying JSON value.
+fn parse_json5_value(raw: &str) -> Result<Value, String> {
+    biscuit_file::Json5::from_str(raw)
+        .map(|j| j.value().clone())
+        .map_err(|e| e.to_string())
 }
 
 fn apply_option(
@@ -169,6 +311,7 @@ fn apply_option(
                     return Err(TransclusionError::ParseDirective {
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
+                        caret_col: None,
                     });
                 };
                 options.replace = ReplaceOption::OneOff(obj.clone());
@@ -209,6 +352,7 @@ impl From<CursorError> for TransclusionError {
         TransclusionError::ParseDirective {
             line: e.line,
             message: e.message,
+            caret_col: Some(e.column),
         }
     }
 }
@@ -326,5 +470,205 @@ mod tests {
         let refs = parse_frontmatter_refs(&fm).unwrap();
         assert_eq!(refs.prologue, vec!["./a.md"]);
         assert_eq!(refs.epilogue, vec!["./b.md", "./c.md"]);
+    }
+
+    // ── set / set.NAME grammar ───────────────────────────────────────
+
+    fn parse_single(content: &str) -> BlockDirective {
+        let mut directives = parse_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        directives.pop().unwrap()
+    }
+
+    #[test]
+    fn parses_set_property_string() {
+        let directive = parse_single(r#"::file ./foo.md set.name="Bob""#);
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(directive.options.set_properties[0].0, "name");
+        assert_eq!(
+            directive.options.set_properties[0].1,
+            Value::String("Bob".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_set_property_scalars() {
+        let directive = parse_single(
+            r#"::file ./foo.md set.age=42 set.tags=[1,2,3] set.meta={x:1} set.x=null set.ok=true"#,
+        );
+        let props: Vec<_> = directive
+            .options
+            .set_properties
+            .iter()
+            .map(|(n, v)| (n.as_str(), v.clone()))
+            .collect();
+        assert_eq!(props[0], ("age", serde_json::json!(42)));
+        assert_eq!(props[1], ("tags", serde_json::json!([1, 2, 3])));
+        assert_eq!(props[2], ("meta", serde_json::json!({"x": 1})));
+        assert_eq!(props[3], ("x", Value::Null));
+        assert_eq!(props[4], ("ok", Value::Bool(true)));
+    }
+
+    #[test]
+    fn parses_set_object_form() {
+        let directive = parse_single(r#"::file ./foo.md set='{a:1,b:"x"}'"#);
+        let map = directive.options.set_object.expect("set_object present");
+        assert_eq!(map.get("a"), Some(&serde_json::json!(1)));
+        assert_eq!(map.get("b"), Some(&Value::String("x".to_string())));
+    }
+
+    #[test]
+    fn parses_set_object_and_properties_in_order() {
+        let directive = parse_single(r#"::file ./foo.md set='{a:1}' set.a="Z" set.b=2"#);
+        let map = directive.options.set_object.expect("set_object present");
+        assert_eq!(map.get("a"), Some(&serde_json::json!(1)));
+        assert_eq!(directive.options.set_properties.len(), 2);
+        assert_eq!(
+            directive.options.set_properties[0],
+            ("a".to_string(), Value::String("Z".to_string()))
+        );
+        assert_eq!(
+            directive.options.set_properties[1],
+            ("b".to_string(), serde_json::json!(2))
+        );
+    }
+
+    #[test]
+    fn set_unquoted_bare_word_is_parse_error() {
+        let err = parse_directives("::file ./foo.md set.name=Bob").unwrap_err();
+        matches_parse_directive(&err);
+    }
+
+    #[test]
+    fn set_empty_rhs_is_parse_error() {
+        let err = parse_directives("::file ./foo.md set.name=").unwrap_err();
+        matches_parse_directive(&err);
+    }
+
+    #[test]
+    fn set_bare_without_equals_is_parse_error() {
+        let err = parse_directives("::file ./foo.md set").unwrap_err();
+        matches_parse_directive(&err);
+    }
+
+    #[test]
+    fn set_nested_dotted_key_is_parse_error() {
+        let err = parse_directives(r#"::file ./foo.md set.author.name="Bob""#).unwrap_err();
+        matches_parse_directive(&err);
+    }
+
+    #[test]
+    fn set_non_object_rhs_defers_error() {
+        let directive = parse_single("::file ./foo.md set=42");
+        assert!(
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(e, DeferredSetError::InvalidAssignment { .. })),
+            "expected InvalidAssignment deferred error, got {:?}",
+            directive.options.deferred_set_errors
+        );
+    }
+
+    #[test]
+    fn set_object_duplicate_defers_error() {
+        let directive = parse_single(r#"::file ./foo.md set='{a:1}' set='{b:2}'"#);
+        assert!(
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(
+                    e,
+                    DeferredSetError::ReassignedProperty { name } if name == "<object>"
+                )),
+            "expected ReassignedProperty(<object>) deferred error, got {:?}",
+            directive.options.deferred_set_errors
+        );
+        assert!(directive.options.set_object.is_some());
+    }
+
+    #[test]
+    fn set_property_duplicate_defers_error_and_rightmost_wins() {
+        let directive = parse_single(r#"::file ./foo.md set.name="Bob" set.name="Mary""#);
+        assert!(
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(
+                    e,
+                    DeferredSetError::ReassignedProperty { name } if name == "name"
+                )),
+            "expected ReassignedProperty(name) deferred error, got {:?}",
+            directive.options.deferred_set_errors
+        );
+        assert_eq!(directive.options.set_properties.len(), 2);
+        assert_eq!(
+            directive.options.set_properties[0],
+            ("name".to_string(), Value::String("Bob".to_string()))
+        );
+        assert_eq!(
+            directive.options.set_properties[1],
+            ("name".to_string(), Value::String("Mary".to_string()))
+        );
+    }
+
+    #[test]
+    fn set_invalid_with_valid_sibling_defers_invalid_and_keeps_valid() {
+        let directive = parse_single(r#"::file ./foo.md set=42 set.name="Bob""#);
+        assert!(directive.options.set_object.is_none());
+        assert!(
+            directive
+                .options
+                .deferred_set_errors
+                .iter()
+                .any(|e| matches!(e, DeferredSetError::InvalidAssignment { .. })),
+        );
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(
+            directive.options.set_properties[0],
+            ("name".to_string(), Value::String("Bob".to_string()))
+        );
+    }
+
+    #[test]
+    fn quoted_property_object_parsed_as_json5() {
+        let directive = parse_single(r#"::file ./foo.md set.author='{name: null}'"#);
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(directive.options.set_properties[0].0, "author");
+        assert_eq!(
+            directive.options.set_properties[0].1,
+            serde_json::json!({"name": null})
+        );
+    }
+
+    #[test]
+    fn quoted_property_object_deep_merge_value() {
+        let directive = parse_single(r#"::file ./foo.md set.a='{y:2}'"#);
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(
+            directive.options.set_properties[0].1,
+            serde_json::json!({"y": 2})
+        );
+    }
+
+    #[test]
+    fn quoted_property_string_fallback_when_not_json5() {
+        let directive = parse_single(r#"::file ./foo.md set.name="Bob""#);
+        assert_eq!(directive.options.set_properties.len(), 1);
+        assert_eq!(
+            directive.options.set_properties[0].1,
+            Value::String("Bob".to_string())
+        );
+    }
+
+    fn matches_parse_directive(err: &TransclusionError) {
+        assert!(
+            matches!(err, TransclusionError::ParseDirective { .. }),
+            "expected ParseDirective, got {:?}",
+            err
+        );
     }
 }

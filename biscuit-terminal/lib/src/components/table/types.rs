@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn vertical_align_derives_debug_clone_copy() {
         let align = VerticalAlign::Middle;
-        let cloned = align.clone();
+        let cloned = align;
         let copied = align;
         assert_eq!(format!("{:?}", align), "Middle");
         assert_eq!(cloned, copied);

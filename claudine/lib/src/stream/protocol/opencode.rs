@@ -45,6 +45,14 @@ pub enum OpenCodeEvent {
     ToolResult(OpenCodeTool),
     #[serde(rename = "tool_end")]
     ToolEnd(OpenCodeTool),
+    #[serde(rename = "reasoning")]
+    Reasoning(OpenCodeReasoning),
+    #[serde(rename = "task_started")]
+    TaskStarted(OpenCodeTaskEvent),
+    #[serde(rename = "task_completed")]
+    TaskCompleted(OpenCodeTaskEvent),
+    #[serde(rename = "task_progress")]
+    TaskProgress(OpenCodeTaskProgress),
 }
 
 /// `init` / `session_start` payload.
@@ -100,6 +108,75 @@ impl OpenCodeText {
             .or(self.text)
             .or(self.content)
     }
+}
+
+/// Reasoning event. Text can arrive at either the top level or nested under
+/// `part.text`, mirroring [`OpenCodeText`]. The `content` fallback is retained
+/// for symmetry with the text shape so callers never have to care which
+/// location the provider happens to use.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeReasoning {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub part: Option<OpenCodeReasoningPart>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeReasoningPart {
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+impl OpenCodeReasoning {
+    pub fn resolved_text(self) -> Option<String> {
+        self.part
+            .and_then(|p| p.text)
+            .or(self.text)
+            .or(self.content)
+    }
+}
+
+/// Task / subagent lifecycle event. OpenCode task records are close to the
+/// Claude shape: a stable task id, a human-facing task name, and an optional
+/// completion status on terminal events.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeTaskEvent {
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default, rename = "taskId")]
+    pub task_id_camel: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub task_name: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+impl OpenCodeTaskEvent {
+    pub fn resolved_task_id(&self) -> Option<String> {
+        self.task_id
+            .clone()
+            .or_else(|| self.task_id_camel.clone())
+            .or_else(|| self.id.clone())
+    }
+
+    pub fn resolved_name(&self) -> Option<String> {
+        self.name.clone().or_else(|| self.task_name.clone())
+    }
+}
+
+/// OpenCode task progress narration. Keep the payload intentionally small and
+/// alias-friendly so format drift degrades to a harmless empty `Info`.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeTaskProgress {
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 /// `step_finish` payload with nested `part.tokens` / `part.cost` / `part.reason`.
@@ -272,14 +349,27 @@ impl OpenCodeToolFields {
 }
 
 /// `tool_use` / `tool_start` / `tool_result` / `tool_end` event. Fields may
-/// appear at the top level or nested under `part`. Use [`OpenCodeTool::resolve`]
-/// to collapse both locations into a single resolved view.
+/// appear at the top level, nested under `part`, or (for the current OpenCode
+/// `run.ts` format) nested under `part.state` — the ToolPart `state` carries
+/// `status`, `input`, `output`, and `error`. Use [`OpenCodeTool::resolve`] to
+/// collapse all three locations into a single resolved view.
 #[derive(Debug, Default, Deserialize)]
 pub struct OpenCodeTool {
     #[serde(flatten)]
     pub top: OpenCodeToolFields,
     #[serde(default)]
-    pub part: Option<OpenCodeToolFields>,
+    pub part: Option<OpenCodeToolPart>,
+}
+
+/// `ToolPart` body: mirrors `OpenCodeToolFields` but also carries the
+/// OpenCode-specific `state` sub-object where recent CLI releases place
+/// `status` / `input` / `output` / `error`.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeToolPart {
+    #[serde(flatten)]
+    pub fields: OpenCodeToolFields,
+    #[serde(default)]
+    pub state: Option<OpenCodeToolFields>,
 }
 
 /// Resolved tool view with top-level fields taking priority over nested
@@ -305,7 +395,11 @@ impl OpenCodeTool {
             status: top.status.take(),
             error: top.error.take(),
         };
-        if let Some(mut part) = part {
+        if let Some(OpenCodeToolPart {
+            fields: mut part,
+            state,
+        }) = part
+        {
             if resolved.id.is_none() {
                 resolved.id = part.resolved_tool_id().map(ToOwned::to_owned);
             }
@@ -323,6 +417,26 @@ impl OpenCodeTool {
             }
             if resolved.error.is_none() {
                 resolved.error = part.error.take();
+            }
+            if let Some(mut state) = state {
+                if resolved.id.is_none() {
+                    resolved.id = state.resolved_tool_id().map(ToOwned::to_owned);
+                }
+                if resolved.name.is_none() {
+                    resolved.name = state.resolved_tool_name().map(ToOwned::to_owned);
+                }
+                if resolved.input.is_none() {
+                    resolved.input = state.take_input();
+                }
+                if resolved.output.is_none() {
+                    resolved.output = state.take_output();
+                }
+                if resolved.status.is_none() {
+                    resolved.status = state.status.take();
+                }
+                if resolved.error.is_none() {
+                    resolved.error = state.error.take();
+                }
             }
         }
         resolved
@@ -424,6 +538,38 @@ mod tests {
     }
 
     #[test]
+    fn opencode_task_started_deserializes() {
+        let event = parse(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#);
+        let OpenCodeEvent::TaskStarted(task) = event else {
+            panic!("expected TaskStarted");
+        };
+        assert_eq!(task.resolved_task_id().as_deref(), Some("sa1"));
+        assert_eq!(task.resolved_name().as_deref(), Some("researcher"));
+    }
+
+    #[test]
+    fn opencode_task_completed_deserializes() {
+        let event = parse(
+            r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
+        );
+        let OpenCodeEvent::TaskCompleted(task) = event else {
+            panic!("expected TaskCompleted");
+        };
+        assert_eq!(task.resolved_task_id().as_deref(), Some("sa1"));
+        assert_eq!(task.resolved_name().as_deref(), Some("researcher"));
+        assert_eq!(task.status.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn opencode_task_progress_deserializes() {
+        let event = parse(r#"{"type":"task_progress","message":"working"}"#);
+        let OpenCodeEvent::TaskProgress(progress) = event else {
+            panic!("expected TaskProgress");
+        };
+        assert_eq!(progress.message.as_deref(), Some("working"));
+    }
+
+    #[test]
     fn opencode_tool_name_from_top_level_name() {
         let event = parse(r#"{"type":"tool_use","name":"search"}"#);
         let OpenCodeEvent::ToolUse(tool) = event else {
@@ -487,6 +633,43 @@ mod tests {
     }
 
     #[test]
+    fn opencode_tool_state_fills_when_part_missing_fields() {
+        // When tool info lives under `part.state.*` (current OpenCode wire format
+        // per message-v2.ts) and is absent at top-level and `part.*`, resolve()
+        // must pick it up.
+        let event = parse(
+            r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+                 "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.id.as_deref(), Some("t1"));
+        assert_eq!(resolved.name.as_deref(), Some("bash"));
+        assert_eq!(resolved.status.as_deref(), Some("completed"));
+        let input = resolved.input.expect("input from part.state");
+        assert_eq!(input.get("command").and_then(Value::as_str), Some("ls -la"));
+        let output = resolved.output.expect("output from part.state");
+        assert_eq!(output.as_str(), Some("file.txt"));
+    }
+
+    #[test]
+    fn opencode_tool_part_fields_beat_state_when_both_present() {
+        // Priority: top-level > part.fields > part.state. When part.fields and
+        // part.state both carry `status`, part.fields must win.
+        let event = parse(
+            r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","status":"from_part",
+                 "state":{"status":"from_state"}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.status.as_deref(), Some("from_part"));
+    }
+
+    #[test]
     fn opencode_tool_args_params_aliases() {
         let event = parse(r#"{"type":"tool_use","args":{"x":1}}"#);
         let OpenCodeEvent::ToolUse(tool) = event else {
@@ -501,5 +684,25 @@ mod tests {
     fn opencode_unknown_event_type_fails_typed() {
         let err = serde_json::from_str::<OpenCodeEvent>(r#"{"type":"not_a_real_event"}"#);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn opencode_reasoning_top_level_text_deserializes() {
+        let event = parse(r#"{"type":"reasoning","text":"Thinking it over"}"#);
+        let OpenCodeEvent::Reasoning(reasoning) = event else {
+            panic!("expected Reasoning");
+        };
+        assert_eq!(reasoning.resolved_text(), Some("Thinking it over".into()));
+    }
+
+    #[test]
+    fn opencode_reasoning_nested_part_text_resolves() {
+        let event = parse(
+            r#"{"type":"reasoning","part":{"id":"prt_1","type":"reasoning","text":"nested prose"}}"#,
+        );
+        let OpenCodeEvent::Reasoning(reasoning) = event else {
+            panic!("expected Reasoning");
+        };
+        assert_eq!(reasoning.resolved_text(), Some("nested prose".into()));
     }
 }

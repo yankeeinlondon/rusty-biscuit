@@ -8,11 +8,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
-use claudine::stream::parser::{StreamChunk, StreamParseError, StreamParser};
+use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
+use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
+use claudine::stream::progress::{self, LiveMetrics};
+use claudine::stream::prompt_timing as prompt_timing_mod;
+use claudine::stream::prompt_timing::{HeaderKind, PromptTimingContext};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use tracing::{Span, info_span};
+
+use super::stream_io::StreamOutput;
 
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
@@ -20,10 +30,33 @@ pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdin_seed: Option<&'a str>,
 }
 
+/// Execution telemetry collected for a single child process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProcessTelemetry {
+    pub total_elapsed: Duration,
+    pub first_response_latency: Option<Duration>,
+}
+
+impl ProcessTelemetry {
+    /// Convert telemetry into the shared [`AgentExecutionPerf`] model.
+    pub(crate) fn into_agent_perf(
+        self,
+        api_duration_ms: Option<u64>,
+    ) -> crate::perf::AgentExecutionPerf {
+        crate::perf::AgentExecutionPerf {
+            launches: 1,
+            total_elapsed: self.total_elapsed,
+            first_response_latency: self.first_response_latency,
+            provider_api_duration: api_duration_ms.map(Duration::from_millis),
+        }
+    }
+}
+
 /// Result of a child process execution, enriched with termination info.
 pub(crate) struct ProcessResult<T> {
     pub(crate) data: T,
     pub(crate) termination: claudine::harness::ProcessTermination,
+    pub(crate) telemetry: ProcessTelemetry,
 }
 
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.
@@ -38,6 +71,17 @@ struct StreamTextRenderer {
     line_buffer: String,
     /// Whether we are inside a fenced code block (``` or ~~~).
     in_code_fence: bool,
+    /// True when the partial line in `line_buffer` has already been written
+    /// to stdout raw. When the newline eventually arrives we only emit `\n`
+    /// instead of re-rendering through darkmatter, avoiding duplicate
+    /// output. Safe to enable now that all stderr status lines route through
+    /// `StreamOutput`, which guarantees a newline-boundary before writing.
+    partial_line_committed: bool,
+    /// Timestamp of the last write into `block_buffer`. Used by
+    /// [`flush_if_idle`] so the heartbeat thread can surface buffered
+    /// assistant text when the provider stalls without emitting a paragraph
+    /// boundary. Reset to `None` whenever the block flushes.
+    last_block_growth_at: Option<Instant>,
     /// Terminal reference for rendering.
     term: Option<Terminal>,
     /// Cached darkmatter options (created once to avoid repeated theme detection).
@@ -57,6 +101,8 @@ impl StreamTextRenderer {
             block_buffer: String::new(),
             line_buffer: String::new(),
             in_code_fence: false,
+            partial_line_committed: false,
+            last_block_growth_at: None,
             term,
             terminal_options,
         }
@@ -73,7 +119,31 @@ impl StreamTextRenderer {
         while let Some(newline_pos) = self.line_buffer.find('\n') {
             let line = self.line_buffer[..=newline_pos].to_string();
             self.line_buffer.drain(..=newline_pos);
+
+            if self.partial_line_committed {
+                // Partial line was already streamed raw; emit only the newline
+                // and skip markdown rendering to avoid duplicate output.
+                let _ = out.write_all(b"\n");
+                let _ = out.flush();
+                self.partial_line_committed = false;
+                continue;
+            }
+
             self.process_line(out, &line);
+        }
+
+        // Stream the remaining partial line immediately so the user sees
+        // progress even when the provider stalls before sending a newline.
+        // Safe across the stdout/stderr boundary because status emissions go
+        // through `StreamOutput`, which inserts a newline before writing
+        // stderr when stdout is mid-line. Skip when we're inside a fenced
+        // block or actively accumulating a markdown block — those paths need
+        // the full block before rendering.
+        if !self.line_buffer.is_empty() && !self.in_code_fence && self.block_buffer.is_empty() {
+            let partial = std::mem::take(&mut self.line_buffer);
+            let _ = out.write_all(partial.as_bytes());
+            let _ = out.flush();
+            self.partial_line_committed = true;
         }
     }
 
@@ -84,7 +154,7 @@ impl StreamTextRenderer {
 
         // Track code fence open/close (``` or ~~~)
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             if self.in_code_fence {
                 // Closing fence — render the complete fenced block
                 self.in_code_fence = false;
@@ -97,14 +167,14 @@ impl StreamTextRenderer {
 
         // Inside a code fence — just accumulate, don't look for boundaries
         if self.in_code_fence {
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             return;
         }
 
         // Blank line outside a code fence = block boundary
         if trimmed.is_empty() {
             // Include the blank line so darkmatter sees proper paragraph spacing
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             self.flush_block(out);
             return;
         }
@@ -114,13 +184,31 @@ impl StreamTextRenderer {
         // the provider stalls after emitting the last list item.
         if is_stream_safe_list_item(trimmed) {
             self.flush_block(out);
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             self.flush_block(out);
             return;
         }
 
-        // Regular content — accumulate
-        self.block_buffer.push_str(line);
+        // Regular content — accumulate.
+        self.append_block(line);
+
+        // Sentence-level early flush: once the block has accumulated past
+        // the size threshold and the latest line ends with sentence-
+        // terminating punctuation, flush so the user sees prose as it is
+        // written instead of waiting for a blank-line boundary. Fence and
+        // list cases above already returned, and short buffers fall below
+        // the threshold, so this never fires mid-code and never chops
+        // short responses.
+        if self.block_buffer.len() >= SENTENCE_FLUSH_MIN_BYTES && line_ends_sentence(trimmed) {
+            self.flush_block(out);
+        }
+    }
+
+    /// Append `content` to the block buffer and stamp the growth clock so
+    /// [`flush_if_idle`] can tell how long the buffer has been sitting idle.
+    fn append_block(&mut self, content: &str) {
+        self.block_buffer.push_str(content);
+        self.last_block_growth_at = Some(Instant::now());
     }
 
     /// Render the accumulated block through darkmatter and write to output.
@@ -129,14 +217,41 @@ impl StreamTextRenderer {
             return;
         }
         let block = std::mem::take(&mut self.block_buffer);
+        self.last_block_growth_at = None;
         self.render_markdown(out, &block);
+    }
+
+    /// Flush buffered markdown if it has been sitting idle for at least
+    /// `idle_threshold`. Returns `true` when something was flushed.
+    ///
+    /// Called by the heartbeat thread before it emits its own status line so
+    /// dangling paragraphs cannot remain invisible while the provider stalls
+    /// without closing stdout. An empty buffer is a no-op; a fresh write
+    /// inside the threshold is a no-op.
+    fn flush_if_idle<W: Write>(&mut self, out: &mut W, idle_threshold: Duration) -> bool {
+        if self.block_buffer.is_empty() {
+            return false;
+        }
+        let Some(stamped_at) = self.last_block_growth_at else {
+            return false;
+        };
+        if stamped_at.elapsed() < idle_threshold {
+            return false;
+        }
+        self.flush_block(out);
+        true
     }
 
     /// Flush any remaining buffered content (incomplete line + block buffer).
     fn flush_remaining<W: Write>(&mut self, out: &mut W) {
         if !self.line_buffer.is_empty() {
             let leftover = std::mem::take(&mut self.line_buffer);
-            self.block_buffer.push_str(&leftover);
+            if self.partial_line_committed {
+                // Already streamed raw — do not re-render through darkmatter.
+                self.partial_line_committed = false;
+            } else {
+                self.append_block(&leftover);
+            }
         }
         self.flush_block(out);
     }
@@ -148,12 +263,37 @@ impl StreamTextRenderer {
                 term,
                 self.terminal_options.as_ref(),
             );
-            let _ = out.write_all(rendered.as_bytes());
+            let normalized = normalize_stream_rendered_newlines(text, &rendered);
+            let _ = out.write_all(normalized.as_bytes());
         } else {
             let _ = out.write_all(text.as_bytes());
         }
         let _ = out.flush();
     }
+}
+
+/// Minimum buffered byte count before a sentence-terminator at the end of a
+/// line is allowed to trigger an early flush. Short single-line responses
+/// (e.g. `"OK."`) stay buffered so they don't render as their own pseudo-
+/// paragraph; only multi-line or otherwise substantial prose qualifies.
+const SENTENCE_FLUSH_MIN_BYTES: usize = 200;
+
+/// Returns `true` when the trimmed line ends with a sentence-terminating
+/// character (`.`, `!`, `?`), optionally followed by a trailing closing
+/// quote / bracket / parenthesis. Trailing whitespace is already stripped by
+/// the caller.
+fn line_ends_sentence(trimmed: &str) -> bool {
+    let bytes = trimmed.as_bytes();
+    let mut idx = bytes.len();
+    while idx > 0 {
+        let ch = bytes[idx - 1];
+        if matches!(ch, b'"' | b'\'' | b')' | b']' | b'}') {
+            idx -= 1;
+            continue;
+        }
+        return matches!(ch, b'.' | b'!' | b'?');
+    }
+    false
 }
 
 fn is_stream_safe_list_item(line: &str) -> bool {
@@ -163,74 +303,35 @@ fn is_stream_safe_list_item(line: &str) -> bool {
     }
 }
 
-/// Renders streamed thinking/reasoning text dimmed to stderr.
-///
-/// Accumulates thinking text and emits it via Prose dim+italic styling so it
-/// is visually distinct from assistant text. A leading "Thinking..." label is
-/// printed when the first thinking chunk arrives.
-///
-/// Writes to stderr using short-lived locks to avoid blocking the separate
-/// stderr processing thread.
-struct StreamThinkingRenderer {
-    buffer: String,
-    active: bool,
-}
-
-impl StreamThinkingRenderer {
-    fn new() -> Self {
-        Self {
-            buffer: String::new(),
-            active: false,
+/// Darkmatter renders each streamed fragment as a standalone Markdown
+/// document. For short fragments such as a single heading or list item,
+/// that can add synthetic trailing blank lines that were not present in
+/// the provider stream, which then shows up as loose-list spacing in the
+/// terminal. Preserve the provider-authored trailing newline count instead.
+fn normalize_stream_rendered_newlines(source: &str, rendered: &str) -> String {
+    let desired_trailing_newlines = source.bytes().rev().take_while(|b| *b == b'\n').count();
+    let mut kept_lines: Vec<&str> = rendered.split_inclusive('\n').collect();
+    while let Some(last) = kept_lines.last() {
+        let stripped = biscuit_terminal::prelude::strip_escape_codes(*last);
+        let visual = stripped.trim_end_matches('\n').trim();
+        if visual.is_empty() {
+            kept_lines.pop();
+        } else {
+            break;
         }
     }
 
-    fn push(&mut self, text: &str) {
-        if !self.active {
-            // Emit a dim+italic "Thinking..." header on first thinking chunk
-            let header = Self::render_dim_italic("\u{27e1} Thinking...");
-            eprintln!("{header}");
-            self.active = true;
-        }
-        self.buffer.push_str(text);
-
-        // Emit complete lines immediately (dimmed)
-        while let Some(newline_pos) = self.buffer.find('\n') {
-            let line = self.buffer[..newline_pos].to_string();
-            self.buffer.drain(..=newline_pos);
-            let rendered = Self::render_dim(&line);
-            eprintln!("{rendered}");
-        }
+    let joined = kept_lines.concat();
+    let trimmed = joined.trim_end_matches('\n');
+    if desired_trailing_newlines == 0 && trimmed.len() == joined.len() {
+        return joined;
     }
 
-    /// Flush remaining thinking text and reset state when switching to
-    /// assistant text or finishing the stream.
-    fn flush_if_active(&mut self) {
-        if !self.active {
-            return;
-        }
-        if !self.buffer.is_empty() {
-            let remaining = std::mem::take(&mut self.buffer);
-            let rendered = Self::render_dim(&remaining);
-            eprintln!("{rendered}");
-        }
-        // Blank line to separate thinking from assistant text
-        eprintln!();
-        self.active = false;
+    let mut normalized = trimmed.to_string();
+    for _ in 0..desired_trailing_newlines {
+        normalized.push('\n');
     }
-
-    fn render_dim(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::terminal())
-    }
-
-    fn render_dim_italic(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim><i>{safe}</i></dim>")).render(&crate::log::terminal())
-    }
+    normalized
 }
 
 /// Spawn the provider child process and return its exit code.
@@ -319,22 +420,40 @@ pub(crate) fn run_child(
         command.process_group(0);
     }
 
+    let spawned_at = Instant::now();
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
+
+    // Shared first-response trackers. Each channel stamps the first
+    // non-filtered line it sees so we can compute best-effort latency
+    // even on the legacy passthrough path.
+    let first_stdout_at: Option<Arc<std::sync::Mutex<Option<Instant>>>> = if filter_stdout {
+        Some(Arc::new(std::sync::Mutex::new(None)))
+    } else {
+        None
+    };
+    let first_stderr_at: Option<Arc<std::sync::Mutex<Option<Instant>>>> = if filter_stderr {
+        Some(Arc::new(std::sync::Mutex::new(None)))
+    } else {
+        None
+    };
 
     // Spawn stdout/stderr reader threads BEFORE writing stdin to avoid a
     // pipe deadlock: if the prompt exceeds the OS pipe buffer (~64 KB on
     // macOS) and the child writes to stdout/stderr during startup, both
     // processes block on pipe I/O with no reader on the other end.
     let stdout_handle = if filter_stdout {
-        let pipe = child.stdout.take().expect("stdout was set to piped");
+        let pipe = child.stdout.take().expect(
+            "child stdout must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stdout_noise_prefixes
             .iter()
             .map(|s| s.to_string())
             .collect();
         let plain = crate::log::is_plain();
+        let first_at = first_stdout_at.clone().expect("set when filter_stdout");
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut out = std::io::stdout().lock();
@@ -342,6 +461,12 @@ pub(crate) fn run_child(
                 let Ok(line) = line else { break };
                 if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                     continue;
+                }
+                {
+                    let mut g = first_at.lock().unwrap();
+                    if g.is_none() {
+                        *g = Some(Instant::now());
+                    }
                 }
                 let stripped = if plain {
                     biscuit_terminal::prelude::strip_escape_codes(&line)
@@ -356,13 +481,16 @@ pub(crate) fn run_child(
     };
 
     let stderr_handle = if filter_stderr {
-        let pipe = child.stderr.take().expect("stderr was set to piped");
+        let pipe = child.stderr.take().expect(
+            "child stderr must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stderr_noise_prefixes
             .iter()
             .map(|s| s.to_string())
             .collect();
         let plain = crate::log::is_plain();
+        let first_at = first_stderr_at.clone().expect("set when filter_stderr");
         Some(thread::spawn(move || {
             let reader = BufReader::new(pipe);
             let mut err = std::io::stderr().lock();
@@ -370,6 +498,12 @@ pub(crate) fn run_child(
                 let Ok(line) = line else { break };
                 if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                     continue;
+                }
+                {
+                    let mut g = first_at.lock().unwrap();
+                    if g.is_none() {
+                        *g = Some(Instant::now());
+                    }
                 }
                 let stripped = if plain {
                     biscuit_terminal::prelude::strip_escape_codes(&line)
@@ -409,9 +543,21 @@ pub(crate) fn run_child(
         join_with_timeout(handle, thread_join_timeout);
     }
 
+    let total_elapsed = spawned_at.elapsed();
+    let first_response = resolve_first_response(
+        None,
+        first_stdout_at.as_ref().and_then(|a| *a.lock().unwrap()),
+        first_stderr_at.as_ref().and_then(|a| *a.lock().unwrap()),
+        spawned_at,
+    );
+
     Ok(ProcessResult {
         data: exit_code,
         termination,
+        telemetry: ProcessTelemetry {
+            total_elapsed,
+            first_response_latency: first_response,
+        },
     })
 }
 
@@ -499,14 +645,21 @@ fn wait_with_signal_handling(
     child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
 
     let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Never signal a PID we no longer own — the kernel may have
+            // recycled `child_pid` onto an unrelated process by now.
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             if !child_in_own_pgroup {
                 // Child shares our process group; the terminal already
@@ -529,6 +682,10 @@ fn wait_with_signal_handling(
     }?;
 
     let status = child.wait()?;
+    // Set the exit flag BEFORE the `_guard` drops so a SIGINT that arrives
+    // in the narrow window between `wait` returning and the guard being
+    // dropped still sees an exited child and refuses to signal the PID.
+    child_exited.store(true, Ordering::SeqCst);
     let code = exit_code_from_status(status);
     let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
     let termination = if was_interrupted {
@@ -549,6 +706,344 @@ fn wait_with_signal_handling(
         exit_code_from_status(status),
         claudine::harness::ProcessTermination::Completed,
     ))
+}
+
+/// Polling wait loop used when an [`EarlyTermination`] receiver is attached
+/// to the structured stream executor.
+///
+/// Behaves like [`wait_with_signal_handling`] while also polling the
+/// stderr-bridge channel. When a signal arrives, the child's process group
+/// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
+/// period. User Ctrl-C still reports `Interrupted`; wrapper-driven early
+/// termination (rate-limit recovery) preserves a
+/// normal `Completed` termination so downstream failure handling can inspect
+/// synthesized summary fields instead of treating the run like a user cancel.
+///
+/// Isolated to the bridge path so non-OpenCode runs keep the existing
+/// `child.wait()`-based helper.
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
+fn wait_with_signal_and_early_termination(
+    child: &mut Child,
+    child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+    live_metrics: Option<LiveMetrics>,
+    stop_threshold: Duration,
+    wall_clock_timeout: Option<Duration>,
+    step_timeout: Option<Duration>,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
+    use std::sync::atomic::{AtomicBool, AtomicU8};
+
+    let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
+    let child_pid = child.id();
+
+    let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
+    let _guard = unsafe {
+        signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Don't signal a PID we no longer own (it may have been
+            // recycled onto an unrelated process).
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
+            let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if !child_in_own_pgroup {
+                return;
+            }
+            match count {
+                1 => {
+                    libc::kill(-(child_pid as i32), libc::SIGINT);
+                }
+                2 => {
+                    libc::kill(-(child_pid as i32), libc::SIGTERM);
+                }
+                _ => {
+                    libc::kill(-(child_pid as i32), libc::SIGKILL);
+                }
+            }
+        })
+    }?;
+
+    let mut early_termination: Option<EarlyTermination> = None;
+    let mut wall_clock_tripped = false;
+    let mut grace_deadline: Option<Instant> = None;
+    let poll_interval = Duration::from_millis(75);
+    let grace_period = Duration::from_secs(5);
+    let loop_start = Instant::now();
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            // Mark the PID as reaped before the 5-second grace window's
+            // signal guard can drop so we never signal a recycled PID.
+            child_exited.store(true, Ordering::SeqCst);
+            let code = exit_code_from_status(status);
+            let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
+            let termination = if was_interrupted {
+                claudine::harness::ProcessTermination::Interrupted
+            } else if wall_clock_tripped {
+                claudine::harness::ProcessTermination::TimedOut
+            } else if early_termination.is_some() {
+                early_termination_process_outcome(early_termination.as_ref())
+            } else {
+                claudine::harness::ProcessTermination::Completed
+            };
+            return Ok((code, termination, early_termination));
+        }
+
+        // Wall-clock timeout check: short-circuits directly to TimedOut
+        // without routing through the EarlyTermination surface (matches
+        // the legacy wait_with_timeout behavior for the streaming path).
+        if !wall_clock_tripped
+            && early_termination.is_none()
+            && let Some(budget) = wall_clock_timeout
+            && loop_start.elapsed() >= budget
+        {
+            tracing::warn!(
+                child_pid,
+                timeout_secs = budget.as_secs(),
+                "wall-clock timeout exceeded; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            wall_clock_tripped = true;
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
+            match early_rx.try_recv() {
+                Ok(signal) => {
+                    tracing::info!(
+                        child_pid,
+                        "early-termination signal received; sending SIGTERM to child process group",
+                    );
+                    let kill_pid = if child_in_own_pgroup {
+                        -(child_pid as i32)
+                    } else {
+                        child_pid as i32
+                    };
+                    unsafe {
+                        libc::kill(kill_pid, libc::SIGTERM);
+                    }
+                    early_termination = Some(signal);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    // Channel closed with no signal; continue normal polling.
+                }
+            }
+        }
+
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) =
+                detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
+        {
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        // Step-silence timeout check: user-configured hard kill that
+        // maps to ProcessTermination::TimedOut. Fires after every other
+        // early-termination branch so wall-clock and rate-limit recoveries
+        // keep precedence when they happen in the same poll tick.
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(silence_budget) = step_timeout
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
+        {
+            tracing::warn!(
+                child_pid,
+                step_timeout_secs = silence_budget.as_secs(),
+                "step_timeout exceeded; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if let Some(deadline) = grace_deadline
+            && Instant::now() >= deadline
+        {
+            tracing::warn!(
+                child_pid,
+                "child did not exit after early-termination SIGTERM; escalating to SIGKILL",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGKILL);
+            }
+            grace_deadline = None;
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+#[cfg(not(unix))]
+#[allow(clippy::too_many_arguments)]
+fn wait_with_signal_and_early_termination(
+    child: &mut Child,
+    _child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+    live_metrics: Option<LiveMetrics>,
+    stop_threshold: Duration,
+    wall_clock_timeout: Option<Duration>,
+    step_timeout: Option<Duration>,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
+    let mut early_termination: Option<EarlyTermination> = None;
+    let mut wall_clock_tripped = false;
+    let mut grace_deadline: Option<Instant> = None;
+    let poll_interval = Duration::from_millis(75);
+    let grace_period = Duration::from_secs(5);
+    let loop_start = Instant::now();
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let code = exit_code_from_status(status);
+            let termination = if wall_clock_tripped {
+                claudine::harness::ProcessTermination::TimedOut
+            } else if early_termination.is_some() {
+                early_termination_process_outcome(early_termination.as_ref())
+            } else {
+                claudine::harness::ProcessTermination::Completed
+            };
+            return Ok((code, termination, early_termination));
+        }
+
+        if !wall_clock_tripped
+            && early_termination.is_none()
+            && let Some(budget) = wall_clock_timeout
+            && loop_start.elapsed() >= budget
+        {
+            let _ = child.kill();
+            wall_clock_tripped = true;
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
+            match early_rx.try_recv() {
+                Ok(signal) => {
+                    let _ = child.kill();
+                    early_termination = Some(signal);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {}
+            }
+        }
+
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) =
+                detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
+        {
+            let _ = child.kill();
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(silence_budget) = step_timeout
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
+        {
+            let _ = child.kill();
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
+        if let Some(deadline) = grace_deadline
+            && Instant::now() >= deadline
+        {
+            let _ = child.kill();
+            grace_deadline = None;
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// Overwrite the synthesized summary fields when the stderr bridge or the
+/// OpenCode wait loop signals an early-exit condition.
+///
+/// Preserves any parser-provided `rate_limit` fields field-by-field:
+/// `is_throttled` is forced to `Some(true)`, `message` is only set when
+/// absent, and `reset_at` keeps the first non-`None` value.
+fn apply_early_termination_to_summary(
+    summary: &mut StreamExecutionSummary,
+    termination: &EarlyTermination,
+) {
+    match termination {
+        EarlyTermination::RateLimit { message, reset_at } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("usage_limit_reached".into());
+            summary.error_message = Some(message.clone());
+
+            let mut rate_limit = summary.rate_limit.clone().unwrap_or_default();
+            rate_limit.is_throttled = Some(true);
+            if rate_limit.message.is_none() {
+                rate_limit.message = Some(message.clone());
+            }
+            if rate_limit.reset_at.is_none()
+                && let Some(reset) = reset_at
+            {
+                rate_limit.reset_at = Some(*reset);
+            }
+            summary.rate_limit = Some(rate_limit);
+        }
+        EarlyTermination::CompletedButHung { .. } => {
+            summary.exit_code = 0;
+            summary.is_error = false;
+            summary.error_kind = None;
+            summary.error_message = None;
+        }
+        EarlyTermination::StepTimeout { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("step_timeout".into());
+            summary.error_message = Some(message.clone());
+        }
+    }
 }
 
 /// Wait for the child with a timeout, sending SIGTERM then SIGKILL.
@@ -711,19 +1206,28 @@ pub(crate) fn run_child_capture(
         command.process_group(0);
     }
 
+    let spawned_at = Instant::now();
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
+    // Shared first-response trackers (always piped in capture mode).
+    let first_stdout_at = Arc::new(std::sync::Mutex::new(None));
+    let first_stderr_at = Arc::new(std::sync::Mutex::new(None));
+
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
     // Capture stdout into a string, applying noise filtering
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stdout_noise: Vec<String> = io
         .stdout_noise_prefixes
         .iter()
         .map(|s| s.to_string())
         .collect();
+    let first_stdout_at_clone = Arc::clone(&first_stdout_at);
     let stdout_handle = thread::spawn(move || {
         let reader = BufReader::new(stdout_pipe);
         let mut captured = String::new();
@@ -731,6 +1235,12 @@ pub(crate) fn run_child_capture(
             let Ok(line) = line else { break };
             if stdout_noise.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
+            }
+            {
+                let mut g = first_stdout_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
             }
             if !captured.is_empty() {
                 captured.push('\n');
@@ -741,12 +1251,16 @@ pub(crate) fn run_child_capture(
     });
 
     // Capture stderr into a string, applying noise filtering
-    let stderr_pipe = child.stderr.take().expect("stderr was set to piped");
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let stderr_noise: Vec<String> = io
         .stderr_noise_prefixes
         .iter()
         .map(|s| s.to_string())
         .collect();
+    let first_stderr_at_clone = Arc::clone(&first_stderr_at);
     let stderr_handle = thread::spawn(move || {
         let reader = BufReader::new(stderr_pipe);
         let mut captured = String::new();
@@ -754,6 +1268,12 @@ pub(crate) fn run_child_capture(
             let Ok(line) = line else { break };
             if stderr_noise.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
+            }
+            {
+                let mut g = first_stderr_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
             }
             if !captured.is_empty() {
                 captured.push('\n');
@@ -782,6 +1302,14 @@ pub(crate) fn run_child_capture(
     let stdout = join_with_timeout_or(stdout_handle, thread_join_timeout, String::new());
     let stderr = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
 
+    let total_elapsed = spawned_at.elapsed();
+    let first_response = resolve_first_response(
+        None,
+        *first_stdout_at.lock().unwrap(),
+        *first_stderr_at.lock().unwrap(),
+        spawned_at,
+    );
+
     Ok(ProcessResult {
         data: CapturedChildOutput {
             exit_code,
@@ -789,48 +1317,488 @@ pub(crate) fn run_child_capture(
             stderr,
         },
         termination,
+        telemetry: ProcessTelemetry {
+            total_elapsed,
+            first_response_latency: first_response,
+        },
     })
 }
 
-/// Spawn a provider child process with structured stream parsing.
+/// Spawn a dedicated ticker that runs [`StreamTextRenderer::flush_if_idle`]
+/// every 30 seconds.
 ///
-/// Stdout is piped through the provider's stream parser. Parsed
-/// assistant text is written to the real stdout. Metadata accumulates
-/// in the parser state. Stderr is forwarded normally (with noise filtering).
+/// Independent from the prompt-scoped timing monitor so buffered markdown
+/// reaches stdout even on runs that have no prompt context (wrapper
+/// passthrough) and regardless of whether any periodic header is being
+/// emitted. The 30-second cadence and 30-second silence window are the
+/// tuning preserved from the previous heartbeat thread.
+fn spawn_flush_if_idle_ticker(
+    stream_output: Arc<StreamOutput>,
+    text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>>,
+) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+    const SILENCE_WINDOW: Duration = Duration::from_secs(30);
+    const CADENCE: Duration = Duration::from_secs(30);
+
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&done);
+    let handle = thread::spawn(move || {
+        let mut next_tick = Instant::now() + CADENCE;
+        while !done_flag.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_tick {
+                if let Ok(mut r) = text_renderer.lock() {
+                    let mut writer = stream_output.stdout_writer();
+                    r.flush_if_idle(&mut writer, SILENCE_WINDOW);
+                }
+                next_tick += CADENCE;
+                continue;
+            }
+            let sleep_for = next_tick
+                .saturating_duration_since(now)
+                .min(Duration::from_secs(1));
+            thread::sleep(sleep_for);
+        }
+    });
+
+    (done, handle)
+}
+
+/// Spawn the prompt-scoped timing monitor.
 ///
-/// Returns the stream execution summary (which includes exit code).
+/// Emits the periodic timing header anchored on the prompt's start time
+/// (`t=0`, `t=10m`, `t=20m`, …) plus two fire-once `Status::Warning`
+/// messages when the user-configured `timeout_warn` / `step_timeout_warn`
+/// thresholds cross. Only spawned for structured runs that carry a
+/// prompt context (every `claudine compose` / `inline-compose` /
+/// `sequence` run); wrapper passthrough runs skip the monitor entirely.
+///
+/// When both warnings cross on the same poll cycle, the step-scoped
+/// warning is emitted first per the feature spec.
+fn spawn_prompt_timing_monitor(
+    started_at: Instant,
+    started_at_wall: chrono::DateTime<chrono::Local>,
+    prompt_timing: PromptTimingContext,
+    hard_timeout: Option<Duration>,
+    hard_step_timeout: Option<Duration>,
+    live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
+) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&done);
+    let prompt_path_display = prompt_timing.absolute_path.display().to_string();
+
+    let handle = thread::spawn(move || {
+        let term = crate::log::terminal();
+
+        emit_timing_header(
+            HeaderKind::Zero,
+            Duration::ZERO,
+            &prompt_timing,
+            &prompt_path_display,
+            &term,
+            &stream_output,
+        );
+
+        let mut next_header_tick = started_at + prompt_timing_mod::HEADER_CADENCE;
+        let mut timeout_warn_fired = false;
+        let poll_interval = Duration::from_secs(1);
+
+        while !done_flag.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            let elapsed = now.saturating_duration_since(started_at);
+
+            if now >= next_header_tick {
+                emit_timing_header(
+                    HeaderKind::Tick,
+                    elapsed,
+                    &prompt_timing,
+                    &prompt_path_display,
+                    &term,
+                    &stream_output,
+                );
+                next_header_tick += prompt_timing_mod::HEADER_CADENCE;
+            }
+
+            // Step-scoped warning must be emitted BEFORE the prompt-scoped
+            // warning when both cross on the same poll cycle (feature spec
+            // §2, "Ordering when both cross in the same cycle").
+            if let Some(threshold) = prompt_timing.step_timeout_warn {
+                maybe_emit_step_timeout_warn(
+                    &prompt_timing,
+                    &prompt_path_display,
+                    &live_metrics,
+                    threshold,
+                    hard_step_timeout,
+                    started_at_wall,
+                    started_at,
+                    now,
+                    &term,
+                    &stream_output,
+                );
+            }
+
+            if let Some(threshold) = prompt_timing.timeout_warn
+                && !timeout_warn_fired
+                && elapsed >= threshold
+            {
+                emit_timeout_warn(
+                    &prompt_timing,
+                    &prompt_path_display,
+                    elapsed,
+                    threshold,
+                    hard_timeout,
+                    started_at_wall,
+                    started_at,
+                    &term,
+                    &stream_output,
+                );
+                timeout_warn_fired = true;
+            }
+
+            let sleep_for = next_header_tick
+                .saturating_duration_since(now)
+                .min(poll_interval);
+            thread::sleep(sleep_for);
+        }
+    });
+
+    (done, handle)
+}
+
+fn emit_timing_header(
+    kind: HeaderKind,
+    elapsed: Duration,
+    prompt_timing: &PromptTimingContext,
+    prompt_path_display: &str,
+    term: &Terminal,
+    stream_output: &StreamOutput,
+) {
+    let body = prompt_timing_mod::render_header_prose(kind, elapsed, prompt_timing);
+    let rendered = Prose::new(body).render(term);
+    stream_output.emit_stderr_line(&rendered);
+    tracing::info!(
+        prompt_path = %prompt_path_display,
+        elapsed_secs = elapsed.as_secs(),
+        tick_kind = match kind {
+            HeaderKind::Zero => "zero",
+            HeaderKind::Tick => "tick",
+        },
+        "prompt timing header emitted",
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn run_child_stream(
+fn emit_timeout_warn(
+    prompt_timing: &PromptTimingContext,
+    prompt_path_display: &str,
+    elapsed: Duration,
+    threshold: Duration,
+    hard_timeout: Option<Duration>,
+    started_at_wall: chrono::DateTime<chrono::Local>,
+    started_at: Instant,
+    term: &Terminal,
+    stream_output: &StreamOutput,
+) {
+    let hard_remaining = hard_timeout.and_then(|hard| {
+        let deadline_instant = started_at + hard;
+        let remaining = deadline_instant.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            None
+        } else {
+            let deadline_wall = started_at_wall + chrono::Duration::from_std(hard).ok()?;
+            Some((remaining, deadline_wall))
+        }
+    });
+    let body = prompt_timing_mod::render_timeout_warn_prose(elapsed, hard_remaining, prompt_timing);
+    let rendered = Status::from_prose(body)
+        .state(StatusState::Warning)
+        .render(term);
+    stream_output.emit_stderr_line(&rendered);
+    tracing::info!(
+        prompt_path = %prompt_path_display,
+        elapsed_secs = elapsed.as_secs(),
+        threshold_secs = threshold.as_secs(),
+        remaining_secs = hard_remaining.map(|(r, _)| r.as_secs()).unwrap_or(0),
+        hard_timeout_set = hard_timeout.is_some(),
+        "timeout_warn emitted",
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn maybe_emit_step_timeout_warn(
+    prompt_timing: &PromptTimingContext,
+    prompt_path_display: &str,
+    live_metrics: &LiveMetrics,
+    threshold: Duration,
+    hard_step_timeout: Option<Duration>,
+    started_at_wall: chrono::DateTime<chrono::Local>,
+    started_at: Instant,
+    now: Instant,
+    term: &Terminal,
+    stream_output: &StreamOutput,
+) {
+    let (silence, last_event_at) = {
+        let mut state = match live_metrics.lock() {
+            Ok(state) => state,
+            Err(_) => return,
+        };
+        if !progress::should_warn_stall(&state, now, threshold) {
+            return;
+        }
+        state.last_stall_warning_at = Some(now);
+        let Some(last_event) = state.last_event_at else {
+            return;
+        };
+        (now.saturating_duration_since(last_event), last_event)
+    };
+
+    let hard_remaining = hard_step_timeout.and_then(|hard| {
+        let deadline_instant = last_event_at + hard;
+        let remaining = deadline_instant.saturating_duration_since(now);
+        if remaining.is_zero() {
+            None
+        } else {
+            let last_event_wall = instant_to_local(started_at_wall, started_at, last_event_at);
+            let deadline_wall = last_event_wall + chrono::Duration::from_std(hard).ok()?;
+            Some((remaining, deadline_wall))
+        }
+    });
+
+    let body =
+        prompt_timing_mod::render_step_timeout_warn_prose(silence, hard_remaining, prompt_timing);
+    let rendered = Status::from_prose(body)
+        .state(StatusState::Warning)
+        .render(term);
+    stream_output.emit_stderr_line(&rendered);
+    tracing::info!(
+        prompt_path = %prompt_path_display,
+        silence_secs = silence.as_secs(),
+        threshold_secs = threshold.as_secs(),
+        remaining_secs = hard_remaining.map(|(r, _)| r.as_secs()).unwrap_or(0),
+        hard_step_timeout_set = hard_step_timeout.is_some(),
+        "step_timeout_warn emitted",
+    );
+}
+
+/// Translate a monotonic [`Instant`] into a wall-clock `DateTime<Local>`
+/// using the prompt-scoped anchor (`started_at_wall` / `started_at`).
+fn instant_to_local(
+    anchor_wall: chrono::DateTime<chrono::Local>,
+    anchor_instant: Instant,
+    sample: Instant,
+) -> chrono::DateTime<chrono::Local> {
+    if sample >= anchor_instant {
+        let delta = sample.duration_since(anchor_instant);
+        match chrono::Duration::from_std(delta) {
+            Ok(d) => anchor_wall + d,
+            Err(_) => anchor_wall,
+        }
+    } else {
+        let delta = anchor_instant.duration_since(sample);
+        match chrono::Duration::from_std(delta) {
+            Ok(d) => anchor_wall - d,
+            Err(_) => anchor_wall,
+        }
+    }
+}
+
+/// Resolve the OpenCode silent-stall recovery threshold.
+///
+/// This is separate from the user-facing stall warning: the warning fires
+/// first, then OpenCode gets additional time to recover before Claudine
+/// kills the hung process group. Invalid or non-positive values fall back to
+/// 5 minutes.
+/// Format a duration in seconds for internal early-termination messages.
+///
+/// Used by the step-silence and OpenCode-hang detectors to compose their
+/// `EarlyTermination::*` messages (these feed the summary, not the
+/// user-visible timing surface). Kept as a small local helper so the
+/// internal format stays stable.
+fn format_internal_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3_600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h{}m", secs / 3_600, (secs % 3_600) / 60)
+    }
+}
+
+/// Detect a step-silence timeout for the harness `step_timeout` field.
+///
+/// Returns `Some(EarlyTermination::StepTimeout)` when the time since the last
+/// stream event exceeds `step_timeout`. Returns `None` when `last_event_at`
+/// is not yet populated (first-event grace so provider startup does not
+/// trip a kill) or when silence is still under budget.
+///
+/// Unlike [`detect_opencode_hang_termination`], this helper does not gate on
+/// `in_flight` state or `provider_status`: any silence past the budget is a
+/// hard kill. The caller is responsible for SIGTERM escalation.
+fn detect_step_timeout(
+    metrics: &LiveMetrics,
+    now: Instant,
+    step_timeout: Duration,
+) -> Option<EarlyTermination> {
+    let state = metrics.lock().ok()?;
+    let last_event_at = state.last_event_at?;
+    let silence = now.saturating_duration_since(last_event_at);
+    if silence >= step_timeout {
+        let silence_text = format_internal_duration(silence.as_secs());
+        Some(EarlyTermination::StepTimeout {
+            message: format!(
+                "no stream activity for {silence_text}; terminating due to step_timeout"
+            ),
+        })
+    } else {
+        None
+    }
+}
+
+fn detect_opencode_hang_termination(
+    metrics: &LiveMetrics,
+    now: Instant,
+    stop_threshold: Duration,
+) -> Option<EarlyTermination> {
+    let state = metrics.lock().ok()?;
+    let last_event_at = state.last_event_at?;
+    let silence = now.saturating_duration_since(last_event_at);
+
+    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
+        return None;
+    }
+
+    let silence_text = format_internal_duration(silence.as_secs());
+    if silence >= stop_threshold && state.provider_status.as_deref() == Some("stop") {
+        return Some(EarlyTermination::CompletedButHung {
+            message: format!(
+                "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
+            ),
+        });
+    }
+
+    None
+}
+
+fn early_termination_process_outcome(
+    early_termination: Option<&EarlyTermination>,
+) -> claudine::harness::ProcessTermination {
+    match early_termination {
+        Some(EarlyTermination::StepTimeout { .. }) => {
+            claudine::harness::ProcessTermination::TimedOut
+        }
+        Some(EarlyTermination::CompletedButHung { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        Some(EarlyTermination::RateLimit { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        None => claudine::harness::ProcessTermination::Completed,
+    }
+}
+
+/// Signal a timing ticker thread to stop and join it.
+///
+/// Shared by the flush-if-idle ticker and the prompt-timing monitor —
+/// both return the same `(done_flag, handle)` pair and need identical
+/// teardown. `None` is accepted so callers can pass through optional
+/// handles without an extra match.
+fn stop_timing_ticker(ticker: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
+    if let Some((done, handle)) = ticker {
+        done.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+    }
+}
+
+/// Minimal fallback parser used when the real parser thread panics.
+struct ErrorParser {
+    exit_code: i32,
+}
+
+impl SemanticStreamParser for ErrorParser {
+    fn feed_line(&mut self, _line: &str) -> std::result::Result<(), StreamParseError> {
+        Ok(())
+    }
+
+    fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
+        StreamExecutionSummary {
+            is_error: true,
+            error_kind: Some("parse_failure".into()),
+            error_message: Some("Stream parser thread panicked".into()),
+            exit_code: self.exit_code,
+            ..Default::default()
+        }
+    }
+}
+
+/// Callback type used by [`run_child_stream_semantic`] for assistant text.
+pub(crate) type OutputTextCallback = Box<dyn FnMut(&str) + Send + 'static>;
+
+/// Callback type used by [`run_child_stream_semantic`] for reasoning text.
+pub(crate) type ReasoningCallback = Box<dyn FnMut(&str) + Send + 'static>;
+
+/// Factory signature used by [`run_child_stream_semantic`] to construct the
+/// parser inside the stdout reader thread.
+///
+/// The caller receives two callbacks: one for stdout markdown
+/// ([`SemanticEvent::OutputText`]) and one for reasoning text
+/// ([`SemanticEvent::Reasoning`]). The reasoning callback is currently a
+/// no-op in the structured-stream path because `LiveSemanticSink` renders
+/// reasoning directly through its section-aware stderr emitter. The second
+/// parameter is retained for signature compatibility.
+///
+/// [`SemanticEvent::OutputText`]: claudine::stream::semantic::SemanticEvent::OutputText
+/// [`SemanticEvent::Reasoning`]: claudine::stream::semantic::SemanticEvent::Reasoning
+/// [`LiveSemanticSink`]: super::live_semantic_sink::LiveSemanticSink
+pub(crate) type SemanticParserBuilder = Box<
+    dyn FnOnce(OutputTextCallback, ReasoningCallback) -> Box<dyn SemanticStreamParser>
+        + Send
+        + 'static,
+>;
+
+/// Spawn a provider child process with structured semantic stream parsing.
+///
+/// This is the Phase 3.4 replacement for [`run_child_stream`]. The
+/// difference is the stdout loop: instead of switching on a returned
+/// [`SemanticEvent`]s, the parser drives a [`SemanticEventSink`] that the
+/// caller has already wired up for status rendering, dispatch, metrics,
+/// and JSONL logging. This function's only rendering responsibility is
+/// wiring the terminal-local `StreamTextRenderer` instance to the sink
+/// through the builder callback so it can run inside the parser thread.
+/// Reasoning rendering is owned entirely by `LiveSemanticSink`.
+///
+/// [`SemanticEventSink`]: claudine::stream::semantic::SemanticEventSink
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_child_stream_semantic(
     binary: &Path,
     args: &[String],
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
     timeout: Option<u64>,
+    step_timeout: Option<u64>,
     stderr_noise_prefixes: &[&str],
     suppress_stderr_on_success: bool,
-    show_progress_heartbeat: bool,
+    show_timing_output: bool,
     stdin_seed: Option<&str>,
-    parser: Box<dyn StreamParser>,
+    build_parser: SemanticParserBuilder,
     child_spawned: &mut bool,
+    live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
+    stderr_bridge: Option<StderrBridgeHandle>,
+    prompt_timing: Option<PromptTimingContext>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
     let needs_stdin_pipe = stdin_seed.is_some();
     let started_at = Instant::now();
+    let started_at_wall = chrono::Local::now();
 
-    // Always pipe stderr in structured stream mode so we can intercept and
-    // format raw API error JSON into human-readable messages.
     let mut command = Command::new(binary);
     command
         .args(args)
         .env_clear()
         .envs(env)
         .current_dir(cwd)
-        // Structured stream mode is only used for non-interactive runs. When
-        // there is no stdin seed to write, closing stdin prevents providers
-        // from waiting on the caller's terminal after they have already
-        // produced their useful output.
         .stdin(if needs_stdin_pipe {
             Stdio::piped()
         } else {
@@ -848,65 +1816,139 @@ pub(crate) fn run_child_stream(
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
-    let heartbeat = spawn_progress_heartbeat(show_progress_heartbeat, started_at);
+
+    // Terminal-local renderer for OutputText (stdout markdown). Wrapped
+    // in Arc<Mutex<_>> so the builder closures can retain independent
+    // handles without untangling lifetimes across the FnMut boundary of
+    // the sink's callback storage. Shared with the flush-if-idle ticker
+    // so buffered markdown can be surfaced even when the provider stalls
+    // without closing stdout.
+    //
+    // Note: reasoning rendering is owned entirely by LiveSemanticSink,
+    // which emits BlockQuote-formatted thinking text through the
+    // section-aware stderr emitter. The reasoning_cb passed to the
+    // parser builder is a no-op.
+    let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
+        Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
+
+    let stdout_output = stream_output.clone();
+    let wait_loop_metrics = live_metrics.clone();
+
+    // Dedicated 30-second ticker that flushes any buffered markdown the
+    // provider has not terminated with a paragraph boundary. Independent
+    // from the prompt-timing monitor per feature spec.
+    let flush_ticker = Some(spawn_flush_if_idle_ticker(
+        stream_output.clone(),
+        text_renderer.clone(),
+    ));
+
+    // Prompt-scoped periodic header + warnings. Only started when the
+    // caller provided a prompt context (every composition run) and when
+    // the CLI is rendering timing output at all. Wrapper passthrough
+    // runs pass `prompt_timing = None` and skip the monitor entirely.
+    let timing_monitor = if show_timing_output {
+        prompt_timing.map(|ctx| {
+            spawn_prompt_timing_monitor(
+                started_at,
+                started_at_wall,
+                ctx,
+                timeout.map(Duration::from_secs),
+                step_timeout.map(Duration::from_secs),
+                live_metrics.clone(),
+                stream_output.clone(),
+            )
+        })
+    } else {
+        None
+    };
+
+    // First-response trackers for structured stream mode:
+    // semantic stdout (preferred), raw stdout (fallback), stderr (final fallback).
+    let first_semantic_at = Arc::new(std::sync::Mutex::new(None));
+    let first_raw_stdout_at = Arc::new(std::sync::Mutex::new(None));
+    let first_stderr_at = Arc::new(std::sync::Mutex::new(None));
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
-
-    // Pipe stdout through the stream parser
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stream_span = Span::current();
+    let stdout_renderer = text_renderer.clone();
+    let first_semantic_at_clone = Arc::clone(&first_semantic_at);
+    let first_raw_stdout_at_clone = Arc::clone(&first_raw_stdout_at);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
         let reader = BufReader::new(stdout_pipe);
-        let mut out = std::io::stdout().lock();
-        let mut parser = parser;
+        let mut out = stdout_output.stdout_writer();
+
+        let text_renderer = stdout_renderer;
+
+        let output_cb: OutputTextCallback = {
+            let text = text_renderer.clone();
+            let mut writer = stdout_output.stdout_writer();
+            let first_at = first_semantic_at_clone;
+            Box::new(move |chunk: &str| {
+                if !chunk.is_empty() {
+                    let mut g = first_at.lock().unwrap();
+                    if g.is_none() {
+                        *g = Some(Instant::now());
+                    }
+                }
+                if let Ok(mut r) = text.lock() {
+                    r.push(&mut writer, chunk);
+                }
+            })
+        };
+        let reasoning_cb: ReasoningCallback = Box::new(|_chunk: &str| {});
+
+        let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
         let mut fallback_mode = false;
-        let mut renderer = StreamTextRenderer::new();
-        let mut thinking_renderer = StreamThinkingRenderer::new();
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
 
+            {
+                let mut g = first_raw_stdout_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
+            }
+
             if fallback_mode {
-                // Fatal parse error: forward remaining raw stdout
                 let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
                 continue;
             }
 
             match parser.feed_line(&line) {
-                Ok(Some(StreamChunk::Text(text))) => {
-                    thinking_renderer.flush_if_active();
-                    renderer.push(&mut out, &text);
-                }
-                Ok(Some(StreamChunk::Thinking(text))) => {
-                    thinking_renderer.push(&text);
-                }
-                Ok(None) => {
-                    // Metadata-only line
-                }
+                Ok(()) => {}
                 Err(StreamParseError::MalformedLine { .. }) => {
-                    // Silently skip — providers (especially Gemini) mix
-                    // non-JSON noise (stack traces, hook logs) into stdout.
+                    // Semantic parsers emit Warning events instead of
+                    // returning MalformedLine, but guard the variant here
+                    // in case a legacy adapter still surfaces it.
                     tracing::debug!("skipping malformed stream line: {line}");
                 }
                 Err(StreamParseError::Fatal(_)) => {
-                    // Fall back to raw forwarding
-                    thinking_renderer.flush_if_active();
-                    renderer.flush_remaining(&mut out);
+                    if let Ok(mut r) = text_renderer.lock() {
+                        r.flush_remaining(&mut out);
+                    }
                     fallback_mode = true;
                     let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
                 }
             }
         }
 
-        thinking_renderer.flush_if_active();
-        renderer.flush_remaining(&mut out);
+        if let Ok(mut r) = text_renderer.lock() {
+            r.flush_remaining(&mut out);
+        }
         parser
     });
 
-    // Stderr processing thread: filters noise prefixes and formats raw API errors.
-    let pipe = child.stderr.take().expect("stderr was set to piped");
+    let pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let prefixes: Vec<String> = stderr_noise_prefixes
         .iter()
         .map(|s| s.to_string())
@@ -914,6 +1956,17 @@ pub(crate) fn run_child_stream(
     let plain = crate::log::is_plain();
     let stderr_term = crate::log::terminal();
     let stderr_span = Span::current();
+    let (mut bridge_for_thread, finalize_for_main, early_terminate_rx) = match stderr_bridge {
+        Some(StderrBridgeHandle {
+            bridge,
+            finalize,
+            early_terminate,
+        }) => (Some(bridge), Some(finalize), early_terminate),
+        None => (None, None, None),
+    };
+    let has_bridge = bridge_for_thread.is_some();
+    let capture_always = has_bridge;
+    let first_stderr_at_clone = Arc::clone(&first_stderr_at);
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let reader = BufReader::new(pipe);
@@ -923,7 +1976,25 @@ pub(crate) fn run_child_stream(
             if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
-            // Format raw API error JSON into human-readable messages
+
+            {
+                let mut g = first_stderr_at_clone.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(Instant::now());
+                }
+            }
+
+            // When a bridge is installed, offer the raw line first so it can
+            // classify structured log records (and their multi-line tails) in
+            // real time. Consumed lines are suppressed from raw passthrough
+            // and never land in the captured buffer — the semantic event the
+            // bridge emitted already carries everything operators need.
+            if let Some(bridge) = bridge_for_thread.as_mut()
+                && matches!(bridge.ingest(&line), StderrIngestOutcome::Consumed)
+            {
+                continue;
+            }
+
             let formatted = crate::output::try_format_api_error(&line, &stderr_term);
             let output_line = formatted.as_deref().unwrap_or(&line);
             let output_line = if plain {
@@ -932,12 +2003,13 @@ pub(crate) fn run_child_stream(
                 output_line.to_string()
             };
 
-            if suppress_stderr_on_success {
+            if suppress_stderr_on_success || capture_always {
                 if !captured.is_empty() {
                     captured.push('\n');
                 }
                 captured.push_str(&output_line);
-            } else {
+            }
+            if !suppress_stderr_on_success {
                 let mut err = std::io::stderr().lock();
                 let _ = writeln!(err, "{output_line}");
             }
@@ -945,28 +2017,58 @@ pub(crate) fn run_child_stream(
         captured
     });
 
-    // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
     if let Some(seed) = stdin_seed
         && let Some(mut stdin_pipe) = child.stdin.take()
     {
         stdin_pipe.write_all(seed.as_bytes())?;
     }
 
-    let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
+    // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"
+    // grace window (120s). It does not drive a user-visible timing line.
+    let opencode_stop_threshold = Duration::from_secs(120);
+    let wall_clock_timeout = timeout.map(Duration::from_secs);
+    let step_timeout_duration = step_timeout.map(Duration::from_secs);
+    let needs_advanced_wait = wall_clock_timeout.is_some()
+        || step_timeout_duration.is_some()
+        || early_terminate_rx.is_some();
+    let (exit_code, termination, early_termination) = if needs_advanced_wait {
+        // Synthesize a disconnected receiver when no stderr bridge is
+        // installed so the wait loop can still enforce wall-clock and
+        // step timeouts for non-OpenCode providers.
+        let rx = early_terminate_rx.unwrap_or_else(|| {
+            let (_tx, rx) = std::sync::mpsc::channel();
+            rx
+        });
+        wait_with_signal_and_early_termination(
+            &mut child,
+            true,
+            rx,
+            Some(wait_loop_metrics),
+            opencode_stop_threshold,
+            wall_clock_timeout,
+            step_timeout_duration,
+        )?
     } else {
-        wait_with_signal_handling(&mut child, true)?
+        let (code, term) = wait_with_signal_handling(&mut child, true)?;
+        (code, term, None)
     };
 
-    // The main child has exited, but descendant processes (e.g. subagents
-    // spawned by OpenCode's Task tool) may still hold inherited pipe fds.
-    // Kill the entire process group so reader threads unblock.
-    kill_process_group(&mut child);
+    if let Some(
+        EarlyTermination::CompletedButHung { message } | EarlyTermination::StepTimeout { message },
+    ) = early_termination.as_ref()
+    {
+        let rendered = Status::new(message)
+            .state(StatusState::Warning)
+            .render(&crate::log::terminal());
+        stream_output.emit_stderr_line(&rendered);
+    }
 
-    stop_progress_heartbeat(heartbeat);
+    kill_process_group(&mut child);
+    stop_timing_ticker(flush_ticker);
+    stop_timing_ticker(timing_monitor);
 
     let thread_join_timeout = Duration::from_secs(5);
-    let parser = join_with_timeout_or(
+    let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(
         stdout_handle,
         thread_join_timeout,
         Box::new(ErrorParser { exit_code }),
@@ -982,207 +2084,61 @@ pub(crate) fn run_child_stream(
         summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
     }
 
-    Ok(ProcessResult {
-        data: summary,
-        termination,
-    })
-}
-
-fn spawn_progress_heartbeat(
-    enabled: bool,
-    started_at: Instant,
-) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
-    if !enabled {
-        return None;
+    // Apply early-termination overrides before the stderr finalizer so the
+    // finalizer's badge recomputation observes the synthesized error fields
+    // (for example, a `usage_limit_reached` error_kind that maps to a Quota
+    // badge). The bridge signaled early termination from the stderr thread;
+    // the main wait loop then killed the child's process group, so the raw
+    // exit code reflects SIGTERM rather than a meaningful provider status.
+    if let Some(termination) = early_termination.as_ref() {
+        apply_early_termination_to_summary(&mut summary, termination);
     }
 
-    let done = Arc::new(AtomicBool::new(false));
-    let done_flag = Arc::clone(&done);
-    let handle = thread::spawn(move || {
-        let interval = Duration::from_secs(30);
-        let mut next_tick = started_at + interval;
-
-        while !done_flag.load(Ordering::Relaxed) {
-            let now = Instant::now();
-            if now >= next_tick {
-                let elapsed_ms = started_at.elapsed().as_millis() as u64;
-                eprintln!(
-                    "status: still running ({} elapsed)",
-                    claudine::stream::stderr::format_duration(elapsed_ms)
-                );
-                next_tick += interval;
-                continue;
-            }
-
-            let sleep_for = next_tick
-                .saturating_duration_since(now)
-                .min(Duration::from_secs(1));
-            thread::sleep(sleep_for);
+    // Merge stderr-derived diagnostics after both reader threads have
+    // joined. The bridge accumulated counters into its own shared state
+    // during streaming; the finalizer reads that state and enriches the
+    // summary. `stderr_text` is attached here so every structured
+    // bridge-enabled session carries the captured stderr regardless of
+    // `suppress_stderr_on_success`. Badge recomputation happens inside
+    // the finalizer so stderr-derived diagnostics show up in the final
+    // `summary.badges` vector.
+    if let Some(finalize) = finalize_for_main {
+        if !captured.is_empty() && summary.stderr_text.is_none() {
+            summary.stderr_text = Some(captured.clone());
         }
-    });
-
-    Some((done, handle))
-}
-
-fn stop_progress_heartbeat(heartbeat: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
-    if let Some((done, handle)) = heartbeat {
-        done.store(true, Ordering::Relaxed);
-        let _ = handle.join();
-    }
-}
-
-/// Spawn a provider child process with structured stream parsing, capturing output.
-///
-/// Like `run_child_stream` but captures assistant text instead of printing.
-/// Used by compose flows.
-#[allow(dead_code, clippy::too_many_arguments)]
-pub(crate) fn run_child_stream_capture(
-    binary: &Path,
-    args: &[String],
-    env: &HashMap<OsString, OsString>,
-    cwd: &Path,
-    timeout: Option<u64>,
-    stderr_noise_prefixes: &[&str],
-    stdin_seed: Option<&str>,
-    parser: Box<dyn StreamParser>,
-) -> Result<ProcessResult<StreamExecutionSummary>> {
-    debug_assert!(env.contains_key(&OsString::from("PATH")));
-    debug_assert!(env.contains_key(&OsString::from("HOME")));
-
-    let needs_stdin_pipe = stdin_seed.is_some();
-    let started_at = Instant::now();
-
-    let mut command = Command::new(binary);
-    command
-        .args(args)
-        .env_clear()
-        .envs(env)
-        .current_dir(cwd)
-        .stdin(if needs_stdin_pipe {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+        finalize(&mut summary);
     }
 
-    let mut child = command.spawn()?;
-    Span::current().record("child_pid", tracing::field::display(child.id()));
-
-    // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
-
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
-    let capture_span = Span::current();
-    let stdout_handle = thread::spawn(move || {
-        let _capture_guard = capture_span.enter();
-        let _parse_span = info_span!("stream_parse").entered();
-        let reader = BufReader::new(stdout_pipe);
-        let mut parser = parser;
-
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            // Feed all lines; text accumulates in parser.assistant_text
-            let _ = parser.feed_line(&line);
-        }
-
-        parser
-    });
-
-    let stderr_pipe = child.stderr.take().expect("stderr was set to piped");
-    let stderr_noise: Vec<String> = stderr_noise_prefixes
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let stderr_span = Span::current();
-    let stderr_handle = thread::spawn(move || {
-        let _stderr_guard = stderr_span.enter();
-        let reader = BufReader::new(stderr_pipe);
-        let mut captured = String::new();
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            if stderr_noise
-                .iter()
-                .any(|prefix| line.starts_with(prefix.as_str()))
-            {
-                continue;
-            }
-            if !captured.is_empty() {
-                captured.push('\n');
-            }
-            captured.push_str(&line);
-        }
-        captured
-    });
-
-    // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
-    if let Some(seed) = stdin_seed
-        && let Some(mut stdin_pipe) = child.stdin.take()
-    {
-        stdin_pipe.write_all(seed.as_bytes())?;
-    }
-
-    let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
-    } else {
-        wait_with_signal_handling(&mut child, true)?
-    };
-
-    kill_process_group(&mut child);
-
-    let thread_join_timeout = Duration::from_secs(5);
-    let parser = join_with_timeout_or(
-        stdout_handle,
-        thread_join_timeout,
-        Box::new(ErrorParser { exit_code }),
+    let first_response = resolve_first_response(
+        *first_semantic_at.lock().unwrap(),
+        *first_raw_stdout_at.lock().unwrap(),
+        *first_stderr_at.lock().unwrap(),
+        started_at,
     );
-    let stderr_text = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
-
-    let mut summary = parser.finish(exit_code);
-    if summary.duration_ms.is_none() {
-        summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
-    }
-    if !stderr_text.trim().is_empty() {
-        if summary.error_message.is_none() && exit_code != 0 {
-            summary.error_message = Some(stderr_text.lines().next().unwrap_or("").to_string());
-            summary.is_error = true;
-        }
-        summary.stderr_text = Some(stderr_text);
-    }
 
     Ok(ProcessResult {
         data: summary,
         termination,
+        telemetry: ProcessTelemetry {
+            total_elapsed: started_at.elapsed(),
+            first_response_latency: first_response,
+        },
     })
 }
 
-/// Minimal fallback parser used when the real parser thread panics.
-struct ErrorParser {
-    exit_code: i32,
-}
-
-impl StreamParser for ErrorParser {
-    fn feed_line(
-        &mut self,
-        _line: &str,
-    ) -> std::result::Result<Option<StreamChunk>, StreamParseError> {
-        Ok(None)
-    }
-
-    fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
-            is_error: true,
-            error_kind: Some("parse_failure".into()),
-            error_message: Some("Stream parser thread panicked".into()),
-            exit_code: self.exit_code,
-            ..Default::default()
-        }
-    }
+/// Resolve first-response latency from three observed timestamps.
+///
+/// Preferred precedence: semantic stdout > raw stdout > stderr.
+fn resolve_first_response(
+    semantic: Option<Instant>,
+    raw_stdout: Option<Instant>,
+    stderr: Option<Instant>,
+    spawned_at: Instant,
+) -> Option<Duration> {
+    semantic
+        .or(raw_stdout)
+        .or(stderr)
+        .map(|t| t.saturating_duration_since(spawned_at))
 }
 
 fn exit_code_from_status(status: ExitStatus) -> i32 {
@@ -1204,132 +2160,55 @@ fn exit_code_from_status(status: ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use darkmatter::markdown::output::terminal::{TerminalImageMode, TerminalOptions};
 
-    #[cfg(unix)]
-    fn current_env() -> HashMap<OsString, OsString> {
-        std::env::vars_os().collect()
+    fn test_renderer() -> StreamTextRenderer {
+        StreamTextRenderer {
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            partial_line_committed: false,
+            last_block_growth_at: None,
+            term: None,
+            terminal_options: None,
+        }
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn structured_capture_drains_stderr_and_preserves_diagnostics() {
-        let env = current_env();
-        let cwd = std::env::current_dir().unwrap();
-        let parser = claudine::stream::create_parser(
-            claudine::events::Provider::Claude,
-            claudine::stream::parser::NullSink,
-            claudine::stream::ParserConfig::default(),
-        );
-        let script = r#"
-i=0
-while [ "$i" -lt 20000 ]; do
-  echo "provider stderr line $i" >&2
-  i=$((i + 1))
-done
-printf '%s\n' '{"type":"init","session_id":"sess-1","model":"claude-sonnet"}'
-printf '%s\n' '{"type":"assistant","content":[{"type":"text","text":"hello"}]}'
-printf '%s\n' '{"type":"result","duration_ms":25}'
-"#;
-        let args = vec!["-c".to_string(), script.to_string()];
-
-        let result = run_child_stream_capture(
-            Path::new("/bin/sh"),
-            &args,
-            &env,
-            &cwd,
-            Some(5),
-            &[],
-            None,
-            parser,
-        )
-        .unwrap();
-        let summary = result.data;
-
-        assert_eq!(summary.exit_code, 0);
-        assert_eq!(summary.assistant_text, "hello");
-        assert!(summary.stderr_text.is_some());
-        assert!(
-            summary
-                .stderr_text
-                .as_deref()
-                .unwrap()
-                .contains("provider stderr line")
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn structured_stream_falls_back_to_wall_clock_duration_when_missing() {
-        let env = current_env();
-        let cwd = std::env::current_dir().unwrap();
-        let parser = claudine::stream::create_parser(
-            claudine::events::Provider::OpenCode,
-            claudine::stream::parser::NullSink,
-            claudine::stream::ParserConfig {
-                model: Some("minimax/MiniMax-M2.5-highspeed".into()),
-            },
-        );
-        let script = r#"
-printf '%s\n' '{"type":"session_start","model":"minimax/MiniMax-M2.5-highspeed"}'
-printf '%s\n' '{"type":"step_start","sessionID":"ses_1"}'
-printf '%s\n' '{"type":"text","text":"hello"}'
-printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens":{"input":150,"output":101,"total":251,"cache":{"read":42}}}}'
-"#;
-        let args = vec!["-c".to_string(), script.to_string()];
-
-        let mut spawned = false;
-        let result = run_child_stream(
-            Path::new("/bin/sh"),
-            &args,
-            &env,
-            &cwd,
-            Some(5),
-            &[],
-            false,
-            false,
-            None,
-            parser,
-            &mut spawned,
-        )
-        .unwrap();
-        let summary = result.data;
-
-        assert!(spawned);
-        assert_eq!(summary.exit_code, 0);
-        assert_eq!(summary.assistant_text, "hello");
-        assert!(summary.duration_ms.is_some());
-        assert!(summary.duration_ms.unwrap() < 5_000);
+    fn markdown_renderer() -> StreamTextRenderer {
+        let term = Terminal::new_optimistic(80);
+        let mut opts = TerminalOptions::default();
+        opts.image_mode = TerminalImageMode::Never;
+        StreamTextRenderer {
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            partial_line_committed: false,
+            last_block_growth_at: None,
+            term: Some(term),
+            terminal_options: Some(opts),
+        }
     }
 
     #[test]
     fn stream_text_renderer_flushes_on_blank_line() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "First paragraph.\n\nSecond");
         let flushed = String::from_utf8(out).unwrap();
 
         assert!(flushed.contains("First paragraph."));
-        // "Second" has no newline yet — sits in line_buffer
-        assert_eq!(renderer.line_buffer, "Second");
+        // Trailing partial "Second" now streams raw immediately because
+        // StreamOutput coordination guarantees stderr lines won't interleave.
+        assert!(flushed.contains("Second"));
+        assert!(renderer.line_buffer.is_empty());
+        assert!(renderer.partial_line_committed);
         assert!(renderer.block_buffer.is_empty());
     }
 
     #[test]
     fn stream_text_renderer_buffers_code_fence() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         // Opening fence + code — should NOT flush yet
@@ -1345,33 +2224,46 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
     }
 
     #[test]
-    fn stream_text_renderer_flush_remaining_drains_everything() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+    fn stream_text_renderer_streams_partial_line_immediately() {
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "trailing text without newline");
-        assert!(out.is_empty());
-
-        renderer.flush_remaining(&mut out);
         let flushed = String::from_utf8(out).unwrap();
         assert_eq!(flushed, "trailing text without newline");
+        assert!(renderer.line_buffer.is_empty());
+        assert!(renderer.partial_line_committed);
+    }
+
+    #[test]
+    fn stream_text_renderer_newline_after_partial_emits_only_newline() {
+        // When the partial line was already streamed raw, the arriving
+        // newline must not cause the line to be re-rendered — otherwise the
+        // user sees the same content twice (once raw, once markdown).
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "Group A: progress.rs");
+        renderer.push(&mut out, "\n");
+        let flushed = String::from_utf8(out).unwrap();
+        assert_eq!(flushed, "Group A: progress.rs\n");
+        assert!(!renderer.partial_line_committed);
+    }
+
+    #[test]
+    fn stream_text_renderer_flush_remaining_does_not_duplicate_streamed_text() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "already streamed");
+        renderer.flush_remaining(&mut out);
+        let flushed = String::from_utf8(out).unwrap();
+        assert_eq!(flushed, "already streamed");
     }
 
     #[test]
     fn stream_text_renderer_flushes_list_items_immediately() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "1. first item\n2. second item\n");
@@ -1382,47 +2274,490 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
         assert!(renderer.line_buffer.is_empty());
     }
 
-    #[cfg(unix)]
     #[test]
-    fn structured_stream_closes_stdin_when_no_seed() {
-        let env = current_env();
-        let cwd = std::env::current_dir().unwrap();
-        let parser = claudine::stream::create_parser(
-            claudine::events::Provider::OpenCode,
-            claudine::stream::parser::NullSink,
-            claudine::stream::ParserConfig {
-                model: Some("minimax/MiniMax-M2.5-highspeed".into()),
+    fn markdown_streamed_list_items_do_not_gain_blank_lines() {
+        let mut renderer = markdown_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(
+            &mut out,
+            "- Hash: `f525870d`\n- Package: `claudine`\n- Operation: `feat`\n",
+        );
+        let flushed =
+            biscuit_terminal::prelude::strip_escape_codes(String::from_utf8(out).expect("utf8"));
+
+        assert!(
+            !flushed.contains("\n\n"),
+            "streamed list items should stay contiguous; got: {flushed:?}"
+        );
+    }
+
+    #[test]
+    fn normalize_stream_rendered_newlines_matches_source_trailing_newlines() {
+        assert_eq!(
+            normalize_stream_rendered_newlines("- item\n", "- item\n\n"),
+            "- item\n"
+        );
+        assert_eq!(
+            normalize_stream_rendered_newlines("paragraph\n\n", "paragraph\n\n\n"),
+            "paragraph\n\n"
+        );
+        assert_eq!(normalize_stream_rendered_newlines("done", "done\n"), "done");
+    }
+
+    #[test]
+    fn flush_if_idle_emits_block_after_threshold() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // Paragraph without trailing blank line — sits in block_buffer.
+        renderer.push(&mut out, "dangling paragraph line\n");
+        assert!(
+            !renderer.block_buffer.is_empty(),
+            "content should be buffered until a boundary or idle flush"
+        );
+        assert!(
+            out.is_empty(),
+            "block buffered text should not be emitted yet"
+        );
+
+        // Threshold not reached — flush_if_idle is a no-op.
+        assert!(!renderer.flush_if_idle(&mut out, Duration::from_secs(60)));
+        assert!(out.is_empty());
+        assert!(!renderer.block_buffer.is_empty());
+
+        // After the idle window has elapsed, the buffered block flushes.
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(
+            flushed.contains("dangling paragraph line"),
+            "expected flushed output to contain the buffered paragraph; got: {flushed:?}"
+        );
+        assert!(renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_does_not_emit_when_block_empty() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // No buffered content — must not flush regardless of threshold.
+        assert!(!renderer.flush_if_idle(&mut out, Duration::from_millis(0)));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_resets_growth_clock() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // Accumulate content, wait past threshold, flush.
+        renderer.push(&mut out, "first block\n");
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+        assert!(renderer.block_buffer.is_empty());
+
+        // New content arrives — growth clock restarts. An immediate idle
+        // check with a large threshold must not flush the fresh content.
+        renderer.push(&mut out, "second block\n");
+        assert!(
+            !renderer.flush_if_idle(&mut out, Duration::from_secs(30)),
+            "growth clock should restart when new content lands"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+
+        // After the new block has been idle long enough, it flushes.
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+        assert!(renderer.block_buffer.is_empty());
+
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(flushed.contains("first block"));
+        assert!(flushed.contains("second block"));
+    }
+
+    #[test]
+    fn flushes_long_prose_on_sentence_terminator() {
+        // After the block buffer accumulates substantial prose (past the
+        // sentence-flush threshold) and the latest line ends with sentence-
+        // terminating punctuation, flush early so the user sees progress
+        // without waiting for a blank line.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        let long_sentence = "This is a long sentence the agent is writing as part of an \
+            extended paragraph that has not yet reached a blank line boundary and would \
+            otherwise sit invisible in the buffer waiting for darkmatter to render it.\n";
+        assert!(long_sentence.len() > SENTENCE_FLUSH_MIN_BYTES);
+
+        renderer.push(&mut out, long_sentence);
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(
+            flushed.contains("extended paragraph"),
+            "long sentence-terminated line should flush early; got: {flushed:?}"
+        );
+        assert!(renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn does_not_flush_short_line_on_sentence_terminator() {
+        // A short response like "OK." must remain buffered — only buffers
+        // past the size threshold are eligible for sentence-level flush.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "OK.\n");
+        assert!(
+            out.is_empty(),
+            "short line should not trigger sentence flush"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn does_not_sentence_flush_inside_code_fence() {
+        // Content inside a fenced block must never trigger sentence-level
+        // flush — the renderer waits for the closing fence.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "```\n");
+        let long_inside = "This is a really long line inside a code fence that ends with a \
+            period and is more than the sentence-flush threshold characters long because \
+            we want to verify that fence content is never flushed by the heuristic.\n";
+        assert!(long_inside.len() > SENTENCE_FLUSH_MIN_BYTES);
+        renderer.push(&mut out, long_inside);
+
+        assert!(
+            out.is_empty(),
+            "fenced content must not sentence-flush; got: {:?}",
+            String::from_utf8(out.clone()).unwrap()
+        );
+        assert!(renderer.in_code_fence);
+    }
+
+    #[test]
+    fn does_not_sentence_flush_when_line_lacks_terminator() {
+        // A long line that does not end in . ! or ? must not flush — only
+        // sentence-terminated lines qualify.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        let long_no_terminator = "This is a long line that the agent is writing without \
+            ever reaching a terminating period and so it should remain buffered until \
+            either a blank line arrives or the idle threshold expires from above and so \
+            we keep going for a while longer to comfortably exceed the byte threshold\n";
+        assert!(long_no_terminator.len() > SENTENCE_FLUSH_MIN_BYTES);
+
+        renderer.push(&mut out, long_no_terminator);
+        assert!(
+            out.is_empty(),
+            "non-terminated line must not sentence-flush"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_ticker_contract_surfaces_dangling_paragraph() {
+        // Contract exercised by `spawn_flush_if_idle_ticker`: when the
+        // 30-second ticker fires idle, buffered assistant text must reach
+        // stdout so the next stderr status line never appears above stale
+        // paragraphs. Simulated directly rather than through the real
+        // thread for deterministic timing.
+        let renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
+            Arc::new(std::sync::Mutex::new(test_renderer()));
+        let mut stdout_bytes: Vec<u8> = Vec::new();
+
+        // Provider emits a final paragraph without a trailing blank line.
+        {
+            let mut r = renderer.lock().unwrap();
+            r.push(&mut stdout_bytes, "final summary line\n");
+        }
+        assert!(
+            stdout_bytes.is_empty(),
+            "buffered text must not escape before the idle window elapses"
+        );
+
+        std::thread::sleep(Duration::from_millis(15));
+        let flushed = {
+            let mut r = renderer.lock().unwrap();
+            r.flush_if_idle(&mut stdout_bytes, Duration::from_millis(5))
+        };
+        assert!(flushed, "idle flush should have fired");
+
+        let stdout_text = String::from_utf8(stdout_bytes).unwrap();
+        assert!(stdout_text.contains("final summary line"));
+    }
+
+    #[test]
+    fn apply_early_termination_rate_limit_sets_usage_limit_summary_fields() {
+        use chrono::TimeZone;
+        let reset_at = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+            .unwrap();
+        let mut summary = StreamExecutionSummary {
+            exit_code: 143,
+            is_error: false,
+            ..Default::default()
+        };
+        let termination = EarlyTermination::RateLimit {
+            message: "Usage limit reached; resets at 2026-04-16 04:18:56 UTC".into(),
+            reset_at: Some(reset_at),
+        };
+
+        apply_early_termination_to_summary(&mut summary, &termination);
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("usage_limit_reached"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("usage limit"),
+        );
+        let rl = summary.rate_limit.as_ref().expect("rate_limit populated");
+        assert_eq!(rl.is_throttled, Some(true));
+        assert_eq!(rl.reset_at, Some(reset_at));
+        assert!(
+            rl.message
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("usage limit")
+        );
+    }
+
+    #[test]
+    fn apply_early_termination_preserves_existing_rate_limit_fields() {
+        use chrono::TimeZone;
+        let existing_reset = chrono::Utc.with_ymd_and_hms(2026, 4, 16, 2, 0, 0).unwrap();
+        let mut summary = StreamExecutionSummary {
+            rate_limit: Some(claudine::stream::summary::RateLimitInfo {
+                is_throttled: Some(false),
+                retry_after_ms: Some(5000),
+                message: Some("pre-existing".into()),
+                reset_at: Some(existing_reset),
+            }),
+            ..Default::default()
+        };
+        let incoming_reset = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+            .unwrap();
+        let termination = EarlyTermination::RateLimit {
+            message: "Usage limit reached".into(),
+            reset_at: Some(incoming_reset),
+        };
+
+        apply_early_termination_to_summary(&mut summary, &termination);
+
+        let rl = summary.rate_limit.as_ref().unwrap();
+        // is_throttled is forced to true even when existing said false.
+        assert_eq!(rl.is_throttled, Some(true));
+        // Existing message is preserved.
+        assert_eq!(rl.message.as_deref(), Some("pre-existing"));
+        // Existing reset_at is preserved (do not clobber parser-provided state).
+        assert_eq!(rl.reset_at, Some(existing_reset));
+        // retry_after_ms is untouched.
+        assert_eq!(rl.retry_after_ms, Some(5000));
+    }
+
+    #[test]
+    fn apply_early_termination_completed_but_hung_restores_success() {
+        let mut summary = StreamExecutionSummary {
+            exit_code: 143,
+            is_error: true,
+            error_kind: Some("agent_native".into()),
+            error_message: Some("killed".into()),
+            ..Default::default()
+        };
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::CompletedButHung {
+                message: "OpenCode reported stop but stayed alive".into(),
             },
         );
-        let script = r#"
-printf '%s\n' '{"type":"step_start","sessionID":"ses_1"}'
-printf '%s\n' '{"type":"text","text":"hello"}'
-printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens":{"input":150,"output":101,"total":251,"cache":{"read":42}}}}'
-cat >/dev/null
-"#;
-        let args = vec!["-c".to_string(), script.to_string()];
 
-        let mut spawned = false;
-        let result = run_child_stream(
-            Path::new("/bin/sh"),
-            &args,
-            &env,
-            &cwd,
-            Some(2),
-            &[],
-            false,
-            false,
-            None,
-            parser,
-            &mut spawned,
-        )
-        .unwrap();
+        assert_eq!(summary.exit_code, 0);
+        assert!(!summary.is_error);
+        assert!(summary.error_kind.is_none());
+        assert!(summary.error_message.is_none());
+    }
 
-        assert_eq!(
-            result.termination,
-            claudine::harness::ProcessTermination::Completed
+    #[test]
+    fn detect_opencode_hang_termination_recovers_after_stop_reason() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.provider_status = Some("stop".into());
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::CompletedButHung { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_step_timeout_fires_after_silence_exceeds_budget() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(6));
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::StepTimeout { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_recent() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(1));
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_last_event_at_is_none() {
+        // First-event grace: a fresh session with no observed SemanticEvent
+        // must never trip the deadline, even if the budget is tiny.
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(1));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn early_termination_process_outcome_maps_step_timeout_to_timed_out() {
+        let termination = EarlyTermination::StepTimeout {
+            message: "no stream activity for 6s; terminating due to step_timeout".into(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::TimedOut);
+    }
+
+    #[test]
+    fn apply_early_termination_step_timeout_sets_step_timeout_error() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::StepTimeout {
+                message: "no stream activity for 6s; terminating due to step_timeout".into(),
+            },
         );
-        assert_eq!(result.data.exit_code, 0);
-        assert_eq!(result.data.assistant_text, "hello");
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("step_timeout"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("no stream activity"),
+        );
+    }
+
+    #[test]
+    fn first_response_preference_semantic_over_raw_over_stderr() {
+        let spawned_at = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let semantic = Some(Instant::now());
+        std::thread::sleep(Duration::from_millis(5));
+        let raw = Some(Instant::now());
+        std::thread::sleep(Duration::from_millis(5));
+        let stderr = Some(Instant::now());
+
+        let resolved = resolve_first_response(semantic, raw, stderr, spawned_at);
+        assert!(resolved.is_some());
+        // Semantic should win even though it is the earliest
+        assert!(resolved.unwrap() >= Duration::from_millis(5));
+        assert!(resolved.unwrap() < Duration::from_millis(15));
+    }
+
+    #[test]
+    fn first_response_falls_back_to_raw_when_no_semantic() {
+        let spawned_at = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let raw = Some(Instant::now());
+
+        let resolved = resolve_first_response(None, raw, None, spawned_at);
+        assert!(resolved.is_some());
+        assert!(resolved.unwrap() >= Duration::from_millis(5));
+    }
+
+    #[test]
+    fn first_response_falls_back_to_stderr_when_nothing_else() {
+        let spawned_at = Instant::now();
+        std::thread::sleep(Duration::from_millis(5));
+        let stderr = Some(Instant::now());
+
+        let resolved = resolve_first_response(None, None, stderr, spawned_at);
+        assert!(resolved.is_some());
+        assert!(resolved.unwrap() >= Duration::from_millis(5));
+    }
+
+    #[test]
+    fn first_response_none_when_no_output_at_all() {
+        let spawned_at = Instant::now();
+        let resolved = resolve_first_response(None, None, None, spawned_at);
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn process_telemetry_into_agent_perf_populates_all_fields() {
+        let telemetry = ProcessTelemetry {
+            total_elapsed: Duration::from_secs(3),
+            first_response_latency: Some(Duration::from_millis(500)),
+        };
+        let perf = telemetry.into_agent_perf(Some(1200));
+        assert_eq!(perf.launches, 1);
+        assert_eq!(perf.total_elapsed, Duration::from_secs(3));
+        assert_eq!(
+            perf.first_response_latency,
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(
+            perf.provider_api_duration,
+            Some(Duration::from_millis(1200))
+        );
+    }
+
+    #[test]
+    fn process_telemetry_into_agent_perf_omits_api_when_none() {
+        let telemetry = ProcessTelemetry {
+            total_elapsed: Duration::from_secs(1),
+            first_response_latency: None,
+        };
+        let perf = telemetry.into_agent_perf(None);
+        assert_eq!(perf.launches, 1);
+        assert_eq!(perf.provider_api_duration, None);
+        assert_eq!(perf.first_response_latency, None);
     }
 }

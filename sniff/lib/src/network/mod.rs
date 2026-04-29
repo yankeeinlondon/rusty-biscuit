@@ -212,8 +212,34 @@ enum PermissionOrError {
     Other(crate::SniffError),
 }
 
+/// Cache entry for interface detection with TTL.
+#[cfg(feature = "network")]
+struct InterfaceCache {
+    value: (Vec<NetworkInterface>, Option<String>, IpAddresses),
+    fetched_at: std::time::Instant,
+}
+
+#[cfg(feature = "network")]
+static INTERFACE_CACHE: Mutex<Option<InterfaceCache>> = Mutex::new(None);
+
+/// TTL for interface list cache (1 second).
+#[cfg(feature = "network")]
+const INTERFACE_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
 fn detect_local_interfaces()
 -> std::result::Result<(Vec<NetworkInterface>, Option<String>, IpAddresses), PermissionOrError> {
+    // Check cache first (only when network feature is enabled)
+    #[cfg(feature = "network")]
+    {
+        if let Ok(guard) = INTERFACE_CACHE.lock()
+            && let Some(entry) = guard.as_ref()
+            && entry.fetched_at.elapsed() < INTERFACE_CACHE_TTL
+        {
+            performance::increment_counter("network.local_interfaces.cache_hits", 1);
+            return Ok(entry.value.clone());
+        }
+    }
+
     let addrs = match getifaddrs::getifaddrs() {
         Ok(addrs) => addrs,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -267,7 +293,20 @@ fn detect_local_interfaces()
 
     let primary = find_primary_interface(&interfaces);
 
-    Ok((interfaces, primary, ip_addresses))
+    let result = (interfaces, primary, ip_addresses);
+
+    // Update cache (only when network feature is enabled)
+    #[cfg(feature = "network")]
+    {
+        if let Ok(mut guard) = INTERFACE_CACHE.lock() {
+            *guard = Some(InterfaceCache {
+                value: result.clone(),
+                fetched_at: std::time::Instant::now(),
+            });
+        }
+    }
+
+    Ok(result)
 }
 
 /// Resolve the WAN IP echo endpoint list, preferring the
@@ -299,10 +338,46 @@ fn resolve_wan_ip_endpoints() -> Vec<String> {
         .collect()
 }
 
+/// Sends an HTTP GET request using a short-lived blocking client.
+///
+/// This avoids creating a new tokio runtime per call (issue #16) by using
+/// `reqwest::blocking` directly. To avoid the "Cannot drop a runtime in an
+/// async context" panic, the blocking client is created and dropped inside a
+/// dedicated thread whenever a tokio runtime is active.
+#[cfg(feature = "network")]
+fn blocking_get(url: &str) -> Option<String> {
+    let url = url.to_string();
+
+    // Check if we're inside a tokio runtime.
+    let in_tokio = tokio::runtime::Handle::try_current().is_ok();
+
+    let fetch = move || {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("sniff-lib/0.1.0")
+            .timeout(std::time::Duration::from_secs(1))
+            .build()
+            .ok()?;
+        let response = client.get(&url).send().ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        response.text().ok()
+    };
+
+    let body = if in_tokio {
+        // Spawn a dedicated thread so the blocking client's internal runtime
+        // is created and dropped outside of tokio's control.
+        std::thread::spawn(fetch).join().ok().flatten()
+    } else {
+        fetch()
+    }?;
+
+    body.trim().parse::<IpAddr>().ok().map(|ip| ip.to_string())
+}
+
 #[cfg(feature = "network")]
 #[derive(Debug, Clone)]
 struct WanIpDetector {
-    client: Option<reqwest::Client>,
     endpoints: Vec<String>,
 }
 
@@ -310,11 +385,6 @@ struct WanIpDetector {
 impl WanIpDetector {
     fn new() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .user_agent("sniff-lib/0.1.0")
-                .timeout(std::time::Duration::from_secs(1))
-                .build()
-                .ok(),
             endpoints: resolve_wan_ip_endpoints(),
         }
     }
@@ -326,38 +396,17 @@ impl WanIpDetector {
     }
 
     fn detect(&self) -> Option<String> {
-        let client = self.client.clone()?;
         let endpoints = self.endpoints.clone();
 
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .ok()?;
+        // Use blocking client via a dedicated thread when in async context,
+        // avoiding both per-call runtime creation and async-context drops.
+        for endpoint in endpoints {
+            if let Some(ip) = blocking_get(&endpoint) {
+                return Some(ip);
+            }
+        }
 
-            runtime.block_on(async move {
-                for endpoint in endpoints {
-                    let response = match client.get(&endpoint).send().await {
-                        Ok(response) if response.status().is_success() => response,
-                        _ => continue,
-                    };
-
-                    let body = match response.text().await {
-                        Ok(body) => body,
-                        Err(_) => continue,
-                    };
-
-                    if let Ok(address) = body.trim().parse::<IpAddr>() {
-                        return Some(address.to_string());
-                    }
-                }
-
-                None
-            })
-        })
-        .join()
-        .ok()
-        .flatten()
+        None
     }
 }
 
@@ -850,6 +899,7 @@ fn interface_name_from_index(index: u32) -> Option<String> {
 }
 
 #[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     if !output.status.success() {

@@ -9,14 +9,57 @@ use sniff::programs::ProgramsInfo;
 use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteReport};
 use sniff::request::*;
 use sniff::services::{ServiceState, detect_services};
-use sniff::{SniffResult, detect_with_plan};
+use sniff::{PerformanceReport, SniffResult, detect_with_plan};
 use tracing::info_span;
 
 use crate::args::{
     BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
-    FileListArgs, FilesFilter, ServiceStateArg,
+    FileListArgs, FilesFilter, PackagesFormat, ServiceStateArg,
 };
 use crate::output::{self, OutputFilter, PathListFormat};
+
+/// CLI-level performance timing for commands that bypass the detection pipeline.
+///
+/// When `--perf` is active, every command path emits a performance report
+/// before returning. Rich terminal commands emit to stdout; scriptable
+/// text commands (machine-readable output) emit to stderr so stdout stays
+/// clean for shell pipelines.
+pub(crate) struct CliPerf {
+    start: Option<std::time::Instant>,
+    plain: bool,
+}
+
+impl CliPerf {
+    fn new(enabled: bool, plain: bool) -> Self {
+        Self {
+            start: enabled.then(std::time::Instant::now),
+            plain,
+        }
+    }
+
+    pub fn emit_stdout(&self, detailed: Option<&PerformanceReport>) {
+        self.emit(detailed, false);
+    }
+
+    pub fn emit_stderr(&self, detailed: Option<&PerformanceReport>) {
+        self.emit(detailed, true);
+    }
+
+    fn emit(&self, detailed: Option<&PerformanceReport>, to_stderr: bool) {
+        let Some(start) = self.start else { return };
+        let report = detailed.cloned().unwrap_or_else(|| PerformanceReport {
+            total_duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+            stages: Default::default(),
+            counters: Default::default(),
+        });
+        let text = output::render_performance_section(&report);
+        if to_stderr {
+            output::emit_stderr(&text, self.plain);
+        } else {
+            output::emit_text(&text, self.plain);
+        }
+    }
+}
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle dynamic shell completions (invoked by shell completion scripts)
@@ -36,7 +79,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
 
-    crate::init_tracing(cli.verbose);
+    crate::init_tracing(cli.debug);
 
     let _root = info_span!("sniff",
         command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
@@ -52,6 +95,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    let perf = CliPerf::new(cli.perf, cli.plain);
+
     // No subcommand and no --json flag: show help
     if cli.command.is_none() && !cli.json {
         Cli::command().print_help()?;
@@ -60,6 +105,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     if matches!(cli.command, Some(Commands::Topics)) {
         output::emit_text(&output::render_topics_table(), cli.plain);
+        perf.emit_stdout(None);
         return Ok(());
     }
 
@@ -71,6 +117,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Handle programs mode separately (doesn't use SniffResult)
     if let Some(ref cmd) = cli.command {
+        // Handle notification-helpers before generic programs mode
+        if matches!(cmd, Commands::NotificationHelpers) {
+            let programs = sniff::programs::ProgramsInfo::detect();
+            if cli.json {
+                output::print_notification_helpers_json(&programs.notification_helpers)?;
+            } else {
+                let rendered = output::render_notification_helpers_markdown(
+                    &programs.notification_helpers,
+                    cli.verbose,
+                );
+                output::emit_text(&rendered, cli.plain);
+            }
+            perf.emit_stdout(None);
+            return Ok(());
+        }
+
         if cmd.is_programs_mode() {
             // Plan-aware install or install-plan
             if let Some((kind, args)) = cmd.install_command_args() {
@@ -96,6 +158,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     output::render_programs_markdown(&programs, cli.verbose, output_filter);
                 output::emit_text(&rendered, cli.plain);
             }
+            perf.emit_stdout(None);
             return Ok(());
         }
 
@@ -119,6 +182,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     output::render_just_text(&justfiles, cli.verbose, with.as_deref(), *grouped);
                 output::emit_text(&rendered, cli.plain);
             }
+            perf.emit_stdout(None);
             return Ok(());
         }
 
@@ -149,6 +213,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 output::emit_stderr(&text_output.stderr, cli.plain);
                 output::emit_text(&text_output.stdout, cli.plain);
             }
+            perf.emit_stdout(None);
             return Ok(());
         }
 
@@ -183,7 +248,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             )?;
 
             if matched_docs.is_empty() {
-                return handle_no_results(*no_error, on_error, cli.plain);
+                return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
 
             if cli.json {
@@ -192,6 +257,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "documents": matched_docs.iter().map(|d| &d.relative).collect::<Vec<_>>(),
                 });
                 println!("{}", serde_json::to_string_pretty(&json_val)?);
+                perf.emit_stdout(None);
             } else {
                 // Extract document paths and render
                 let repo = git2::Repository::discover(&base)
@@ -216,6 +282,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                 let rendered = output::render_path_list(&repo_root, &doc_paths, format, *no_path);
                 output::emit_text(&rendered, cli.plain);
+                perf.emit_stderr(None);
             }
 
             return Ok(());
@@ -237,6 +304,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     cli.plain,
                 );
             }
+            perf.emit_stdout(None);
             return Ok(());
         }
     }
@@ -255,9 +323,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         match action {
             crate::args::RepoAction::Remote { remote } => {
                 if remote.contains("://") || remote.starts_with("git@") {
-                    return handle_remote_url(remote, cli.json, cli.plain, cli.verbose).await;
+                    let result =
+                        handle_remote_url(remote, cli.json, cli.plain, cli.verbose, &perf).await;
+                    perf.emit_stdout(None);
+                    return result;
                 } else if is_owner_repo_shorthand(remote) {
-                    return handle_shorthand(remote, cli.json, cli.plain, cli.verbose).await;
+                    let result =
+                        handle_shorthand(remote, cli.json, cli.plain, cli.verbose, &perf).await;
+                    perf.emit_stdout(None);
+                    return result;
                 } else {
                     let url =
                         resolve_remote_name(remote, base_dir.as_deref()).ok_or_else(|| {
@@ -266,8 +340,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 remote
                             )
                         })?;
-                    return handle_remote_url(&url, cli.json, cli.plain, cli.verbose).await;
+                    let result =
+                        handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf).await;
+                    perf.emit_stdout(None);
+                    return result;
                 }
+            }
+            crate::args::RepoAction::Pr { status, .. } => {
+                let result =
+                    handle_pr_command(*status, cli.json, cli.plain, cli.verbose, base_dir.as_deref(),
+                    &perf).await;
+                perf.emit_stdout(None);
+                return result;
             }
             crate::args::RepoAction::Hash { sha } => {
                 let dir = base_dir
@@ -300,6 +384,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         cli.plain,
                     );
                 }
+                perf.emit_stdout(None);
                 return Ok(());
             }
             crate::args::RepoAction::UnstagedFiles { package: _ }
@@ -337,6 +422,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         })
                         .collect();
                     if files.is_empty() {
+                        perf.emit_stderr(result.performance.as_ref());
                         std::process::exit(1);
                     }
                     if cli.json {
@@ -348,8 +434,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                 } else {
+                    perf.emit_stderr(None);
                     std::process::exit(1);
                 }
+                perf.emit_stderr(result.performance.as_ref());
                 return Ok(());
             }
             crate::args::RepoAction::StagedFiles(args)
@@ -382,7 +470,30 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     cli.json,
                     cli.plain,
                     base_dir.as_deref(),
+                    &perf,
                 );
+            }
+            crate::args::RepoAction::Root => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let repo = git2::Repository::discover(dir)
+                    .map_err(|e| format!("Not a git repository: {}", e))?;
+                let Some(workdir) = repo.workdir() else {
+                    perf.emit_stderr(None);
+                    std::process::exit(1);
+                };
+                if cli.json {
+                    let json = serde_json::json!({
+                        "root": workdir.display().to_string(),
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json)?);
+                    perf.emit_stdout(None);
+                } else {
+                    println!("{}", workdir.display());
+                    perf.emit_stderr(None);
+                }
+                return Ok(());
             }
             crate::args::RepoAction::HasMergeConflict => {
                 let dir = base_dir
@@ -396,6 +507,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("{}", path.display());
                     }
                 }
+                perf.emit_stderr(None);
                 if conflicted.is_empty() {
                     std::process::exit(1);
                 }
@@ -410,6 +522,43 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     cli.json,
                     cli.plain,
                     cli.verbose,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::Packages {
+                filter,
+                package_area,
+                format,
+            } => {
+                return handle_repo_packages(
+                    base_dir.as_deref(),
+                    RepoPackagesArgs {
+                        filter,
+                        package_area: package_area.as_deref(),
+                        format: *format,
+                    },
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::PackageAreas {
+                filter,
+                package_area,
+                format,
+            } => {
+                return handle_repo_package_areas(
+                    base_dir.as_deref(),
+                    RepoPackageAreasArgs {
+                        filter,
+                        package_area: package_area.as_deref(),
+                        format: *format,
+                    },
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    &perf,
                 );
             }
             _ => {
@@ -439,9 +588,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_or(DEFAULT_COMMIT_COUNT, |c| c.history()),
     };
 
+    // Lightweight repo subcommands only need the repo root and package list —
+    // no worktrees, commits, or per-file change stats. Using `summary` skips the
+    // expensive worktree enumeration (opens each worktree, runs status scan).
+    let lightweight_repo_action = matches!(
+        &repo_action,
+        Some(
+            crate::args::RepoAction::Root
+                | crate::args::RepoAction::PackageRoot
+                | crate::args::RepoAction::PackageAreaRoot
+                | crate::args::RepoAction::Package { .. }
+                | crate::args::RepoAction::PackageArea { .. }
+        )
+    );
+
     // Build git request based on deep/commit_count flags
     let git_request = if refresh_remotes_enabled {
         GitRequest::deep().commit_count(history_count)
+    } else if lightweight_repo_action {
+        GitRequest::summary()
     } else {
         GitRequest::full().commit_count(history_count)
     };
@@ -531,6 +696,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -607,7 +773,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .count();
                     git.status.is_dirty = git.status.staged_count > 0
                         || git.status.unstaged_count > 0
-                        || git.status.untracked_count > 0;
+                        || git.status.untracked_count > 0
+                        || git
+                            .file_changes
+                            .iter()
+                            .any(|f| f.status == sniff::filesystem::git::FileStatus::Conflicted);
                 }
             }
         }
@@ -620,17 +790,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let rendered =
                     output::render_repo_package(&result, base_dir.as_deref(), cli.verbose);
                 if rendered.is_empty() {
-                    return handle_no_results(*no_error, on_error, cli.plain);
+                    return handle_no_results(*no_error, on_error, cli.plain, &perf);
                 }
                 println!("{rendered}");
+                perf.emit_stderr(result.performance.as_ref());
                 return Ok(());
             }
             crate::args::RepoAction::PackageArea { no_error, on_error } => {
                 let rendered = output::render_repo_package_area(&result, base_dir.as_deref());
                 if rendered.is_empty() {
-                    return handle_no_results(*no_error, on_error, cli.plain);
+                    return handle_no_results(*no_error, on_error, cli.plain, &perf);
                 }
                 println!("{rendered}");
+                perf.emit_stderr(result.performance.as_ref());
                 return Ok(());
             }
             _ => {}
@@ -666,8 +838,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // - With subcommand: text by default, --json for JSON
     let use_json = cli.command.is_none() || cli.json;
 
+    let is_scriptable_text = !use_json && is_scriptable_repo_action(repo_action.as_ref());
+
     if use_json {
         output::print_json(&result, output_filter, &docs_filter, &files_filter)?;
+        perf.emit_stdout(result.performance.as_ref());
     } else {
         let text = output::render_text(
             &result,
@@ -681,6 +856,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             latest_versions_enabled,
         );
         output::emit_text(&text, cli.plain);
+        if is_scriptable_text {
+            perf.emit_stderr(result.performance.as_ref());
+        } else {
+            perf.emit_stdout(result.performance.as_ref());
+        }
     }
 
     Ok(())
@@ -737,6 +917,7 @@ async fn handle_shorthand(
     json: bool,
     plain: bool,
     verbose: u8,
+    _perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (owner, repo) = shorthand.split_once('/').expect("already validated");
     let remote = GitRemote::from_shorthand(owner, repo).await?;
@@ -761,6 +942,7 @@ async fn handle_remote_url(
     json: bool,
     plain: bool,
     verbose: u8,
+    _perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let remote = GitRemote::from_url(url)?;
     let parsed = GitRemote::parse_url(url)?;
@@ -775,6 +957,125 @@ async fn handle_remote_url(
     }
 
     Ok(())
+}
+
+/// Handle `sniff repo pr` — list pull requests for the current repo's remote.
+///
+/// Discovers the git repo, resolves the preferred remote, fetches PRs, and
+/// renders them as JSON or text (table / verbose block).
+async fn handle_pr_command(
+    status: sniff::remote::PullRequestState,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+    base_dir: Option<&std::path::Path>,
+    perf: &CliPerf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
+
+    // 1. Discover the git repository
+    let repo = git2::Repository::discover(dir)
+        .map_err(|_| format!("No git repository found from {}", dir.display()))?;
+
+    // 2. Resolve preferred remote URL (origin first, then first configured remote)
+    let remote_url = resolve_origin_or_first_remote(&repo)
+        .ok_or("No git remotes found for this repository")?;
+
+    // 3. Parse the remote URL and construct the provider
+    let parsed = GitRemote::parse_url(&remote_url).map_err(|e| {
+        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+    })?;
+    let remote = GitRemote::from_url(&remote_url).map_err(|e| {
+        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+    })?;
+
+    // 4. Fetch pull requests
+    let prs = match remote.list_pull_requests(&parsed.owner, &parsed.repo, status).await {
+        Ok(prs) => prs,
+        Err(sniff::SniffError::MissingCredentials { provider, env_var }) => {
+            return Err(format!(
+                "{} requires credentials for this resource: set the {} environment variable",
+                provider, env_var
+            )
+            .into());
+        }
+        Err(sniff::SniffError::InvalidCredentials { provider, message }) => {
+            return Err(format!(
+                "{} rejected credentials: {} (check your token environment variable)",
+                provider, message
+            )
+            .into());
+        }
+        Err(sniff::SniffError::RateLimited { provider, retry_after }) => {
+            let retry_msg = retry_after
+                .map(|s| format!(", retry after {}s", s))
+                .unwrap_or_default();
+            return Err(format!(
+                "Rate limited by {} API{}",
+                provider, retry_msg
+            )
+            .into());
+        }
+        Err(sniff::SniffError::RemoteApi { status, provider, message }) => {
+            return Err(format!(
+                "{} API error (HTTP {}): {}",
+                provider, status, message
+            )
+            .into());
+        }
+        Err(sniff::SniffError::RemoteInit { provider, message }) => {
+            return Err(format!(
+                "Failed to initialize {} remote provider: {}",
+                provider, message
+            )
+            .into());
+        }
+        Err(e) => {
+            return Err(format!(
+                "Failed to list pull requests from {}: {}",
+                parsed.provider.display_name(), e
+            )
+            .into());
+        }
+    };
+
+    // 5. Output
+    if json {
+        println!("{}", serde_json::to_string_pretty(&prs)?);
+    } else {
+        if prs.is_empty() {
+            let rendered = output::render_pull_requests_empty(status);
+            output::emit_text(&rendered, plain);
+        } else if verbose > 0 {
+            let rendered = output::render_pull_requests_verbose(&prs);
+            output::emit_text(&rendered, plain);
+        } else {
+            let rendered = output::render_pull_requests_table(&prs);
+            output::emit_text(&rendered, plain);
+        }
+    }
+
+    perf.emit_stdout(None);
+    Ok(())
+}
+
+/// Resolve the origin remote URL, or fall back to the first configured remote.
+fn resolve_origin_or_first_remote(repo: &git2::Repository) -> Option<String> {
+    if let Ok(remote) = repo.find_remote("origin")
+        && let Some(url) = remote.url()
+    {
+        return Some(url.to_string());
+    }
+
+    for remote_name in repo.remotes().ok()?.iter().flatten() {
+        if let Ok(remote) = repo.find_remote(remote_name)
+            && let Some(url) = remote.url()
+        {
+            return Some(url.to_string());
+        }
+    }
+
+    None
 }
 
 /// Fetch the README content when verbose mode is enabled.
@@ -998,6 +1299,129 @@ fn resolve_package_path(
     .into())
 }
 
+/// Subcommand-specific args for `sniff repo packages`.
+struct RepoPackagesArgs<'a> {
+    filter: &'a [String],
+    package_area: Option<&'a str>,
+    format: PackagesFormat,
+}
+
+/// Fast-path handler for `sniff repo packages`.
+///
+/// Skips the full detection pipeline and calls `detect_repo_structure` directly,
+/// which avoids git scanning, file inventory, language detection, docs, and
+/// formatting work. Typical wall time on a large monorepo: well under 50ms.
+fn handle_repo_packages(
+    base_dir: Option<&std::path::Path>,
+    args: RepoPackagesArgs<'_>,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+    perf: &CliPerf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let RepoPackagesArgs {
+        filter,
+        package_area,
+        format,
+    } = args;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let explicit = base_dir.unwrap_or(&cwd);
+    let root = if base_dir.is_some() {
+        explicit.to_path_buf()
+    } else {
+        git2::Repository::discover(explicit)
+            .ok()
+            .and_then(|repo| repo.workdir().map(std::path::PathBuf::from))
+            .unwrap_or_else(|| explicit.to_path_buf())
+    };
+
+    let info = match sniff::filesystem::repo::detect_repo_structure(&root)? {
+        Some(info) => info,
+        None => {
+            return Err("Not inside a recognized repository".into());
+        }
+    };
+
+    if json {
+        let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
+        println!("{}", serde_json::to_string(&names)?);
+        perf.emit_stderr(None);
+        return Ok(());
+    }
+
+    let rendered =
+        output::render_repo_packages_formatted(&info, filter, package_area, format, verbose);
+    let with_newline = if rendered.ends_with('\n') {
+        rendered
+    } else {
+        format!("{rendered}\n")
+    };
+    output::emit_text(&with_newline, plain);
+    perf.emit_stderr(None);
+    Ok(())
+}
+
+/// Subcommand-specific args for `sniff repo package-areas`.
+struct RepoPackageAreasArgs<'a> {
+    filter: &'a [String],
+    package_area: Option<&'a str>,
+    format: PackagesFormat,
+}
+
+/// Fast-path handler for `sniff repo package-areas`.
+///
+/// Uses `detect_repo_structure` (same fast path as `sniff repo packages`) so
+/// the command returns well under 100 ms even on large monorepos.
+fn handle_repo_package_areas(
+    base_dir: Option<&std::path::Path>,
+    args: RepoPackageAreasArgs<'_>,
+    json: bool,
+    plain: bool,
+    verbose: u8,
+    perf: &CliPerf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let RepoPackageAreasArgs {
+        filter,
+        package_area,
+        format,
+    } = args;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let explicit = base_dir.unwrap_or(&cwd);
+    let root = if base_dir.is_some() {
+        explicit.to_path_buf()
+    } else {
+        git2::Repository::discover(explicit)
+            .ok()
+            .and_then(|repo| repo.workdir().map(std::path::PathBuf::from))
+            .unwrap_or_else(|| explicit.to_path_buf())
+    };
+
+    let info = match sniff::filesystem::repo::detect_repo_structure(&root)? {
+        Some(info) => info,
+        None => {
+            return Err("Not inside a recognized repository".into());
+        }
+    };
+
+    if json {
+        let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
+        println!("{}", serde_json::to_string(&names)?);
+        perf.emit_stderr(None);
+        return Ok(());
+    }
+
+    let rendered =
+        output::render_repo_package_areas_formatted(&info, filter, package_area, format, verbose);
+    let with_newline = if rendered.ends_with('\n') {
+        rendered
+    } else {
+        format!("{rendered}\n")
+    };
+    output::emit_text(&with_newline, plain);
+    perf.emit_stderr(None);
+    Ok(())
+}
+
 /// Resolve `FileListArgs` flags into a `PathListFormat`.
 fn path_list_format(args: &FileListArgs) -> PathListFormat {
     if args.list {
@@ -1019,6 +1443,7 @@ pub(crate) fn handle_no_results(
     no_error: bool,
     on_error: &Option<String>,
     plain: bool,
+    perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
@@ -1039,6 +1464,7 @@ pub(crate) fn handle_no_results(
         }
     }
 
+    perf.emit_stderr(None);
     if no_error {
         std::process::exit(0);
     } else {
@@ -1055,6 +1481,7 @@ fn handle_file_list_command(
     json: bool,
     plain: bool,
     base_dir: Option<&std::path::Path>,
+    perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
     let query = ChangedPathQuery {
@@ -1068,7 +1495,7 @@ fn handle_file_list_command(
     let result = collect_changed_paths(dir, &query)?;
 
     if result.paths.is_empty() {
-        return handle_no_results(args.no_error, &args.on_error, plain);
+        return handle_no_results(args.no_error, &args.on_error, plain, perf);
     }
 
     if json {
@@ -1078,11 +1505,13 @@ fn handle_file_list_command(
             "paths": result.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         });
         println!("{}", serde_json::to_string_pretty(&json_val)?);
+        perf.emit_stdout(None);
     } else {
         let format = path_list_format(args);
         let rendered =
             output::render_path_list(&result.repo_root, &result.paths, format, args.no_path);
         output::emit_text(&rendered, plain);
+        perf.emit_stderr(None);
     }
 
     Ok(())
@@ -1131,6 +1560,24 @@ fn detect_programs_for_filter(filter: OutputFilter) -> ProgramsInfo {
         _ => return ProgramsInfo::detect(),
     }
     programs
+}
+
+/// Determine if a repo action produces machine-readable/pipable text output.
+///
+/// Scriptable commands emit perf to stderr so stdout stays clean for pipelines.
+fn is_scriptable_repo_action(action: Option<&crate::args::RepoAction>) -> bool {
+    use crate::args::RepoAction;
+    match action {
+        None => false,
+        Some(
+            RepoAction::Structure { .. }
+            | RepoAction::GitStatus { .. }
+            | RepoAction::Deps { .. }
+            | RepoAction::Remote { .. }
+            | RepoAction::Hash { .. },
+        ) => false,
+        Some(_) => true,
+    }
 }
 
 #[cfg(test)]

@@ -128,11 +128,20 @@ sniff repo untracked-files       # Untracked files
 ```bash
 sniff repo git-status                # Git status with commit history
 sniff repo git-status --history 20   # Show more commits
+sniff repo git-status --compact      # Show only the Status section
 sniff repo hash HEAD                 # Show latest commit details
 sniff repo remote origin             # Inspect remote repository
+sniff repo pr                        # List open pull requests
+sniff repo pr --status merged        # List merged pull requests
+sniff repo pr --status draft --json  # Draft PRs as JSON
+sniff repo pr -v                     # Verbose PR block output
 sniff repo deps                      # Text dependency list
 sniff repo deps --ui                 # Mermaid dependency diagram
-sniff repo packages                  # List all package names
+sniff repo packages                  # List all package names (CSV)
+sniff repo packages --md             # Markdown unordered list
+sniff repo packages --list           # Raw list (one per line)
+sniff repo packages --package-area A # Restrict to a single area
+sniff repo packages --verbose        # Annotate each entry with its root dir
 sniff repo package                   # Package name for current directory
 sniff repo package-area              # Package area for current directory
 sniff repo dirty-packages            # Packages with uncommitted changes
@@ -145,6 +154,7 @@ sniff repo has-merge-conflict        # Check for merge conflicts
 sniff repo recent-commits             # Commits from last 3 days (default)
 sniff repo recent-commits 1w          # Commits from last week
 sniff repo recent-commits today       # Today's commits
+sniff repo recent-commits 10          # The last 10 commits
 sniff repo source-code-changes 1w     # Source code changes in last week
 sniff repo documentation-changes 1w   # Documentation changes in last week
 # Filter by scope:
@@ -246,6 +256,27 @@ sniff filesystem --refresh-remotes --latest-versions
 - Latest version information for dependencies from package registries
 - Package-level update summaries in text output
 - `latest_version`, `is_updatable`, and `has_major_update` fields in JSON output
+
+### Performance Reporting
+
+The `--perf` flag appends structured performance timings to any command:
+
+```bash
+# Rich terminal output: perf appended to stdout
+sniff programs --perf
+sniff repo --perf
+
+# Scriptable text output: perf emitted to stderr (stdout stays clean)
+sniff repo packages --perf        # CSV names on stdout, timings on stderr
+sniff repo package-area --perf    # Area name on stdout, timings on stderr
+sniff repo root --perf            # Path on stdout, timings on stderr
+
+# JSON output: perf embedded in the JSON object
+sniff repo packages --perf --json
+```
+
+Performance data includes total wall-clock time, per-stage timings (calls, total,
+max, last), and aggregated counters (cache hits/misses, etc.).
 
 ## Output Examples
 
@@ -636,6 +667,12 @@ sniff repo remote origin
 
 # Or specify a URL directly
 sniff repo remote https://github.com/rust-lang/cargo
+
+# List pull requests
+sniff repo pr
+sniff repo pr --status merged
+sniff repo pr --status draft --json
+sniff repo pr -v
 ```
 
 **Output includes:**
@@ -655,6 +692,34 @@ sniff repo remote https://github.com/rust-lang/cargo
 | GitLab | `GITLAB_TOKEN` or `GITLAB_PRIVATE_TOKEN` |
 | Gitea | `GITEA_TOKEN` (or `CODEBERG_TOKEN` for Codeberg) |
 | Bitbucket | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` |
+
+### Authentication Strategy
+
+Sniff uses an **attempt-unauthenticated-first** strategy for remote repository
+inspection (`sniff repo remote`, `sniff repo pr`):
+
+1. The CLI first issues the API request **anonymously**, with no credentials
+   attached — even if relevant token environment variables happen to be set
+   on the calling shell. This lets public-repo lookups succeed without any
+   configuration.
+2. Only if the unauthenticated request is rejected with a `401 Unauthorized`,
+   `403 Forbidden`, or rate-limit error does the CLI surface a
+   `MissingCredentials` error advising the user which environment variable
+   to set.
+3. If credentials *are* provided but the API rejects them, a separate
+   `InvalidCredentials` error is shown.
+
+This means the typical user never has to provide a token to query a public
+repository, and only sees the credential prompt when the resource genuinely
+requires one (private repos, rate limits, etc.).
+
+### Pull Request Limitations by Provider
+
+| Limitation | Affects | Notes |
+|---|---|---|
+| Draft PR filter (`--status draft`) | **Bitbucket Cloud** | Returns an empty list. Bitbucket Cloud has no native concept of draft pull requests. |
+| Verbose body / description | **Bitbucket Cloud** | The list-pull-requests endpoint does not return PR descriptions. The `body` field is `None` for Bitbucket PRs in both default and verbose output. (A per-PR follow-up fetch is a planned enhancement.) |
+| Labels | **Bitbucket Cloud** | The Bitbucket Cloud PR API does not expose labels (labels exist on Issues only). The `labels` field is always empty for Bitbucket PRs. |
 
 ### Error Handling
 

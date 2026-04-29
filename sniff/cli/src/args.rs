@@ -18,6 +18,7 @@ pub enum RepoAction {
     GitStatus {
         history: usize,
         refresh_remotes: bool,
+        compact: bool,
         package: Option<String>,
     },
     Hash {
@@ -39,6 +40,13 @@ pub enum RepoAction {
     },
     Packages {
         filter: Vec<String>,
+        package_area: Option<String>,
+        format: PackagesFormat,
+    },
+    PackageAreas {
+        filter: Vec<String>,
+        package_area: Option<String>,
+        format: PackagesFormat,
     },
     Package {
         no_error: bool,
@@ -99,6 +107,10 @@ pub enum RepoAction {
         package_area: Option<String>,
         no_error: bool,
         on_error: Option<String>,
+    },
+    Pr {
+        status: sniff::remote::PullRequestState,
+        verbose: bool,
     },
 }
 
@@ -187,6 +199,18 @@ pub enum BlastRadiusScopeArg {
     LastCommit,
 }
 
+/// Output shape for the `repo packages` subcommand.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PackagesFormat {
+    /// Comma-separated values on a single line (default).
+    #[default]
+    Csv,
+    /// Markdown unordered list (`- name` per line).
+    Markdown,
+    /// Plain list (one entry per line, no bullet).
+    List,
+}
+
 /// Detect system and repository information
 #[derive(Parser)]
 #[command(
@@ -210,9 +234,13 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub perf: bool,
 
-    /// Increase output verbosity
+    /// Increase output verbosity (styled user output only; never raw tracing)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
+
+    /// Emit raw developer tracing to stderr; repeat for higher verbosity
+    #[arg(long, action = clap::ArgAction::Count, global = true)]
+    pub debug: u8,
 
     /// Strip terminal escape codes from text output
     #[arg(long, global = true)]
@@ -500,7 +528,7 @@ pub enum Commands {
     },
 
     /// Show only headless audio players
-    Audio {
+    AudioPlayers {
         #[command(subcommand)]
         action: Option<AudioAction>,
     },
@@ -510,6 +538,9 @@ pub enum Commands {
         #[command(subcommand)]
         action: Option<AgentAction>,
     },
+
+    /// Show only desktop notification helpers
+    NotificationHelpers,
 
     /// Show only system services (init system and service list)
     Services {
@@ -587,6 +618,9 @@ pub enum RepoSubcommand {
         /// Fetch remotes to check if branches are out of sync
         #[arg(long)]
         refresh_remotes: bool,
+        /// Only render the Status section
+        #[arg(long)]
+        compact: bool,
         /// Scope git view to a specific package or package area
         #[arg(short, long, value_name = "PKG")]
         package: Option<String>,
@@ -644,6 +678,30 @@ pub enum RepoSubcommand {
     Packages {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Restrict output to packages in the specified package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Render as a Markdown unordered list (one `- name` per line)
+        #[arg(long, conflicts_with = "list")]
+        md: bool,
+        /// Render as a raw list (one name per line, no bullet)
+        #[arg(long, conflicts_with = "md")]
+        list: bool,
+    },
+    /// Output only package area names as a comma-separated list
+    #[command(name = "package-areas")]
+    PackageAreas {
+        /// Filter by area name; prefix with ! to exclude
+        filter: Vec<String>,
+        /// Restrict output to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Render as a Markdown unordered list (one `- name` per line)
+        #[arg(long, conflicts_with = "list")]
+        md: bool,
+        /// Render as a raw list (one entry per line, no bullet)
+        #[arg(long, conflicts_with = "md")]
+        list: bool,
     },
     /// Output the package name for the current directory
     Package {
@@ -715,7 +773,7 @@ pub enum RepoSubcommand {
     /// Show recent commits for a period
     #[command(name = "recent-commits")]
     RecentCommits {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -736,7 +794,7 @@ pub enum RepoSubcommand {
     /// Show source code changes for a period
     #[command(name = "source-code-changes")]
     SourceCodeChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -757,7 +815,7 @@ pub enum RepoSubcommand {
     /// Show documentation changes for a period
     #[command(name = "documentation-changes")]
     DocumentationChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -774,6 +832,12 @@ pub enum RepoSubcommand {
         /// Message to display when no results found
         #[arg(long, value_name = "MESSAGE")]
         on_error: Option<String>,
+    },
+    /// List pull requests for the current repository's remote
+    Pr {
+        /// Filter pull requests by state (note: 'draft' returns no results on Bitbucket — drafts are not a Bitbucket Cloud feature)
+        #[arg(long, default_value = "open")]
+        status: sniff::remote::PullRequestState,
     },
 }
 
@@ -802,8 +866,9 @@ impl Commands {
             Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
             Commands::TtsClients { .. } => OutputFilter::TtsClients,
             Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
-            Commands::Audio { .. } => OutputFilter::HeadlessAudio,
+            Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
+            Commands::NotificationHelpers => OutputFilter::NotificationHelpers,
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
             Commands::Just { .. } => OutputFilter::Just,
@@ -821,7 +886,7 @@ impl Commands {
                 | Commands::OsPackageManagers { .. }
                 | Commands::TtsClients { .. }
                 | Commands::TerminalApps { .. }
-                | Commands::Audio { .. }
+                | Commands::AudioPlayers { .. }
                 | Commands::Agents { .. }
         )
     }
@@ -896,10 +961,10 @@ impl Commands {
             TerminalApps {
                 action: Some(TerminalAppAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::Install(args)),
             } => Some((InstallCommandKind::Install, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
             Agents {
@@ -1017,10 +1082,12 @@ impl Commands {
                 Some(RepoSubcommand::GitStatus {
                     history,
                     refresh_remotes,
+                    compact,
                     package,
                 }) => RepoAction::GitStatus {
                     history: *history,
                     refresh_remotes: *refresh_remotes,
+                    compact: *compact,
                     package: package.clone(),
                 },
                 Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
@@ -1045,11 +1112,44 @@ impl Commands {
                     },
                     ui: *ui,
                 },
-                Some(RepoSubcommand::Packages { filter: sub_filter }) => RepoAction::Packages {
+                Some(RepoSubcommand::Packages {
+                    filter: sub_filter,
+                    package_area,
+                    md,
+                    list,
+                }) => RepoAction::Packages {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
                     } else {
                         sub_filter.clone()
+                    },
+                    package_area: package_area.clone(),
+                    format: if *md {
+                        PackagesFormat::Markdown
+                    } else if *list {
+                        PackagesFormat::List
+                    } else {
+                        PackagesFormat::Csv
+                    },
+                },
+                Some(RepoSubcommand::PackageAreas {
+                    filter: sub_filter,
+                    package_area,
+                    md,
+                    list,
+                }) => RepoAction::PackageAreas {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package_area: package_area.clone(),
+                    format: if *md {
+                        PackagesFormat::Markdown
+                    } else if *list {
+                        PackagesFormat::List
+                    } else {
+                        PackagesFormat::Csv
                     },
                 },
                 Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {
@@ -1180,6 +1280,10 @@ impl Commands {
                     package_area: package_area.clone(),
                     no_error: *no_error,
                     on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::Pr { status }) => RepoAction::Pr {
+                    status: *status,
+                    verbose: false,
                 },
             }),
             _ => None,
@@ -1317,6 +1421,7 @@ Commands:
     sniff editors                         Show editors (supports 'install' and 'install-plan')
     sniff utilities                       Show utilities
     sniff agents                          Show AI agent CLI tools
+    sniff notification-helpers            Show desktop notification helpers
 
   Services:
     sniff services        Show running services
@@ -1344,6 +1449,7 @@ Structure:
 Git:
   sniff repo git-status               Show git status and recent commits
   sniff repo git-status --history 20  Show more commits
+  sniff repo git-status --compact     Show only the Status section
   sniff repo hash HEAD                Show latest commit details
   sniff repo staged-files             List staged files
   sniff repo unstaged-files           List unstaged files
@@ -1352,10 +1458,14 @@ Git:
   sniff repo staged-source-code       List staged source code files
   sniff repo dirty-files              List all dirty files
   sniff repo remote origin            Inspect the 'origin' remote
+  sniff repo pr                       List open pull requests
+  sniff repo pr --status merged       List merged pull requests
+  sniff repo pr -v                    Verbose PR block output
 
 Recent Commits:
   sniff repo recent-commits           Show commits from last 3 days
   sniff repo recent-commits 1w        Show commits from last week
+  sniff repo recent-commits 10        Show the last 10 commits
   sniff repo source-code-changes 1w   Source code changes in last week
   sniff repo documentation-changes 1w Documentation changes in last week
 
@@ -1541,6 +1651,15 @@ mod tests {
                 })
             ));
 
+            let cli = parse_args(&["repo", "package-areas"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::PackageAreas { .. }),
+                    ..
+                })
+            ));
+
             let cli = parse_args(&["repo", "package"]).unwrap();
             assert!(matches!(
                 cli.command,
@@ -1669,6 +1788,80 @@ mod tests {
                     ..
                 }) if actions == vec![RecentCommitActionArg::Chore]
             ));
+        }
+
+        #[test]
+        fn repo_pr_default_status_open() {
+            let cli = parse_args(&["repo", "pr"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Open,
+                    }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_pr_status_merged() {
+            let cli = parse_args(&["repo", "pr", "--status", "merged"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Merged,
+                    }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_pr_status_draft_with_json() {
+            let cli = parse_args(&["repo", "pr", "--status", "draft", "--json"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Draft,
+                    }),
+                    ..
+                })
+            ));
+            assert!(cli.json);
+        }
+
+        #[test]
+        fn repo_pr_verbose_global_flag() {
+            let cli = parse_args(&["repo", "pr", "-v"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Pr {
+                        status: sniff::remote::PullRequestState::Open,
+                    }),
+                    ..
+                })
+            ));
+            assert_eq!(cli.verbose, 1);
+        }
+
+        #[test]
+        fn repo_pr_invalid_status_shows_valid_values() {
+            match parse_args(&["repo", "pr", "--status", "invalid"]) {
+                Ok(_) => panic!("Expected parsing to fail for invalid status"),
+                Err(err) => {
+                    let msg = err.to_string();
+                    assert!(msg.contains("invalid PR state 'invalid'"), "Error should mention invalid state: {msg}");
+                    assert!(msg.contains("open"), "Error should mention 'open': {msg}");
+                    assert!(msg.contains("closed"), "Error should mention 'closed': {msg}");
+                    assert!(msg.contains("merged"), "Error should mention 'merged': {msg}");
+                    assert!(msg.contains("draft"), "Error should mention 'draft': {msg}");
+                    assert!(msg.contains("all"), "Error should mention 'all': {msg}");
+                }
+            }
         }
 
         #[test]
@@ -2039,6 +2232,7 @@ mod tests {
                     Some(RepoSubcommand::GitStatus {
                         history,
                         refresh_remotes,
+                        compact,
                         package,
                     }),
                 ..
@@ -2046,6 +2240,7 @@ mod tests {
             {
                 assert_eq!(history, DEFAULT_COMMIT_COUNT);
                 assert!(!refresh_remotes);
+                assert!(!compact);
                 assert!(package.is_none());
             } else {
                 panic!("Expected repo git-status");
@@ -2060,6 +2255,7 @@ mod tests {
                 "--history",
                 "20",
                 "--refresh-remotes",
+                "--compact",
                 "--package",
                 "homelab",
             ])
@@ -2069,6 +2265,7 @@ mod tests {
                     Some(RepoSubcommand::GitStatus {
                         history,
                         refresh_remotes,
+                        compact,
                         package,
                     }),
                 ..
@@ -2076,6 +2273,7 @@ mod tests {
             {
                 assert_eq!(history, 20);
                 assert!(refresh_remotes);
+                assert!(compact);
                 assert_eq!(package.as_deref(), Some("homelab"));
             } else {
                 panic!("Expected repo git-status with flags");
@@ -2177,6 +2375,7 @@ mod tests {
                 repo_subcommand: Some(RepoSubcommand::GitStatus {
                     history: 25,
                     refresh_remotes: true,
+                    compact: true,
                     package: Some("homelab".to_string()),
                 }),
             };
@@ -2184,13 +2383,33 @@ mod tests {
                 Some(RepoAction::GitStatus {
                     history,
                     refresh_remotes,
+                    compact,
                     package,
                 }) => {
                     assert_eq!(history, 25);
                     assert!(refresh_remotes);
+                    assert!(compact);
                     assert_eq!(package.as_deref(), Some("homelab"));
                 }
                 _ => panic!("Expected GitStatus action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_pr() {
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: vec![],
+                repo_subcommand: Some(RepoSubcommand::Pr {
+                    status: sniff::remote::PullRequestState::Merged,
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Pr { status, verbose }) => {
+                    assert_eq!(status, sniff::remote::PullRequestState::Merged);
+                    assert!(!verbose);
+                }
+                _ => panic!("Expected Pr action"),
             }
         }
     }

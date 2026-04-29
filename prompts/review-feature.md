@@ -1,40 +1,53 @@
 ---
 dir: "$(pwd)"
-spec: ""
-design: ""
-review: "review"
 iteration: 1
+area: "{{ctx.current_package_area}}"
+start:
+    message: "🏃‍♂️ starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
 success:
-    say: "Feature review {{iteration}} has completed"
+    stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
+    message: "✅ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
 failure:
-    say: "Feature review {{iteration}} failed to complete!"
+    stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
+    message: "❌ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area failed to complete!"
 ---
 
-We have just completed a feature defined in "{{dir}}":
+We have just completed a feature defined in "{{area}}/{{dir}}":
 
 ::block when="spec"
-- specification: "{{dir}}/{{spec}}"
+- specification: "{{area}}/{{dir}}/{{spec}}"
 ::end-block
 ::block when="design"
-- technical design: "{{dir}}/{{design}}"
+- technical design: "{{area}}/{{dir}}/{{design}}"
 ::end-block
 
-::block when="spec && design"
+::block when="And(spec, design)"
 Read both the specification and design documents and then perform a review on the implementation:
-::endblock
+::end-block
 ::block when="spec"
 Read both the specification document and then perform a review on the implementation:
-::endblock
+::end-block
 ::block when="design"
 Read both the specification document and then perform a review on the implementation:
-::endblock
+::end-block
+
+::block when="iteration != 1"
+> **Note:** this is _not_ the first review we've done on this functionality but the prior review's
+> suggestions have now all been implemented.
+
+::end-block
 
 - look for gaps in functionality that were designed but not implemented
 - features who's implementation is broken or incomplete
 - functionality which is light on test coverage (we expect strong unit and integration testing for everything)
 - are there any changes which would make the code more ergonomic, more performant, or both?
 
-Save your review suggestions to "{{dir}}/{{review}}-{{iteration}}.md"
+## Closure
+
+- Save your review suggestions to "{{area}}/{{dir}}/review-{{iteration}}.md"
+- based on your review suggestions indicate whether you think this feature is ready for production by setting the `ready` frontmatter property on "{{area}}/{{dir}}/review-{{iteration}}.md"
+- save the `agent` frontmatter property as "{{env.AGENT}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
+- save the `model` frontmatter property as "{{env.MODEL}}" in the "{{area}}/{{dir}}/review-{{iteration}}.md" file
 
 **IMPORTANT:**
 

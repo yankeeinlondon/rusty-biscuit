@@ -45,7 +45,9 @@ fn bench_prose_render(c: &mut Criterion) {
     let simple = "Hello world, this is a simple prose string.";
     let tokens = "Hello {{bold}}world{{reset}}! This is {{red}}important{{reset}} text with {{italic}}emphasis{{reset}}.";
     let long_tokens = (0..20)
-        .map(|i| format!("Item {{bold}}{i}{{reset}}: description of item {i} with {{red}}color{{reset}}"))
+        .map(|i| {
+            format!("Item {{bold}}{i}{{reset}}: description of item {i} with {{red}}color{{reset}}")
+        })
         .collect::<Vec<_>>()
         .join(". ");
 
@@ -85,22 +87,10 @@ fn bench_word_wrap(c: &mut Criterion) {
         b.iter(|| word_wrap(black_box(short), WordWrap::WrapProse(None, None), 80))
     });
     group.bench_function("paragraph_wrap_80", |b| {
-        b.iter(|| {
-            word_wrap(
-                black_box(paragraph),
-                WordWrap::WrapProse(None, None),
-                80,
-            )
-        })
+        b.iter(|| word_wrap(black_box(paragraph), WordWrap::WrapProse(None, None), 80))
     });
     group.bench_function("multiline_wrap_60", |b| {
-        b.iter(|| {
-            word_wrap(
-                black_box(multiline),
-                WordWrap::WrapProse(None, None),
-                60,
-            )
-        })
+        b.iter(|| word_wrap(black_box(multiline), WordWrap::WrapProse(None, None), 60))
     });
     group.finish();
 }
@@ -158,7 +148,9 @@ fn bench_component_render(c: &mut Criterion) {
         b.iter(|| {
             let items: Vec<RenderableContent> = (1..=5)
                 .map(|i| {
-                    RenderableContent::Component(Rc::new(Prose::new(&format!("Item number {i} with some descriptive text"))))
+                    RenderableContent::Component(Rc::new(Prose::new(format!(
+                        "Item number {i} with some descriptive text"
+                    ))))
                 })
                 .collect();
             let list = UnorderedList::from(items);

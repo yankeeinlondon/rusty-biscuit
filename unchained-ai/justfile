@@ -1,9 +1,17 @@
 set dotenv-load
 set positional-arguments
+# set allow-duplicate-recipes
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
 
 BOLD := '\033[1m'
 ITALIC := '\033[3m'
-DIM := '\033[2m'
 RESET := '\033[0m'
 YELLOW2 := '\033[38;5;3m'
 BLACK := '\033[30m'
@@ -14,9 +22,6 @@ BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 WHITE := '\033[37m'
-DOCS := ""
-
-PACKAGE := "Unchained AI"
 
 default:
     #!/usr/bin/env bash
@@ -34,128 +39,33 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_opencode prompt:
-    #!/usr/bin/env bash
-    if command -v opencode &> /dev/null; then
-        local MODEL
-        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
-        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
-        echo
-        opencode run "{{prompt}}" --model "$MODEL"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_codex prompt:
-    #!/usr/bin/env bash
-    if command -v codex &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        codex exec "{{prompt}}"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-
-# use an AI agent to respond to a question (uses `AGENT`)
-ask prompt:
-    #!/usr/bin/env bash
-    if [[ "${AGENT,,}" == "opencode" ]]; then
-        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    elif [[ "${AGENT,,}" == "codex"  ]]; then
-        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    else
-        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
-    fi
-
 # build unchained-ai packages (lib, cli, gen)
 build *args="":
-    @echo ""
-    @echo "Build unchained-ai Packages (Library, CLI, Gen)"
-    @echo "---------------------------------------------------"
-    @echo ""
-    @cargo build -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen {{args}}
+    @just _build unchained-ai "unchained-ai Library" {{args}}
+    @just _build unchained-ai-cli "unchained-ai Library" {{args}}
+    @just _build unchained-ai-gen "unchained-ai Library" {{args}}
 
-# run tests for unchained-ai packages
+# Test both library and CLI.
 test *args="":
-    @echo ""
-    @echo "Testing {{BOLD}}unchained-ai{{RESET}} ({{ITALIC}}Library, CLI, Gen{{RESET}})"
-    @echo "-----------------------------------------------"
-    @echo ""
-    @cargo test -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen {{args}}
+    @just _test unchained-ai {{args}}
+    @just _test unchained-ai-cli {{args}}
+    @just _test unchained-ai-gen {{args}}
 
 # run clippy on unchained-ai packages
-lint:
-    @echo ""
-    @echo "Linting unchained-ai Packages"
-    @echo "--------------------------"
-    @echo ""
-    @cargo clippy -p unchained-ai -- -D warnings
-    @cargo clippy -p unchained-ai-cli -- -D warnings
-    @cargo clippy -p unchained-ai-gen -- -D warnings
+lint *args="":
+    @just _lint unchained-ai {{args}}
+    @just _lint unchained-ai-cli {{args}}
+    @just _lint unchained-ai-gen {{args}}
 
-install:
-    @echo ""
-    @echo "{{BOLD}}Building unchained-ai Library{{RESET}}"
-    @cargo build -p unchained-ai --release  || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing unchained-ai CLI ({{ITALIC}}unchained{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
-    @cargo install --path ./cli  || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo ""
-    @echo "{{BOLD}}{{BLUE}}unchained-ai CLI installed{{RESET}}"
-    @echo ""
-    @playa effect drop-4 2>/dev/null || exit 0
+# lint and fix with AI if problems found
+lint-fix *args="":
+    @just _lint unchained-ai {{args}} || just _lint_fix unchained-ai
+    @just _lint unchained-ai-cli {{args}} || just _lint_fix unchained-ai-cli
+    @just _lint unchained-ai-gen {{args}} || just _lint_fix unchained-ai-gen
+
+install *args="":
+    @just build --release
+    @just _install "./cli" "Unchained AI" {{args}}
 
 check:
     @echo ""
@@ -163,64 +73,10 @@ check:
     @echo ""
     @cargo check -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen
 
-# run the unchained CLI in dev mode
-cli *args="":
-    @cargo run -p unchained-ai-cli -- {{args}}
-
-# run model gen
-gen *args="":
-    @cargo run -p unchained-ai-gen {{args}}
-
-# Open Opencode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
-
 # Outdated packages
 outdated:
     @cargo outdated --root-deps-only
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
-
-refresh-skill:
-    @clear
-    @echo "Refreshing {{BOLD}}unchained-ai{{RESET}} skill"
-    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-unchained-ai.md)"\'
-
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
-    @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}unchained-ai{{RESET}} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
-    @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- unchained-ai {{DOCS}} {{args}}
-    @_speak "the drift recipe for the unchained-ai package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

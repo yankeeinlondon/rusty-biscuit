@@ -5,8 +5,12 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::interpolation::{ComparisonOp, Expr, parse};
+use super::expression::{EvaluationLookup, evaluate, is_truthy, parse_condition};
 use serde_json::Value;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::path::Path;
 use tracing::{debug, trace};
 
 /// Errors from condition parsing or evaluation.
@@ -18,6 +22,12 @@ pub enum ConditionError {
         expr: String,
         line: usize,
         message: String,
+        /// Byte range in `expr` that the parser identified as problematic.
+        ///
+        /// When the parser reports only a single byte position, darkmatter
+        /// records a single-point span at that offset. If no position can be
+        /// recovered, the span falls back to the full expression.
+        span: Range<usize>,
     },
     /// Failed to evaluate a condition expression.
     #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
@@ -28,7 +38,75 @@ pub enum ConditionError {
     },
 }
 
-/// Evaluates a `when` condition expression.
+impl biscuit_terminal::errors::BlockError for ConditionError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round</cyan>";
+
+        match self {
+            ConditionError::Parse {
+                expr,
+                line,
+                message,
+                span,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ConditionError", "parse failed"))
+                .body(format!(
+                    "<dim>Expression:</dim>\n  <cyan>{expr}</cyan>\n{}\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}",
+                    caret_marker(expr, span.start)
+                ))
+                .hint(operator_hint),
+
+            ConditionError::Eval { expr, line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ConditionError", "evaluation failed"))
+                .body(format!(
+                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("Confirm every variable referenced is present in the effective state."),
+        }
+    }
+}
+
+/// Evaluates a `when` condition expression against an effective state.
+///
+/// This is the primary entry point for condition evaluation in the compose
+/// pipeline. It parses the expression in condition mode (where `||` is logical
+/// OR and `&&` is logical AND) and evaluates it against the provided state.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::{conditions::evaluate_condition, EffectiveStateBuilder, ComposeContext};
+/// use serde_json::json;
+/// use std::collections::HashMap;
+/// use std::path::Path;
+///
+/// let state = EffectiveStateBuilder::new()
+///     .with_frontmatter([("draft".to_string(), json!(true))].into())
+///     .with_context(ComposeContext::capture_for_dir(Path::new(".")))
+///     .build()
+///     .unwrap();
+///
+/// assert!(evaluate_condition("draft", &state, 1).unwrap());
+/// assert!(!evaluate_condition("!draft", &state, 1).unwrap());
+/// ```
+///
+/// ## Returns
+///
+/// - `Ok(true)` when the expression evaluates to a truthy value
+/// - `Ok(false)` when the expression evaluates to a falsy value
+///
+/// ## Errors
+///
+/// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
+/// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
+/// Both variants include the source expression and line number.
 pub fn evaluate_condition(
     expr: &str,
     state: &EffectiveState,
@@ -36,13 +114,14 @@ pub fn evaluate_condition(
 ) -> Result<bool, ConditionError> {
     trace!(expr = %expr, line, "conditions: evaluating");
 
-    let parsed = parse(expr).map_err(|e| ConditionError::Parse {
+    let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
         expr: expr.to_string(),
         line,
-        message: e.to_string(),
+        message: e.message.clone(),
+        span: parse_error_span(expr, e.position),
     })?;
 
-    let value = eval_expr(&parsed, state).map_err(|message| ConditionError::Eval {
+    let value = evaluate(&parsed, state).map_err(|message| ConditionError::Eval {
         expr: expr.to_string(),
         line,
         message,
@@ -54,195 +133,198 @@ pub fn evaluate_condition(
     Ok(result)
 }
 
-fn eval_expr(expr: &Expr, state: &EffectiveState) -> Result<Value, String> {
-    match expr {
-        Expr::Variable(path) => Ok(state.get(path).unwrap_or(Value::Null)),
-        Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
-        Expr::NumberLiteral(n) => {
-            let num = serde_json::Number::from_f64(*n)
-                .ok_or_else(|| format!("Invalid numeric literal: {n}"))?;
-            Ok(Value::Number(num))
-        }
-        Expr::UnaryNot(inner) => {
-            let value = eval_expr(inner, state)?;
-            Ok(Value::Bool(!is_truthy(&value)))
-        }
-        Expr::Fallback { primary, fallback } => {
-            let primary = eval_expr(primary, state)?;
-            if is_truthy(&primary) {
-                Ok(primary)
-            } else {
-                eval_expr(fallback, state)
-            }
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            let condition = eval_expr(condition, state)?;
-            if is_truthy(&condition) {
-                eval_expr(then_branch, state)
-            } else {
-                eval_expr(else_branch, state)
-            }
-        }
-        Expr::Comparison { left, op, right } => {
-            let left = eval_expr(left, state)?;
-            let right = eval_expr(right, state)?;
+fn parse_error_span(expr: &str, position: usize) -> Range<usize> {
+    if expr.is_empty() {
+        return 0..0;
+    }
 
-            // Null-safe comparisons: when both sides are Null (undefined),
-            // equality and inequality both return false. Comparing two
-            // unknown values yields no meaningful result.
-            let both_null = left.is_null() && right.is_null();
+    let start = position.min(expr.len());
+    let end = (start.saturating_add(1)).min(expr.len());
+    if start == end {
+        0..expr.len()
+    } else {
+        start..end
+    }
+}
 
-            let outcome = match op {
-                ComparisonOp::Equal => !both_null && scalar_string(&left) == scalar_string(&right),
-                ComparisonOp::NotEqual => {
-                    !both_null && scalar_string(&left) != scalar_string(&right)
+fn caret_marker(input: &str, byte_offset: usize) -> String {
+    let clamped = byte_offset.min(input.len());
+    let column = input
+        .char_indices()
+        .take_while(|(idx, _)| *idx < clamped)
+        .count();
+    format!("  {}^", " ".repeat(column))
+}
+
+/// Evaluates a condition expression against plain JSON data without
+/// constructing an [`EffectiveState`].
+///
+/// This is a shortcut for external callers who only need the boolean
+/// DSL with no frontmatter pipeline involvement.
+///
+/// ## Resolution Order
+///
+/// 1. **Top-level properties** are resolved against the provided `data`.
+/// 2. **`env.*` properties** are resolved against the system environment.
+/// 3. **`ctx.*` properties** are resolved via lazy runtime context capture
+///    based on the referenced context group.
+/// 4. **Unprefixed missing keys** fall back to the `ctx.*` namespace
+///    (same behavior as [`EffectiveState`]).
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+/// use serde_json::json;
+/// use std::path::Path;
+///
+/// let data = json!({ "draft": true, "audience": "internal" });
+/// let result = evaluate_condition_against(
+///     "draft && audience == 'internal'",
+///     &data,
+///     Path::new("."),
+/// ).unwrap();
+/// assert!(result);
+/// ```
+///
+/// ## Returns
+///
+/// - `Ok(true)` when the expression evaluates to a truthy value
+/// - `Ok(false)` when the expression evaluates to a falsy value
+///
+/// ## Errors
+///
+/// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
+/// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
+/// Both variants use line `1` for the shortcut API.
+///
+/// ## Notes
+///
+/// - [`ConditionError`] implements [`biscuit_terminal::errors::BlockError`],
+///   so parse and evaluation failures can be rendered as status blocks.
+/// - Context capture is lazy: only the context groups actually referenced
+///   by the expression are captured, and only when needed.
+pub fn evaluate_condition_against(
+    expr: &str,
+    data: &Value,
+    work_dir: &Path,
+) -> Result<bool, ConditionError> {
+    trace!(expr = %expr, "conditions: evaluating against plain data");
+
+    let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
+        expr: expr.to_string(),
+        line: 1,
+        message: e.message.clone(),
+        span: parse_error_span(expr, e.position),
+    })?;
+
+    let lookup = ShortcutLookup::new(data, work_dir);
+    let value = evaluate(&parsed, &lookup).map_err(|message| ConditionError::Eval {
+        expr: expr.to_string(),
+        line: 1,
+        message,
+    })?;
+
+    let result = is_truthy(&value);
+    debug!(expr = %expr, result, "conditions: evaluated against plain data");
+
+    Ok(result)
+}
+
+/// Lookup implementation for the shortcut API that resolves variables
+/// against plain JSON data, environment variables, and lazily-captured
+/// runtime context.
+struct ShortcutLookup<'a> {
+    /// Plain data payload for top-level and nested lookups.
+    data: &'a Value,
+    /// Base directory for runtime context capture.
+    work_dir: &'a Path,
+    /// Cache of lazily-captured context values.
+    ctx_cache: RefCell<HashMap<String, Value>>,
+    /// Set of context groups that have already been captured.
+    captured_groups: RefCell<HashSet<super::context::capture::ContextGroup>>,
+}
+
+impl<'a> ShortcutLookup<'a> {
+    fn new(data: &'a Value, work_dir: &'a Path) -> Self {
+        Self {
+            data,
+            work_dir,
+            ctx_cache: RefCell::new(HashMap::new()),
+            captured_groups: RefCell::new(HashSet::new()),
+        }
+    }
+
+    /// Looks up a value from the plain data payload using dot notation.
+    fn get_from_data(&self, path: &str) -> Option<Value> {
+        let parts: Vec<&str> = path.split('.').collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        let mut current = self.data.get(parts[0])?.clone();
+
+        for part in &parts[1..] {
+            current = match current {
+                Value::Object(obj) => obj.get(*part)?.clone(),
+                _ => return None,
+            };
+        }
+
+        Some(current)
+    }
+
+    /// Captures a single context group and merges its values into the cache.
+    fn capture_group(&self, group: super::context::capture::ContextGroup) {
+        let (values, _diagnostics, _timings) =
+            super::context::capture::capture_runtime_context_for_groups(self.work_dir, &[group]);
+
+        let mut cache = self.ctx_cache.borrow_mut();
+        let mut captured = self.captured_groups.borrow_mut();
+        for (key, value) in values {
+            cache.insert(key, value);
+        }
+        captured.insert(group);
+    }
+
+    #[cfg(test)]
+    fn captured_groups(&self) -> Vec<super::context::capture::ContextGroup> {
+        self.captured_groups.borrow().iter().cloned().collect()
+    }
+}
+
+impl EvaluationLookup for ShortcutLookup<'_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        // Handle ctx.* prefixes with lazy capture
+        if let Some(ctx_key) = path.strip_prefix("ctx.") {
+            // Check cache first
+            if let Some(cached) = self.ctx_cache.borrow().get(ctx_key) {
+                return Some(cached.clone());
+            }
+
+            // Determine which group this key belongs to
+            if let Some(group) = super::context::capture::ContextGroup::for_key(ctx_key) {
+                let need_capture = !self.captured_groups.borrow().contains(&group);
+                if need_capture {
+                    self.capture_group(group);
                 }
-                ComparisonOp::GreaterThan => to_number_coerce(&left) > to_number_coerce(&right),
-                ComparisonOp::GreaterThanOrEqual => {
-                    to_number_coerce(&left) >= to_number_coerce(&right)
-                }
-                ComparisonOp::LessThan => to_number_coerce(&left) < to_number_coerce(&right),
-            };
-            Ok(Value::Bool(outcome))
-        }
-        Expr::FunctionCall { name, args } => eval_function(name, args, state),
-    }
-}
-
-fn eval_function(name: &str, args: &[Expr], state: &EffectiveState) -> Result<Value, String> {
-    let name = name.to_ascii_lowercase();
-    match name.as_str() {
-        "and" => {
-            let result = args
-                .iter()
-                .map(|arg| eval_expr(arg, state))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .all(is_truthy);
-            Ok(Value::Bool(result))
-        }
-        "or" => {
-            let result = args
-                .iter()
-                .map(|arg| eval_expr(arg, state))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .any(is_truthy);
-            Ok(Value::Bool(result))
-        }
-        "haskey" | "has_key" => {
-            if args.len() < 2 {
-                return Err("HasKey() requires 2 arguments".to_string());
             }
-            let object = eval_expr(&args[0], state)?;
-            let key = scalar_string(&eval_expr(&args[1], state)?);
-            let has = object
-                .as_object()
-                .map(|obj| obj.contains_key(&key))
-                .unwrap_or(false);
-            Ok(Value::Bool(has))
-        }
-        "contains" => {
-            if args.len() < 2 {
-                return Err("Contains() requires 2 arguments".to_string());
-            }
-            let haystack = eval_expr(&args[0], state)?;
-            let needle = eval_expr(&args[1], state)?;
-            let found = match haystack {
-                Value::Array(values) => values
-                    .iter()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::Object(values) => values
-                    .values()
-                    .any(|value| scalar_string(value) == scalar_string(&needle)),
-                Value::String(value) => value.contains(&scalar_string(&needle)),
-                value => scalar_string(&value).contains(&scalar_string(&needle)),
-            };
-            Ok(Value::Bool(found))
-        }
-        "length" => {
-            if args.is_empty() {
-                return Err("Length() requires 1 argument".to_string());
-            }
-            let value = eval_expr(&args[0], state)?;
-            let len = match value {
-                Value::String(s) => s.chars().count(),
-                Value::Array(arr) => arr.len(),
-                Value::Object(obj) => obj.len(),
-                Value::Number(n) => n.to_string().chars().count(),
-                Value::Bool(_) => 0,
-                Value::Null => 0,
-            };
-            Ok(Value::Number(serde_json::Number::from(len)))
-        }
-        "number" => {
-            if args.is_empty() {
-                return Err("number() requires at least 1 argument".to_string());
-            }
-            let value = eval_expr(&args[0], state)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&eval_expr(&args[1], state)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default);
-            let json_number = serde_json::Number::from_f64(number)
-                .ok_or_else(|| "Unable to represent number".to_string())?;
-            Ok(Value::Number(json_number))
-        }
-        "round" => {
-            if args.is_empty() {
-                return Err("round() requires at least 1 argument".to_string());
-            }
-            let value = eval_expr(&args[0], state)?;
-            let default = if args.len() > 1 {
-                to_number_coerce(&eval_expr(&args[1], state)?)
-            } else {
-                0.0
-            };
-            let number = to_number(&value).unwrap_or(default).round() as i64;
-            Ok(Value::Number(serde_json::Number::from(number)))
-        }
-        _ => Err(format!("Unknown function: {name}")),
-    }
-}
 
-fn to_number(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse::<f64>().ok(),
-        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Null => None,
-        Value::Array(_) | Value::Object(_) => None,
-    }
-}
+            return self.ctx_cache.borrow().get(ctx_key).cloned();
+        }
 
-fn to_number_coerce(value: &Value) -> f64 {
-    to_number(value).unwrap_or(0.0)
-}
+        // Handle env.* prefixes
+        if let Some(env_key) = path.strip_prefix("env.") {
+            return std::env::var(env_key).ok().map(Value::String);
+        }
 
-fn scalar_string(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
-        Value::Array(_) | Value::Object(_) => value.to_string(),
-    }
-}
+        // Try plain data lookup first
+        if let Some(value) = self.get_from_data(path) {
+            return Some(value);
+        }
 
-fn is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(v) => *v,
-        Value::Number(n) => n.as_f64().unwrap_or(0.0) != 0.0,
-        Value::String(s) => !s.is_empty(),
-        Value::Array(values) => !values.is_empty(),
-        Value::Object(values) => !values.is_empty(),
+        // Fall back to ctx.* (same behavior as EffectiveState)
+        self.get(&format!("ctx.{path}"))
     }
 }
 
@@ -250,7 +332,7 @@ fn is_truthy(value: &Value) -> bool {
 mod tests {
     use super::*;
     use crate::markdown::compose::{ComposeContext, EffectiveStateBuilder};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::collections::HashMap;
 
     fn test_state(data: Value) -> EffectiveState {
@@ -374,5 +456,423 @@ mod tests {
         assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
         assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
         assert!(evaluate_condition("!env.AGENT", &state, 1).unwrap());
+    }
+
+    // ── Infix `&&` / `||` coverage ────────────────────────────────────────
+
+    #[test]
+    fn infix_and_both_true() {
+        let state = test_state(json!({ "a": true, "b": true }));
+        assert!(evaluate_condition("a && b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_one_false() {
+        let state = test_state(json!({ "a": true, "b": false }));
+        assert!(!evaluate_condition("a && b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_or_both_false() {
+        let state = test_state(json!({ "a": false, "b": false }));
+        assert!(!evaluate_condition("a || b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_or_one_true() {
+        let state = test_state(json!({ "a": false, "b": true }));
+        assert!(evaluate_condition("a || b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_binds_tighter_than_or() {
+        // (false && true) || true => true
+        let state = test_state(json!({ "a": false, "b": true, "c": true }));
+        assert!(evaluate_condition("a && b || c", &state, 1).unwrap());
+
+        // false || (true && false) => false
+        let state = test_state(json!({ "a": false, "b": true, "c": false }));
+        assert!(!evaluate_condition("a || b && c", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_parenthesized_or_then_and() {
+        // (a || b) && c
+        let state = test_state(json!({ "a": false, "b": true, "c": true }));
+        assert!(evaluate_condition("(a || b) && c", &state, 1).unwrap());
+
+        let state = test_state(json!({ "a": false, "b": true, "c": false }));
+        assert!(!evaluate_condition("(a || b) && c", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_or_with_literal() {
+        // a || (missing || "default") — Or short-circuits on `a`.
+        let state = test_state(json!({ "a": true }));
+        assert!(evaluate_condition(r#"a || (missing || "default")"#, &state, 1).unwrap());
+    }
+
+    #[test]
+    fn legacy_and_or_function_still_works() {
+        let state = test_state(json!({ "a": true, "b": false }));
+        assert!(!evaluate_condition("And(a, b)", &state, 1).unwrap());
+        assert!(evaluate_condition("Or(a, b)", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_short_circuits_on_false() {
+        // UnknownFn would raise `Unknown function` — but short-circuit on
+        // leading `false` means the rhs is never evaluated.
+        let state = test_state(json!({}));
+        assert!(!evaluate_condition("false_flag && UnknownFn(x)", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_or_short_circuits_on_true() {
+        let state = test_state(json!({ "truthy_flag": true }));
+        assert!(evaluate_condition("truthy_flag || UnknownFn(x)", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn function_and_short_circuits_on_false() {
+        let state = test_state(json!({}));
+        assert!(!evaluate_condition("And(false_flag, UnknownFn(x))", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn function_or_short_circuits_on_true() {
+        let state = test_state(json!({ "truthy_flag": true }));
+        assert!(evaluate_condition("Or(truthy_flag, UnknownFn(x))", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn infix_and_without_short_circuit_propagates_eval_error() {
+        // When short-circuit doesn't kick in, unknown functions must surface
+        // as an evaluation error.
+        let state = test_state(json!({ "truthy_flag": true }));
+        let result = evaluate_condition("truthy_flag && UnknownFn(x)", &state, 1);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ConditionError::Eval { .. }));
+    }
+
+    #[test]
+    fn infix_with_comparison_operands() {
+        let state = test_state(json!({ "count": 5, "name": "alice" }));
+        assert!(evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1).unwrap());
+        assert!(!evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1).unwrap());
+        assert!(evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1).unwrap());
+    }
+
+    // ── Shortcut API: evaluate_condition_against ──────────────────────
+
+    #[test]
+    fn shortcut_top_level_lookup() {
+        let data = json!({ "draft": true, "title": "Hello" });
+        assert!(evaluate_condition_against("draft", &data, std::path::Path::new(".")).unwrap());
+        assert!(
+            evaluate_condition_against("title == 'Hello'", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_nested_lookup() {
+        let data = json!({ "user": { "name": "Alice", "admin": true } });
+        assert!(
+            evaluate_condition_against("user.name == 'Alice'", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+        assert!(
+            evaluate_condition_against("user.admin", &data, std::path::Path::new(".")).unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_missing_values() {
+        let data = json!({});
+        assert!(!evaluate_condition_against("missing", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("!missing", &data, std::path::Path::new(".")).unwrap());
+    }
+
+    #[test]
+    fn shortcut_comparisons_and_helpers() {
+        let data = json!({ "count": 5, "items": [1, 2, 3], "user": { "name": "Alice" } });
+        assert!(evaluate_condition_against("count > 0", &data, std::path::Path::new(".")).unwrap());
+        assert!(
+            evaluate_condition_against("count >= 5", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("count < 10", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(
+            evaluate_condition_against("length(items) == 3", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+        assert!(
+            evaluate_condition_against("HasKey(user, 'name')", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_short_circuits() {
+        let data = json!({ "false_flag": false, "truthy_flag": true });
+        // Infix AND short-circuits on false
+        assert!(
+            !evaluate_condition_against(
+                "false_flag && UnknownFn(x)",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+        // Infix OR short-circuits on true
+        assert!(
+            evaluate_condition_against(
+                "truthy_flag || UnknownFn(x)",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_and_or_functions() {
+        let data = json!({ "a": true, "b": false });
+        assert!(
+            !evaluate_condition_against("And(a, b)", &data, std::path::Path::new(".")).unwrap()
+        );
+        assert!(evaluate_condition_against("Or(a, b)", &data, std::path::Path::new(".")).unwrap());
+    }
+
+    #[test]
+    fn shortcut_ternary() {
+        let data = json!({ "enabled": true, "yes": "yes", "empty": "" });
+        assert!(
+            evaluate_condition_against("enabled ? yes : empty", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+        let data = json!({ "enabled": false, "yes": "yes", "empty": "" });
+        assert!(
+            !evaluate_condition_against("enabled ? yes : empty", &data, std::path::Path::new("."))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn shortcut_parse_error_shape() {
+        let data = json!({});
+        let result = evaluate_condition_against("&& invalid", &data, std::path::Path::new("."));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConditionError::Parse { line: 1, .. }));
+    }
+
+    #[test]
+    fn shortcut_eval_error_shape() {
+        let data = json!({ "truthy_flag": true });
+        let result = evaluate_condition_against(
+            "truthy_flag && UnknownFn(x)",
+            &data,
+            std::path::Path::new("."),
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConditionError::Eval { line: 1, .. }));
+    }
+
+    #[test]
+    fn shortcut_env_lookup() {
+        // Set a known env var for the test
+        unsafe {
+            std::env::set_var("DM_TEST_AGENT", "claude");
+        }
+        let data = json!({});
+        assert!(
+            evaluate_condition_against(
+                "env.DM_TEST_AGENT == 'claude'",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+        assert!(
+            !evaluate_condition_against(
+                "env.DM_TEST_AGENT == 'opencode'",
+                &data,
+                std::path::Path::new(".")
+            )
+            .unwrap()
+        );
+        unsafe {
+            std::env::remove_var("DM_TEST_AGENT");
+        }
+    }
+
+    #[test]
+    fn shortcut_ctx_datetime_lookup() {
+        let data = json!({});
+        // ctx.today and ctx.year are cheap (no I/O)
+        let result = evaluate_condition_against("ctx.today", &data, std::path::Path::new("."));
+        assert!(result.is_ok());
+        // The result depends on the actual date, but it should evaluate without error
+    }
+
+    #[test]
+    fn shortcut_unprefixed_fallback_to_ctx() {
+        let data = json!({});
+        // When a key is not in data, fall back to ctx.* (same as EffectiveState)
+        // We test with a datetime key since it's always available
+        let result = evaluate_condition_against("year", &data, std::path::Path::new("."));
+        assert!(result.is_ok());
+    }
+
+    // ── Lazy Context Resolution ─────────────────────────────────────────
+
+    #[test]
+    fn shortcut_and_short_circuits_prevents_ctx_capture() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "false_flag": false });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("false_flag && ctx.repo == 'x'").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "Repo context should not be captured when short-circuited: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_or_short_circuits_prevents_ctx_capture() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "true_flag": true });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("true_flag || ctx.gpu").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "GPU context should not be captured when short-circuited: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_plain_data_expression_does_not_capture_context() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "draft": true });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("draft == true").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "No context should be captured for plain-data expressions: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_unknown_ctx_key_does_not_capture() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({});
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("missing_repo_name").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.is_empty(),
+            "Unknown context keys should not trigger capture: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_ctx_reference_captures_needed_group() {
+        use crate::markdown::compose::context::capture::ContextGroup;
+        use crate::markdown::compose::expression;
+
+        let data = json!({});
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("ctx.today").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert!(
+            captured.contains(&ContextGroup::DateTime),
+            "DateTime group should be captured when ctx.today is referenced"
+        );
+    }
+
+    #[test]
+    fn shortcut_same_group_captured_only_once() {
+        use crate::markdown::compose::context::capture::ContextGroup;
+        use crate::markdown::compose::expression;
+
+        let data = json!({});
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let parsed = expression::parse_condition("ctx.today && ctx.year").unwrap();
+        let _ = expression::evaluate(&parsed, &lookup);
+        let captured = lookup.captured_groups();
+        assert_eq!(
+            captured.len(),
+            1,
+            "DateTime should only be captured once, but got: {:?}",
+            captured
+        );
+        assert!(
+            captured.contains(&ContextGroup::DateTime),
+            "DateTime group should be in captured set"
+        );
+    }
+
+    #[test]
+    fn shortcut_ternary_short_circuits_then_branch() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "false_flag": false });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        // Condition is false, so `ctx.repo` (then-branch) should NOT be evaluated or captured
+        let parsed = expression::parse_condition("false_flag ? ctx.repo : 'default'").unwrap();
+        let result = expression::evaluate(&parsed, &lookup).unwrap();
+        let captured = lookup.captured_groups();
+        assert_eq!(
+            result,
+            serde_json::Value::String("default".to_string()),
+            "Ternary should return else-branch when condition is false"
+        );
+        assert!(
+            captured.is_empty(),
+            "Repo context should NOT be captured when ternary short-circuits then-branch: captured {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn shortcut_ternary_short_circuits_else_branch() {
+        use crate::markdown::compose::expression;
+
+        let data = json!({ "true_flag": true });
+        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        // Condition is true, so `ctx.repo` (else-branch) should NOT be evaluated or captured
+        let parsed = expression::parse_condition("true_flag ? 'default' : ctx.repo").unwrap();
+        let result = expression::evaluate(&parsed, &lookup).unwrap();
+        let captured = lookup.captured_groups();
+        assert_eq!(
+            result,
+            serde_json::Value::String("default".to_string()),
+            "Ternary should return then-branch when condition is true"
+        );
+        assert!(
+            captured.is_empty(),
+            "Repo context should NOT be captured when ternary short-circuits else-branch: captured {:?}",
+            captured
+        );
     }
 }

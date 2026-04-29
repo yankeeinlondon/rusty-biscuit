@@ -1060,13 +1060,9 @@ fn push_string_array_value(root: &mut Value, path: &[&str], value: &str) {
     if !target.is_array() {
         *target = Value::Array(Vec::new());
     }
-    debug_assert!(
-        target.is_array(),
-        "push_string_array_value: type mismatch after set — expected array, got {:?}",
-        target
-    );
-    // SAFETY: the value is guaranteed to be an Array because we just set it above
-    let array = unsafe { target.as_array_mut().unwrap_unchecked() };
+    let array = target
+        .as_array_mut()
+        .expect("push_string_array_value: target was just set to Array above");
     let already_present = array
         .iter()
         .any(|existing| existing.as_str() == Some(value));

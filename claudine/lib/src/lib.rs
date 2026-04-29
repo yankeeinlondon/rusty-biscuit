@@ -11,6 +11,7 @@ pub mod harness;
 pub mod linking;
 pub mod mcp;
 pub mod messaging;
+pub mod model_catalog;
 pub mod permissions;
 pub mod reporting;
 pub mod services;

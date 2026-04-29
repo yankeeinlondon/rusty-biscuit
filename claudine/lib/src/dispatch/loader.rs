@@ -303,6 +303,20 @@ fn bridge_provider_config(cfg: &MessengerProviderConfig) -> MessagingRouteConfig
             phone_number_id: None,
             phone_number_id_env: phone_number_id_env.clone(),
         },
+        MessengerProviderConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => MessagingRouteConfig::DiscordWebhook {
+            webhook_url: webhook_url.clone(),
+            webhook_url_env: webhook_url_env.clone(),
+        },
+        MessengerProviderConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => MessagingRouteConfig::SlackWebhook {
+            webhook_url: webhook_url.clone(),
+            webhook_url_env: webhook_url_env.clone(),
+        },
     }
 }
 
@@ -539,6 +553,36 @@ mod tests {
     }
 
     #[test]
+    fn load_claudine_config_accepts_hyphenated_discord_webhook_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let json5_content = r#"{
+            preferred_agent: "claude",
+            messenger: {
+                active_config: "alerts",
+                configurations: {
+                    alerts: {
+                        provider: "discord-webhook",
+                        webhook_url_env: "MY_DISCORD_URL",
+                    },
+                },
+            },
+        }"#;
+        let path = config_dir.join("config.json");
+        std::fs::write(&path, json5_content).unwrap();
+
+        let config = load_claudine_config(Some(&path), None).unwrap();
+        let messenger = config.messenger.unwrap();
+        assert_eq!(messenger.active_config.as_deref(), Some("alerts"));
+        assert!(matches!(
+            messenger.configurations.get("alerts").unwrap(),
+            MessengerProviderConfig::DiscordWebhook { .. }
+        ));
+    }
+
+    #[test]
     fn load_claudine_config_detects_old_format() {
         let dir = tempfile::tempdir().unwrap();
         let config_dir = dir.path().join(".claudine");
@@ -612,28 +656,30 @@ mod tests {
     fn merge_repo_override_applies_active_messenger() {
         use crate::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
 
-        let mut user = ClaudineConfig::default();
-        user.messenger = Some(ClaudineMessengerConfig {
-            active_config: Some("personal".to_string()),
-            configurations: {
-                let mut m = std::collections::HashMap::new();
-                m.insert(
-                    "personal".to_string(),
-                    MessengerProviderConfig::Discord {
-                        channel_id: "123".to_string(),
-                        bot_token_env: "TOKEN".to_string(),
-                    },
-                );
-                m.insert(
-                    "work".to_string(),
-                    MessengerProviderConfig::Slack {
-                        channel_id: "C456".to_string(),
-                        bot_token_env: "SLACK_URL".to_string(),
-                    },
-                );
-                m
-            },
-        });
+        let mut user = ClaudineConfig {
+            messenger: Some(ClaudineMessengerConfig {
+                active_config: Some("personal".to_string()),
+                configurations: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert(
+                        "personal".to_string(),
+                        MessengerProviderConfig::Discord {
+                            channel_id: "123".to_string(),
+                            bot_token_env: "TOKEN".to_string(),
+                        },
+                    );
+                    m.insert(
+                        "work".to_string(),
+                        MessengerProviderConfig::Slack {
+                            channel_id: "C456".to_string(),
+                            bot_token_env: "SLACK_URL".to_string(),
+                        },
+                    );
+                    m
+                },
+            }),
+            ..Default::default()
+        };
 
         let repo = RepoOverrideConfig {
             active_messenger: Some(Some("work".to_string())),
@@ -652,11 +698,13 @@ mod tests {
     fn merge_repo_override_disables_messenger_with_null() {
         use crate::config::claudine_config::ClaudineMessengerConfig;
 
-        let mut user = ClaudineConfig::default();
-        user.messenger = Some(ClaudineMessengerConfig {
-            active_config: Some("personal".to_string()),
-            configurations: std::collections::HashMap::new(),
-        });
+        let mut user = ClaudineConfig {
+            messenger: Some(ClaudineMessengerConfig {
+                active_config: Some("personal".to_string()),
+                configurations: std::collections::HashMap::new(),
+            }),
+            ..Default::default()
+        };
 
         let repo = RepoOverrideConfig {
             active_messenger: Some(None),
@@ -915,6 +963,47 @@ mod tests {
     }
 
     #[test]
+    fn bridge_provider_config_discord_webhook() {
+        let cfg = MessengerProviderConfig::DiscordWebhook {
+            webhook_url: None,
+            webhook_url_env: "MY_DISCORD_URL".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, None);
+                assert_eq!(webhook_url_env, "MY_DISCORD_URL");
+            }
+            other => panic!("expected DiscordWebhook, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_slack_webhook() {
+        let cfg = MessengerProviderConfig::SlackWebhook {
+            webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXX".to_string()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(
+                    webhook_url,
+                    Some("https://hooks.slack.com/services/T000/B000/XXXX".to_string())
+                );
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+            other => panic!("expected SlackWebhook, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn canonical_runtime_exposes_config() {
         let config = ClaudineConfig::default();
         let runtime = compile_canonical_runtime(config.clone(), None).unwrap();
@@ -931,7 +1020,7 @@ mod tests {
 
         let user_path = dir.path().join("user-config.json");
         let user_config = ClaudineConfig {
-            preferred_agent: Provider::Claude,
+            preferred_agent: Some(Provider::Claude),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&user_config, &user_path).unwrap();
@@ -953,7 +1042,7 @@ mod tests {
         let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
         assert_eq!(
             loaded.preferred_agent,
-            Provider::Claude,
+            Some(Provider::Claude),
             "user config should be returned when repo config is old format"
         );
 
@@ -1003,7 +1092,7 @@ mod tests {
         let path = dir.path().join("config.json");
 
         let config = ClaudineConfig {
-            preferred_agent: Provider::Codex,
+            preferred_agent: Some(Provider::Codex),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&config, &path).unwrap();
@@ -1011,7 +1100,7 @@ mod tests {
         let loaded = load_claudine_config(Some(&path), None).unwrap();
         assert_eq!(
             loaded.preferred_agent,
-            Provider::Codex,
+            Some(Provider::Codex),
             "preferred_agent should be Codex as written"
         );
     }
@@ -1033,16 +1122,27 @@ mod tests {
         for provider in providers {
             let path = dir.path().join(format!("{provider:?}.json"));
             let config = ClaudineConfig {
-                preferred_agent: provider,
+                preferred_agent: Some(provider),
                 ..ClaudineConfig::default()
             };
             save_claudine_config(&config, &path).unwrap();
             let loaded = load_claudine_config(Some(&path), None).unwrap();
             assert_eq!(
-                loaded.preferred_agent, provider,
+                loaded.preferred_agent,
+                Some(provider),
                 "preferred_agent round-trip failed for {provider:?}"
             );
         }
+    }
+
+    #[test]
+    fn load_claudine_config_preferred_agent_absent_loads_as_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{}").unwrap();
+
+        let loaded = load_claudine_config(Some(&path), None).unwrap();
+        assert!(loaded.preferred_agent.is_none());
     }
 
     #[test]
@@ -1051,7 +1151,7 @@ mod tests {
 
         let user_path = dir.path().join("user.json");
         let user_config = ClaudineConfig {
-            preferred_agent: Provider::Codex,
+            preferred_agent: Some(Provider::Codex),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&user_config, &user_path).unwrap();
@@ -1067,7 +1167,7 @@ mod tests {
         let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
         assert_eq!(
             loaded.preferred_agent,
-            Provider::Codex,
+            Some(Provider::Codex),
             "repo should not override user's preferred_agent"
         );
         assert_eq!(
@@ -1181,13 +1281,13 @@ mod tests {
         let path = dir.path().join("config.json");
 
         let new_config = ClaudineConfig {
-            preferred_agent: Provider::Claude,
+            preferred_agent: Some(Provider::Claude),
             ..ClaudineConfig::default()
         };
         save_claudine_config(&new_config, &path).unwrap();
 
         let loaded = load_claudine_config(Some(&path), None).unwrap();
-        assert_eq!(loaded.preferred_agent, Provider::Claude);
+        assert_eq!(loaded.preferred_agent, Some(Provider::Claude));
         assert!(
             !dir.path().join("config.json.bak").exists(),
             "new format should not produce a backup"

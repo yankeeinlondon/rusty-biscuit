@@ -16,7 +16,6 @@ use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
-use std::process::Command;
 use tracing::{debug, info, instrument};
 
 /// Resolved theme configuration for terminal rendering.
@@ -206,8 +205,11 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_missing_transclusions,
             allow_any_missing_reference,
             allow_ctx_override,
+            allow_invalid_frontmatter_assignment,
+            allow_reassigned_frontmatter_property,
             timeout,
             allow_shell_timeout,
+            shell,
             perf,
         } => {
             let parsed = parse_compose_positionals(&args)?;
@@ -229,8 +231,11 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 indent,
                 &allow,
                 allow_ctx_override,
+                allow_invalid_frontmatter_assignment,
+                allow_reassigned_frontmatter_property,
                 timeout,
                 allow_shell_timeout,
+                shell,
                 perf,
                 cli,
             )?;
@@ -431,8 +436,11 @@ pub fn run_compose(
     indent: Option<usize>,
     allow: &ComposeAllowFlags,
     allow_ctx_override: bool,
+    allow_invalid_frontmatter_assignment: bool,
+    allow_reassigned_frontmatter_property: bool,
     timeout_secs: Option<u64>,
     allow_shell_timeout: bool,
+    shell_report: bool,
     perf: bool,
     cli: &Cli,
 ) -> Result<()> {
@@ -602,18 +610,31 @@ pub fn run_compose(
     }
     options = options.with_list_spacing(list_spacing);
     options = options.with_allow_ctx_override(allow_ctx_override);
+    options =
+        options.with_allow_invalid_frontmatter_assignment(allow_invalid_frontmatter_assignment);
+    options =
+        options.with_allow_reassigned_frontmatter_property(allow_reassigned_frontmatter_property);
     options = options.with_perf(perf);
     if let Some(size) = indent {
         options = options.with_indent_size(size);
     }
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
+    if shell_report {
+        use darkmatter::markdown::compose::shell_expansion::collect_shell_commands;
+
+        let commands = collect_shell_commands(&md, &options)?;
+        print_shell_command_report(&commands);
+        drop(options_ctx_ref);
+        return Ok(());
+    }
+
     let compose_start = perf.then(Instant::now);
     let (composed, report) = md.compose_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
 
-        match &e {
+        match e {
             ShellExpansion(ShellExpansionError::ExecutionFailed {
                 command,
                 code,
@@ -659,13 +680,13 @@ pub fn run_compose(
                 origin: _,
                 ..
             }) => {
-                let executable = command.split_whitespace().next().unwrap_or(command);
+                let executable = command.split_whitespace().next().unwrap_or(&command);
                 eyre!(
                     "Approval required for '{command}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {command}\n  prefix {executable}",
                     whitelist_path.display(),
                 )
             }
-            _ => eyre!("{e}"),
+            other => other.into(),
         }
     })?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
@@ -778,6 +799,36 @@ pub fn run_compose(
     drop(options_ctx_ref);
 
     Ok(())
+}
+
+fn print_shell_command_report(
+    commands: &[darkmatter::markdown::compose::shell_expansion::ShellCommandEntry],
+) {
+    if commands.is_empty() {
+        println!("No shell commands discovered.");
+        return;
+    }
+
+    println!("Shell commands discovered: {}", commands.len());
+    println!();
+    println!("| Command | Source | Origin |");
+    println!("| --- | --- | --- |");
+
+    for command in commands {
+        println!(
+            "| {} | {} | {} |",
+            escape_table_cell(&command.normalized),
+            escape_table_cell(&command.source_file.display().to_string()),
+            escape_table_cell(&command.origin.to_string()),
+        );
+    }
+}
+
+fn escape_table_cell(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace('\n', " ")
 }
 
 /// Get frontmatter properties from a markdown document.
@@ -1016,37 +1067,6 @@ fn format_raw(value: &serde_json::Value) -> String {
     }
 }
 
-/// Default editor priority when neither `$EDITOR` nor `$VISUAL` resolve to an
-/// installed binary. Ordered from most capable/modern to most basic.
-const DEFAULT_EDITOR_PRIORITY: &[sniff::programs::Editor] = &[
-    sniff::programs::Editor::Neovim,
-    sniff::programs::Editor::Helix,
-    sniff::programs::Editor::Vim,
-    sniff::programs::Editor::Zed,
-    sniff::programs::Editor::VSCode,
-    sniff::programs::Editor::VSCodium,
-    sniff::programs::Editor::Sublime,
-    sniff::programs::Editor::Micro,
-    sniff::programs::Editor::Kakoune,
-    sniff::programs::Editor::Emacs,
-    sniff::programs::Editor::Lapce,
-    sniff::programs::Editor::TextMate,
-    sniff::programs::Editor::BBEdit,
-    sniff::programs::Editor::Kate,
-    sniff::programs::Editor::Geany,
-    sniff::programs::Editor::Nano,
-    sniff::programs::Editor::Vi,
-    sniff::programs::Editor::Amp,
-    sniff::programs::Editor::XEmacs,
-    sniff::programs::Editor::PhpStorm,
-    sniff::programs::Editor::IntellijIdea,
-    sniff::programs::Editor::PyCharm,
-    sniff::programs::Editor::WebStorm,
-    sniff::programs::Editor::CLion,
-    sniff::programs::Editor::GoLand,
-    sniff::programs::Editor::Rider,
-];
-
 /// Open a file in the user's preferred editor, blocking until the editor exits.
 ///
 /// Resolves the file path using biscuit-file's `FileReference` system. Creates the
@@ -1100,39 +1120,11 @@ pub fn run_edit(raw_file: &str) -> Result<()> {
             .wrap_err_with(|| format!("Failed to create file: {}", path.display()))?;
     }
 
-    // --- Select the editor ---
-    let editor_cmd = resolve_editor_command()?;
-
     // --- Launch the editor ---
     let canonical = path
         .canonicalize()
         .wrap_err_with(|| format!("Failed to canonicalize path: {}", path.display()))?;
-
-    // Split editor command into binary + any pre-existing args (e.g., "code --new-window")
-    let mut parts = editor_cmd.split_whitespace();
-    let editor_bin = parts.next().unwrap_or(&editor_cmd);
-    let mut cmd = Command::new(editor_bin);
-    for arg in parts {
-        cmd.arg(arg);
-    }
-
-    // GUI editors exit immediately unless told to wait — inject the appropriate flag.
-    for flag in wait_args_for_editor(editor_bin) {
-        cmd.arg(flag);
-    }
-
-    cmd.arg(&canonical);
-
-    let status = cmd
-        .status()
-        .wrap_err_with(|| format!("Failed to launch editor: {}", editor_cmd))?;
-
-    if !status.success() {
-        return Err(eyre!(
-            "Editor exited with non-zero status: {}",
-            status.code().unwrap_or(-1)
-        ));
-    }
+    darkmatter::editor::launch_editor_on_path(&canonical)?;
 
     // --- Validate the result ---
     if !canonical.exists() {
@@ -1156,70 +1148,6 @@ pub fn run_edit(raw_file: &str) -> Result<()> {
     println!("{}", canonical.display());
 
     Ok(())
-}
-
-/// Resolve the editor command to use, checking (in order):
-/// 1. `$EDITOR` environment variable
-/// 2. `$VISUAL` environment variable
-/// 3. First installed editor from `DEFAULT_EDITOR_PRIORITY`
-fn resolve_editor_command() -> Result<String> {
-    use sniff::programs::{ProgramMetadata, find_program};
-
-    // Check $EDITOR
-    if let Ok(editor) = std::env::var("EDITOR") {
-        let cmd = editor.split_whitespace().next().unwrap_or(&editor);
-        if find_program(cmd).is_some() {
-            return Ok(editor);
-        }
-    }
-
-    // Check $VISUAL
-    if let Ok(visual) = std::env::var("VISUAL") {
-        let cmd = visual.split_whitespace().next().unwrap_or(&visual);
-        if find_program(cmd).is_some() {
-            return Ok(visual);
-        }
-    }
-
-    // Fall back to default priority list
-    let editors = sniff::programs::InstalledEditors::new();
-    for &editor in DEFAULT_EDITOR_PRIORITY {
-        if editors.is_installed(editor) {
-            return Ok(editor.binary_name().to_string());
-        }
-    }
-
-    Err(eyre!(
-        "No editor found. Set $EDITOR or $VISUAL, or install one of: nvim, vim, code, nano"
-    ))
-}
-
-/// Returns the CLI flags needed to make a GUI editor block until the file is closed.
-///
-/// Terminal editors (vim, neovim, helix, nano, etc.) naturally block because they
-/// run in the foreground. GUI editors use a client-server model where the CLI wrapper
-/// exits immediately after handing off to the running instance. The `--wait` flag
-/// (or equivalent) tells the CLI wrapper to stay alive until the file tab is closed.
-///
-/// Returns an empty slice for terminal editors or unrecognized binaries.
-fn wait_args_for_editor(binary: &str) -> &'static [&'static str] {
-    match binary {
-        // VS Code / VS Codium
-        "code" | "codium" | "code-insiders" => &["--wait"],
-        // Sublime Text
-        "subl" => &["--wait"],
-        // Zed
-        "zed" => &["--wait"],
-        // TextMate
-        "mate" => &["--wait"],
-        // BBEdit
-        "bbedit" => &["--wait"],
-        // Kate
-        "kate" => &["--block"],
-        // JetBrains IDEs
-        "phpstorm" | "idea" | "pycharm" | "webstorm" | "clion" | "goland" | "rider" => &["--wait"],
-        _ => &[],
-    }
 }
 
 /// Hash a markdown document's frontmatter and/or body.
@@ -1339,265 +1267,7 @@ fn read_from_stdin() -> Result<Markdown> {
     io::stdin()
         .read_to_string(&mut buffer)
         .wrap_err("Failed to read from stdin")?;
-    Ok(buffer.into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_compose_setter_rejects_empty_key() {
-        let parsed = parse_compose_setter("=value").expect("expected setter parse result");
-        let err = parsed.expect_err("expected empty-key error");
-        assert_eq!(err, "setter key must not be empty");
-    }
-
-    #[test]
-    fn parse_compose_setter_rejects_numeric_leading_key_as_non_setter() {
-        assert!(parse_compose_setter("9key=value").is_none());
-    }
-
-    #[test]
-    fn parse_compose_setter_accepts_hyphenated_and_private_keys() {
-        let hyphenated = parse_compose_setter("my-key=value")
-            .expect("expected setter")
-            .expect("expected valid setter");
-        assert_eq!(hyphenated.0, "my-key");
-        assert_eq!(hyphenated.1, serde_json::Value::String("value".to_string()));
-
-        let private = parse_compose_setter("_private=true")
-            .expect("expected setter")
-            .expect("expected valid setter");
-        assert_eq!(private.0, "_private");
-        assert_eq!(private.1, serde_json::Value::Bool(true));
-    }
-
-    #[test]
-    fn parse_compose_setter_treats_path_like_keys_as_input_candidates() {
-        assert!(parse_compose_setter("path/key=value").is_none());
-    }
-
-    #[test]
-    fn parse_shorthand_value_parses_primitives_and_falls_back_to_string() {
-        assert_eq!(parse_shorthand_value("true"), serde_json::Value::Bool(true));
-        assert_eq!(parse_shorthand_value("null"), serde_json::Value::Null);
-        assert_eq!(
-            parse_shorthand_value("hello"),
-            serde_json::Value::String("hello".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_compose_positionals_empty_args_have_no_input_or_setters() {
-        let parsed = parse_compose_positionals(&[]).expect("expected parse to succeed");
-        assert!(parsed.input.is_none());
-        assert!(parsed.shorthand_setters.is_empty());
-    }
-
-    #[test]
-    fn parse_compose_positionals_setter_only_args_keep_input_empty() {
-        let args = vec!["iteration=1".to_string(), "draft=false".to_string()];
-        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
-        assert!(parsed.input.is_none());
-        assert_eq!(
-            parsed.shorthand_setters.get("iteration"),
-            Some(&serde_json::json!(1))
-        );
-        assert_eq!(
-            parsed.shorthand_setters.get("draft"),
-            Some(&serde_json::json!(false))
-        );
-    }
-
-    #[test]
-    fn parse_compose_positionals_invalid_empty_key_surfaces_error() {
-        let args = vec!["=value".to_string()];
-        let err = parse_compose_positionals(&args).expect_err("expected parse to fail");
-        assert!(err.to_string().contains("Invalid setter '=value'"));
-    }
-
-    #[test]
-    fn parse_compose_positionals_treats_numeric_leading_key_as_input() {
-        let args = vec!["9key=value".to_string()];
-        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
-        assert_eq!(parsed.input, Some(PathBuf::from("9key=value")));
-        assert!(parsed.shorthand_setters.is_empty());
-    }
-
-    #[test]
-    fn wait_args_vscode_returns_wait() {
-        assert_eq!(wait_args_for_editor("code"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_codium_returns_wait() {
-        assert_eq!(wait_args_for_editor("codium"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_code_insiders_returns_wait() {
-        assert_eq!(wait_args_for_editor("code-insiders"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_sublime_returns_wait() {
-        assert_eq!(wait_args_for_editor("subl"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_zed_returns_wait() {
-        assert_eq!(wait_args_for_editor("zed"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_kate_returns_block() {
-        assert_eq!(wait_args_for_editor("kate"), &["--block"]);
-    }
-
-    #[test]
-    fn wait_args_jetbrains_ides_return_wait() {
-        for ide in [
-            "phpstorm", "idea", "pycharm", "webstorm", "clion", "goland", "rider",
-        ] {
-            assert_eq!(
-                wait_args_for_editor(ide),
-                &["--wait"],
-                "expected --wait for {ide}"
-            );
-        }
-    }
-
-    #[test]
-    fn wait_args_textmate_returns_wait() {
-        assert_eq!(wait_args_for_editor("mate"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_bbedit_returns_wait() {
-        assert_eq!(wait_args_for_editor("bbedit"), &["--wait"]);
-    }
-
-    #[test]
-    fn wait_args_terminal_editors_return_empty() {
-        for editor in ["nvim", "vim", "vi", "hx", "nano", "micro", "kak", "emacs"] {
-            assert!(
-                wait_args_for_editor(editor).is_empty(),
-                "expected no wait args for {editor}"
-            );
-        }
-    }
-
-    #[test]
-    fn wait_args_unknown_binary_returns_empty() {
-        assert!(wait_args_for_editor("my-custom-editor").is_empty());
-    }
-
-    #[test]
-    fn format_duration_microseconds() {
-        assert_eq!(format_duration(std::time::Duration::from_micros(0)), "0µs");
-        assert_eq!(
-            format_duration(std::time::Duration::from_micros(42)),
-            "42µs"
-        );
-        assert_eq!(
-            format_duration(std::time::Duration::from_micros(999)),
-            "999µs"
-        );
-    }
-
-    #[test]
-    fn format_duration_milliseconds() {
-        assert_eq!(
-            format_duration(std::time::Duration::from_micros(1_000)),
-            "1.0ms"
-        );
-        assert_eq!(
-            format_duration(std::time::Duration::from_millis(42)),
-            "42.0ms"
-        );
-        assert_eq!(
-            format_duration(std::time::Duration::from_micros(5_200)),
-            "5.2ms"
-        );
-    }
-
-    #[test]
-    fn format_duration_seconds() {
-        assert_eq!(
-            format_duration(std::time::Duration::from_millis(1000)),
-            "1.00s"
-        );
-        assert_eq!(
-            format_duration(std::time::Duration::from_millis(2600)),
-            "2.60s"
-        );
-    }
-
-    #[test]
-    fn format_compose_perf_report_contains_sections() {
-        use darkmatter::markdown::compose::{ComposePerfMetric, ComposePerfReport, ComposeStage};
-
-        let cli_perf = CliComposePerfReport {
-            load_input: std::time::Duration::from_millis(8),
-            resolve_input: std::time::Duration::from_millis(1),
-            capture_context: std::time::Duration::from_millis(50),
-            capture_context_details: vec![
-                ("git".to_string(), std::time::Duration::from_millis(20)),
-                ("repo".to_string(), std::time::Duration::from_millis(15)),
-            ],
-            validate_references: std::time::Duration::from_millis(100),
-            build_options: std::time::Duration::from_millis(2),
-            compose_pipeline: std::time::Duration::from_millis(54),
-            elapsed: std::time::Duration::from_millis(215),
-        };
-
-        let compose_perf = ComposePerfReport {
-            total: std::time::Duration::from_millis(54),
-            metrics: vec![
-                ComposePerfMetric {
-                    stage: ComposeStage::Cleanup,
-                    elapsed: std::time::Duration::from_millis(3),
-                    calls: 1,
-                },
-                ComposePerfMetric {
-                    stage: ComposeStage::Normalization,
-                    elapsed: std::time::Duration::from_millis(5),
-                    calls: 1,
-                },
-            ],
-        };
-
-        let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf));
-
-        assert!(rendered.contains("Command Setup"));
-        assert!(rendered.contains("Compose Pipeline"));
-        assert!(rendered.contains("Compose Performance"));
-        assert!(rendered.contains("load input:"));
-        assert!(rendered.contains("cleanup:"));
-        assert!(rendered.contains("normalization:"));
-        // Verify the border is present
-        assert!(rendered.contains("▌"));
-    }
-
-    #[test]
-    fn format_compose_perf_report_without_pipeline() {
-        let cli_perf = CliComposePerfReport {
-            load_input: std::time::Duration::from_millis(1),
-            resolve_input: std::time::Duration::ZERO,
-            capture_context: std::time::Duration::ZERO,
-            capture_context_details: Vec::new(),
-            validate_references: std::time::Duration::ZERO,
-            build_options: std::time::Duration::ZERO,
-            compose_pipeline: std::time::Duration::ZERO,
-            elapsed: std::time::Duration::from_millis(1),
-        };
-
-        let rendered = format_compose_perf_report(&cli_perf, None);
-
-        assert!(rendered.contains("Command Setup"));
-        assert!(!rendered.contains("Compose Pipeline"));
-    }
+    Markdown::try_from_content(buffer).map_err(Into::into)
 }
 
 #[instrument(skip_all, fields(command = "validate"))]
@@ -2305,4 +1975,193 @@ fn format_compose_perf_report(
         rendered.push('\n');
     }
     rendered
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_compose_setter_rejects_empty_key() {
+        let parsed = parse_compose_setter("=value").expect("expected setter parse result");
+        let err = parsed.expect_err("expected empty-key error");
+        assert_eq!(err, "setter key must not be empty");
+    }
+
+    #[test]
+    fn parse_compose_setter_rejects_numeric_leading_key_as_non_setter() {
+        assert!(parse_compose_setter("9key=value").is_none());
+    }
+
+    #[test]
+    fn parse_compose_setter_accepts_hyphenated_and_private_keys() {
+        let hyphenated = parse_compose_setter("my-key=value")
+            .expect("expected setter")
+            .expect("expected valid setter");
+        assert_eq!(hyphenated.0, "my-key");
+        assert_eq!(hyphenated.1, serde_json::Value::String("value".to_string()));
+
+        let private = parse_compose_setter("_private=true")
+            .expect("expected setter")
+            .expect("expected valid setter");
+        assert_eq!(private.0, "_private");
+        assert_eq!(private.1, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn parse_compose_setter_treats_path_like_keys_as_input_candidates() {
+        assert!(parse_compose_setter("path/key=value").is_none());
+    }
+
+    #[test]
+    fn parse_shorthand_value_parses_primitives_and_falls_back_to_string() {
+        assert_eq!(parse_shorthand_value("true"), serde_json::Value::Bool(true));
+        assert_eq!(parse_shorthand_value("null"), serde_json::Value::Null);
+        assert_eq!(
+            parse_shorthand_value("hello"),
+            serde_json::Value::String("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_compose_positionals_empty_args_have_no_input_or_setters() {
+        let parsed = parse_compose_positionals(&[]).expect("expected parse to succeed");
+        assert!(parsed.input.is_none());
+        assert!(parsed.shorthand_setters.is_empty());
+    }
+
+    #[test]
+    fn parse_compose_positionals_setter_only_args_keep_input_empty() {
+        let args = vec!["iteration=1".to_string(), "draft=false".to_string()];
+        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
+        assert!(parsed.input.is_none());
+        assert_eq!(
+            parsed.shorthand_setters.get("iteration"),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            parsed.shorthand_setters.get("draft"),
+            Some(&serde_json::json!(false))
+        );
+    }
+
+    #[test]
+    fn parse_compose_positionals_invalid_empty_key_surfaces_error() {
+        let args = vec!["=value".to_string()];
+        let err = parse_compose_positionals(&args).expect_err("expected parse to fail");
+        assert!(err.to_string().contains("Invalid setter '=value'"));
+    }
+
+    #[test]
+    fn parse_compose_positionals_treats_numeric_leading_key_as_input() {
+        let args = vec!["9key=value".to_string()];
+        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
+        assert_eq!(parsed.input, Some(PathBuf::from("9key=value")));
+        assert!(parsed.shorthand_setters.is_empty());
+    }
+
+    #[test]
+    fn format_duration_microseconds() {
+        assert_eq!(format_duration(std::time::Duration::from_micros(0)), "0µs");
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(42)),
+            "42µs"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(999)),
+            "999µs"
+        );
+    }
+
+    #[test]
+    fn format_duration_milliseconds() {
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(1_000)),
+            "1.0ms"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(42)),
+            "42.0ms"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(5_200)),
+            "5.2ms"
+        );
+    }
+
+    #[test]
+    fn format_duration_seconds() {
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(1000)),
+            "1.00s"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(2600)),
+            "2.60s"
+        );
+    }
+
+    #[test]
+    fn format_compose_perf_report_contains_sections() {
+        use darkmatter::markdown::compose::{ComposePerfMetric, ComposePerfReport, ComposeStage};
+
+        let cli_perf = CliComposePerfReport {
+            load_input: std::time::Duration::from_millis(8),
+            resolve_input: std::time::Duration::from_millis(1),
+            capture_context: std::time::Duration::from_millis(50),
+            capture_context_details: vec![
+                ("git".to_string(), std::time::Duration::from_millis(20)),
+                ("repo".to_string(), std::time::Duration::from_millis(15)),
+            ],
+            validate_references: std::time::Duration::from_millis(100),
+            build_options: std::time::Duration::from_millis(2),
+            compose_pipeline: std::time::Duration::from_millis(54),
+            elapsed: std::time::Duration::from_millis(215),
+        };
+
+        let compose_perf = ComposePerfReport {
+            total: std::time::Duration::from_millis(54),
+            metrics: vec![
+                ComposePerfMetric {
+                    stage: ComposeStage::Cleanup,
+                    elapsed: std::time::Duration::from_millis(3),
+                    calls: 1,
+                },
+                ComposePerfMetric {
+                    stage: ComposeStage::Normalization,
+                    elapsed: std::time::Duration::from_millis(5),
+                    calls: 1,
+                },
+            ],
+        };
+
+        let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf));
+
+        assert!(rendered.contains("Command Setup"));
+        assert!(rendered.contains("Compose Pipeline"));
+        assert!(rendered.contains("Compose Performance"));
+        assert!(rendered.contains("load input:"));
+        assert!(rendered.contains("cleanup:"));
+        assert!(rendered.contains("normalization:"));
+        // Verify the border is present
+        assert!(rendered.contains("▌"));
+    }
+
+    #[test]
+    fn format_compose_perf_report_without_pipeline() {
+        let cli_perf = CliComposePerfReport {
+            load_input: std::time::Duration::from_millis(1),
+            resolve_input: std::time::Duration::ZERO,
+            capture_context: std::time::Duration::ZERO,
+            capture_context_details: Vec::new(),
+            validate_references: std::time::Duration::ZERO,
+            build_options: std::time::Duration::ZERO,
+            compose_pipeline: std::time::Duration::ZERO,
+            elapsed: std::time::Duration::from_millis(1),
+        };
+
+        let rendered = format_compose_perf_report(&cli_perf, None);
+
+        assert!(rendered.contains("Command Setup"));
+        assert!(!rendered.contains("Compose Pipeline"));
+    }
 }

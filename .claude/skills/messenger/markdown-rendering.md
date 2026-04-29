@@ -9,6 +9,7 @@ Markdown rendering uses a three-stage pipeline:
 3. **Render**: Per-provider output (Discord Markdown, Slack mrkdwn, Telegram HTML, plain text)
 
 The Markdown is parsed once per message. Each provider renderer walks the same AST.
+Discord bot sends and Discord webhook sends share the same Discord renderer; the webhook adapter changes transport and capabilities, not markup syntax.
 
 ## Module Structure
 
@@ -58,7 +59,7 @@ Unsupported Markdown constructs (images, tables, block quotes) are flattened to 
 
 ## Provider-Specific Notes
 
-**Discord**: Mostly pass-through Markdown. Discord natively supports the same syntax.
+**Discord / Discord-Webhook**: Mostly pass-through Markdown. Both adapters use the same renderer because Discord webhooks accept the same formatting syntax as bot-authenticated sends.
 
 **Slack**: Uses mrkdwn dialect. Bold is `*text*` (not `**`), links use `<url|label>` pipe syntax. Headings render as bold text since Slack has no heading syntax.
 

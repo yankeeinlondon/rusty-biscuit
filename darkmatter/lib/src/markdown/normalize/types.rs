@@ -410,8 +410,82 @@ pub enum NormalizationError {
     },
 
     /// A custom validation rule was violated.
-    #[error("Validation failed: {0}")]
-    ValidationFailed(String),
+    #[error("Validation failed: {} issue(s)", .0.len())]
+    ValidationFailed(Vec<StructureIssue>),
+}
+
+impl biscuit_terminal::errors::BlockError for NormalizationError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::LevelOverflow {
+                target,
+                affected_count,
+                deepest_title,
+                would_become,
+            } => {
+                // Work out the deepest safe target that would not overflow H6.
+                // `would_become = target + depth` so `depth = would_become - target`.
+                let target_u8 = target.as_u8();
+                let depth = would_become.saturating_sub(target_u8);
+                let max_safe = 6u8.saturating_sub(depth).max(1);
+                let max_safe_display = format!("H{max_safe}");
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("NormalizationError", "heading level overflow"))
+                    .body(format!(
+                        "<dim>Target:</dim> {target}\n<dim>Affected headings:</dim> {affected_count}\n<dim>Deepest heading:</dim> <cyan>{deepest_title}</cyan>\n<dim>Would become:</dim> H{would_become} (exceeds H6)"
+                    ))
+                    .hint(format!(
+                        "Pick a target shallower than or equal to <cyan>{max_safe_display}</cyan> so no heading overflows H6."
+                    ))
+            }
+
+            Self::ValidationFailed(issues) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "NormalizationError",
+                    "validation failed",
+                ))
+                .body(render_validation_issues(issues))
+                .hint(
+                    "Fix the highlighted structural issues (multiple H1, skipped levels, hierarchy violations) before re-leveling.",
+                ),
+        }
+    }
+}
+
+fn render_validation_issues(issues: &[StructureIssue]) -> String {
+    let details = issues
+        .iter()
+        .map(|issue| {
+            let mut line = if issue.line_number > 0 {
+                format!(
+                    "- <b>{}</b> at line {}: {}",
+                    issue.kind, issue.line_number, issue.description
+                )
+            } else {
+                format!("- <b>{}</b>: {}", issue.kind, issue.description)
+            };
+
+            if let Some(suggestion) = &issue.suggestion {
+                line.push_str(&format!("\n  <dim>Suggestion:</dim> {suggestion}"));
+            }
+
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "<dim>Issue count:</dim> {} issue(s)\n{details}",
+        issues.len()
+    )
 }
 
 #[cfg(test)]

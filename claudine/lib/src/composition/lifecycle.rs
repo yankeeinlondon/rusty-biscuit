@@ -46,6 +46,9 @@ pub struct LifecycleNotification {
 
     /// Message to write to stderr.
     pub stderr: Option<String>,
+
+    /// Title for a local desktop notification.
+    pub notify: Option<String>,
 }
 
 /// Complete lifecycle configuration for a composition.
@@ -136,6 +139,9 @@ pub trait LifecycleEmitter {
 
     /// Play a named sound effect.
     fn emit_effect(&self, name: &str);
+
+    /// Fire a local desktop notification.
+    fn emit_notification(&self, title: &str);
 }
 
 /// Production emitter that performs real side effects.
@@ -172,6 +178,10 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
 
     fn emit_effect(&self, name: &str) {
         play_effect_blocking(name);
+    }
+
+    fn emit_notification(&self, title: &str) {
+        crate::messaging::execute_notification(title);
     }
 }
 
@@ -294,6 +304,9 @@ impl<'a> LifecycleRunGuard<'a> {
                 self.ctx.repo_root,
                 self.ctx.messaging,
             );
+        }
+        if let Some(notify_title) = &notification.notify {
+            self.emitter.emit_notification(notify_title);
         }
 
         // --- Audio phases (sequential, blocking, lazy TTS config) ---
@@ -422,14 +435,14 @@ impl LifecycleSignal {
     /// # use biscuit_terminal::components::status::StatusState;
     /// assert_eq!(LifecycleSignal::Start.status_state(), StatusState::Info);
     /// assert_eq!(LifecycleSignal::Success.status_state(), StatusState::Success);
-    /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Failure);
-    /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Failure);
+    /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Error);
+    /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Error);
     /// ```
     pub fn status_state(&self) -> StatusState {
         match self {
             Self::Start => StatusState::Info,
             Self::Success => StatusState::Success,
-            Self::Blocked | Self::Failure => StatusState::Failure,
+            Self::Blocked | Self::Failure => StatusState::Error,
         }
     }
 }
@@ -527,8 +540,9 @@ pub fn parse_lifecycle_config(
 
         // Deserialize the notification
         let mut notification: LifecycleNotification = serde_json::from_value(value.clone())
-            .map_err(|e| {
-                CompositionError::ComposeFailed(format!("invalid {}: {}", property_name, e))
+            .map_err(|e| CompositionError::LifecycleInvalid {
+                property: property_name.to_string(),
+                message: e.to_string(),
             })?;
 
         // Normalize empty strings to None
@@ -537,6 +551,7 @@ pub fn parse_lifecycle_config(
         normalize_empty_string(&mut notification.effect);
         normalize_empty_string(&mut notification.message);
         normalize_empty_string(&mut notification.stderr);
+        normalize_empty_string(&mut notification.notify);
 
         // Validate mutual exclusivity of say and say_first
         if notification.say.is_some() && notification.say_first.is_some() {
@@ -676,6 +691,10 @@ pub fn emit_lifecycle_signal(
             ctx.repo_root,
             ctx.messaging,
         );
+    }
+    // notify
+    if let Some(notify_title) = &notification.notify {
+        crate::messaging::execute_notification(notify_title);
     }
 
     // --- Audio phases (sequential, blocking, lazy TTS config) ---
@@ -922,14 +941,8 @@ mod tests {
             LifecycleSignal::Success.status_state(),
             StatusState::Success
         );
-        assert_eq!(
-            LifecycleSignal::Blocked.status_state(),
-            StatusState::Failure
-        );
-        assert_eq!(
-            LifecycleSignal::Failure.status_state(),
-            StatusState::Failure
-        );
+        assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Error);
+        assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Error);
     }
 
     #[test]
@@ -983,6 +996,9 @@ mod tests {
         },
         Message {
             text: String,
+        },
+        Notification {
+            title: String,
         },
         Speech {
             text: String,
@@ -1050,6 +1066,15 @@ mod tests {
             self.actions.lock().unwrap().push(EmittedAction::Effect {
                 name: name.to_string(),
             });
+        }
+
+        fn emit_notification(&self, title: &str) {
+            self.actions
+                .lock()
+                .unwrap()
+                .push(EmittedAction::Notification {
+                    title: title.to_string(),
+                });
         }
     }
 
@@ -1309,6 +1334,7 @@ mod tests {
             "start": {
                 "stderr": "starting",
                 "message": "msg",
+                "notify": "notify-msg",
                 "say": "hello",
                 "effect": "confirmation",
             }
@@ -1328,13 +1354,14 @@ mod tests {
         guard.defuse();
 
         let actions = emitter.actions();
-        assert_eq!(actions.len(), 4);
+        assert_eq!(actions.len(), 5);
         // Non-audio first
         assert!(matches!(actions[0], EmittedAction::Stderr { .. }));
         assert!(matches!(actions[1], EmittedAction::Message { .. }));
+        assert!(matches!(actions[2], EmittedAction::Notification { .. }));
         // Audio: effect before say (default order)
-        assert!(matches!(actions[2], EmittedAction::Effect { .. }));
-        assert!(matches!(actions[3], EmittedAction::Speech { .. }));
+        assert!(matches!(actions[3], EmittedAction::Effect { .. }));
+        assert!(matches!(actions[4], EmittedAction::Speech { .. }));
     }
 
     #[test]
@@ -1364,5 +1391,158 @@ mod tests {
         // say_first → speech before effect
         assert!(matches!(actions[0], EmittedAction::Speech { .. }));
         assert!(matches!(actions[1], EmittedAction::Effect { .. }));
+    }
+
+    // =====================================================================
+    // notify parsing and emission (Phase 3)
+    // =====================================================================
+
+    #[test]
+    fn parses_notify_for_all_signals() {
+        let fm = json!({
+            "start": { "notify": "Starting" },
+            "success": { "notify": "Done" },
+            "blocked": { "notify": "Blocked" },
+            "failure": { "notify": "Failed" }
+        });
+        let config = parse_lifecycle_config(&fm).unwrap();
+
+        assert_eq!(
+            config.start.as_ref().unwrap().notify.as_deref(),
+            Some("Starting")
+        );
+        assert_eq!(
+            config.success.as_ref().unwrap().notify.as_deref(),
+            Some("Done")
+        );
+        assert_eq!(
+            config.blocked.as_ref().unwrap().notify.as_deref(),
+            Some("Blocked")
+        );
+        assert_eq!(
+            config.failure.as_ref().unwrap().notify.as_deref(),
+            Some("Failed")
+        );
+    }
+
+    #[test]
+    fn parses_message_and_notify_independently() {
+        let fm = json!({
+            "start": {
+                "message": "Remote message",
+                "notify": "Local notification"
+            }
+        });
+        let config = parse_lifecycle_config(&fm).unwrap();
+        let start = config.start.as_ref().unwrap();
+        assert_eq!(start.message.as_deref(), Some("Remote message"));
+        assert_eq!(start.notify.as_deref(), Some("Local notification"));
+    }
+
+    #[test]
+    fn blank_notify_is_normalized_to_none() {
+        let fm = json!({
+            "start": { "notify": "   " },
+            "success": { "notify": "" }
+        });
+        let config = parse_lifecycle_config(&fm).unwrap();
+        assert!(config.start.as_ref().unwrap().notify.is_none());
+        assert!(config.success.as_ref().unwrap().notify.is_none());
+    }
+
+    #[test]
+    fn notify_emits_without_active_route() {
+        let config = parse_lifecycle_config(&json!({
+            "start": { "notify": "Hello desktop" }
+        }))
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.defuse();
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0],
+            EmittedAction::Notification {
+                title: "Hello desktop".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn notify_emits_before_audio_phases() {
+        let config = parse_lifecycle_config(&json!({
+            "start": {
+                "notify": "Desktop first",
+                "say": "hello",
+                "effect": "confirmation",
+            }
+        }))
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.defuse();
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 3);
+        assert!(matches!(actions[0], EmittedAction::Notification { .. }));
+        assert!(matches!(actions[1], EmittedAction::Effect { .. }));
+        assert!(matches!(actions[2], EmittedAction::Speech { .. }));
+    }
+
+    #[test]
+    fn notify_alone_no_other_outputs() {
+        let config = parse_lifecycle_config(&json!({
+            "success": { "notify": "Only notify" }
+        }))
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_terminal(LifecycleSignal::Success);
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0],
+            EmittedAction::Notification {
+                title: "Only notify".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn default_lifecycle_emitter_emit_notification_does_not_panic() {
+        let emitter = DefaultLifecycleEmitter;
+        // Fire-and-forget: should return immediately without panic
+        emitter.emit_notification("test notification title");
+        // Give the spawned task a moment to start
+        tokio::task::yield_now().await;
     }
 }

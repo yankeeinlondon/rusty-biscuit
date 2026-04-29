@@ -410,11 +410,11 @@ mod tests {
         let coords = Coordinates::new(0.0, 0.0).unwrap();
 
         let result = geocoder.reverse(&coords).await;
-        assert!(
-            result.is_err(),
-            "expected timeout error, got: {result:?}"
-        );
-        assert!(matches!(result.unwrap_err(), LocationError::ReverseGeocode(_)));
+        assert!(result.is_err(), "expected timeout error, got: {result:?}");
+        assert!(matches!(
+            result.unwrap_err(),
+            LocationError::ReverseGeocode(_)
+        ));
     }
 
     /// Live integration test confirming the default HTTPS endpoint can be reached.

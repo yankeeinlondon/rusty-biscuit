@@ -7,7 +7,7 @@ use clap_complete::Shell;
 
 /// Location services: GPS, IP lookup, reverse geocoding, and distance.
 #[derive(Parser, Debug)]
-#[command(name = "where", version, about, long_about = None)]
+#[command(name = "geo", version, about, long_about = None)]
 #[command(after_help = AFTER_HELP)]
 #[command(disable_help_subcommand = true)]
 pub struct Cli {
@@ -81,6 +81,13 @@ pub enum Commands {
         unit: DistanceUnitArg,
     },
 
+    /// Download or update the MaxMind GeoLite2-City database
+    FetchDb {
+        /// Re-download even if the database already exists
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Generate shell completions
     #[command(hide = true)]
     Completions {
@@ -121,31 +128,36 @@ impl From<DistanceUnitArg> for biscuit_location::DistanceUnit {
 
 const AFTER_HELP: &str = "\
 Examples:
-  where gps                                   Get location from GPS
-  where ip 8.8.8.8                            Look up Google DNS location
-  where reverse 34.0522 -118.2437             Reverse geocode LA coordinates
-  where distance 34.05,-118.24 40.71,-74.01   LA to NYC distance
-  where distance gps ip:8.8.8.8               GPS to IP-based location
-  where ip 8.8.8.8 --maps                     Include Google Maps link
-  where ip 8.8.8.8 --json                     Machine-readable JSON output
+  geo gps                                   Get location from GPS
+  geo ip 8.8.8.8                            Look up Google DNS location
+  geo reverse 34.0522 -118.2437             Reverse geocode LA coordinates
+  geo distance 34.05,-118.24 40.71,-74.01   LA to NYC distance
+  geo distance gps ip:8.8.8.8               GPS to IP-based location
+  geo ip 8.8.8.8 --maps                     Include Google Maps link
+  geo ip 8.8.8.8 --json                     Machine-readable JSON output
+  geo fetch-db                              Download MaxMind database
+
+Environment variables:
+  MAXMIND_LICENSE_KEY  Required for fetch-db and auto-download (free signup at maxmind.com)
+  MAXMIND_ACCOUNT_ID   Optional account ID (defaults to '1' for free tier)
 
 Shell completions:
-  where completions bash   > ~/.local/share/bash-completion/completions/where
-  where completions zsh    > ~/.zfunc/_where
-  where completions fish   > ~/.config/fish/completions/where.fish
+  geo completions bash   > ~/.local/share/bash-completion/completions/geo
+  geo completions zsh    > ~/.zfunc/_geo
+  geo completions fish   > ~/.config/fish/completions/geo.fish
 
 Exit codes:
   0   success
   1   runtime error (lookup failed, network issue, etc.)
   2   usage error (invalid arguments)
-";
+ ";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
-        Cli::try_parse_from(std::iter::once("where").chain(args.iter().copied()))
+        Cli::try_parse_from(std::iter::once("geo").chain(args.iter().copied()))
     }
 
     #[test]

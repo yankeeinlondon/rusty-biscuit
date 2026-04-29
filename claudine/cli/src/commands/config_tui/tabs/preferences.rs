@@ -23,10 +23,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ])
         .split(area);
 
-    let agent_name = app.config.preferred_agent.to_string();
+    let agent_name = app
+        .config
+        .preferred_agent
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "(not set)".to_string());
     let agent_line = Line::from(vec![
         Span::styled(
-            "Preferred Agent",
+            "Favorite Agent",
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(": "),
@@ -71,7 +75,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // Repo Scoped Provider (indented)
     if app.is_in_repo {
-<<<<<<< Updated upstream
         let repo_provider = app
             .repo_config
             .as_ref()
@@ -81,27 +84,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let repo_line = Line::from(vec![
             Span::raw("  "),
             Span::styled("Repo Scoped Provider", Style::default()),
-||||||| Stash base
-        let repo_line = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Repo Provider",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-=======
-        let repo_provider = app
-            .repo_config
-            .as_ref()
-            .and_then(|c| c.canonical_provider)
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| "(not set)".to_string());
-        let repo_line = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Repo Provider",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
->>>>>>> Stashed changes
             Span::raw(": "),
-<<<<<<< Updated upstream
             Span::styled(
                 repo_provider,
                 if is_detail {
@@ -112,22 +95,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             ),
         ]);
         frame.render_widget(Paragraph::new(repo_line), chunks[3]);
-||||||| Stash base
-            Span::styled("[not set]", Style::default().fg(Color::DarkGray)),
-        ]));
-        frame.render_widget(repo_line, chunks[2]);
-=======
-            Span::styled(
-                format!("[{repo_provider}]"),
-                if is_detail {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default()
-                },
-            ),
-        ]));
-        frame.render_widget(repo_line, chunks[2]);
->>>>>>> Stashed changes
     } else {
         let repo_line = Line::from(vec![
             Span::raw("  "),
@@ -159,7 +126,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .unwrap_or("none");
     let error = app.config.default_sounds.error.as_deref().unwrap_or("none");
 
-<<<<<<< Updated upstream
     let value_style = Style::default().fg(Color::Indexed(250));
     let success_line = Line::from(vec![
         Span::raw("  "),
@@ -179,31 +145,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(success_line), chunks[6]);
     frame.render_widget(Paragraph::new(attention_line), chunks[7]);
     frame.render_widget(Paragraph::new(error_line), chunks[8]);
-||||||| Stash base
-    if is_detail {
-        let help = Paragraph::new(
-            " a: Agent | u: User provider | r: Repo provider | 1: Success | 2: Attention | 3: Error",
-        )
-        .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(help, chunks[6]);
-    }
-=======
-    if is_detail {
-        let help = Paragraph::new(
-            " a: Agent | u: User provider | r: Repo provider | s: Success | t: Attention | e: Error | p: Preview",
-        )
-        .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(help, chunks[6]);
-    }
->>>>>>> Stashed changes
 
     if let Some(ModalState::AgentSelector { highlighted }) = &app.modal {
         let agents = super::super::get_available_providers(app);
-        let items: Vec<String> = agents.iter().map(|p| p.to_string()).collect();
+        let mut items: Vec<String> = agents.iter().map(|p| p.to_string()).collect();
+        items.insert(0, "(clear)".to_string());
         super::super::widgets::modal::render_list_modal(
             frame,
             area,
-            "Select Preferred Agent",
+            "Select Favorite Agent",
             &items,
             *highlighted,
         );
@@ -263,13 +213,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('a') | KeyCode::Char('A') => {
             let agents = super::super::get_available_providers(app);
-            if !agents.is_empty() {
-                let highlighted = agents
-                    .iter()
-                    .position(|p| *p == app.config.preferred_agent)
-                    .unwrap_or(0);
-                app.modal = Some(ModalState::AgentSelector { highlighted });
-            }
+            // Open the picker even when no providers are installed so users
+            // can still clear the favorite via the "(clear)" entry.
+            let highlighted = app
+                .config
+                .preferred_agent
+                .and_then(|cp| agents.iter().position(|p| *p == cp))
+                .map(|i| i + 1) // +1 for "(clear)" at index 0
+                .unwrap_or(0);
+            app.modal = Some(ModalState::AgentSelector { highlighted });
         }
         KeyCode::Char('u') | KeyCode::Char('U') => {
             let providers = super::super::get_available_providers(app);
@@ -283,21 +235,18 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 app.modal = Some(ModalState::UserProviderSelector { highlighted });
             }
         }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            if app.is_in_repo {
-                let providers = super::super::get_provider_list();
-                let current = app
-                    .repo_config
-                    .as_ref()
-                    .and_then(|rc| rc.canonical_provider);
-                let highlighted = current
-                    .and_then(|cp| providers.iter().position(|p| *p == cp))
-                    .map(|i| i + 1) // +1 for "(clear)" at index 0
-                    .unwrap_or(0);
-                app.modal = Some(ModalState::RepoProviderSelector { highlighted });
-            }
+        KeyCode::Char('r') | KeyCode::Char('R') if app.is_in_repo => {
+            let providers = super::super::get_provider_list();
+            let current = app
+                .repo_config
+                .as_ref()
+                .and_then(|rc| rc.canonical_provider);
+            let highlighted = current
+                .and_then(|cp| providers.iter().position(|p| *p == cp))
+                .map(|i| i + 1) // +1 for "(clear)" at index 0
+                .unwrap_or(0);
+            app.modal = Some(ModalState::RepoProviderSelector { highlighted });
         }
-<<<<<<< Updated upstream
         KeyCode::Char('s') | KeyCode::Char('S') => {
             let current = app.config.default_sounds.success.as_deref();
             let sounds = super::super::get_sound_effect_names();
@@ -305,17 +254,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 .and_then(|name| sounds.iter().position(|s| *s == name))
                 .map(|i| i + 1) // +1 because index 0 is "(none)"
                 .unwrap_or(0);
-||||||| Stash base
-        KeyCode::Char('1') => {
-=======
-        KeyCode::Char('s') | KeyCode::Char('S') => {
->>>>>>> Stashed changes
             app.modal = Some(ModalState::SoundSelector {
                 category: SoundCategory::Success,
                 highlighted,
             });
         }
-<<<<<<< Updated upstream
         // Note: 'A' is taken by Agent selector, so Attention uses 'N' (atteNtion)
         KeyCode::Char('n') | KeyCode::Char('N') => {
             let current = app.config.default_sounds.attention.as_deref();
@@ -324,17 +267,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 .and_then(|name| sounds.iter().position(|s| *s == name))
                 .map(|i| i + 1)
                 .unwrap_or(0);
-||||||| Stash base
-        KeyCode::Char('2') => {
-=======
-        KeyCode::Char('t') | KeyCode::Char('T') => {
->>>>>>> Stashed changes
             app.modal = Some(ModalState::SoundSelector {
                 category: SoundCategory::Attention,
                 highlighted,
             });
         }
-<<<<<<< Updated upstream
         KeyCode::Char('e') | KeyCode::Char('E') => {
             let current = app.config.default_sounds.error.as_deref();
             let sounds = super::super::get_sound_effect_names();
@@ -342,18 +279,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 .and_then(|name| sounds.iter().position(|s| *s == name))
                 .map(|i| i + 1)
                 .unwrap_or(0);
-||||||| Stash base
-        KeyCode::Char('3') => {
-=======
-        KeyCode::Char('e') | KeyCode::Char('E') => {
->>>>>>> Stashed changes
             app.modal = Some(ModalState::SoundSelector {
                 category: SoundCategory::Error,
                 highlighted,
             });
-        }
-        KeyCode::Char('p') | KeyCode::Char('P') => {
-            preview_default_sounds(app);
         }
         _ => {}
     }
@@ -361,7 +290,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 
 pub fn handle_agent_selector_modal(app: &mut App, key: KeyEvent) {
     let providers = super::super::get_available_providers(app);
-    let count = providers.len();
+    let count = providers.len() + 1;
     match key.code {
         KeyCode::Up => {
             let idx = app.modal_highlighted();
@@ -377,10 +306,12 @@ pub fn handle_agent_selector_modal(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => {
             let idx = app.modal_highlighted();
-            if let Some(provider) = providers.get(idx) {
-                app.config.preferred_agent = *provider;
-                app.dirty = true;
+            if idx == 0 {
+                app.config.preferred_agent = None;
+            } else if let Some(provider) = providers.get(idx - 1) {
+                app.config.preferred_agent = Some(*provider);
             }
+            app.dirty = true;
             app.modal = None;
         }
         KeyCode::Esc => {
@@ -424,7 +355,6 @@ pub fn handle_user_provider_modal(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_repo_provider_modal(app: &mut App, key: KeyEvent) {
-<<<<<<< Updated upstream
     let providers = super::super::get_provider_list();
     let count = providers.len() + 1;
     match key.code {
@@ -461,47 +391,6 @@ pub fn handle_repo_provider_modal(app: &mut App, key: KeyEvent) {
         }
         _ => {}
     }
-||||||| Stash base
-    handle_user_provider_modal(app, key);
-=======
-    let providers = super::super::get_provider_list();
-    let count = providers.len() + 1;
-    match key.code {
-        KeyCode::Up => {
-            let idx = app.modal_highlighted();
-            if idx > 0 {
-                app.set_modal_highlighted(idx - 1);
-            }
-        }
-        KeyCode::Down => {
-            let idx = app.modal_highlighted();
-            if idx + 1 < count {
-                app.set_modal_highlighted(idx + 1);
-            }
-        }
-        KeyCode::Enter => {
-            let idx = app.modal_highlighted();
-            let selected = if idx == 0 {
-                None
-            } else {
-                providers.get(idx - 1).copied()
-            };
-            if app.repo_config.is_none() {
-                app.repo_config =
-                    Some(claudine::config::claudine_config::ClaudineConfig::default());
-            }
-            if let Some(ref mut repo_cfg) = app.repo_config {
-                repo_cfg.canonical_provider = selected;
-            }
-            app.repo_dirty = true;
-            app.modal = None;
-        }
-        KeyCode::Esc => {
-            app.modal = None;
-        }
-        _ => {}
-    }
->>>>>>> Stashed changes
 }
 
 pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: SoundCategory) {
@@ -524,7 +413,6 @@ pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: Soun
                 app.set_modal_highlighted(idx + 1);
             }
         }
-<<<<<<< Updated upstream
         KeyCode::Char('p') | KeyCode::Char('P') => {
             let idx = app.modal_highlighted();
             if idx > 0
@@ -537,17 +425,6 @@ pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: Soun
             }
         }
         KeyCode::Enter | KeyCode::Char('d') | KeyCode::Char('D') => {
-||||||| Stash base
-        KeyCode::Enter => {
-=======
-        KeyCode::Char('p') | KeyCode::Char('P') => {
-            let idx = app.modal_highlighted();
-            if idx > 0 {
-                preview_sound(&sounds[idx - 1]);
-            }
-        }
-        KeyCode::Enter => {
->>>>>>> Stashed changes
             let idx = app.modal_highlighted();
             let value = if idx == 0 {
                 None
@@ -568,7 +445,6 @@ pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: Soun
         _ => {}
     }
 }
-<<<<<<< Updated upstream
 
 #[cfg(test)]
 mod tests {
@@ -631,25 +507,3 @@ mod tests {
         assert!(app.modal.is_none());
     }
 }
-||||||| Stash base
-=======
-
-fn preview_sound(name: &str) {
-    if let Some(effect) = playa::SoundEffect::from_name(name) {
-        std::thread::spawn(move || {
-            let _ = effect.play();
-        });
-    }
-}
-
-fn preview_default_sounds(app: &App) {
-    let sounds = &app.config.default_sounds;
-    if let Some(name) = &sounds.success {
-        preview_sound(name);
-    } else if let Some(name) = &sounds.attention {
-        preview_sound(name);
-    } else if let Some(name) = &sounds.error {
-        preview_sound(name);
-    }
-}
->>>>>>> Stashed changes

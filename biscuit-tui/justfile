@@ -1,0 +1,79 @@
+set dotenv-load
+set positional-arguments
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+import "../just/spec.just"
+import "../just/lifecycle.just"
+import "../just/review.just"
+import "../just/plan.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+
+PACKAGE := "tui-chrome"
+LIBRARY := "tui-chrome"
+CLI := "tui-chrome-cli"
+CLI_PATH := "./cli"
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+    echo "tui-chrome Library & CLI (binary: question)"
+    echo "==========================================="
+    echo
+    just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @just _build {{LIBRARY}} "tui-chrome Library" {{args}}
+    @just _build {{CLI}} "tui-chrome CLI" {{args}}
+
+# test library and CLI
+test *args="":
+    @just _test {{LIBRARY}} {{args}}
+    @just _test {{CLI}} {{args}}
+
+# Lint both the library and CLI
+lint:
+    @just _lint {{LIBRARY}}
+    @just _lint {{CLI}}
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint {{LIBRARY}} || just _fix_lint {{LIBRARY}}
+    @just _lint {{CLI}} || just _fix_lint {{CLI}}
+
+# install CLI binary
+install *args="":
+    @just build --release
+    @just _install "{{CLI_PATH}}" "tui-chrome" "question" {{args}}
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p {{LIBRARY}} -p {{CLI}}
+
+# build and show the docs for the library code
+docs:
+    @echo "Build and then show latest docs for the tui-chrome library code"
+    @echo ""
+    @cargo doc -p {{LIBRARY}} --open
+
+# run CLI in development mode
+cli *args="":
+    @cargo run -p {{CLI}} -- {{args}}
+
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true

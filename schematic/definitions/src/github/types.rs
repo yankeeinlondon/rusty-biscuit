@@ -289,6 +289,15 @@ pub struct PullRequestSummary {
     /// API URL for statuses.
     #[serde(default)]
     pub statuses_url: Option<String>,
+
+    /// Labels applied to the PR.
+    ///
+    /// GitHub returns labels on PRs through the same `labels` array shape
+    /// used by issues. The list endpoint includes this field by default,
+    /// but `#[serde(default)]` keeps older fixtures (or alternative APIs
+    /// that omit it) deserializable.
+    #[serde(default)]
+    pub labels: Vec<IssueLabel>,
 }
 
 /// A file changed in a pull request.
@@ -923,6 +932,35 @@ mod tests {
         assert_eq!(pr.number, 1347);
         assert_eq!(pr.state, "open");
         assert_eq!(pr.base.ref_name, "main");
+        // Labels field defaults to empty when omitted from the payload.
+        assert!(pr.labels.is_empty());
+    }
+
+    #[test]
+    fn pull_request_summary_with_labels_deserialization() {
+        let json = r#"{
+            "number": 1347,
+            "state": "open",
+            "title": "Amazing feature",
+            "user": { "login": "octocat" },
+            "base": { "ref": "main", "sha": "abc123" },
+            "head": { "ref": "feature", "sha": "def456" },
+            "created_at": "2011-01-26T19:01:12Z",
+            "updated_at": "2011-01-26T19:01:12Z",
+            "html_url": "https://github.com/octocat/Hello-World/pull/1347",
+            "url": "https://api.github.com/repos/octocat/Hello-World/pulls/1347",
+            "labels": [
+                {"name": "bug", "color": "d73a4a"},
+                {"name": "enhancement"}
+            ]
+        }"#;
+
+        let pr: PullRequestSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(pr.labels.len(), 2);
+        assert_eq!(pr.labels[0].name, "bug");
+        assert_eq!(pr.labels[0].color.as_deref(), Some("d73a4a"));
+        assert_eq!(pr.labels[1].name, "enhancement");
+        assert!(pr.labels[1].color.is_none());
     }
 
     #[test]

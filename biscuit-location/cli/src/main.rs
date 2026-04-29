@@ -3,10 +3,10 @@
 //! ## Usage
 //!
 //! ```bash
-//! where gps                                   # Get location from GPS
-//! where ip 8.8.8.8                            # Look up IP location
-//! where reverse 34.0522 -118.2437             # Reverse geocode coordinates
-//! where distance 34.05,-118.24 40.71,-74.01   # Distance between points
+//! geo gps                                   # Get location from GPS
+//! geo ip 8.8.8.8                            # Look up IP location
+//! geo reverse 34.0522 -118.2437             # Reverse geocode coordinates
+//! geo distance 34.05,-118.24 40.71,-74.01   # Distance between points
 //! ```
 //!
 //! ## Output Modes
@@ -28,8 +28,8 @@ mod output;
 use std::io::{self, Write};
 
 use clap::{CommandFactory, Parser};
-use clap_complete::{generate, Shell};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use clap_complete::{Shell, generate};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use args::{Cli, Commands};
 use output::OutputMode;
@@ -97,12 +97,11 @@ fn init_tracing(verbose: u8) {
         return;
     }
 
-    // The binary is named `where` (a Rust keyword), so the compiled crate
-    // name — and therefore every tracing target — carries an `r#` prefix.
+    // The binary is named `geo`. Tracing targets use the binary crate name.
     let base_filter = explicit_rust_log.unwrap_or_else(|| match verbose {
-        1 => "warn,biscuit_location=info,r#where=info".into(),
-        2 => "info,biscuit_location=debug,r#where=debug".into(),
-        _ => "debug,biscuit_location=trace,r#where=trace".into(),
+        1 => "warn,biscuit_location=info,geo=info".into(),
+        2 => "info,biscuit_location=debug,geo=debug".into(),
+        _ => "debug,biscuit_location=trace,geo=trace".into(),
     });
 
     let filter = EnvFilter::try_new(&base_filter).unwrap_or_else(|_| EnvFilter::new("warn"));

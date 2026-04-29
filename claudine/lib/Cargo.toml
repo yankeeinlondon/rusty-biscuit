@@ -19,7 +19,7 @@ biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }
 darkmatter = { path = "../../darkmatter/lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
-messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp"] }
+messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp", "desktop"] }
 secrecy = "0.10"
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
@@ -29,6 +29,8 @@ serde_json = "1.0"
 
 # Date/time
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+chrono-tz = "0.10"
+iana-time-zone = "0.1"
 
 # Error handling
 thiserror = "2.0"
@@ -60,11 +62,11 @@ toml = "1.0"
 # Structured logging
 tracing = "0.1"
 
-# File locking
-fs2 = "0.4"
+# Atomic file writes via unique temp file + rename
+tempfile = "3"
 
 # SQLite reporting index
-rusqlite = { version = "0.31", features = ["chrono", "serde_json"] }
+rusqlite = { version = "0.31", features = ["bundled", "chrono", "serde_json"] }
 
 # Directory traversal
 walkdir = "2.5"
@@ -77,7 +79,6 @@ shell-words = "1"
 
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
-tempfile = "3"
 serial_test = "3"
 serde_json = "1.0"
 criterion = "0.5"

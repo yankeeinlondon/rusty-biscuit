@@ -923,7 +923,11 @@ impl Headers {
     #[must_use]
     pub fn has_header(&self, name: &str) -> bool {
         if name.eq_ignore_ascii_case("Authorization") {
-            return self.authorization.is_some();
+            return self.authorization.is_some()
+                || self
+                    .custom
+                    .iter()
+                    .any(|(header_name, _)| header_name.eq_ignore_ascii_case("Authorization"));
         }
 
         self.custom

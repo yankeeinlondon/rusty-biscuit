@@ -620,7 +620,7 @@ fn test_storage_subcommand_json_output() {
 
     // Should have at least one disk
     let storage = json.as_array().unwrap();
-    assert!(storage.len() > 0, "storage should have at least one disk");
+    assert!(!storage.is_empty(), "storage should have at least one disk");
 }
 
 // ============================================================================
@@ -647,6 +647,16 @@ fn test_git_status_subcommand_with_history_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Status"));
+}
+
+#[test]
+fn test_git_status_subcommand_compact_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "git-status", "--compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Status"))
+        .stdout(predicate::str::contains("Meta").not());
 }
 
 #[test]
@@ -894,7 +904,7 @@ fn test_terminal_apps_subcommand_json_output() {
 #[test]
 fn test_audio_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
-        .arg("audio")
+        .arg("audio-players")
         .assert()
         .success()
         .stdout(predicate::str::contains("Name"))
@@ -904,7 +914,7 @@ fn test_audio_subcommand_text_output() {
 #[test]
 fn test_audio_subcommand_json_output() {
     cargo_bin_cmd!("sniff")
-        .args(["audio", "--json"])
+        .args(["audio-players", "--json"])
         .assert()
         .success();
 }
@@ -992,7 +1002,8 @@ fn test_git_status_help_mentions_refresh_remotes() {
         .args(["repo", "git-status", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--refresh-remotes"));
+        .stdout(predicate::str::contains("--refresh-remotes"))
+        .stdout(predicate::str::contains("--compact"));
 }
 
 #[test]
@@ -1813,6 +1824,55 @@ fn test_repo_recent_commits_with_period() {
 }
 
 #[test]
+fn test_repo_recent_commits_with_count_period() {
+    let (_dir, path) = create_test_repo();
+    for i in 0..5 {
+        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
+    }
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "2",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    let commits = json["commits"].as_array().expect("commits array");
+    assert_eq!(commits.len(), 2, "expected exactly 2 commits");
+    assert_eq!(
+        json["period_label"].as_str().unwrap(),
+        "last 2 commits",
+        "period label should describe the count"
+    );
+}
+
+#[test]
+fn test_repo_source_code_changes_with_count_period() {
+    let (_dir, path) = create_test_repo();
+    for i in 0..3 {
+        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
+    }
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+            "2",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
 fn test_repo_recent_commits_with_json() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
@@ -2064,6 +2124,47 @@ edition = "2024"
         .unwrap();
 
     let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+fn create_cli_monorepo_with_root_package() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_cli_monorepo();
+    let repo = git2::Repository::open(&path).unwrap();
+
+    std::fs::write(
+        path.join("Cargo.toml"),
+        r#"[package]
+name = "root-tool"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = ["pkg-a/lib", "pkg-b/lib", "."]
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(path.join("src")).unwrap();
+    std::fs::write(path.join("src/lib.rs"), "pub fn root_tool() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "add root workspace package",
+        &tree,
+        &[&parent],
+    )
+    .unwrap();
+
     (dir, path)
 }
 
@@ -2472,7 +2573,7 @@ fn test_repo_source_code_changes_json_exact_fields() {
         c["files"].as_array().is_some_and(|files| {
             files
                 .iter()
-                .any(|f| f.as_str().is_some_and(|s| s.ends_with(".rs")))
+                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".rs")))
         })
     });
     assert!(has_rs_file, "Source code changes should include .rs files");
@@ -2505,7 +2606,7 @@ fn test_repo_documentation_changes_json_exact_fields() {
         c["files"].as_array().is_some_and(|files| {
             files
                 .iter()
-                .any(|f| f.as_str().is_some_and(|s| s.ends_with(".md")))
+                .any(|f| f["path"].as_str().is_some_and(|s| s.ends_with(".md")))
         })
     });
     assert!(
@@ -2534,19 +2635,451 @@ fn test_repo_recent_commits_plain_output_exact_structure() {
 
     // Plain output should contain markdown structure
     assert!(
-        stdout.contains("**Commit:**"),
-        "Plain output should have commit markers"
+        stdout.contains("[") && stdout.contains("] at "),
+        "Plain output should have `[hash] at TIME` commit markers, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("**Files:**"),
-        "Plain output should have files section"
+        stdout.contains("**Files Impacted:**"),
+        "Plain output should have files section, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("**Description:**"),
-        "Plain output should have description"
+        stdout.contains("add file"),
+        "Plain output should include the commit description, got:\n{stdout}"
     );
     assert!(
         stdout.contains("src/main.rs"),
-        "Plain output should list the committed file"
+        "Plain output should list the committed file, got:\n{stdout}"
     );
+}
+
+// ============================================================================
+// repo packages Subcommand Tests
+// ============================================================================
+
+#[test]
+fn test_repo_packages_csv_default() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a, pkg-b");
+}
+
+#[test]
+fn test_repo_packages_md_format() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--md",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "- pkg-a\n- pkg-b");
+}
+
+#[test]
+fn test_repo_packages_list_format() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a\npkg-b");
+}
+
+#[test]
+fn test_repo_packages_md_and_list_conflict() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--md",
+            "--list",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_packages_package_area_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package-area",
+            "pkg-b",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-b");
+}
+
+#[test]
+fn test_repo_packages_verbose_shows_root_dir() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--list",
+            "--verbose",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("pkg-a(./pkg-a/lib)"),
+        "Verbose list output should include the package root, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("pkg-b(./pkg-b/lib)"),
+        "Verbose list output should include the package root, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_repo_packages_verbose_does_not_emit_tracing() {
+    let (_dir, path) = create_cli_monorepo();
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--verbose",
+        ])
+        .output()
+        .expect("failed to run sniff");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("performance stage complete"),
+        "--verbose must not leak tracing output to stderr, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("INFO"),
+        "--verbose must not emit INFO tracing, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_repo_packages_json_output() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
+    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+}
+
+// ============================================================================
+// repo package-areas Subcommand Tests
+// ============================================================================
+
+#[test]
+fn test_repo_package_areas_csv_default() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a, pkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_md_format() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--md",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "- pkg-a\n- pkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_list_format() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a\npkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_md_and_list_conflict() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--md",
+            "--list",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_package_areas_package_area_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--package-area",
+            "pkg-b",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_positional_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "pkg-a",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-a");
+}
+
+#[test]
+fn test_repo_package_areas_positional_filter_negation() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "!pkg-a",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "pkg-b");
+}
+
+#[test]
+fn test_repo_package_areas_verbose_shows_root_dir() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--list",
+            "--verbose",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("pkg-a (./pkg-a)"),
+        "Verbose list output should include the area root, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("pkg-b (./pkg-b)"),
+        "Verbose list output should include the area root, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_repo_package_areas_root_area_verbose_renders_dot_slash() {
+    let (_dir, path) = create_cli_monorepo_with_root_package();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--list",
+            "--verbose",
+            "--plain",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("root (./)"),
+        "Root package area should render as the repo root, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("root (./root)"),
+        "Root package area should not render a non-existent root directory, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_repo_package_areas_verbose_does_not_emit_tracing() {
+    let (_dir, path) = create_cli_monorepo();
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--verbose",
+        ])
+        .output()
+        .expect("failed to run sniff");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("performance stage complete"),
+        "--verbose must not leak tracing output to stderr, got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("INFO"),
+        "--verbose must not emit INFO tracing, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_repo_package_areas_json_output() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
+    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+}
+
+#[test]
+fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "--json",
+            "--perf",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
+    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        !stderr.trim().is_empty(),
+        "perf output should be written to stderr"
+    );
+    assert!(
+        stderr.contains("Performance") || stderr.contains("Total"),
+        "stderr should contain performance timing text, got:\n{stderr}"
+    );
+}
+
+// ============================================================================
+// `repo pr` Subcommand Tests
+// ============================================================================
+
+#[test]
+fn test_repo_pr_help_documents_bitbucket_draft_limitation() {
+    // The --status flag's help text must call out the Bitbucket draft
+    // limitation so users know `--status draft` returns nothing for
+    // Bitbucket-hosted repositories.
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "pr", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--status"))
+        .stdout(predicate::str::contains("Bitbucket"));
 }

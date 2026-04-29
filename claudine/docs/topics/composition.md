@@ -4,10 +4,80 @@ Claudine supports the ability to _compose_ content by leveraging the Darkmatter 
 
 Two canonical commands:
 
-- **`claudine compose <file-ref>`** — direct (chained) composition
-- **`claudine inline-compose <file-ref>`** — inline composition
+- **`claudine compose [flags] <arg>...`** — direct (chained) composition
+- **`claudine inline-compose [flags] <arg>...`** — inline composition
 
 Both commands share the same five-stage pipeline and inherit full wrapper-grade behavior: environment setup, harness detection, structured streaming, and handler-driven recovery.
+
+Because composition flows through the same execution path as `claudine claude` / `codex` / etc., it inherits every behavior of the live stderr surface documented in [Non-Interactive Sessions](non-interactive-sessions.md):
+
+- **Tool call rendering** — `→ Name(summary)` / `← Name(slot)` with shell-name prefixing for `Bash` / `shell` / `run_command` and `description → subject → prompt → task` field order for `Task`.
+- **Idle flush** — buffered assistant markdown is flushed by an independent 30-second ticker whenever the block buffer has been idle for 30 s, so a dangling final paragraph never sits invisible while a slow-to-close provider waits to exit.
+- **Prompt-scoped timing header** — every 10 minutes the stderr surface emits `⏱️ {HH:MM} {TZ} running the <prompt> prompt for <duration>` anchored on the prompt's start time (and a `t=0` header without the duration at run start). See [Timing Surface](#timing-surface) below.
+- **Typed error rendering** — `SemanticEvent::Error` is rendered as a colored `BlockQuote` whose label and border come from `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`).
+- **Reasoning / thinking** — provider reasoning (Claude, Codex, OpenCode, Gemini, Qwen) renders into `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border that matches the System Prompt and Agent Prompt sections.
+
+### Positional Arguments
+
+Each command accepts exactly one file reference plus zero or more `key=value`
+setters, in any order:
+
+```sh
+claudine compose @prompts/review.md review=review.md
+claudine compose review=review.md @prompts/review.md
+claudine inline-compose draft=false @notes/update.md
+```
+
+A token is a setter when it contains `=` and its key starts with an ASCII
+letter or `_` and contains only letters, digits, `_`, or `-`. Dot-paths and
+path-like tokens (for example `foo.bar=baz`) are not setters and are treated
+as file-reference candidates.
+
+Setter values are parsed as JSON5 first and fall back to strings when JSON5
+parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
+`review=review.md` all resolve to their natural types.
+
+Inline setters override matching keys from `--set`. For `sequence`, reserved
+per-step overlay keys still win over both `--set` and shorthand setters.
+
+### Shell Completion
+
+Dynamic completion fires at markdown-expecting argument positions on all
+three composition commands and on the `--append-system-prompt` /
+`--replace-system-prompt` flag values — both on compose/inline-compose/
+sequence themselves and on every wrapped provider subcommand (`claude`,
+`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`). All three
+composition commands share one markdown-only contract; there is no
+per-command frontmatter validation at completion time.
+
+The generated bash/zsh/fish scripts shell out to `claudine __complete` on
+every `<TAB>`. The supplement engine applies these rules in order:
+
+- **Candidates are markdown files only** (`*.md`). Directories,
+  non-markdown files, `./`/`../` traversal tokens, `!` package sigils,
+  `vault:`, `/abs`, `%`, and `{{…}}` prefixes all return zero candidates.
+- **Two supported entry forms**: `@`-prefixed magic paths (enumerated
+  against repo root + user home) and implicit-relative paths like
+  `prompts/…` (enumerated against the repo root only).
+- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+  segments before a `/` don't count) use the curated scope only —
+  `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
+  `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend
+  to a `.gitignore`-aware walk of the enclosing git repo.
+- **Case-insensitive substring matching** on the filename with `.md`
+  stripped for matching only. `@omp<TAB>` matches `prompt.md`.
+- **`KEY=<TAB>` setters** return zero candidates so shell default
+  behavior kicks in.
+
+Install with `claudine completions <shell>` — regenerate and reinstall
+after a Claudine upgrade that changes the callback wiring. The hidden
+`claudine __complete` subprocess always tracks the running binary, so
+the completion candidates themselves never go stale. PowerShell and
+Elvish retain the legacy one-line `COMPLETE=<shell>` bootstrap; users
+who installed an older `COMPLETE=<shell>` snippet continue to reach the
+legacy completion path on every shell until they regenerate. See
+[shell-completions.md](../shell-completions.md) for the full install
+matrix, supported token shapes, and the open-questions list.
 
 ## Direct Composition
 
@@ -64,13 +134,64 @@ Steps:
 
 ## Provider Selection
 
-Both commands use a deterministic precedence chain:
+Provider selection behaves differently in **TTY** (interactive terminal) and **non-TTY** (piped or CI) modes. In both modes, explicit `--<provider>` flags always win unconditionally.
 
-1. **Explicit flag** (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
-2. **Single installed** — if only one provider remains after `--exclude` filtering
-3. **Frontmatter hint** — the `agent` property in the effective (composed) frontmatter, fuzzy-matched against provider names
-4. **Config favorite** — `settings.linking.preference[0]` from `~/.claudine/config.json` or `<repo>/.claudine/config.json`
-5. **Interactive chooser** — if a TTY is available, prompt the user; otherwise error
+### TTY Mode
+
+When stdout is a terminal and no explicit `--<provider>` flag is given:
+
+1. **Interactive picker** — a `tui-chrome` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
+
+### Non-TTY Mode
+
+When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict chain with no interactive fallback:
+
+1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
+3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
+4. **Config favorite** — `favorite_agent` from `~/.claudine/config.json`
+5. **Hard error** — if none of the above resolve, the command fails with a structured error
+
+The old "single installed" auto-selection shortcut has been removed. Even when only one provider is installed, non-TTY sessions still require an explicit signal (flag, frontmatter, or favorite).
+
+### Frontmatter `agent` and `model`
+
+Both `agent` and `model` frontmatter properties accept either a single string or an ordered list of strings:
+
+```yaml
+agent: codex
+agent: [gemini, codex, claude]
+model: gpt-4o
+model: [gpt-4o, o3-mini]
+```
+
+List-valued `agent` is treated as author preference order: the first installed provider wins. List-valued `model` is validated against the provider's model catalog; the first valid entry wins. When a catalog is unavailable (e.g., Gemini, Kimi, Goose in v1), frontmatter `model` is gracefully skipped rather than treated as an error.
+
+### Model Resolution
+
+Model selection follows a single chain independent of TTY mode:
+
+1. **CLI `--model`**
+2. **Provider-specific env var** (`CODEX_MODEL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.)
+3. **Generic `MODEL` env var**
+4. **Frontmatter `model`** (validated against catalog when available)
+5. **Provider default** (`None` — let the provider choose)
+
+### OpenCode Non-TTY Requirement
+
+OpenCode requires a model in non-interactive mode. If no model survives the resolution chain when running OpenCode in non-TTY mode, Claudine emits a hard error before launching the provider:
+
+```
+OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
+```
+
+### Roo Exclusion
+
+Roo Code is excluded from composition provider selection because it is a VS Code extension rather than a wrappable CLI. Roo does not appear in the TTY picker and is silently filtered from the installed-provider snapshot in non-TTY resolution.
+
+### Shorthand Flags
+
+The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
 
 ### The `--interactive` Flag
 
@@ -105,13 +226,109 @@ Available validations include filesystem checks (`file_exists`, `dir_exists`, `j
 
 ### Timeouts
 
-The `timeout` frontmatter property sets a per-execution deadline:
+Claudine supports two independent timeout properties that share the same
+human-readable duration syntax (`s`/`sec`/`seconds`, `m`/`min`/`minutes`,
+`h`/`hr`/`hours`):
 
 ```yaml
 timeout: 5m
+step_timeout: 30s
 ```
 
-Accepts `s`/`sec`/`seconds`, `m`/`min`/`minutes`, `h`/`hr`/`hours` units.
+- **`timeout`** is a wall-clock deadline for the entire provider run. When the
+  elapsed time since launch exceeds this budget, Claudine sends SIGTERM (then
+  SIGKILL after a short grace period).
+- **`step_timeout`** is a silence deadline. The timer resets on every
+  `SemanticEvent` observed on the provider's structured stream (tool call,
+  tool result, reasoning chunk, assistant text, info/warning, etc.). If no
+  event is observed for longer than the budget, Claudine kills the child.
+
+Both timeouts surface as the same `FailureEvent::Timeout` variant, so a
+single `handle_timeout` handler matches either one.
+
+**Streaming-only.** `step_timeout` requires structured streaming. If the
+selected provider runs in capture or passthrough mode, Claudine emits a
+warning and ignores the field. The non-streaming Goose wrapper is the
+primary example.
+
+**Relational validation.** When both properties are present,
+`step_timeout` must be less than or equal to `timeout`. Documents that
+violate this invariant fail parse-time validation with
+`HarnessError::InvalidTimeout`.
+
+**Precedence.** The CLI flags `--timeout` and `--step-timeout` override
+frontmatter when provided. Wall-clock enforcement is checked before
+step-silence on each poll, so if both budgets expire in the same tick the
+run is reported as the wall-clock timeout.
+
+```yaml
+timeout: 10m          # hard ceiling on total runtime
+step_timeout: 45s     # kill the child if it goes silent for 45s
+```
+
+## Timing Surface
+
+Every composition run (whether harness-enabled or not) shares a single
+user-visible timing surface rendered to stderr. Two emitters drive it:
+
+1. **Periodic prompt-scoped header.** Emitted at `t=0` when the prompt
+   begins and then at monotonic offsets from `t=0` (`t=10m`, `t=20m`,
+   `t=30m`, …). Ticks are anchored on the prompt's start time, not on
+   wall-clock `:00 :10 :20` boundaries.
+
+    - The `t=0` header reads `⏱️ {HH:MM} {TZ} running the {prompt} prompt`
+      (no duration segment).
+    - Subsequent ticks read `⏱️ {HH:MM} {TZ} running the {prompt} prompt
+      for {duration}`.
+    - `{prompt}` is an OSC8 link whose visible text is the path relative
+      to the repo root (falling back to CWD, `$HOME`, then absolute).
+
+2. **Fire-once warnings** (harness frontmatter only):
+
+    - **`timeout_warn`** — prompt-scoped. Fires once when the prompt has
+      been running for this long. Message variants:
+        - *With `timeout` also set:* `the {prompt} has been running for
+          {elapsed}, this is longer than we'd expect it to take but we
+          won't timeout this prompt until we reach {HH:MM} in
+          {remaining}.`
+        - *Without `timeout`:* `the {prompt} has been running for
+          {elapsed}, this is longer than we'd expect it to take. Press
+          CTRL+C to terminate this prompt if you're convinced that the
+          prompt has hung.`
+    - **`step_timeout_warn`** — step-scoped, fires once per stall episode
+      using the same silence clock as `step_timeout`. Message variants:
+        - *With `step_timeout` also set:* `the {prompt} has not produced
+          output for {silence}, this is longer than we'd expect, but we
+          won't abort this step until we reach {HH:MM} in {remaining}.`
+        - *Without `step_timeout`:* `the {prompt} has not produced output
+          for {silence}, this is longer than we'd expect. Press CTRL+C to
+          terminate this prompt if you're convinced that the prompt has
+          hung.`
+
+```yaml
+timeout: 10m
+timeout_warn: 5m         # warn at 5m; still kill at 10m
+step_timeout: 45s
+step_timeout_warn: 20s   # warn at 20s silence; still kill at 45s silence
+```
+
+**Duration rendering.** All user-visible durations use a single format:
+`{N}s` under 60 seconds (e.g. `45s`), `{N}m` between 1 and 59 minutes
+(e.g. `12m`), `{H}h {M}m` at 60 minutes or more (e.g. `1h 30m`, `2h 5m`).
+No zero-padding, no colon-separated forms.
+
+**Preflight validation.** Each `*_warn` must be strictly less than its
+corresponding hard threshold when both are present. `timeout_warn >=
+timeout` or `step_timeout_warn >= step_timeout` is rejected at parse
+time with `HarnessError::InvalidTimeout`. `*_warn` values `<= 0` are
+also rejected (the underlying duration parser requires positive values).
+A warn set without its corresponding hard threshold is legal — the
+"without hard threshold" message variant applies.
+
+**Fire-once semantics.** `timeout_warn` fires at most once per prompt
+run. `step_timeout_warn` fires at most once per stall episode; once
+activity resumes it re-arms for the next stall. Neither emission blocks
+the provider or affects hard-timeout behavior.
 
 ### Handlers
 
@@ -307,3 +524,17 @@ Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 - **Select**: `composition::select_provider()` applies the precedence chain
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)
 - **Closure**: `composition::closure::rewrite_inline_document()` reconstructs the document for inline mode; direct mode outputs to stdout
+
+## Performance Reporting
+
+Composition commands support an opt-in `--perf` flag that prints a detailed performance breakdown to stderr after execution completes. The report includes:
+
+- **CLI Overhead** — arg parsing, config loading, tracing init, and environment setup.
+- **Composition Report** — when `compose` or `inline-compose` (or each step of a `sequence`) triggers document preparation, the Darkmatter composition timings are shown (total time plus per-stage breakdown: interpolation, shell expansion, transclusion apply, etc.).
+- **Agent Execution** — launches, first-response latency, total execution time, and provider-reported API duration when available.
+
+For `sequence`, the report is aggregated across all steps: launches and total execution time are summed, first-response latencies are averaged (with the minimum shown in a note), and composition metrics are merged. The report appears exactly once at the end of the run, after the sequence summary.
+
+`--perf` is emitted unconditionally when passed, even alongside `--silent` or `--quiet`, because it is an explicit opt-in.
+
+> **Note:** `provider_api_duration` is only populated for structured-streaming providers. Legacy providers (e.g., Goose) omit this line.

@@ -542,8 +542,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: u8) {
         );
         println!(
             "  TERM_PROGRAM: {}",
-            std::env::var("TERM_PROGRAM")
-                .unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+            std::env::var("TERM_PROGRAM").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
         );
         println!(
             "  COLORTERM:  {}",
@@ -602,13 +601,13 @@ mod tests {
         let analysis = analyze_content(text);
         assert_eq!(analysis.total_length, 11);
         assert_eq!(analysis.line_count, 1);
-        assert_eq!(analysis.contains_color_escape_codes, true);
+        assert!(analysis.contains_color_escape_codes);
 
         let clean_text = "Just plain text\nwith two lines";
         let analysis_clean = analyze_content(clean_text);
         assert_eq!(analysis_clean.total_length, 29);
         assert_eq!(analysis_clean.line_count, 2);
-        assert_eq!(analysis_clean.contains_color_escape_codes, false);
+        assert!(!analysis_clean.contains_color_escape_codes);
     }
 
     #[test]
@@ -616,10 +615,7 @@ mod tests {
         assert_eq!(TerminalApp::Kitty.to_string(), "Kitty");
         assert_eq!(TerminalApp::Ghostty.to_string(), "Ghostty");
         assert_eq!(TerminalApp::ITerm2.to_string(), "ITerm2");
-        assert_eq!(
-            TerminalApp::Other("xterm".to_string()).to_string(),
-            "xterm"
-        );
+        assert_eq!(TerminalApp::Other("xterm".to_string()).to_string(), "xterm");
         assert_eq!(
             TerminalApp::Other("Windows Terminal".to_string()).to_string(),
             "Windows Terminal"

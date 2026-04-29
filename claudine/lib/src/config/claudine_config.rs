@@ -41,6 +41,14 @@ fn default_whatsapp_phone_number_id() -> String {
     "WHATSAPP_PHONE_NUMBER_ID".to_string()
 }
 
+fn default_discord_webhook_url() -> String {
+    "DISCORD_WEBHOOK_URL".to_string()
+}
+
+fn default_slack_webhook_url() -> String {
+    "SLACK_WEBHOOK_URL".to_string()
+}
+
 // ============================================================================
 // TTS types
 // ============================================================================
@@ -177,6 +185,26 @@ pub enum MessengerProviderConfig {
         #[serde(default = "default_whatsapp_phone_number_id")]
         phone_number_id_env: String,
     },
+    /// Discord webhook configuration.
+    #[serde(alias = "discord-webhook")]
+    DiscordWebhook {
+        /// Optional inline webhook URL.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_url: Option<String>,
+        /// Environment variable holding the webhook URL.
+        #[serde(default = "default_discord_webhook_url")]
+        webhook_url_env: String,
+    },
+    /// Slack webhook configuration.
+    #[serde(alias = "slack-webhook")]
+    SlackWebhook {
+        /// Optional inline webhook URL.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        webhook_url: Option<String>,
+        /// Environment variable holding the webhook URL.
+        #[serde(default = "default_slack_webhook_url")]
+        webhook_url_env: String,
+    },
 }
 
 /// Messenger settings: named configurations and an active selection.
@@ -207,13 +235,139 @@ impl ClaudineMessengerConfig {
                 )));
             }
         }
+
+        for (name, config) in &self.configurations {
+            validate_provider_config(config, name)?;
+        }
+
         Ok(())
     }
+}
+
+fn validate_provider_config(config: &MessengerProviderConfig, name: &str) -> Result<()> {
+    match config {
+        // Existing bot-token routes are validated at the runtime level;
+        // leave them unvalidated here so the TUI can create WIP routes.
+        MessengerProviderConfig::Discord { .. }
+        | MessengerProviderConfig::Slack { .. }
+        | MessengerProviderConfig::Signal { .. }
+        | MessengerProviderConfig::Whatsapp { .. } => {}
+        MessengerProviderConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            if webhook_url
+                .as_ref()
+                .map(|s| s.trim())
+                .is_none_or(|s| s.is_empty())
+                && webhook_url_env.trim().is_empty()
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "messenger configuration '{name}': webhook_url_env cannot be blank when webhook_url is not set"
+                )));
+            }
+            if let Some(url) = webhook_url
+                && !url.trim().is_empty()
+                && !crate::messaging::validate_discord_webhook_url(url)
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "messenger configuration '{name}': webhook_url is not a valid Discord webhook URL"
+                )));
+            }
+        }
+        MessengerProviderConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            if webhook_url
+                .as_ref()
+                .map(|s| s.trim())
+                .is_none_or(|s| s.is_empty())
+                && webhook_url_env.trim().is_empty()
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "messenger configuration '{name}': webhook_url_env cannot be blank when webhook_url is not set"
+                )));
+            }
+            if let Some(url) = webhook_url
+                && !url.trim().is_empty()
+                && !crate::messaging::validate_slack_webhook_url(url)
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "messenger configuration '{name}': webhook_url is not a valid Slack webhook URL"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 // ============================================================================
 // ClaudineConfig
 // ============================================================================
+
+/// User-supplied per-provider model override entries.
+///
+/// Two shapes are supported on disk:
+///
+/// 1. A bare string list (additive): `models.codex: ["gpt-x", "gpt-y"]`
+/// 2. An explicit object: `models.codex: { mode: "replace", values: [...] }`
+///
+/// The bare-list shorthand always means [`ModelOverrideMode::Add`]. Use the
+/// object form to fully replace the dynamically fetched catalog for a
+/// provider via [`ModelOverrideMode::Replace`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ProviderModelOverride {
+    /// Additive shorthand: a bare list of model identifiers added to the
+    /// fetched catalog.
+    AddList(Vec<String>),
+    /// Explicit object form supporting `mode` and `values`.
+    Detailed(DetailedModelOverride),
+}
+
+/// Explicit object form of a model override entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetailedModelOverride {
+    /// Override mode: additive (default) or replace.
+    #[serde(default)]
+    pub mode: ModelOverrideMode,
+
+    /// Model identifiers to add or replace with.
+    #[serde(default)]
+    pub values: Vec<String>,
+}
+
+/// Whether a [`ProviderModelOverride`] adds to or replaces the fetched
+/// catalog for a provider.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelOverrideMode {
+    /// Add user-supplied entries to the fetched list.
+    #[default]
+    Add,
+    /// Replace the fetched list entirely with user-supplied entries.
+    Replace,
+}
+
+impl ProviderModelOverride {
+    /// Return the configured override mode.
+    pub fn mode(&self) -> ModelOverrideMode {
+        match self {
+            ProviderModelOverride::AddList(_) => ModelOverrideMode::Add,
+            ProviderModelOverride::Detailed(detailed) => detailed.mode,
+        }
+    }
+
+    /// Return the user-supplied model identifiers.
+    pub fn values(&self) -> &[String] {
+        match self {
+            ProviderModelOverride::AddList(values) => values,
+            ProviderModelOverride::Detailed(detailed) => &detailed.values,
+        }
+    }
+}
 
 /// Top-level configuration for the Claudine tool.
 ///
@@ -247,12 +401,29 @@ pub struct ClaudineConfig {
     #[serde(default)]
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
 
-    /// Preferred agent provider for lazy composition operations.
-    pub preferred_agent: Provider,
+    /// Favorite agent provider for lazy composition operations.
+    ///
+    /// Stored on disk as `preferred_agent` (with `favorite_agent` accepted
+    /// as a serde alias on read). When absent, composition resolution
+    /// simply has one fewer signal to consider — it is never an error.
+    #[serde(
+        default,
+        alias = "favorite_agent",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preferred_agent: Option<Provider>,
 
     /// The canonical provider for this scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_provider: Option<Provider>,
+
+    /// Per-provider model catalog overrides.
+    ///
+    /// Augments or replaces the dynamically fetched model catalog used to
+    /// validate frontmatter `model` hints during composition resolution.
+    /// User-scope only; repo configs may not declare this field.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub models: HashMap<Provider, ProviderModelOverride>,
 
     /// Default sound effects for outcome categories.
     #[serde(default)]
@@ -327,8 +498,9 @@ impl Default for ClaudineConfig {
             logging: true,
             protect: ProtectConfig::default(),
             actions: HashMap::new(),
-            preferred_agent: Provider::Claude,
+            preferred_agent: None,
             canonical_provider: None,
+            models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
         }
     }
@@ -688,6 +860,214 @@ mod tests {
         assert_eq!(messenger.active_config.as_deref(), Some("main"));
     }
 
+    #[test]
+    fn messenger_discord_webhook_deserializes_with_defaults() {
+        let json = serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "alerts": {
+                        "provider": "discord_webhook",
+                        "webhook_url_env": "MY_DISCORD_URL"
+                    }
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let messenger = config.messenger.unwrap();
+        match messenger.configurations.get("alerts").unwrap() {
+            MessengerProviderConfig::DiscordWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(webhook_url, &None);
+                assert_eq!(webhook_url_env, "MY_DISCORD_URL");
+            }
+            other => panic!("expected DiscordWebhook, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn messenger_discord_webhook_accepts_hyphenated_provider_alias() {
+        let json = serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "alerts": {
+                        "provider": "discord-webhook",
+                        "webhook_url_env": "MY_DISCORD_URL"
+                    }
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let messenger = config.messenger.unwrap();
+        assert!(matches!(
+            messenger.configurations.get("alerts").unwrap(),
+            MessengerProviderConfig::DiscordWebhook { .. }
+        ));
+    }
+
+    #[test]
+    fn messenger_slack_webhook_deserializes_with_inline_url() {
+        let json = serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "deploys": {
+                        "provider": "slack_webhook",
+                        "webhook_url": "https://hooks.slack.com/services/T000/B000/XXXX",
+                        "webhook_url_env": "SLACK_WEBHOOK_URL"
+                    }
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let messenger = config.messenger.unwrap();
+        match messenger.configurations.get("deploys").unwrap() {
+            MessengerProviderConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert_eq!(
+                    webhook_url.as_deref(),
+                    Some("https://hooks.slack.com/services/T000/B000/XXXX")
+                );
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+            other => panic!("expected SlackWebhook, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn messenger_webhook_round_trip() {
+        let json = serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "active_config": "deploys",
+                "configurations": {
+                    "deploys": {
+                        "provider": "slack_webhook",
+                        "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+                    },
+                    "personal-alerts": {
+                        "provider": "discord_webhook",
+                        "webhook_url_env": "DISCORD_WEBHOOK_URL"
+                    }
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json.clone()).unwrap();
+        let serialized = serde_json::to_value(&config).unwrap();
+        let back: ClaudineConfig = serde_json::from_value(serialized).unwrap();
+        let messenger = back.messenger.unwrap();
+        assert_eq!(messenger.active_config.as_deref(), Some("deploys"));
+        assert!(messenger.configurations.contains_key("deploys"));
+        assert!(messenger.configurations.contains_key("personal-alerts"));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_discord_webhook_url() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "bad": {
+                        "provider": "discord_webhook",
+                        "webhook_url": "not-a-url"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("bad"), "error: {msg}");
+        assert!(
+            msg.contains("not a valid Discord webhook URL"),
+            "error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_invalid_slack_webhook_url() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "bad": {
+                        "provider": "slack_webhook",
+                        "webhook_url": "https://example.com/hook"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("bad"), "error: {msg}");
+        assert!(
+            msg.contains("not a valid Slack webhook URL"),
+            "error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_env_only_webhook_config() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "env-only": {
+                        "provider": "discord_webhook",
+                        "webhook_url_env": "MY_DISCORD_URL"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_valid_inline_webhook_url() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "inline": {
+                        "provider": "discord_webhook",
+                        "webhook_url": "https://discord.com/api/webhooks/123456/abcDEF"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_blank_webhook_url_env_when_no_inline() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
+            "messenger": {
+                "configurations": {
+                    "bad": {
+                        "provider": "slack_webhook",
+                        "webhook_url_env": ""
+                    }
+                }
+            }
+        }))
+        .unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("bad"), "error: {msg}");
+    }
+
     // -------------------------------------------------------------------------
     // DefaultSounds
     // -------------------------------------------------------------------------
@@ -731,7 +1111,44 @@ mod tests {
     fn preferred_agent_deserializes() {
         let json = serde_json::json!({ "preferred_agent": "claude" });
         let config: ClaudineConfig = serde_json::from_value(json).unwrap();
-        assert_eq!(config.preferred_agent, Provider::Claude);
+        assert_eq!(config.preferred_agent, Some(Provider::Claude));
+    }
+
+    #[test]
+    fn favorite_agent_alias_deserializes() {
+        let json = serde_json::json!({ "favorite_agent": "codex" });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(config.preferred_agent, Some(Provider::Codex));
+    }
+
+    #[test]
+    fn preferred_agent_absent_deserializes_to_none() {
+        let json = serde_json::json!({});
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        assert!(config.preferred_agent.is_none());
+    }
+
+    #[test]
+    fn preferred_agent_round_trip_when_set() {
+        let config = ClaudineConfig {
+            preferred_agent: Some(Provider::Gemini),
+            ..ClaudineConfig::default()
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(back.preferred_agent, Some(Provider::Gemini));
+    }
+
+    #[test]
+    fn preferred_agent_round_trip_when_none_skips_field() {
+        let config = ClaudineConfig::default();
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(
+            json.get("preferred_agent").is_none(),
+            "preferred_agent should be omitted when None"
+        );
+        let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+        assert!(back.preferred_agent.is_none());
     }
 
     #[test]
@@ -755,22 +1172,23 @@ mod tests {
         assert!(config.protect.enabled);
         assert!(config.actions.is_empty());
         assert!(config.messenger.is_none());
-        assert_eq!(config.preferred_agent, Provider::Claude);
+        assert_eq!(config.preferred_agent, Some(Provider::Claude));
         assert!(config.canonical_provider.is_none());
+        assert!(config.models.is_empty());
     }
 
     #[test]
-    fn default_impl_matches_minimal_deserialization() {
+    fn default_impl_matches_empty_deserialization() {
         let from_default = ClaudineConfig::default();
-        let from_json: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
-        // Both should have TtsValue::Boolean(false)
+        let from_json: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
         assert!(matches!(from_default.tts, TtsValue::Boolean(false)));
         assert!(matches!(from_json.tts, TtsValue::Boolean(false)));
         assert_eq!(from_default.logging, from_json.logging);
         assert_eq!(from_default.protect.enabled, from_json.protect.enabled);
-        assert_eq!(from_default.preferred_agent, Provider::Claude);
-        assert_eq!(from_json.preferred_agent, Provider::Claude);
+        assert!(from_default.preferred_agent.is_none());
+        assert!(from_json.preferred_agent.is_none());
+        assert!(from_default.models.is_empty());
+        assert!(from_json.models.is_empty());
     }
 
     // -------------------------------------------------------------------------
@@ -1263,8 +1681,9 @@ mod tests {
             logging: true,
             protect: ProtectConfig::default(),
             actions,
-            preferred_agent: Provider::Codex,
+            preferred_agent: Some(Provider::Codex),
             canonical_provider: Some(Provider::Gemini),
+            models: HashMap::new(),
             default_sounds: DefaultSounds {
                 success: Some("doorbell".to_string()),
                 attention: Some("bong".to_string()),
@@ -1285,7 +1704,7 @@ mod tests {
             .expect("round-tripped validation should pass");
 
         // Verify key fields survived the round-trip
-        assert_eq!(roundtripped.preferred_agent, Provider::Codex);
+        assert_eq!(roundtripped.preferred_agent, Some(Provider::Codex));
         assert_eq!(roundtripped.canonical_provider, Some(Provider::Gemini));
         assert!(roundtripped.logging);
         assert_eq!(
@@ -1356,7 +1775,150 @@ mod tests {
         assert!(back.validate().is_ok());
         assert!(back.logging);
         assert!(back.protect.enabled);
-        assert_eq!(back.preferred_agent, Provider::Claude);
+        assert_eq!(back.preferred_agent, Some(Provider::Claude));
         assert_eq!(back.canonical_provider, Some(Provider::Gemini));
+    }
+
+    // -------------------------------------------------------------------------
+    // ProviderModelOverride / ModelOverrideMode
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn models_additive_shorthand_deserializes() {
+        let json = serde_json::json!({
+            "models": {
+                "codex": ["gpt-5.4", "gpt-5.4-mini"]
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let entry = config
+            .models
+            .get(&Provider::Codex)
+            .expect("codex override should be present");
+        assert_eq!(entry.mode(), ModelOverrideMode::Add);
+        assert_eq!(entry.values(), &["gpt-5.4", "gpt-5.4-mini"]);
+    }
+
+    #[test]
+    fn models_replace_object_deserializes() {
+        let json = serde_json::json!({
+            "models": {
+                "open_code": {
+                    "mode": "replace",
+                    "values": ["openrouter/auto"]
+                }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let entry = config
+            .models
+            .get(&Provider::OpenCode)
+            .expect("opencode override should be present");
+        assert_eq!(entry.mode(), ModelOverrideMode::Replace);
+        assert_eq!(entry.values(), &["openrouter/auto"]);
+    }
+
+    #[test]
+    fn models_object_defaults_to_add_mode() {
+        let json = serde_json::json!({
+            "models": {
+                "claude": { "values": ["claude-x"] }
+            }
+        });
+        let config: ClaudineConfig = serde_json::from_value(json).unwrap();
+        let entry = config
+            .models
+            .get(&Provider::Claude)
+            .expect("claude override should be present");
+        assert_eq!(entry.mode(), ModelOverrideMode::Add);
+        assert_eq!(entry.values(), &["claude-x"]);
+    }
+
+    #[test]
+    fn models_round_trip_preserves_modes() {
+        let mut models = HashMap::new();
+        models.insert(
+            Provider::Codex,
+            ProviderModelOverride::AddList(vec!["a".to_string(), "b".to_string()]),
+        );
+        models.insert(
+            Provider::OpenCode,
+            ProviderModelOverride::Detailed(DetailedModelOverride {
+                mode: ModelOverrideMode::Replace,
+                values: vec!["openrouter/auto".to_string()],
+            }),
+        );
+        let config = ClaudineConfig {
+            models,
+            ..ClaudineConfig::default()
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        let back: ClaudineConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.models.get(&Provider::Codex).unwrap().mode(),
+            ModelOverrideMode::Add
+        );
+        assert_eq!(
+            back.models.get(&Provider::OpenCode).unwrap().mode(),
+            ModelOverrideMode::Replace
+        );
+    }
+
+    #[test]
+    fn models_field_skipped_when_empty() {
+        let config = ClaudineConfig::default();
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(
+            json.get("models").is_none(),
+            "empty `models` should be omitted from serialized output"
+        );
+    }
+
+    #[test]
+    fn models_detailed_form_rejects_unknown_field() {
+        let json = serde_json::json!({
+            "models": {
+                "codex": {
+                    "mode": "add",
+                    "values": ["x"],
+                    "extra": true
+                }
+            }
+        });
+        let result = serde_json::from_value::<ClaudineConfig>(json);
+        assert!(
+            result.is_err(),
+            "unknown field inside detailed override should be rejected"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // RepoOverrideConfig — preferred_agent/favorite_agent/models rejection
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn repo_override_rejects_favorite_agent_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "favorite_agent": "claude"
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("favorite_agent"),
+            "error should mention the unknown field: {msg}"
+        );
+    }
+
+    #[test]
+    fn repo_override_rejects_models_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "models": { "codex": ["foo"] }
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("models"),
+            "error should mention the unknown field: {msg}"
+        );
     }
 }

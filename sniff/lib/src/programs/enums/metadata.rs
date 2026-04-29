@@ -5,7 +5,8 @@ use crate::programs::types::InstallationMethod;
 
 use super::categories::{
     ALL_OS, AiCli, CategoryEnum, Editor, HeadlessAudio, LINUX_ONLY, LanguagePackageManager,
-    MACOS_ONLY, OsPackageManager, TerminalApp, TtsClient, UNIX_ONLY, Utility, WINDOWS_ONLY,
+    MACOS_ONLY, NotificationHelper, OsPackageManager, TerminalApp, TtsClient, UNIX_ONLY, Utility,
+    WINDOWS_ONLY,
 };
 
 pub(crate) static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
@@ -157,6 +158,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/vim/vim"),
         installation_methods: VI_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "vim",
@@ -171,6 +173,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/vim/vim"),
         installation_methods: VIM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "nvim",
@@ -185,6 +188,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/neovim/neovim"),
         installation_methods: NEOVIM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "emacs",
@@ -199,6 +203,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://git.savannah.gnu.org/cgit/emacs.git"),
         installation_methods: EMACS_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "xemacs",
@@ -213,6 +218,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/xemacs/xemacs"),
         installation_methods: XEMACS_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "nano",
@@ -227,6 +233,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://git.savannah.gnu.org/cgit/nano.git"),
         installation_methods: NANO_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "hx",
@@ -241,6 +248,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/helix-editor/helix"),
         installation_methods: HELIX_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "code",
@@ -255,6 +263,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/microsoft/vscode"),
         installation_methods: VSCODE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "codium",
@@ -269,6 +278,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/VSCodium/vscodium"),
         installation_methods: VSCODIUM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "subl",
@@ -283,6 +293,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/sublimehq"),
         installation_methods: SUBLIME_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "zed",
@@ -297,6 +308,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: MACOS_ONLY,
         repo: Some("https://github.com/zed-industries/zed"),
         installation_methods: ZED_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "micro",
@@ -311,6 +323,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/zyedidia/micro"),
         installation_methods: MICRO_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "kak",
@@ -325,6 +338,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/mawww/kakoune"),
         installation_methods: KAKOUNE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "amp",
@@ -339,6 +353,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/jmacdonald/amp"),
         installation_methods: AMP_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "lapce",
@@ -353,6 +368,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/lapce/lapce"),
         installation_methods: LAPCE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "phpstorm",
@@ -367,6 +383,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://www.jetbrains.com/phpstorm/"),
         installation_methods: PHPSTORM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "idea",
@@ -381,6 +398,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://www.jetbrains.com/idea/"),
         installation_methods: INTELLIJ_IDEA_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "pycharm",
@@ -395,6 +413,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://www.jetbrains.com/pycharm/"),
         installation_methods: PYCHARM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "webstorm",
@@ -409,6 +428,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://www.jetbrains.com/webstorm/"),
         installation_methods: WEBSTORM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "clion",
@@ -423,6 +443,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://www.jetbrains.com/clion/"),
         installation_methods: CLION_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "goland",
@@ -437,6 +458,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://www.jetbrains.com/go/"),
         installation_methods: GOLAND_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "rider",
@@ -451,6 +473,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://www.jetbrains.com/rider/"),
         installation_methods: RIDER_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "mate",
@@ -465,6 +488,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: MACOS_ONLY,
         repo: Some("https://github.com/textmate/textmate"),
         installation_methods: TEXTMATE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "bbedit",
@@ -479,6 +503,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: MACOS_ONLY,
         repo: None,
         installation_methods: BBEDIT_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "geany",
@@ -493,6 +518,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/geany/geany"),
         installation_methods: GEANY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "kate",
@@ -507,6 +533,7 @@ pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://invent.kde.org/utilities/kate"),
         installation_methods: KATE_INSTALL,
+        system_prerequisites: &[],
     },
 ];
 
@@ -773,6 +800,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/ogham/exa"),
         installation_methods: EXA_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "eza",
@@ -787,6 +815,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/eza-community/eza"),
         installation_methods: EZA_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "rg",
@@ -801,6 +830,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/BurntSushi/ripgrep"),
         installation_methods: RIPGREP_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "dust",
@@ -815,6 +845,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/bootandy/dust"),
         installation_methods: DUST_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "bat",
@@ -829,6 +860,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/sharkdp/bat"),
         installation_methods: BAT_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "fd",
@@ -843,6 +875,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/sharkdp/fd"),
         installation_methods: FD_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "procs",
@@ -857,6 +890,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/dalance/procs"),
         installation_methods: PROCS_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "btm",
@@ -871,6 +905,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/ClementTsang/bottom"),
         installation_methods: BOTTOM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "fzf",
@@ -885,6 +920,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/junegunn/fzf"),
         installation_methods: FZF_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "zoxide",
@@ -899,6 +935,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/ajeetdsouza/zoxide"),
         installation_methods: ZOXIDE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "starship",
@@ -913,6 +950,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/starship/starship"),
         installation_methods: STARSHIP_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "direnv",
@@ -927,6 +965,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/direnv/direnv"),
         installation_methods: DIRENV_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "jq",
@@ -941,6 +980,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/jqlang/jq"),
         installation_methods: JQ_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "delta",
@@ -955,6 +995,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/dandavison/delta"),
         installation_methods: DELTA_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "tldr",
@@ -969,6 +1010,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/dbrgn/tealdeer"),
         installation_methods: TEALDEER_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "lazygit",
@@ -983,6 +1025,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/jesseduffield/lazygit"),
         installation_methods: LAZYGIT_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "gh",
@@ -997,6 +1040,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/cli/cli"),
         installation_methods: GH_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "htop",
@@ -1011,6 +1055,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/htop-dev/htop"),
         installation_methods: HTOP_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "btop",
@@ -1025,6 +1070,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/aristocratos/btop"),
         installation_methods: BTOP_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "tmux",
@@ -1039,6 +1085,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/tmux/tmux"),
         installation_methods: TMUX_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "zellij",
@@ -1053,6 +1100,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/zellij-org/zellij"),
         installation_methods: ZELLIJ_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "http",
@@ -1067,6 +1115,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/httpie/cli"),
         installation_methods: HTTPIE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "curlie",
@@ -1081,6 +1130,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/rs/curlie"),
         installation_methods: CURLIE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "mise",
@@ -1095,6 +1145,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/jdx/mise"),
         installation_methods: MISE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "hyperfine",
@@ -1109,6 +1160,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/sharkdp/hyperfine"),
         installation_methods: HYPERFINE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "tokei",
@@ -1123,6 +1175,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/XAMPPRocky/tokei"),
         installation_methods: TOKEI_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "xh",
@@ -1137,6 +1190,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/ducaale/xh"),
         installation_methods: XH_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "curl",
@@ -1151,6 +1205,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/curl/curl"),
         installation_methods: CURL_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "wget",
@@ -1165,6 +1220,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://git.savannah.gnu.org/cgit/wget.git"),
         installation_methods: WGET_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "iperf3",
@@ -1179,6 +1235,7 @@ pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/esnet/iperf"),
         installation_methods: IPERF3_INSTALL,
+        system_prerequisites: &[],
     },
 ];
 
@@ -1340,6 +1397,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/npm/cli"),
         installation_methods: NPM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "pnpm",
@@ -1354,6 +1412,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/pnpm/pnpm"),
         installation_methods: PNPM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "yarn",
@@ -1368,6 +1427,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/yarnpkg/berry"),
         installation_methods: YARN_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "bun",
@@ -1382,6 +1442,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/oven-sh/bun"),
         installation_methods: BUN_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "cargo",
@@ -1396,6 +1457,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/rust-lang/cargo"),
         installation_methods: CARGO_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "go",
@@ -1410,6 +1472,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/golang/go"),
         installation_methods: GO_MODULES_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "composer",
@@ -1424,6 +1487,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/composer/composer"),
         installation_methods: COMPOSER_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "swift",
@@ -1438,6 +1502,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/apple/swift-package-manager"),
         installation_methods: SWIFTPM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "luarocks",
@@ -1452,6 +1517,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/luarocks/luarocks"),
         installation_methods: LUAROCKS_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "vcpkg",
@@ -1466,6 +1532,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/microsoft/vcpkg"),
         installation_methods: VCPKG_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "conan",
@@ -1480,6 +1547,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/conan-io/conan"),
         installation_methods: CONAN_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "nuget",
@@ -1494,6 +1562,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/NuGet/NuGet.Client"),
         installation_methods: NUGET_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "mix",
@@ -1508,6 +1577,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/hexpm/hex"),
         installation_methods: HEX_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "pip",
@@ -1522,6 +1592,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/pypa/pip"),
         installation_methods: PIP_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "uv",
@@ -1536,6 +1607,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/astral-sh/uv"),
         installation_methods: UV_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "poetry",
@@ -1550,6 +1622,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/python-poetry/poetry"),
         installation_methods: POETRY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "cpan",
@@ -1564,6 +1637,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/Perl/perl5"),
         installation_methods: CPAN_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "cpanm",
@@ -1578,6 +1652,7 @@ pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/miyagawa/cpanminus"),
         installation_methods: CPANM_INSTALL,
+        system_prerequisites: &[],
     },
 ];
 
@@ -1635,6 +1710,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://salsa.debian.org/apt-team/apt"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "nala",
@@ -1649,6 +1725,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://github.com/volitank/nala"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "brew",
@@ -1663,6 +1740,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/Homebrew/brew"),
         installation_methods: BREW_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "dnf",
@@ -1677,6 +1755,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://github.com/rpm-software-management/dnf"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "pacman",
@@ -1691,6 +1770,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://gitlab.archlinux.org/pacman/pacman"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "winget",
@@ -1705,6 +1785,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: WINDOWS_ONLY,
         repo: Some("https://github.com/microsoft/winget-cli"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "choco",
@@ -1719,6 +1800,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: WINDOWS_ONLY,
         repo: Some("https://github.com/chocolatey/choco"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "scoop",
@@ -1733,6 +1815,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: WINDOWS_ONLY,
         repo: Some("https://github.com/ScoopInstaller/Scoop"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "nix",
@@ -1747,6 +1830,7 @@ pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/NixOS/nix"),
         installation_methods: &[],
+        system_prerequisites: &[],
     },
 ];
 
@@ -1836,6 +1920,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: MACOS_ONLY,
         repo: None,
         installation_methods: &[],
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "espeak",
@@ -1850,6 +1935,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/espeak-ng/espeak-ng"),
         installation_methods: ESPEAK_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "espeak-ng",
@@ -1864,6 +1950,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/espeak-ng/espeak-ng"),
         installation_methods: ESPEAK_NG_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "festival",
@@ -1878,6 +1965,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/festvox/festival"),
         installation_methods: FESTIVAL_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "mimic",
@@ -1892,6 +1980,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/MycroftAI/mimic"),
         installation_methods: MIMIC_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "mimic3",
@@ -1906,6 +1995,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/MycroftAI/mycroft-mimic3-tts"),
         installation_methods: MIMIC3_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "piper",
@@ -1920,6 +2010,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/rhasspy/piper"),
         installation_methods: PIPER_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "echogarden",
@@ -1934,6 +2025,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/echogarden-project/echogarden"),
         installation_methods: ECHOGARDEN_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "balcon",
@@ -1948,6 +2040,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: WINDOWS_ONLY,
         repo: None,
         installation_methods: BALCON_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "sapi",
@@ -1962,6 +2055,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: WINDOWS_ONLY,
         repo: None,
         installation_methods: WINDOWS_SAPI_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "gtts-cli",
@@ -1976,6 +2070,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/pndurette/gTTS"),
         installation_methods: GTTS_CLI_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "tts",
@@ -1990,6 +2085,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/coqui-ai/TTS"),
         installation_methods: COQUI_TTS_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "sherpa-onnx-offline-tts",
@@ -2004,6 +2100,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/k2-fsa/sherpa-onnx"),
         installation_methods: SHERPA_ONNX_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "kokoro-tts",
@@ -2018,6 +2115,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/nazdridoy/kokoro-tts"),
         installation_methods: KOKORO_TTS_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "pico2wave",
@@ -2032,6 +2130,7 @@ pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/naggety/picmotts"),
         installation_methods: PICO2WAVE_INSTALL,
+        system_prerequisites: &[],
     },
 ];
 
@@ -2176,6 +2275,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/alacritty/alacritty"),
         installation_methods: ALACRITTY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "kitty",
@@ -2190,6 +2290,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/kovidgoyal/kitty"),
         installation_methods: KITTY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "iterm2",
@@ -2204,6 +2305,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: MACOS_ONLY,
         repo: Some("https://github.com/gnachman/iTerm2"),
         installation_methods: ITERM2_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "wezterm",
@@ -2218,6 +2320,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/wez/wezterm"),
         installation_methods: WEZTERM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "ghostty",
@@ -2232,6 +2335,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/ghostty-org/ghostty"),
         installation_methods: GHOSTTY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "warp-terminal",
@@ -2246,6 +2350,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: MACOS_ONLY,
         repo: Some("https://www.warp.dev/"),
         installation_methods: WARP_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "rio",
@@ -2260,6 +2365,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/raphamorim/rio"),
         installation_methods: RIO_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "tabby",
@@ -2274,6 +2380,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/Eugeny/tabby"),
         installation_methods: TABBY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "foot",
@@ -2288,6 +2395,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://codeberg.org/dnkl/foot"),
         installation_methods: FOOT_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "gnome-terminal",
@@ -2302,6 +2410,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://gitlab.gnome.org/GNOME/gnome-terminal"),
         installation_methods: GNOME_TERMINAL_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "konsole",
@@ -2316,6 +2425,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://invent.kde.org/utilities/konsole"),
         installation_methods: KONSOLE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "xfce4-terminal",
@@ -2330,6 +2440,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://gitlab.xfce.org/apps/xfce4-terminal"),
         installation_methods: XFCE_TERMINAL_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "terminology",
@@ -2344,6 +2455,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://github.com/Enlightenment/terminology"),
         installation_methods: TERMINOLOGY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "st",
@@ -2358,6 +2470,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://git.suckless.org/st"),
         installation_methods: ST_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "xterm",
@@ -2372,6 +2485,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://invisible-island.net/xterm/"),
         installation_methods: XTERM_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "hyper",
@@ -2386,6 +2500,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/vercel/hyper"),
         installation_methods: HYPER_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "wt",
@@ -2400,6 +2515,7 @@ pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         os_availability: WINDOWS_ONLY,
         repo: Some("https://github.com/microsoft/terminal"),
         installation_methods: WINDOWS_TERMINAL_INSTALL,
+        system_prerequisites: &[],
     },
 ];
 
@@ -2530,6 +2646,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/mpv-player/mpv"),
         installation_methods: MPV_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "ffplay",
@@ -2544,6 +2661,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/FFmpeg/FFmpeg"),
         installation_methods: FFPLAY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "cvlc",
@@ -2558,6 +2676,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/videolan/vlc"),
         installation_methods: VLC_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "mplayer",
@@ -2572,6 +2691,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/mplayerhq/mplayer"),
         installation_methods: MPLAYER_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "gst-play-1.0",
@@ -2586,6 +2706,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://gitlab.freedesktop.org/gstreamer/gstreamer"),
         installation_methods: GSTREAMER_GST_PLAY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "play",
@@ -2600,6 +2721,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://sourceforge.net/projects/sox/"),
         installation_methods: SOX_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "mpg123",
@@ -2614,6 +2736,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/madebr/mpg123"),
         installation_methods: MPG123_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "ogg123",
@@ -2628,6 +2751,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: UNIX_ONLY,
         repo: Some("https://github.com/xiph/vorbis-tools"),
         installation_methods: OGG123_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "aplay",
@@ -2642,6 +2766,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: None,
         installation_methods: ALSA_APLAY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "afplay",
@@ -2656,6 +2781,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: MACOS_ONLY,
         repo: None,
         installation_methods: MACOS_AFPLAY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "paplay",
@@ -2670,6 +2796,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: None,
         installation_methods: PULSEAUDIO_PAPLAY_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "pacat",
@@ -2684,6 +2811,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: None,
         installation_methods: PULSEAUDIO_PACAT_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "pw-play",
@@ -2698,6 +2826,7 @@ pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         os_availability: LINUX_ONLY,
         repo: Some("https://gitlab.freedesktop.org/pipewire/pipewire"),
         installation_methods: PIPEWIRE_INSTALL,
+        system_prerequisites: &[],
     },
 ];
 
@@ -2781,6 +2910,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/anthropics/claude-code"),
         installation_methods: CLAUDE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "opencode",
@@ -2795,6 +2925,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/opencode-ai/opencode"),
         installation_methods: OPENCODE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "roo",
@@ -2809,6 +2940,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/RooVetGit/Roo-Code"),
         installation_methods: ROO_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "gemini",
@@ -2823,6 +2955,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/google-gemini/gemini-cli"),
         installation_methods: GEMINI_CLI_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "aider",
@@ -2837,6 +2970,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/paul-gauthier/aider"),
         installation_methods: AIDER_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "codex",
@@ -2851,6 +2985,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/openai/codex"),
         installation_methods: CODEX_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "goose",
@@ -2865,6 +3000,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/block/goose"),
         installation_methods: GOOSE_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "kimi",
@@ -2879,6 +3015,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/MoonshotAI/kimi-cli"),
         installation_methods: KIMI_CLI_INSTALL,
+        system_prerequisites: &[],
     },
     ProgramInfo {
         binary_name: "qwen",
@@ -2893,6 +3030,7 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         os_availability: ALL_OS,
         repo: Some("https://github.com/QwenLM/qwen-code"),
         installation_methods: QWEN_CLI_INSTALL,
+        system_prerequisites: &[],
     },
 ];
 
@@ -2924,4 +3062,188 @@ impl CategoryEnum for AiCli {
             AiCli::QwenCli => "qwen_cli",
         }
     }
+}
+
+// Notification helper installation methods
+pub(crate) static TERMINAL_NOTIFIER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("terminal-notifier"),
+];
+pub(crate) static ALERTER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("vjeantet/tap/alerter"),
+];
+pub(crate) static SNORETOAST_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Chocolatey("snoretoast"),
+    InstallationMethod::Scoop("snoretoast"),
+];
+pub(crate) static BURNTTOAST_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::RemoteBash("https://raw.githubusercontent.com/Windos/BurntToast/main/install.ps1"),
+];
+pub(crate) static DUNSTIFY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("dunst"),
+    InstallationMethod::Dnf("dunst"),
+    InstallationMethod::Pacman("dunst"),
+];
+pub(crate) static NOTIFY_SEND_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("libnotify-bin"),
+    InstallationMethod::Dnf("libnotify"),
+    InstallationMethod::Pacman("libnotify"),
+];
+
+/// Metadata lookup table for notification helpers.
+pub(crate) static NOTIFICATION_HELPER_INFO: &[ProgramInfo] = &[
+    ProgramInfo {
+        binary_name: "terminal-notifier",
+        display_name: "terminal-notifier",
+        description: "macOS notification helper with rich controls",
+        website: "https://github.com/julienXX/terminal-notifier",
+        version_flag: VersionFlag::Custom("-help"),
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://github.com/julienXX/terminal-notifier"),
+        installation_methods: TERMINAL_NOTIFIER_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "alerter",
+        display_name: "alerter",
+        description: "macOS notification helper with actions and replies",
+        website: "https://github.com/vjeantet/alerter",
+        version_flag: VersionFlag::Custom("-help"),
+        parse_strategy: VersionParseStrategy::Regex,
+        version_regex: Some(r"(?i)version\s+([\d.]+)"),
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://github.com/vjeantet/alerter"),
+        installation_methods: ALERTER_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "snoretoast",
+        display_name: "SnoreToast",
+        description: "Windows toast notification helper",
+        website: "https://github.com/KDE/snoretoast",
+        version_flag: VersionFlag::Short,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/KDE/snoretoast"),
+        installation_methods: SNORETOAST_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "BurntToast",
+        display_name: "BurntToast",
+        description: "PowerShell module for Windows toast notifications",
+        website: "https://github.com/Windos/BurntToast",
+        version_flag: VersionFlag::None,
+        parse_strategy: VersionParseStrategy::Custom,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/Windos/BurntToast"),
+        installation_methods: BURNTTOAST_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "dunstify",
+        display_name: "dunstify",
+        description: "Dunst notification helper for Linux",
+        website: "https://dunst-project.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://github.com/dunst-project/dunst"),
+        installation_methods: DUNSTIFY_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "notify-send",
+        display_name: "notify-send",
+        description: "libnotify CLI for Linux desktop notifications",
+        website: "https://gitlab.gnome.org/GNOME/libnotify",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://gitlab.gnome.org/GNOME/libnotify"),
+        installation_methods: NOTIFY_SEND_INSTALL,
+        system_prerequisites: &[],
+    },
+];
+
+impl ProgramMetadata for NotificationHelper {
+    fn info(&self) -> &'static ProgramInfo {
+        &NOTIFICATION_HELPER_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for NotificationHelper {
+    fn category_name() -> &'static str {
+        "notification_helpers"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            NotificationHelper::TerminalNotifier => "terminal_notifier",
+            NotificationHelper::Alerter => "alerter",
+            NotificationHelper::SnoreToast => "snore_toast",
+            NotificationHelper::BurntToast => "burnt_toast",
+            NotificationHelper::Dunstify => "dunstify",
+            NotificationHelper::NotifySend => "notify_send",
+        }
+    }
+
+    fn platform_override(
+        &self,
+    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
+        match self {
+            NotificationHelper::BurntToast => {
+                if cfg!(target_os = "windows") && is_burnttoast_available() {
+                    Some((
+                        std::path::PathBuf::from("BurntToast"),
+                        crate::programs::types::ExecutableSource::Path,
+                    ))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Cached per-process result of the BurntToast PowerShell module probe.
+static BURNTTOAST_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Probe whether the BurntToast PowerShell module is installed.
+fn is_burnttoast_available() -> bool {
+    *BURNTTOAST_AVAILABLE.get_or_init(|| {
+        let output = std::process::Command::new("pwsh")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "if (Get-Module -ListAvailable BurntToast) { 'yes' } else { 'no' }",
+            ])
+            .output();
+        match output {
+            Ok(out) => String::from_utf8_lossy(&out.stdout).trim() == "yes",
+            Err(_) => false,
+        }
+    })
 }

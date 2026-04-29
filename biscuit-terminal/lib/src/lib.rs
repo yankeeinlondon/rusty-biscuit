@@ -42,6 +42,7 @@
 
 pub mod components;
 pub mod discovery;
+pub mod errors;
 pub mod prelude;
 pub mod terminal;
 pub mod utils;

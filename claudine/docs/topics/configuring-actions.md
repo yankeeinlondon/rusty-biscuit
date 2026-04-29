@@ -157,7 +157,7 @@ Spawn an external command asynchronously without waiting for completion or inspe
 
 ### `message`
 
-Send a message to the configured messaging destination (Slack, Discord, Signal, or WhatsApp). Fire-and-forget -- delivery is async and does not block the pipeline. Empty messages after template interpolation are silently skipped.
+Send a message to the configured messaging destination (Slack, Discord, Signal, WhatsApp, or webhooks). Fire-and-forget -- delivery is async and does not block the pipeline. Empty messages after template interpolation are silently skipped.
 
 Requires messaging configuration in `settings.messaging` (see [Messaging Configuration](#messaging-configuration) below).
 
@@ -316,6 +316,26 @@ Secrets can be provided inline (e.g., `bot_token`) or via an environment variabl
 }
 ```
 
+**Discord Webhook:**
+
+```json
+{
+  "provider": "discord_webhook",
+  "webhook_url": "https://discord.com/api/webhooks/123456789/abcdef...",
+  "webhook_url_env": "DISCORD_WEBHOOK_URL"
+}
+```
+
+**Slack Webhook:**
+
+```json
+{
+  "provider": "slack_webhook",
+  "webhook_url": "https://hooks.slack.com/services/T00/B00/XXXX",
+  "webhook_url_env": "SLACK_WEBHOOK_URL"
+}
+```
+
 **Signal:**
 
 ```json
@@ -340,6 +360,23 @@ Recipients starting with `+` are treated as phone numbers; other values are trea
 }
 ```
 
+### Env-Only Webhook Configuration
+
+Webhook routes can omit the inline `webhook_url` and rely solely on an environment variable:
+
+```json
+{
+  "provider": "slack_webhook",
+  "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+}
+```
+
+This is useful for shared repo configs where the webhook secret should not be committed.
+
+### Desktop Notifications
+
+Desktop notifications are **zero-config** and are not managed through `claudine config`. They are triggered via the `notify` field in composition lifecycle frontmatter only. See [Lifecycle Notifications](lifecycle.md).
+
 ### Example Settings Block
 
 ```json
@@ -357,6 +394,14 @@ Recipients starting with `+` are treated as phone numbers; other values are trea
           "provider": "discord",
           "channel_id": "123456789012345678",
           "bot_token_env": "DISCORD_BOT_TOKEN"
+        },
+        "deploy-webhook": {
+          "provider": "slack_webhook",
+          "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+        },
+        "alerts-webhook": {
+          "provider": "discord_webhook",
+          "webhook_url_env": "DISCORD_WEBHOOK_URL"
         }
       }
     }

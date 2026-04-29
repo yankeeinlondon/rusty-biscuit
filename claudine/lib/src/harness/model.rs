@@ -12,8 +12,25 @@ use crate::harness::error::HarnessError;
 pub struct HarnessPlan {
     /// Absolute path to the source document.
     pub source_path: PathBuf,
-    /// Per-page timeout, if specified.
+    /// Per-page wall-clock timeout, if specified.
     pub timeout: Option<std::time::Duration>,
+    /// Per-page step-silence timeout, if specified.
+    ///
+    /// Resets on every stream event; when silence exceeds this budget the
+    /// child is killed. Streaming-only: ignored in capture and passthrough
+    /// modes. Parse-time validation requires `step_timeout <= timeout` when
+    /// both are present.
+    pub step_timeout: Option<std::time::Duration>,
+    /// Wall-clock warning threshold. When the prompt has been running for
+    /// this long, claudine emits a single `Status::Warning` line instead
+    /// of killing the child. Parse-time validation requires
+    /// `timeout_warn < timeout` when both are present.
+    pub timeout_warn: Option<std::time::Duration>,
+    /// Step-silence warning threshold. When the provider has been silent
+    /// for this long, claudine emits a single `Status::Warning` line per
+    /// stall episode instead of killing the child. Parse-time validation
+    /// requires `step_timeout_warn < step_timeout` when both are present.
+    pub step_timeout_warn: Option<std::time::Duration>,
     /// Validations that must pass before launching the provider.
     pub pre_checks: Vec<ValidationRule>,
     /// Validations that must pass after the provider completes.
@@ -288,6 +305,10 @@ pub enum HandlerAction {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FailureEvent {
     AgentFailure,
+    /// Timed-out termination.
+    ///
+    /// Both wall-clock `timeout` and silence `step_timeout` produce this
+    /// variant so handler authors write a single `handle_timeout` block.
     Timeout,
     Validation(ValidationEvent),
     ShellAuditDenied,

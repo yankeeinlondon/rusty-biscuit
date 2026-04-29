@@ -9,6 +9,7 @@ mod filesystem;
 mod hardware;
 mod just;
 mod network;
+mod notification_helpers;
 mod os;
 mod programs;
 pub(crate) mod recent_commits;
@@ -33,20 +34,27 @@ pub use filesystem::{
     render_hash_section, render_path_list,
 };
 pub use just::{filter_justfiles_for_json, render_just_text};
+pub use notification_helpers::{
+    print_notification_helpers_json, render_notification_helpers_markdown,
+};
 pub use programs::{print_programs_json, render_programs_markdown};
-pub use remote::{print_remote_json, render_remote_text};
+pub use remote::{
+    print_remote_json, render_pull_requests_empty, render_pull_requests_table,
+    render_pull_requests_verbose, render_remote_text,
+};
 pub use services::{print_services_json, render_services_text};
 pub use topics::render_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_current_package_area_dirty, print_package_area_has_source_code_changes,
-    render_dirty_package_areas, render_dirty_packages, render_files_section,
-    render_filesystem_section, render_language_section, render_repo_deps_text,
-    render_repo_deps_visual, render_repo_package, render_repo_package_area,
-    render_repo_package_area_root, render_repo_package_root, render_repo_packages,
-    render_repo_root, render_repo_section, render_staged_package_areas, render_staged_packages,
-    render_unstaged_package_areas, render_unstaged_packages,
+    collect_repo_package_area_names, collect_repo_package_names, print_current_package_area_dirty,
+    print_package_area_has_source_code_changes, render_dirty_package_areas, render_dirty_packages,
+    render_files_section, render_filesystem_section, render_language_section,
+    render_repo_deps_text, render_repo_deps_visual, render_repo_package, render_repo_package_area,
+    render_repo_package_area_root, render_repo_package_areas_formatted, render_repo_package_root,
+    render_repo_packages_formatted, render_repo_root, render_repo_section,
+    render_staged_package_areas, render_staged_packages, render_unstaged_package_areas,
+    render_unstaged_packages,
 };
 pub(crate) use hardware::{
     render_audio_devices_section, render_cpu_section, render_gpu_section, render_hardware_section,
@@ -109,6 +117,8 @@ pub enum OutputFilter {
     HeadlessAudio,
     /// Show only AI CLI tools (programs subsection)
     AiClients,
+    /// Show only desktop notification helpers (programs subsection)
+    NotificationHelpers,
     /// Show only system services (init system and service list)
     Services,
     /// Show justfiles and their recipes
@@ -205,7 +215,7 @@ pub(crate) fn format_uptime(seconds: u64) -> String {
     }
 }
 
-fn render_performance_section(report: &PerformanceReport) -> String {
+pub fn render_performance_section(report: &PerformanceReport) -> String {
     let mut out = String::new();
     out.push_str("\n## Performance\n\n");
     out.push_str(&format!("Total: {:.2} ms\n", report.total_duration_ms));
@@ -434,10 +444,11 @@ pub fn render_text(
                 Some(RepoAction::PackageArea { .. }) => {
                     unreachable!("PackageArea is handled as an early return in commands.rs")
                 }
-                Some(RepoAction::Packages { filter }) => {
-                    let rendered = render_repo_packages(result, filter);
-                    out.push_str(&rendered);
-                    out.push('\n');
+                Some(RepoAction::Packages { .. }) => {
+                    unreachable!("Packages is handled as an early return in commands.rs")
+                }
+                Some(RepoAction::PackageAreas { .. }) => {
+                    unreachable!("PackageAreas is handled as an early return in commands.rs")
                 }
                 Some(RepoAction::DirtyPackages { filter }) => {
                     let rendered = render_dirty_packages(result, filter);
@@ -530,11 +541,11 @@ pub fn render_text(
                     // Side-effect only: calls std::process::exit
                     print_package_area_has_source_code_changes(result, base_dir, verbose);
                 }
-                Some(RepoAction::GitStatus { .. }) => {
+                Some(RepoAction::GitStatus { compact, .. }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref git) = filesystem.git
                     {
-                        out.push_str(&render_git_section(git, history_count, verbose));
+                        out.push_str(&render_git_section(git, history_count, verbose, *compact));
                     }
                 }
                 Some(RepoAction::Structure { filter, .. }) => {
@@ -600,6 +611,7 @@ pub fn render_text(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -607,10 +619,6 @@ pub fn render_text(
                 "Programs, Services, Just, BlastRadius, and Remote filters should be handled separately"
             )
         }
-    }
-
-    if let Some(ref performance) = result.performance {
-        out.push_str(&render_performance_section(performance));
     }
 
     out
@@ -755,6 +763,7 @@ fn apply_filter_to_json(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {

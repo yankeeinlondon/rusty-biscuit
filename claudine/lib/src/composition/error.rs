@@ -2,8 +2,10 @@
 
 use std::path::PathBuf;
 
+use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
+use super::types::ResolutionMode;
 use crate::events::Provider;
 use thiserror::Error;
 
@@ -34,9 +36,14 @@ pub enum CompositionError {
     #[error("frontmatter `prompt` must be a string, got {0}")]
     PromptPropertyWrongType(String),
 
-    /// Darkmatter composition failed.
+    /// Darkmatter composition failed for a reason other than a known
+    /// structured shell-expansion failure.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker can
+    /// render a rich `BlockError` report (transclusion cycles, reference
+    /// errors, etc.) instead of a flat string.
     #[error("compose failed: {0}")]
-    ComposeFailed(String),
+    ComposeFailed(#[source] MarkdownError),
 
     /// A shell expansion directive inside the composed document failed in a
     /// structurally-known way. Carries the underlying `ShellExpansionError`
@@ -63,6 +70,14 @@ pub enum CompositionError {
     #[error("agent hint `{0}` does not match any known provider")]
     AgentHintInvalid(String),
 
+    /// The `agent` frontmatter property is not a valid type.
+    #[error("frontmatter `agent` must be a string or array of strings, got {0}")]
+    AgentHintWrongType(String),
+
+    /// The `model` frontmatter property is not a valid type.
+    #[error("frontmatter `model` must be a string or array of strings, got {0}")]
+    ModelHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -71,6 +86,22 @@ pub enum CompositionError {
         /// The matched providers for interactive disambiguation.
         providers: Vec<Provider>,
     },
+
+    /// Provider selection could not resolve in the current mode.
+    #[error(
+        "could not resolve provider in {mode} mode; installed: {installed:?}, \
+         favorite_agent: {favorite_agent:?}, frontmatter_agent_present: {frontmatter_agent_present}"
+    )]
+    SelectionUnavailable {
+        mode: ResolutionMode,
+        installed: Vec<Provider>,
+        favorite_agent: Option<Provider>,
+        frontmatter_agent_present: bool,
+    },
+
+    /// A model is required but none was resolved.
+    #[error("model selection failed for {provider}: {reason}")]
+    ModelSelectionFailed { provider: Provider, reason: String },
 
     /// Interactive selection is required but no TTY is available.
     #[error(
@@ -98,8 +129,13 @@ pub enum CompositionError {
     InsufficientFilePermissions(String),
 
     /// Pre-flight shell command discovery failed.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker can
+    /// render a rich `BlockError` report (e.g. transclusion cycles or
+    /// reference errors encountered while walking the document graph) instead
+    /// of a flat string.
     #[error("pre-flight discovery failed: {0}")]
-    PreFlightDiscoveryFailed(String),
+    PreFlightDiscoveryFailed(#[source] MarkdownError),
 
     /// A general pre-flight failure (blacklisted command, missing handler, etc.).
     #[error("pre-flight shell approval failed: {0}")]
@@ -114,6 +150,15 @@ pub enum CompositionError {
         command: String,
         source_file: PathBuf,
         line: usize,
+    },
+
+    /// A lifecycle notification property failed to deserialize.
+    #[error("invalid lifecycle property `{property}`: {message}")]
+    LifecycleInvalid {
+        /// The frontmatter property that failed to parse.
+        property: String,
+        /// The underlying deserialization error message.
+        message: String,
     },
 
     /// A lifecycle notification property has both `say` and `say_first`.
@@ -160,4 +205,24 @@ pub enum CompositionError {
     /// A template key collides with a reserved sequence overlay key.
     #[error("sequence template key `{0}` collides with reserved sequence key")]
     SequenceReservedTemplateKey(String),
+
+    /// One or more sequence steps failed provider/model resolution in non-TTY mode.
+    #[error("sequence selection failed for {failure_count} step(s): {failures:?}")]
+    SequenceSelectionFailed {
+        failures: Vec<SequenceSelectionFailure>,
+        failure_count: usize,
+    },
+}
+
+/// Per-step failure information for sequence selection errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceSelectionFailure {
+    /// 1-based step number.
+    pub step: usize,
+    /// Display name of the step.
+    pub step_name: String,
+    /// Why the step failed resolution.
+    pub reason: String,
+    /// Providers that were installed at the time of resolution.
+    pub installed: Vec<Provider>,
 }

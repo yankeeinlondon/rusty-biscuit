@@ -245,7 +245,7 @@ pub fn normalize(
     }
 
     // Sort by position descending
-    replacements.sort_by(|a, b| b.0.cmp(&a.0));
+    replacements.sort_by_key(|b| std::cmp::Reverse(b.0));
 
     // Apply replacements
     let mut result = content.to_string();

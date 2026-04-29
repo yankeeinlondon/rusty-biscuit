@@ -1,11 +1,13 @@
 ---
-homepage: https://block.github.io/goose/
-docs: https://block.github.io/goose/docs/guides/goose-cli-commands/
-cli_docs: https://block.github.io/goose/docs/guides/goose-cli-commands/
+homepage: https://goose-docs.ai/
+docs: https://goose-docs.ai/docs/guides/goose-cli-commands/
+cli_docs: https://goose-docs.ai/docs/guides/goose-cli-commands/
+repo: https://github.com/aaif-goose/goose
 schema:
 schema_type:
 data_format: json / ndjson
-last_updated: 2026-04-06
+latest_version: v1.32.0
+last_updated: 2026-04-27
 ---
 
 # Goose CLI Structured Output in Non-Interactive Sessions
@@ -13,6 +15,8 @@ last_updated: 2026-04-06
 ## Summary
 
 Goose currently exposes two machine-readable output modes for `goose run`: batch `json` and streaming `stream-json`. The batch mode returns one JSON object after the run finishes. The streaming mode emits one JSON object per line as the run progresses, so it is functionally NDJSON even though the CLI flag is named `stream-json`.
+
+Goose has moved from `block/goose` to [aaif-goose/goose](https://github.com/aaif-goose/goose) under the Agentic AI Foundation (AAIF) at the Linux Foundation. Documentation moved from `block.github.io/goose/` to [goose-docs.ai](https://goose-docs.ai/). The latest version is v1.32.0 (2026-04-23).
 
 The important Claudine implication is that Goose does **not** publish a standalone JSON Schema or OpenAPI document for this wire format. The closest provider-owned formal specification is the Rust source: `StreamEvent` in `crates/goose-cli/src/session/mod.rs`, plus the reusable `Message`, `MessageContent`, `ActionRequiredData`, and `SystemNotificationContent` types in `crates/goose/src/conversation/message.rs`.
 
@@ -32,6 +36,255 @@ For Claudine, the most robust integration strategy is:
 - Use `complete.total_tokens` as the only stable built-in session token total.
 - Expect several important cases, especially permissions, auth failures, and subagent activity, to require inference from tool calls, tool responses, or notification log strings.
 
+## CLI Switch Summary
+
+Source: `crates/goose-cli/src/cli.rs` in [aaif-goose/goose](https://github.com/aaif-goose/goose). Based on v1.32.0.
+
+### `goose run`
+
+Primary non-interactive / headless execution command. Combines all shared argument groups.
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--text` | `-t` | `String` | — | Input text to provide directly |
+| `--instructions` | `-i` | `String` | — | Path to instruction file. Use `-` for stdin |
+| `--recipe` | | `String` | — | Recipe name or full path to recipe file |
+| `--system` | | `String` | — | Additional system prompt |
+| `--params` | | `KEY=VALUE` (repeatable) | — | Dynamic parameters for recipe |
+| `--sub-recipe` | | `String` (repeatable) | — | Sub-recipe name or file path |
+| `--explain` | | `bool` | `false` | Show recipe title, description, and parameters |
+| `--render-recipe` | | `bool` | `false` | Print rendered recipe instead of running it |
+| `--name` | `-n` | `String` | — | Name for the session |
+| `--session-id` | (alias `--id`) | `String` | — | Session ID (e.g. `20250921_143022`) |
+| `--path` | | `PathBuf` | — | Legacy: path for session storage |
+| `--interactive` | `-s` | `bool` | `false` | Continue in interactive mode after processing input |
+| `--no-session` | | `bool` | `false` | Run without storing a session file |
+| `--resume` | `-r` | `bool` | `false` | Resume from a previous run |
+| `--debug` | | `bool` | `false` | Enable debug output (full content, no truncation) |
+| `--max-tool-repetitions` | | `u32` | — | Max consecutive identical tool calls |
+| `--max-turns` | | `u32` | `1000` | Max turns without user input |
+| `--container` | | `String` | — | Docker container ID for extension isolation |
+| `--with-extension` | | `String` (repeatable) | — | Add stdio extensions |
+| `--with-streamable-http-extension` | | `String` (repeatable) | — | Add Streamable HTTP extensions |
+| `--with-builtin` | | `String` (comma-delimited) | — | Add builtin extensions by name |
+| `--no-profile` | | `bool` | `false` | Don't load default extensions |
+| `--quiet` | `-q` | `bool` | `false` | Suppress non-response output |
+| `--output-format` | | `String` | `text` | Output format: `text`, `json`, `stream-json` |
+| `--provider` | | `String` | — | Override GOOSE_PROVIDER (e.g. `openai`, `anthropic`) |
+| `--model` | | `String` | — | Override GOOSE_MODEL (e.g. `gpt-4o`) |
+
+Examples:
+
+```bash
+goose run -t "summarize this repo" --output-format json
+goose run -t "summarize this repo" --output-format stream-json
+goose run --recipe my-recipe.yaml --params env=production --params region=us-west-2
+goose run --provider anthropic --model claude-4-sonnet -t "initial prompt"
+goose run -i instructions.txt --no-session --output-format stream-json
+goose run -t "fix the tests" --max-turns 10 --interactive
+goose run --with-extension "npx -y @modelcontextprotocol/server-memory" -t "remember my coding style"
+goose run --with-builtin developer,computercontroller -t "analyze the repo"
+```
+
+### `goose session` (alias: `goose s`)
+
+Start or resume interactive sessions.
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--name` | `-n` | `String` | — | Name for the session |
+| `--session-id` | | `String` | — | Session ID |
+| `--path` | | `PathBuf` | — | Legacy: path for session |
+| `--resume` | `-r` | `bool` | `false` | Resume a previous session |
+| `--fork` | | `bool` | `false` | Fork session (requires `--resume`) |
+| `--history` | | `bool` | `false` | Show previous messages on resume |
+| `--debug` | | `bool` | `false` | Enable debug output |
+| `--max-tool-repetitions` | | `u32` | — | Max consecutive identical tool calls |
+| `--max-turns` | | `u32` | `1000` | Max turns without user input |
+| `--container` | | `String` | — | Docker container ID |
+| `--with-extension` | | `String` (repeatable) | — | Add stdio extensions |
+| `--with-streamable-http-extension` | | `String` (repeatable) | — | Add Streamable HTTP extensions |
+| `--with-builtin` | | `String` | — | Add builtin extensions |
+| `--no-profile` | | `bool` | `false` | Don't load default extensions |
+
+Examples:
+
+```bash
+goose session -n my-project
+goose session --resume -n my-project
+goose session --resume --fork --history
+goose session --with-extension "npx -y @modelcontextprotocol/server-memory"
+goose session --with-builtin developer --debug --max-turns 25
+```
+
+### `goose session list`
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--format` | `-f` | `String` | `text` | Output format: `text`, `json` |
+| `--ascending` | | `bool` | `false` | Sort oldest first |
+| `--working_dir` | `-w` (alias `-p`) | `PathBuf` | — | Filter by working directory |
+| `--limit` | `-l` | `usize` | — | Limit number of results |
+
+### `goose session remove`
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--session-id` | | `String` | — | Remove by session ID |
+| `--name` | `-n` | `String` | — | Remove by name |
+| `--regex` | `-r` | `String` | — | Remove sessions matching regex |
+| `--path` | | `PathBuf` | — | Remove by path (legacy) |
+
+### `goose session export`
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--session-id` | | `String` | — | Export by session ID |
+| `--name` | `-n` | `String` | — | Export by name |
+| `--path` | | `PathBuf` | — | Export by path (legacy) |
+| `--output` | `-o` | `PathBuf` | stdout | Output file path |
+| `--format` | | `String` | `markdown` | Output format: `markdown`, `json`, `yaml` |
+
+### `goose session diagnostics`
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--session-id` | | `String` | — | Diagnostics by session ID |
+| `--name` | `-n` | `String` | — | Diagnostics by name |
+| `--path` | | `PathBuf` | — | Diagnostics by path (legacy) |
+| `--output` | `-o` | `PathBuf` | `diagnostics_{id}.zip` | Output path for diagnostics zip |
+
+### `goose configure`
+
+Interactive configuration. No flags.
+
+### `goose info`
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--verbose` | `-v` | `bool` | `false` | Show config.yaml, env vars, enabled extensions |
+| `--check` | | `bool` | `false` | Test provider connection and show status |
+
+### `goose update`
+
+| Flag | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--canary` | `-c` | `bool` | `false` | Update to canary version |
+| `--reconfigure` | | `bool` | `false` | Force re-configure during update |
+
+### `goose completion <SHELL>`
+
+| Arg | Type | Description |
+|---|---|---|
+| `<SHELL>` | enum: `bash`, `zsh`, `fish`, `powershell`, `elvish` | Shell to generate completions for |
+| `--bin-name` | `String` (default: `goose`) | Custom binary name |
+
+### `goose recipe`
+
+| Subcommand | Flags |
+|---|---|
+| `validate <RECIPE>` | positional recipe name/path |
+| `deeplink <RECIPE>` | `-p, --param KEY=VALUE` (repeatable) |
+| `open <RECIPE>` | `-p, --param KEY=VALUE` (repeatable) |
+| `list` | `--format text\|json` (default `text`), `-v, --verbose` |
+
+### `goose schedule` (alias: `goose sched`)
+
+| Subcommand | Flags |
+|---|---|
+| `add` | `--schedule-id` (required), `--cron` (required), `--recipe-source` (required) |
+| `list` | no flags |
+| `remove` | `--schedule-id` (required) |
+| `sessions` | `--schedule-id` (required), `-l, --limit` |
+| `run-now` | `--schedule-id` (required) |
+| `services-status` | no flags (deprecated) |
+| `services-stop` | no flags (deprecated) |
+| `cron-help` | no flags |
+
+### `goose serve`
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--host` | `String` | `127.0.0.1` | Host to bind |
+| `--port` | `u16` | `3284` | Port to bind |
+| `--with-builtin` | `String` (repeatable) | — | Add builtin extensions |
+
+### `goose acp`
+
+Run goose as an ACP agent server over stdio.
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--with-builtin` | `String` | — | Add builtin extensions |
+
+### `goose gateway` (alias: `goose gw`)
+
+| Subcommand | Flags |
+|---|---|
+| `status` | no flags |
+| `start <TYPE>` | `--bot-token` (required) |
+| `stop <TYPE>` | positional gateway type |
+| `pair <TYPE>` | positional gateway type |
+
+### `goose mcp <SERVER>`
+
+Run a bundled MCP server. Positional arg: server name (e.g. `auto-visualiser`, `computer-controller`, `memory`, `tutorial`).
+
+### `goose project` (alias `goose p`)
+
+Open last project. No flags.
+
+### `goose projects` (alias `goose ps`)
+
+List recent projects. No flags.
+
+### `goose term`
+
+| Subcommand | Flags |
+|---|---|
+| `init <SHELL>` | `-n, --name`, `--default` |
+| `run <PROMPT...>` | positional prompt words |
+| `info` | no flags |
+| `log <COMMAND>` | positional command (hidden) |
+
+### `goose local-models` (alias `goose lm`, feature-gated: `local-inference`)
+
+| Subcommand | Flags |
+|---|---|
+| `search <QUERY>` | `-l, --limit` (default `10`) |
+| `download <SPEC>` | positional `user/repo:quantization` |
+| `list` | no flags |
+| `delete <ID>` | positional model ID |
+
+### `goose bench`
+
+Evaluate system configuration across practical tasks. See [benchmarking tutorial](https://goose-docs.ai/docs/tutorials/benchmarking).
+
+### Interactive Session Slash Commands
+
+These are in-session commands (not subcommands):
+
+| Command | Description |
+|---|---|
+| `/help`, `/?` | Display help menu |
+| `/exit`, `/quit` | Exit session |
+| `/builtin <names>` | Add builtin extensions (comma-separated) |
+| `/extension <command>` | Add stdio extension |
+| `/clear` | Clear chat history |
+| `/compact` | Summarize conversation to reduce context |
+| `/mode <name>` | Set goose mode (`auto`, `approve`, `chat`, `smart_approve`) |
+| `/plan [text]` | Enter plan mode |
+| `/endplan` | Exit plan mode |
+| `/prompts [--extension <name>]` | List available prompts |
+| `/prompt <n> [--info] [key=value...]` | Get prompt info or execute prompt |
+| `/recipe [filepath]` | Generate recipe from conversation |
+| `/skills` | List available skills |
+| `/load-skill <names>` | Load skills by name |
+| `/edit [prefill]` | Open external editor for prompt |
+| `/r` | Toggle full tool output display |
+| `/t` | Cycle theme (light/dark/ansi) |
+| `/t <name>` | Set theme directly |
+
 ## Schema
 
 ### What Goose publishes today
@@ -45,7 +298,7 @@ I did **not** find a standalone published schema artifact for Goose's non-intera
 
 I checked:
 
-- Official docs: [CLI Commands](https://block.github.io/goose/docs/guides/goose-cli-commands/), [Running Tasks](https://block.github.io/goose/docs/guides/running-tasks/), [Using goose in Headless Mode for Automation](https://block.github.io/goose/docs/tutorials/headless-goose/), [MCP Elicitation](https://block.github.io/goose/docs/guides/mcp-elicitation/), [Customizing Prompt Templates](https://block.github.io/goose/docs/guides/prompt-templates/)
+- Official docs: [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/), [Running Tasks](https://goose-docs.ai/docs/guides/running-tasks/), [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/), [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/), [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
 - Current Goose source on GitHub
 - Release notes on GitHub
 - Broader searches for third-party formalizations, including searches targeted at Vercel AI SDK and LangChain repositories
@@ -56,11 +309,11 @@ I did not find a respected third-party project that formalizes Goose's CLI outpu
 
 The closest provider-owned formal definitions are Rust `serde` types in Goose's source:
 
-- Top-level streaming envelope: [`StreamEvent`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
+- Top-level streaming envelope: [`StreamEvent`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
 - Batch output object: same file, `JsonOutput` and `JsonMetadata`
-- Shared message schema: [`Message`, `MessageMetadata`, `MessageContent`, `ActionRequiredData`, `SystemNotificationContent`, `SystemNotificationType`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/conversation/message.rs)
-- Tool request / response serialization rules: [`tool_result_serde.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/conversation/tool_result_serde.rs)
-- Developer shell tool output schema: [`ShellOutput`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/agents/platform_extensions/developer/shell.rs)
+- Shared message schema: [`Message`, `MessageMetadata`, `MessageContent`, `ActionRequiredData`, `SystemNotificationContent`, `SystemNotificationType`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
+- Tool request / response serialization rules: [`tool_result_serde.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/tool_result_serde.rs)
+- Developer shell tool output schema: [`ShellOutput`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/shell.rs)
 
 Schema language used by those source definitions:
 
@@ -186,50 +439,60 @@ Or, on error:
 
 The most relevant official docs for non-interactive structured output are:
 
-- [CLI Commands](https://block.github.io/goose/docs/guides/goose-cli-commands/)
-  - Documents `goose run`
+- [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
+  - Documents `goose run`, `goose session`, `goose recipe`, `goose schedule`, `goose serve`, `goose acp`, `goose mcp`, `goose configure`, and more
   - Documents `--output-format text|json|stream-json`
   - Explicitly says `json` is for results after completion and `stream-json` is for events as they occur
-- [Running Tasks](https://block.github.io/goose/docs/guides/running-tasks/)
+- [Run Tasks](https://goose-docs.ai/docs/guides/running-tasks/)
   - Main official non-interactive task execution guide
-- [Using goose in Headless Mode for Automation](https://block.github.io/goose/docs/tutorials/headless-goose/)
+- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
   - Best official explanation of non-interactive behavior, limitations, and automation gotchas
-- [MCP Elicitation](https://block.github.io/goose/docs/guides/mcp-elicitation/)
+- [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
   - Important for understanding structured human-in-the-loop requests
-- [goose Permission Modes](https://block.github.io/goose/docs/guides/goose-permissions/)
+- [goose Permission Modes](https://goose-docs.ai/docs/guides/goose-permissions/)
+  - Four modes: Auto (default), Approve, Smart Approve, Chat
   - Important for understanding when tool confirmation requests can happen
-- [Customizing Prompt Templates](https://block.github.io/goose/docs/guides/prompt-templates/)
+- [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
   - Important for subagent prompt injection and customization
+- [ACP Providers](https://goose-docs.ai/docs/guides/acp-providers/)
+  - ACP adapters for Claude Code, Codex, Amp, and Pi as providers
+- [Subagents](https://goose-docs.ai/docs/guides/subagents/)
+  - Internal and external subagent lifecycle, configuration, and security constraints
 
 Official built-in extension docs that matter when interpreting tool events:
 
-- [Developer Extension](https://block.github.io/goose/docs/mcp/developer-mcp/)
-- [Computer Controller Extension](https://block.github.io/goose/docs/mcp/computer-controller-mcp/)
-- [Memory Extension](https://block.github.io/goose/docs/mcp/memory-mcp/)
-- [Tutorial Extension](https://block.github.io/goose/docs/mcp/tutorial-mcp/)
-- [Auto Visualiser Extension](https://block.github.io/goose/docs/mcp/autovisualiser-mcp/)
+- [Developer Extension](https://goose-docs.ai/docs/mcp/developer-mcp/)
+- [Computer Controller Extension](https://goose-docs.ai/docs/mcp/computer-controller-mcp/)
+- [Memory Extension](https://goose-docs.ai/docs/mcp/memory-mcp/)
+- [Tutorial Extension](https://goose-docs.ai/docs/mcp/tutorial-mcp/)
+- [Auto Visualiser Extension](https://goose-docs.ai/docs/mcp/autovisualiser-mcp/)
 
 ### Release notes and changelog-style docs
 
 These are important because Goose's current stream behavior is clarified more by source and releases than by one dedicated schema doc:
 
-- [v1.25.0 release](https://github.com/block/goose/releases/tag/v1.25.0)
-- [v1.26.0 release](https://github.com/block/goose/releases/tag/v1.26.0)
-- [v1.27.0 release](https://github.com/block/goose/releases/tag/v1.27.0)
-- [v1.29.0 release](https://github.com/block/goose/releases/tag/v1.29.0)
-- [v1.17.0 release](https://github.com/block/goose/releases/tag/v1.17.0)
-- [v1.0.30 release](https://github.com/block/goose/releases/tag/v1.0.30)
+- [v1.25.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.25.0)
+- [v1.26.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.26.0)
+- [v1.27.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.27.0)
+- [v1.29.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.29.0)
+- [v1.30.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.30.0)
+- [v1.31.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.31.0)
+- [v1.32.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.32.0)
+- [v1.17.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.17.0)
+- [v1.0.30 release](https://github.com/aaif-goose/goose/releases/tag/v1.0.30)
 
 ### Articles and tutorials worth reading
 
 These are the highest-signal public writeups I found that help explain or operationalize Goose's structured output surface:
 
-- [Using goose in Headless Mode for Automation](https://block.github.io/goose/docs/tutorials/headless-goose/)
+- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
   - Best official prose guide for non-interactive usage
-- [goose v1.25.0 is here](https://github.com/block/goose/releases/tag/v1.25.0)
+- [goose v1.25.0 is here](https://github.com/aaif-goose/goose/releases/tag/v1.25.0)
   - Explicitly mentions `stream-json` in provider integration work
-- [goose v1.27.0 is here](https://github.com/block/goose/releases/tag/v1.27.0)
+- [goose v1.27.0 is here](https://github.com/aaif-goose/goose/releases/tag/v1.27.0)
   - Important because it adds a structured output schema for the Developer extension's `shell` tool
+- [goose v1.32.0](https://github.com/aaif-goose/goose/releases/tag/v1.32.0)
+  - ACP providers, skills system, terminal integration, gateway, local-models, auto-compaction, and many bug fixes
 
 ### Documentation quality assessment
 
@@ -284,6 +547,13 @@ Structured output can be combined with the usual non-interactive input methods:
 - `-i, --instructions <FILE>`
 - `-i -` for stdin
 - `--recipe ...`
+- `--system ...`
+- `--params KEY=VALUE`
+- `--sub-recipe ...`
+- `--provider ...` and `--model ...` to override provider/model
+- `--with-extension`, `--with-streamable-http-extension`, `--with-builtin` to add extensions
+- `--quiet` to suppress non-response output
+- `--interactive` to drop into a session after processing
 
 ### Behavioral differences by format
 
@@ -321,8 +591,8 @@ If Claudine wants strict validation, it must derive it from Goose source or main
 
 Sources:
 
-- [CLI Commands](https://block.github.io/goose/docs/guides/goose-cli-commands/)
-- [`session/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
+- [CLI Commands](https://goose-docs.ai/docs/guides/goose-cli-commands/)
+- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
 
 ### 2. Outer events are `snake_case`; nested messages are `camelCase`
 
@@ -335,8 +605,8 @@ This is a real wire-format sharp edge:
 
 Sources:
 
-- [`session/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
-- [`message.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/conversation/message.rs)
+- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
+- [`message.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
 
 ### 3. `notification` events flatten their payload
 
@@ -362,17 +632,17 @@ This matters if Claudine already has code written against older examples.
 
 Source:
 
-- [`session/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
+- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
 
 ### 4. Current source does not expose `model_change`
 
-Older Goose examples and some secondary research mention a `model_change` event. I did **not** find it in the current `StreamEvent` enum on mainline Goose as of 2026-04-06.
+Older Goose examples and some secondary research mention a `model_change` event. I did **not** find it in the current `StreamEvent` enum on mainline Goose as of 2026-04-27.
 
 Claudine should therefore treat model/provider detection as out-of-band unless pinned to an older Goose build that still emitted such an event.
 
 Source:
 
-- [`session/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
+- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
 
 ### 5. Headless mode cannot answer questions
 
@@ -380,9 +650,9 @@ Official headless docs are clear: non-interactive execution cannot provide clari
 
 Sources:
 
-- [Using goose in Headless Mode for Automation](https://block.github.io/goose/docs/tutorials/headless-goose/)
-- [MCP Elicitation](https://block.github.io/goose/docs/guides/mcp-elicitation/)
-- [goose Permission Modes](https://block.github.io/goose/docs/guides/goose-permissions/)
+- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
+- [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
+- [goose Permission Modes](https://goose-docs.ai/docs/guides/goose-permissions/)
 
 ### 6. Subagent and MCP notifications are sometimes downgraded to strings
 
@@ -392,7 +662,7 @@ This is the single biggest information-loss problem in Goose's live stream for C
 
 Source:
 
-- [`handle_mcp_notification` and `format_logging_notification`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
+- [`handle_mcp_notification` and `format_logging_notification`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
 
 ### 7. Official tool docs lag the current Developer extension surface
 
@@ -402,8 +672,8 @@ For Claudine's parser, source should be treated as more authoritative than prose
 
 Sources:
 
-- [Developer Extension docs](https://block.github.io/goose/docs/mcp/developer-mcp/)
-- [`developer/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
+- [Developer Extension docs](https://goose-docs.ai/docs/mcp/developer-mcp/)
+- [`developer/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
 
 ## Timeline
 
@@ -411,11 +681,13 @@ This timeline focuses on structured output and adjacent features that materially
 
 | Date | Version | Event | Why it matters |
 |---|---|---|---|
-| 2025-06-27 | [v1.0.30](https://github.com/block/goose/releases/tag/v1.0.30) | Subagents shipped | Subagent activity later becomes something stream consumers want to observe |
-| 2025-12-18 | [v1.17.0](https://github.com/block/goose/releases/tag/v1.17.0) | MCP Elicitation support shipped | Introduces structured user-input requests that appear as `actionRequired` content |
-| 2026-02-18 | [v1.25.0](https://github.com/block/goose/releases/tag/v1.25.0) | Release notes explicitly mention `stream-json` in provider integration work, including Gemini CLI and isolated `session_id` handling | Confirms `stream-json` is an important internal and external integration surface by this point |
-| 2026-02-26 | [v1.26.0](https://github.com/block/goose/releases/tag/v1.26.0) | Release notes mention low-balance detection, stream subagent tool call docs, and stream-json event work | Important for Claudine's caps/funds/subagent monitoring story |
-| 2026-03-05 | [v1.27.0](https://github.com/block/goose/releases/tag/v1.27.0) | Developer `shell` tool gains structured `{stdout, stderr}` output schema | Significant improvement in tool-response structure |
+| 2025-06-27 | [v1.0.30](https://github.com/aaif-goose/goose/releases/tag/v1.0.30) | Subagents shipped | Subagent activity later becomes something stream consumers want to observe |
+| 2025-12-18 | [v1.17.0](https://github.com/aaif-goose/goose/releases/tag/v1.17.0) | MCP Elicitation support shipped | Introduces structured user-input requests that appear as `actionRequired` content |
+| 2026-02-18 | [v1.25.0](https://github.com/aaif-goose/goose/releases/tag/v1.25.0) | Release notes explicitly mention `stream-json` in provider integration work, including Gemini CLI and isolated `session_id` handling | Confirms `stream-json` is an important internal and external integration surface by this point |
+| 2026-02-26 | [v1.26.0](https://github.com/aaif-goose/goose/releases/tag/v1.26.0) | Release notes mention low-balance detection, stream subagent tool call docs, and stream-json event work | Important for Claudine's caps/funds/subagent monitoring story |
+| 2026-03-05 | [v1.27.0](https://github.com/aaif-goose/goose/releases/tag/v1.27.0) | Developer `shell` tool gains structured `{stdout, stderr}` output schema | Significant improvement in tool-response structure |
+| 2026-04-07 | — | Goose moves from Block to AAIF at the Linux Foundation | Repo moves to `aaif-goose/goose`, docs move to `goose-docs.ai` |
+| 2026-04-23 | [v1.32.0](https://github.com/aaif-goose/goose/releases/tag/v1.32.0) | ACP providers (Claude Code, Codex, Amp, Pi), skills system, `/skills` command, auto-compaction, gateway, local-models, terminal integration, `/edit` command, Novita AI provider, Kimi Code provider with OAuth | Major expansion of CLI surface and provider ecosystem |
 
 Timeline note:
 
@@ -438,12 +710,12 @@ Current bundled built-ins from Goose's desktop extension manifest are:
 
 Sources:
 
-- [`bundled-extensions.json`](https://raw.githubusercontent.com/block/goose/main/ui/desktop/src/components/settings/extensions/bundled-extensions.json)
-- [`developer/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
-- [`computercontroller/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-mcp/src/computercontroller/mod.rs)
-- [`autovisualiser/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-mcp/src/autovisualiser/mod.rs)
-- [`memory/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-mcp/src/memory/mod.rs)
-- [`tutorial/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-mcp/src/tutorial/mod.rs)
+- [`bundled-extensions.json`](https://raw.githubusercontent.com/aaif-goose/goose/main/ui/desktop/src/components/settings/extensions/bundled-extensions.json)
+- [`developer/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
+- [`computercontroller/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/computercontroller/mod.rs)
+- [`autovisualiser/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/autovisualiser/mod.rs)
+- [`memory/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/memory/mod.rs)
+- [`tutorial/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-mcp/src/tutorial/mod.rs)
 
 ### What the stream exposes before and after tool calls
 
@@ -693,9 +965,9 @@ Hook parity:
 
 Sources:
 
-- [`message.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/conversation/message.rs)
-- [`output.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/output.rs)
-- [v1.26.0 release](https://github.com/block/goose/releases/tag/v1.26.0) mentions low-balance detection work
+- [`message.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
+- [`output.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/output.rs)
+- [v1.26.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.26.0) mentions low-balance detection work
 
 ### Auth
 
@@ -803,8 +1075,8 @@ Hook parity:
 
 Sources:
 
-- [`developer/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
-- [`edit.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/agents/platform_extensions/developer/edit.rs)
+- [`developer/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/mod.rs)
+- [`edit.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/platform_extensions/developer/edit.rs)
 
 ### Tokens Consumed
 
@@ -828,7 +1100,7 @@ Hook parity:
 
 Sources:
 
-- [`session/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
+- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
 
 ### Model Used
 
@@ -935,10 +1207,10 @@ Hook parity:
 
 Sources:
 
-- [`message.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose/src/conversation/message.rs)
-- [`session/mod.rs`](https://raw.githubusercontent.com/block/goose/main/crates/goose-cli/src/session/mod.rs)
-- [MCP Elicitation](https://block.github.io/goose/docs/guides/mcp-elicitation/)
-- [Headless Mode](https://block.github.io/goose/docs/tutorials/headless-goose/)
+- [`message.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/conversation/message.rs)
+- [`session/mod.rs`](https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose-cli/src/session/mod.rs)
+- [MCP Elicitation](https://goose-docs.ai/docs/guides/mcp-elicitation/)
+- [Headless Mode](https://goose-docs.ai/docs/tutorials/headless-goose/)
 
 ### Injecting into Subagent Prompt
 
@@ -947,7 +1219,7 @@ Yes, but indirectly rather than through one dedicated "subagent prompt injection
 What Goose gives you:
 
 - Global / user-overridden prompt templates, including:
-  - [`subagent_system.md`](https://github.com/block/goose/blob/main/crates/goose/src/prompts/subagent_system.md)
+  - [`subagent_system.md`](https://github.com/aaif-goose/goose/blob/main/crates/goose/src/prompts/subagent_system.md)
 - Additional run-scoped system instructions via `goose run --system`
 - Project / user hints via `.goosehints` and `AGENTS.md`
 - Recipe and sub-recipe instructions
@@ -974,7 +1246,7 @@ Hook parity:
 
 Sources:
 
-- [Customizing Prompt Templates](https://block.github.io/goose/docs/guides/prompt-templates/)
-- [Using goose in Headless Mode for Automation](https://block.github.io/goose/docs/tutorials/headless-goose/)
-- [Using Subagents](https://block.github.io/goose/docs/tutorials/subagents/)
-- [v1.27.0 release](https://github.com/block/goose/releases/tag/v1.27.0) mentions restored subagent system-prompt behavior
+- [Customizing Prompt Templates](https://goose-docs.ai/docs/guides/prompt-templates/)
+- [Using goose in Headless Mode for Automation](https://goose-docs.ai/docs/tutorials/headless-goose/)
+- [Using Subagents](https://goose-docs.ai/docs/tutorials/subagents/)
+- [v1.27.0 release](https://github.com/aaif-goose/goose/releases/tag/v1.27.0) mentions restored subagent system-prompt behavior

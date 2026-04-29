@@ -27,10 +27,12 @@
 //! assert_eq!(title, Some("Hello World".to_string()));
 //! ```
 
+pub mod block;
 pub mod cleanup;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
+pub mod errors;
 mod frontmatter;
 pub mod fs;
 pub mod hash;
@@ -42,6 +44,7 @@ pub mod output;
 pub mod reference;
 pub mod toc;
 mod types;
+pub mod yaml_block;
 
 pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
@@ -59,6 +62,7 @@ pub use reference::{
 };
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+pub use yaml_block::{YamlBlock, YamlBlockError};
 
 use std::path::Path;
 
@@ -110,7 +114,7 @@ impl Markdown {
     /// ```
     pub async fn from_url(url: &Url) -> MarkdownResult<Self> {
         let content = reqwest::get(url.as_str()).await?.text().await?;
-        Ok(content.into())
+        Self::try_from_content(content)
     }
 
     /// Gets a typed value from frontmatter.
@@ -171,6 +175,25 @@ impl Markdown {
     /// Consumes the markdown document and returns `(frontmatter, content)`.
     pub fn into_parts(self) -> (Frontmatter, String) {
         (self.frontmatter, self.content)
+    }
+
+    /// Parses markdown content into a [`Markdown`], surfacing frontmatter
+    /// errors instead of silently dropping them.
+    ///
+    /// Prefer this over the infallible [`From<String>`] / [`From<&str>`]
+    /// conversions when you need to know whether the source contained
+    /// malformed frontmatter (for example, in CLI loaders that should error
+    /// out instead of returning a document with empty frontmatter).
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`MarkdownError::FrontmatterParse`] if the YAML between the
+    /// leading `---` markers fails to parse. Documents without frontmatter
+    /// are still accepted and returned with an empty [`Frontmatter`].
+    pub fn try_from_content(content: impl Into<String>) -> MarkdownResult<Self> {
+        let content = content.into();
+        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content)?;
+        Ok(Self::with_frontmatter(frontmatter, remaining))
     }
 
     /// Extracts typed links from document content.
@@ -788,7 +811,7 @@ impl TryFrom<&Path> for Markdown {
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let content = std::fs::read_to_string(path)?;
-        let md: Markdown = content.into();
+        let md = Markdown::try_from_content(content)?;
         Ok(md.with_source(ComposeSource::infer_from_path(path)))
     }
 }

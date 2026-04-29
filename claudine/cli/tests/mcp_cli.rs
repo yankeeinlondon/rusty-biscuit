@@ -610,6 +610,7 @@ fn strict_mode_errors_on_missing_tag() {
     cargo_bin_cmd!("claudine")
         .env("HOME", &home)
         .env("NO_COLOR", "1")
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &path_dir)
         .args([
             "opencode",
@@ -643,6 +644,7 @@ fn strict_mode_errors_on_ambiguous_tag() {
     cargo_bin_cmd!("claudine")
         .env("HOME", &home)
         .env("NO_COLOR", "1")
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &path_dir)
         .args([
             "opencode",

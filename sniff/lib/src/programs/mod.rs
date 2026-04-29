@@ -14,6 +14,7 @@
 //! - **Terminal Apps**: Terminal emulators (alacritty, kitty, wezterm, etc.)
 //! - **Headless Audio**: Background audio players (afplay, pacat, aplay, etc.)
 //! - **AI CLI Tools**: AI-powered coding assistants (claude, aider, goose, etc.)
+//! - **Notification Helpers**: Desktop notification utilities (terminal-notifier, alerter, snoretoast, burnttoast, dunstify, notify-send)
 //!
 //! ## Usage
 //!
@@ -83,6 +84,8 @@
 //!     match source {
 //!         ExecutableSource::Path => println!("Found in PATH: {}", path.display()),
 //!         ExecutableSource::MacOsAppBundle => println!("Found as macOS app: {}", path.display()),
+//!         ExecutableSource::WindowsAppPaths => println!("Found via App Paths: {}", path.display()),
+//!         ExecutableSource::WindowsInstallRoot => println!("Found under install root: {}", path.display()),
 //!     }
 //! }
 //! ```
@@ -103,6 +106,7 @@ pub mod install_plan;
 pub mod installer;
 pub mod inventory;
 pub mod macos_bundle;
+pub mod notification_helpers;
 pub mod pkg_mngrs;
 pub mod schema;
 pub mod terminal_apps;
@@ -118,9 +122,10 @@ use tracing::{info_span, instrument};
 pub use ai_cli::InstalledAiClients;
 pub use editors::InstalledEditors;
 pub use enums::{
-    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
-    TerminalApp, TtsClient, Utility,
+    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
+    OsPackageManager, TerminalApp, TtsClient, Utility,
 };
+pub use notification_helpers::InstalledNotificationHelpers;
 pub use find_program::{
     ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
     find_programs_with_source_from_index, find_programs_with_source_parallel,
@@ -146,7 +151,10 @@ pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{CategoryDetector, ExecutableSource, InstallationMethod, ProgramDetector};
+pub use types::{
+    CategoryDetector, ExecutableSource, InstallationMethod, PrereqProbe, ProgramDetector,
+    SystemPrerequisite,
+};
 pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.
@@ -179,6 +187,9 @@ pub struct ProgramsInfo {
 
     /// AI-powered CLI coding tools installed on the system.
     pub ai_clients: InstalledAiClients,
+
+    /// Desktop notification helper utilities installed on the system.
+    pub notification_helpers: InstalledNotificationHelpers,
 }
 
 impl ProgramsInfo {
@@ -225,6 +236,8 @@ impl ProgramsInfo {
             || InstalledAiClients::new_with_index(&index),
         );
 
+        let notification_helpers = InstalledNotificationHelpers::new_with_index(&index);
+
         Self {
             editors,
             utilities,
@@ -234,6 +247,7 @@ impl ProgramsInfo {
             terminal_apps,
             headless_audio,
             ai_clients,
+            notification_helpers,
         }
     }
 

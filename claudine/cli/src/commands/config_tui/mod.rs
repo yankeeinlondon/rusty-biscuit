@@ -4,8 +4,9 @@ pub mod tabs;
 pub mod widgets;
 
 use std::io::stdout;
+use std::time::Duration;
 
-use clap::Args;
+use clap::{Args, Subcommand};
 use crossterm::{
     ExecutableCommand,
     event::{self, Event},
@@ -16,34 +17,107 @@ use ratatui::widgets::*;
 
 use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
 use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
-use claudine::events::PROVIDERS_DISPLAY_ORDER;
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::services::protect::catalog::RuleGroup;
 use claudine::services::protect::config::{ProtectRuleToggles, RuleGroupConfig};
 
 use crate::commands::config_tui::app::{ActionView, App};
+use crate::log;
 
+/// Arguments for `claudine config`.
+///
+/// With no subcommand, launches the interactive TUI. With a subcommand, runs a
+/// specific non-interactive setter.
 #[derive(Debug, Args)]
-pub struct ConfigArgs {}
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: Option<ConfigCommand>,
+}
 
-pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
+/// Non-interactive `claudine config <subcommand>` operations.
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommand {
+    /// Set a configuration value.
+    Set {
+        #[command(subcommand)]
+        target: ConfigSetTarget,
+    },
+}
+
+/// Setter operations for `claudine config set`.
+#[derive(Debug, Subcommand)]
+pub enum ConfigSetTarget {
+    /// Set the favorite agent for lazy composition.
+    ///
+    /// Pass a provider slug (e.g., `claude`, `codex`, `opencode`) to set the
+    /// favorite, or `none`/`clear`/`-` to clear the favorite.
+    #[command(name = "favorite-agent")]
+    FavoriteAgent {
+        /// The provider name (or `none`/`clear`/`-` to clear).
+        value: String,
+    },
+}
+
+pub async fn run(args: ConfigArgs) -> color_eyre::Result<()> {
+    if let Some(command) = args.command {
+        return run_setter(command).await;
+    }
+    run_tui().await
+}
+
+async fn run_setter(command: ConfigCommand) -> color_eyre::Result<()> {
+    match command {
+        ConfigCommand::Set { target } => match target {
+            ConfigSetTarget::FavoriteAgent { value } => run_set_favorite_agent(&value).await,
+        },
+    }
+}
+
+async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
+    let config_path = claudine::dispatch::loader::user_config_path();
+    let mut config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
+
+    let trimmed = value.trim();
+    let new_favorite = match trimmed.to_ascii_lowercase().as_str() {
+        "" | "none" | "clear" | "unset" | "-" => None,
+        _ => match Provider::fuzzy_match_cli_name(trimmed) {
+            Some(provider) => Some(provider),
+            None => {
+                return Err(color_eyre::eyre::eyre!(
+                    "unknown provider '{value}' — try one of: claude, codex, gemini, goose, kimi, opencode, qwen, roo (or pass `none` to clear)"
+                ));
+            }
+        },
+    };
+
+    if config.preferred_agent == new_favorite {
+        log::message(&match new_favorite {
+            Some(provider) => format!("Favorite agent already set to {provider}; no change."),
+            None => "Favorite agent already cleared; no change.".to_string(),
+        });
+        return Ok(());
+    }
+
+    config.preferred_agent = new_favorite;
+    claudine::dispatch::loader::save_claudine_config(&config, &config_path)?;
+    log::message(&match new_favorite {
+        Some(provider) => format!("Set favorite agent to {provider}."),
+        None => "Cleared favorite agent.".to_string(),
+    });
+    log::message(&format!("Updated {}.", config_path.display()));
+    Ok(())
+}
+
+async fn run_tui() -> color_eyre::Result<()> {
     let config_path = claudine::dispatch::loader::user_config_path();
     // Init check is now centralized in main.rs — config is guaranteed to exist here.
     let config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
-<<<<<<< Updated upstream
     let cwd = std::env::current_dir()?;
     let git_info = sniff::filesystem::git::detect_git(&cwd, false, 1)
         .ok()
         .flatten();
     let is_in_repo = git_info.is_some();
-||||||| Stash base
-    let is_in_repo = sniff::filesystem::git::detect_git(&std::env::current_dir()?, false, 1)
-        .ok()
-        .flatten()
-        .is_some();
-=======
->>>>>>> Stashed changes
 
-<<<<<<< Updated upstream
     let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
         let repo_root = &git.repo_root;
         let repo_cfg_path = repo_root.join(".claudine").join("config.json");
@@ -65,28 +139,6 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
         repo_name,
         branch_name,
     );
-||||||| Stash base
-    let mut app = App::new(config, is_in_repo);
-=======
-    let cwd = std::env::current_dir()?;
-    let git_info = sniff::filesystem::git::detect_git(&cwd, false, 1).ok().flatten();
-    let is_in_repo = git_info.is_some();
-
-    let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
-        let repo_root = &git.repo_root;
-        let repo_cfg_path = repo_root.join(".claudine").join("config.json");
-        let repo_cfg = if repo_cfg_path.exists() {
-            claudine::dispatch::loader::load_claudine_config(Some(&repo_cfg_path), None).ok()
-        } else {
-            None
-        };
-        (repo_cfg, Some(repo_cfg_path))
-    } else {
-        (None, None)
-    };
-
-    let mut app = App::new(config, repo_config, repo_config_path.clone(), is_in_repo);
->>>>>>> Stashed changes
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
@@ -95,8 +147,38 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     loop {
         terminal.draw(|frame| render(frame, &app))?;
 
-        if let Event::Key(key) = event::read()? {
+        // Use a short poll timeout so we can check for pending async test
+        // results without blocking the event loop indefinitely.
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
             app.handle_key(key);
+        }
+
+        // Poll for pending webhook test-connection results
+        if let Some(ref rx) = app.pending_test {
+            match rx.try_recv() {
+                Ok(result) => {
+                    app.pending_test = None;
+                    if let Some(app::ModalState::MessengerInput {
+                        test_status, error, ..
+                    }) = &mut app.modal
+                    {
+                        *test_status = Some(match result {
+                            Ok(()) => "✓ Test connection successful".to_string(),
+                            Err(e) => format!("✗ {}", e),
+                        });
+                        *error = None;
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // Test still running; leave status as "Testing…"
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Sender dropped without sending; clean up
+                    app.pending_test = None;
+                }
+            }
         }
 
         if app.should_quit {
@@ -163,16 +245,15 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
         }
         eprintln!();
     }
-    if app.repo_dirty {
-        if let Some(ref path) = app.repo_config_path {
-            if let Some(ref repo_cfg) = app.repo_config {
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                claudine::dispatch::loader::save_claudine_config(repo_cfg, path)?;
-                eprintln!("Repo configuration saved to {}", path.display());
-            }
+    if app.repo_dirty
+        && let Some(ref path) = app.repo_config_path
+        && let Some(ref repo_cfg) = app.repo_config
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
+        claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
+        eprintln!("Repo configuration saved to {}", path.display());
     }
 
     Ok(())
@@ -312,7 +393,15 @@ fn build_hotkey_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
             }
         }
         app::Tab::Messenger => {
-            pairs.extend([("Tab", "Focus"), ("Enter", "Activate"), ("S", "Select")]);
+            // T: Test is intentionally omitted from the outer strip because
+            // it is only meaningful inside the webhook input modal. The modal
+            // itself surfaces the T hotkey when appropriate.
+            pairs.extend([
+                ("Tab", "Focus"),
+                ("Enter", "Activate"),
+                ("S", "Select"),
+                ("A", "Add"),
+            ]);
         }
     }
 

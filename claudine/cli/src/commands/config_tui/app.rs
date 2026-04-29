@@ -70,21 +70,14 @@ pub struct App {
     pub selected_tab: Option<Tab>,
     pub actions_view: ActionView,
     pub config: ClaudineConfig,
-    pub repo_config: Option<ClaudineConfig>,
-    pub repo_config_path: Option<std::path::PathBuf>,
     pub is_in_repo: bool,
     pub should_quit: bool,
     pub dirty: bool,
-<<<<<<< Updated upstream
     pub repo_config: Option<RepoOverrideConfig>,
     pub repo_config_path: Option<std::path::PathBuf>,
     pub repo_dirty: bool,
     pub repo_name: Option<String>,
     pub branch_name: Option<String>,
-||||||| Stash base
-=======
-    pub repo_dirty: bool,
->>>>>>> Stashed changes
     pub list_index: usize,
     pub modal: Option<ModalState>,
     pub modal_stack: Vec<ModalState>,
@@ -92,6 +85,9 @@ pub struct App {
     pub messenger_focus: usize,
     /// Cached provider discovery results (computed once in `App::new()`).
     pub cached_agents: Vec<claudine::config::AgentInfo>,
+    /// Pending webhook test connection result receiver.
+    /// When Some, the TUI event loop polls this channel for async test results.
+    pub pending_test: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,32 +130,13 @@ pub enum ModalState {
     EventSelector {
         highlighted: usize,
     },
-<<<<<<< Updated upstream
     ActionTypeChooser {
         event: claudine::events::AgenticEvent,
         highlighted: usize,
     },
-||||||| Stash base
-=======
-    ActionTypeSelector {
-        event: claudine::events::AgenticEvent,
-        highlighted: usize,
-    },
-    MessengerEdit {
-        config_name: String,
-        field_index: usize,
-    },
-    MessengerFieldInput {
-        config_name: String,
-        field_name: String,
-        input: String,
-        cursor: usize,
-    },
->>>>>>> Stashed changes
     ConfirmDelete {
         event_index: usize,
     },
-<<<<<<< Updated upstream
     TextInput {
         event: claudine::events::AgenticEvent,
         action_type: usize,
@@ -184,6 +161,12 @@ pub enum ModalState {
         fields: Vec<(String, String)>,
         buffer: String,
         label: String,
+        /// Whether the current field should be rendered as a secret (masked).
+        is_secret: bool,
+        /// Optional validation error to display for the current field.
+        error: Option<String>,
+        /// Optional test-connection status for webhook providers.
+        test_status: Option<String>,
     },
     /// Multi-field editor for an individual action's properties.
     ActionFieldList {
@@ -199,25 +182,6 @@ pub enum ModalState {
         buffer: String,
         label: String,
     },
-||||||| Stash base
-=======
-    ActionListEditor {
-        event: claudine::events::AgenticEvent,
-        highlighted: usize,
-    },
-    ActionFieldEditor {
-        event: claudine::events::AgenticEvent,
-        action_index: usize,
-        field_index: usize,
-    },
-    ActionFieldInput {
-        event: claudine::events::AgenticEvent,
-        action_index: usize,
-        field_name: String,
-        input: String,
-        cursor: usize,
-    },
->>>>>>> Stashed changes
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,7 +198,6 @@ pub enum GenderTab {
 }
 
 impl App {
-<<<<<<< Updated upstream
     pub fn new(
         config: ClaudineConfig,
         repo_config: Option<RepoOverrideConfig>,
@@ -244,16 +207,6 @@ impl App {
         branch_name: Option<String>,
     ) -> Self {
         let cached_agents = claudine::config::discover_agents_full();
-||||||| Stash base
-    pub fn new(config: ClaudineConfig, is_in_repo: bool) -> Self {
-=======
-    pub fn new(
-        config: ClaudineConfig,
-        repo_config: Option<ClaudineConfig>,
-        repo_config_path: Option<std::path::PathBuf>,
-        is_in_repo: bool,
-    ) -> Self {
->>>>>>> Stashed changes
         Self {
             mode: AppMode::Overview,
             focused_tab: Tab::Preferences,
@@ -264,27 +217,21 @@ impl App {
                 ActionView::User
             },
             config,
-            repo_config,
-            repo_config_path,
             is_in_repo,
             should_quit: false,
             dirty: false,
-<<<<<<< Updated upstream
             repo_config,
             repo_config_path,
             repo_dirty: false,
             repo_name,
             branch_name,
-||||||| Stash base
-=======
-            repo_dirty: false,
->>>>>>> Stashed changes
             list_index: 0,
             modal: None,
             modal_stack: Vec::new(),
             cached_voices: Vec::new(),
             messenger_focus: 0,
             cached_agents,
+            pending_test: None,
         }
     }
 
@@ -377,29 +324,15 @@ impl App {
             ModalState::MessengerAdd { .. } => {
                 super::tabs::messenger::handle_messenger_add_modal(self, key);
             }
-            ModalState::MessengerEdit { .. } => {
-                super::tabs::messenger::handle_messenger_edit_modal(self, key);
-            }
-            ModalState::MessengerFieldInput { .. } => {
-                super::tabs::messenger::handle_messenger_field_input(self, key);
-            }
             ModalState::EventSelector { .. } => {
                 super::tabs::actions::handle_event_selector_modal(self, key);
             }
-<<<<<<< Updated upstream
             ModalState::ActionTypeChooser { .. } => {
                 super::tabs::actions::handle_action_type_chooser_modal(self, key);
             }
-||||||| Stash base
-=======
-            ModalState::ActionTypeSelector { .. } => {
-                super::tabs::actions::handle_action_type_selector_modal(self, key);
-            }
->>>>>>> Stashed changes
             ModalState::ConfirmDelete { .. } => {
                 super::tabs::actions::handle_confirm_delete_modal(self, key);
             }
-<<<<<<< Updated upstream
             ModalState::TextInput { .. } => {
                 super::tabs::actions::handle_text_input_modal(self, key);
             }
@@ -415,18 +348,6 @@ impl App {
             ModalState::ActionFieldInput { .. } => {
                 super::tabs::actions::handle_action_field_input_modal(self, key);
             }
-||||||| Stash base
-=======
-            ModalState::ActionListEditor { .. } => {
-                super::tabs::actions::handle_action_list_editor(self, key);
-            }
-            ModalState::ActionFieldEditor { .. } => {
-                super::tabs::actions::handle_action_field_editor(self, key);
-            }
-            ModalState::ActionFieldInput { .. } => {
-                super::tabs::actions::handle_action_field_input(self, key);
-            }
->>>>>>> Stashed changes
         }
     }
 
@@ -443,27 +364,13 @@ impl App {
             Some(ModalState::MessengerSelect { highlighted, .. }) => *highlighted,
             Some(ModalState::MessengerAdd { highlighted }) => *highlighted,
             Some(ModalState::EventSelector { highlighted }) => *highlighted,
-<<<<<<< Updated upstream
             Some(ModalState::ActionTypeChooser { highlighted, .. }) => *highlighted,
-||||||| Stash base
-=======
-            Some(ModalState::ActionTypeSelector { highlighted, .. }) => *highlighted,
-            Some(ModalState::MessengerEdit { field_index, .. }) => *field_index,
-            Some(ModalState::MessengerFieldInput { .. }) => 0,
->>>>>>> Stashed changes
             Some(ModalState::ConfirmDelete { .. }) => 0,
-<<<<<<< Updated upstream
             Some(ModalState::TextInput { .. }) => 0,
             Some(ModalState::ActionSoundSelector { highlighted, .. }) => *highlighted,
             Some(ModalState::MessengerInput { .. }) => 0,
             Some(ModalState::ActionFieldList { highlighted, .. }) => *highlighted,
             Some(ModalState::ActionFieldInput { .. }) => 0,
-||||||| Stash base
-=======
-            Some(ModalState::ActionListEditor { highlighted, .. }) => *highlighted,
-            Some(ModalState::ActionFieldEditor { field_index, .. }) => *field_index,
-            Some(ModalState::ActionFieldInput { .. }) => 0,
->>>>>>> Stashed changes
             None => 0,
         }
     }
@@ -482,16 +389,8 @@ impl App {
                 ModalState::MessengerSelect { highlighted, .. } => *highlighted = new_idx,
                 ModalState::MessengerAdd { highlighted } => *highlighted = new_idx,
                 ModalState::EventSelector { highlighted } => *highlighted = new_idx,
-<<<<<<< Updated upstream
                 ModalState::ActionTypeChooser { highlighted, .. } => *highlighted = new_idx,
-||||||| Stash base
-=======
-                ModalState::ActionTypeSelector { highlighted, .. } => *highlighted = new_idx,
-                ModalState::MessengerEdit { field_index, .. } => *field_index = new_idx,
-                ModalState::MessengerFieldInput { .. } => {}
->>>>>>> Stashed changes
                 ModalState::ConfirmDelete { .. } => {}
-<<<<<<< Updated upstream
                 ModalState::TextInput { .. } => {}
                 ModalState::ActionSoundSelector { highlighted, .. } => *highlighted = new_idx,
                 ModalState::MessengerInput { .. } => {}
@@ -520,12 +419,6 @@ impl App {
             match &self.modal {
                 Some(ModalState::EditActions { .. }) | None => return,
                 _ => self.modal = self.modal_stack.pop(),
-||||||| Stash base
-=======
-                ModalState::ActionListEditor { highlighted, .. } => *highlighted = new_idx,
-                ModalState::ActionFieldEditor { field_index, .. } => *field_index = new_idx,
-                ModalState::ActionFieldInput { .. } => {}
->>>>>>> Stashed changes
             }
         }
     }

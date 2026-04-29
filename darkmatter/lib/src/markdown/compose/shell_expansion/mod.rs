@@ -238,8 +238,21 @@ pub(crate) fn prepare_directive(
             alias_name: alias_name.clone(),
         };
 
+        // To prevent duplicate handler calls in concurrent transclusion,
+        // reserve this command for allow-once handling before calling the
+        // handler.  If another thread has already reserved or allowed it,
+        // skip the handler and treat as already allowed.
+        let reserved = shell_runtime.try_reserve_allow_once(&normalized);
+        if !reserved {
+            return Ok(PreparedShellDirective {
+                effective,
+                display_command,
+            });
+        }
+
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
+                shell_runtime.complete_allow_once(&normalized, false);
                 store::append_whitelist_exact(policy_paths, &normalized)?;
                 shell_runtime.persist_whitelist_exact(normalized);
                 Ok(PreparedShellDirective {
@@ -248,6 +261,7 @@ pub(crate) fn prepare_directive(
                 })
             }
             ShellApprovalDecision::AllowCommandPersist => {
+                shell_runtime.complete_allow_once(&normalized, false);
                 store::append_whitelist_prefix(policy_paths, &effective.executable)?;
                 shell_runtime.persist_whitelist_prefix(effective.executable.clone());
                 Ok(PreparedShellDirective {
@@ -256,17 +270,22 @@ pub(crate) fn prepare_directive(
                 })
             }
             ShellApprovalDecision::AllowOnce => {
-                shell_runtime.allow_once(normalized);
+                shell_runtime.complete_allow_once(&normalized, true);
+                shell_runtime.approvals_used += 1;
                 Ok(PreparedShellDirective {
                     effective,
                     display_command,
                 })
             }
-            ShellApprovalDecision::Deny => Err(ShellExpansionError::Denied {
-                command: display_command,
-                origin: directive.origin.clone(),
-            }),
+            ShellApprovalDecision::Deny => {
+                shell_runtime.complete_allow_once(&normalized, false);
+                Err(ShellExpansionError::Denied {
+                    command: display_command,
+                    origin: directive.origin.clone(),
+                })
+            }
             ShellApprovalDecision::BlacklistPersist => {
+                shell_runtime.complete_allow_once(&normalized, false);
                 store::append_blacklist_exact(policy_paths, &normalized)?;
                 shell_runtime.persist_blacklist_exact(normalized);
                 Err(ShellExpansionError::Blacklisted {
@@ -310,6 +329,7 @@ pub(crate) fn execute_prepared_directive(
         warnings.push(match prepared.effective.origin {
             ShellCommandOrigin::Body { line } => warning.at_line(line),
             ShellCommandOrigin::Frontmatter { .. } => warning,
+            ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(command_line),
         });
     }
 
@@ -454,7 +474,7 @@ pub fn apply_replacements_in_reverse(
     content: &mut String,
     mut replacements: Vec<(std::ops::Range<usize>, String)>,
 ) {
-    replacements.sort_by(|a, b| b.0.start.cmp(&a.0.start));
+    replacements.sort_by_key(|b| std::cmp::Reverse(b.0.start));
     for (span, replacement) in replacements {
         content.replace_range(span, &replacement);
     }

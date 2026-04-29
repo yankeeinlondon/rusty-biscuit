@@ -1,5 +1,7 @@
 //! Frontmatter parsing and manipulation utilities.
 
+use biscuit_file::YamlParseError;
+
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
 use serde::Serialize;
@@ -206,7 +208,12 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
         FrontmatterMap::new()
     } else {
-        parse_yaml_with_fallbacks(&yaml_content)?
+        parse_yaml_with_fallbacks(&yaml_content).map_err(|source| {
+            MarkdownError::FrontmatterParse {
+                source,
+                yaml: yaml_content.clone(),
+            }
+        })?
     };
 
     // Extract remaining content
@@ -216,15 +223,19 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     Ok((Frontmatter::from_map(frontmatter_map), remaining_content))
 }
 
+// UTF-8-boundary audit (2026-04-24): the byte-indexed scanners in this file
+// were the only `markdown/*` sites that copied `yaml[pos..pos + 1]` into a
+// String. Sibling scanners under `markdown/` walk `as_bytes()` only for
+// ASCII sentinel checks and never slice the source by an arbitrary `pos`.
 /// Attempts to parse YAML with progressive fallback strategies.
 ///
 /// 1. Direct parse
 /// 2. Tab-normalized parse
-/// 3. Expression-protected parse: temporarily replaces `{{ }}` expression
-///    bodies with safe placeholders so YAML-significant characters inside
-///    interpolation expressions (e.g., `"` in `{{ plan || "plan.md" }}`)
-///    don't break the YAML parser.
-fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
+/// 3. Expression-protected parse: temporarily replaces `$(...)` shell command
+///    substitutions and `{{ }}` interpolation expressions with safe
+///    placeholders so YAML-significant characters inside them (e.g., nested
+///    double quotes in `"$(dirname "{{path}}")"`) don't break the YAML parser.
+fn parse_yaml_with_fallbacks(yaml: &str) -> Result<FrontmatterMap, YamlParseError> {
     // Strategy 1: direct parse
     match serde_yaml_ng::from_str(yaml) {
         Ok(map) => Ok(map),
@@ -237,42 +248,118 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
                 return Ok(map);
             }
 
-            // Strategy 3: protect interpolation expressions
-            let (protected, replacements) = protect_interpolation_expressions(yaml);
-            if !replacements.is_empty() {
-                let target = if normalized != *yaml {
-                    &normalized
-                } else {
-                    yaml
-                };
-                let (protected_target, target_replacements) =
-                    protect_interpolation_expressions(target);
-                let (parse_result, restore_map) = if !target_replacements.is_empty() {
-                    (
-                        serde_yaml_ng::from_str::<FrontmatterMap>(&protected_target),
-                        &target_replacements,
-                    )
-                } else {
-                    (
-                        serde_yaml_ng::from_str::<FrontmatterMap>(&protected),
-                        &replacements,
-                    )
-                };
+            // Strategy 3: protect shell and interpolation expressions.
+            // Shell protection runs first so a `{{ }}` placeholder never
+            // swallows a surrounding `$(...)` it was embedded in; shell
+            // replacements are applied last during restoration so any
+            // shell placeholder that survives inside a restored expression
+            // body (e.g., `{{ fallback || "$(pwd)" }}`) resolves correctly.
+            let target = if normalized != *yaml {
+                normalized.as_str()
+            } else {
+                yaml
+            };
 
-                match parse_result {
-                    Ok(map) => return Ok(restore_expressions_in_map(map, restore_map)),
-                    Err(_) => return Err(original_err.into()),
+            let (shell_protected, shell_replacements) = protect_shell_expressions(target);
+            let (fully_protected, expr_replacements) =
+                protect_interpolation_expressions(&shell_protected);
+
+            if shell_replacements.is_empty() && expr_replacements.is_empty() {
+                return Err(original_err);
+            }
+
+            match serde_yaml_ng::from_str::<FrontmatterMap>(&fully_protected) {
+                Ok(map) => {
+                    let map = restore_expressions_in_map(map, &expr_replacements);
+                    let map = restore_expressions_in_map(map, &shell_replacements);
+                    Ok(map)
+                }
+                Err(_) => Err(original_err),
+            }
+        }
+    }
+}
+
+/// Replaces `$(...)` shell command substitution bodies with safe placeholders.
+///
+/// Shell command substitutions inside double-quoted YAML values often contain
+/// their own double quotes (e.g., `"$(dirname "{{path}}")"`), which breaks
+/// standard YAML parsing. This helper walks the raw YAML text, finds balanced
+/// `$(...)` spans (tracking nested parentheses), and replaces each with an
+/// opaque `__DM_SHELL_N__` placeholder so the remaining YAML parses cleanly.
+/// Placeholders are later restored in parsed scalar values via
+/// [`restore_expressions_in_map`].
+///
+/// The scanner is quoting-agnostic: it does not attempt to understand shell
+/// quoting rules, because any valid shell `$(...)` must have balanced
+/// parentheses regardless of inner quoting. Backtick substitutions and process
+/// substitutions (`<(...)`, `>(...)`) are not protected — add them when a
+/// real case emerges.
+///
+/// Non-matched content advances by full UTF-8 scalar boundaries (via
+/// `yaml[pos..].chars().next()` + `char.len_utf8()`) so `pos` never lands
+/// inside a multi-byte scalar.
+fn protect_shell_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
+    let mut result = String::with_capacity(yaml.len());
+    let mut replacements = Vec::new();
+    let bytes = yaml.as_bytes();
+    let mut pos = 0;
+
+    while pos < bytes.len() {
+        if pos + 1 < bytes.len() && bytes[pos] == b'$' && bytes[pos + 1] == b'(' {
+            let start = pos;
+            pos += 2;
+            let mut depth = 1usize;
+            while pos < bytes.len() && depth > 0 {
+                match bytes[pos] {
+                    b'(' => {
+                        depth += 1;
+                        pos += 1;
+                    }
+                    b')' => {
+                        depth -= 1;
+                        pos += 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => pos += 1,
                 }
             }
 
-            Err(original_err.into())
+            if depth != 0 {
+                // Unbalanced: emit the rest verbatim and stop scanning for
+                // shell expressions. Returning an unclosed placeholder would
+                // leave a token in the YAML that never gets restored.
+                result.push_str(&yaml[start..]);
+                return (result, replacements);
+            }
+
+            let original = &yaml[start..pos];
+            let placeholder = format!("__DM_SHELL_{}__", replacements.len());
+            replacements.push((placeholder.clone(), original.to_string()));
+            result.push_str(&placeholder);
+        } else if let Some(ch) = yaml[pos..].chars().next() {
+            // Non-matching byte: advance by a full UTF-8 scalar so `pos`
+            // always lands on a char boundary. Slicing `yaml[pos..pos + 1]`
+            // here would panic when `pos` falls inside a multi-byte scalar.
+            result.push(ch);
+            pos += ch.len_utf8();
+        } else {
+            break;
         }
     }
+
+    (result, replacements)
 }
 
 /// Replaces `{{ }}` expression bodies with safe placeholders.
 ///
 /// Returns the modified string and a map of placeholder → original expression.
+///
+/// Non-matched content advances by full UTF-8 scalar boundaries (via
+/// `yaml[pos..].chars().next()` + `char.len_utf8()`) so `pos` never lands
+/// inside a multi-byte scalar.
 fn protect_interpolation_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
     let mut result = String::with_capacity(yaml.len());
     let mut replacements = Vec::new();
@@ -304,9 +391,14 @@ fn protect_interpolation_expressions(yaml: &str) -> (String, Vec<(String, String
             let placeholder = format!("__DM_EXPR_{}__", replacements.len());
             replacements.push((placeholder.clone(), original.to_string()));
             result.push_str(&placeholder);
+        } else if let Some(ch) = yaml[pos..].chars().next() {
+            // Non-matching byte: advance by a full UTF-8 scalar so `pos`
+            // always lands on a char boundary. Slicing `yaml[pos..pos + 1]`
+            // here would panic when `pos` falls inside a multi-byte scalar.
+            result.push(ch);
+            pos += ch.len_utf8();
         } else {
-            result.push(yaml[pos..pos + 1].chars().next().unwrap_or('?'));
-            pos += 1;
+            break;
         }
     }
 
@@ -591,6 +683,29 @@ This is content."#;
     }
 
     #[test]
+    fn test_protect_interpolation_expressions_unicode_outside_sentinel_preserved() {
+        // Pre-fix: this panics with "byte index N is not a char boundary"
+        // because the non-matching branch sliced `yaml[pos..pos + 1]` while
+        // `pos` was inside the multi-byte scalar for the emoji.
+        let yaml = "key: \"\u{1F5A5}\u{FE0F} prefix {{var}} suffix\"";
+        let (protected, replacements) = protect_interpolation_expressions(yaml);
+
+        // Sentinel still detected and replaced.
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].1, "{{var}}");
+        assert!(protected.contains("__DM_EXPR_0__"));
+
+        // Non-ASCII characters outside the sentinel are preserved byte-identically.
+        assert!(protected.contains('\u{1F5A5}'));
+        assert!(protected.contains('\u{FE0F}'));
+        assert!(protected.contains("prefix"));
+        assert!(protected.contains("suffix"));
+
+        // No lossy `'?'` substitution survives in the output.
+        assert!(!protected.contains('?'));
+    }
+
+    #[test]
     fn test_restore_expressions_in_value() {
         let replacements = vec![
             ("__DM_EXPR_0__".to_string(), "{{foo}}".to_string()),
@@ -603,5 +718,169 @@ This is content."#;
         let value = json!("prefix/__DM_EXPR_0__/__DM_EXPR_1__");
         let restored = restore_expressions_in_value(value, &replacements);
         assert_eq!(restored, json!("prefix/{{foo}}/{{bar || \"baz\"}}"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_nested_quotes_in_shell_expression() {
+        // Shell command substitutions with quoted arguments inside a double-quoted
+        // YAML value break the standard YAML parser. The fallback should protect
+        // `$(...)` expressions so the value is preserved verbatim for later
+        // frontmatter shell expansion.
+        let content = concat!(
+            "---\n",
+            "review: \"reviews/foo.md\"\n",
+            "dir: \"$(dirname \"reviews/foo.md\")\"\n",
+            "basename: \"$(basename \"reviews/foo.md\" .md)\"\n",
+            "---\n",
+            "# Body\n",
+        );
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+        let review: Option<String> = fm.get("review").unwrap();
+        let dir: Option<String> = fm.get("dir").unwrap();
+        let basename: Option<String> = fm.get("basename").unwrap();
+
+        assert_eq!(review, Some("reviews/foo.md".to_string()));
+        assert_eq!(dir, Some("$(dirname \"reviews/foo.md\")".to_string()));
+        assert_eq!(
+            basename,
+            Some("$(basename \"reviews/foo.md\" .md)".to_string())
+        );
+        assert!(remaining.starts_with("# Body"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_interpolation_inside_shell_expression() {
+        // Classic user pattern: shell substitution wrapping an interpolation.
+        // Both protections must coexist so `{{review}}` survives for later
+        // frontmatter interpolation and `$(dirname ...)` survives for later
+        // frontmatter shell expansion.
+        let content = concat!(
+            "---\n",
+            "review: \"\"\n",
+            "dir: \"$(dirname \"{{review}}\")\"\n",
+            "basename: \"$(basename \"{{review}}\" .md)\"\n",
+            "plan: \"{{dir}}/plan-for-{{basename}}.md\"\n",
+            "---\n",
+            "Body: {{review}}\n",
+        );
+
+        let (fm, _remaining) = parse_frontmatter(content).unwrap();
+        let dir: Option<String> = fm.get("dir").unwrap();
+        let basename: Option<String> = fm.get("basename").unwrap();
+        let plan: Option<String> = fm.get("plan").unwrap();
+
+        assert_eq!(dir, Some("$(dirname \"{{review}}\")".to_string()));
+        assert_eq!(basename, Some("$(basename \"{{review}}\" .md)".to_string()));
+        assert_eq!(plan, Some("{{dir}}/plan-for-{{basename}}.md".to_string()));
+    }
+
+    #[test]
+    fn test_protect_shell_expressions_basic() {
+        let yaml = r#"key: "$(dirname "path/file.md")""#;
+        let (protected, replacements) = protect_shell_expressions(yaml);
+
+        assert_eq!(replacements.len(), 1);
+        assert!(!protected.contains("$("));
+        assert!(protected.contains("__DM_SHELL_0__"));
+        assert_eq!(replacements[0].1, r#"$(dirname "path/file.md")"#);
+    }
+
+    #[test]
+    fn test_protect_shell_expressions_nested_parens() {
+        // Nested parens are common in shell: `$(cmd (inner) arg)` or similar.
+        let yaml = r#"key: "$(echo $(date))""#;
+        let (protected, replacements) = protect_shell_expressions(yaml);
+
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].1, r#"$(echo $(date))"#);
+        assert!(protected.contains("__DM_SHELL_0__"));
+    }
+
+    #[test]
+    fn test_protect_shell_expressions_multiple() {
+        let yaml = r#"a: "$(echo a)"
+b: "$(echo b)""#;
+        let (protected, replacements) = protect_shell_expressions(yaml);
+
+        assert_eq!(replacements.len(), 2);
+        assert!(protected.contains("__DM_SHELL_0__"));
+        assert!(protected.contains("__DM_SHELL_1__"));
+    }
+
+    #[test]
+    fn test_protect_shell_expressions_unicode_outside_sentinel_preserved() {
+        // Pre-fix: this panics with "byte index N is not a char boundary"
+        // because the non-matching branch sliced `yaml[pos..pos + 1]` while
+        // `pos` was inside the multi-byte scalar for the emoji.
+        let yaml = "key: \"\u{1F5A5}\u{FE0F} prefix $(echo hi) suffix\"";
+        let (protected, replacements) = protect_shell_expressions(yaml);
+
+        // Sentinel still detected and replaced.
+        assert_eq!(replacements.len(), 1);
+        assert_eq!(replacements[0].1, "$(echo hi)");
+        assert!(protected.contains("__DM_SHELL_0__"));
+
+        // Non-ASCII characters outside the sentinel are preserved byte-identically.
+        assert!(protected.contains('\u{1F5A5}'));
+        assert!(protected.contains('\u{FE0F}'));
+        assert!(protected.contains("prefix"));
+        assert!(protected.contains("suffix"));
+
+        // No lossy `'?'` substitution survives in the output.
+        assert!(!protected.contains('?'));
+    }
+
+    #[test]
+    fn test_markdown_from_str_with_shell_in_frontmatter_strips_frontmatter() {
+        use crate::markdown::Markdown;
+
+        // Regression test: when frontmatter contains shell substitutions
+        // with nested quotes, parsing must still succeed so the raw
+        // `---...---` block does NOT leak into `content()`.
+        let content = concat!(
+            "---\n",
+            "dir: \"$(dirname \"x.md\")\"\n",
+            "---\n",
+            "# Body\n",
+        );
+
+        let md: Markdown = content.into();
+        assert!(
+            !md.frontmatter().is_empty(),
+            "frontmatter should parse successfully"
+        );
+        assert!(
+            !md.content().contains("---"),
+            "content must not contain the raw frontmatter delimiters; got: {:?}",
+            md.content()
+        );
+        assert!(md.content().starts_with("# Body"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_emoji_value_and_unquoted_interpolation() {
+        // Reproduction from the spec: an unquoted `{{...}}` value forces
+        // parse_yaml_with_fallbacks() into the byte-scanning fallback, and
+        // the multi-byte emoji in a quoted value used to panic the scanner.
+        // Both must round-trip verbatim through the fallback path.
+        let content = concat!(
+            "---\n",
+            "area: {{ctx.current_package_area}}\n",
+            "success_message: \"\u{1F5A5}\u{FE0F} Build succeeded\"\n",
+            "---\n",
+            "# Body\n",
+        );
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+        let area: Option<String> = fm.get("area").unwrap();
+        let message: Option<String> = fm.get("success_message").unwrap();
+
+        assert_eq!(area, Some("{{ctx.current_package_area}}".to_string()));
+        assert_eq!(
+            message,
+            Some("\u{1F5A5}\u{FE0F} Build succeeded".to_string())
+        );
+        assert!(remaining.starts_with("# Body"));
     }
 }

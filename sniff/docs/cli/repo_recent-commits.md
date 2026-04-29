@@ -82,6 +82,9 @@ The optional `PERIOD` argument accepts several formats:
 | Named | `yesterday` | Midnight-to-midnight UTC yesterday |
 | Date | `2026-04-01` | All commits on that date (YYYY-MM-DD) |
 | Hash | `a1b2c3d` | All commits from that hash to HEAD |
+| Count | `10`, `25` | The last N commits reachable from HEAD (bare positive integer) |
+
+Detection is ordered: `today`/`yesterday` → ISO date → bare number (count) → duration → hash. An all-digit argument is always treated as a count, so a SHA that happens to be entirely numeric must be disambiguated by supplying more of the hash (e.g. include a non-digit hex char) or by lengthening the input past the numeric portion.
 
 ### Duration Units
 
@@ -139,6 +142,7 @@ sniff repo recent-commits today              # Since midnight
 sniff repo recent-commits yesterday          # Yesterday only
 sniff repo recent-commits 2026-04-01         # Specific date
 sniff repo recent-commits a1b2c3d            # From hash to HEAD
+sniff repo recent-commits 10                 # The last 10 commits
 sniff repo recent-commits --action fix       # Only conventional fix commits
 sniff repo recent-commits --action feat --action refactor
 sniff repo recent-commits 2w --package sniff # Last 2 weeks, sniff package only

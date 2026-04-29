@@ -15,7 +15,7 @@ Shows a compact git status for the current repository: recent commit history, wo
 
 ```
 sniff repo git-status [OPTIONS]
-sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes] [-p <PKG>]
+sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes] [--compact] [-p <PKG>]
 ```
 
 ## Flags and Options
@@ -24,6 +24,7 @@ sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes
 |------|-------|---------|-------------|
 | `--history <N>` | | `10` | Number of recent commits to display |
 | `--refresh-remotes` | | off | Fetch remotes to check if branches are out of sync (enables `--deep` detection) |
+| `--compact` | | off | Render only the top Status section |
 | `--package <PKG>` | `-p` | | Scope the git view to a specific package or package area |
 | `--json` | | off | Emit JSON instead of styled text (global flag) |
 | `--plain` | | off | Strip all ANSI escape codes from text output (global flag) |
@@ -36,6 +37,10 @@ Controls how many recent commits appear in the Status section. Commits are displ
 ### `--refresh-remotes`
 
 Enables deep detection: fetches remote refs to populate tracking data. Without this flag, ahead/behind counts for remotes come from locally-cached ref data only. When enabled, `RemoteInfo.branches` and `RemoteInfo.default_branch` are also populated, and the `is_behind` field on `RepoStatus` is computed.
+
+### `--compact`
+
+Limits text output to the **Status** section. The **Worktrees** and **Meta** sections are omitted. JSON output is unchanged.
 
 ### `-p` / `--package <PKG>`
 
@@ -64,11 +69,14 @@ At `verbose > 0`, the author name is appended to each commit line.
 
 #### File Change Lines
 
-After commits, file changes are listed in three groups (staged, then unstaged, then untracked):
+Status lines are listed in this order: conflicted files, recent commits, staged files, unstaged files, then untracked files.
 
+- **Conflicted** — rendered in red at the top of the list: `conflicted: [dir/]<filename>`
 - **Staged** — rendered in lime: `staged(<action>): [dir/]<filename>` with diff stats for modified files
 - **Unstaged** — rendered in yellow: `unstaged(<action>): [dir/]<filename>` with diff stats
-- **Untracked** — rendered in red: `untracked: [dir/]<filename>`
+- **Untracked** — rendered in dim grey: `untracked: [dir/]<filename>`
+
+Each displayed file path is rendered as an OSC8 hyperlink targeting the file's absolute path. In `--plain` mode, the hyperlink markup is stripped and the same visible text remains.
 
 Diff stats appear as `<N added, M removed>` and are omitted for created or deleted files.
 

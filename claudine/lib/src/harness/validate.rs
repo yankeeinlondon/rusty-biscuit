@@ -8,6 +8,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use tracing::{debug, info_span};
+
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     AttemptOutcome, FailurePhase, FileFingerprint, HarnessPermissionProbe, HarnessPlan,
@@ -24,14 +26,27 @@ pub fn evaluate_pre_checks(
     plan: &HarnessPlan,
     permission_probe: Option<&dyn HarnessPermissionProbe>,
 ) -> ValidationPhaseReport {
-    run_checks(
+    let _span = info_span!(
+        "harness_pre_checks",
+        source = %plan.source_path.display(),
+        check_count = plan.pre_checks.len(),
+    )
+    .entered();
+    let report = run_checks(
         &plan.pre_checks,
         None,
         None,
         &plan.source_path,
         permission_probe,
         FailurePhase::PreCheck,
-    )
+    );
+    debug!(
+        total = report.count(),
+        passed = report.outcomes.iter().filter(|o| o.passed).count(),
+        failed = report.failures().len(),
+        "pre-checks complete",
+    );
+    report
 }
 
 /// Capture a pre-run snapshot for subjects referenced by post-checks.
@@ -43,12 +58,12 @@ pub fn capture_pre_run_snapshot(plan: &HarnessPlan) -> Result<PreRunSnapshot, Ha
 
     for rule in &plan.post_checks {
         match &rule.kind {
-            ValidationKind::FileChanged { file } | ValidationKind::FileUnchanged { file } => {
-                if !snapshot.tracked_files.contains_key(file) {
-                    snapshot
-                        .tracked_files
-                        .insert(file.clone(), fingerprint_file(file));
-                }
+            ValidationKind::FileChanged { file } | ValidationKind::FileUnchanged { file }
+                if !snapshot.tracked_files.contains_key(file) =>
+            {
+                snapshot
+                    .tracked_files
+                    .insert(file.clone(), fingerprint_file(file));
             }
             ValidationKind::FrontmatterPropChanged { prop }
             | ValidationKind::FrontmatterPropUnchanged { prop } => {
@@ -93,14 +108,29 @@ pub fn evaluate_post_checks(
     outcome: &AttemptOutcome,
     permission_probe: Option<&dyn HarnessPermissionProbe>,
 ) -> ValidationPhaseReport {
-    run_checks(
+    let _span = info_span!(
+        "harness_post_checks",
+        source = %plan.source_path.display(),
+        check_count = plan.post_checks.len(),
+        attempt = outcome.attempt,
+        termination = %outcome.termination,
+    )
+    .entered();
+    let report = run_checks(
         &plan.post_checks,
         Some(snapshot),
         Some(outcome),
         &plan.source_path,
         permission_probe,
         FailurePhase::PostCheck,
-    )
+    );
+    debug!(
+        total = report.count(),
+        passed = report.outcomes.iter().filter(|o| o.passed).count(),
+        failed = report.failures().len(),
+        "post-checks complete",
+    );
+    report
 }
 
 /// Run a set of checks and return a structured phase report.
@@ -1456,6 +1486,9 @@ mod tests {
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
             timeout: None,
+            step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,
@@ -1482,6 +1515,9 @@ mod tests {
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
             timeout: None,
+            step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: Vec::new(),
             post_checks: vec![make_rule(
                 0,

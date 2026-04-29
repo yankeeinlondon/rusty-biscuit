@@ -6,11 +6,19 @@
 //! per-step variable overlay for each composition run.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use biscuit_file::FileReference;
+use regex::Regex;
 
 use super::error::CompositionError;
 use super::types::{SequencePlan, SequenceSource, SequenceStep, SequenceStepOverlay};
+
+/// Matches `{{key}}` and `{{key || default}}` placeholder patterns.
+static PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\{\{\s*([^{}|]+?)(?:\s*\|\|\s*([^{}]*?))?\s*\}\}")
+        .expect("placeholder regex is valid")
+});
 
 /// Detect and resolve a sequence plan from a resolved composition source.
 ///
@@ -336,12 +344,8 @@ fn render_simple_template(
     template: &str,
     fields: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
-    let mut result = template.to_string();
-    // Match {{ key }} and {{ key || default }} patterns
-    let re = regex::Regex::new(r"\{\{\s*([^{}|]+?)(?:\s*\|\|\s*([^{}]*?))?\s*\}\}").unwrap();
-
-    result = re
-        .replace_all(&result, |caps: &regex::Captures| {
+    PLACEHOLDER_RE
+        .replace_all(template, |caps: &regex::Captures| {
             let key = caps[1].trim();
             let default = caps.get(2).map(|m| m.as_str().trim().trim_matches('\''));
 
@@ -351,9 +355,7 @@ fn render_simple_template(
                 Some(other) => other.to_string(),
             }
         })
-        .to_string();
-
-    result
+        .into_owned()
 }
 
 fn json_type_name(value: &serde_json::Value) -> &'static str {

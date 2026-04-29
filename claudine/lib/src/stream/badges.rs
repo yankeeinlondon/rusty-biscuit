@@ -22,6 +22,7 @@ pub enum BadgeCategory {
     RateLimit,
     ContextPressure,
     Permission,
+    Config,
 }
 
 /// Severity of a badge from the operator's perspective.
@@ -157,7 +158,9 @@ pub fn derive_badges(summary: &StreamExecutionSummary, provider: Provider) -> Ve
         }
     }
 
-    let already_has_rate_limit = badges.iter().any(|b| b.category == BadgeCategory::RateLimit);
+    let already_has_rate_limit = badges
+        .iter()
+        .any(|b| b.category == BadgeCategory::RateLimit);
 
     if !already_has_rate_limit
         && let Some(rate_limit) = summary.rate_limit.as_ref()
@@ -201,6 +204,33 @@ pub fn derive_badges(summary: &StreamExecutionSummary, provider: Provider) -> Ve
             message: format!("Context window pressure: {percent:.0}% used ({used}/{total} tokens)"),
             remediation_url: dashboard_url.clone(),
         });
+    }
+
+    if let Some(diagnostics) = summary.stderr_diagnostics.as_ref() {
+        let already_has_rate_limit = badges
+            .iter()
+            .any(|b| b.category == BadgeCategory::RateLimit);
+        if !already_has_rate_limit && diagnostics.rate_limit_events > 0 {
+            let reset_hint = diagnostics
+                .rate_limit_reset_at
+                .map(|reset| format!(" (resets at {})", reset.format("%Y-%m-%d %H:%M:%S UTC")))
+                .unwrap_or_default();
+            badges.push(SessionBadge {
+                category: BadgeCategory::RateLimit,
+                severity: BadgeSeverity::Warning,
+                label: "Rate Limit".into(),
+                message: format!("Rate limit hit{reset_hint}"),
+                remediation_url: dashboard_url.clone(),
+            });
+        }
+
+        // Malformed-asset events intentionally do NOT emit a trailer
+        // badge — each malformed asset is already surfaced once per
+        // line as a `SemanticEvent::Warning` ("󰀨 Skipped malformed
+        // OpenCode <kind>: <path>"), which is the authoritative
+        // human-visible surface. The `malformed_asset_events`
+        // counter on `StderrDiagnostics` is preserved for JSONL
+        // reporting and downstream dashboards.
     }
 
     badges
@@ -256,7 +286,8 @@ mod tests {
 
     #[test]
     fn auth_kind_yields_auth_badge_with_dashboard_url() {
-        let summary = summary_with_kind(Provider::Claude, "authentication_error", "Invalid API key");
+        let summary =
+            summary_with_kind(Provider::Claude, "authentication_error", "Invalid API key");
         let badges = derive_badges(&summary, Provider::Claude);
         assert_eq!(badges.len(), 1);
         let badge = &badges[0];
@@ -297,8 +328,7 @@ mod tests {
 
     #[test]
     fn billing_kind_yields_billing_badge() {
-        let summary =
-            summary_with_kind(Provider::Claude, "billing_error", "Insufficient credits");
+        let summary = summary_with_kind(Provider::Claude, "billing_error", "Insufficient credits");
         let badges = derive_badges(&summary, Provider::Claude);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::Billing);
@@ -340,8 +370,7 @@ mod tests {
 
     #[test]
     fn rate_limit_kind_yields_rate_limit_badge() {
-        let summary =
-            summary_with_kind(Provider::Codex, "rate_limit", "Too many requests");
+        let summary = summary_with_kind(Provider::Codex, "rate_limit", "Too many requests");
         let badges = derive_badges(&summary, Provider::Codex);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::RateLimit);
@@ -352,8 +381,7 @@ mod tests {
 
     #[test]
     fn permission_kind_yields_permission_badge() {
-        let summary =
-            summary_with_kind(Provider::Gemini, "permission_error", "Access denied");
+        let summary = summary_with_kind(Provider::Gemini, "permission_error", "Access denied");
         let badges = derive_badges(&summary, Provider::Gemini);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::Permission);
@@ -380,6 +408,7 @@ mod tests {
                 is_throttled: Some(true),
                 retry_after_ms: Some(5000),
                 message: Some("Rate limit exceeded".into()),
+                reset_at: None,
             }),
             ..Default::default()
         };
@@ -398,6 +427,7 @@ mod tests {
                 is_throttled: Some(false),
                 retry_after_ms: None,
                 message: None,
+                reset_at: None,
             }),
             ..Default::default()
         };
@@ -416,6 +446,7 @@ mod tests {
                 is_throttled: Some(true),
                 retry_after_ms: Some(1000),
                 message: Some("Slow down".into()),
+                reset_at: None,
             }),
             ..Default::default()
         };
@@ -468,6 +499,32 @@ mod tests {
     }
 
     #[test]
+    fn billing_error_does_not_produce_rate_limit_badge() {
+        let summary = summary_with_kind(
+            Provider::Claude,
+            "billing_error",
+            "Credit balance is too low",
+        );
+        let badges = derive_badges(&summary, Provider::Claude);
+        let rate_limit_count = badges
+            .iter()
+            .filter(|b| b.category == BadgeCategory::RateLimit)
+            .count();
+        let billing_count = badges
+            .iter()
+            .filter(|b| b.category == BadgeCategory::Billing)
+            .count();
+        assert_eq!(
+            rate_limit_count, 0,
+            "billing_error must not yield a RateLimit badge"
+        );
+        assert_eq!(
+            billing_count, 1,
+            "billing_error must yield exactly one Billing badge"
+        );
+    }
+
+    #[test]
     fn context_usage_at_exact_threshold_yields_badge() {
         use crate::stream::summary::ContextUsage;
         let summary = StreamExecutionSummary {
@@ -481,5 +538,129 @@ mod tests {
         let badges = derive_badges(&summary, Provider::KimiCode);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::ContextPressure);
+    }
+
+    #[test]
+    fn stderr_diagnostics_rate_limit_yields_rate_limit_badge() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 3,
+                rate_limit_events: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].category, BadgeCategory::RateLimit);
+        assert_eq!(badges[0].severity, BadgeSeverity::Warning);
+        assert_eq!(badges[0].label, "Rate Limit");
+    }
+
+    #[test]
+    fn stderr_diagnostics_rate_limit_includes_reset_time_in_message() {
+        use crate::stream::summary::StderrDiagnostics;
+        use chrono::TimeZone;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                rate_limit_events: 1,
+                rate_limit_reset_at: Some(
+                    chrono::Utc
+                        .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+                        .unwrap(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert_eq!(badges.len(), 1);
+        assert!(badges[0].message.contains("2026-04-16 04:18:56"));
+    }
+
+    #[test]
+    fn stderr_diagnostics_does_not_duplicate_rate_limit_badge_from_error_kind() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            is_error: true,
+            error_kind: Some("rate_limit".into()),
+            error_message: Some("Too many requests".into()),
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                rate_limit_events: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        let rate_limit_count = badges
+            .iter()
+            .filter(|b| b.category == BadgeCategory::RateLimit)
+            .count();
+        assert_eq!(rate_limit_count, 1);
+    }
+
+    #[test]
+    fn stderr_diagnostics_malformed_assets_does_not_emit_config_badge() {
+        use crate::stream::summary::StderrDiagnostics;
+        // Per the 2026-04-18 OpenCode reporting contract, malformed
+        // asset events are surfaced once per line as Warning events
+        // and MUST NOT be repeated as a trailer Config badge — even
+        // when the diagnostics counter is non-zero.
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 2,
+                malformed_asset_events: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert!(
+            !badges.iter().any(|b| b.category == BadgeCategory::Config),
+            "Config trailer badge must be absent for malformed assets: {badges:?}"
+        );
+    }
+
+    #[test]
+    fn stderr_diagnostics_single_malformed_asset_does_not_emit_config_badge() {
+        use crate::stream::summary::StderrDiagnostics;
+        // Singular-noun branch is also gone — no trailer badge regardless
+        // of the count.
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                malformed_asset_events: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert!(
+            !badges.iter().any(|b| b.category == BadgeCategory::Config),
+            "Config trailer badge must be absent for single malformed asset: {badges:?}"
+        );
+    }
+
+    #[test]
+    fn stderr_diagnostics_empty_counts_produce_no_badges() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert!(badges.is_empty());
+    }
+
+    #[test]
+    fn config_category_serializes_snake_case() {
+        let json = serde_json::to_string(&BadgeCategory::Config).unwrap();
+        assert_eq!(json, "\"config\"");
     }
 }

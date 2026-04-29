@@ -11,16 +11,23 @@
         "hostable",
         "indicatif",
         "insta",
+        "Kakoune",
         "lazydocker",
         "mermaidjs",
         "nextest",
+        "osascript",
         "oxker",
         "pinentry",
         "proptest",
         "ptyprocess",
         "Qwen",
         "rankdir",
+        "sclu",
+        "skellock",
         "sparklines",
+        "tolower",
+        "toupper",
+        "underspecified",
         "yazi"
     ]
 }

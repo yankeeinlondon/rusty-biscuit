@@ -29,12 +29,15 @@
 
 use crate::markdown::{
     Markdown, MarkdownError,
+    block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
     dsl::parse_code_info,
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
     inline::{InlineEvent, InlineTag, MarkProcessor},
+    output::code_block,
 };
+use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
@@ -50,9 +53,15 @@ use biscuit_terminal::utils::UnicodeWidthStr;
 use biscuit_terminal::utils::layout::Alignment;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::path::{Path, PathBuf};
-use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
-use syntect::parsing::{Scope, SyntaxReference};
+use syntect::parsing::Scope;
+
+// Re-export shared code-block helpers so existing call sites and tests keep working.
+#[cfg(test)]
+pub(crate) use code_block::compute_highlight_bg;
+#[cfg(test)]
+pub(crate) use code_block::find_syntax;
+pub(crate) use code_block::render_terminal_code_block as highlight_code;
 
 /// Parse image alt text to extract optional width specification.
 ///
@@ -786,6 +795,7 @@ pub fn write_terminal<W: std::io::Write>(
     tracing::debug!(terminal_width, "Terminal width for rendering");
 
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    let hr_defaults = hr_defaults_from_frontmatter(md);
 
     // Load prose theme for ProseHighlighter
     let prose_syntect_theme =
@@ -799,11 +809,12 @@ pub fn write_terminal<W: std::io::Write>(
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
     // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
+    // and RuleProcessor for horizontal rules with attributes
     let parser = Parser::new_ext(
         md.content(),
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     );
-    let events = MarkProcessor::new(parser);
+    let events = RuleProcessor::new(MarkProcessor::new(parser));
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -818,7 +829,11 @@ pub fn write_terminal<W: std::io::Write>(
     let mut table_alignments: Vec<Alignment> = Vec::new();
     let mut current_row: Vec<String> = Vec::new();
     let mut current_cell = String::new();
-    let table_terminal = Terminal::builder()
+    // Single outer `Terminal` context shared by every component that renders
+    // inside this pipeline (tables, horizontal rules, ...). Built once from
+    // the resolved options so every consumer honors `max_width`, `color_depth`,
+    // and `emit_hyperlinks` without re-running capability detection (B2).
+    let mut render_terminal = Terminal::builder()
         .width(terminal_width as u32)
         .osc_link_support(emit_hyperlinks)
         .color_depth(match color_depth {
@@ -828,6 +843,19 @@ pub fn write_terminal<W: std::io::Write>(
             ColorDepth::None => TerminalColorDepth::None,
         })
         .build();
+    match options.image_mode {
+        TerminalImageMode::Never => {
+            render_terminal.is_tty = false;
+            render_terminal.image_support = ImageSupport::None;
+        }
+        TerminalImageMode::Force => {
+            render_terminal.is_tty = true;
+            if matches!(render_terminal.image_support, ImageSupport::None) {
+                render_terminal.image_support = ImageSupport::Kitty;
+            }
+        }
+        TerminalImageMode::Auto => {}
+    }
 
     // Image tracking and rendering
     let mut in_image = false;
@@ -880,6 +908,25 @@ pub fn write_terminal<W: std::io::Write>(
             InlineEvent::End(InlineTag::Mark) => {
                 in_mark = false;
                 scope_stack.pop();
+            }
+
+            // Handle horizontal rule with attributes
+            InlineEvent::HorizontalRule(attrs) => {
+                // Build the rule from attributes via the shared helper so the
+                // terminal and HTML code paths stay consistent (Phase 5).
+                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
+                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+            }
+            // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
+            // pulldown-cmark `Event::Rule`. Handle them explicitly so the
+            // terminal output gets a default dashed rule instead of falling
+            // through the catch-all arm.
+            InlineEvent::Standard(Event::Rule) => {
+                let rule = build_rule_with_defaults(
+                    hr_defaults.as_ref(),
+                    &crate::markdown::inline::HorizontalRuleAttrs::default(),
+                );
+                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
             }
 
             // Standard pulldown-cmark events
@@ -1280,7 +1327,7 @@ pub fn write_terminal<W: std::io::Write>(
                             in_emphasis,
                             in_strong,
                         },
-                        &table_terminal,
+                        &render_terminal,
                     ));
                 } else {
                     let style = resolve_prose_text_style(
@@ -1825,7 +1872,13 @@ fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
 /// ANSI-formatted string with title (if present) on the left and language right-aligned.
 /// Title is bold, language is not. For title-only headers (empty language with title),
 /// only the title is rendered.
-fn format_header_row(
+///
+/// ## Notes
+///
+/// This helper is also reused by [`crate::markdown::yaml_block::YamlBlock`] to keep
+/// the YAML-fence header row byte-identical between Markdown and YamlBlock outputs.
+/// Any signature change here must keep that consumer in sync.
+pub(crate) fn format_header_row(
     title: Option<&str>,
     language: &str,
     bg_color: Color,
@@ -1888,20 +1941,6 @@ fn format_header_row(
     }
 
     output
-}
-
-/// Emits a padding row with the specified background color.
-///
-/// The padding row consists of:
-/// - Setting the background color
-/// - Clearing to end of line (\x1b[K)
-/// - Resetting all attributes (\x1b[0m)
-/// - Adding a newline
-fn emit_padding_row(bg_color: Color) -> String {
-    format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
-        bg_color.r, bg_color.g, bg_color.b
-    )
 }
 
 /// A wrapper that handles word-based line wrapping for prose text.
@@ -2234,6 +2273,55 @@ impl LineWrapper {
     }
 }
 
+/// Emits a rendered [`HorizontalRule`] into `wrapper`, honoring the rule's
+/// [`Layout`](biscuit_terminal::utils::layout::Layout) margins (B3) and using
+/// the outer [`Terminal`] context (B2).
+///
+/// The rule's `top_margin` and `bottom_margin` are resolved to character
+/// counts via [`Layout::resolve_margin`](biscuit_terminal::utils::layout::Layout::resolve_margin)
+/// and emitted as blank lines. A default-layout rule (`Margin::None`) produces
+/// a single trailing blank line to match the surrounding markdown rhythm —
+/// replacing the previous hardcoded double `\n\n` spacing.
+fn write_horizontal_rule(
+    wrapper: &mut LineWrapper,
+    rule: &HorizontalRule,
+    term: &Terminal,
+    terminal_width: u16,
+) {
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::utils::layout::{Layout, Margin};
+
+    // If we're mid-line, break to column 0 before emitting margins.
+    if wrapper.current_col() > 0 {
+        wrapper.newline();
+    }
+
+    let layout = rule.layout();
+    let top = Layout::resolve_margin(&layout.top_margin, terminal_width as u32);
+    for _ in 0..top {
+        wrapper.newline();
+    }
+
+    // `render` returns the rule content without a trailing newline; use
+    // `push_with_newlines` + an explicit `\n` so wrapper column tracking
+    // resets correctly.
+    wrapper.push_with_newlines(&rule.render(term));
+    wrapper.push_with_newlines("\n");
+
+    let bottom = Layout::resolve_margin(&layout.bottom_margin, terminal_width as u32);
+    if matches!(layout.bottom_margin, Margin::None) {
+        // Default behavior: one blank line after the rule so subsequent
+        // blocks visually separate without forcing authors to set an
+        // explicit margin. Callers that want tighter or looser spacing can
+        // configure `layout.bottom_margin` on the rule.
+        wrapper.push_with_newlines("\n");
+    } else {
+        for _ in 0..bottom {
+            wrapper.newline();
+        }
+    }
+}
+
 /// Adjusts a background color based on color mode and RGB delta values.
 ///
 /// For dark mode, adds brightness (capped at 235 to avoid white).
@@ -2256,7 +2344,7 @@ impl LineWrapper {
 /// let adjusted = adjust_background(theme_bg, ColorMode::Dark, (30, 25, 0), (20, 15, 0));
 /// // Result: Color { r: 70, g: 65, b: 40, a: 255 }
 /// ```
-fn adjust_background(
+pub(crate) fn adjust_background(
     base: Color,
     color_mode: ColorMode,
     dark_delta: (u8, u8, u8),
@@ -2278,214 +2366,12 @@ fn adjust_background(
     }
 }
 
-/// Computes a highlighted background color based on the theme background and color mode.
-///
-/// Uses warmer tones (more red/green) to create a visual highlight effect.
-#[inline]
-fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
-    adjust_background(theme_bg, color_mode, (30, 25, 0), (20, 15, 0))
-}
-
 /// Computes a subtle background color for blockquotes based on the theme background.
 ///
 /// Uses uniform brightness adjustment for subtle visual separation.
 #[inline]
 fn compute_blockquote_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
     adjust_background(theme_bg, color_mode, (20, 20, 20), (15, 15, 15))
-}
-
-/// Highlights code with syntax highlighting and optional line numbers.
-///
-/// Applies syntax highlighting using syntect, adds top/bottom padding rows,
-/// and optionally renders line numbers and line highlighting based on DSL metadata.
-///
-/// ## Arguments
-///
-/// * `code` - Source code to highlight
-/// * `language` - Programming language identifier (e.g., "rust", "python")
-/// * `highlighter` - Code highlighter with loaded syntax set and theme
-/// * `options` - Terminal rendering options (includes global line numbering flag)
-/// * `meta` - Code block DSL metadata (title, highlight ranges, line numbering override)
-/// * `color_mode` - Dark or light mode for computing highlight background colors
-///
-/// ## Returns
-///
-/// ANSI-formatted string with:
-/// - Top padding row (blank line with theme background)
-/// - Code lines with syntax highlighting, optional line numbers, and highlight backgrounds
-/// - Bottom padding row (blank line with theme background)
-///
-/// ## Examples
-///
-/// ```ignore
-/// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-/// use darkmatter::markdown::output::TerminalOptions;
-/// use darkmatter::markdown::dsl::CodeBlockMeta;
-///
-/// let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-/// let options = TerminalOptions::default();
-/// let meta = CodeBlockMeta::default();
-///
-/// let result = highlight_code(
-///     "fn main() {}",
-///     "rust",
-///     &highlighter,
-///     &options,
-///     &meta,
-///     ColorMode::Dark
-/// );
-/// // Result: ANSI-formatted code with padding, syntax colors, and backgrounds
-/// ```
-fn highlight_code(
-    code: &str,
-    language: &str,
-    highlighter: &CodeHighlighter,
-    options: &TerminalOptions,
-    meta: &crate::markdown::dsl::CodeBlockMeta,
-    color_mode: ColorMode,
-) -> Result<String, MarkdownError> {
-    let syntax = find_syntax(language, highlighter.syntax_set())
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
-    let theme = highlighter.theme();
-
-    // Get background color from theme
-    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
-
-    // Use LinesWithEndings to preserve newlines - required for proper multi-line
-    // syntax parsing in grammars like bash/shell that track state across lines
-    use syntect::util::LinesWithEndings;
-    let lines: Vec<&str> = LinesWithEndings::from(code).collect();
-    let mut output = String::with_capacity(code.len() * 2);
-
-    // Determine line number width
-    let line_number_width = if options.include_line_numbers || meta.line_numbering {
-        format!("{}", lines.len()).len()
-    } else {
-        0
-    };
-
-    // Add top padding row
-    output.push_str(&emit_padding_row(bg_color));
-
-    // Create highlighter for this code block
-    let mut hl = HighlightLines::new(syntax, theme);
-
-    for (idx, line) in lines.iter().enumerate() {
-        let line_number = idx + 1;
-
-        // Determine if this line should be highlighted
-        let is_highlighted = meta.highlight.contains(line_number);
-        let line_bg = if is_highlighted {
-            compute_highlight_bg(bg_color, color_mode)
-        } else {
-            bg_color
-        };
-
-        // Set background color for the line (applies to gutter and content)
-        output.push_str(&format!(
-            "\x1b[48;2;{};{};{}m",
-            line_bg.r, line_bg.g, line_bg.b
-        ));
-
-        // Add line number gutter if enabled (with background already set)
-        if line_number_width > 0 {
-            // Gray foreground for line numbers, background already set above
-            output.push_str(&format!(
-                "\x1b[38;2;128;128;128m{:>width$} │ ",
-                line_number,
-                width = line_number_width
-            ));
-        } else {
-            // Add left padding (1 character) when no line numbers
-            output.push(' ');
-        }
-
-        // Highlight the line and get styled ranges
-        let ranges = hl
-            .highlight_line(line, highlighter.syntax_set())
-            .map_err(|e| MarkdownError::ThemeLoad(format!("Syntax highlighting failed: {}", e)))?;
-
-        // Convert styled ranges to ANSI escape codes, but filter out newlines
-        // from the output (we handle line breaks ourselves)
-        for (style, text) in &ranges {
-            let text_without_newline = text.trim_end_matches('\n');
-            if !text_without_newline.is_empty() {
-                output.push_str(&format!(
-                    "\x1b[38;2;{};{};{}m{}",
-                    style.foreground.r,
-                    style.foreground.g,
-                    style.foreground.b,
-                    text_without_newline
-                ));
-            }
-        }
-
-        // Clear to end of line with background color, then reset
-        // \x1b[K clears from cursor to end of line using current background
-        output.push_str("\x1b[K\x1b[0m");
-
-        // Add newline after each line (including last line, so bottom padding is on its own line)
-        output.push('\n');
-    }
-
-    // Add bottom padding row (without trailing newline to avoid double spacing)
-    output.push_str(&format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
-        bg_color.r, bg_color.g, bg_color.b
-    ));
-
-    Ok(output)
-}
-
-/// Finds syntax definition by language identifier.
-///
-/// Searches in the following order:
-/// 1. By file extension (e.g., "rs", "py", "js")
-/// 2. By exact name (e.g., "Rust", "Python")
-/// 3. By case-insensitive name match (e.g., "rust" -> "Rust")
-/// 4. By common alias mapping (e.g., "shell" -> "bash", "c++" -> "cpp")
-fn find_syntax<'a>(
-    language: &str,
-    syntax_set: &'a syntect::parsing::SyntaxSet,
-) -> Option<&'a SyntaxReference> {
-    if language.is_empty() {
-        return None;
-    }
-
-    // Try by extension first (common case)
-    if let Some(syntax) = syntax_set.find_syntax_by_extension(language) {
-        return Some(syntax);
-    }
-
-    // Try by exact name
-    if let Some(syntax) = syntax_set.find_syntax_by_name(language) {
-        return Some(syntax);
-    }
-
-    // Try case-insensitive name match
-    let language_lower = language.to_lowercase();
-    for syntax in syntax_set.syntaxes() {
-        if syntax.name.to_lowercase() == language_lower {
-            return Some(syntax);
-        }
-    }
-
-    // Try common aliases that differ from extension/name
-    let alias = match language_lower.as_str() {
-        "shell" | "zsh" => "bash",
-        "c++" => "cpp",
-        "dockerfile" => "Dockerfile",
-        "makefile" | "make" => "Makefile",
-        "javascript" => "js",
-        "typescript" => "ts",
-        "python3" => "py",
-        _ => return None,
-    };
-
-    // Try alias as extension first, then as name
-    syntax_set
-        .find_syntax_by_extension(alias)
-        .or_else(|| syntax_set.find_syntax_by_name(alias))
 }
 
 #[cfg(test)]
@@ -6447,7 +6333,7 @@ fn line6() {}
 
         // Check for duplicate background codes
         let bg_code = "\x1b[48;2;255;243;184m";
-        let bg_count = output.matches(bg_code).count();
+        let _bg_count = output.matches(bg_code).count();
 
         // For "separate it from" (3 words + 2 spaces when styled), we expect up to 5 bg codes
         // But we should NOT have consecutive duplicate codes

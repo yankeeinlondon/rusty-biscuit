@@ -59,6 +59,9 @@ pub(crate) enum Commands {
     Handle(commands::handle::HandleArgs),
     /// Generate shell completions.
     Completions(commands::completions::CompletionsArgs),
+    /// Hidden completion engine invoked by generated bash/zsh/fish scripts.
+    #[command(name = "__complete", hide = true)]
+    Complete(commands::completions::CompleteArgs),
     /// Manage Claudine configuration with a TUI.
     Config(commands::config_tui::ConfigArgs),
     /// Re-sync hook registrations with detected agents.
@@ -104,19 +107,4 @@ pub(crate) enum Commands {
     InlineCompose(commands::compose::InlineComposeArgs),
     /// Run a serial sequence of composition steps from a single document.
     Sequence(commands::sequence::SequenceArgs),
-}
-
-impl Commands {
-    /// Whether this command should trigger the init wizard when no user config exists.
-    ///
-    /// Returns `false` for commands that work without user-scope configuration:
-    /// - `Completions` generates shell completions (no config needed)
-    /// - `Handle` is called from hook registrations and resolves config from
-    ///   the dispatcher (which merges user + repo scope)
-    ///
-    /// Wrapper commands (Claude, Codex, etc.) are dispatched before this check
-    /// runs and are not affected.
-    pub fn requires_config(&self) -> bool {
-        !matches!(self, Commands::Completions(_) | Commands::Handle(_))
-    }
 }

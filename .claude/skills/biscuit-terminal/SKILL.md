@@ -37,7 +37,7 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | Topic | Description |
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
-| [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, Table, TerminalImage, TextBlock, Todo, TwoColumn |
+| [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, HorizontalRule, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, StatusBlock, Table, TerminalImage, TextBlock, Todo, TwoColumn |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | Terminal-facing `MermaidDiagram` adapter backed by biscuit-visualized |
 | [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |
@@ -96,6 +96,71 @@ let fg = match Terminal::color_mode() {
     ColorMode::Dark | ColorMode::Unknown => "white",
 };
 ```
+
+### Status Blocks
+
+```rust
+use biscuit_terminal::prelude::{Prose, StatusBlock, StatusState};
+
+let block = StatusBlock::new(StatusState::Error)
+    .header("<b>Shell Expansion Failed</b>")
+    .body(Prose::new("Missing closing brace in `${...}` directive."))
+    .hint("Check the template syntax and retry.");
+```
+
+Use `StatusBlock` when you need the common Claudine-style `Status` header plus a colored
+`BlockQuote` body and optional hint as one renderable. It defaults to a `┃ ` border,
+`left_margin = 0`, `right_margin = 5`, and `WordWrap::WrapProse(Some(8), None)` so the
+body border lines up with the preceding `Status` icon/header line.
+
+### Horizontal Rules
+
+```rust
+use biscuit_terminal::prelude::*;  // HorizontalRule, RuleStyle, RuleAlignment, RuleWeight, BrowserRenderable
+
+let rule = HorizontalRule::new()
+    .style(RuleStyle::Waves)
+    .alignment(RuleAlignment::Centered)
+    .weight(RuleWeight::Medium)
+    .width("75%");
+
+// Terminal rendering — honors color_depth and width from the passed `Terminal`
+let output = rule.render(&terminal);
+
+// Browser rendering — default SVG declares --hr-weight / --hr-color / --hr-width
+let svg = rule.render_to_browser();
+
+// Browser rendering with per-instance CSS variable overrides
+use std::collections::HashMap;
+let mut overrides = HashMap::new();
+overrides.insert("hr-weight".to_string(), "12".to_string());
+let svg_override = rule.render_to_browser_with_inline_variables(&overrides);
+```
+
+The `HorizontalRule` component implements both `Renderable` (terminal output) and `BrowserRenderable` (HTML/SVG output).
+
+**Supported attributes:**
+
+- `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+- `alignment`: `full` (default), `centered`, `left`, `right`
+- `weight`: `thin`, `medium` (default), `thick` — heavy Unicode glyphs in Tier 2, 2/4/8px stroke in browser
+- `width`: CSS-like string (e.g. `"75%"`, `"200px"`)
+- `color`: CSS color name or `#rrggbb` — emits ANSI escapes in terminal when `color_depth` supports it
+
+**Terminal rendering tiers:**
+
+1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path when the terminal advertises Kitty-compatible image support.
+2. **Tier 2 (Unicode):** fallback; gated on `locale::env_says_utf8()`.
+3. **Tier 3 (ASCII):** fallback when the locale does not signal UTF-8.
+
+All four main types (`HorizontalRule`, `RuleStyle`, `RuleAlignment`, `RuleWeight`) plus the `BrowserRenderable` trait are re-exported through `biscuit_terminal::prelude`.
+
+`StatusState::Error` is now the canonical error severity. `StatusState::Failure` remains as a
+deprecated compatibility variant, and persisted JSON `"Failure"` still deserializes as
+`StatusState::Error`. Prefer `StatusState::default_color()` when you want the canonical border
+or accent color for a severity instead of re-encoding the Tailwind mapping yourself. See
+[`biscuit-terminal/README.md`](../../../biscuit-terminal/README.md) for the full severity table
+and override knobs.
 
 ## Terminal Support Matrix
 
@@ -177,6 +242,7 @@ biscuit_terminal/
 │   ├── section.rs        # Section with heading levels (h1-h6)
 │   ├── block_quote.rs    # BlockQuote with attribution
 │   ├── prose.rs          # Styled text with tokens
+│   ├── status_block.rs   # Status + BlockQuote + hint composite
 │   ├── text_block.rs     # Uniform block styling
 │   ├── inline_content.rs # Inline concatenation without newlines
 │   ├── list.rs           # OrderedList, UnorderedList

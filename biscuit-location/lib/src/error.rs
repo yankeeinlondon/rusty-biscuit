@@ -6,7 +6,9 @@ pub type Result<T> = std::result::Result<T, LocationError>;
 /// Errors produced by biscuit-location operations.
 #[derive(Debug, thiserror::Error)]
 pub enum LocationError {
-    #[error("invalid coordinates: latitude must be in [-90, 90] and longitude in [-180, 180], got ({latitude}, {longitude})")]
+    #[error(
+        "invalid coordinates: latitude must be in [-90, 90] and longitude in [-180, 180], got ({latitude}, {longitude})"
+    )]
     InvalidCoordinates { latitude: f64, longitude: f64 },
 
     #[error("invalid location input: {0}")]
@@ -35,6 +37,12 @@ pub enum LocationError {
 
     #[error("no GPS fix available")]
     NoGpsFix,
+
+    #[error("MaxMind database download failed: {0}")]
+    DatabaseDownload(String),
+
+    #[error("MaxMind license key not configured (set MAXMIND_LICENSE_KEY env var)")]
+    MissingLicenseKey,
 
     #[error("internal error: {0}")]
     Internal(String),

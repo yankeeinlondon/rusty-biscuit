@@ -1,10 +1,11 @@
 pub(crate) mod error_report;
-pub(crate) mod shell_expansion_error;
+pub(crate) mod error_walker;
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
@@ -711,6 +712,20 @@ pub(crate) fn format_session_start(
     .render(&crate::log::terminal())
 }
 
+/// Format a terminal-error `Status` line announcing that the user aborted
+/// the wrapped session with Ctrl+C.
+///
+/// Rendered with the circular failure theme so the icon matches Claudine's
+/// other terminal-error surfaces. Intended for stderr in the wrap command's
+/// `ProcessTermination::Interrupted` short-circuit.
+#[allow(deprecated)]
+pub(crate) fn format_user_interrupt_status() -> String {
+    Status::new("User terminated non-interactive session with CTRL+C")
+        .state(StatusState::Failure)
+        .theme(StatusTheme::Circular)
+        .render(&crate::log::terminal())
+}
+
 /// Format an INFO-only line announcing the working directory used to launch the agent.
 pub(crate) fn format_launch_directory(directory: &Path) -> String {
     Prose::new(format!(
@@ -1130,6 +1145,29 @@ mod tests {
             }
 
             prop_assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+        }
+    }
+
+    mod interrupt_status_tests {
+        use super::super::format_user_interrupt_status;
+        use biscuit_terminal::prelude::strip_escape_codes;
+
+        #[test]
+        fn format_user_interrupt_status_renders_failure_icon_and_message() {
+            let rendered = format_user_interrupt_status();
+            let plain = strip_escape_codes(&rendered);
+            assert!(
+                plain.contains("User terminated non-interactive session with CTRL+C"),
+                "missing expected interrupt message: {plain:?}"
+            );
+            assert!(
+                !plain.contains('\u{2192}') && !plain.contains('\u{2190}'),
+                "interrupt status must not reuse tool-call arrows: {plain:?}"
+            );
+            assert!(
+                !plain.trim().is_empty(),
+                "rendered status line must not be empty"
+            );
         }
     }
 }

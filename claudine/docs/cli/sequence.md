@@ -13,8 +13,25 @@ The `sequence` command allows you to run a serial sequence of composition steps 
 ## Usage
 
 ```bash
-claudine sequence <file> [flags]
+claudine sequence [flags] <arg>...
 ```
+
+Positional arguments are one file reference plus optional `key=value` setters
+in any order:
+
+```bash
+claudine sequence @research.md topic="async traits" retries=3
+claudine sequence topic="async traits" @research.md
+```
+
+Setter values are parsed as JSON5 first and fall back to strings when parsing
+fails. Setter keys must start with an ASCII letter or `_` and may contain
+letters, digits, `_`, or `-`. Dot-paths and path-like tokens such as
+`foo.bar=baz` are not valid setters and are treated as file-reference
+candidates.
+
+Inline setters override matching keys from `--set`, but reserved overlay keys
+listed in [Reserved Overlay Keys](#reserved-overlay-keys) still win over both.
 
 ## Frontmatter Configuration
 
@@ -124,6 +141,16 @@ The `sequence` command inherits all shared composition flags:
 - **Output Control**: `--output <FORMAT>`, `--quiet` (`-q`), `--silent`.
 - **Overrides**: `--set <JSON>`, `--model <MODEL>`.
 
+### Performance Reporting
+
+`claudine sequence --perf` emits a single aggregated performance report at the end of the run, after the sequence summary. The report includes:
+
+- **CLI Overhead** — startup timings captured at sequence entry.
+- **Composition Report** — merged across all steps that performed document composition.
+- **Agent Execution** — summed launches and total time, with first-response latency averaged across steps. The note line includes both average and minimum latency.
+
+If the sequence is interrupted or stops due to `fail_fast`, the report is still rendered and includes a `partial sequence metrics` note. `--perf` overrides `--silent` and `--quiet` because it is an explicit opt-in.
+
 ## Example: Multi-Provider Research
 
 ```markdown
@@ -142,4 +169,9 @@ Research the following topic using {{state.name}}:
 {{topic || 'Rust 2024 Edition changes'}}
 ```
 
-Run with: `claudine sequence research.md --set '{"topic": "Async traits in Rust"}'`
+Run with either form:
+
+```bash
+claudine sequence research.md --set '{"topic":"Async traits in Rust"}'
+claudine sequence research.md topic="Async traits in Rust"
+```

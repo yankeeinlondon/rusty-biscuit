@@ -1,4 +1,6 @@
-use crate::{Attachment, AttachmentKind, Location, Message, MessageBody, PreparedMessage, ProviderKind};
+use crate::{
+    Attachment, AttachmentKind, Location, Message, MessageBody, PreparedMessage, ProviderKind,
+};
 
 #[test]
 fn text_message_builder() {
@@ -51,6 +53,7 @@ fn metadata_builder() {
 #[test]
 fn is_empty_checks() {
     let empty = Message {
+        title: None,
         body: None,
         attachments: vec![],
         location: None,
@@ -144,6 +147,7 @@ fn prepared_message_no_body_has_location() {
 #[test]
 fn prepared_message_no_body_no_location() {
     let msg = Message {
+        title: None,
         body: None,
         attachments: vec![],
         location: None,
@@ -177,6 +181,7 @@ fn prepared_message_render_body_for_provider_markdown() {
 fn prepared_message_render_body_for_provider_none() {
     // Test the render_body_for_provider with no body
     let msg = Message {
+        title: None,
         body: None,
         attachments: vec![],
         location: None,

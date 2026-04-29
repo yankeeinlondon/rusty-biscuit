@@ -48,6 +48,10 @@ pub enum ComposeOperation {
     /// with the command's stdout output.
     ShellExpansion,
 
+    /// Executes approved `::shell-block` directives and replaces them
+    /// with the combined output of the block's commands.
+    ShellBlocks,
+
     /// Resolves `::file` and `::url` directives by including the
     /// referenced markdown document (recursively composed).
     BlockTransclusion,
@@ -151,7 +155,7 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 13;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
@@ -162,12 +166,13 @@ impl ComposeOperation {
             Self::PageBlocks => 3,
             Self::Interpolation => 4,
             Self::ShellExpansion => 5,
-            Self::BlockTransclusion => 6,
-            Self::FrontmatterTransclusion => 7,
-            Self::CodeTransclusion => 8,
-            Self::TocLinking => 9,
-            Self::Cleanup => 10,
-            Self::Normalization => 11,
+            Self::ShellBlocks => 6,
+            Self::BlockTransclusion => 7,
+            Self::FrontmatterTransclusion => 8,
+            Self::CodeTransclusion => 9,
+            Self::TocLinking => 10,
+            Self::Cleanup => 11,
+            Self::Normalization => 12,
         }
     }
 
@@ -179,7 +184,8 @@ impl ComposeOperation {
             | Self::TextReplacement
             | Self::PageBlocks
             | Self::Interpolation
-            | Self::ShellExpansion => ComposePhase::InlinePre,
+            | Self::ShellExpansion
+            | Self::ShellBlocks => ComposePhase::InlinePre,
 
             Self::BlockTransclusion
             | Self::FrontmatterTransclusion
@@ -200,6 +206,7 @@ impl ComposeOperation {
             Self::PageBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
+            Self::ShellBlocks,
             // Transclusion (concurrent)
             Self::BlockTransclusion,
             Self::FrontmatterTransclusion,
@@ -226,6 +233,7 @@ impl std::fmt::Display for ComposeOperation {
             Self::PageBlocks => write!(f, "PageBlocks"),
             Self::Interpolation => write!(f, "Interpolation"),
             Self::ShellExpansion => write!(f, "ShellExpansion"),
+            Self::ShellBlocks => write!(f, "ShellBlocks"),
             Self::BlockTransclusion => write!(f, "BlockTransclusion"),
             Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
             Self::CodeTransclusion => write!(f, "CodeTransclusion"),
@@ -292,6 +300,18 @@ pub struct ComposeOptions {
     /// When `true`, non-object `ctx` frontmatter is downgraded from an error
     /// to a warning and the runtime context is used instead.
     pub(crate) allow_ctx_override: bool,
+
+    // ── Transclusion set-override permissive flags ─────────────────
+    /// When `true`, a `::file` directive whose `set=<value>` RHS fails
+    /// to parse as a JSON5 object is downgraded from `InvalidFrontmatterAssignment`
+    /// to a `ComposeWarning`; sibling valid set clauses still apply.
+    pub(crate) allow_invalid_frontmatter_assignment: bool,
+
+    /// When `true`, a `::file` directive that reassigns the same set
+    /// property (or duplicates the object form) is downgraded from
+    /// `InvalidReassignedFrontmatterProperty` to a `ComposeWarning`; the
+    /// rightmost assignment wins.
+    pub(crate) allow_reassigned_frontmatter_property: bool,
 
     // ── Source context ─────────────────────────────────────────────
     /// Source location of the document being composed.
@@ -447,15 +467,14 @@ pub struct ComposeOptions {
 
     // ── Interpolation ─────────────────────────────────────────────
     /// When `true`, body interpolation processes `{{ }}` expressions
-    /// inside inline code spans and fenced code blocks.
+    /// inside fenced and indented code blocks.
     ///
-    /// By default (`false`), the interpolation scanner skips code
-    /// regions to preserve literal code examples. Set this to `true`
-    /// for template documents where backtick-wrapped expressions
-    /// should still be interpolated.
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this flag only governs fenced/indented code blocks, which by
+    /// default (`false`) are skipped to preserve literal code examples.
     ///
-    /// Can also be set via frontmatter: `interpolate_code_spans: true`.
-    pub(crate) interpolate_code_spans: bool,
+    /// Can also be set via frontmatter: `interpolate_code_blocks: true`.
+    pub(crate) interpolate_code_blocks: bool,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -501,7 +520,15 @@ impl std::fmt::Debug for ComposeOptions {
             .field("perf_enabled", &self.perf_enabled)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
-            .field("interpolate_code_spans", &self.interpolate_code_spans)
+            .field("interpolate_code_blocks", &self.interpolate_code_blocks)
+            .field(
+                "allow_invalid_frontmatter_assignment",
+                &self.allow_invalid_frontmatter_assignment,
+            )
+            .field(
+                "allow_reassigned_frontmatter_property",
+                &self.allow_reassigned_frontmatter_property,
+            )
             .field("context", &self.context)
             .finish()
     }
@@ -527,6 +554,8 @@ impl ComposeOptions {
             enabled_operations: ComposeOperation::all(),
             fail_fast: false,
             allow_ctx_override: false,
+            allow_invalid_frontmatter_assignment: false,
+            allow_reassigned_frontmatter_property: false,
             source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
@@ -554,7 +583,7 @@ impl ComposeOptions {
             context,
             replace_parent_wins: false,
             one_off_replace: None,
-            interpolate_code_spans: false,
+            interpolate_code_blocks: false,
             shell_strip_ansi: true,
         }
     }
@@ -667,14 +696,38 @@ impl ComposeOptions {
         self
     }
 
-    /// Enables interpolation inside code spans and fenced code blocks.
+    /// Downgrades `InvalidFrontmatterAssignment` to a compose warning.
     ///
-    /// When set, `{{ }}` expressions inside backticks and code fences
-    /// are evaluated instead of being skipped. Useful for template
-    /// documents where code formatting wraps interpolation targets.
+    /// When `true`, a `::file` directive whose `set=<value>` RHS is not
+    /// a JSON5 object is dropped with a warning instead of failing the
+    /// pipeline. Sibling `set.NAME=<value>` clauses on the same directive
+    /// line are unaffected and still apply.
     #[must_use]
-    pub fn with_interpolate_code_spans(mut self, enabled: bool) -> Self {
-        self.interpolate_code_spans = enabled;
+    pub fn with_allow_invalid_frontmatter_assignment(mut self, allow: bool) -> Self {
+        self.allow_invalid_frontmatter_assignment = allow;
+        self
+    }
+
+    /// Downgrades `InvalidReassignedFrontmatterProperty` to a compose warning.
+    ///
+    /// When `true`, a duplicate `set.NAME=` assignment (or duplicate
+    /// `set=<object>`) on the same `::file` directive emits a warning
+    /// instead of failing the pipeline. The rightmost assignment wins.
+    #[must_use]
+    pub fn with_allow_reassigned_frontmatter_property(mut self, allow: bool) -> Self {
+        self.allow_reassigned_frontmatter_property = allow;
+        self
+    }
+
+    /// Enables interpolation inside fenced and indented code blocks.
+    ///
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this option only opts fenced/indented code blocks into the
+    /// interpolation scan, which is otherwise skipped to preserve
+    /// literal code examples.
+    #[must_use]
+    pub fn with_interpolate_code_blocks(mut self, enabled: bool) -> Self {
+        self.interpolate_code_blocks = enabled;
         self
     }
 
@@ -1313,6 +1366,7 @@ pub enum ComposeStage {
     PageBlocks,
     Interpolation,
     ShellExpansion,
+    ShellBlocks,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
@@ -1331,6 +1385,7 @@ impl std::fmt::Display for ComposeStage {
             Self::PageBlocks => "page blocks",
             Self::Interpolation => "interpolation",
             Self::ShellExpansion => "shell expansion",
+            Self::ShellBlocks => "shell blocks",
             Self::TransclusionParse => "transclusion parse",
             Self::TransclusionPrepare => "transclusion prepare",
             Self::TransclusionResolve => "transclusion resolve",
@@ -1400,6 +1455,9 @@ pub struct ComposeReport {
     /// Number of shell expansions applied.
     pub shell_expansions_applied: usize,
 
+    /// Number of shell blocks applied.
+    pub shell_blocks_applied: usize,
+
     /// Number of shell approvals used.
     pub shell_approvals_used: usize,
 
@@ -1467,6 +1525,7 @@ impl ComposeReport {
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
             || self.shell_expansions_applied > 0
+            || self.shell_blocks_applied > 0
             || self.cleanup_changed
             || self.page_blocks_rendered > 0
             || self.transclusions_applied > 0
@@ -1515,6 +1574,10 @@ impl ComposeReport {
                 "{} shell expansion(s)",
                 self.shell_expansions_applied
             ));
+        }
+
+        if self.shell_blocks_applied > 0 {
+            parts.push(format!("{} shell block(s)", self.shell_blocks_applied));
         }
 
         if self.shell_approvals_used > 0 {
@@ -1581,6 +1644,7 @@ impl ComposeReport {
         self.interpolations_applied += other.interpolations_applied;
         self.toc_links_generated += other.toc_links_generated;
         self.shell_expansions_applied += other.shell_expansions_applied;
+        self.shell_blocks_applied += other.shell_blocks_applied;
         self.shell_approvals_used += other.shell_approvals_used;
         self.cleanup_changed |= other.cleanup_changed;
         self.page_blocks_rendered += other.page_blocks_rendered;
@@ -1738,6 +1802,7 @@ mod tests {
                 ComposeOperation::PageBlocks,
                 ComposeOperation::Interpolation,
                 ComposeOperation::ShellExpansion,
+                ComposeOperation::ShellBlocks,
                 ComposeOperation::BlockTransclusion,
                 ComposeOperation::FrontmatterTransclusion,
                 ComposeOperation::CodeTransclusion,
@@ -1763,6 +1828,7 @@ mod tests {
             (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
             (ComposeOperation::Interpolation, ComposePhase::InlinePre),
             (ComposeOperation::ShellExpansion, ComposePhase::InlinePre),
+            (ComposeOperation::ShellBlocks, ComposePhase::InlinePre),
             (
                 ComposeOperation::BlockTransclusion,
                 ComposePhase::Transclusion,
@@ -2189,7 +2255,7 @@ mod tests {
     }
 
     #[test]
-    fn default_order_has_twelve_operations() {
-        assert_eq!(ComposeOperation::default_order().len(), 12);
+    fn default_order_has_thirteen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 13);
     }
 }

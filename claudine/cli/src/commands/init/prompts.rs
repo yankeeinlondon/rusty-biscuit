@@ -1,4 +1,10 @@
 //! Interactive prompts for the init wizard using the inquire crate.
+//!
+//! This module is compiled only for tests (`#[cfg(test)] pub mod init;`
+//! in `commands/mod.rs`). The production wizard lives in
+//! `init_wizard`; the helpers here are retained alongside their
+//! tests for reference, so `dead_code` is allowed.
+#![allow(dead_code)]
 
 use std::collections::HashSet;
 use std::path::PathBuf;

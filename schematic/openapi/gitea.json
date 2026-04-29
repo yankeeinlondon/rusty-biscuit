@@ -954,6 +954,17 @@
             "type": "integer",
             "format": "int64"
           },
+          "labels": {
+            "description": "Labels applied to the PR.\n\nGitea returns the same `Label` shape on PRs as on issues. The list\nendpoint includes this field by default, but `#[serde(default)]`\nkeeps responses (or fixtures) that omit it deserializable.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Label"
+                }
+              ]
+            }
+          },
           "mergeable": {
             "description": "Whether the PR is mergeable.",
             "type": "boolean"
@@ -1183,6 +1194,38 @@
               "$ref": "#/components/schemas/TimelineEvent"
             }
           ]
+        }
+      },
+      "Label": {
+        "title": "Label",
+        "description": "A label applied to a Gitea issue or pull request.\n\nGitea uses a single `Label` shape for both issues and PRs.",
+        "type": "object",
+        "properties": {
+          "color": {
+            "description": "Label color (hex without `#`, e.g. \"ff0000\").",
+            "type": "string"
+          },
+          "description": {
+            "description": "Optional human-readable description.",
+            "type": "string"
+          },
+          "exclusive": {
+            "description": "Whether the label is exclusive within its scope.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Label ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "description": "Label name (e.g. \"bug\", \"enhancement\").",
+            "type": "string"
+          },
+          "url": {
+            "description": "Optional API URL for the label resource.",
+            "type": "string"
+          }
         }
       },
       "RepoTag": {

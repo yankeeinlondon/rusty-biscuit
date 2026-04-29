@@ -1,7 +1,14 @@
 set dotenv-load
 set positional-arguments
+# set allow-duplicate-recipes
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -20,12 +27,6 @@ PACKAGE := "Schematic"
 SCHEMATIC := lowercase(PACKAGE)
 DEFINE_NAME := PACKAGE + " Define Library"
 DEFINE := SCHEMATIC + "-define"
-GEN_NAME := PACKAGE + " Gen Library"
-GEN := SCHEMATIC + "-gen"
-SCHEMA_NAME := PACKAGE + " Schema Library"
-SCHEMA := SCHEMATIC + "-schema"
-
-DOCS := "@schematic/docs/io/openapi-extensions.md @schematic/docs/json-schema/deep-dive.md "
 
 
 default:
@@ -44,107 +45,18 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_opencode prompt:
-    #!/usr/bin/env bash
-    if command -v opencode &> /dev/null; then
-        local MODEL
-        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
-        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
-        echo
-        opencode run "{{prompt}}" --model "$MODEL"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_codex prompt:
-    #!/usr/bin/env bash
-    if command -v codex &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        codex exec "{{prompt}}"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-
-# use an AI agent to respond to a question (uses `AGENT`)
-ask prompt:
-    #!/usr/bin/env bash
-    if [[ "${AGENT,,}" == "opencode" ]]; then
-        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    elif [[ "${AGENT,,}" == "codex"  ]]; then
-        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    else
-        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
-    fi
-
 
 # build schematic packages (define, definitions, gen)
 build *args="":
-    @echo ""
-    @echo "Build Schematic Packages"
-    @echo "------------------------"
-    @echo ""
-    @cargo build -p schematic-define -p schematic-definitions -p schematic-gen {{args}}
+    @just _build schematic-define "Schematic Define" {{args}}
+    @just _build schematic-gen "Schematic Generation" {{args}}
+    @just _build schematic-definitions "Schematic Definitions" {{args}}
 
 # run tests for schematic packages
 test *args="":
-    @echo ""
-    @echo "Testing Schematic Packages"
-    @echo "--------------------------"
-    @echo ""
-    @cargo test -p schematic-define -p schematic-definitions -p schematic-gen {{args}}
+    @just _test schematic-define {{args}}
+    @just _test schematic-gen {{args}}
+    @just _test schematic-definitions {{args}}
 
 # check for artifact drift (run after making definition changes)
 check-drift:
@@ -156,13 +68,9 @@ check-drift:
 
 # run clippy on schematic packages
 lint:
-    @echo ""
-    @echo "Linting Schematic Packages"
-    @echo "--------------------------"
-    @echo ""
-    @cargo clippy -p schematic-define -- -D warnings
-    @cargo clippy -p schematic-definitions -- -D warnings
-    @cargo clippy -p schematic-gen -- -D warnings
+    @just _lint schematic-define
+    @just _lint schematic-gen
+    @just _lint schematic-definitions
 
 # generate OpenAI API client code (dry-run preview)
 generate-dry-run:
@@ -287,20 +195,6 @@ review-api api design:
     @echo
     @claudine gem --ni "A review on the {{api}} API in schematic was performed and produced the suggestions found in @schematic/docs/{{TODAY}}-review-of-{{api}}.md ; your task is to apply the completion checklist found in @schematic/skill/completion-checklist.md to the {{api}} API implementation and then add any additional suggestions you have to the same @schematic/docs/{{TODAY}}-review-of-{{api}}.md document. Remember that this is a non-interactive process so avoid asking questions and just complete the task."
 
-
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
-
 # stages all files in package area and then commits and pushes
 cp:
     @echo ""
@@ -320,125 +214,14 @@ cp:
     @echo -e "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
     @echo
 
-# Open Opencode in yolo mode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 # Show the dependencies for this package
 deps:
     @echo "Dependencies:"
     @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{DEFINE}}*:"
 
-readme_files:
-    @sniff docs --readme --json | jq -r '[.[] | select(.relative | startswith("{{DEFINE}}")) | "@" + .relative ] | join(" ")'
-
-# review this package using the Codex CLI
-review *args="":
-    @clear
-    @echo -e "Performing a code review on the {{BOLD}}{{DEFINE_NAME}}{{RESET}} package"
-    @echo ""
-    @cd .. && codex exec "/code-review the code in the {{DEFINE_NAME}} package; use the rust, {{DEFINE}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{DEFINE}}/docs/{YYYY}-{MM}. {{DEFINE}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{DEFINE_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{DEFINE_NAME}} review."  && exit 1 )
-    @echo
-    @echo -e "Code Review for the {{BLUE}}{{DEFINE_NAME}}{{RESET}} package has completed"
-    @just _speak "Review for {{DEFINE_NAME}} package has completed."
-
-
-# the temp file for the documents prompt
-DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + SCHEMATIC + "_docs_prompt.md"
-# the temp file for the skills prompt
-SKILL_PROMPT := "../.ai/logs/" + TODAY + ". skill_prompt_for_" + SCHEMATIC + "_skill_prompt.md"
-
-
-# Render the documentation refresh prompt template.
-#
-# Placeholder keys in the template: DOCS, ARGS, LIBRARY, CLI, LIB_NAME, DEPS
-_docs_prompt TEMPLATE DOCS ARGS LIBRARY CLI LIB_NAME DEPS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    CLI_VALUE={{quote(CLI)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DEPS_VALUE={{quote(DEPS)}}
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}CLI${CLOSE}/${CLI_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DEPS${CLOSE}/${DEPS_VALUE}}"
-    mkdir -p "$(dirname "{{DOCS_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{DOCS_PROMPT}}"
-
-# Render the skill refresh prompt template.
-#
-# Placeholder keys in the template: LIBRARY, LIB_NAME, DOCS, SUMMARY, ARGS
-_skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    SUMMARY_VALUE="$(cat "{{SUMMARY_FILE}}")"
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}SUMMARY${CLOSE}/${SUMMARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    mkdir -p "$(dirname "{{SKILL_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{SKILL_PROMPT}}"
-
-_refresh_docs *args="":
-    @echo >&2
-    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
-    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{DEFINE}}" "{{SCHEMATIC}}" "{{DEFINE_NAME}}" "$(just deps)"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{DOCS_PROMPT}}"
-
-
-_refresh_skill SUMMARY_FILE *args:
-    @just _speak "The documentation files for {{PACKAGE}} were updated and now we're starting the update of the skill files"
-    @echo >&2
-    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}" >&2
-    @echo >&2
-    @just _skill_prompt "../.ai/prompts/agent-skills.md" "{{DEFINE}}" "{{DEFINE_NAME}}" "$(just readme_files)" "{{SUMMARY_FILE}}" "{{args}}"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{SKILL_PROMPT}}"
-
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
-    @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}{{SCHEMATIC}}{{RESET}} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
-    @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{SCHEMATIC}} {{DOCS}} {{args}}
-    @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
-
-
-
+readme:
+    _readme_files schematic
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

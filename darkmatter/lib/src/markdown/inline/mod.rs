@@ -42,7 +42,7 @@
 
 mod types;
 
-pub use types::{InlineEvent, InlineTag};
+pub use types::{HorizontalRuleAttrs, InlineEvent, InlineTag};
 
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 use std::collections::VecDeque;
@@ -88,6 +88,7 @@ use std::collections::VecDeque;
 ///         InlineEvent::Start(InlineTag::Mark) => println!("<mark>"),
 ///         InlineEvent::End(InlineTag::Mark) => println!("</mark>"),
 ///         InlineEvent::Standard(e) => println!("{:?}", e),
+///         InlineEvent::HorizontalRule(_) => println!("<hr/>"),
 ///     }
 /// }
 /// ```

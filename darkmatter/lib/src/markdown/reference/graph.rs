@@ -30,6 +30,14 @@ struct ReferenceAnalysisRuntime {
     cache: RunLocalCache,
 }
 
+fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
+    match source {
+        ComposeSource::File(path) => path.clone(),
+        ComposeSource::Url(url) => std::path::PathBuf::from(url.to_string()),
+        ComposeSource::Unknown => std::path::PathBuf::from("<unknown>"),
+    }
+}
+
 impl ReferenceAnalysisRuntime {
     /// Load a markdown document, using the shared cache.
     fn load_markdown(&self, path: &std::path::Path) -> Option<Markdown> {
@@ -72,7 +80,9 @@ fn build_graph_inner(
     // Seed the runtime with the root node so child documents that
     // transclude the root are detected as cycles immediately.
     let root_id = source_to_id(&source);
-    let _ = runtime.transclusion.enter(root_id.to_string());
+    let _ = runtime
+        .transclusion
+        .enter(root_id.to_string(), source_to_path(&source), 1);
 
     let (root, all_nodes) = build_node(md, &source, options, &mut runtime, extract_references)?;
 
@@ -317,7 +327,11 @@ fn build_node(
                     let child_id = source_to_id(&child_source);
 
                     // Cycle/depth check
-                    if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                    if runtime
+                        .transclusion
+                        .enter(child_id.to_string(), child_path.clone(), directive.line)
+                        .is_ok()
+                    {
                         if let Some(child_md) = runtime.load_markdown(&child_path) {
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
@@ -408,7 +422,11 @@ fn build_node(
                     }
                 }
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), path.clone(), directive.line)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -532,7 +550,11 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), child_path.clone(), 0)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -603,7 +625,11 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), child_path.clone(), 0)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -1133,5 +1159,76 @@ mod tests {
         assert_eq!(flat.len(), 2);
         assert_eq!(flat.records[0].id, "a_ref");
         assert_eq!(flat.records[1].id, "b_ref");
+    }
+
+    #[test]
+    fn when_infix_and_true_follows_transclusion() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let child_path = dir.path().join("child.md");
+        std::fs::write(&child_path, "[link](https://example.com)").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nenabled: true\nvisible: true\n---\n\n::file child.md when=\"enabled && visible\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        // Root + child = 2 nodes when the condition is true
+        assert_eq!(graph.node_count(), 2);
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 1);
+    }
+
+    #[test]
+    fn when_infix_and_false_skips_transclusion() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let child_path = dir.path().join("child.md");
+        std::fs::write(&child_path, "[link](https://example.com)").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nenabled: true\nvisible: false\n---\n\n::file child.md when=\"enabled && visible\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        // Child is skipped, so only the root node remains
+        assert_eq!(graph.node_count(), 1);
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 0);
+    }
+
+    #[test]
+    fn when_infix_or_follows_on_either_true() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let child_path = dir.path().join("child.md");
+        std::fs::write(&child_path, "[link](https://example.com)").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nprimary: false\nbackup: true\n---\n\n::file child.md when=\"primary || backup\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        assert_eq!(graph.node_count(), 2);
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 1);
     }
 }

@@ -83,6 +83,7 @@ sniff just
 sniff repo                           # Monorepo structure
 sniff repo recent-commits 1w         # Commits from last week
 sniff repo git-status                # Git status with commit history
+sniff repo git-status --compact      # Status section only
 sniff repo remote origin             # Inspect remote repository
 sniff blast-radius                   # Docs affected by dirty changes
 

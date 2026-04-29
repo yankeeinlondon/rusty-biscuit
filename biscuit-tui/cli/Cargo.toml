@@ -1,0 +1,19 @@
+[package]
+name = "tui-chrome-cli"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "question"
+path = "src/main.rs"
+
+[dependencies]
+tui-chrome = { path = "../lib" }
+clap = { version = "4", features = ["derive", "wrap_help"] }
+serde_json = "1"
+
+[dev-dependencies]
+assert_cmd = "2"
+expectrl = "0.8"
+predicates = "3"

@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 
 #[cfg(test)]
@@ -8,13 +9,28 @@ use serde_json::{Map, Value};
 use tokio::process::Command;
 use tracing::{debug, info_span, warn};
 
+/// Matches any Handlebars-style `{{...}}` placeholder so we can count
+/// them when diagnosing whitespace-split interpolated values.
+static BASH_PARAMS_PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\{\{[^{}]*\}\}").expect("bash-params placeholder regex is valid")
+});
+
+/// Sentinel token substituted for each `{{...}}` during the diagnostic
+/// "expected token count" render. Chosen to be unlikely to appear in any
+/// real config and free of shell metacharacters.
+const BASH_PARAMS_SENTINEL: &str = "__CLAUDINE_TEMPLATE_SENTINEL__";
+
+/// Upper bound on how long a single bash action may run before the
+/// dispatch loop gives up on it. Bash actions used to be fire-and-forget
+/// via `tokio::spawn`, which silently lost work whenever Claudine was
+/// invoked as a `handle` hook under [`CLAUDINE_HANDLE_DEADLINE_SECONDS`].
+/// Awaiting inline with this bound lets the hook handler complete the
+/// action reliably while still protecting long-lived wrapper sessions
+/// from a hung bash action stalling the event pipeline.
+const BASH_ACTION_TIMEOUT: Duration = Duration::from_secs(3);
+
 use super::template::interpolate;
-<<<<<<< Updated upstream
 use crate::actions::bash_executor;
-||||||| Stash base
-=======
-use crate::actions::bash_executor::{self, ValidatedCommand};
->>>>>>> Stashed changes
 use crate::actions::{
     CompiledMapper, HookAction, HookDecision, HookResponse, Mapper, ReportFormat, ReportHandler,
 };
@@ -102,12 +118,12 @@ pub(crate) async fn execute_actions(
                     action_index = index,
                     action_kind = "bash",
                     blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
+                    timeout_ms = BASH_ACTION_TIMEOUT.as_millis() as u64,
                     target_kind = tracing::field::Empty,
                     command = %command,
                 )
                 .entered();
-                execute_bash(command, params, meta)
+                execute_bash(command, params, meta).await;
             }
             HookAction::Call {
                 command,
@@ -169,7 +185,15 @@ pub(crate) async fn execute_actions(
                         Ok(response) => {
                             let response = attach_protect_context(response, protect_decision);
                             if can_block {
-                                if should_replace_selected(selected_response.as_ref(), &response) {
+                                if !response_has_blocking_effect(&response) {
+                                    debug!(
+                                        %cmd,
+                                        "Call response on blocking event had no actionable decision or payload; falling through"
+                                    );
+                                } else if should_replace_selected(
+                                    selected_response.as_ref(),
+                                    &response,
+                                ) {
                                     selected_response = Some(response);
                                 }
                             } else {
@@ -178,13 +202,43 @@ pub(crate) async fn execute_actions(
                         }
                         Err(error) => {
                             warn!(%cmd, %error, "Call mapper failed");
+                            if can_block {
+                                let response = blocking_call_failure_response(
+                                    &cmd,
+                                    format!("call action mapper failed: {error}"),
+                                );
+                                if should_replace_selected(selected_response.as_ref(), &response) {
+                                    selected_response = Some(response);
+                                }
+                            }
                         }
                     },
                     Ok(Err(error)) => {
                         warn!(%cmd, %error, "Call command failed");
+                        if can_block {
+                            let response = blocking_call_failure_response(
+                                &cmd,
+                                format!("call action command failed: {error}"),
+                            );
+                            if should_replace_selected(selected_response.as_ref(), &response) {
+                                selected_response = Some(response);
+                            }
+                        }
                     }
                     Err(_) => {
                         warn!(%cmd, timeout_ms = timeout.as_millis(), "Call command timed out");
+                        if can_block {
+                            let response = blocking_call_failure_response(
+                                &cmd,
+                                format!(
+                                    "call action command timed out after {}ms",
+                                    timeout.as_millis()
+                                ),
+                            );
+                            if should_replace_selected(selected_response.as_ref(), &response) {
+                                selected_response = Some(response);
+                            }
+                        }
                     }
                 }
             }
@@ -337,6 +391,21 @@ fn attach_protect_context(
     response
 }
 
+fn response_has_blocking_effect(response: &HookResponse) -> bool {
+    response.decision.is_some()
+        || response.updated_input.is_some()
+        || response.additional_context.is_some()
+        || response.raw.is_some()
+}
+
+fn blocking_call_failure_response(command: &str, reason: String) -> HookResponse {
+    HookResponse {
+        decision: Some(HookDecision::Deny),
+        reason: Some(format!("{reason} ({command})")),
+        ..HookResponse::default()
+    }
+}
+
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).
 #[cfg(test)]
 fn tts_config_from_settings(settings: Option<&crate::events::TtsSettings>) -> TtsConfig {
@@ -390,7 +459,6 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
     });
 }
 
-<<<<<<< Updated upstream
 /// Determine which default sound (if any) should play for the given event.
 ///
 /// Maps canonical events to sound categories:
@@ -442,15 +510,7 @@ pub(crate) fn play_default_sound_for_event(
 ///   `sh -c`.
 /// - The `shell_escape()` helper in `bash_executor` is intentionally
 ///   not used here — it is for callers that build `sh -c` strings.
-||||||| Stash base
-/// Execute a shell command asynchronously via `sh -c "command params"`.
-=======
-/// Execute a shell command asynchronously.
-///
-/// Validates the command against the blocklist, resolves JS/TS interpreters,
-/// and shell-escapes all interpolated parameters before execution.
->>>>>>> Stashed changes
-fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
+async fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
 
     let validated = match bash_executor::validate_command(&cmd) {
@@ -462,56 +522,6 @@ fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     };
 
     let rendered_params = interpolate(params, meta);
-<<<<<<< Updated upstream
-
-    // Validate the command before execution
-    let validated = match bash_executor::validate_command(&cmd) {
-        Ok(v) => v,
-        Err(error) => {
-            warn!(%cmd, %error, "Bash action command validation failed");
-            return;
-        }
-||||||| Stash base
-    let full_command = if rendered_params.is_empty() {
-        cmd.clone()
-    } else {
-        format!("{cmd} {rendered_params}")
-=======
-    let escaped_params = if rendered_params.is_empty() {
-        String::new()
-    } else {
-        rendered_params
-            .split_whitespace()
-            .map(bash_executor::shell_escape)
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-
-    let full_command = match &validated {
-        ValidatedCommand::Direct(binary) => {
-            if escaped_params.is_empty() {
-                bash_executor::shell_escape(binary)
-            } else {
-                format!("{} {escaped_params}", bash_executor::shell_escape(binary))
-            }
-        }
-        ValidatedCommand::Interpreted { interpreter, script } => {
-            if escaped_params.is_empty() {
-                format!(
-                    "{} {}",
-                    bash_executor::shell_escape(interpreter),
-                    bash_executor::shell_escape(script)
-                )
-            } else {
-                format!(
-                    "{} {} {escaped_params}",
-                    bash_executor::shell_escape(interpreter),
-                    bash_executor::shell_escape(script)
-                )
-            }
-        }
->>>>>>> Stashed changes
-    };
 
     // Parse rendered_params using shell-words to correctly handle quoted arguments
     // and interpolated values containing spaces (e.g., `--message 'hello world'`).
@@ -527,10 +537,23 @@ fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
         }
     };
 
-    debug!(?validated, ?param_args, "Spawning bash action");
+    // Diagnostic: if the rendered params split into more tokens than the
+    // same template with every placeholder replaced by a single sentinel
+    // word, an interpolated value contained whitespace that the author
+    // likely did not intend (e.g. `--message {{tool_name}}` with
+    // `tool_name = "my tool"` silently becomes `["--message", "my",
+    // "tool"]`). The canonical fix is to quote the placeholder in the
+    // template. We only warn, so existing configs keep working.
+    warn_on_silent_token_split(params, &rendered_params, &param_args);
 
-    tokio::spawn(async move {
-        let result = match &validated {
+    debug!(?validated, ?param_args, "Awaiting bash action inline");
+
+    // Run inline with a bounded timeout. Previously this was a
+    // `tokio::spawn(...)` fire-and-forget, which silently lost work
+    // whenever the dispatch completed before the spawned task ran
+    // (notably the `handle` hook path under `CLAUDINE_HANDLE_DEADLINE_SECONDS`).
+    let action = async {
+        match &validated {
             bash_executor::ValidatedCommand::Direct(executable) => {
                 Command::new(executable).args(&param_args).output().await
             }
@@ -545,18 +568,57 @@ fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
                 cmd.args(&param_args);
                 cmd.output().await
             }
-        };
-        match result {
-            Ok(output) if !output.status.success() => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                warn!(?validated, %stderr, "Bash action exited with non-zero status");
-            }
-            Err(error) => {
-                warn!(?validated, %error, "Bash action failed to spawn");
-            }
-            _ => {}
         }
-    });
+    };
+    match tokio::time::timeout(BASH_ACTION_TIMEOUT, action).await {
+        Ok(Ok(output)) if !output.status.success() => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(?validated, %stderr, "Bash action exited with non-zero status");
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => {
+            warn!(?validated, %error, "Bash action failed to spawn");
+        }
+        Err(_) => {
+            warn!(
+                ?validated,
+                timeout_ms = BASH_ACTION_TIMEOUT.as_millis() as u64,
+                "Bash action timed out",
+            );
+        }
+    }
+}
+
+/// Emit a diagnostic `warn!` when an interpolated bash-action param split
+/// on whitespace in a way the template author likely did not intend.
+///
+/// We render the template a second time with each `{{...}}` replaced by
+/// [`BASH_PARAMS_SENTINEL`], split both forms via `shell_words`, and
+/// compare token counts. A mismatch means the interpolation introduced
+/// extra argv slots — useful to surface because the resulting command
+/// runs silently with the wrong arguments.
+fn warn_on_silent_token_split(template: &str, rendered: &str, actual: &[String]) {
+    if template.is_empty() {
+        return;
+    }
+    let sentinel_template = BASH_PARAMS_PLACEHOLDER_RE
+        .replace_all(template, BASH_PARAMS_SENTINEL)
+        .into_owned();
+    let Ok(expected_tokens) = shell_words::split(&sentinel_template) else {
+        return;
+    };
+    if expected_tokens.len() != actual.len() {
+        warn!(
+            template,
+            rendered,
+            expected_tokens = expected_tokens.len(),
+            actual_tokens = actual.len(),
+            "Bash action param template split differently after interpolation. \
+             Quote your placeholders (e.g. `'{{value}}'`) to keep each one in a \
+             single argv slot, or migrate the config to an array-form `params` \
+             so interpolation happens per-item."
+        );
+    }
 }
 
 fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta, blocking: bool) {
@@ -581,7 +643,10 @@ fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta, blocking: b
 fn terminal_meta_json(meta: &EventMeta) -> String {
     let mut value = terminal_meta_value(meta);
     strip_nulls(&mut value);
-    serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&value).unwrap_or_else(|err| {
+        warn!(%err, "serializing terminal event metadata failed; falling back to empty object");
+        "{}".to_string()
+    })
 }
 
 fn terminal_meta_value(meta: &EventMeta) -> Value {
@@ -597,7 +662,10 @@ fn terminal_meta_value(meta: &EventMeta) -> Value {
     );
     object.insert(
         "timestamp".to_string(),
-        serde_json::to_value(meta.timestamp).unwrap_or(Value::Null),
+        serde_json::to_value(meta.timestamp).unwrap_or_else(|err| {
+            warn!(%err, "serializing event timestamp failed; substituting null");
+            Value::Null
+        }),
     );
 
     if let Some(value) = &meta.session_id {
@@ -639,22 +707,37 @@ fn terminal_meta_value(meta: &EventMeta) -> Value {
 
     object.insert(
         "extra".to_string(),
-        serde_json::to_value(&meta.extra).unwrap_or_else(|_| Value::Object(Map::new())),
+        serde_json::to_value(&meta.extra).unwrap_or_else(|err| {
+            warn!(%err, "serializing event `extra` map failed; substituting empty object");
+            Value::Object(Map::new())
+        }),
     );
     object.insert(
         "env".to_string(),
-        serde_json::to_value(&meta.env).unwrap_or(Value::Null),
+        serde_json::to_value(&meta.env).unwrap_or_else(|err| {
+            warn!(%err, "serializing event `env` failed; substituting null");
+            Value::Null
+        }),
     );
 
     Value::Object(object)
 }
 
 fn strip_nulls(value: &mut Value) {
+    strip_nulls_recursive(value, 0);
+}
+
+const STRIP_NULLS_MAX_DEPTH: u32 = 64;
+
+fn strip_nulls_recursive(value: &mut Value, depth: u32) {
+    if depth >= STRIP_NULLS_MAX_DEPTH {
+        return;
+    }
     match value {
         Value::Object(map) => {
             let mut to_remove = Vec::new();
             for (key, nested) in map.iter_mut() {
-                strip_nulls(nested);
+                strip_nulls_recursive(nested, depth + 1);
                 if nested.is_null() {
                     to_remove.push(key.clone());
                 }
@@ -665,7 +748,7 @@ fn strip_nulls(value: &mut Value) {
         }
         Value::Array(items) => {
             for nested in items.iter_mut() {
-                strip_nulls(nested);
+                strip_nulls_recursive(nested, depth + 1);
             }
             items.retain(|item| !item.is_null());
         }
@@ -756,12 +839,27 @@ fn apply_mapper(
     }
 }
 
+/// Map a `Call` action's child exit status onto a `HookResponse`.
+///
+/// - `0` → [`HookDecision::Allow`].
+/// - `2` → [`HookDecision::Deny`].
+/// - Anything else → no decision (the caller falls through to the next
+///   action). A `tracing::warn!` is emitted so operators can distinguish
+///   "command crashed" (`139`), "not found" (`127`), "permission denied"
+///   (`126`), and user-defined anomalous exits from a clean success.
 fn map_exit_code(output: &CommandOutput) -> HookResponse {
     let code = output.status.code().unwrap_or(1);
     let decision = match code {
         0 => Some(HookDecision::Allow),
         2 => Some(HookDecision::Deny),
-        _ => Some(HookDecision::Allow),
+        _ => {
+            warn!(
+                exit_code = code,
+                stderr = %output.stderr,
+                "map_exit_code: unexpected exit status — no decision emitted",
+            );
+            None
+        }
     };
 
     let reason = if !output.stdout.is_empty() {
@@ -897,6 +995,38 @@ mod tests {
         let mapped = apply_mapper(None, None, &output).unwrap();
         assert_eq!(mapped.decision, Some(HookDecision::Deny));
         assert_eq!(mapped.reason.as_deref(), Some("blocked"));
+    }
+
+    #[test]
+    fn mapper_exit_code_allow_on_zero() {
+        let output = CommandOutput {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: "ok".to_string(),
+            stderr: String::new(),
+        };
+        let mapped = apply_mapper(None, None, &output).unwrap();
+        assert_eq!(mapped.decision, Some(HookDecision::Allow));
+    }
+
+    #[test]
+    fn mapper_exit_code_unknown_is_none_and_warns() {
+        // Exit codes other than 0/2 (crashes, command-not-found, etc.)
+        // must NOT silently map to Allow. The dispatcher instead emits
+        // no decision and logs a warn!, so the caller falls through to
+        // the next action.
+        for code in [1_i32, 127, 139, 200] {
+            let output = CommandOutput {
+                status: std::process::ExitStatus::from_raw(code << 8),
+                stdout: String::new(),
+                stderr: format!("boom at {code}"),
+            };
+            let mapped = apply_mapper(None, None, &output).unwrap();
+            assert_eq!(
+                mapped.decision, None,
+                "unexpected exit code {code} must not produce a decision",
+            );
+            assert_eq!(mapped.reason.as_deref(), Some(&*format!("boom at {code}")));
+        }
     }
 
     #[test]
@@ -1069,8 +1199,9 @@ mod tests {
             logging: true,
             protect: Default::default(),
             actions: HashMap::new(),
-            preferred_agent: Provider::Claude,
+            preferred_agent: Some(Provider::Claude),
             canonical_provider: None,
+            models: HashMap::new(),
             default_sounds: Default::default(),
         }
     }
@@ -1227,7 +1358,66 @@ mod tests {
 
         assert!(result.is_none());
     }
-<<<<<<< Updated upstream
+
+    #[tokio::test]
+    async fn blocking_call_command_failure_fails_closed() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_command__".to_string(),
+            args: None,
+            timeout_ms: Some(25),
+            mapper: None,
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("blocking call failure must synthesize a deny response");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+        let reason = result.reason.expect("deny response should explain failure");
+        assert!(reason.contains("call action command failed"));
+        assert!(reason.contains("__claudine_missing_command__"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn blocking_call_without_actionable_response_falls_through() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "sh".to_string(),
+            args: Some(vec!["-c".to_string(), "exit 1".to_string()]),
+            timeout_ms: Some(250),
+            mapper: None,
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.is_none(),
+            "exit-code mapper status 1 should fall through instead of producing an implicit allow"
+        );
+    }
 
     // =========================================================================
     // shell_words argv interpolation contract tests
@@ -1271,95 +1461,19 @@ mod tests {
         };
         assert!(args.is_empty());
     }
-||||||| Stash base
-=======
 
     // =========================================================================
     // Bash execution security tests
     // =========================================================================
 
-    #[tokio::test]
-    async fn bash_action_with_blocked_command_does_not_fail_pipeline() {
-        // A blocked command (rm) should be silently skipped, not crash the action pipeline.
-        let actions = vec![
-            HookAction::Bash {
-                command: "rm".to_string(),
-                params: "-rf /".to_string(),
-            },
-            HookAction::Report { handler: None },
-        ];
-
-        let messaging = crate::messaging::RuntimeMessagingSettings::default();
-
-        let result = execute_actions(
-            &actions,
-            None,
-            &meta(),
-            &GlobalSettings::default(),
-            &messaging,
-            false,
-            None,
-        )
-        .await;
-
-        // Pipeline completes successfully — blocked bash action is skipped
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn bash_action_v2_with_blocked_command_does_not_fail_pipeline() {
-        let config = claudine_config_with_tts(TtsValue::Boolean(false));
-        let messaging = RuntimeMessagingSettings::default();
-
-        let actions = vec![
-            HookAction::Bash {
-                command: "rm".to_string(),
-                params: String::new(),
-            },
-            HookAction::Report { handler: None },
-        ];
-
-        let result = execute_actions_v2(
-            &actions,
-            None,
-            &meta(),
-            &config,
-            &messaging,
-            false,
-            None,
-        )
-        .await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn bash_action_with_safe_command_succeeds() {
-        let config = claudine_config_with_tts(TtsValue::Boolean(false));
-        let messaging = RuntimeMessagingSettings::default();
-
-        let actions = vec![HookAction::Bash {
-            command: "echo".to_string(),
-            params: "safe output".to_string(),
-        }];
-
-        let result = execute_actions_v2(
-            &actions,
-            None,
-            &meta(),
-            &config,
-            &messaging,
-            false,
-            None,
-        )
-        .await;
-
-        assert!(result.is_ok());
-    }
-
     #[test]
-    fn validate_command_blocks_rm() {
-        assert!(bash_executor::validate_command("rm").is_err());
+    fn validate_command_advisory_for_rm() {
+        // `BLOCKED_COMMANDS` is an advisory speed bump only; `rm` is no
+        // longer rejected here. Real command gating belongs to
+        // `ProtectService`.
+        if which::which("rm").is_ok() {
+            assert!(bash_executor::validate_command("rm").is_ok());
+        }
     }
 
     #[test]
@@ -1371,7 +1485,6 @@ mod tests {
     fn shell_escape_neutralizes_injection() {
         let escaped = bash_executor::shell_escape("$(rm -rf /)");
         assert_eq!(escaped, "'$(rm -rf /)'");
-        // Single-quoted strings prevent shell expansion
     }
 
     #[test]
@@ -1385,5 +1498,4 @@ mod tests {
         let escaped = bash_executor::shell_escape("`rm -rf /`");
         assert_eq!(escaped, "'`rm -rf /`'");
     }
->>>>>>> Stashed changes
 }

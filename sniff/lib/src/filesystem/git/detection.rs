@@ -30,7 +30,7 @@ pub fn detect_git_with_request(path: &Path, request: &GitRequest) -> Result<Opti
 /// Collects all refs (branches, remote tracking, tags) pointing to each commit.
 ///
 /// Returns a HashMap from commit OID to a vector of ref decorations.
-fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecoration>> {
+pub(crate) fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecoration>> {
     let mut decorations: HashMap<git2::Oid, Vec<RefDecoration>> = HashMap::new();
 
     // Get current HEAD target to mark the active branch
@@ -114,6 +114,15 @@ fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecor
 
 /// Gets the last N commits from HEAD using revwalk.
 pub(crate) fn get_recent_commits(repo: &Repository, count: usize) -> Vec<CommitInfo> {
+    get_recent_commits_with_decorations(repo, count, None)
+}
+
+/// Gets the last N commits from HEAD using revwalk, with optional pre-computed ref decorations.
+pub(crate) fn get_recent_commits_with_decorations(
+    repo: &Repository,
+    count: usize,
+    ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
+) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
     let Ok(mut revwalk) = repo.revwalk() else {
@@ -124,8 +133,9 @@ pub(crate) fn get_recent_commits(repo: &Repository, count: usize) -> Vec<CommitI
         return commits;
     }
 
-    // Collect ref decorations once for all commits
-    let ref_decorations = collect_ref_decorations(repo);
+    // Collect ref decorations once for all commits (if not provided)
+    let cached = ref_decorations.cloned();
+    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
 
     for oid_result in revwalk.take(count) {
         let Ok(oid) = oid_result else {
@@ -136,7 +146,7 @@ pub(crate) fn get_recent_commits(repo: &Repository, count: usize) -> Vec<CommitI
         };
 
         // Get refs pointing to this commit
-        let refs = ref_decorations.get(&oid).cloned().unwrap_or_default();
+        let refs = decorations.get(&oid).cloned().unwrap_or_default();
 
         let author = commit.author();
         commits.push(CommitInfo {
@@ -163,6 +173,8 @@ pub(crate) fn get_repo_status_with_changes(
     repo: &Repository,
     include_diffs: bool,
 ) -> Result<(RepoStatus, Vec<FileChange>)> {
+    use std::collections::HashSet;
+
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
     // Recurse into untracked directories to get individual file paths
@@ -170,7 +182,8 @@ pub(crate) fn get_repo_status_with_changes(
 
     let statuses = repo.statuses(Some(&mut opts))?;
 
-    use std::collections::HashSet;
+    // Resolve HEAD tree once upfront to avoid repeated resolution per dirty file
+    let head_tree = repo.head().and_then(|h| h.peel_to_tree()).ok();
 
     let mut staged = 0;
     let mut unstaged = 0;
@@ -235,7 +248,7 @@ pub(crate) fn get_repo_status_with_changes(
         {
             if is_staged && is_unstaged {
                 // File is both staged and has additional modifications
-                let (lines_added, lines_removed) = get_file_diff_stats(repo, p);
+                let (lines_added, lines_removed) = get_file_diff_stats(repo, p, head_tree.as_ref());
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Both,
@@ -245,7 +258,7 @@ pub(crate) fn get_repo_status_with_changes(
                 });
                 dirty_set.insert(p.clone());
             } else if is_staged {
-                let (lines_added, lines_removed) = get_file_diff_stats(repo, p);
+                let (lines_added, lines_removed) = get_file_diff_stats(repo, p, head_tree.as_ref());
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Staged,
@@ -255,7 +268,7 @@ pub(crate) fn get_repo_status_with_changes(
                 });
                 dirty_set.insert(p.clone());
             } else if is_unstaged {
-                let (lines_added, lines_removed) = get_file_diff_stats(repo, p);
+                let (lines_added, lines_removed) = get_file_diff_stats(repo, p, head_tree.as_ref());
                 file_changes.push(FileChange {
                     path: p.clone(),
                     status: FileStatus::Modified,
@@ -266,6 +279,22 @@ pub(crate) fn get_repo_status_with_changes(
                 dirty_set.insert(p.clone());
             }
         }
+    }
+
+    let conflicted_paths = detect_merge_conflicts(repo);
+    if !conflicted_paths.is_empty() {
+        let conflicted_set: HashSet<_> = conflicted_paths.iter().cloned().collect();
+        file_changes.retain(|change| !conflicted_set.contains(&change.path));
+
+        let conflicted_changes = conflicted_paths.into_iter().map(|path| FileChange {
+            path,
+            status: FileStatus::Conflicted,
+            action: FileAction::Modified,
+            lines_added: 0,
+            lines_removed: 0,
+        });
+
+        file_changes = conflicted_changes.chain(file_changes).collect();
     }
 
     // Convert HashSet to Vec for downstream processing
@@ -292,7 +321,12 @@ pub(crate) fn get_repo_status_with_changes(
     };
 
     let repo_status = RepoStatus {
-        is_dirty: staged > 0 || unstaged > 0 || untracked_count > 0,
+        is_dirty: staged > 0
+            || unstaged > 0
+            || untracked_count > 0
+            || file_changes
+                .iter()
+                .any(|change| change.status == FileStatus::Conflicted),
         staged_count: staged,
         unstaged_count: unstaged,
         untracked_count,
@@ -406,15 +440,22 @@ fn build_dirty_files(
 
 /// Gets the unified diff for a single file (combined staged + unstaged changes).
 /// Returns `(lines_added, lines_removed)` for a single file by combining staged and unstaged diffs.
-fn get_file_diff_stats(repo: &Repository, filepath: &Path) -> (usize, usize) {
+///
+/// `head_tree` should be pre-resolved from `repo.head().and_then(|h| h.peel_to_tree())`
+/// to avoid repeated tree resolution when this function is called in a loop.
+fn get_file_diff_stats(
+    repo: &Repository,
+    filepath: &Path,
+    head_tree: Option<&git2::Tree>,
+) -> (usize, usize) {
     let mut added: usize = 0;
     let mut removed: usize = 0;
 
     // Staged changes (HEAD to index)
-    if let Ok(head_tree) = repo.head().and_then(|h| h.peel_to_tree()) {
+    if let Some(head_tree) = head_tree {
         let mut opts = git2::DiffOptions::new();
         opts.pathspec(filepath);
-        if let Ok(diff) = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut opts))
+        if let Ok(diff) = repo.diff_tree_to_index(Some(head_tree), None, Some(&mut opts))
             && let Ok(stats) = diff.stats()
         {
             added += stats.insertions();
@@ -970,126 +1011,108 @@ pub(crate) fn get_repo_status_counts_detailed(repo: &Repository) -> (bool, usize
 /// HEAD commit, dirty status, and ahead/behind counts relative to the base
 /// repository's default branch.
 pub(crate) fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
-    let mut worktrees = HashMap::new();
+    use rayon::prelude::*;
 
     let worktree_names = match repo.worktrees() {
         Ok(names) => names,
-        Err(_) => return worktrees,
+        Err(_) => return HashMap::new(),
     };
 
     // Resolve the base branch name and its commit OID for ahead/behind calculations.
     // Try the base repo's HEAD first; fall back to "main" then "master".
     let (base_branch, base_oid) = resolve_base_branch(repo);
 
-    for name in worktree_names.iter().flatten() {
-        let worktree = match repo.find_worktree(name) {
-            Ok(wt) => wt,
-            Err(_) => continue,
-        };
+    // Collect (name, path) pairs up front — cheap sequential work — so per-worktree
+    // analysis can fan out in parallel. git2::Repository is !Sync, so each worker
+    // opens its own handles rather than sharing `repo`.
+    let base_repo_path = repo.path().to_path_buf();
+    let worktree_paths: Vec<(String, PathBuf)> = worktree_names
+        .iter()
+        .flatten()
+        .filter_map(|name| {
+            let wt = repo.find_worktree(name).ok()?;
+            Some((name.to_string(), wt.path().to_path_buf()))
+        })
+        .collect();
 
-        let worktree_path = worktree.path();
-        let worktree_repo = match Repository::open(worktree_path) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
+    // Open the base repo once before the parallel section to avoid N reopens.
+    // We keep the opened handle alive for the scope of the parallel work.
+    let _base_repo = Repository::open(&base_repo_path).ok();
 
-        // Get branch name from worktree's HEAD
-        let branch = worktree_repo
-            .head()
-            .map_err(|e| {
-                debug!(worktree = name, error = %e, "could not read worktree HEAD");
-                e
-            })
-            .ok()
-            .and_then(|h| h.shorthand().map(String::from))
-            .unwrap_or_else(|| name.to_string());
+    worktree_paths
+        .par_iter()
+        .filter_map(|(name, worktree_path)| {
+            let worktree_repo = Repository::open(worktree_path).ok()?;
 
-        // Get HEAD commit SHA and OID
-        let head_commit = worktree_repo
-            .head()
-            .map_err(|e| {
-                debug!(worktree = name, error = %e, "could not read worktree HEAD for commit");
-                e
-            })
-            .ok()
-            .and_then(|h| {
-                h.peel_to_commit()
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not peel worktree HEAD to commit");
-                        e
-                    })
-                    .ok()
-            });
-        let sha = head_commit
-            .as_ref()
-            .map(|c| c.id().to_string())
-            .unwrap_or_default();
+            // Get branch name and HEAD commit from worktree
+            let head = worktree_repo.head().ok();
+            let branch = head
+                .as_ref()
+                .and_then(|h| h.shorthand().map(String::from))
+                .unwrap_or_else(|| name.to_string());
+            let head_commit = head.and_then(|h| h.peel_to_commit().ok());
+            let sha = head_commit
+                .as_ref()
+                .map(|c| c.id().to_string())
+                .unwrap_or_default();
 
-        // Compute ahead/behind relative to base branch
-        let (ahead, behind) = base_oid
-            .zip(head_commit.as_ref())
-            .and_then(|(base, wt_commit)| {
-                repo.graph_ahead_behind(wt_commit.id(), base)
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not compute worktree ahead/behind");
-                        e
-                    })
-                    .ok()
-            })
-            .unwrap_or((0, 0));
+            // Open a per-thread handle on the base repo for graph/merge queries.
+            // The outer _base_repo keeps the underlying git structures warm,
+            // but git2::Repository is !Sync so each thread still needs its own handle.
+            let base_repo = Repository::open(&base_repo_path).ok();
 
-        // Check if worktree branch is fully merged into base (ancestor of base HEAD)
-        let merged = base_oid
-            .zip(head_commit.as_ref())
-            .map(|(base, wt_commit)| {
-                repo.graph_descendant_of(base, wt_commit.id())
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
+            let (ahead, behind) = base_repo
+                .as_ref()
+                .zip(base_oid)
+                .zip(head_commit.as_ref())
+                .and_then(|((base_repo, base), wt_commit)| {
+                    base_repo.graph_ahead_behind(wt_commit.id(), base).ok()
+                })
+                .unwrap_or((0, 0));
 
-        // Check for merge conflicts by performing an in-memory merge
-        let has_conflicts = base_oid
-            .zip(head_commit.as_ref())
-            .and_then(|(base_id, wt_commit)| {
-                let base_commit = repo
-                    .find_commit(base_id)
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not find base commit");
-                        e
-                    })
-                    .ok()?;
-                let index = repo
-                    .merge_commits(wt_commit, &base_commit, None)
-                    .map_err(|e| {
-                        debug!(worktree = name, error = %e, "could not perform merge check");
-                        e
-                    })
-                    .ok()?;
-                Some(index.has_conflicts())
-            })
-            .unwrap_or(false);
+            let merged = base_repo
+                .as_ref()
+                .zip(base_oid)
+                .zip(head_commit.as_ref())
+                .map(|((base_repo, base), wt_commit)| {
+                    base_repo
+                        .graph_descendant_of(base, wt_commit.id())
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
 
-        // Check if worktree is dirty and count changed files
-        let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
+            let has_conflicts = base_repo
+                .as_ref()
+                .zip(base_oid)
+                .zip(head_commit.as_ref())
+                .and_then(|((base_repo, base_id), wt_commit)| {
+                    let base_commit = base_repo.find_commit(base_id).ok()?;
+                    let index = base_repo
+                        .merge_commits(wt_commit, &base_commit, None)
+                        .ok()?;
+                    Some(index.has_conflicts())
+                })
+                .unwrap_or(false);
 
-        worktrees.insert(
-            branch.clone(),
-            WorktreeInfo {
-                branch,
-                filepath: worktree_path.to_path_buf(),
-                sha,
-                dirty,
-                ahead,
-                behind,
-                base_branch: base_branch.clone(),
-                has_conflicts,
-                merged,
-                changed_files,
-            },
-        );
-    }
+            let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
 
-    worktrees
+            Some((
+                branch.clone(),
+                WorktreeInfo {
+                    branch,
+                    filepath: worktree_path.clone(),
+                    sha,
+                    dirty,
+                    ahead,
+                    behind,
+                    base_branch: base_branch.clone(),
+                    has_conflicts,
+                    merged,
+                    changed_files,
+                },
+            ))
+        })
+        .collect()
 }
 
 /// Resolves the base branch name and its commit OID for ahead/behind calculations.
@@ -1195,6 +1218,15 @@ impl DeltaKind {
 ///
 /// Returns `None` if the SHA doesn't resolve to a valid commit.
 pub fn get_commit_by_sha(repo: &Repository, sha_prefix: &str) -> Option<CommitInfo> {
+    get_commit_by_sha_with_decorations(repo, sha_prefix, None)
+}
+
+/// Look up a single commit by SHA with optional pre-computed ref decorations.
+pub(crate) fn get_commit_by_sha_with_decorations(
+    repo: &Repository,
+    sha_prefix: &str,
+    ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
+) -> Option<CommitInfo> {
     let obj = repo
         .revparse_single(sha_prefix)
         .map_err(|e| {
@@ -1210,9 +1242,11 @@ pub fn get_commit_by_sha(repo: &Repository, sha_prefix: &str) -> Option<CommitIn
         })
         .ok()?;
 
-    let ref_decorations = collect_ref_decorations(repo);
+    let decorations = ref_decorations
+        .cloned()
+        .unwrap_or_else(|| collect_ref_decorations(repo));
     let oid = commit.id();
-    let refs = ref_decorations.get(&oid).cloned().unwrap_or_default();
+    let refs = decorations.get(&oid).cloned().unwrap_or_default();
 
     let author = commit.author();
     Some(CommitInfo {
@@ -1288,6 +1322,16 @@ pub fn get_commit_files(repo: &Repository, full_sha: &str) -> Vec<(PathBuf, Delt
 ///
 /// Ref decorations are collected once and reused for all matching commits.
 pub fn get_commits_for_path(repo: &Repository, path_prefix: &str, count: usize) -> Vec<CommitInfo> {
+    get_commits_for_path_with_decorations(repo, path_prefix, count, None)
+}
+
+/// Get recent commits for a path with optional pre-computed ref decorations.
+pub(crate) fn get_commits_for_path_with_decorations(
+    repo: &Repository,
+    path_prefix: &str,
+    count: usize,
+    ref_decorations: Option<&HashMap<git2::Oid, Vec<RefDecoration>>>,
+) -> Vec<CommitInfo> {
     let mut commits = Vec::new();
 
     let Ok(mut revwalk) = repo.revwalk() else {
@@ -1297,7 +1341,8 @@ pub fn get_commits_for_path(repo: &Repository, path_prefix: &str, count: usize) 
         return commits;
     }
 
-    let ref_decorations = collect_ref_decorations(repo);
+    let cached = ref_decorations.cloned();
+    let decorations = cached.unwrap_or_else(|| collect_ref_decorations(repo));
 
     for oid_result in revwalk {
         if commits.len() >= count {
@@ -1347,7 +1392,7 @@ pub fn get_commits_for_path(repo: &Repository, path_prefix: &str, count: usize) 
         });
 
         if touches_path {
-            let refs = ref_decorations.get(&oid).cloned().unwrap_or_default();
+            let refs = decorations.get(&oid).cloned().unwrap_or_default();
             let author = commit.author();
             commits.push(CommitInfo {
                 sha: oid.to_string(),
@@ -1398,4 +1443,95 @@ pub fn detect_merge_conflicts(repo: &Repository) -> Vec<PathBuf> {
     }
 
     conflicted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Creates a temporary git repo with a single file committed.
+    fn setup_repo() -> (TempDir, Repository) {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        // Create initial file and commit
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "initial content\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+                .unwrap();
+        }
+
+        (dir, repo)
+    }
+
+    #[test]
+    fn get_file_diff_stats_with_none_head_tree_returns_only_unstaged() {
+        let (dir, repo) = setup_repo();
+
+        // Modify the file (unstaged change)
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "modified content\n").unwrap();
+
+        let (added, removed) = get_file_diff_stats(&repo, Path::new("test.txt"), None);
+
+        // Without head_tree, only unstaged changes are counted
+        assert_eq!(added, 1);
+        assert_eq!(removed, 1);
+    }
+
+    #[test]
+    fn get_file_diff_stats_with_head_tree_counts_staged_and_unstaged() {
+        let (dir, repo) = setup_repo();
+
+        // Stage a modification
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "staged content\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+
+        // Also modify unstaged
+        std::fs::write(&file_path, "unstaged content\nmore lines\n").unwrap();
+
+        let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let (added, removed) = get_file_diff_stats(&repo, Path::new("test.txt"), Some(&head_tree));
+
+        // Should count both staged (1 add, 1 remove) and unstaged (2 add, 1 remove)
+        assert_eq!(added, 3);
+        assert_eq!(removed, 2);
+    }
+
+    #[test]
+    fn get_repo_status_with_changes_resolves_head_once() {
+        let (dir, repo) = setup_repo();
+
+        // Create and stage multiple files
+        for i in 0..3 {
+            let name = format!("file{}.txt", i);
+            let path = dir.path().join(&name);
+            std::fs::write(&path, format!("content {}\n", i)).unwrap();
+
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new(&name)).unwrap();
+            index.write().unwrap();
+        }
+
+        // This should work without error and resolve HEAD only once
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.staged_count, 3);
+        assert_eq!(changes.len(), 3);
+    }
 }

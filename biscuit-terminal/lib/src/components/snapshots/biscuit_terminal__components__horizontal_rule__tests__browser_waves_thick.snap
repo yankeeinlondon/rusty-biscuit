@@ -1,0 +1,7 @@
+---
+source: biscuit-terminal/lib/src/components/horizontal_rule.rs
+expression: result
+---
+<svg width="100%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 8; --hr-color: currentColor; --hr-width: 100%;">
+  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 8)" fill="none" stroke-linecap="round"/>
+</svg>

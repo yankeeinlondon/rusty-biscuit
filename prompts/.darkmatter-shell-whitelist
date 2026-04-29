@@ -1,2 +1,4 @@
 prefix sniff
 exact pwd
+prefix dirname
+prefix basename

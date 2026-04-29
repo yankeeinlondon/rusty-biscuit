@@ -508,6 +508,15 @@ If the provider/event supports blocking and a `Call` action returns a response:
 
 On non-blocking events, `Call` can still run, but any response it produces is informational only.
 
+## Hook Handler Deadlines
+
+To prevent hook handlers from blocking the parent agent session indefinitely (e.g., during a 30s hang), `claudine handle` enforces a hard execution deadline.
+
+- **Global Deadline:** 5 seconds (default), overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`.
+- **Exit Code:** Exits `124` when the deadline is exceeded.
+- **Action Timeouts:** `Bash` and `Message` actions have a tighter **3s timeout** when running inside `claudine handle`.
+- **Tracing:** Phase-level spans (`handle_stdin_read`, `handle_dispatch_canonical`, `load_config`, `run_bindings`, etc.) ensure that any hang can be diagnosed via `RUST_LOG=claudine=debug`.
+
 ## Support Level Implications
 
 - **Hook providers** have a native registration surface Claudine can install into. This is what `claudine sync` manages.

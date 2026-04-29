@@ -1,10 +1,14 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::Result;
-use inquire::{Confirm, InquireError, Select, Text};
+use color_eyre::eyre::{Result, eyre};
+use inquire::{Confirm, InquireError, Password, PasswordDisplayMode, Select, Text};
 
-use crate::config::{Config, RouteConfig, RouteProvider};
+use crate::config::{
+    Config, DesktopLinuxConfig, DesktopMacOsConfig, DesktopWindowsConfig, RouteConfig,
+    RouteMacOsStrategy, RouteProvider, RouteUrgency,
+};
+use crate::desktop_setup::{self, DEFAULT_WINDOWS_APP_ID};
 
 fn styled(text: impl Into<String>) -> String {
     Prose::new(text).render(&Terminal::default())
@@ -24,6 +28,7 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
             ExistingAction::AddAnother => {}
             ExistingAction::Modify(route_name) => {
                 let route = configure_provider(&provider, Some(&route_name))?;
+                finalize_route(&route)?;
                 config.routes.insert(route_name, route);
                 config.save()?;
                 println!("\n{}", styled("<green>Configuration updated.</green>"));
@@ -34,6 +39,9 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
                         Config::config_path()?.display()
                     ))
                 );
+                if provider == RouteProvider::Desktop {
+                    print_desktop_info_section(&config);
+                }
                 return Ok(());
             }
         }
@@ -66,6 +74,8 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
         .map_err(handle_cancel)?
     };
 
+    finalize_route(&route)?;
+
     config.routes.insert(route_name.clone(), route);
     if set_default {
         config.default_route = Some(route_name.clone());
@@ -87,7 +97,26 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
         ))
     );
 
+    if provider == RouteProvider::Desktop {
+        print_desktop_info_section(&config);
+    }
+
     Ok(())
+}
+
+/// Print the desktop-specific portion of `messenger info` after a successful
+/// desktop setup. Shows helpers detected on the host and the resulting
+/// election order so the user immediately sees what they gained.
+fn print_desktop_info_section(config: &Config) {
+    let helpers = crate::info::config_helpers_for_host(config, sniff::os::detect_os_type());
+    let report = crate::info::build_report(config, &helpers);
+    println!();
+    println!(
+        "{}",
+        styled("<dim>Detected notification helpers and election order:</dim>")
+    );
+    println!();
+    print!("{}", crate::info::render_text(&report));
 }
 
 fn select_provider() -> Result<RouteProvider> {
@@ -163,11 +192,54 @@ fn configure_provider(provider: &RouteProvider, route_name: Option<&str>) -> Res
 
     match provider {
         RouteProvider::Discord => configure_discord(),
+        RouteProvider::DiscordWebhook => configure_discord_webhook(),
         RouteProvider::Slack => configure_slack(),
+        RouteProvider::SlackWebhook => configure_slack_webhook(),
         RouteProvider::Signal => configure_signal(),
         RouteProvider::WhatsApp => configure_whatsapp(),
         RouteProvider::Telegram => configure_telegram(),
+        RouteProvider::Desktop => configure_desktop(),
     }
+}
+
+fn configure_discord_webhook() -> Result<RouteConfig> {
+    println!(
+        "\n{}",
+        styled(
+            "<dim>Discord webhooks require the full webhook URL (https://discord.com/api/v10/webhooks/ID/TOKEN).</dim>"
+        )
+    );
+    println!(
+        "{}",
+        styled("<dim>Create one under Server Settings → Integrations → Webhooks.</dim>")
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>The URL binds both the channel and authentication — treat it as a secret.</dim>"
+        )
+    );
+
+    let webhook_url = Text::new("Webhook URL:")
+        .with_help_message("Full webhook URL (leave empty to use env var instead)")
+        .prompt()
+        .map_err(handle_cancel)?;
+    let webhook_url = non_empty(webhook_url);
+
+    let webhook_url_env = if webhook_url.is_none() {
+        Text::new("Environment variable for webhook URL:")
+            .with_default("DISCORD_WEBHOOK_URL")
+            .with_help_message("The env var that holds your Discord webhook URL")
+            .prompt()
+            .map_err(handle_cancel)?
+    } else {
+        "DISCORD_WEBHOOK_URL".into()
+    };
+
+    Ok(RouteConfig::DiscordWebhook {
+        webhook_url,
+        webhook_url_env,
+    })
 }
 
 fn configure_discord() -> Result<RouteConfig> {
@@ -265,6 +337,69 @@ fn configure_slack() -> Result<RouteConfig> {
         channel_id,
         bot_token,
         bot_token_env,
+    })
+}
+
+fn configure_slack_webhook() -> Result<RouteConfig> {
+    println!(
+        "\n{}",
+        styled(
+            "<dim>Slack Incoming Webhooks require the full webhook URL (https://hooks.slack.com/services/T.../B.../token).</dim>"
+        )
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>Create one under Slack app settings → Incoming Webhooks and pick a target channel.</dim>"
+        )
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>The URL binds both the channel and authentication — treat it as a secret.</dim>"
+        )
+    );
+
+    let use_env_var = Confirm::new("Load the webhook URL from an environment variable?")
+        .with_default(false)
+        .with_help_message(
+            "Select Yes to store only an env-var name in config; select No to enter the URL now (masked input).",
+        )
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    if use_env_var {
+        let webhook_url_env = Text::new("Environment variable for webhook URL:")
+            .with_default("SLACK_WEBHOOK_URL")
+            .with_help_message("The env var that holds your Slack webhook URL")
+            .prompt()
+            .map_err(handle_cancel)?;
+
+        return Ok(RouteConfig::SlackWebhook {
+            webhook_url: None,
+            webhook_url_env,
+        });
+    }
+
+    let webhook_url = Password::new("Webhook URL:")
+        .with_display_mode(PasswordDisplayMode::Masked)
+        .with_help_message("Full Slack webhook URL — treated as a secret and will not be echoed")
+        .without_confirmation()
+        .with_validator(|input: &str| {
+            if input.trim().is_empty() {
+                Ok(inquire::validator::Validation::Invalid(
+                    "Webhook URL cannot be empty.".into(),
+                ))
+            } else {
+                Ok(inquire::validator::Validation::Valid)
+            }
+        })
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    Ok(RouteConfig::SlackWebhook {
+        webhook_url: Some(webhook_url),
+        webhook_url_env: "SLACK_WEBHOOK_URL".into(),
     })
 }
 
@@ -457,6 +592,223 @@ fn configure_telegram() -> Result<RouteConfig> {
     })
 }
 
+fn configure_desktop() -> Result<RouteConfig> {
+    println!(
+        "\n{}",
+        styled("<dim>Desktop notifications deliver to the host OS notification center.</dim>")
+    );
+    println!(
+        "{}",
+        styled(
+            "<dim>No channel or token is needed; configs are portable across hosts and platform-specific fields are optional.</dim>"
+        )
+    );
+
+    let app_name = Text::new("App name:")
+        .with_default("Messenger")
+        .with_help_message("Name shown by the notification center")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    let default_title = Text::new("Default title (optional):")
+        .with_help_message("Used when a message does not supply its own title")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    let icon = Text::new("Icon name or path (optional):")
+        .with_help_message("Freedesktop icon name (Linux/macOS) or absolute path to an image file")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    let category = Text::new("Category / thread identifier (optional):")
+        .with_help_message(
+            "Maps to D-Bus category on Linux, categoryIdentifier on macOS, tag on Windows",
+        )
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    let urgency = prompt_urgency()?;
+    let timeout_ms = prompt_optional_timeout_ms()?;
+
+    let windows = prompt_windows_desktop_config()?;
+    let macos = prompt_macos_desktop_config()?;
+    let linux = prompt_linux_desktop_config()?;
+
+    Ok(RouteConfig::Desktop {
+        app_name,
+        default_title: non_empty(default_title),
+        icon: non_empty(icon),
+        category: non_empty(category),
+        urgency,
+        timeout_ms,
+        actions: Vec::new(),
+        progress: None,
+        badge_count: None,
+        windows,
+        macos,
+        linux,
+    })
+}
+
+fn prompt_urgency() -> Result<RouteUrgency> {
+    let options = vec!["low", "normal", "critical"];
+    let selection = Select::new("Default urgency:", options)
+        .with_starting_cursor(1)
+        .with_help_message("Urgency hints vary per platform; \"normal\" is a safe default")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    Ok(match selection {
+        "low" => RouteUrgency::Low,
+        "critical" => RouteUrgency::Critical,
+        _ => RouteUrgency::Normal,
+    })
+}
+
+fn prompt_optional_timeout_ms() -> Result<Option<u32>> {
+    loop {
+        let raw = Text::new("Default expiry timeout in milliseconds (optional):")
+            .with_help_message(
+                "Leave blank to use the platform default; enter a positive integer otherwise",
+            )
+            .prompt()
+            .map_err(handle_cancel)?;
+
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+
+        match trimmed.parse::<u32>() {
+            Ok(value) => return Ok(Some(value)),
+            Err(_) => {
+                println!(
+                    "{}",
+                    styled(format!(
+                        "<red>\"{trimmed}\" is not a valid positive integer. Try again.</red>"
+                    ))
+                );
+            }
+        }
+    }
+}
+
+fn prompt_windows_desktop_config() -> Result<DesktopWindowsConfig> {
+    println!(
+        "\n{}",
+        styled(
+            "<dim>Windows WinRT toasts require an App User Model ID. On Windows, completing this setup writes a Start Menu shortcut so toasts can render.</dim>"
+        )
+    );
+
+    let raw = Text::new("Windows App User Model ID (optional):")
+        .with_default(DEFAULT_WINDOWS_APP_ID)
+        .with_help_message(
+            "Leave blank to skip Windows; defaults to RustyBiscuit.Messenger when set",
+        )
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    Ok(DesktopWindowsConfig {
+        app_id: non_empty(raw),
+        prefer_helpers: Vec::new(),
+    })
+}
+
+fn prompt_macos_desktop_config() -> Result<DesktopMacOsConfig> {
+    println!(
+        "\n{}",
+        styled(
+            "<dim>macOS: strategy \"auto\" uses AppleScript (no authorization prompt); \"native_user_notifications\" requires a bundled app identity and may trigger a permission prompt.</dim>"
+        )
+    );
+
+    let bundle_id = Text::new("macOS bundle identifier (optional):")
+        .with_help_message("Used only when strategy = native_user_notifications")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    let strategy_choice = Select::new(
+        "macOS notification strategy:",
+        vec!["auto", "native_user_notifications", "applescript"],
+    )
+    .with_starting_cursor(0)
+    .with_help_message("\"auto\" is recommended for v1 and maps to AppleScript delivery")
+    .prompt()
+    .map_err(handle_cancel)?;
+
+    let strategy = match strategy_choice {
+        "native_user_notifications" => RouteMacOsStrategy::NativeUserNotifications,
+        "applescript" => RouteMacOsStrategy::AppleScript,
+        _ => RouteMacOsStrategy::Auto,
+    };
+
+    Ok(DesktopMacOsConfig {
+        bundle_id: non_empty(bundle_id),
+        strategy,
+        prefer_helpers: Vec::new(),
+    })
+}
+
+fn prompt_linux_desktop_config() -> Result<DesktopLinuxConfig> {
+    println!(
+        "\n{}",
+        styled(
+            "<dim>Linux: the optional desktop entry maps to the freedesktop.org <b>desktop-entry</b> hint, used by some notification servers for per-app settings.</dim>"
+        )
+    );
+
+    let desktop_entry = Text::new("Linux desktop entry (optional):")
+        .with_help_message("Name of the .desktop file without the extension (e.g. \"messenger\")")
+        .prompt()
+        .map_err(handle_cancel)?;
+
+    Ok(DesktopLinuxConfig {
+        desktop_entry: non_empty(desktop_entry),
+        prefer_helpers: Vec::new(),
+    })
+}
+
+/// Run any post-save side effects tied to the just-configured route.
+///
+/// For the desktop provider on Windows this is where the Start Menu shortcut
+/// is registered. Non-Windows hosts and non-desktop routes fall through as
+/// no-ops. The registration runs before persisting the config so a failed
+/// shortcut write does not leave a half-configured route behind.
+pub(crate) fn finalize_route(route: &RouteConfig) -> Result<()> {
+    let RouteConfig::Desktop {
+        app_name, windows, ..
+    } = route
+    else {
+        return Ok(());
+    };
+
+    if !cfg!(target_os = "windows") {
+        return Ok(());
+    }
+
+    let Some(app_id) = windows.app_id.as_deref() else {
+        return Ok(());
+    };
+
+    match desktop_setup::register_windows_shortcut(app_id, app_name) {
+        Ok(outcome) => {
+            println!(
+                "{}",
+                styled(format!(
+                    "<green>Windows Start Menu shortcut written to <b>{}</b>.</green>",
+                    outcome.shortcut_path.display()
+                ))
+            );
+            Ok(())
+        }
+        Err(error) => Err(eyre!(
+            "failed to register the Windows Start Menu shortcut: {error}. \
+             Rerun `messenger setup desktop` after resolving the issue."
+        )),
+    }
+}
+
 fn suggest_route_name(provider: &RouteProvider, config: &Config) -> String {
     let base = provider.to_string();
     if !config.routes.contains_key(&base) {
@@ -482,5 +834,124 @@ fn handle_cancel(err: InquireError) -> color_eyre::eyre::Error {
             std::process::exit(0);
         }
         other => other.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn desktop_route_with(app_id: Option<&str>) -> RouteConfig {
+        RouteConfig::Desktop {
+            app_name: "Messenger".into(),
+            default_title: Some("Messenger".into()),
+            icon: Some("dialog-information".into()),
+            category: Some("im.received".into()),
+            urgency: RouteUrgency::Normal,
+            timeout_ms: Some(5000),
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
+            windows: DesktopWindowsConfig {
+                app_id: app_id.map(str::to_string),
+                prefer_helpers: Vec::new(),
+            },
+            macos: DesktopMacOsConfig {
+                bundle_id: Some("com.rustybiscuit.messenger".into()),
+                strategy: RouteMacOsStrategy::Auto,
+                prefer_helpers: Vec::new(),
+            },
+            linux: DesktopLinuxConfig {
+                desktop_entry: Some("messenger".into()),
+                prefer_helpers: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn finalize_route_is_noop_for_non_desktop_routes() {
+        let route = RouteConfig::Slack {
+            channel_id: "C123".into(),
+            bot_token: None,
+            bot_token_env: "SLACK_BOT_TOKEN".into(),
+        };
+        finalize_route(&route).expect("non-desktop route must short-circuit");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn finalize_route_is_noop_for_desktop_on_non_windows() {
+        // A desktop route on a Linux or macOS host must not attempt Windows
+        // shortcut registration — Phase 6's acceptance constraint forbids
+        // side effects outside `~/.messenger/` during both setup and send.
+        let route = desktop_route_with(Some("RustyBiscuit.Messenger"));
+        finalize_route(&route).expect("desktop finalize on non-Windows must be a no-op");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn finalize_route_is_noop_when_app_id_missing() {
+        let route = desktop_route_with(None);
+        finalize_route(&route).expect("missing app_id on non-Windows must short-circuit cleanly");
+    }
+
+    #[test]
+    fn full_desktop_route_round_trips_through_saved_config() {
+        // Mirrors the payload produced by the expanded setup flow once the
+        // interactive prompts have been answered. Proves the config layer
+        // preserves every new field that Phase 6 collects.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let route = desktop_route_with(Some("RustyBiscuit.Messenger"));
+
+        let mut config = Config {
+            default_route: Some("desktop.local".into()),
+            routes: HashMap::new(),
+        };
+        config.routes.insert("desktop.local".into(), route.clone());
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
+        let stored = loaded.routes.get("desktop.local").unwrap();
+        assert_eq!(stored, &route);
+        match stored {
+            RouteConfig::Desktop {
+                windows,
+                macos,
+                linux,
+                urgency,
+                timeout_ms,
+                icon,
+                category,
+                default_title,
+                ..
+            } => {
+                assert_eq!(windows.app_id.as_deref(), Some("RustyBiscuit.Messenger"));
+                assert_eq!(
+                    macos.bundle_id.as_deref(),
+                    Some("com.rustybiscuit.messenger")
+                );
+                assert_eq!(macos.strategy, RouteMacOsStrategy::Auto);
+                assert_eq!(linux.desktop_entry.as_deref(), Some("messenger"));
+                assert_eq!(*urgency, RouteUrgency::Normal);
+                assert_eq!(*timeout_ms, Some(5000));
+                assert_eq!(icon.as_deref(), Some("dialog-information"));
+                assert_eq!(category.as_deref(), Some("im.received"));
+                assert_eq!(default_title.as_deref(), Some("Messenger"));
+            }
+            other => panic!("expected Desktop route, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_empty_helper_normalizes_whitespace() {
+        assert_eq!(non_empty("".into()), None);
+        assert_eq!(non_empty("   ".into()), None);
+        assert_eq!(non_empty("value".into()), Some("value".into()));
     }
 }

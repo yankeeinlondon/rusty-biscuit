@@ -260,6 +260,8 @@ Sub-modules:
 - `guardrails` — inline composition guardrails appended to prompts to constrain output shape
 - `types` — shared types including `PreparedComposition`, `SelectedProvider`, `SequencePlan`, `SequenceStep`, `SharedApprovalCache`, `CompositionMode`, and `SystemPromptInput`
 
+Execution parity note (2026-04-16): the CLI-side non-harness execution of `compose` and `inline-compose` flows through a single `execute_without_harness` function parameterized by `CompositionExecutionMode::{Direct, Inline}`, with a shared `run_structured_composition` helper that produces a `CompositionStreamResult` and a shared `emit_composition_summary` function that selects section-stream routing via a `defer_section_separator` flag. The Goose-only legacy (non-structured) path renders through `emit_minimal_composition_summary` so it emits the same stderr summary block as structured runs instead of the previous JSONL-only silence.
+
 ### Badges (`badges`)
 
 Styled terminal badge constants for the execution line header: `YOLO`, `NON_INTERACTIVE`, `INTERACTIVE`, `VERBOSE`, `COMPOSE`, `INLINE_COMPOSE`, `REPO_FLAG`, and scope badges (`USER_SCOPED`, `REPO_SCOPED`, `MASKED_REPO_SCOPED`).
@@ -364,7 +366,8 @@ Typed pre/post validations, timeouts, handler resolution, and shell policy for c
 
 ## Lessons Learned
 
-- **Hook handlers must respond fast**: Providers in non-interactive mode (`--print`, `--prompt`) may cancel hooks that don't produce stdout output within their shutdown window. The `handle` command uses `detect_environment_fast` (git/filesystem only, skipping OS/hardware/network) to minimize latency. Non-blocking events (SessionStart, SessionEnd, etc.) return a `{}` JSON acknowledgment via the adapter's `non_blocking_ack()` method — silent stdout is interpreted as "hook cancelled" by Claude Code, Gemini, and other providers that read hook output.
+- **Hook handlers must respond fast**: Providers in non-interactive mode (`--print`, `--prompt`) may cancel hooks that don't produce stdout output within their shutdown window. `claudine handle` enforces a hard **5-second execution deadline** by default to prevent blocking the parent agent session. Individual `Bash` and `Message` actions also have tighter 3s timeouts when running inside a hook handler. Non-blocking events return a `{}` JSON acknowledgment via the adapter's `non_blocking_ack()` method — silent stdout is interpreted as "hook cancelled" by Claude Code, Gemini, and others.
+- **Refined structured output**: Wrapped non-interactive sessions follow a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing. Thinking prose is rendered as a `BlockQuote` on stderr. Tool calls use a canonical `ToolCallDisplay` contract (`🔧 →` / `🔧 ←`) with humanized names and summarized inputs/results, managed by `LiveSemanticSink`.
 - **Config merge is intentionally asymmetric**: repo provider configs fully replace user-level (not merged per-event) to give projects complete control. Settings merge field-by-field because they're global preferences. Nested structs like `linking` and `canonical_provider` also merge field-by-field — repo non-`None` values override user, but user-only fields (e.g. `user_skill`) survive when the repo config doesn't set them.
 - **All 8 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, Qwen, and Roo parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose and Roo are observation-only.
 - **Template regex is lazy-compiled**: `LazyLock<Regex>` ensures the Handlebars `\{\{\s*([^{}]+?)\s*\}\}` pattern compiles once across all interpolation calls.
@@ -372,3 +375,18 @@ Typed pre/post validations, timeouts, handler resolution, and shell policy for c
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.
 - **Legacy single-brace templates are deprecated**: `{placeholder}` is automatically rewritten to `{{placeholder}}` with a tracing warning. New configs should use Handlebars-style double braces.
+
+## Compatibility Notes
+
+### Contextual Errors (2026-04)
+
+Several error variants were refactored to carry typed `darkmatter::markdown::MarkdownError` values instead of pre-stringified text so the CLI's cause-chain walker can render rich `BlockError` reports (path, line, hint, transclusion chain, etc.).
+
+- `ClaudineError::SystemPromptComposition(String)` → `SystemPromptComposition(#[from] MarkdownError)`
+- `composition::CompositionError::ComposeFailed(String)` → `ComposeFailed(#[source] MarkdownError)`
+- `composition::CompositionError::PreFlightDiscoveryFailed(String)` → `PreFlightDiscoveryFailed(#[source] MarkdownError)`
+- `composition::CompositionError::LifecycleInvalid { property, message }` — new variant that replaces the previous `ComposeFailed(format!("invalid …"))` route for frontmatter lifecycle deserialization failures.
+
+External consumers that pattern-match on these variants or inspect their string payload need to update their matches. The `Display` output for each variant still begins with the same human-readable prefix (`"system prompt composition failed: …"`, `"compose failed: …"`, `"pre-flight discovery failed: …"`), so consumers that only format-and-log these errors are unaffected.
+
+The harness sites at `harness/parse.rs` (`tokenize()`) and `harness/audit.rs` (`parse_directives()`) remain deliberately out of scope; they discard darkmatter error detail on internal paths that are not user-facing today and are tracked for a follow-up.

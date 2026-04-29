@@ -1,0 +1,26 @@
+I'll check the current file and search git history for previous versions.
+The file shows in glob results but can't be read. Let me investigate further.
+The glob found it but the directory doesn't exist on disk — it's likely on a different branch. Let me search across all branches and the main repo.
+Found one commit referencing the file. Let me look at the full history and check if there was a more complete version before that commit.
+That's the truncated version. Let me check what happened in that commit — it says "move", so there was likely an earlier location with more content.
+The commit added only 5 lines — but says "move from dated folder." Let me look for the original location.
+Found it — commit `d255fe97` removed the old location and `7445879c` looks like the original detailed spec. Let me check these.
+That's the detailed doc. Let me also search for any other commits that may have had even more content in this file or the sequences doc.
+Now let me check the current version of this doc to see if the detailed content is still there.
+Here's what I found:
+
+**The spec.md was always just 5 lines** — every version in git history (across all branches) contains only:
+
+```md
+# Improved Sequences
+
+![alt text](image.png)
+
+Sequences define a set
+```
+
+It was never more complete than that. It was created at commit `7445879c`, moved from `features/2026-04-11-improved-sequences/` to `features/_unscheduled/improved-sequences/` at `67869041`, and the old copy was deleted at `d255fe97`. The content was identical in all three commits.
+
+**However**, the detailed sequence documentation you're probably remembering lives in `claudine/docs/topics/agent-flows/sequences.md` — that file has the full writeup with Simple Named Steps, Object State definitions, YAML Templates, etc. It's still there and intact (94 lines), though it cuts off mid-sentence at "So far we've been showing you a very popular style of sequence which consists of" — so it may also be incomplete.
+
+It looks like the spec.md was always a stub that pointed at the image, and the real content was in `sequences.md`. That doc appears to have been truncated too (the "Advanced Techniques" section is unfinished).

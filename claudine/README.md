@@ -70,6 +70,13 @@ The immediate benefits of wrapped execution are:
 
     > **Note:** by default when you start Claudine in wrapped execution mode, it will explicitly share which variables have been removed and which have been added. Later, if you don't want to always see that you can run your commands with the `--quiet` flag and this extra information will be removed.
 
+- **Refined Agent Responses**
+    - Claudine normalizes and cleans up the output from all agents, ensuring consistent formatting, spacing, and styling.
+    - **Section Model.** Every non-interactive run follows a 9-section rendered model (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing rules (at most one blank line between sections).
+    - **Thinking Prose.** Reasoning and thinking content from providers (Claude, Codex, etc.) is rendered as a `BlockQuote` with a grey vertical line and dim-italic text on stderr, providing continuous feedback during long turns.
+    - **Tool-Call Display.** Tool calls use a canonical contract (`🔧 →` for outgoing, `🔧 ←` for incoming) with humanized names and summarized arguments/results. No more raw JSON dumps to the terminal for known tools.
+    - **Markdown Rendering.** Improved markdown support, including a fix for Gemini's mid-list truncation and stray blank lines in unordered lists.
+
 - **Better Logging**
     - By being at the _start_ and _end_ of each session we can provide better logs
 - **Consistent CLI Switches**
@@ -79,6 +86,7 @@ The immediate benefits of wrapped execution are:
         - when you're wrapping execution you can use `--yolo`, `-y` with any Agent and it will map that into the provider's CLI appropriately
     - Note:
         - no CLI functionality is lost via this approach, any CLI switch which is not a "standardized/universal" switch will be passed down to the provider as well so you can still access any feature you need
+        - **OpenCode YOLO.** Claudine now correctly forwards `--dangerously-skip-permissions` to OpenCode in non-interactive sessions when `--yolo` is used.
 - **Compositional Flow Features**
     - We'll cover this in the next section
 
@@ -89,16 +97,42 @@ Claudine's composition features let you use Markdown as a dynamic template for a
 
 Three canonical commands:
 
-- **`claudine compose <file-ref>`** — compose a Markdown file and send it as a prompt (no file mutation)
-- **`claudine inline-compose <file-ref>`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
-- **`claudine sequence <file-ref>`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure
+- **`claudine compose <file-ref> [key=value ...]`** — compose a Markdown file and send it as a prompt (no file mutation)
+- **`claudine inline-compose <file-ref> [key=value ...]`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
+- **`claudine sequence <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure
+
+**Inline Shorthand.** You can override frontmatter values using `key=value` positional arguments. Values are parsed as JSON5 first (supporting numbers, booleans, arrays) and fall back to plain strings. These shorthand overrides win over `--set` JSON blobs.
+
+```sh
+claudine compose @prompts/review.md review="review.md" count=3 draft=true
+```
 
 All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and handler-driven recovery.
+
+**Consistent Rendering.** `compose` and `inline-compose` go through one shared execution path (`execute_without_harness`) with one shared structured-stream helper (`run_structured_composition`) and one shared summary emitter (`emit_composition_summary`). Their stderr summary output is identical modulo four intentional inline-only differences: closure validation messages, file-write status, partial-body reports on interruption, and writability pre-checks. Deferred summary timing in inline-compose is the only reason those two flows diverge. The legacy (non-structured) path — reachable today only for Goose — emits the same stderr summary block as structured runs via `emit_minimal_composition_summary`, so Goose compositions are no longer JSONL-only silent.
 
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 
 For full details, see [Composition](./docs/topics/composition.md).
 
+### Performance Reporting
+
+All wrapper and composition commands support an opt-in `--perf` flag that emits a detailed performance report to **stderr** after the command completes:
+
+- `claudine {agent} --perf ...`
+- `claudine compose --perf ...`
+- `claudine inline-compose --perf ...`
+- `claudine sequence --perf ...`
+
+The report is divided into three sections:
+
+1. **CLI Overhead** — time spent on arg parsing, config loading, tracing init, and environment setup.
+2. **Composition Report** — when document composition occurred, shows Darkmatter pipeline timings (transclusion, interpolation, shell expansion, etc.).
+3. **Agent Execution** — number of launches, first-response latency, total execution time, and provider-reported API duration when available.
+
+For `sequence`, a single aggregated report is printed at the very end, averaging first-response latencies across all steps and summing launches and total time. The report is emitted unconditionally when `--perf` is passed, even if `--silent` or `--quiet` are also present — perf is an explicit opt-in that overrides silence settings.
+
+> **Note:** `provider_api_duration` is only available for providers that use the structured-streaming path (e.g., Codex, Gemini, OpenCode). Legacy providers such as Goose do not report this metric.
 
 ## Getting Started
 

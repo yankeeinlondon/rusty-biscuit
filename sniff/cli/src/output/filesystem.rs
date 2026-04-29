@@ -17,7 +17,7 @@ use sniff::filesystem::{
 };
 
 use super::{TextOutput, format_number, relative_path};
-use crate::args::FilesFilter;
+use crate::args::{FilesFilter, PackagesFormat};
 
 /// Parsed repo filter with support for negation (`!`) and area matching (`@`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -506,18 +506,11 @@ pub fn render_git_file_list(
     out
 }
 
-/// ## Arguments
-///
-/// * `git` - Git repository information
-/// * `history_count` - Number of recent commits to display
-pub fn render_git_section(
+fn build_git_status_items(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
-) -> String {
-    let mut out = String::new();
-    let terminal = Terminal::default();
-
+) -> Vec<String> {
     // Build commit URL base from the preferred remote (usually "origin").
     let commit_url_base = build_commit_url_base(git);
 
@@ -530,11 +523,20 @@ pub fn render_git_section(
         .map(|t| t.ahead)
         .unwrap_or(0);
 
-    // === Status Section ===
-    let status_title = Prose::new("<b><u>Status</u></b>");
-    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
-
     let mut status_items: Vec<String> = Vec::new();
+
+    let conflicted: Vec<_> = git
+        .file_changes
+        .iter()
+        .filter(|f| f.status == FileStatus::Conflicted)
+        .collect();
+    for file in &conflicted {
+        let path = file.path.display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<red>conflicted: {linked_path}</red>");
+        status_items.push(line);
+    }
 
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
@@ -552,7 +554,6 @@ pub fn render_git_section(
         status_items.push(format_commit_line(commit, verbose, commit_url.as_deref()));
     }
 
-    // File changes grouped by status
     let staged: Vec<_> = git
         .file_changes
         .iter()
@@ -572,7 +573,8 @@ pub fn render_git_section(
     // Add staged files
     for file in &staged {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         // Only show diff stats for modified files (not created/deleted)
         let diff_stats = if file.action == FileAction::Modified {
@@ -580,51 +582,53 @@ pub fn render_git_section(
         } else {
             String::new()
         };
-        let line = if dir.is_empty() {
-            format!(
-                "<lime>staged(<dim><i>{action}</i></dim>): <b>{}</b></lime>{diff_stats}",
-                name
-            )
-        } else {
-            format!(
-                "<lime>staged(<dim><i>{action}</i></dim>): {}<b>{}</b></lime>{diff_stats}",
-                dir, name
-            )
-        };
+        let line =
+            format!("<lime>staged(<dim><i>{action}</i></dim>): {linked_path}</lime>{diff_stats}");
         status_items.push(line);
     }
 
     // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
-        let line = if dir.is_empty() {
-            format!(
-                "<yellow>unstaged(<dim><i>{action}</i></dim>): <b>{}</b></yellow>{diff_stats}",
-                name
-            )
-        } else {
-            format!(
-                "<yellow>unstaged(<dim><i>{action}</i></dim>): {}<b>{}</b></yellow>{diff_stats}",
-                dir, name
-            )
-        };
+        let line = format!(
+            "<yellow>unstaged(<dim><i>{action}</i></dim>): {linked_path}</yellow>{diff_stats}"
+        );
         status_items.push(line);
     }
 
-    // Add untracked files
     for file in &untracked {
         let path = file.path.display().to_string();
-        let (dir, name) = split_path(&path);
-        let line = if dir.is_empty() {
-            format!("<red>untracked: <b>{}</b></red>", name)
-        } else {
-            format!("<red>untracked: {}<b>{}</b></red>", dir, name)
-        };
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<dim>untracked: {linked_path}</dim>");
         status_items.push(line);
     }
+
+    status_items
+}
+
+/// ## Arguments
+///
+/// * `git` - Git repository information
+/// * `history_count` - Number of recent commits to display
+pub fn render_git_section(
+    git: &sniff::filesystem::git::GitInfo,
+    history_count: usize,
+    verbose: u8,
+    compact: bool,
+) -> String {
+    let mut out = String::new();
+    let terminal = Terminal::default();
+
+    // === Status Section ===
+    let status_title = Prose::new("<b><u>Status</u></b>");
+    writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
+
+    let status_items = build_git_status_items(git, history_count, verbose);
 
     // Render status items as list
     if !status_items.is_empty() {
@@ -637,6 +641,10 @@ pub fn render_git_section(
     } else {
         let clean = Prose::new("<dim>No changes</dim>");
         writeln!(out, "  {}", clean.render(&terminal)).unwrap();
+    }
+
+    if compact {
+        return out;
     }
 
     // === Worktrees Section (only if worktrees exist) ===
@@ -1297,20 +1305,269 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
 /// Render package names as a comma-separated plain text list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_repo_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
-    let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
+/// Filter a package list by name/area filters and an optional package-area scope.
+fn select_repo_packages<'a>(
+    packages: &'a [Package],
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a Package> {
+    let mut filtered = filter_packages(packages, repo_filter);
+    if let Some(area) = package_area {
+        let needle = area.to_lowercase();
+        filtered.retain(|p| p.package_area.to_lowercase() == needle);
+    }
+    filtered
+}
 
-    match repo {
-        Some(repo) if repo.is_monorepo => {
-            if let Some(ref packages) = repo.packages {
-                let filtered = filter_packages(packages, repo_filter);
-                let names: Vec<&str> = filtered.iter().map(|p| p.name.as_str()).collect();
-                names.join(", ")
-            } else {
-                String::new()
+/// Collect package names matching the given filters and area scope.
+///
+/// Returns an empty vec when the repo is not a monorepo.
+pub fn collect_repo_package_names<'a>(
+    repo: &'a RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a str> {
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    select_repo_packages(packages, repo_filter, package_area)
+        .into_iter()
+        .map(|p| p.name.as_str())
+        .collect()
+}
+
+/// Render a styled package entry; with `verbose > 0` appends the dimmed/italic
+/// repo-relative root directory (e.g. `name(<dim><i>./relative</i></dim>)`).
+fn package_entry_markup(pkg: &Package, verbose: u8) -> String {
+    if verbose > 0 {
+        format!(
+            "{}(<dim><i>./{}</i></dim>)",
+            pkg.name,
+            pkg.relative.trim_start_matches("./")
+        )
+    } else {
+        pkg.name.clone()
+    }
+}
+
+/// Render the package list for `sniff repo packages` in the requested format.
+///
+/// Honors `--md` (Markdown unordered list), `--list` (one entry per line), and
+/// the default csv form. With `verbose > 0`, each entry is annotated with the
+/// dimmed package root directory.
+pub fn render_repo_packages_formatted(
+    repo: &RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+    format: PackagesFormat,
+    verbose: u8,
+) -> String {
+    if !repo.is_monorepo {
+        return String::from(
+            "- the \"packages\" subcommand is only intended to be used in a monorepo",
+        );
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return String::new();
+    };
+
+    let filtered = select_repo_packages(packages, repo_filter, package_area);
+    if filtered.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let entries: Vec<String> = filtered
+        .iter()
+        .map(|pkg| {
+            let markup = package_entry_markup(pkg, verbose);
+            Prose::new(markup).render(&term)
+        })
+        .collect();
+
+    match format {
+        PackagesFormat::Csv => entries.join(", "),
+        PackagesFormat::Markdown => entries
+            .iter()
+            .map(|e| format!("- {e}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        PackagesFormat::List => entries.join("\n"),
+    }
+}
+
+/// Collect unique package area names, honoring the optional scope and filters.
+fn select_repo_package_areas<'a>(
+    packages: &'a [Package],
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a str> {
+    select_repo_package_areas_with_roots(packages, repo_filter, package_area)
+        .into_iter()
+        .map(|(area, _)| area)
+        .collect()
+}
+
+/// Compute the repo-relative area root directory for a given package.
+///
+/// For a package whose `package_area` is `"root"` (a top-level package living
+/// directly at the repo root, such as `model_id` in this workspace), returns
+/// `"."` — the repo root itself.
+///
+/// Otherwise, when `pkg.relative` starts with `pkg.package_area` (the common
+/// case — including multi-segment areas such as `apps/browser`), the area root
+/// is the `package_area` value verbatim. This preserves correctness for nested
+/// monorepo layouts where an area name can legitimately contain `/`.
+///
+/// If neither of those holds, falls back to the first path component of
+/// `pkg.relative`, which matches `Package::package_area` for the overwhelming
+/// majority of this workspace's layouts.
+///
+/// Returns a borrowed `&str` to avoid allocation in the hot render loop.
+fn package_area_root(pkg: &Package) -> &str {
+    if pkg.package_area == "root" {
+        return ".";
+    }
+
+    let relative = pkg.relative.trim_start_matches("./");
+
+    // Prefer `pkg.package_area` when it prefixes `relative` at a path boundary.
+    // This handles multi-segment areas like `apps/browser/my_package` where the
+    // area is `apps/browser` — naive `split('/').next()` would incorrectly
+    // return `apps`.
+    if relative == pkg.package_area {
+        return &pkg.package_area;
+    }
+    if let Some(rest) = relative.strip_prefix(pkg.package_area.as_str())
+        && rest.starts_with('/')
+    {
+        return &pkg.package_area;
+    }
+
+    relative.split('/').next().unwrap_or(relative)
+}
+
+/// Same selection logic as [`select_repo_package_areas`] but also returns the
+/// repo-relative area root directory derived from each area's first package.
+fn select_repo_package_areas_with_roots<'a>(
+    packages: &'a [Package],
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<(&'a str, &'a str)> {
+    // Capture the first package encountered for each area (deterministic via
+    // BTreeMap ordering) so we can derive the area root once.
+    let mut seen: std::collections::BTreeMap<&str, &Package> = std::collections::BTreeMap::new();
+    for pkg in packages {
+        seen.entry(pkg.package_area.as_str()).or_insert(pkg);
+    }
+
+    let scope = package_area.map(str::to_lowercase);
+    let filters: Vec<RepoFilter> = if repo_filter.is_empty() {
+        Vec::new()
+    } else {
+        repo_filter.iter().map(|f| RepoFilter::parse(f)).collect()
+    };
+
+    seen.into_iter()
+        .filter(|(area, _)| {
+            if let Some(needle) = scope.as_deref()
+                && area.to_lowercase() != needle
+            {
+                return false;
             }
-        }
-        _ => String::from("- the \"--packages\" switch is only intended to be used in a monorepo"),
+            if filters.is_empty() {
+                return true;
+            }
+            let lower = area.to_lowercase();
+            filters.iter().any(|f| {
+                let hit = lower.contains(&f.query.to_lowercase());
+                if f.negate { !hit } else { hit }
+            })
+        })
+        .map(|(area, pkg)| (area, package_area_root(pkg)))
+        .collect()
+}
+
+/// Collect unique package area names matching the given filters and scope.
+///
+/// Returns an empty vec when the repo is not a monorepo.
+pub fn collect_repo_package_area_names<'a>(
+    repo: &'a RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+) -> Vec<&'a str> {
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    select_repo_package_areas(packages, repo_filter, package_area)
+}
+
+/// Render the unique package area list for `sniff repo package-areas` in the
+/// requested format.
+///
+/// Honors `--md` (Markdown unordered list), `--list` (one entry per line), and
+/// the default csv form. With `verbose > 0`, each entry is annotated with the
+/// dimmed repo-relative area directory.
+pub fn render_repo_package_areas_formatted(
+    repo: &RepoInfo,
+    repo_filter: &[String],
+    package_area: Option<&str>,
+    format: PackagesFormat,
+    verbose: u8,
+) -> String {
+    if !repo.is_monorepo {
+        return String::from(
+            "- the \"package-areas\" subcommand is only intended to be used in a monorepo",
+        );
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return String::new();
+    };
+
+    let areas = select_repo_package_areas_with_roots(packages, repo_filter, package_area);
+    if areas.is_empty() {
+        return String::new();
+    }
+
+    let term = Terminal::default();
+    let entries: Vec<String> = areas
+        .iter()
+        .map(|(area, root)| {
+            let markup = if verbose > 0 {
+                // Special-case the "root" area so the annotation reads
+                // "root (./)" rather than "root (./root)" (a non-existent
+                // directory). Every other area renders as "./{root}".
+                let dir_label = if *root == "." {
+                    String::from("./")
+                } else {
+                    format!("./{root}")
+                };
+                // Note the SPACE before the open paren — spec requires
+                // "{package-area} (<dim><i>{dir}</i></dim>)".
+                format!("{area} (<dim><i>{dir_label}</i></dim>)")
+            } else {
+                (*area).to_string()
+            };
+            Prose::new(markup).render(&term)
+        })
+        .collect();
+
+    match format {
+        PackagesFormat::Csv => entries.join(", "),
+        PackagesFormat::Markdown => entries
+            .iter()
+            .map(|e| format!("- {e}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        PackagesFormat::List => entries.join("\n"),
     }
 }
 
@@ -2947,6 +3204,15 @@ fn format_basename_filepath(relative: &str, absolute: &str) -> String {
     format!("<a href=\"{absolute}\"><blue>{basename}</blue></a>")
 }
 
+/// Format a git-status filepath preserving the existing visible text while
+/// making the path clickable through Prose OSC8 support.
+fn format_git_status_filepath(relative: &str, absolute: &str) -> String {
+    match relative.rsplit_once('/') {
+        Some((dir, file)) => format!("<a href=\"{absolute}\">{dir}/<b>{file}</b></a>"),
+        None => format!("<a href=\"{absolute}\"><b>{relative}</b></a>"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared path-list renderer
 // ---------------------------------------------------------------------------
@@ -3204,7 +3470,12 @@ pub fn render_repo_deps_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use sniff::filesystem::git::{
+        CommitInfo, FileAction, FileChange, FileStatus, GitConfig, GitInfo, RepoStatus,
+    };
     use sniff::filesystem::repo::Package;
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     fn make_package(name: &str, area: &str, depends_on: &[&str]) -> Package {
@@ -3237,6 +3508,114 @@ mod tests {
             is_updatable: None,
             has_major_update: None,
             is_excluded: false,
+        }
+    }
+
+    fn make_git_info(file_changes: Vec<FileChange>) -> GitInfo {
+        let staged_count = file_changes
+            .iter()
+            .filter(|f| f.status == FileStatus::Staged || f.status == FileStatus::Both)
+            .count();
+        let unstaged_count = file_changes
+            .iter()
+            .filter(|f| f.status == FileStatus::Modified || f.status == FileStatus::Both)
+            .count();
+        let untracked_count = file_changes
+            .iter()
+            .filter(|f| f.status == FileStatus::Untracked)
+            .count();
+
+        GitInfo {
+            repo_root: PathBuf::from("/repo"),
+            org: None,
+            repo: None,
+            current_branch: Some("main".to_string()),
+            branches: vec![],
+            in_worktree: false,
+            base_repo_root: None,
+            recent: vec![CommitInfo {
+                sha: "1234567890abcdef".to_string(),
+                message: "feat: add status output".to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            }],
+            status: RepoStatus {
+                is_dirty: !file_changes.is_empty(),
+                staged_count,
+                unstaged_count,
+                untracked_count,
+                dirty: vec![],
+                untracked: vec![],
+                is_behind: None,
+            },
+            remotes: vec![],
+            worktrees: HashMap::new(),
+            config: GitConfig::default(),
+            tracking: vec![],
+            file_changes,
+        }
+    }
+
+    mod git_status_rendering {
+        use super::*;
+
+        #[test]
+        fn conflicted_files_render_before_commits_and_untracked_is_dimmed() {
+            let git = make_git_info(vec![
+                FileChange {
+                    path: PathBuf::from("src/main.rs"),
+                    status: FileStatus::Staged,
+                    action: FileAction::Modified,
+                    lines_added: 3,
+                    lines_removed: 1,
+                },
+                FileChange {
+                    path: PathBuf::from("conflict.txt"),
+                    status: FileStatus::Conflicted,
+                    action: FileAction::Modified,
+                    lines_added: 0,
+                    lines_removed: 0,
+                },
+                FileChange {
+                    path: PathBuf::from("notes.md"),
+                    status: FileStatus::Untracked,
+                    action: FileAction::Created,
+                    lines_added: 0,
+                    lines_removed: 0,
+                },
+            ]);
+
+            let items = build_git_status_items(&git, 10, 0);
+
+            assert!(items[0].starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
+            assert!(items[0].contains("<b>conflict.txt</b></a>"));
+            assert!(items.iter().any(|item| {
+                item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
+                    && item.contains("<b>notes.md</b></a>")
+            }));
+            assert!(items.iter().any(|item| {
+                item.starts_with("<lime>staged(")
+                    && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
+            }));
+        }
+
+        #[test]
+        fn compact_git_status_omits_meta_section() {
+            let git = make_git_info(vec![FileChange {
+                path: PathBuf::from("conflict.txt"),
+                status: FileStatus::Conflicted,
+                action: FileAction::Modified,
+                lines_added: 0,
+                lines_removed: 0,
+            }]);
+
+            let output = render_git_section(&git, 10, 0, true);
+
+            assert!(output.contains("Status"));
+            assert!(!output.contains("Meta"));
+            assert!(!output.contains("Worktrees"));
         }
     }
 
@@ -3312,6 +3691,42 @@ mod tests {
 
             assert_eq!(top, vec!["apps/browser".to_string()]);
             assert!(children.is_empty());
+        }
+    }
+
+    mod package_area_root {
+        use super::*;
+
+        #[test]
+        fn root_sentinel_returns_repo_root() {
+            let mut pkg = make_package("model_id", "root", &[]);
+            pkg.relative = "model_id".to_string();
+            pkg.path = PathBuf::from("/repo/model_id");
+
+            assert_eq!(super::super::package_area_root(&pkg), ".");
+        }
+
+        #[test]
+        fn normal_area_returns_package_area() {
+            let pkg = make_package("cli", "sniff", &[]);
+
+            assert_eq!(super::super::package_area_root(&pkg), "sniff");
+        }
+
+        #[test]
+        fn multi_segment_area_returns_full_package_area() {
+            let pkg = make_package("my_package", "apps/browser", &[]);
+
+            assert_eq!(super::super::package_area_root(&pkg), "apps/browser");
+        }
+
+        #[test]
+        fn mismatched_area_falls_back_to_relative_first_component() {
+            let mut pkg = make_package("pkg", "weird", &[]);
+            pkg.relative = "actual/path".to_string();
+            pkg.path = PathBuf::from("/repo/actual/path");
+
+            assert_eq!(super::super::package_area_root(&pkg), "actual");
         }
     }
 

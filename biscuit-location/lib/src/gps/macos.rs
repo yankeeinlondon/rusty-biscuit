@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{define_class, msg_send, AnyThread, DefinedClass};
+use objc2::{AnyThread, DefinedClass, define_class, msg_send};
 use objc2_core_location::{CLLocation, CLLocationManager, CLLocationManagerDelegate};
 use objc2_foundation::{NSArray, NSDate, NSError, NSObject, NSObjectProtocol, NSRunLoop};
 
@@ -39,8 +39,7 @@ define_class!(
                     None
                 };
                 if let Some(sender) = self.ivars().sender.lock().unwrap().take() {
-                    let fix: Option<GpsFix> =
-                        Some((coord.latitude, coord.longitude, acc));
+                    let fix: Option<GpsFix> = Some((coord.latitude, coord.longitude, acc));
                     let _ = sender.send(fix);
                 }
             }

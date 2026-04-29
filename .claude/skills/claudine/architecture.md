@@ -223,7 +223,7 @@ The core event processing pipeline runs in 6 steps:
 1. **Select adapter** — `adapter_for(provider)`
 2. **Parse event** — adapter normalizes raw JSON into `(AgenticEvent, EventMeta)`
 3. **Load config** — merges user (`~/.claudine/config.json`) and repo (`.claudine/config.json`) configs, precompiling matcher and mapper regexes
-4. **Look up binding** — finds `RuntimeEventBinding` for this provider + event, checks enabled and non-empty actions
+4. **Look up binding** — finds `RuntimeEventBinding` for the canonical event (provider-agnostic), checks enabled and non-empty actions
 5. **Check matcher** — precompiled regex match against event metadata (filters actions)
 6. **Execute actions** — runs each action via `runner::execute_actions()`, collecting blocking responses from `Call` actions
 
@@ -236,25 +236,30 @@ The core event processing pipeline runs in 6 steps:
 
 ### Config Merge Strategy
 
-Repo-level provider configs completely replace user-level (not merged per-event) to give projects complete control. Settings merge field-by-field because they're global preferences. Nested structs like `linking` and `canonical_provider` also merge field-by-field — repo non-`None` values override user, but user-only fields (e.g. `user_skill`) survive when the repo config doesn't set them.
+User config (`ClaudineConfig`) is the full source of truth; repo config (`RepoOverrideConfig`) is an optional overlay where every field is `Option`-like. Per-event `actions` replace user-level actions per canonical event (a repo entry for `BeforeTool` fully replaces the user's `BeforeTool` actions; events not present in the repo config fall through to user). `canonical_provider` overrides when set. `messenger_override` uses three-state semantics: absent = inherit, `null` = disable, object = override. Global toggles (`logging`, `protect`, `preferred_agent`, etc.) live only in the user config.
 
 ## Configuration Schema
 
 ```rust
-pub struct HookerConfig {
-    pub version: String,
-    pub settings: GlobalSettings,
-    pub providers: HashMap<Provider, ProviderConfig>,
+// User scope: ~/.claudine/config.json
+pub struct ClaudineConfig {
+    pub tts: TtsValue,
+    pub messenger: Option<ClaudineMessengerConfig>,
+    pub logging: bool,
+    pub protect: ProtectConfig,
+    /// Canonical-event → actions (provider-agnostic).
+    pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
+    pub preferred_agent: Provider,
+    pub canonical_provider: Option<Provider>,
+    pub default_sounds: DefaultSounds,
 }
 
-pub struct ProviderConfig {
-    pub events: HashMap<AgenticEvent, EventBinding>,
-}
-
-pub struct EventBinding {
-    pub enabled: bool,
-    pub actions: Vec<HookAction>,
-    pub matcher: Option<String>,  // Regex filter
+// Repo scope: <repo>/.claudine/config.json (all fields optional)
+pub struct RepoOverrideConfig {
+    pub canonical_provider: Option<Provider>,
+    pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
+    pub messenger_override: /* three-state: absent / null / object */,
+    // ...other optional overrides
 }
 ```
 
@@ -308,6 +313,21 @@ Unknown placeholders are left as-is. `None` values render as empty strings.
 ## Stream Parsing
 
 Provider-native structured stream parsing for wrapped non-interactive sessions. Each provider's structured output (stream-json, JSONL, or NDJSON) is parsed live, extracting clean assistant text for stdout and metadata for stderr summaries and JSONL reporting.
+
+### Section Model
+
+All non-interactive runs follow a **9-section model** for rendered output, ensuring consistent spacing and structure across providers:
+1. **Execution line** — header line withbadges. _stderr._
+2. **ENV variables** — sanitized environment details. _stderr._
+3. **System Prompt** — effective system prompt. _stderr._
+4. **Agent Prompt** — user's startup prompt. _stderr._
+5. **Session ID / Model** — provider-specific session metadata. _stderr._
+6. **Thinking Prose** — dim-italic `BlockQuote` for reasoning feedback. _stderr._
+7. **Tool / Info Events** — canonical `ToolCallDisplay` and status lines. _stderr._
+8. **Final STDOUT** — reconstructed assistant response text. _stdout._
+9. **Final Metadata** — timing, usage, cost, and summary line. _stderr._
+
+Spacing is enforced at the sink level, with at most one blank line between any two sections.
 
 ### Provider Parsers (6)
 
@@ -396,6 +416,7 @@ Note: OpenCode also reads `.claude/skills/` directly
 
 ## Key Lessons
 
+- **Hook handlers must respond fast**: `claudine handle` enforces a hard **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have tighter 3s timeouts when running inside a hook handler. Phase-level tracing spans ensure any hang is diagnostic.
 - **All 8 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, Qwen, and Roo parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose and Roo are observation-only.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.

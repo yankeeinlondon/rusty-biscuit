@@ -204,7 +204,9 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
                 PulsePlaybackOutcome::PlaybackCompleted | PulsePlaybackOutcome::PlaybackStarted => {
                     return Ok(());
                 }
-                PulsePlaybackOutcome::SetupFailed(_) => {}
+                PulsePlaybackOutcome::SetupFailed(e) => {
+                    eprintln!("playa: PulseAudio setup failed, falling back to rodio: {e}");
+                }
             }
         }
     }
@@ -835,7 +837,11 @@ mod linux {
     pub(crate) enum PulsePlaybackOutcome {
         /// PulseAudio setup (context/stream connection) failed before audio was
         /// written to the server. Safe to fall back to another playback path.
-        SetupFailed(#[allow(dead_code)] Box<dyn std::error::Error>),
+        ///
+        /// The inner error is carried for future diagnostics (e.g. tracing) but
+        /// is not currently read; callers only branch on the variant.
+        #[allow(dead_code)]
+        SetupFailed(Box<dyn std::error::Error>),
         /// Audio was written to PulseAudio and the drain completed. Fully done.
         PlaybackCompleted,
         /// Audio was written to PulseAudio but the drain timed out or failed.

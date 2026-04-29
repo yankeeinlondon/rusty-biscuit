@@ -20,6 +20,7 @@ pub enum PeriodSpecifier {
     Duration(Duration),
     Date(NaiveDate),
     Hash(String),
+    Count(usize),
     Today,
     Yesterday,
 }
@@ -37,6 +38,18 @@ pub fn parse_period(input: &str) -> Result<PeriodSpecifier> {
 
     if let Ok(date) = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
         return Ok(PeriodSpecifier::Date(date));
+    }
+
+    // A bare positive decimal integer means "the last N commits".
+    // This check runs before hash detection so that all-digit inputs
+    // are always interpreted as a count, not a (rare) all-decimal SHA.
+    if !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit()) {
+        if let Ok(count) = trimmed.parse::<usize>()
+            && count > 0
+        {
+            return Ok(PeriodSpecifier::Count(count));
+        }
+        return Err(SniffError::InvalidPeriod(trimmed.to_string()));
     }
 
     if let Some(spec) = parse_duration(&lower) {
@@ -308,6 +321,38 @@ pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitD
     })
 }
 
+/// Return the most recent `count` commits reachable from `HEAD`, newest-first.
+///
+/// ## Errors
+///
+/// Returns `SniffError::NotARepository` if `base_dir` is not inside a git
+/// repository, or `SniffError::InvalidPeriod` if `count` is zero.
+pub fn get_recent_commits_by_count(base_dir: &Path, count: usize) -> Result<CommitDescSet> {
+    if count == 0 {
+        return Err(SniffError::InvalidPeriod("0".to_string()));
+    }
+
+    let repo = Repository::discover(base_dir)
+        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let repo_root = repo
+        .workdir()
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
+        .to_path_buf();
+
+    let repo_info = detect_repo(&repo_root)?;
+
+    let commits = collect_commits_by_count(&repo, count, repo_info.as_ref());
+    let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
+    let period_label = format!("last {} commits", count);
+
+    Ok(CommitDescSet {
+        commits,
+        period_label,
+        repo_root,
+        packages,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Internal commit walker
 // ---------------------------------------------------------------------------
@@ -489,6 +534,91 @@ fn collect_commits_from_hash_to_head(
         if oid == target_oid {
             break;
         }
+    }
+
+    commits
+}
+
+/// Walk HEAD newest-first and emit at most `count` commits.
+fn collect_commits_by_count(
+    repo: &Repository,
+    count: usize,
+    repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
+) -> Vec<CommitDesc> {
+    let mut commits = Vec::new();
+
+    let Ok(mut revwalk) = repo.revwalk() else {
+        return commits;
+    };
+    revwalk.set_sorting(git2::Sort::TIME).ok();
+    if revwalk.push_head().is_err() {
+        return commits;
+    }
+
+    let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
+    let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
+
+    for oid_result in revwalk {
+        if commits.len() >= count {
+            break;
+        }
+        let Ok(oid) = oid_result else {
+            continue;
+        };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+
+        let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
+
+        let sha = oid.to_string();
+        let files_raw = get_commit_files(repo, &sha);
+        let files: Vec<CommitFileChange> = files_raw
+            .iter()
+            .map(|(p, k)| CommitFileChange {
+                path: p.to_string_lossy().to_string(),
+                kind: *k,
+            })
+            .collect();
+
+        let message = commit.message().unwrap_or("").trim();
+        let (description, bullet_points) = parse_commit_message(message);
+
+        let (commit_packages, commit_package_areas) = if is_monorepo {
+            if let Some(pkgs) = packages {
+                let mut pkg_set: BTreeSet<String> = BTreeSet::new();
+                let mut area_set: BTreeSet<String> = BTreeSet::new();
+
+                for file_path in &files_raw {
+                    let file_path_buf = &file_path.0;
+                    for pkg in pkgs.iter() {
+                        if file_path_buf.starts_with(&pkg.relative) {
+                            pkg_set.insert(pkg.name.clone());
+                            area_set.insert(pkg.package_area.clone());
+                        }
+                    }
+                }
+
+                (
+                    Some(pkg_set.into_iter().collect()),
+                    Some(area_set.into_iter().collect()),
+                )
+            } else {
+                (Some(vec![]), Some(vec![]))
+            }
+        } else {
+            (None, None)
+        };
+
+        commits.push(CommitDesc {
+            hash: sha,
+            datetime: commit_time.to_rfc3339(),
+            packages: commit_packages,
+            package_areas: commit_package_areas,
+            files,
+            description,
+            bullet_points,
+        });
     }
 
     commits
@@ -948,8 +1078,24 @@ mod tests {
         }
 
         #[test]
-        fn bare_number_invalid() {
-            assert!(parse_period("123").is_err());
+        fn bare_number_is_count() {
+            assert_eq!(parse_period("10").unwrap(), PeriodSpecifier::Count(10));
+            assert_eq!(parse_period("123").unwrap(), PeriodSpecifier::Count(123));
+            assert_eq!(parse_period("1").unwrap(), PeriodSpecifier::Count(1));
+        }
+
+        #[test]
+        fn bare_zero_invalid() {
+            assert!(parse_period("0").is_err());
+        }
+
+        #[test]
+        fn bare_number_beats_hash_lookalike() {
+            // A 7+ digit numeric string should be parsed as a count, not a hash.
+            assert_eq!(
+                parse_period("1234567").unwrap(),
+                PeriodSpecifier::Count(1234567)
+            );
         }
 
         #[test]
