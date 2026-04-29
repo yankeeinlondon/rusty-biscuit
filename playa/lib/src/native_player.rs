@@ -14,6 +14,7 @@
 
 use std::fs::File;
 use std::io::{BufReader, Cursor};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
@@ -35,6 +36,62 @@ const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(300);
 /// Default time without forward playback progress before the device is
 /// considered wedged.
 const DEFAULT_STALL_WINDOW: Duration = Duration::from_secs(5);
+
+/// Process-wide cache for the default-device mixer sink.
+///
+/// Opened lazily on the first native playback call. Once cached, every
+/// default-device playback connects a fresh `Player` to this sink's
+/// mixer instead of opening a new CoreAudio stream. This dramatically
+/// reduces device-open churn against `coreaudiod` on macOS.
+///
+/// The slot is a `Mutex<Option<Arc<MixerDeviceSink>>>` so a failed
+/// initial open does not poison the slot — subsequent calls retry.
+static SHARED_DEFAULT_SINK: OnceLock<Mutex<Option<Arc<rodio::MixerDeviceSink>>>> =
+    OnceLock::new();
+
+fn shared_default_sink_slot() -> &'static Mutex<Option<Arc<rodio::MixerDeviceSink>>> {
+    SHARED_DEFAULT_SINK.get_or_init(|| Mutex::new(None))
+}
+
+/// Acquire (lazily open) the cached default-device sink and run `body`
+/// against its mixer.
+///
+/// On first call, `open` is invoked to construct the sink; the result
+/// is cached for subsequent calls. If `open` fails, the cache stays
+/// empty and the next call retries.
+///
+/// `MixerDeviceSink::log_on_drop(false)` is set so the cached sink
+/// never logs spurious "dropping DeviceSink" noise during process
+/// shutdown.
+fn with_cached_default_mixer<F>(
+    open: impl FnOnce() -> Result<rodio::MixerDeviceSink, NativePlaybackError>,
+    body: F,
+) -> Result<(), NativePlaybackError>
+where
+    F: FnOnce(&rodio::mixer::Mixer) -> Result<(), NativePlaybackError>,
+{
+    let slot = shared_default_sink_slot();
+    let mut guard = slot.lock().expect("default sink mutex poisoned");
+
+    if guard.is_none() {
+        let mut sink = open()?;
+        sink.log_on_drop(false);
+        *guard = Some(Arc::new(sink));
+    }
+
+    let sink = guard.as_ref().expect("just inserted").clone();
+    drop(guard);
+
+    body(sink.mixer())
+}
+
+#[cfg(test)]
+fn reset_default_sink_cache_for_tests() {
+    if let Some(slot) = SHARED_DEFAULT_SINK.get() {
+        let mut guard = slot.lock().expect("default sink mutex poisoned");
+        *guard = None;
+    }
+}
 
 /// Reads `PLAYA_PLAYBACK_STALL_SECONDS` from the environment.
 ///
@@ -253,6 +310,43 @@ fn play_from_file(
 
 /// Play a decoded audio source through the specified or default output device.
 fn play_source(
+    source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
+    options: &PlaybackOptions,
+) -> Result<(), NativePlaybackError> {
+    if options.channel.is_some() {
+        return play_source_one_shot(source, options);
+    }
+
+    with_cached_default_mixer(
+        || open_default_stream_with_timeout(NATIVE_DEVICE_TIMEOUT),
+        |mixer| {
+            let player = Player::connect_new(mixer);
+
+            if let Some(vol) = options.volume {
+                player.set_volume(vol);
+            }
+            if let Some(speed) = options.speed {
+                player.set_speed(speed);
+            }
+
+            player.append(source);
+            wait_with_progress(
+                &player,
+                PLAYBACK_TIMEOUT,
+                resolved_stall_window(),
+                Duration::from_millis(50),
+            )?;
+
+            Ok(())
+        },
+    )
+}
+
+/// One-shot device-open path for channel-override playback.
+///
+/// Channel routing bypasses the cached default-device sink so each
+/// call resolves the requested device fresh.
+fn play_source_one_shot(
     source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
     options: &PlaybackOptions,
 ) -> Result<(), NativePlaybackError> {
@@ -479,6 +573,32 @@ mod tests {
 
         assert!(matches!(result, Err(NativePlaybackError::Decode(_))));
         assert!(crate::native_audio::native_audio_available());
+    }
+
+    mod sink_cache {
+        use super::*;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        #[test]
+        fn failed_open_does_not_poison_cache() {
+            reset_default_sink_cache_for_tests();
+
+            let opens = AtomicU32::new(0);
+            let try_open = || {
+                opens.fetch_add(1, Ordering::SeqCst);
+                Err::<rodio::MixerDeviceSink, NativePlaybackError>(
+                    NativePlaybackError::DeviceOpenTimeout(0),
+                )
+            };
+
+            let r1 = with_cached_default_mixer(&try_open, |_mixer| Ok(()));
+            assert!(r1.is_err());
+
+            let r2 = with_cached_default_mixer(&try_open, |_mixer| Ok(()));
+            assert!(r2.is_err());
+
+            assert_eq!(opens.load(Ordering::SeqCst), 2);
+        }
     }
 
     mod progress_wait {
