@@ -10,7 +10,7 @@ fn choose_one_exits_nonzero_when_no_option_source() {
         .assert()
         .failure()
         .code(predicate::ne(0))
-        .stderr(predicate::str::contains("one of --options"));
+        .stderr(predicate::str::contains("no options provided"));
 }
 
 #[test]
@@ -20,7 +20,7 @@ fn choose_many_exits_nonzero_when_no_option_source() {
         .assert()
         .failure()
         .code(predicate::ne(0))
-        .stderr(predicate::str::contains("one of --options"));
+        .stderr(predicate::str::contains("no options provided"));
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
             "choose-one",
             vec![
                 "choose-one",
-                "--options",
+                "--csv",
                 "Red,Green,Blue",
                 "--initial",
                 "Red",
@@ -66,7 +66,7 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
         ),
         (
             "choose-many",
-            vec!["choose-many", "--options", "A,B,C", "--initial", "A,C"],
+            vec!["choose-many", "--csv", "A,B,C", "--initial", "A,C"],
         ),
         (
             "input-table",

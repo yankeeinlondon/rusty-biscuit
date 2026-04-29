@@ -94,7 +94,7 @@ fn choose_one_selected_and_initial_conflict() {
     cargo_bin_cmd!("question")
         .args([
             "choose-one",
-            "--options",
+            "--csv",
             "a,b",
             "--selected",
             "a",
