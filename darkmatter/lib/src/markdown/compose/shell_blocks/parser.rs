@@ -379,4 +379,80 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("must be in format"), "{msg}");
     }
+
+    #[test]
+    fn reject_single_dash_flag() {
+        let err = parse_opener_params("::shell-block -when-error fallback", 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid flag syntax"), "{msg}");
+    }
+
+    #[test]
+    fn reject_double_dash_timeout() {
+        let err = parse_opener_params("::shell-block --timeout=5", 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid flag syntax"), "{msg}");
+        assert!(msg.contains("timeout"), "{msg}");
+    }
+
+    #[test]
+    fn reject_bare_key_without_equals() {
+        let err = parse_opener_params("::shell-block timeout", 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Expected '='"), "{msg}");
+    }
+
+    #[test]
+    fn parse_except_exit_code() {
+        let (handling, _) = parse_opener_params("::shell-block except_exit_code=\"2,skip\"", 1).unwrap();
+        assert_eq!(handling.except_exit_code, vec![(2, "skip".to_string())]);
+    }
+
+    #[test]
+    fn parse_stderr_lacks() {
+        let (handling, _) = parse_opener_params("::shell-block stderr_lacks=\"error,clean\"", 1).unwrap();
+        assert_eq!(handling.stderr_lacks, vec![("error".to_string(), "clean".to_string())]);
+    }
+
+    #[test]
+    fn parse_enrich_error() {
+        let (handling, _) = parse_opener_params("::shell-block enrich_error=\"details\"", 1).unwrap();
+        assert_eq!(handling.enrich_error, Some("details".to_string()));
+    }
+
+    #[test]
+    fn parse_enrich_error_on() {
+        let (handling, _) = parse_opener_params("::shell-block enrich_error_on=\"1,info\"", 1).unwrap();
+        assert_eq!(handling.enrich_error_on, vec![(1, "info".to_string())]);
+    }
+
+    #[test]
+    fn reject_invalid_timeout_non_numeric() {
+        let err = parse_opener_params("::shell-block timeout=abc", 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid timeout value"), "{msg}");
+    }
+
+    #[test]
+    fn reject_invalid_timeout_float() {
+        let err = parse_opener_params("::shell-block timeout=1.5", 1).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Invalid timeout value"), "{msg}");
+    }
+
+    #[test]
+    fn parse_all_error_handling_options() {
+        let (handling, timeout) = parse_opener_params(
+            "::shell-block when_error=\"fallback\" when_exit_code=\"1,oops\" except_exit_code=\"2,skip\" stderr_contains=\"warn,w\" stderr_lacks=\"err,c\" enrich_error=\"details\" enrich_error_on=\"3,info\" timeout=30",
+            1,
+        ).unwrap();
+        assert_eq!(handling.when_error, Some("fallback".to_string()));
+        assert_eq!(handling.when_exit_code, vec![(1, "oops".to_string())]);
+        assert_eq!(handling.except_exit_code, vec![(2, "skip".to_string())]);
+        assert_eq!(handling.stderr_contains, vec![("warn".to_string(), "w".to_string())]);
+        assert_eq!(handling.stderr_lacks, vec![("err".to_string(), "c".to_string())]);
+        assert_eq!(handling.enrich_error, Some("details".to_string()));
+        assert_eq!(handling.enrich_error_on, vec![(3, "info".to_string())]);
+        assert_eq!(timeout, Some(Duration::from_secs(30)));
+    }
 }

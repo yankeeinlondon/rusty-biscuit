@@ -44,6 +44,13 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/parser.rs
+  - darkmatter/lib/tests/shell_block_integration.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - darkmatter
 ---

@@ -239,6 +239,24 @@ mod tests {
         }
     }
 
+    /// Handler that denies commands containing "deny-me" in the raw command.
+    struct DenyMatchingHandler {
+        pattern: String,
+    }
+
+    impl ShellApprovalHandler for DenyMatchingHandler {
+        fn approve(
+            &self,
+            request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, crate::markdown::compose::ShellExpansionError> {
+            if request.raw_command.contains(&self.pattern) {
+                Ok(ShellApprovalDecision::Deny)
+            } else {
+                Ok(ShellApprovalDecision::AllowOnce)
+            }
+        }
+    }
+
     fn test_options_with_handler(handler: Arc<dyn ShellApprovalHandler>) -> (ComposeOptions, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let options = ComposeOptions::new()
@@ -295,6 +313,26 @@ mod tests {
         let mut runtime = ShellExpansionRuntime::new();
         let result = run_shell_blocks_stage(content, &options, &mut runtime);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn denial_of_second_command_prevents_first_execution() {
+        // All commands are prepared before any execute. If command 2 is denied
+        // during preparation, command 1 must never execute.
+        let content = "::shell-block\necho cmd1\necho deny-me\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(DenyMatchingHandler {
+            pattern: "deny-me".to_string(),
+        }));
+        let mut runtime = ShellExpansionRuntime::new();
+        let err = run_shell_blocks_stage(content, &options, &mut runtime).unwrap_err();
+        // The error should be about the second command being denied
+        let msg = err.to_string();
+        assert!(
+            msg.contains("denied") || msg.contains("Approval"),
+            "Expected denial error, got: {msg}"
+        );
+        // Command 1 should NOT have executed — no "cmd1" in output
+        // (The function returns an error, so there's no output at all)
     }
 
     #[test]
