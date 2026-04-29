@@ -542,7 +542,9 @@ mod tests {
     }
 
     #[test]
-    fn run_returns_1_without_output_on_esc() {
+    fn run_returns_0_on_esc_with_restored_value() {
+        // Phase 5: ChooseOne Esc restores the initial selection and
+        // submits, so the CLI exits 0 rather than 1.
         let args = ChooseOneArgs {
             options: Some("Red,Green".into()),
             ..default_args()
@@ -554,11 +556,11 @@ mod tests {
             OutputMode::Raw,
             None,
             &mut output,
-            |_state, _height| Err(io::Error::new(ABORTED_KIND, "cancelled")),
+            |_state, _height| Ok(Some("Red".into())),
         )
         .unwrap();
 
-        assert_eq!(status, 1);
-        assert!(output.is_empty());
+        assert_eq!(status, 0);
+        assert_eq!(output, b"Red\n");
     }
 }

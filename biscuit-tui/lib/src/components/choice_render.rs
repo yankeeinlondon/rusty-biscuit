@@ -12,7 +12,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::core::{ComponentTheme, FuzzyFilter, TerminalStyle};
+use crate::core::{ComponentTheme, FuzzyFilter, NerdFontStatus, TerminalStyle};
 use super::choose::{ChoiceOption, HotkeyDisplayMode, Orientation};
 
 /// Minimum label width (in cells) at which the fuzzy filter renders
@@ -42,38 +42,64 @@ pub struct ChoiceRenderContext<'a> {
     pub unselected_indicator: &'a str,
 }
 
+/// Nerd Font selected radio glyph (filled circle).
+const NF_RADIO_SELECTED: &str = "\u{f043e}";
+/// Nerd Font unselected radio glyph (empty circle).
+const NF_RADIO_UNSELECTED: &str = "\u{f4aa}";
+/// Nerd Font selected checkbox glyph (checked box).
+const NF_CHECK_SELECTED: &str = "\u{f14a}";
+/// Nerd Font unselected checkbox glyph (empty box).
+const NF_CHECK_UNSELECTED: &str = "\u{f0131}";
+
 impl<'a> ChoiceRenderContext<'a> {
     /// Creates a context for single-selection (radio-style) indicators.
+    ///
+    /// Uses Nerd Font glyphs when [`TerminalStyle::nerd_font`] is
+    /// [`NerdFontStatus::Likely`]; otherwise falls back to the theme's
+    /// standard Unicode indicators.
     pub fn for_single(
         theme: &'a ComponentTheme,
         terminal_style: TerminalStyle,
         orientation: Orientation,
     ) -> Self {
+        let (selected, unselected): (&str, &str) = match terminal_style.nerd_font {
+            NerdFontStatus::Likely => (NF_RADIO_SELECTED, NF_RADIO_UNSELECTED),
+            NerdFontStatus::Unknown => (
+                theme.selected_indicator.as_str(),
+                theme.unselected_indicator.as_str(),
+            ),
+        };
         Self {
             theme,
             terminal_style,
             orientation,
             hotkey_display: HotkeyDisplayMode::Hidden,
-            selected_indicator: &theme.selected_indicator,
-            unselected_indicator: &theme.unselected_indicator,
+            selected_indicator: selected,
+            unselected_indicator: unselected,
         }
     }
 
     /// Creates a context for multi-selection (checkbox-style) indicators.
+    ///
+    /// Uses Nerd Font glyphs when [`TerminalStyle::nerd_font`] is
+    /// [`NerdFontStatus::Likely`]; otherwise falls back to standard
+    /// Unicode checkbox glyphs.
     pub fn for_multiple(
         theme: &'a ComponentTheme,
         terminal_style: TerminalStyle,
         orientation: Orientation,
-        selected_indicator: &'a str,
-        unselected_indicator: &'a str,
     ) -> Self {
+        let (selected, unselected) = match terminal_style.nerd_font {
+            NerdFontStatus::Likely => (NF_CHECK_SELECTED, NF_CHECK_UNSELECTED),
+            NerdFontStatus::Unknown => ("☑", "☐"),
+        };
         Self {
             theme,
             terminal_style,
             orientation,
             hotkey_display: HotkeyDisplayMode::Hidden,
-            selected_indicator,
-            unselected_indicator,
+            selected_indicator: selected,
+            unselected_indicator: unselected,
         }
     }
 
@@ -377,8 +403,6 @@ mod tests {
             &theme,
             TerminalStyle::default(),
             Orientation::Vertical,
-            "☑",
-            "☐",
         );
         let options = vec![
             ChoiceOption::<String>::new("a", "Alpha", "alpha"),
@@ -579,5 +603,135 @@ mod tests {
         assert_eq!(spans[0].style, match_style);
         assert_eq!(spans[1].content, "fé");
         assert_eq!(spans[1].style, base);
+    }
+
+    #[test]
+    fn render_single_uses_fallback_glyphs_when_no_nerd_font() {
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_single(
+            &theme,
+            TerminalStyle {
+                nerd_font: NerdFontStatus::Unknown,
+                ..TerminalStyle::default()
+            },
+            Orientation::Vertical,
+        );
+        let options = vec![ChoiceOption::<String>::new("r", "Red", "red")];
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+
+        ctx.render(
+            area,
+            &mut buf,
+            &options,
+            &[0],
+            0,
+            0,
+            |_idx| true,
+            None,
+            None,
+        );
+
+        let row = buffer_row(&buf, 0);
+        assert!(row.contains("●"), "expected fallback filled radio ●, got: {row}");
+    }
+
+    #[test]
+    fn render_single_uses_nerd_font_glyphs_when_likely() {
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_single(
+            &theme,
+            TerminalStyle {
+                nerd_font: NerdFontStatus::Likely,
+                ..TerminalStyle::default()
+            },
+            Orientation::Vertical,
+        );
+        let options = vec![ChoiceOption::<String>::new("r", "Red", "red")];
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+
+        ctx.render(
+            area,
+            &mut buf,
+            &options,
+            &[0],
+            0,
+            0,
+            |_idx| true,
+            None,
+            None,
+        );
+
+        let row = buffer_row(&buf, 0);
+        assert!(
+            row.contains('\u{f043e}'),
+            "expected Nerd Font filled radio \\u{{f043e}}, got: {row}"
+        );
+    }
+
+    #[test]
+    fn render_multiple_uses_fallback_glyphs_when_no_nerd_font() {
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_multiple(
+            &theme,
+            TerminalStyle {
+                nerd_font: NerdFontStatus::Unknown,
+                ..TerminalStyle::default()
+            },
+            Orientation::Vertical,
+        );
+        let options = vec![ChoiceOption::<String>::new("a", "Alpha", "alpha")];
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+
+        ctx.render(
+            area,
+            &mut buf,
+            &options,
+            &[0],
+            0,
+            0,
+            |_idx| true,
+            None,
+            None,
+        );
+
+        let row = buffer_row(&buf, 0);
+        assert!(row.contains("☑"), "expected fallback checked box ☑, got: {row}");
+    }
+
+    #[test]
+    fn render_multiple_uses_nerd_font_glyphs_when_likely() {
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_multiple(
+            &theme,
+            TerminalStyle {
+                nerd_font: NerdFontStatus::Likely,
+                ..TerminalStyle::default()
+            },
+            Orientation::Vertical,
+        );
+        let options = vec![ChoiceOption::<String>::new("a", "Alpha", "alpha")];
+        let area = Rect::new(0, 0, 20, 1);
+        let mut buf = Buffer::empty(area);
+
+        ctx.render(
+            area,
+            &mut buf,
+            &options,
+            &[0],
+            0,
+            0,
+            |_idx| true,
+            None,
+            None,
+        );
+
+        let row = buffer_row(&buf, 0);
+        assert!(
+            row.contains('\u{f14a}'),
+            "expected Nerd Font checked box \\u{{f14a}}, got: {row}"
+        );
     }
 }

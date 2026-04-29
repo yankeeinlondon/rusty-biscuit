@@ -38,7 +38,7 @@ use crate::core::{
 
 use super::choice_render::ChoiceRenderContext;
 
-use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
+use super::choose::{ChoiceInput, ChoiceOption, HotkeySpec, SelectionMode};
 
 /// Mutable state for a [`ChooseOne`] widget.
 ///
@@ -53,8 +53,11 @@ pub struct ChooseOneState<V = String> {
     input: ChoiceInput<V>,
     hover: usize,
     selected: Option<usize>,
+    initial_selected: Option<usize>,
     scroll_offset: usize,
     hotkeys: HashMap<char, usize>,
+    ctrl_hotkeys: HashMap<char, usize>,
+    alt_hotkeys: HashMap<char, usize>,
     label: Option<Label>,
     theme: ComponentTheme,
     bindings: KeyBindings,
@@ -76,6 +79,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             input.options.shuffle(&mut rand::rng());
         }
         let hotkeys = build_hotkeys(&input.options);
+        let (ctrl_hotkeys, alt_hotkeys) = build_explicit_hotkeys(&input.options);
         let hover = first_enabled_index(&input.options).unwrap_or(0);
         let cached_labels: Vec<String> = input.options.iter().map(|o| o.label.clone()).collect();
         let mut filter = FuzzyFilter::new();
@@ -84,8 +88,11 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             input,
             hover,
             selected: None,
+            initial_selected: None,
             scroll_offset: 0,
             hotkeys,
+            ctrl_hotkeys,
+            alt_hotkeys,
             label: None,
             theme: ComponentTheme::default(),
             bindings: KeyBindings::default(),
@@ -129,6 +136,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             .find(|(_, option)| option.id == id)
         {
             self.selected = Some(idx);
+            self.initial_selected = Some(idx);
             self.hover = idx;
         }
         self
@@ -155,6 +163,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             .find(|(_, option)| option.value == *value)
         {
             self.selected = Some(idx);
+            self.initial_selected = Some(idx);
             self.hover = idx;
         }
         self
@@ -212,6 +221,16 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
     /// Returns the precomputed hotkey map keyed by lowercase char.
     pub fn hotkeys(&self) -> &HashMap<char, usize> {
         &self.hotkeys
+    }
+
+    /// Returns the explicit Ctrl hotkey map keyed by lowercase char.
+    pub fn ctrl_hotkeys(&self) -> &HashMap<char, usize> {
+        &self.ctrl_hotkeys
+    }
+
+    /// Returns the explicit Alt hotkey map keyed by lowercase char.
+    pub fn alt_hotkeys(&self) -> &HashMap<char, usize> {
+        &self.alt_hotkeys
     }
 
     /// Returns a reference to the key bindings.
@@ -360,7 +379,8 @@ fn draw_search_prompt<V: Clone + PartialEq>(
 impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
         // Cancel binding: when a fuzzy filter is active, the first
-        // press clears it; subsequent presses fall through to abort.
+        // press clears it; subsequent presses restore the initial
+        // selection and submit.
         if KeyBindings::matches(&state.bindings.cancel, &event) {
             if state.filter_visible && state.filter.is_active() {
                 state.filter.clear(&state.cached_labels);
@@ -374,7 +394,9 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
                 snap_hover_to_visible(state);
                 return EventOutcome::Consumed;
             }
-            return EventOutcome::Cancelled;
+            // Phase 5: Esc restores the initial selection and submits.
+            state.selected = state.initial_selected;
+            return EventOutcome::Submitted;
         }
 
         // When the search prompt is showing, route printable chars and
@@ -412,6 +434,27 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
         if KeyBindings::matches(&state.bindings.down, &event) {
             move_hover(state, 1);
             return EventOutcome::Consumed;
+        }
+
+        // Ctrl/Alt hotkeys select and submit (Phase 5).
+        match event.modifiers {
+            KeyModifiers::CONTROL => {
+                if let KeyCode::Char(c) = event.code
+                    && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
+                {
+                    select_at(state, idx);
+                    return EventOutcome::Submitted;
+                }
+            }
+            KeyModifiers::ALT => {
+                if let KeyCode::Char(c) = event.code
+                    && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
+                {
+                    select_at(state, idx);
+                    return EventOutcome::Submitted;
+                }
+            }
+            _ => {}
         }
 
         // Home/End/vim-style jumps, hotkey or filter-open, only when
@@ -462,8 +505,8 @@ fn submit<V: Clone + PartialEq>(state: &mut ChooseOneState<V>) -> EventOutcome {
     {
         return EventOutcome::Consumed;
     }
-    if state.selected.is_none()
-        && let Some(idx) = state.hover()
+    // Phase 5: Enter always selects the active enabled item.
+    if let Some(idx) = state.hover()
         && !state.input.options[idx].disabled
         && state.filter.visible().contains(&idx)
     {
@@ -572,6 +615,31 @@ pub(super) fn build_hotkeys<V>(options: &[ChoiceOption<V>]) -> HashMap<char, usi
         }
     }
     map
+}
+
+/// Builds separate maps for explicit Ctrl and Alt hotkeys declared on
+/// [`ChoiceOption::hotkey`].
+pub(super) fn build_explicit_hotkeys<V>(
+    options: &[ChoiceOption<V>],
+) -> (HashMap<char, usize>, HashMap<char, usize>) {
+    let mut ctrl = HashMap::new();
+    let mut alt = HashMap::new();
+    for (idx, option) in options.iter().enumerate() {
+        if option.disabled {
+            continue;
+        }
+        if let Some(hotkey) = option.hotkey {
+            match hotkey {
+                HotkeySpec::Ctrl(c) => {
+                    ctrl.entry(c.to_ascii_lowercase()).or_insert(idx);
+                }
+                HotkeySpec::Alt(c) => {
+                    alt.entry(c.to_ascii_lowercase()).or_insert(idx);
+                }
+            }
+        }
+    }
+    (ctrl, alt)
 }
 
 fn error_row_y<V: Clone + PartialEq>(
@@ -831,10 +899,49 @@ mod tests {
     }
 
     #[test]
-    fn esc_cancels() {
+    fn esc_restores_initial_and_submits() {
         let mut state = ChooseOneState::new(fixture_input());
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
-        assert_eq!(outcome, EventOutcome::Cancelled);
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert!(state.selected_index().is_none());
+    }
+
+    #[test]
+    fn esc_after_navigation_restores_initial_selection() {
+        let input = fixture_input();
+        let mut state = ChooseOneState::new(input).with_initial_selection("r");
+        assert_eq!(state.selected_index(), Some(0));
+
+        // Navigate away and change selection.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_index(), Some(1));
+
+        // Esc restores the initial selection and submits.
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn esc_after_space_restores_initial_selection() {
+        let input = fixture_input();
+        let mut state = ChooseOneState::new(input).with_initial_selection("g");
+        assert_eq!(state.selected_index(), Some(1));
+
+        // Space selects the hovered option (which is also index 1 initially).
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_index(), Some(1));
+
+        // Navigate and Space again to change selection.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_index(), Some(2));
+
+        // Esc restores the initial selection and submits.
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(1));
     }
 
     #[test]
@@ -893,6 +1000,43 @@ mod tests {
         ]);
         let state = ChooseOneState::new(input);
         assert_eq!(state.hotkeys().get(&'a'), Some(&0));
+    }
+
+    #[test]
+    fn explicit_ctrl_hotkey_selects_and_submits() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+            ChoiceOption::new("b", "Banana", "banana"),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn explicit_alt_hotkey_selects_and_submits() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("a", "Apple", "apple"),
+            ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(1));
+    }
+
+    #[test]
+    fn explicit_hotkey_is_case_insensitive() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('A')),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Submitted);
     }
 
     #[test]
@@ -971,18 +1115,18 @@ mod tests {
     }
 
     #[test]
-    fn custom_cancel_binding_works() {
+    fn custom_cancel_binding_restores_and_submits() {
         let bindings = KeyBindings {
             cancel: vec![press(KeyCode::Char('q'))],
             ..KeyBindings::default()
         };
         let mut state = ChooseOneState::new(fixture_input()).with_key_bindings(bindings);
 
-        // q should cancel.
+        // q should restore initial selection and submit.
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Char('q')));
-        assert_eq!(outcome, EventOutcome::Cancelled);
+        assert_eq!(outcome, EventOutcome::Submitted);
 
-        // Esc should be ignored.
+        // Esc should be ignored (no longer bound to cancel).
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
         assert_eq!(outcome, EventOutcome::Ignored);
     }
@@ -1307,7 +1451,7 @@ mod tests {
     }
 
     #[test]
-    fn esc_clears_filter_first_then_aborts() {
+    fn esc_clears_filter_first_then_submits() {
         let mut state = ChooseOneState::new(filter_fixture_input());
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Char('b')));
         assert!(state.filter_visible());
@@ -1318,9 +1462,9 @@ mod tests {
         assert!(!state.filter_visible());
         assert_eq!(state.filter_pattern(), "");
 
-        // Second Esc: aborts.
+        // Second Esc: restores initial selection and submits.
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
-        assert_eq!(outcome, EventOutcome::Cancelled);
+        assert_eq!(outcome, EventOutcome::Submitted);
     }
 
     #[test]
@@ -1361,8 +1505,8 @@ mod tests {
     }
 
     #[test]
-    fn esc_with_empty_filter_still_hides_prompt_then_aborts() {
-        // Pattern is active, Esc clears + hides it, second Esc aborts.
+    fn esc_with_empty_filter_still_hides_prompt_then_restores() {
+        // Pattern is active, Esc clears + hides it, second Esc restores + submits.
         let mut state = ChooseOneState::new(filter_fixture_input());
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Char('b')));
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Backspace));

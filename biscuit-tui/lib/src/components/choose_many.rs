@@ -42,9 +42,6 @@ use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
 use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
 use super::choice_render::ChoiceRenderContext;
 
-const CHECKED_GLYPH: &str = "☑";
-const UNCHECKED_GLYPH: &str = "☐";
-
 /// Mutable state for a [`ChooseMany`] widget.
 ///
 /// Wraps a [`ChoiceInput<V>`] (forced to `SelectionMode::Multiple`)
@@ -382,8 +379,6 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
                 &state.theme,
                 TerminalStyle::default(),
                 state.input.orientation,
-                CHECKED_GLYPH,
-                UNCHECKED_GLYPH,
             );
             ctx.render(
                 list_area,
@@ -528,13 +523,8 @@ fn submit<V: Clone + PartialEq>(state: &mut ChooseManyState<V>) -> EventOutcome 
     {
         return EventOutcome::Consumed;
     }
-    if state.selected_count() == 0
-        && let Some(idx) = state.hover()
-        && !state.input.options[idx].disabled
-        && state.filter.visible().contains(&idx)
-    {
-        state.selected[idx] = true;
-    }
+    // Phase 5: Enter submits the selected set exactly as-is — no
+    // fallback auto-selection of the active row.
     let count = state.selected_count();
     if state.input.required && count == 0 {
         state.validation_error = Some("Please make a selection".into());
@@ -811,9 +801,9 @@ mod tests {
     }
 
     #[test]
-    fn fallback_submit_selects_active_when_none_chosen() {
-        // When no option is explicitly selected, Enter toggles the hovered
-        // option on as a fallback and then submits.
+    fn enter_does_not_auto_select_when_none_chosen() {
+        // Phase 5: Enter submits the selected set exactly as-is — no
+        // fallback auto-selection of the active row.
         let mut state = ChooseManyState::new(fixture_input());
         ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
         assert_eq!(state.hover(), Some(1));
@@ -821,8 +811,8 @@ mod tests {
 
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
         assert_eq!(outcome, EventOutcome::Submitted);
-        assert!(state.is_selected(1));
-        assert_eq!(state.selected_count(), 1);
+        assert!(!state.is_selected(1));
+        assert_eq!(state.selected_count(), 0);
     }
 
     #[test]
