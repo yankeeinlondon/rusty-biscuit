@@ -19,6 +19,7 @@ use super::errors::{ConfigError, McpError};
 use crate::adapters::ProviderAdapter;
 use crate::config::AgentConfigurator;
 use crate::error::Result;
+use crate::events::AgenticEvent;
 use crate::mcp::export::ExportServer;
 use crate::mcp::inject::McpInjector;
 use crate::mcp::state::Scope;
@@ -144,6 +145,16 @@ pub trait AdapterBehavior: Send + Sync + std::fmt::Debug + 'static {
     fn detect(&self, raw: &Value) -> bool {
         let _ = raw;
         false
+    }
+
+    /// Attempt to parse a raw JSON payload into a canonical [`AgenticEvent`].
+    ///
+    /// Defaults to `None`; providers that support non-hook capture methods
+    /// (stream parsing, wire proxy, wrapper) may override this to extract
+    /// events from provider-native payloads.
+    fn parse_payload(&self, raw: &Value) -> Option<AgenticEvent> {
+        let _ = raw;
+        None
     }
 
     /// Returns the static [`ProviderAdapter`] implementation for this

@@ -22,24 +22,56 @@
 //! Empty `native_name` strings carry the legacy "supported but no specific
 //! native name" meaning so existing snapshots are preserved bit-for-bit.
 
+use serde::Serialize;
+
 use crate::events::AgenticEvent;
+use crate::provider::acp::AcpEvent;
+use crate::stream::StreamProtocol;
+
+/// Wire-proxy mode for providers that capture events through a protocol
+/// interception layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireProxyMode {
+    /// JSON-RPC 2.0 wire proxy (Kimi Code `--wire`).
+    JsonRpc,
+}
 
 /// Level of event support for a provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EventSupportLevel {
+    /// Event is not supported by this provider.
+    NotSupported,
+
     /// Event is supported via native hooks (config-file based).
     ///
     /// These events can be registered by modifying the provider's config file.
     /// Examples: Claude hooks, Gemini hooks, OpenCode plugins.
-    Hook,
+    Hook {
+        /// Provider-native event name.
+        native_name: &'static str,
+    },
 
-    /// Event is supported via non-hook methods (wrapper/wire-mode/stream parsing).
+    /// Event is captured by parsing the provider's structured output stream.
     ///
-    /// These events require alternative capture methods that are not yet implemented:
-    /// - **Wrapper scripts**: Intercept CLI invocation (Goose GOOSE_STATUS_HOOK)
-    /// - **Wire mode proxy**: JSON-RPC interception (Kimi Code --wire)
-    /// - **Stream parsing**: Parse CLI output (Codex JSONL, Qwen stream-json)
-    NonHook,
+    /// Examples: Codex JSONL, Qwen stream-json.
+    StreamParse {
+        /// Stream protocol used by this provider.
+        protocol: StreamProtocol,
+        /// Provider-native event name.
+        native_name: &'static str,
+    },
+
+    /// Event is captured through a wire-mode protocol proxy.
+    ///
+    /// Example: Kimi Code `--wire` JSON-RPC envelopes.
+    WireProxy {
+        /// Wire proxy mode.
+        mode: WireProxyMode,
+        /// Provider-native event name.
+        native_name: &'static str,
+    },
 
     /// Event is captured via the Agent Client Protocol (ACP).
     ///
@@ -47,10 +79,20 @@ pub enum EventSupportLevel {
     /// reached via Claudine's wire-mode JSON-RPC proxy). Providers with at
     /// least one `Acp` row are required to report a non-`NotSupported`
     /// [`AcpSupport::server_mode`](super::AcpSupport).
-    Acp,
+    Acp {
+        /// Canonical ACP event type.
+        event: AcpEvent,
+        /// Provider-native event name.
+        native_name: &'static str,
+    },
 
-    /// Event is not supported by this provider.
-    NotSupported,
+    /// Event is captured via a wrapper script or environment interception.
+    ///
+    /// Example: Goose `GOOSE_STATUS_HOOK`.
+    Wrapper {
+        /// Provider-native event name.
+        native_name: &'static str,
+    },
 }
 
 impl EventSupportLevel {
@@ -61,28 +103,37 @@ impl EventSupportLevel {
 
     /// Returns whether this level indicates hook-based support.
     pub fn is_hook(&self) -> bool {
-        matches!(self, EventSupportLevel::Hook)
+        matches!(self, EventSupportLevel::Hook { .. })
     }
 
     /// Returns whether this level indicates ACP-based capture.
     pub fn is_acp(&self) -> bool {
-        matches!(self, EventSupportLevel::Acp)
+        matches!(self, EventSupportLevel::Acp { .. })
+    }
+
+    /// Returns the native name carried by this support level, if any.
+    pub fn native_name(&self) -> Option<&'static str> {
+        match self {
+            EventSupportLevel::NotSupported => None,
+            EventSupportLevel::Hook { native_name } => Some(native_name),
+            EventSupportLevel::StreamParse { native_name, .. } => Some(native_name),
+            EventSupportLevel::WireProxy { native_name, .. } => Some(native_name),
+            EventSupportLevel::Acp { native_name, .. } => Some(native_name),
+            EventSupportLevel::Wrapper { native_name } => Some(native_name),
+        }
     }
 }
 
-/// Single event mapping entry: support level + native name + parse aliases.
-#[derive(Debug, Clone, Copy)]
+/// Single event mapping entry: support level + parse aliases.
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct EventMapping {
     /// Canonical agentic event for this row.
     pub event: AgenticEvent,
-    /// Support level for this event on this provider.
+    /// Support level for this event on this provider. The variant carries
+    /// the provider-native event name when relevant.
     pub support_level: EventSupportLevel,
-    /// Provider-native event name. Empty when the event has no specific
-    /// native name (matches the legacy `Some("")` return from
-    /// `Provider::native_event_name`).
-    pub native_name: &'static str,
     /// Parse aliases used to resolve a native event name back to this
-    /// [`AgenticEvent`]. Includes `native_name` when relevant.
+    /// [`AgenticEvent`]. Includes the native name when relevant.
     pub parse_aliases: &'static [&'static str],
     /// When `true`, this row participates in the provider's standard hook
     /// registration workflow (e.g. settings.json hooks for Claude/Gemini,
@@ -94,7 +145,7 @@ pub struct EventMapping {
 }
 
 /// Per-provider event mapping table.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct EventMappingTable {
     /// All mapping rows. Rows with [`EventSupportLevel::NotSupported`] may be
     /// included for completeness but are typically omitted.
@@ -118,29 +169,25 @@ impl EventMappingTable {
     /// Returns the provider-native name for `event`.
     ///
     /// Returns `None` when the event is not supported, matching the legacy
-    /// `Provider::native_event_name` contract. Returns `Some("")` when the
-    /// event is supported but has no specific native name.
+    /// `Provider::native_event_name` contract.
     pub fn native_name(&self, event: AgenticEvent) -> Option<&'static str> {
         let entry = self.lookup(event)?;
-        if entry.support_level == EventSupportLevel::NotSupported {
-            None
-        } else {
-            Some(entry.native_name)
-        }
+        entry.support_level.native_name()
     }
 
     /// Returns the registration native name used by configurators when
     /// writing a hook entry for `event`.
     ///
     /// Only rows with `registration_target == true` and a non-empty
-    /// `native_name` produce `Some`; everything else returns `None`. This
+    /// native name produce `Some`; everything else returns `None`. This
     /// preserves the legacy `Provider::registration_native_event_name`
     /// contract where only events present in the previous shared mapping
     /// constants resolved.
     pub fn registration_native_name(&self, event: AgenticEvent) -> Option<&'static str> {
         let entry = self.lookup(event)?;
-        if entry.registration_target && !entry.native_name.is_empty() {
-            Some(entry.native_name)
+        let name = entry.support_level.native_name()?;
+        if entry.registration_target && !name.is_empty() {
+            Some(name)
         } else {
             None
         }

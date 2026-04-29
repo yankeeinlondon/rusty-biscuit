@@ -1,8 +1,8 @@
-use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use super::{
     Agent, AgentCapabilities, AgentDefinitionFormat, CapabilityStatus, CommandFormat, ConfigFormat,
     agent_for, all_agents, parse_agent_id,
 };
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 #[derive(Debug)]
 struct StubAgent {

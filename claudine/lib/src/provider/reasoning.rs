@@ -6,8 +6,11 @@
 //! a structured [`ReasoningSupport`] enum that distinguishes named-level,
 //! numeric-budget, binary-toggle, and provider-specific reasoning surfaces.
 
+use serde::Serialize;
+
 /// How a provider exposes reasoning / extended-thinking controls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReasoningSupport {
     /// The provider has no reasoning surface.
     NotSupported,
@@ -48,7 +51,8 @@ pub enum ReasoningSupport {
 
 /// Provider-specific reasoning behaviors that don't fit the standard
 /// shapes. Extended as new providers are onboarded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReasoningCustomTag {
     /// Goose: reasoning effort is delegated through provider-specific
     /// environment variables (e.g. `GEMINI3_THINKING_LEVEL`).

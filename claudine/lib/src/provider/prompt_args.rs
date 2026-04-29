@@ -7,12 +7,14 @@
 //! default reads from `provider_info(self.provider()).prompt_arg_conventions`,
 //! eliminating per-provider overrides for ordinary cases.
 
+use serde::Serialize;
+
 /// Describes how a provider's native CLI represents a prompt on argv.
 ///
 /// Used by the CLI's `extract_prompt_source_from_passthrough` helper to
 /// find a prompt in raw passthrough arguments without embedding
 /// per-provider logic in a central match.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct PromptArgConventions {
     /// Value-taking flags that carry the prompt string when present,
     /// e.g. `&["-p", "--prompt"]` for Gemini, `&["-t", "--text"]` for

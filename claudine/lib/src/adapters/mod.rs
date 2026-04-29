@@ -249,7 +249,7 @@ mod tests {
                     provider_info(provider)
                         .event_mapping
                         .registration_native_name(mapping.event),
-                    Some(mapping.native_name),
+                    mapping.support_level.native_name(),
                     "shared registration mapping mismatch for {provider}/{:?}",
                     mapping.event
                 );

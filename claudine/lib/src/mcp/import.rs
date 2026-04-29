@@ -272,9 +272,7 @@ pub(crate) fn discover_claude_configs(repo_root: Option<&Path>) -> Vec<(PathBuf,
         if local_config.exists() {
             configs.push((local_config, Scope::Repo(root.to_path_buf())));
         }
-        for plugin_config in
-            discover_claude_plugin_configs(&root.join(".claude").join("plugins"))
-        {
+        for plugin_config in discover_claude_plugin_configs(&root.join(".claude").join("plugins")) {
             configs.push((plugin_config, Scope::Repo(root.to_path_buf())));
         }
     }

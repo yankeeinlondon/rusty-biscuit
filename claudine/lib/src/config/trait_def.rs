@@ -4,8 +4,8 @@ use sniff::programs::InstalledAiClients;
 
 use crate::error::Result;
 use crate::events::AgenticEvent;
-use crate::provider::Provider;
 use crate::linking::ResourceScope;
+use crate::provider::Provider;
 
 /// Result of registering hooks with a provider.
 #[derive(Debug)]

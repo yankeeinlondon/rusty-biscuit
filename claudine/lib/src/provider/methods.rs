@@ -1,9 +1,11 @@
 //! Methods on the canonical [`Provider`] enum.
 //!
-//! This module hosts the `impl Provider` blocks and the [`Display`] impl that
-//! were previously defined in `crate::events::provider`. Phase 8 of the
-//! centralized providers refactor consolidated them here so the `events`
-//! module no longer owns provider-level metadata or behavior.
+//! This module hosts the `impl Provider` blocks and the [`Display`] impl.
+//! Phase 2 of the centralized providers refactor (Review 1) eliminated all
+//! lib-side `match Provider { ... }` dispatch from this module: every
+//! identity helper now reads its data straight off
+//! [`provider_info`](super::registry::provider_info), so the only authoritative
+//! `match Provider` site in the lib crate is the central registry.
 
 use serde_json::Value;
 use sniff::programs::AiCli;
@@ -17,16 +19,7 @@ use crate::events::AgenticEvent;
 impl Provider {
     /// Returns common CLI aliases accepted for this provider.
     pub fn cli_aliases(&self) -> &'static [&'static str] {
-        match self {
-            Provider::Claude => &["claude"],
-            Provider::Codex => &["codex"],
-            Provider::Gemini => &["gemini"],
-            Provider::Goose => &["goose"],
-            Provider::KimiCode => &["kimi", "kimicode", "kimi_code", "kimi-code"],
-            Provider::OpenCode => &["opencode", "open_code", "open-code"],
-            Provider::QwenCode => &["qwen", "qwencode", "qwen_code", "qwen-code"],
-            Provider::RooCode => &["roo", "roocode", "roo_code", "roo-code"],
-        }
+        provider_info(*self).cli_aliases
     }
 
     /// Parse a provider from a CLI-facing name or alias.
@@ -136,24 +129,28 @@ impl Provider {
 
     /// Returns the corresponding sniff `AiCli` variant for install detection.
     pub fn sniff_ai_cli(&self) -> AiCli {
-        match self {
-            Provider::Claude => AiCli::Claude,
-            Provider::Codex => AiCli::Codex,
-            Provider::Gemini => AiCli::GeminiCli,
-            Provider::Goose => AiCli::Goose,
-            Provider::KimiCode => AiCli::KimiCli,
-            Provider::OpenCode => AiCli::Opencode,
-            Provider::QwenCode => AiCli::QwenCli,
-            Provider::RooCode => AiCli::Roo,
-        }
+        provider_info(*self).sniff_binding
     }
 
     /// Detect a provider from raw payload shape.
+    ///
+    /// Walks providers in canonical display order and asks each provider's
+    /// adapter behavior to recognize the payload. The first hit wins; this
+    /// keeps detection table-driven rather than re-implementing payload
+    /// shape rules in a per-variant `match` here.
     pub fn detect_from_payload(raw: &Value) -> Option<Self> {
+        // Provider adapters get first refusal — they own the most specific
+        // shape detection (e.g. Codex's payload-shape heuristics).
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            if provider_info(provider).adapter.detect(raw) {
+                return Some(provider);
+            }
+        }
+
+        // Cross-cutting fallbacks for ambiguous shapes that match multiple
+        // providers (e.g. Claude vs. Gemini both use `hook_event_name`).
+        // These are JSON-shape checks, not provider-typed dispatch.
         if let Some(name) = raw.get("hook_event_name").and_then(Value::as_str) {
-            // Both Claude and Gemini use `hook_event_name`, but with different
-            // native event names. If the value resolves to a Gemini event but
-            // NOT a Claude event, it's Gemini.
             let gemini_table = provider_info(Provider::Gemini).event_mapping;
             let claude_table = provider_info(Provider::Claude).event_mapping;
             let is_gemini = gemini_table.event_from_native_name(name).is_some()
@@ -184,57 +181,22 @@ impl Provider {
     /// Use this for file system paths, config keys, and anywhere that needs a
     /// stable, machine-readable identifier. Use `Display` for user-facing output.
     pub fn as_slug(&self) -> &'static str {
-        match self {
-            Provider::Claude => "claude",
-            Provider::Codex => "codex",
-            Provider::Gemini => "gemini",
-            Provider::Goose => "goose",
-            Provider::KimiCode => "kimi_code",
-            Provider::OpenCode => "open_code",
-            Provider::QwenCode => "qwen_code",
-            Provider::RooCode => "roo_code",
-        }
+        provider_info(*self).slug
     }
 
     /// Returns whether this provider supports skill discovery.
     pub fn supports_skills(&self) -> bool {
-        matches!(
-            self,
-            Provider::Claude
-                | Provider::Codex
-                | Provider::Gemini
-                | Provider::OpenCode
-                | Provider::QwenCode
-                | Provider::RooCode
-        )
+        provider_info(*self).supports_skills
     }
 
     /// Returns the documentation URL for this provider.
     pub fn docs_url(&self) -> &'static str {
-        match self {
-            Provider::Claude => "https://docs.anthropic.com/en/docs/claude-code",
-            Provider::Codex => "https://github.com/openai/codex",
-            Provider::Gemini => "https://github.com/google-gemini/gemini-cli",
-            Provider::Goose => "https://block.github.io/goose/",
-            Provider::KimiCode => "https://moonshotai.github.io/kimi-cli/en/",
-            Provider::OpenCode => "https://github.com/opencode-ai/opencode",
-            Provider::QwenCode => "https://qwenlm.github.io/qwen-code-docs/",
-            Provider::RooCode => "https://github.com/RooVetGit/Roo-Code",
-        }
+        provider_info(*self).docs_url
     }
 
     /// Returns the usage/billing dashboard URL for this provider, if one exists.
     pub fn usage_dashboard_url(&self) -> Option<&'static str> {
-        match self {
-            Provider::Claude => Some("https://console.anthropic.com/settings/billing"),
-            Provider::Codex => Some("https://platform.openai.com/usage"),
-            Provider::Gemini => Some("https://aistudio.google.com/billing"),
-            Provider::Goose => None,
-            Provider::KimiCode => Some("https://platform.moonshot.cn/console/account"),
-            Provider::OpenCode => None,
-            Provider::QwenCode => Some("https://bailian.console.aliyun.com/"),
-            Provider::RooCode => None,
-        }
+        provider_info(*self).usage_dashboard_url
     }
 
     /// Returns the native name used by configurators for hook registration.
@@ -276,16 +238,7 @@ impl Provider {
 
     /// Returns the agent offset directory name for this provider.
     pub fn agent_offset(&self) -> &'static str {
-        match self {
-            Provider::Claude => ".claude",
-            Provider::Codex => ".codex",
-            Provider::Gemini => ".gemini",
-            Provider::Goose => ".goose",
-            Provider::KimiCode => ".kimi",
-            Provider::OpenCode => ".opencode",
-            Provider::QwenCode => ".qwen",
-            Provider::RooCode => ".roo",
-        }
+        provider_info(*self).agent_offset
     }
 }
 
@@ -328,17 +281,7 @@ fn normalize_provider_input(input: &str) -> String {
 
 impl fmt::Display for Provider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Provider::Claude => "Claude",
-            Provider::Codex => "Codex",
-            Provider::Gemini => "Gemini",
-            Provider::Goose => "Goose",
-            Provider::KimiCode => "Kimi Code",
-            Provider::OpenCode => "OpenCode",
-            Provider::QwenCode => "Qwen Code",
-            Provider::RooCode => "Roo Code",
-        };
-        f.write_str(name)
+        f.write_str(provider_info(*self).display_name)
     }
 }
 
@@ -570,97 +513,145 @@ mod tests {
 
     #[test]
     fn event_support_level_claude_all_hook() {
-        use super::EventSupportLevel::*;
         use crate::events::AgenticEvent::*;
-        assert_eq!(Provider::Claude.event_support_level(&TurnComplete), Hook);
-        assert_eq!(Provider::Claude.event_support_level(&BeforeTool), Hook);
-        assert_eq!(
-            Provider::Claude.event_support_level(&BeforeModel),
-            NotSupported
+        assert!(Provider::Claude.event_support_level(&TurnComplete).is_hook());
+        assert!(Provider::Claude.event_support_level(&BeforeTool).is_hook());
+        assert!(
+            !Provider::Claude.event_support_level(&BeforeModel).is_supported()
         );
     }
 
     #[test]
     fn event_support_level_codex_mixed() {
-        use super::EventSupportLevel::*;
         use crate::events::AgenticEvent::*;
-        assert_eq!(Provider::Codex.event_support_level(&TurnComplete), Hook);
-        assert_eq!(Provider::Codex.event_support_level(&BeforeTool), NonHook);
-        assert_eq!(Provider::Codex.event_support_level(&AfterTool), NonHook);
-        assert_eq!(Provider::Codex.event_support_level(&SessionStart), NonHook);
-        assert_eq!(
-            Provider::Codex.event_support_level(&PermissionRequest),
-            NotSupported
+        assert!(Provider::Codex.event_support_level(&TurnComplete).is_hook());
+        assert!(
+            Provider::Codex
+                .event_support_level(&BeforeTool)
+                .is_supported()
+                && !Provider::Codex.event_support_level(&BeforeTool).is_hook()
+        );
+        assert!(
+            Provider::Codex
+                .event_support_level(&AfterTool)
+                .is_supported()
+                && !Provider::Codex.event_support_level(&AfterTool).is_hook()
+        );
+        assert!(
+            Provider::Codex
+                .event_support_level(&SessionStart)
+                .is_supported()
+                && !Provider::Codex.event_support_level(&SessionStart).is_hook()
+        );
+        assert!(
+            !Provider::Codex
+                .event_support_level(&PermissionRequest)
+                .is_supported()
         );
     }
 
     #[test]
     fn event_support_level_goose_all_non_hook() {
-        use super::EventSupportLevel::*;
         use crate::events::AgenticEvent::*;
-        assert_eq!(Provider::Goose.event_support_level(&TurnComplete), NonHook);
-        assert_eq!(Provider::Goose.event_support_level(&Notification), NonHook);
-        assert_eq!(
-            Provider::Goose.event_support_level(&SessionStart),
-            NotSupported
+        assert!(
+            Provider::Goose
+                .event_support_level(&TurnComplete)
+                .is_supported()
+                && !Provider::Goose.event_support_level(&TurnComplete).is_hook()
         );
-        assert_eq!(
-            Provider::Goose.event_support_level(&BeforeTool),
-            NotSupported
+        assert!(
+            Provider::Goose
+                .event_support_level(&Notification)
+                .is_supported()
+                && !Provider::Goose.event_support_level(&Notification).is_hook()
+        );
+        assert!(
+            !Provider::Goose
+                .event_support_level(&SessionStart)
+                .is_supported()
+        );
+        assert!(
+            !Provider::Goose
+                .event_support_level(&BeforeTool)
+                .is_supported()
         );
     }
 
     #[test]
     fn event_support_level_kimicode_all_non_hook() {
-        use super::EventSupportLevel::*;
         use crate::events::AgenticEvent::*;
-        assert_eq!(
-            Provider::KimiCode.event_support_level(&TurnComplete),
-            NonHook
+        assert!(
+            Provider::KimiCode
+                .event_support_level(&TurnComplete)
+                .is_supported()
+                && !Provider::KimiCode.event_support_level(&TurnComplete).is_hook()
         );
-        assert_eq!(Provider::KimiCode.event_support_level(&BeforeTool), NonHook);
-        assert_eq!(
-            Provider::KimiCode.event_support_level(&PermissionRequest),
-            Acp
+        assert!(
+            Provider::KimiCode
+                .event_support_level(&BeforeTool)
+                .is_supported()
+                && !Provider::KimiCode.event_support_level(&BeforeTool).is_hook()
         );
-        assert_eq!(
-            Provider::KimiCode.event_support_level(&SessionStart),
-            NotSupported
+        assert!(Provider::KimiCode
+            .event_support_level(&PermissionRequest)
+            .is_acp());
+        assert!(
+            !Provider::KimiCode
+                .event_support_level(&SessionStart)
+                .is_supported()
         );
     }
 
     #[test]
     fn event_support_level_qwencode_all_non_hook() {
-        use super::EventSupportLevel::*;
         use crate::events::AgenticEvent::*;
-        assert_eq!(
-            Provider::QwenCode.event_support_level(&TurnComplete),
-            NonHook
+        assert!(
+            Provider::QwenCode
+                .event_support_level(&TurnComplete)
+                .is_supported()
+                && !Provider::QwenCode.event_support_level(&TurnComplete).is_hook()
         );
-        assert_eq!(Provider::QwenCode.event_support_level(&AfterModel), NonHook);
-        assert_eq!(
-            Provider::QwenCode.event_support_level(&PermissionRequest),
-            NonHook
+        assert!(
+            Provider::QwenCode
+                .event_support_level(&AfterModel)
+                .is_supported()
+                && !Provider::QwenCode.event_support_level(&AfterModel).is_hook()
         );
-        assert_eq!(
-            Provider::QwenCode.event_support_level(&BeforeTool),
-            NotSupported
+        assert!(
+            Provider::QwenCode
+                .event_support_level(&PermissionRequest)
+                .is_supported()
+                && !Provider::QwenCode
+                .event_support_level(&PermissionRequest)
+                .is_hook()
+        );
+        assert!(
+            !Provider::QwenCode
+                .event_support_level(&BeforeTool)
+                .is_supported()
         );
     }
 
     #[test]
     fn event_support_level_roocode_all_non_hook() {
-        use super::EventSupportLevel::*;
         use crate::events::AgenticEvent::*;
 
-        assert_eq!(
-            Provider::RooCode.event_support_level(&TurnComplete),
-            NonHook
+        assert!(
+            Provider::RooCode
+                .event_support_level(&TurnComplete)
+                .is_supported()
+                && !Provider::RooCode.event_support_level(&TurnComplete).is_hook()
         );
-        assert_eq!(Provider::RooCode.event_support_level(&BeforeTool), NonHook);
-        assert_eq!(
-            Provider::RooCode.event_support_level(&BeforePrompt),
-            NotSupported
+        assert!(
+            Provider::RooCode
+                .event_support_level(&BeforeTool)
+                .is_supported()
+                && !Provider::RooCode.event_support_level(&BeforeTool).is_hook()
+        );
+        assert!(
+            !Provider::RooCode
+                .event_support_level(&BeforePrompt)
+                .is_supported()
         );
     }
 

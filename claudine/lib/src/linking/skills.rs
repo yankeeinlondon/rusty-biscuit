@@ -5,8 +5,6 @@ use std::{collections::BTreeSet, fs};
 use biscuit_file::serde_yaml_ng;
 use regex::Regex;
 
-use crate::error::Result;
-use crate::provider::Provider;
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::compatibility::{
     fix_frontmatter_indentation_tabs, frontmatter_has_indentation_tabs,
@@ -15,6 +13,8 @@ use super::compatibility::{
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_skill_link};
+use crate::error::Result;
+use crate::provider::Provider;
 
 /// Backward-compatible alias for `ResourceFilter`.
 pub type SkillFilter = ResourceFilter;

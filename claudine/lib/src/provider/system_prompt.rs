@@ -7,10 +7,13 @@
 //! provider accepts system-prompt overrides in interactive vs
 //! non-interactive mode.
 
+use serde::Serialize;
+
 use super::path_template::PathTemplate;
 
 /// One mechanism by which a provider accepts a system prompt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SystemPromptDelivery {
     /// An inline CLI flag accepting the prompt text directly,
     /// e.g. `--append-system-prompt "..."`.
@@ -46,7 +49,8 @@ pub enum SystemPromptDelivery {
 /// Tags for system-prompt delivery patterns that don't fit the standard
 /// flag/env-var shape. New variants are added as new providers are
 /// onboarded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SystemPromptCustomTag {
     /// Kimi Code: prompts are delivered via a per-session AGENT YAML file.
     KimiAgentFile,
@@ -57,7 +61,7 @@ pub enum SystemPromptCustomTag {
 }
 
 /// System-prompt delivery split by entrypoint mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SystemPromptDeliveryByMode {
     /// Mechanism used in interactive mode.
     pub interactive: SystemPromptDelivery,
@@ -66,7 +70,7 @@ pub struct SystemPromptDeliveryByMode {
 }
 
 /// Composite system-prompt capability descriptor for a provider.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct SystemPromptSpec {
     /// How the provider accepts an *appended* system prompt (added on
     /// top of the built-in prompt).

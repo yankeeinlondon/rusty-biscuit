@@ -4,15 +4,15 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 
-use crate::error::{ClaudineError, Result};
-use crate::events::AgenticEvent;
-use crate::provider::Provider;
 use super::metrics::{RecoveryEvent, classify_tool, normalize_tool_name, summarize_metrics};
 use super::types::{
     DailySummary, DailyToolStat, DateRange, ErrorRecord, ErrorsReport, LabeledCount, ProviderSplit,
     RepoActivity, ReportingFilters, ReposReport, SessionDetailReport, SessionEvent, SessionInfo,
     SessionsReport, ToolsReport, TrendPoint, TrendsReport, UsageTotals,
 };
+use crate::error::{ClaudineError, Result};
+use crate::events::AgenticEvent;
+use crate::provider::Provider;
 
 #[derive(Debug, Default)]
 struct WhereBuilder {

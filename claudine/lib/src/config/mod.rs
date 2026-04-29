@@ -25,7 +25,9 @@ pub(crate) use roo::RooConfigurator;
 
 use std::path::PathBuf;
 
-use sniff::programs::{AiCli, InstalledAiClients, ProgramMetadata, find_program::find_program};
+use sniff::programs::{InstalledAiClients, ProgramMetadata, find_program::find_program};
+
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 
 /// Resolve the full path to the claudine executable.
 ///
@@ -47,7 +49,6 @@ pub(crate) fn claudine_handle_command(provider: Provider) -> impl Fn(&str) -> St
     move |event| format!("{claudine_bin} handle {event} --provider {provider}")
 }
 
-use crate::provider::Provider;
 /// Rich information about a detected agent.
 #[derive(Debug, Clone)]
 pub struct AgentInfo {
@@ -74,73 +75,36 @@ impl AgentInfo {
 
 /// Discover all supported agents with rich availability information.
 ///
-/// Returns information about all supported providers, including whether
-/// their config exists and whether their binary is on PATH.
+/// Returns one [`AgentInfo`] per entry in
+/// [`crate::provider::PROVIDERS_DISPLAY_ORDER`]. All static facts —
+/// display name, binary name, sniff binding, and the primary user-level
+/// config path — are sourced from the central provider catalog via
+/// [`provider_info`]. The first element of `info.config_paths` is treated
+/// as the primary user-level config path; consult the field documentation
+/// on [`crate::provider::ProviderInfo::config_paths`] for the convention.
 pub fn discover_agents_full() -> Vec<AgentInfo> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
     let ai_clients = InstalledAiClients::new();
 
-    // Provider configs: (Provider, config_path, AiCli)
-    let providers = [
-        (
-            Provider::Claude,
-            home.join(".claude").join("settings.json"),
-            AiCli::Claude,
-        ),
-        (
-            Provider::Codex,
-            home.join(".codex").join("config.toml"),
-            AiCli::Codex,
-        ),
-        (
-            Provider::Gemini,
-            home.join(".gemini").join("settings.json"),
-            AiCli::GeminiCli,
-        ),
-        (
-            Provider::Goose,
-            home.join(".config").join("goose").join("config.yaml"),
-            AiCli::Goose,
-        ),
-        (
-            Provider::KimiCode,
-            home.join(".kimi").join("config.json"),
-            AiCli::KimiCli,
-        ),
-        (
-            Provider::OpenCode,
-            home.join(".config").join("opencode").join("opencode.json"),
-            AiCli::Opencode,
-        ),
-        (
-            Provider::QwenCode,
-            home.join(".qwen").join("settings.json"),
-            AiCli::QwenCli,
-        ),
-        (
-            Provider::RooCode,
-            home.join(".roo").join("settings.json"),
-            AiCli::Roo,
-        ),
-    ];
-
-    providers
+    PROVIDERS_DISPLAY_ORDER
         .into_iter()
-        .map(|(provider, config_path, ai_cli)| {
-            let config_exists = config_path.exists();
-            let on_path = ai_clients.is_installed(ai_cli);
+        .map(|provider| {
+            let info = provider_info(provider);
+            let primary = info
+                .config_paths
+                .first()
+                .expect("every provider must declare at least one config path")
+                .resolve_with_home(&home);
+            let config_exists = primary.exists();
+            let on_path = ai_clients.is_installed(info.sniff_binding);
 
             AgentInfo {
                 provider,
                 config_exists,
                 on_path,
-                display_name: ai_cli.display_name(),
-                binary_name: ai_cli.binary_name(),
-                config_path: if config_exists {
-                    Some(config_path)
-                } else {
-                    None
-                },
+                display_name: info.sniff_binding.display_name(),
+                binary_name: info.sniff_binding.binary_name(),
+                config_path: if config_exists { Some(primary) } else { None },
             }
         })
         .collect()
@@ -206,6 +170,58 @@ mod tests {
             .unwrap();
         assert_eq!(claude.display_name, "Claude Code");
         assert_eq!(claude.binary_name, "claude");
+    }
+
+    #[test]
+    fn discover_agents_full_uses_catalog_sniff_binding() {
+        let agents = discover_agents_full();
+        for agent in &agents {
+            let info = provider_info(agent.provider);
+            assert_eq!(
+                agent.display_name,
+                info.sniff_binding.display_name(),
+                "{:?}: display_name must come from catalog sniff binding",
+                agent.provider,
+            );
+            assert_eq!(
+                agent.binary_name,
+                info.sniff_binding.binary_name(),
+                "{:?}: binary_name must come from catalog sniff binding",
+                agent.provider,
+            );
+        }
+    }
+
+    #[test]
+    fn discover_agents_full_covers_every_catalog_provider_exactly_once() {
+        let agents = discover_agents_full();
+        let observed: std::collections::HashSet<_> = agents.iter().map(|a| a.provider).collect();
+        let expected: std::collections::HashSet<_> =
+            PROVIDERS_DISPLAY_ORDER.into_iter().collect();
+        assert_eq!(observed, expected);
+        assert_eq!(agents.len(), crate::provider::PROVIDER_COUNT);
+    }
+
+    #[test]
+    fn discover_agents_full_primary_config_path_matches_catalog_template() {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        let agents = discover_agents_full();
+        for agent in &agents {
+            let info = provider_info(agent.provider);
+            let expected = info
+                .config_paths
+                .first()
+                .expect("every provider must declare at least one config path")
+                .resolve_with_home(&home);
+            // `config_path` is `None` when the file does not exist; in
+            // that case we still want the resolution to match the catalog,
+            // so reconstruct it from the same source.
+            let actual = agent
+                .config_path
+                .clone()
+                .unwrap_or_else(|| expected.clone());
+            assert_eq!(actual, expected, "{:?}", agent.provider);
+        }
     }
 
     #[test]

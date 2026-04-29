@@ -5,8 +5,11 @@
 //! [`YoloSupport`] enum that captures the full shape of each provider's
 //! YOLO surface (direct flag, env-var, mode-conditional, etc.).
 
+use serde::Serialize;
+
 /// How a provider exposes a "skip permission prompts" / YOLO mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum YoloSupport {
     /// The provider does not expose any YOLO equivalent.
     None,

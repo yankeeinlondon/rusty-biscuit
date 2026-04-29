@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::error::Result;
-use crate::provider::Provider;
 use super::atomic::atomic_write;
 use super::backup::create_backup;
 use super::claudine_handle_command;
 use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
+use crate::error::Result;
+use crate::provider::Provider;
 
 pub(crate) struct ClaudeConfigurator;
 
@@ -586,11 +586,11 @@ mod tests {
 
     #[test]
     fn human_in_the_loop_supported_via_hook_for_claude() {
-        use crate::provider::EventSupportLevel;
         // HumanInTheLoop is captured via PreToolUse hook with AskUserQuestion tool matcher
-        assert_eq!(
-            Provider::Claude.event_support_level(&AgenticEvent::HumanInTheLoop),
-            EventSupportLevel::Hook
+        assert!(
+            Provider::Claude
+                .event_support_level(&AgenticEvent::HumanInTheLoop)
+                .is_hook()
         );
     }
 

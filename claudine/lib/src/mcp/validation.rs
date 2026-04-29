@@ -234,9 +234,9 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::provider::Provider;
     use crate::mcp::state::Scope;
     use crate::mcp::types::{McpServerMetadata, McpTransport, ProviderStateEntry};
+    use crate::provider::Provider;
 
     fn make_server(id: &str) -> McpServer {
         McpServer {

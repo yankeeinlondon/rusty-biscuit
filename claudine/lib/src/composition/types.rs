@@ -11,8 +11,8 @@ use darkmatter::markdown::compose::ComposePerfReport;
 use serde::{Deserialize, Serialize};
 
 use super::lifecycle::LifecycleConfig;
-use crate::provider::Provider;
 use crate::harness::shell::CachedApprovalDecision;
+use crate::provider::Provider;
 
 /// Shared approval cache that can be reused across composition runs
 /// (e.g. steps of one sequence) so that previously approved commands

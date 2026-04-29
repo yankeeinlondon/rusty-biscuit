@@ -20,10 +20,10 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 
+use super::{AdapterError, ProviderAdapter, str_field};
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EventMeta};
 use crate::provider::Provider;
-use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct KimiCodeAdapter;
 

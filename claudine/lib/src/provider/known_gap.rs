@@ -4,10 +4,13 @@
 //! `confidence.gaps: Vec<&'static str>` free-form list with a structured
 //! [`KnownGap`] entry tagged by [`KnownGapArea`].
 
+use serde::Serialize;
+
 /// Coarse area in which a known gap lives. Mirrors the agent capability
 /// areas exposed by [`crate::agents::AgentCapabilities`] plus a small
 /// catch-all set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum KnownGapArea {
     /// Skill discovery / activation surface.
     Skills,
@@ -40,7 +43,7 @@ pub enum KnownGapArea {
 }
 
 /// One known gap in a provider's capability data or behavior coverage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct KnownGap {
     /// Coarse area the gap belongs to.
     pub area: KnownGapArea,

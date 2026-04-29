@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::error::Result;
-use crate::provider::Provider;
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capabilities_for};
 use super::hashing;
 use super::paths::{ProviderSkillPaths, ResourceScope};
+use crate::error::Result;
+use crate::provider::Provider;
 
 /// A resource discovered by detector-based scanning.
 #[derive(Debug, Clone, PartialEq, Eq)]

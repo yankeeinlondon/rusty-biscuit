@@ -10,6 +10,8 @@
 //! representation used by `claudine::composition::OutputFormat` so that
 //! downstream code can translate between the two without bespoke logic.
 
+use serde::Serialize;
+
 /// Universal output-format identifier shared by composition and wrapper
 /// catalog data.
 ///
@@ -17,7 +19,8 @@
 /// (text/json/stream) and the CLI's wrapper-side `OutputFormat`. The lib
 /// crate retains its own copy here so the provider catalog stays free of
 /// composition-specific types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OutputFormat {
     /// Plain text output (the default for most providers).
     Text,
@@ -42,7 +45,7 @@ impl OutputFormat {
 
 /// Metadata describing how a provider exposes a particular [`OutputFormat`]
 /// in non-interactive mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct OutputFormatSupport {
     /// The universal output format identifier this entry maps from.
     pub format: OutputFormat,
@@ -59,7 +62,8 @@ pub struct OutputFormatSupport {
 
 /// Whether an entrypoint is available in interactive mode, non-interactive
 /// mode, or both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EntrypointMode {
     /// The entrypoint is non-interactive only (e.g. `codex exec`).
     NonInteractive,
@@ -70,7 +74,7 @@ pub enum EntrypointMode {
 }
 
 /// Catalog entry for a non-interactive entrypoint exposed by a provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct EntrypointSpec {
     /// Optional subcommand (e.g. `Some("exec")` for Codex).
     /// `None` means the provider's main binary is the entrypoint.

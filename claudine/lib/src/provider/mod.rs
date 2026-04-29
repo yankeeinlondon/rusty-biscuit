@@ -17,6 +17,7 @@
 mod acp;
 mod behavior;
 mod claude;
+mod cli_sensitivity;
 mod codex;
 mod errors;
 mod event_mapping;
@@ -26,6 +27,7 @@ mod identity;
 mod kimi;
 mod known_gap;
 mod methods;
+mod model_catalog_source;
 mod opencode;
 mod output_format;
 mod path_template;
@@ -42,10 +44,12 @@ mod tests;
 
 pub use acp::{AcpEvent, AcpServerMode, AcpSupport};
 pub use behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+pub use cli_sensitivity::CliSensitiveAxes;
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
-pub use identity::{Provider, PROVIDERS_DISPLAY_ORDER};
+pub use identity::{PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER, Provider};
 pub use known_gap::{KnownGap, KnownGapArea};
+pub use model_catalog_source::ModelCatalogSource;
 pub use output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 pub use path_template::{GlobKind, PathContext, PathSegment, PathTemplate};
 pub use prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
@@ -73,7 +77,13 @@ use crate::stream::StreamProtocol;
 ///
 /// All static fields are `&'static` references or trivially copyable values
 /// so a `ProviderInfo` lives in the binary's read-only data segment with no
-/// heap allocation. Trait-object fields are skipped during serialization.
+/// heap allocation. Trait-object fields and the `fn`-pointer accessors
+/// (`agent_capabilities_fn`, `resource_support_fn`) are skipped during
+/// serialization because they are not data; every other catalog field is
+/// serializable so the JSON payload from
+/// `claudine providers --describe --format json` round-trips the catalog
+/// without information loss. JSON is the authoritative descriptive surface
+/// for the typed catalog half.
 #[derive(Debug, Serialize)]
 pub struct ProviderInfo {
     /// Canonical [`Provider`] identifier for this entry.
@@ -110,22 +120,12 @@ pub struct ProviderInfo {
     /// Structured stream format used by the provider, when one is present.
     ///
     /// `None` for providers without a structured non-interactive output
-    /// stream. Skipped during serialization to keep the
-    /// `claudine providers --describe --format json` payload byte-for-byte
-    /// identical with prior phases.
-    #[serde(skip)]
+    /// stream.
     pub stream_protocol: Option<StreamProtocol>,
 
     /// Per-provider event mapping table. Source of truth for event support
     /// level, provider-native event names, parse aliases, and which rows
     /// participate in standard hook registration.
-    ///
-    /// Skipped during serialization because Phase 3 of the centralized
-    /// providers refactor deliberately preserves the existing
-    /// `claudine providers --describe --format json` payload bit-for-bit;
-    /// Phase 5 introduces typed event-mapping serialization as an additive
-    /// change.
-    #[serde(skip)]
     pub event_mapping: &'static EventMappingTable,
 
     /// Cross-cutting dynamic behavior (payload detection, parser construction).
@@ -167,71 +167,81 @@ pub struct ProviderInfo {
     #[serde(skip)]
     pub resource_support_fn: fn() -> &'static ProviderCapabilities,
 
-    // -- Phase 5: typed catalog data ----------------------------------------
+    // -- Typed catalog data -------------------------------------------------
     //
-    // These fields are additive for Phase 5 of the centralized providers
-    // refactor. They live alongside the legacy `Vec<&'static str>` fields
-    // on `RuntimeCapabilities` (kept through Phase 8) and are skipped
-    // during serialization so the existing `claudine providers --describe
-    // --format json` payload is unchanged.
+    // These fields are the strongly typed half of the centralized provider
+    // catalog. JSON serialization of the catalog (consumed by
+    // `claudine providers --describe --format json`) is the authoritative
+    // descriptive surface for these fields.
     /// Templates for per-session log files (e.g. JSONL transcripts).
-    #[serde(skip)]
     pub session_log_paths: &'static [PathTemplate],
 
     /// Templates for ancillary session-state directories.
-    #[serde(skip)]
     pub session_locations: &'static [PathTemplate],
 
     /// Templates for user / project / local config files.
-    #[serde(skip)]
+    ///
+    /// ## Notes
+    ///
+    /// The first element is treated as the **primary user-level config
+    /// path** by [`crate::config::discover_agents_full`]. The catalog
+    /// invariant test
+    /// [`crate::provider::tests::config_paths_have_primary_user_entry`]
+    /// asserts every provider declares at least one entry; the discovery
+    /// helper relies on `config_paths[0]` to determine config-file
+    /// presence and the path surfaced via [`crate::config::AgentInfo`].
     pub config_paths: &'static [PathTemplate],
 
     /// Templates for memory / instruction files contributing to the
     /// system prompt hierarchy.
-    #[serde(skip)]
     pub memory_files: &'static [PathTemplate],
 
     /// Output formats supported in non-interactive mode.
-    #[serde(skip)]
     pub output_formats: &'static [OutputFormatSupport],
 
     /// Available non-interactive (and selected interactive) entrypoints.
-    #[serde(skip)]
     pub entrypoints: &'static [EntrypointSpec],
 
     /// Typed system-prompt delivery descriptor.
-    #[serde(skip)]
     pub system_prompt: &'static SystemPromptSpec,
 
     /// Typed YOLO / auto-approve descriptor.
-    #[serde(skip)]
     pub yolo: YoloSupport,
 
     /// Typed reasoning / extended-thinking descriptor.
-    #[serde(skip)]
     pub reasoning: ReasoningSupport,
 
     /// Known gaps in provider capability data, classified by area.
-    #[serde(skip)]
     pub known_gaps: &'static [KnownGap],
 
     /// Typed ACP capability descriptor.
     ///
-    /// Skipped during serialization to keep the
-    /// `claudine providers --describe --format json` payload byte-for-byte
-    /// identical with prior phases. The descriptor is consumed by hook
-    /// reporting (`claudine hooks --capture-method`) and by the
-    /// invariant test that pairs `EventSupportLevel::Acp` rows with a
-    /// non-`NotSupported` [`AcpSupport::server_mode`].
-    #[serde(skip)]
+    /// Consumed by hook reporting (`claudine hooks --capture-method`) and
+    /// by the invariant test that pairs `EventSupportLevel::Acp` rows with
+    /// a non-`NotSupported` [`AcpSupport::server_mode`].
     pub acp: AcpSupport,
 
     /// Argv conventions describing how this provider's native CLI
     /// represents a prompt (prompt-carrying flags, optional entrypoint
     /// subcommand, and additional value-taking flags). Consumed by the
     /// CLI wrapper's prompt-extraction helpers.
-    #[serde(skip)]
     pub prompt_arg_conventions: PromptArgConventions,
+
+    /// Static, compiled-in model catalog for providers with a known model
+    /// enum. Empty for providers whose catalog is dynamic or unavailable.
+    pub static_models: &'static [&'static str],
+
+    /// Source of this provider's dynamic model catalog. See
+    /// [`ModelCatalogSource`] for the variants.
+    pub dynamic_source: ModelCatalogSource,
+
+    /// Provider-specific environment variables consulted (in order) for the
+    /// `MODEL` selection chain. Consumed by `composition::select`.
+    pub model_env_vars: &'static [&'static str],
+
+    /// CLI override sensitivity axes. Consumed by `permissions::query` to
+    /// flag results that may flip due to provider CLI flag overrides.
+    pub cli_sensitive_axes: CliSensitiveAxes,
 }
 
 impl ProviderInfo {

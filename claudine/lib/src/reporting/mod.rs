@@ -129,8 +129,8 @@ mod tests {
 
     use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
 
-    use crate::provider::Provider;
     use super::*;
+    use crate::provider::Provider;
 
     #[test]
     fn reporting_filters_support_package_area_and_package() {
