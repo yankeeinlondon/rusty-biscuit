@@ -22,6 +22,11 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .opencode/skill/darkmatter/SKILL.md
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/output/terminal.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - biscuit-terminal
   - darkmatter
