@@ -480,11 +480,7 @@ pub fn render_pull_requests_verbose(prs: &[PullRequestInfo]) -> String {
         if let Some(ref body) = pr.body
             && !body.trim().is_empty()
         {
-            let preview: String = body
-                .lines()
-                .take(10)
-                .collect::<Vec<_>>()
-                .join("\n");
+            let preview: String = body.lines().take(10).collect::<Vec<_>>().join("\n");
             let md: Markdown = preview.into();
             let mut buffer = Vec::new();
             let _ = write_terminal(&mut buffer, &md, TerminalOptions::default());
@@ -559,7 +555,12 @@ mod tests {
         }
     }
 
-    fn make_test_pr(number: u64, state: &str, draft: bool, merged_at: Option<String>) -> PullRequestInfo {
+    fn make_test_pr(
+        number: u64,
+        state: &str,
+        draft: bool,
+        merged_at: Option<String>,
+    ) -> PullRequestInfo {
         PullRequestInfo {
             number,
             title: format!("PR #{number}"),
@@ -632,7 +633,12 @@ mod tests {
 
     #[test]
     fn test_render_pull_requests_table_merged_state() {
-        let prs = vec![make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()))];
+        let prs = vec![make_test_pr(
+            1,
+            "closed",
+            false,
+            Some("2024-01-20T10:00:00Z".to_string()),
+        )];
         let rendered = render_pull_requests_table(&prs);
         assert!(rendered.contains("merged"));
     }
@@ -705,7 +711,12 @@ mod tests {
 
     #[test]
     fn test_render_pull_requests_verbose_merged_state() {
-        let prs = vec![make_test_pr(1, "closed", false, Some("2024-01-20T10:00:00Z".to_string()))];
+        let prs = vec![make_test_pr(
+            1,
+            "closed",
+            false,
+            Some("2024-01-20T10:00:00Z".to_string()),
+        )];
         let rendered = render_pull_requests_verbose(&prs);
         assert!(rendered.contains("merged"));
     }
