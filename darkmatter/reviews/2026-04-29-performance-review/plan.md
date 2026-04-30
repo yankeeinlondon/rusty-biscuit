@@ -27,10 +27,16 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_5:
+  - biscuit-file/lib/src/pdf/backends.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
   - biscuit-terminal
   - tree-hugger
   - darkmatter
+  - biscuit-file
 ---
 
 # Performance Review Implementation Plan
