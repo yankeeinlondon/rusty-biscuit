@@ -13,6 +13,8 @@
 //! script blocks. The helper then locates that marker in stdout and parses
 //! the JSON payload into receipt metadata.
 
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -121,7 +123,9 @@ impl BurntToastHelper {
 
         if let Some(image) = request.image.as_ref() {
             let path = ps_quote(&image.to_string_lossy());
-            script.push_str(&format!("$AppLogo = New-BTImage -Source {path} -AppLogoOverride\n"));
+            script.push_str(&format!(
+                "$AppLogo = New-BTImage -Source {path} -AppLogoOverride\n"
+            ));
         }
 
         if let Some(sound) = sound_for_urgency(request.urgency, request.silent) {
@@ -139,7 +143,9 @@ impl BurntToastHelper {
         script.push_str("if ($Texts[1] -and $Texts[1].Length -gt 0) { $Bindings += New-BTText -Text $Texts[1] }\n");
 
         let visual_args = match request.image.as_ref() {
-            Some(_) => "$Visual = New-BTVisual -BindingGeneric (New-BTBinding -Children $Bindings -AppLogoOverride $AppLogo)\n",
+            Some(_) => {
+                "$Visual = New-BTVisual -BindingGeneric (New-BTBinding -Children $Bindings -AppLogoOverride $AppLogo)\n"
+            }
             None => "$Visual = New-BTVisual -BindingGeneric (New-BTBinding -Children $Bindings)\n",
         };
         script.push_str(visual_args);
@@ -170,14 +176,17 @@ impl BurntToastHelper {
         script.push_str("}\n");
 
         script.push_str("$DismissedScript = {\n");
-        script.push_str("    $payload = @{ activationType = 'dismissed' } | ConvertTo-Json -Compress\n");
+        script.push_str(
+            "    $payload = @{ activationType = 'dismissed' } | ConvertTo-Json -Compress\n",
+        );
         script.push_str(&format!(
             "    Write-Host \"{ACTIVATION_MARKER}`t$payload\"\n"
         ));
         script.push_str("}\n");
 
         script.push_str("$FailedScript = {\n");
-        script.push_str("    $payload = @{ activationType = 'failed' } | ConvertTo-Json -Compress\n");
+        script
+            .push_str("    $payload = @{ activationType = 'failed' } | ConvertTo-Json -Compress\n");
         script.push_str(&format!(
             "    Write-Host \"{ACTIVATION_MARKER}`t$payload\"\n"
         ));
@@ -215,8 +224,8 @@ impl BurntToastHelper {
 
         match find_activation_marker(stdout) {
             Some(payload) => {
-                let activation: BurntToastActivation = serde_json::from_str(payload)
-                    .map_err(|error| {
+                let activation: BurntToastActivation =
+                    serde_json::from_str(payload).map_err(|error| {
                         HelperError::Parse(format!(
                             "burnttoast activation JSON unparseable: {error}; raw=`{payload}`"
                         ))
@@ -282,8 +291,13 @@ impl BurntToastHelper {
         }
         let args = self.build_args();
         let script = self.build_register_script();
-        let output =
-            spawn_helper(&self.pwsh_path, &args, Some(&script), Some(NOTICE_TIMEOUT_MS)).await?;
+        let output = spawn_helper(
+            &self.pwsh_path,
+            &args,
+            Some(&script),
+            Some(NOTICE_TIMEOUT_MS),
+        )
+        .await?;
         if output.status != 0 {
             return Err(HelperError::Exited {
                 status: output.status,
@@ -350,8 +364,13 @@ impl HelperBackend for BurntToastHelper {
         request.replace_id = Some(id.to_string());
         let args = self.build_args();
         let script = self.build_script(&request);
-        let output =
-            spawn_helper(&self.pwsh_path, &args, Some(&script), Some(NOTICE_TIMEOUT_MS)).await?;
+        let output = spawn_helper(
+            &self.pwsh_path,
+            &args,
+            Some(&script),
+            Some(NOTICE_TIMEOUT_MS),
+        )
+        .await?;
         if output.status != 0 {
             return Err(HelperError::Exited {
                 status: output.status,
@@ -551,7 +570,8 @@ mod tests {
     #[test]
     fn parse_output_recovers_reply_text() {
         let request = notice_request();
-        let stdout = "__MESSENGER_ACTIVATION__\t{\"activationType\":\"reply\",\"replyText\":\"hi\"}";
+        let stdout =
+            "__MESSENGER_ACTIVATION__\t{\"activationType\":\"reply\",\"replyText\":\"hi\"}";
         let receipt = BurntToastHelper::parse_output(&request, stdout).unwrap();
         assert_eq!(
             receipt.metadata.get("activation_type").map(String::as_str),
@@ -640,7 +660,9 @@ mod tests {
         let script = helper.build_register_script();
         assert!(script.contains("Import-Module BurntToast"));
         assert!(
-            script.contains("New-BTAppId -AppId 'RustyBiscuit.Messenger' -ErrorAction SilentlyContinue")
+            script.contains(
+                "New-BTAppId -AppId 'RustyBiscuit.Messenger' -ErrorAction SilentlyContinue"
+            )
         );
     }
 

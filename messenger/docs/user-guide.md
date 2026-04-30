@@ -386,7 +386,9 @@ Desktop routes persist configuration only — no secrets. Running `messenger sen
 
 ### Desktop Notification Helpers
 
-Each desktop backend can delegate delivery to a third-party CLI helper before falling back to its native API. The library detects which helpers are present at startup, scores them per dispatch, and uses the highest-scoring one. If a helper fails (missing binary, exited non-zero, timed out), the backend tries the next helper and finally the native path.
+On Linux and Windows, `messenger` uses installed helper utilities (`dunstify`, `notify-send`, `snoretoast`, `BurntToast`) as the **primary** delivery path. When helpers are present, interactive actions, inline replies, image attachments, and reliable notification replacement are fully supported. The native API (`notify-rust` on Linux, `winrt-notification` on Windows) remains as a fallback for simple notifications when no helper is installed.
+
+Each desktop backend delegates delivery to a third-party CLI helper before falling back to its native API. The library detects which helpers are present at startup, scores them per dispatch, and uses the highest-scoring one. If a helper fails (missing binary, exited non-zero, timed out), the backend tries the next helper and finally the native path.
 
 **Helpers per OS:**
 

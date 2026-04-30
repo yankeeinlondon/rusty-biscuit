@@ -7,15 +7,12 @@
 //! provider-send surface so that tests and the CLI can exercise the
 //! public provider API with a swappable in-memory backend.
 
-mod backend;
+pub(crate) mod backend;
 pub(crate) mod helpers;
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "macos")]
-mod macos;
+pub(crate) mod linux;
+pub(crate) mod macos;
 pub mod request;
-#[cfg(target_os = "windows")]
-mod windows;
+pub(crate) mod windows;
 
 use std::path::PathBuf;
 use std::sync::Arc;
