@@ -6,13 +6,13 @@
 //! `serde_json::Value`-based extraction behavior.
 
 use chrono::{DateTime, TimeZone, Utc};
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// Tagged enum over all Claude Code stream event variants that the parser
 /// dispatches on. Unknown event types fail to deserialize and are handled by
 /// the parser's fallback arm.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum ClaudeEvent {
     #[serde(rename = "init")]
@@ -39,6 +39,16 @@ pub enum ClaudeEvent {
     ToolResult(ClaudeToolResult),
     #[serde(rename = "user")]
     User(ClaudeUser),
+    #[serde(rename = "task_started")]
+    TaskStarted(ClaudeTaskEvent),
+    #[serde(rename = "task_progress")]
+    TaskProgress(ClaudeTaskEvent),
+    #[serde(rename = "task_notification")]
+    TaskNotification(ClaudeTaskEvent),
+    #[serde(rename = "task_completed")]
+    TaskCompleted(ClaudeTaskEvent),
+    #[serde(rename = "system/api_retry")]
+    SystemApiRetry(ClaudeApiRetry),
 }
 
 impl ClaudeEvent {
@@ -57,12 +67,17 @@ impl ClaudeEvent {
             ClaudeEvent::ToolUse(_) => "tool_use",
             ClaudeEvent::ToolResult(_) => "tool_result",
             ClaudeEvent::User(_) => "user",
+            ClaudeEvent::TaskStarted(_) => "task_started",
+            ClaudeEvent::TaskProgress(_) => "task_progress",
+            ClaudeEvent::TaskNotification(_) => "task_notification",
+            ClaudeEvent::TaskCompleted(_) => "task_completed",
+            ClaudeEvent::SystemApiRetry(_) => "system/api_retry",
         }
     }
 }
 
 /// Session metadata emitted by Claude Code's `init` and `system` events.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeInit {
     #[serde(default)]
     pub session_id: Option<String>,
@@ -74,12 +89,16 @@ pub struct ClaudeInit {
     /// but captured for future diagnostics.
     #[serde(default)]
     pub subtype: Option<String>,
+    /// Dynamic fallback for unknown fields so the raw payload can be
+    /// reconstructed without a second parse.
+    #[serde(flatten, default)]
+    pub extra: Map<String, Value>,
 }
 
 /// Full assistant message event. Claude Code nests the message under a
 /// `message` key, while the simplified test format puts `content` at the top
 /// level. Both forms are accepted.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeAssistant {
     #[serde(default)]
     pub message: Option<ClaudeAssistantMessage>,
@@ -97,7 +116,7 @@ pub struct ClaudeAssistant {
 /// `tool_result` block. The parser extracts tool_result blocks into
 /// [`SemanticEvent::ToolResult`]; text blocks are silently dropped because
 /// they only echo input.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeUser {
     #[serde(default)]
     pub message: Option<ClaudeUserMessage>,
@@ -107,13 +126,13 @@ pub struct ClaudeUser {
     pub parent_tool_use_id: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeUserMessage {
     #[serde(default)]
     pub content: Option<Vec<Value>>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeAssistantMessage {
     #[serde(default)]
     pub content: Option<Vec<ClaudeContentPart>>,
@@ -124,7 +143,7 @@ pub struct ClaudeAssistantMessage {
 /// A single `content` array entry. The parser only looks at entries where
 /// `kind == "text"` for plain text extraction; other kinds (images, tool_use)
 /// are dispatched through dedicated event variants.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeContentPart {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -159,7 +178,7 @@ impl ClaudeContentPart {
 
 /// `content_block_start` event — when `content_block.kind == "tool_use"` the
 /// parser dispatches this through the tool-use pipeline.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeContentBlockStart {
     #[serde(default)]
     pub content_block: Option<ClaudeContentBlock>,
@@ -170,7 +189,7 @@ pub struct ClaudeContentBlockStart {
 /// Nested `content_block` payload on `content_block_start` events. Shares its
 /// tool-related fields with [`ClaudeToolUse`] so the parser can forward it
 /// into the same handler.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeContentBlock {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -202,7 +221,7 @@ impl ClaudeContentBlock {
 /// `kind` discriminator because Claude emits multiple delta variants
 /// (`text_delta`, `thinking_delta`, `input_json_delta`) and we want each one
 /// to tolerate missing fields without failing deserialization.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeContentBlockDelta {
     #[serde(default)]
     pub delta: Option<ClaudeDelta>,
@@ -210,7 +229,7 @@ pub struct ClaudeContentBlockDelta {
     pub index: Option<usize>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeDelta {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -224,13 +243,13 @@ pub struct ClaudeDelta {
 
 /// `error` / `assistant.error` event. The nested `error` object carries the
 /// `kind` and `message` that the parser surfaces in the execution summary.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeErrorEvent {
     #[serde(default)]
     pub error: Option<ClaudeErrorDetail>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeErrorDetail {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -241,7 +260,7 @@ pub struct ClaudeErrorDetail {
 /// Terminal `result` event. All fields are optional because Claude omits many
 /// of them in practice, and the parser merges whatever is present into the
 /// `StreamExecutionSummary`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeResult {
     #[serde(default)]
     pub subtype: Option<String>,
@@ -281,6 +300,10 @@ pub struct ClaudeResult {
     /// Per-model usage map; shape is provider-defined.
     #[serde(default, rename = "modelUsage")]
     pub model_usage: Option<Value>,
+    /// Dynamic fallback for unknown fields so the raw payload can be
+    /// reconstructed without a second parse.
+    #[serde(flatten, default)]
+    pub extra: Map<String, Value>,
 }
 
 impl ClaudeResult {
@@ -291,7 +314,7 @@ impl ClaudeResult {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeUsage {
     #[serde(default)]
     pub input_tokens: Option<u64>,
@@ -302,7 +325,7 @@ pub struct ClaudeUsage {
 }
 
 /// `rate_limit_event` — surfaces throttling notifications.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeRateLimit {
     #[serde(default)]
     pub is_throttled: Option<bool>,
@@ -318,7 +341,7 @@ pub struct ClaudeRateLimit {
     pub reset_at_seconds: Option<i64>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeRateLimitInfo {
     #[serde(default)]
     pub status: Option<String>,
@@ -377,7 +400,7 @@ impl ClaudeRateLimit {
 /// Top-level `tool_use` event. For `content_block_start` events that wrap a
 /// tool_use block, the parser constructs this struct via
 /// [`ClaudeContentBlock::into_tool_use`].
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeToolUse {
     #[serde(default)]
     pub id: Option<String>,
@@ -409,7 +432,7 @@ impl ClaudeToolUse {
 
 /// `tool_result` event. The result payload can arrive under three different
 /// keys (`content`, `output`, `result`) depending on the tool.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ClaudeToolResult {
     #[serde(default)]
     pub tool_use_id: Option<String>,
@@ -434,6 +457,31 @@ impl ClaudeToolResult {
     pub fn response(self) -> Option<Value> {
         self.content.or(self.output).or(self.result)
     }
+}
+
+/// Task lifecycle events (`task_started`, `task_progress`, `task_notification`,
+/// `task_completed`) emitted by Claude Code's sub-agent orchestration.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct ClaudeTaskEvent {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, alias = "task_name")]
+    pub task_name: Option<String>,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// `system/api_retry` event emitted by Claude Code when retrying an API call.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct ClaudeApiRetry {
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 #[cfg(test)]

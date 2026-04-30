@@ -93,6 +93,21 @@ impl KimiEnvelope {
             _ => None,
         }
     }
+
+    /// Returns the raw kind string for this envelope, matching the format
+    /// produced by the legacy `envelope_raw_kind(Value)` helper.
+    pub fn raw_kind(&self) -> String {
+        match self {
+            KimiEnvelope::Notification(params) => {
+                format!("event:{}", params.event_type)
+            }
+            KimiEnvelope::Request { params, .. } => {
+                format!("request:{}", params.request_type)
+            }
+            KimiEnvelope::SuccessResponse { .. } => "response".into(),
+            KimiEnvelope::ErrorResponse { .. } => "error_response".into(),
+        }
+    }
 }
 
 /// Internal raw shape used by [`KimiEnvelope::classify`]. Every field is

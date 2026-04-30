@@ -1,12 +1,12 @@
 //! Typed event models for Qwen CLI's `stream-json` format.
 
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// Tagged enum over all Qwen CLI stream event variants dispatched by the
 /// parser. Unknown event types fail typed deserialization and are handled by
 /// the parser's fallback arm.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum QwenEvent {
     #[serde(rename = "init")]
@@ -55,7 +55,7 @@ impl QwenEvent {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenInit {
     #[serde(default)]
     pub session_id: Option<String>,
@@ -65,7 +65,7 @@ pub struct QwenInit {
 
 /// `system` events only become session-start signals when `subtype` is
 /// `"session_start"`. Other subtypes are ignored by the parser.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenSystem {
     #[serde(default)]
     pub subtype: Option<String>,
@@ -88,7 +88,7 @@ impl QwenSystem {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenMessage {
     #[serde(default)]
     pub role: Option<String>,
@@ -124,26 +124,26 @@ impl QwenMessage {
 /// Qwen's `message.content` accepts either a Gemini-style array of
 /// [`QwenContentPart`] entries or a plain string. Order matters: the array
 /// variant must come first so a JSON array doesn't fall through to `Text`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum QwenMessageContent {
     Parts(Vec<QwenContentPart>),
     Text(String),
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenContentPart {
     #[serde(default)]
     pub text: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenErrorEvent {
     #[serde(default)]
     pub error: Option<QwenErrorDetail>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenErrorDetail {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -153,7 +153,7 @@ pub struct QwenErrorDetail {
 
 /// Qwen's `result` / `summary` event. Usage can arrive under `stats`,
 /// `usage`, or `token_usage` depending on which Qwen build emits it.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenResult {
     #[serde(default)]
     pub duration_ms: Option<u64>,
@@ -169,6 +169,10 @@ pub struct QwenResult {
     pub usage: Option<QwenUsage>,
     #[serde(default)]
     pub token_usage: Option<QwenUsage>,
+    /// Dynamic fallback for unknown fields so the raw payload can be
+    /// reconstructed without a second parse.
+    #[serde(flatten, default)]
+    pub extra: Map<String, Value>,
 }
 
 impl QwenResult {
@@ -191,7 +195,7 @@ pub struct QwenResultMeta {
     pub cost_usd: Option<f64>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenUsage {
     #[serde(default)]
     pub input_tokens: Option<u64>,
@@ -206,7 +210,7 @@ pub struct QwenUsage {
 /// Tool event struct covering both tool_use/tool_call and
 /// tool_result/tool_response. Input field accepts five aliases:
 /// `input`, `parameters`, `arguments`, `args`, `params`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenTool {
     #[serde(default)]
     pub id: Option<String>,

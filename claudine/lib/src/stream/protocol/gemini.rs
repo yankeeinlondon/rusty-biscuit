@@ -1,12 +1,12 @@
 //! Typed event models for Gemini CLI's `stream-json` NDJSON format.
 
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// Tagged enum over all Gemini CLI stream event variants dispatched by the
 /// parser. Unknown event types fail typed deserialization and are handled by
 /// the parser's fallback arm.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum GeminiEvent {
     #[serde(rename = "init")]
@@ -40,7 +40,7 @@ impl GeminiEvent {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiInit {
     #[serde(default)]
     pub session_id: Option<String>,
@@ -53,7 +53,7 @@ pub struct GeminiInit {
 /// accepts both Gemini's real plain-string format and the defensive array
 /// fallback shape. `delta` is captured from streaming-mode messages even
 /// though arrival of the event itself is what drives streaming.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiMessage {
     #[serde(default)]
     pub role: Option<String>,
@@ -92,7 +92,7 @@ impl GeminiMessage {
 /// format, but historical and defensive paths emit an array of
 /// [`GeminiContentPart`] entries. This untagged enum accepts both shapes so
 /// the parser doesn't have to walk a `serde_json::Value`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum GeminiMessageContent {
     Text(String),
@@ -101,7 +101,7 @@ pub enum GeminiMessageContent {
 
 /// Single entry in a `message.content` array. Only `text` is consumed today;
 /// other fields are tolerated but ignored.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiContentPart {
     #[serde(default)]
     pub text: Option<String>,
@@ -109,7 +109,7 @@ pub struct GeminiContentPart {
 
 /// `error` event. Gemini's error events carry a `severity` that determines
 /// whether they surface as a warning or a turn error.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiErrorEvent {
     #[serde(default)]
     pub severity: Option<String>,
@@ -119,7 +119,7 @@ pub struct GeminiErrorEvent {
 
 /// Terminal `result` event. `status` is either `"success"` or `"error"`;
 /// in the error case the nested `error` struct carries the kind/message.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiResult {
     #[serde(default)]
     pub status: Option<String>,
@@ -129,9 +129,13 @@ pub struct GeminiResult {
     pub cost_usd: Option<f64>,
     #[serde(default)]
     pub stats: Option<GeminiStats>,
+    /// Dynamic fallback for unknown fields so the raw payload can be
+    /// reconstructed without a second parse.
+    #[serde(flatten, default)]
+    pub extra: Map<String, Value>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiResultError {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -141,7 +145,7 @@ pub struct GeminiResultError {
 
 /// Stats block reported by `result.stats`. Gemini reports `cached` as
 /// cache-read tokens and `input` as the pre-cache input count.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiStats {
     #[serde(default)]
     pub total_tokens: Option<u64>,
@@ -161,7 +165,7 @@ pub struct GeminiStats {
 
 /// `tool_use` event. Gemini places input under either `parameters` or
 /// `input`, with `tool_name` and `name` as aliases for the tool name.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiToolUse {
     #[serde(default)]
     pub tool_id: Option<String>,
@@ -191,7 +195,7 @@ impl GeminiToolUse {
 
 /// `tool_result` event. Response is in `output` or `result`; errors may
 /// surface via the `error` field and `status` reports success/failure.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct GeminiToolResult {
     #[serde(default)]
     pub tool_id: Option<String>,
