@@ -1138,8 +1138,12 @@ mod tests {
 
         let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
-        tokio::fs::create_dir_all(edit.path.parent().unwrap()).await.unwrap();
-        tokio::fs::write(&edit.path, edit.after_preview.as_bytes()).await.unwrap();
+        tokio::fs::create_dir_all(edit.path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&edit.path, edit.after_preview.as_bytes())
+            .await
+            .unwrap();
 
         let sources = backend.discover_sources(&ctx).await.unwrap();
         let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();

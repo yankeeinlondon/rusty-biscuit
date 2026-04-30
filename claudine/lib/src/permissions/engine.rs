@@ -294,10 +294,7 @@ mod tests {
             BackendCapabilities::full(BackendFidelity::Stub)
         }
 
-        async fn discover_sources(
-            &self,
-            _ctx: &PolicyContext,
-        ) -> Result<Vec<PolicySource>> {
+        async fn discover_sources(&self, _ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
             Ok(vec![PolicySource {
                 id: "user-config".to_owned(),
                 kind: PolicySourceKind::UserConfig,
