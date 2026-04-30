@@ -39,8 +39,17 @@ pub struct ComponentTheme {
     /// `TextInput`.
     pub cursor_style: Style,
 
-    /// Style applied to the selected option in `ChooseOne` /
-    /// `ChooseMany`.
+    /// Style applied to the selected option in `BooleanSwitch` and
+    /// `InputTable` row highlighting.
+    ///
+    /// ## Notes
+    ///
+    /// As of the 2026-04 choose-one improvements, `ChooseOne` and
+    /// `ChooseMany` no longer read this field — they resolve the active
+    /// row's style via [`crate::core::resolve_active_style`] using
+    /// [`crate::components::ActiveChoiceColor`] and the detected
+    /// [`crate::core::TerminalBackground`]. Other components still rely
+    /// on `selected_style` for their own row/cell highlighting.
     pub selected_style: Style,
 
     /// Style applied to inline validation error text.

@@ -18,10 +18,13 @@
 //!
 //! and returns an error if none are available.
 
-use std::io::{self, IsTerminal, Read};
-
 use clap::{Args, ValueEnum};
-use tui_chrome::{BorderStyle, ChoiceOption, FrameChromeConfig, HeightSpec, Margin, SortOrder};
+use tui_chrome::{
+    ActiveChoiceColor, BorderStyle, FrameChromeConfig, HeightSpec, HotkeyDisplayMode, Margin,
+    Padding, SortOrder,
+};
+
+use crate::choice_normalize::NamingConvention;
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
@@ -103,6 +106,135 @@ pub struct ChooseChromeArgs {
     /// `--margin` for the right side only.
     #[arg(long, value_name = "CELLS")]
     pub mr: Option<u16>,
+
+    /// Padding (in cells) applied to all four sides inside the border.
+    ///
+    /// Per-side flags (`--pt`, `--pb`, `--pl`, `--pr`) override the
+    /// umbrella value for that side only — `--padding 2 --pt 0` yields
+    /// `Padding { top: 0, bottom: 2, left: 2, right: 2 }`.
+    #[arg(short = 'p', long, value_name = "CELLS")]
+    pub padding: Option<u16>,
+
+    /// Override the top padding (cells). Takes precedence over
+    /// `--padding` for the top side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pt: Option<u16>,
+
+    /// Override the bottom padding (cells). Takes precedence over
+    /// `--padding` for the bottom side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pb: Option<u16>,
+
+    /// Override the left padding (cells). Takes precedence over
+    /// `--padding` for the left side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pl: Option<u16>,
+
+    /// Override the right padding (cells). Takes precedence over
+    /// `--padding` for the right side only.
+    #[arg(long, value_name = "CELLS")]
+    pub pr: Option<u16>,
+
+    /// Assign numeric hotkeys (Ctrl+1..9,0 then Alt+1..9,0) to the
+    /// first 20 options. Explicit hotkeys are never overwritten.
+    #[arg(long)]
+    pub numeric_hot_keys: bool,
+
+    /// Naming convention applied to option labels.
+    #[arg(long, value_enum, default_value_t = NamingConvention::None)]
+    pub label_convention: NamingConvention,
+
+    /// Naming convention applied to option values.
+    #[arg(long, value_enum, default_value_t = NamingConvention::None)]
+    pub value_convention: NamingConvention,
+
+    /// Background colour applied to the actively hovered option.
+    ///
+    /// The renderer resolves this against the detected terminal
+    /// background (light/dark/unknown) to pick a palette that meets the
+    /// spec's contrast rules.
+    #[arg(long, value_enum, value_name = "COLOR", default_value_t = ActiveColorArg::Grey)]
+    pub active_color: ActiveColorArg,
+
+    /// When to render hotkey badges next to options that carry an
+    /// explicit `Ctrl+X` / `Alt+X` shortcut.
+    ///
+    /// `auto` (the default) shows badges while the matching modifier
+    /// is held — using a brief deadline-based fallback on terminals
+    /// that do not emit modifier-only key events. `always` keeps
+    /// badges visible for the lifetime of the prompt; `never` hides
+    /// them entirely.
+    #[arg(long, value_enum, value_name = "MODE", default_value_t = HotkeyBadgesArg::Auto)]
+    pub hotkey_badges: HotkeyBadgesArg,
+}
+
+/// CLI-facing hotkey badge mode.
+///
+/// Mirrors [`HotkeyDisplayMode`] for the optional `--hotkey-badges`
+/// flag while keeping the CLI free of clap-specific dependencies on
+/// the library side.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum HotkeyBadgesArg {
+    /// Show badges only while the matching modifier is held (with a
+    /// brief deadline fallback on unsupported terminals).
+    #[default]
+    Auto,
+    /// Always show Ctrl badges (Alt badges render dim).
+    Always,
+    /// Never show badges, regardless of modifier state.
+    #[clap(alias = "hidden")]
+    Never,
+    /// Force-show Ctrl badges for the lifetime of the prompt.
+    Ctrl,
+    /// Force-show Alt badges for the lifetime of the prompt.
+    Alt,
+}
+
+/// Resolved hotkey badge override, if any.
+///
+/// Returns `None` for the default `auto` mode (so the state's
+/// dynamic detection drives display). For `always` and `never` the
+/// caller forces the corresponding [`HotkeyDisplayMode`] on the
+/// state via `with_hotkey_display`.
+pub fn resolve_hotkey_badges(arg: HotkeyBadgesArg) -> Option<HotkeyDisplayMode> {
+    match arg {
+        HotkeyBadgesArg::Auto => None,
+        HotkeyBadgesArg::Always => Some(HotkeyDisplayMode::CtrlHeld),
+        HotkeyBadgesArg::Never => Some(HotkeyDisplayMode::Hidden),
+        HotkeyBadgesArg::Ctrl => Some(HotkeyDisplayMode::CtrlHeld),
+        HotkeyBadgesArg::Alt => Some(HotkeyDisplayMode::AltHeld),
+    }
+}
+
+/// CLI-facing active-colour mirror.
+///
+/// Kept separate from [`ActiveChoiceColor`] so clap can render
+/// kebab-case help values without forcing the library to depend on
+/// clap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum ActiveColorArg {
+    /// Neutral grey (the default; safe on light and dark terminals).
+    #[default]
+    Grey,
+    /// Green accent.
+    Green,
+    /// Yellow accent.
+    Yellow,
+    /// Red accent.
+    Red,
+}
+
+impl From<ActiveColorArg> for ActiveChoiceColor {
+    fn from(value: ActiveColorArg) -> Self {
+        match value {
+            ActiveColorArg::Grey => ActiveChoiceColor::Grey,
+            ActiveColorArg::Green => ActiveChoiceColor::Green,
+            ActiveColorArg::Yellow => ActiveChoiceColor::Yellow,
+            ActiveColorArg::Red => ActiveChoiceColor::Red,
+        }
+    }
 }
 
 /// CLI-facing sort-order mirror.
@@ -110,6 +242,14 @@ pub struct ChooseChromeArgs {
 /// Kept separate from [`SortOrder`] so that clap's derive can render
 /// kebab-case help values without the library having to depend on
 /// clap.
+///
+/// ## Notes
+///
+/// `Inverse` is the canonical clap value. The legacy spelling
+/// `reverse` remains accepted as a hidden alias on the same variant
+/// for backward compatibility but is deliberately omitted from
+/// `--help` output and shell completions so that `inverse` is the
+/// only documented choice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 #[clap(rename_all = "kebab-case")]
 pub enum SortOrderArg {
@@ -117,7 +257,13 @@ pub enum SortOrderArg {
     #[default]
     Natural,
     /// Reverse source order.
-    Reverse,
+    //
+    // The `reverse` clap alias is intentional and kept hidden from
+    // `--help` and shell completions for backward compatibility — see
+    // the type-level rustdoc above. We use a non-doc comment here so
+    // the alias does not leak into clap's rendered help text.
+    #[clap(alias = "reverse")]
+    Inverse,
     /// Sort lexically by label (ascending).
     Asc,
     /// Sort lexically by label (descending).
@@ -128,7 +274,7 @@ impl From<SortOrderArg> for SortOrder {
     fn from(value: SortOrderArg) -> Self {
         match value {
             SortOrderArg::Natural => SortOrder::Natural,
-            SortOrderArg::Reverse => SortOrder::Reverse,
+            SortOrderArg::Inverse => SortOrder::Inverse,
             SortOrderArg::Asc => SortOrder::Asc,
             SortOrderArg::Desc => SortOrder::Desc,
         }
@@ -195,128 +341,6 @@ impl From<BorderStyleArg> for BorderStyle {
     }
 }
 
-/// Resolves the raw option strings from the CLI's source-precedence
-/// chain.
-///
-/// ## Returns
-///
-/// - `Ok(None)` when the caller is using a legacy source
-///   (`--options` / `--options-from-file` /
-///   `--options-from-dictionary`) and should build the choice input
-///   through the existing builder helpers.
-/// - `Ok(Some(strings))` when either positional args or piped STDIN
-///   supplied the option list.
-///
-/// ## Errors
-///
-/// Returns [`io::ErrorKind::InvalidInput`] when no source is
-/// available — no legacy flag, no positionals, and STDIN is a TTY —
-/// so the user is told which flag to set.
-pub fn resolve_option_strings(
-    has_legacy_source: bool,
-    positional: Vec<String>,
-) -> io::Result<Option<Vec<String>>> {
-    if has_legacy_source {
-        return Ok(None);
-    }
-    if !positional.is_empty() {
-        return Ok(Some(positional));
-    }
-    if io::stdin().is_terminal() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "no options provided: pass options as positional args, via stdin, or use one of \
-             --options, --options-from-file, --options-from-dictionary",
-        ));
-    }
-    let lines = read_option_strings_from(io::stdin().lock())?;
-    Ok(Some(lines))
-}
-
-/// Reads option strings from an arbitrary [`Read`] source.
-///
-/// Encapsulates the `read_to_string` → split lines → CR-trim →
-/// filter-empty → empty-check pipeline so the stdin branch of
-/// [`resolve_option_strings`] is reachable from unit tests via
-/// [`std::io::Cursor`] (or any in-memory reader).
-///
-/// ## Returns
-///
-/// `Ok(Vec<String>)` containing one option per non-empty input line,
-/// with any trailing `\r` stripped so Windows-style line endings
-/// round-trip cleanly.
-///
-/// ## Errors
-///
-/// Returns [`io::ErrorKind::InvalidInput`] when the resulting vec is
-/// empty (no non-blank lines), matching the message emitted by
-/// [`resolve_option_strings`] when its STDIN branch produces nothing.
-/// Propagates any [`io::Error`] raised by the underlying reader.
-pub(crate) fn read_option_strings_from<R: Read>(mut reader: R) -> io::Result<Vec<String>> {
-    let mut buf = String::new();
-    reader.read_to_string(&mut buf)?;
-    let lines: Vec<String> = buf
-        .lines()
-        .map(|line| line.trim_end_matches('\r'))
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect();
-    if lines.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "no options provided: pass options as positional args, via stdin, or use one of \
-             --options, --options-from-file, --options-from-dictionary",
-        ));
-    }
-    Ok(lines)
-}
-
-/// Splits an option string into `(label, value)` on the first
-/// occurrence of `delimiter`.
-///
-/// When `delimiter` is `None`, or the string does not contain the
-/// delimiter, both label and value are the original string. Trim is
-/// applied after the split so `"Apple : 1"` with `':'` yields
-/// `("Apple", "1")`.
-pub fn parse_label_value(s: &str, delimiter: Option<char>) -> (String, String) {
-    match delimiter {
-        Some(ch) => match s.split_once(ch) {
-            Some((label, value)) => (label.trim().to_string(), value.trim().to_string()),
-            None => (s.to_string(), s.to_string()),
-        },
-        None => (s.to_string(), s.to_string()),
-    }
-}
-
-/// Builds a list of [`ChoiceOption<String>`] from raw option strings.
-///
-/// The `id` field of each option is set to the **value** (not the
-/// label) so `--selected` matches by value. This is the behaviour
-/// change spec callers expect when a `--delimiter` splits a
-/// `label⟂value` pair.
-pub fn build_options(
-    raw_strings: Vec<String>,
-    delimiter: Option<char>,
-) -> Vec<ChoiceOption<String>> {
-    raw_strings
-        .into_iter()
-        .map(|s| {
-            let (label, value) = parse_label_value(&s, delimiter);
-            ChoiceOption::new(value.clone(), label, value)
-        })
-        .collect()
-}
-
-/// Applies the caller's [`SortOrder`] to `options` in place.
-///
-/// Sort runs after `--delimiter` parsing so users sort on labels, not
-/// on raw input strings. Invoked uniformly for every source (legacy
-/// `--options*`, positional, and STDIN) so the CLI's ordering is
-/// independent of source precedence.
-pub fn apply_sort(options: &mut [ChoiceOption<String>], order: SortOrder) {
-    order.apply(options);
-}
-
 /// Builds a [`FrameChromeConfig`] from the shared CLI args.
 ///
 /// Phase 9 wires the `--border`, `--border-label`, and
@@ -331,6 +355,7 @@ pub fn build_chrome(args: &ChooseChromeArgs) -> FrameChromeConfig {
         border,
         border_label: args.border_label.clone(),
         margin: resolve_margin(args),
+        padding: resolve_padding(args),
         ..Default::default()
     }
 }
@@ -387,6 +412,32 @@ fn resolve_margin(args: &ChooseChromeArgs) -> Margin {
     }
 }
 
+/// Resolves the effective [`Padding`] from the supplied args.
+///
+/// `--padding` seeds every side; each per-side flag (`--pt`, `--pb`,
+/// `--pl`, `--pr`) overrides the matching side when set. When no
+/// padding flag is set, the library default — [`Padding::default`],
+/// equivalent to `Padding::uniform(1)` — is used. Explicit
+/// `--padding 0` produces [`Padding::zero`] (no interior spacing).
+fn resolve_padding(args: &ChooseChromeArgs) -> Padding {
+    let base = args.padding;
+    let has_any_padding_flag = base.is_some()
+        || args.pt.is_some()
+        || args.pb.is_some()
+        || args.pl.is_some()
+        || args.pr.is_some();
+    if !has_any_padding_flag {
+        return Padding::default();
+    }
+    let base = base.unwrap_or(0);
+    Padding {
+        top: args.pt.unwrap_or(base),
+        bottom: args.pb.unwrap_or(base),
+        left: args.pl.unwrap_or(base),
+        right: args.pr.unwrap_or(base),
+    }
+}
+
 /// Resolves the effective [`BorderStyle`] from the supplied args.
 ///
 /// Precedence:
@@ -411,105 +462,15 @@ fn resolve_border_style(args: &ChooseChromeArgs) -> BorderStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tui_chrome::Padding;
 
     #[test]
-    fn parse_label_value_no_delimiter_returns_identity() {
-        let (label, value) = parse_label_value("Apple", None);
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "Apple");
-    }
-
-    #[test]
-    fn parse_label_value_splits_on_first_delimiter_only() {
-        let (label, value) = parse_label_value("Apple:1:2", Some(':'));
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "1:2");
-    }
-
-    #[test]
-    fn parse_label_value_trims_around_delimiter() {
-        let (label, value) = parse_label_value("Apple : 1", Some(':'));
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "1");
-    }
-
-    #[test]
-    fn parse_label_value_falls_back_to_identity_when_delimiter_missing() {
-        let (label, value) = parse_label_value("Apple", Some(':'));
-        assert_eq!(label, "Apple");
-        assert_eq!(value, "Apple");
-    }
-
-    #[test]
-    fn build_options_sets_id_to_value() {
-        let opts = build_options(vec!["Apple:1".into(), "Berry:2".into()], Some(':'));
-        assert_eq!(opts.len(), 2);
-        assert_eq!(opts[0].id, "1");
-        assert_eq!(opts[0].label, "Apple");
-        assert_eq!(opts[0].value, "1");
-        assert_eq!(opts[1].id, "2");
-        assert_eq!(opts[1].label, "Berry");
-        assert_eq!(opts[1].value, "2");
-    }
-
-    #[test]
-    fn build_options_without_delimiter_sets_id_equal_to_label_equal_to_value() {
-        let opts = build_options(vec!["alpha".into(), "beta".into()], None);
-        assert_eq!(opts.len(), 2);
-        assert_eq!(opts[0].id, "alpha");
-        assert_eq!(opts[0].label, "alpha");
-        assert_eq!(opts[0].value, "alpha");
-    }
-
-    #[test]
-    fn resolve_option_strings_returns_none_for_legacy_source() {
-        let resolved = resolve_option_strings(true, vec![]).unwrap();
-        assert!(resolved.is_none());
-    }
-
-    #[test]
-    fn resolve_option_strings_prefers_positional_over_stdin() {
-        let resolved = resolve_option_strings(false, vec!["a".into(), "b".into()]).unwrap();
-        assert_eq!(resolved, Some(vec!["a".to_string(), "b".to_string()]));
-    }
-
-    #[test]
-    fn read_option_strings_strips_trailing_carriage_return() {
-        let cursor = std::io::Cursor::new(b"alpha\r\nbeta\r\n");
-        let lines = read_option_strings_from(cursor).unwrap();
-        assert_eq!(lines, vec!["alpha".to_string(), "beta".to_string()]);
-    }
-
-    #[test]
-    fn read_option_strings_filters_empty_lines() {
-        let cursor = std::io::Cursor::new(b"\nalpha\n\n\nbeta\n");
-        let lines = read_option_strings_from(cursor).unwrap();
-        assert_eq!(lines, vec!["alpha".to_string(), "beta".to_string()]);
-    }
-
-    #[test]
-    fn read_option_strings_empty_input_is_invalid_input() {
-        let cursor = std::io::Cursor::new(b"");
-        let err = read_option_strings_from(cursor).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-        assert!(err.to_string().contains("no options provided"));
-    }
-
-    #[test]
-    fn read_option_strings_whitespace_only_lines_are_kept_as_is() {
-        // Whitespace-only labels are preserved — the caller is
-        // responsible for trimming (via `parse_label_value`). Only
-        // wholly empty lines are dropped.
-        let cursor = std::io::Cursor::new(b"  alpha  \nbeta\n");
-        let lines = read_option_strings_from(cursor).unwrap();
-        assert_eq!(lines, vec!["  alpha  ".to_string(), "beta".to_string()]);
-    }
-
-    #[test]
-    fn build_chrome_returns_default_config() {
+    fn build_chrome_returns_default_config_with_padding() {
         let args = ChooseChromeArgs::default();
         let chrome = build_chrome(&args);
-        assert!(chrome.is_empty());
+        // Default padding is uniform(1), so the config is not empty.
+        assert!(!chrome.is_empty());
+        assert_eq!(chrome.padding, Padding::uniform(1));
     }
 
     #[test]
@@ -615,7 +576,7 @@ mod tests {
     #[test]
     fn sort_order_arg_maps_to_library_enum() {
         assert_eq!(SortOrder::from(SortOrderArg::Natural), SortOrder::Natural);
-        assert_eq!(SortOrder::from(SortOrderArg::Reverse), SortOrder::Reverse);
+        assert_eq!(SortOrder::from(SortOrderArg::Inverse), SortOrder::Inverse);
         assert_eq!(SortOrder::from(SortOrderArg::Asc), SortOrder::Asc);
         assert_eq!(SortOrder::from(SortOrderArg::Desc), SortOrder::Desc);
     }
@@ -720,37 +681,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_sort_reorders_labels_lexically_when_asc() {
-        let mut options =
-            build_options(vec!["Berry".into(), "Apple".into(), "Cherry".into()], None);
-        apply_sort(&mut options, SortOrder::Asc);
-        let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
-        assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
-    }
-
-    #[test]
-    fn apply_sort_on_labels_not_raw_strings_when_delimiter_present() {
-        // With `--delimiter :` the label is the part before the colon.
-        // Sorting ascending should order by label ("Apple" < "Berry"),
-        // not by raw string ("Apple:zzz" vs "Berry:aaa").
-        let mut options = build_options(vec!["Berry:aaa".into(), "Apple:zzz".into()], Some(':'));
-        apply_sort(&mut options, SortOrder::Asc);
-        assert_eq!(options[0].label, "Apple");
-        assert_eq!(options[0].value, "zzz");
-        assert_eq!(options[1].label, "Berry");
-        assert_eq!(options[1].value, "aaa");
-    }
-
-    #[test]
-    fn apply_sort_natural_is_no_op() {
-        let mut options =
-            build_options(vec!["Berry".into(), "Apple".into(), "Cherry".into()], None);
-        apply_sort(&mut options, SortOrder::Natural);
-        let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
-        assert_eq!(labels, vec!["Berry", "Apple", "Cherry"]);
-    }
-
-    #[test]
     fn parse_height_spec_accepts_bare_integer_as_cells() {
         assert_eq!(parse_height_spec("10"), Ok(HeightSpec::Cells(10)));
         assert_eq!(parse_height_spec(" 5 "), Ok(HeightSpec::Cells(5)));
@@ -786,5 +716,162 @@ mod tests {
     fn parse_height_spec_rejects_non_numeric_input() {
         assert!(parse_height_spec("tall").is_err());
         assert!(parse_height_spec("twenty%").is_err());
+    }
+
+    #[test]
+    fn build_chrome_padding_sets_all_sides() {
+        let args = ChooseChromeArgs {
+            padding: Some(2),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.padding, Padding::uniform(2));
+    }
+
+    #[test]
+    fn build_chrome_per_side_overrides_umbrella_padding() {
+        let args = ChooseChromeArgs {
+            padding: Some(2),
+            pt: Some(0),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.padding,
+            Padding {
+                top: 0,
+                bottom: 2,
+                left: 2,
+                right: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_per_side_only_padding_defaults_other_sides_to_zero() {
+        let args = ChooseChromeArgs {
+            pl: Some(3),
+            pr: Some(4),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.padding,
+            Padding {
+                top: 0,
+                bottom: 0,
+                left: 3,
+                right: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_all_per_side_padding_overrides_applied() {
+        let args = ChooseChromeArgs {
+            padding: Some(5),
+            pt: Some(1),
+            pb: Some(2),
+            pl: Some(3),
+            pr: Some(4),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(
+            chrome.padding,
+            Padding {
+                top: 1,
+                bottom: 2,
+                left: 3,
+                right: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn build_chrome_no_padding_flag_uses_library_default_uniform_one() {
+        // Phase 2: when no --padding/--pt/--pb/--pl/--pr is supplied,
+        // the resolver should return the library default
+        // (Padding::uniform(1)) — *not* Padding::zero(). This
+        // exercises the "unset flags use library default" rule and
+        // mirrors the new `Padding::default()` behaviour.
+        let args = ChooseChromeArgs::default();
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.padding, Padding::uniform(1));
+        assert_eq!(chrome.padding, Padding::default());
+        // Default padding alone makes the chrome non-empty because
+        // padding affects layout; only Padding::zero() is "empty".
+        assert!(!chrome.is_empty());
+    }
+
+    #[test]
+    fn build_chrome_explicit_padding_zero_produces_zero_padding() {
+        // Phase 2: --padding 0 must produce Padding::zero(), even
+        // though the library default is now uniform(1). Combined with
+        // no border/margin, this restores the FrameChromeConfig to
+        // its empty state.
+        let args = ChooseChromeArgs {
+            padding: Some(0),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.padding, Padding::zero());
+        assert!(chrome.is_empty());
+    }
+
+    #[test]
+    fn hotkey_badges_arg_default_is_auto() {
+        assert_eq!(HotkeyBadgesArg::default(), HotkeyBadgesArg::Auto);
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_auto_returns_none() {
+        assert!(resolve_hotkey_badges(HotkeyBadgesArg::Auto).is_none());
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_always_forces_ctrl_held() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Always),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_never_forces_hidden() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Never),
+            Some(HotkeyDisplayMode::Hidden)
+        );
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_ctrl_forces_ctrl_held() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Ctrl),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
+    }
+
+    #[test]
+    fn resolve_hotkey_badges_alt_forces_alt_held() {
+        assert_eq!(
+            resolve_hotkey_badges(HotkeyBadgesArg::Alt),
+            Some(HotkeyDisplayMode::AltHeld)
+        );
+    }
+
+    #[test]
+    fn build_chrome_padding_combined_with_border_and_margin() {
+        let args = ChooseChromeArgs {
+            border: true,
+            margin: Some(2),
+            padding: Some(1),
+            ..ChooseChromeArgs::default()
+        };
+        let chrome = build_chrome(&args);
+        assert_eq!(chrome.border, BorderStyle::Rounded);
+        assert_eq!(chrome.margin, Margin::uniform(2));
+        assert_eq!(chrome.padding, Padding::uniform(1));
     }
 }

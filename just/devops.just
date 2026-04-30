@@ -49,9 +49,9 @@ _install path pkg_name binary="" *args="":
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
 commit agent="opencode" *args="":
     @echo ""
-    @echo -e "Committing staged changes in the {{bold}}Rusty Biscuit{{reset}} monorepo to git"
+    @echo "Committing staged changes in the {{bold}}Rusty Biscuit{{reset}} monorepo to git"
     @echo ""
-    @echo -e "{{bold}}{{blue}}Staged Files:{{reset}}"
+    @echo "{{bold}}{{blue}}Staged Files:{{reset}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
     @claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
@@ -200,9 +200,8 @@ status subject="":
     eza "${matched}" -lga --hyperlink
 
 
-_coverage pkg *args="":
-    @echo
-    @echo "🏃‍♂️ running coverage tests for {{bold}}{{pkg}}{{reset}} package"
-    @echo
-    @cargo llvm-cov -p "{{pkg}}" {{args}}
-    @echo
+[arg("spec", long="spec")]
+positional filter="" spec="" design="":
+    @echo "Filter: {{filter}}"
+    @echo "Spec: {{spec}}"
+    @echo "Design: {{design}}"

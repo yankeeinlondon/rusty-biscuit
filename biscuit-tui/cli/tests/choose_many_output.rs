@@ -9,9 +9,14 @@ fn choose_many_help_lists_options_and_validation_flags() {
         .args(["choose-many", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--options"))
-        .stdout(predicate::str::contains("--options-from-file"))
-        .stdout(predicate::str::contains("--options-from-dictionary"))
+        .stdout(predicate::str::contains("--csv"))
+        .stdout(predicate::str::contains("--list"))
+        .stdout(predicate::str::contains("--rows"))
+        .stdout(predicate::str::contains("--file"))
+        .stdout(predicate::str::contains("--md"))
+        .stdout(predicate::str::contains("--numeric-hot-keys"))
+        .stdout(predicate::str::contains("--label-convention"))
+        .stdout(predicate::str::contains("--value-convention"))
         .stdout(predicate::str::contains("--required"))
         .stdout(predicate::str::contains("--min-selections"))
         .stdout(predicate::str::contains("--max-selections"));
@@ -32,7 +37,7 @@ fn choose_many_fails_when_no_option_source_provided() {
         .args(["choose-many"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("one of --options"));
+        .stderr(predicate::str::contains("no options provided"));
 }
 
 #[test]
@@ -40,7 +45,7 @@ fn choose_many_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty(
     cargo_bin_cmd!("question")
         .args([
             "choose-many",
-            "--options",
+            "--csv",
             "A,B,C",
             "--initial",
             "A,C",
@@ -69,7 +74,7 @@ fn choose_many_submits_raw_output_via_real_tty() {
             "--output",
             "raw",
             "choose-many",
-            "--options",
+            "--csv",
             "A,B,C",
             "--initial",
             "A,C",

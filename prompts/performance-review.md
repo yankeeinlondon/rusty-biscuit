@@ -1,5 +1,6 @@
 ---
 area: "{{ctx.current_package_area || ''}}"
+today: "{{ctx.today}}"
 packages: "{{ctx.packages || '' }}"
 start:
     message: "🏃‍♂️ starting a performance review for {{bold}}{{area}}{{reset}} package area"
@@ -247,39 +248,41 @@ Produce the review using the following structure.
    - areas that already appear performance-conscious
    - areas where more measurement is needed
 
-   ## Findings
+2. `## Findings`
 
-2. `## Finding Title`
+    For each finding:
 
-   **Severity:** High | Medium | Low  
-   **Category:** runtime | memory | async/concurrency | I/O | parsing/text | data-structure | API/architecture | compile-time | dependency  
-   **Location:** `path/to/file.rs`, function/module name
+   - `## Finding Title`
 
-   **Problem**
+      **Severity:** High | Medium | Low  
+      **Category:** runtime | memory | async/concurrency | I/O | parsing/text | data-structure | API/architecture | compile-time | dependency  
+      **Location:** `path/to/file.rs`, function/module name
 
-   Explain the inefficient behavior.
+      **Problem**
 
-   **Why it matters**
+      Explain the inefficient behavior.
 
-   Explain when this cost becomes significant.
+      **Why it matters**
 
-   **Evidence**
+      Explain when this cost becomes significant.
 
-   Point to the relevant code pattern, call path, loop behavior, allocation behavior, dependency behavior, or complexity issue.
+      **Evidence**
 
-   **Recommendation**
+      Point to the relevant code pattern, call path, loop behavior, allocation behavior, dependency behavior, or complexity issue.
 
-   Give a concrete change. Include a short code sketch when useful.
+      **Recommendation**
 
-   **Expected impact**
+      Give a concrete change. Include a short code sketch when useful.
 
-   Explain what gets faster, cheaper, or more scalable.
+      **Expected impact**
 
-   **Risk/tradeoff**
+      Explain what gets faster, cheaper, or more scalable.
 
-   Explain any downside, migration concern, correctness risk, or maintainability tradeoff.
+      **Risk/tradeoff**
 
-   Repeat for each finding.
+      Explain any downside, migration concern, correctness risk, or maintainability tradeoff.
+
+   > Note: repeat for each finding.
 
 3. `## Quick Wins`
 
@@ -329,4 +332,16 @@ Produce the review using the following structure.
    3. Medium-impact cleanup
    4. Benchmarking and validation
    5. Optional compile-time or dependency cleanup
+
+## Review Finalization
+
+To complete this task you must 
+
+- save the specified report format to the file "{{area}}/reviews/{{today}}-performance-review/review.md"
+- set the `agent` Frontmatter property to "{{env.AGENT}}"
+- set the `model` Frontmatter property to "{{env.MODEL}}"
+- set the `repo` Frontmatter property to "{{ctx.repo}}"
+- set the `created` Frontmatter property to "{{today}} at {{time}}"
+- ensure all Frontmatter properties have been saved to "{{area}}/reviews/{{today}}-performance-review/review.md" and that the review content is in the body of the document
+
 

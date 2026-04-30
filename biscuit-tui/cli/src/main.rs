@@ -7,9 +7,13 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use tui_chrome::HeightSpec;
 
+mod choice_normalize;
 mod commands;
+mod completions;
+mod option_sources;
 mod output;
 
 use commands::boolean_switch::{BooleanSwitchArgs, run as run_boolean_switch};
@@ -56,6 +60,11 @@ enum Commands {
     ChooseMany(ChooseManyArgs),
     /// Grid of heterogeneous editable cells.
     InputTable(InputTableArgs),
+    /// Generate shell completion scripts.
+    Completions {
+        /// Target shell.
+        shell: Shell,
+    },
 }
 
 fn main() -> ExitCode {
@@ -77,5 +86,11 @@ fn dispatch(cli: Cli) -> std::io::Result<i32> {
         Commands::ChooseOne(args) => run_choose_one(args, cli.output, cli.height),
         Commands::ChooseMany(args) => run_choose_many(args, cli.output, cli.height),
         Commands::InputTable(args) => run_input_table(args, cli.output, cli.height),
+        Commands::Completions { shell } => {
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            completions::write_completions::<Cli, _>(shell, "question", &mut lock)?;
+            Ok(0)
+        }
     }
 }

@@ -14,6 +14,7 @@ fn top_level_help_uses_canonical_public_names() {
         .stdout(predicate::str::contains("text-input"))
         .stdout(predicate::str::contains("text-area-input"))
         .stdout(predicate::str::contains("input-table"))
+        .stdout(predicate::str::contains("completions"))
         .stdout(predicate::str::contains("select-one").not())
         .stdout(predicate::str::contains("select-many").not());
 }
@@ -50,6 +51,7 @@ fn every_subcommand_accepts_height_before_subcommand_token() {
         "choose-one",
         "choose-many",
         "input-table",
+        "completions",
     ];
 
     for subcommand in subcommands {

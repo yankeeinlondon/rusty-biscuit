@@ -99,3 +99,7 @@ When you start your work read the memory/just.md file (if it exists) as it provi
 
 If you feel like you learned something novel about `just` and not within your normal training set that is worth remembering then you should append that learning to the `memory/just.md` file (create the file if it doesn't exist).
 
+
+## Parameters
+
+[Recipe Parameters](https://just.systems/man/en/recipe-parameters.html) documentation.
