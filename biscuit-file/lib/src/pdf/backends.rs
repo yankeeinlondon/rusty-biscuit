@@ -35,67 +35,76 @@ pub fn extract_text(bytes: &[u8], config: &PdfConfig) -> Result<String, PdfError
 /// - Removes leading/trailing whitespace
 /// - De-hyphenates words split across lines (hyphen immediately before
 ///   a newline, followed by whitespace on the next line)
+///
+/// Implemented as a single pass over the input with one output buffer.
 pub fn normalize_text(text: &str) -> String {
-    // First pass: de-hyphenate line breaks.
-    // A hyphen at the end of a line (before \n or \r\n) indicates a word split.
-    let dehyphenated = {
-        let mut result = String::with_capacity(text.len());
-        let mut chars = text.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if ch == '-' {
-                match chars.peek() {
-                    Some('\n') => {
-                        chars.next(); // consume \n
-                        // Skip leading whitespace on next line
-                        while let Some(&ws) = chars.peek() {
-                            if ws.is_whitespace() && ws != '\n' {
-                                chars.next();
-                            } else {
-                                break;
-                            }
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut pending_whitespace = false;
+
+    while let Some(ch) = chars.next() {
+        if ch == '-' {
+            // Check for dehyphenation pattern: hyphen followed by line break.
+            match chars.peek() {
+                Some('\n') => {
+                    chars.next(); // consume \n
+                    // Skip leading whitespace on next line (but not \n)
+                    while let Some(&ws) = chars.peek() {
+                        if ws.is_whitespace() && ws != '\n' {
+                            chars.next();
+                        } else {
+                            break;
                         }
                     }
-                    Some('\r') => {
-                        chars.next(); // consume \r
-                        if chars.peek() == Some(&'\n') {
-                            chars.next(); // consume \n
-                        }
-                        while let Some(&ws) = chars.peek() {
-                            if ws.is_whitespace() && ws != '\n' {
-                                chars.next();
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    _ => {
-                        result.push(ch);
-                    }
+                    // Don't emit hyphen; preserve pending whitespace state
+                    continue;
                 }
-            } else {
-                result.push(ch);
+                Some('\r') => {
+                    chars.next(); // consume \r
+                    if chars.peek() == Some(&'\n') {
+                        chars.next(); // consume \n
+                    }
+                    // Skip leading whitespace on next line (but not \n)
+                    while let Some(&ws) = chars.peek() {
+                        if ws.is_whitespace() && ws != '\n' {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    // Don't emit hyphen; preserve pending whitespace state
+                    continue;
+                }
+                _ => {
+                    // Not a line break after hyphen: emit pending whitespace,
+                    // then the hyphen itself.
+                    if pending_whitespace {
+                        result.push(' ');
+                        pending_whitespace = false;
+                    }
+                    result.push(ch);
+                }
             }
-        }
-        result
-    };
-
-    // Second pass: collapse whitespace
-    let mut result = String::with_capacity(dehyphenated.len());
-    let mut last_was_whitespace = false;
-
-    for ch in dehyphenated.chars() {
-        if ch.is_whitespace() {
-            if !last_was_whitespace && !result.is_empty() {
-                result.push(' ');
+        } else if ch.is_whitespace() {
+            // Collapse whitespace: don't emit immediately. Only mark as
+            // pending when we already have content (avoids leading spaces).
+            if !result.is_empty() {
+                pending_whitespace = true;
             }
-            last_was_whitespace = true;
         } else {
+            // Non-whitespace character: flush any pending whitespace first,
+            // then emit the character.
+            if pending_whitespace {
+                result.push(' ');
+                pending_whitespace = false;
+            }
             result.push(ch);
-            last_was_whitespace = false;
         }
     }
 
-    result.trim().to_string()
+    // Trailing whitespace is already suppressed because we never emit
+    // pending whitespace at the end of the loop.
+    result
 }
 
 /// Extract table of contents from PDF bytes using lopdf.
@@ -320,5 +329,21 @@ mod tests {
 
         // Unicode whitespace should be normalized
         assert_eq!(normalize_text("hello\u{00A0}world"), "hello world"); // non-breaking space
+    }
+
+    #[test]
+    fn test_normalize_text_crlf_dehyphenation() {
+        // CRLF line ending with leading whitespace on continuation line
+        assert_eq!(normalize_text("word-\r\n   continued"), "wordcontinued");
+    }
+
+    #[test]
+    fn test_normalize_text_trailing_whitespace_after_dehyphenation() {
+        assert_eq!(normalize_text("word-\n   continued   "), "wordcontinued");
+    }
+
+    #[test]
+    fn test_normalize_text_whitespace_only() {
+        assert_eq!(normalize_text("   \n\t  "), "");
     }
 }
