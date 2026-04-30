@@ -384,6 +384,7 @@ mod tests {
     }
 
     impl FakeHelper {
+        #[allow(clippy::new_ret_no_self)]
         fn new(
             name: HelperName,
             score: u8,
