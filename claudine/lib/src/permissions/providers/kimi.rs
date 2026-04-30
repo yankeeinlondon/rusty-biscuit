@@ -1,7 +1,7 @@
-use std::fs;
+use async_trait::async_trait;
+use tokio::fs;
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, PathProtectionRule,
@@ -13,6 +13,7 @@ use crate::permissions::mutation::PolicyMutationPlan;
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone, Default)]
 struct KimiConfig {
@@ -33,6 +34,7 @@ struct KimiState {
 #[derive(Debug, Default)]
 pub(crate) struct KimiPolicyBackend;
 
+#[async_trait]
 impl ProviderPolicyBackend for KimiPolicyBackend {
     fn provider(&self) -> Provider {
         Provider::KimiCode
@@ -51,7 +53,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
         }
     }
 
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
         let mut sources = Vec::new();
         if let Some(home) = &ctx.home_dir {
             for (id, rel, precedence, kind) in [
@@ -69,7 +71,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
                 ),
             ] {
                 let path = home.join(rel);
-                if path.exists() {
+                if fs::try_exists(&path).await.unwrap_or(false) {
                     sources.push(PolicySource {
                         id: id.to_owned(),
                         kind,
@@ -84,7 +86,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
         Ok(sources)
     }
 
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         _ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -97,7 +99,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
                     source.id
                 ))
             })?;
-            let content = fs::read_to_string(path)?;
+            let content = fs::read_to_string(path).await?;
             let config = if path.extension().and_then(|value| value.to_str()) == Some("toml") {
                 let value: toml::Value =
                     toml::from_str(&content).map_err(|error| ClaudineError::PolicyNativeParse {
@@ -205,7 +207,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
         ))
     }
 
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         _ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
@@ -267,7 +269,7 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
         Ok(policy)
     }
 
-    fn plan_change(
+    async fn plan_change(
         &self,
         _ctx: &PolicyContext,
         _current: &NativeEffectivePolicy,
@@ -284,23 +286,24 @@ impl ProviderPolicyBackend for KimiPolicyBackend {
 mod tests {
     use super::*;
 
-    #[test]
-    fn kimi_backend_returns_partial_snapshot_with_runtime_mode() {
+    #[tokio::test]
+    async fn kimi_backend_returns_partial_snapshot_with_runtime_mode() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
-        fs::create_dir_all(home.join(".kimi")).unwrap();
-        fs::write(
+        tokio::fs::create_dir_all(home.join(".kimi")).await.unwrap();
+        tokio::fs::write(
             home.join(".kimi/config.toml"),
             "permission_mode = \"prompted\"\n",
         )
+        .await
         .unwrap();
 
         let ctx = PolicyContext::new(dir.path().join("repo")).with_home_dir(home);
         let backend = KimiPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
 
         assert_eq!(
             canonical.axes.runtime.approval_mode,

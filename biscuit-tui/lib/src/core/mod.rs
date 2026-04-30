@@ -23,18 +23,20 @@ pub mod keybindings;
 pub mod label;
 pub mod sort;
 pub mod standalone;
+pub mod terminal_style;
 pub mod theme;
 pub mod validation;
 
 pub use event::EventOutcome;
-pub use frame::{BorderStyle, FrameChrome, FrameChromeConfig, HeightSpec, Margin};
+pub use frame::{BorderStyle, FrameChrome, FrameChromeConfig, HeightSpec, Margin, Padding};
 pub use fuzzy::FuzzyFilter;
 pub use keybindings::KeyBindings;
 pub use label::{Label, LabelPosition, render_with_label};
-pub use sort::SortOrder;
+pub use sort::{OptionSort, SortOrder};
 pub use standalone::{
     ABORTED_KIND, CANCELLED_KIND, HandleEvent, LoopExit, StandaloneState, drive_event_loop,
     drive_event_loop_with_chrome, run_standalone, run_standalone_with_chrome,
 };
+pub use terminal_style::{NerdFontStatus, TerminalBackground, TerminalStyle, resolve_active_style};
 pub use theme::ComponentTheme;
 pub use validation::ValidationState;

@@ -30,7 +30,7 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,7 +38,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta};
+
+use claudine::provider::Provider;
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::LiveMetrics;
 use claudine::stream::protocol::kimi::{
@@ -329,6 +331,17 @@ impl WireWriter {
         guard.flush()?;
         Ok(serialized)
     }
+
+    /// Close the underlying child stdin pipe by replacing the inner writer
+    /// with `io::sink()`. This drops the original `ChildStdin`, signalling
+    /// EOF to the Kimi child so it exits its read loop cleanly after the
+    /// prompt response has been received. Subsequent `send_value` calls
+    /// succeed silently (the bytes go to the sink), so any late cancel
+    /// path remains a no-op rather than a panic.
+    pub(crate) fn close_stdin(&self) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Box::new(io::sink());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -538,7 +551,10 @@ impl std::fmt::Display for WireInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingProtocolVersion => {
-                write!(f, "kimi initialize response did not include protocol_version")
+                write!(
+                    f,
+                    "kimi initialize response did not include protocol_version"
+                )
             }
             Self::UnsupportedProtocolVersion {
                 negotiated,
@@ -658,6 +674,8 @@ pub(crate) fn run_kimi_wire_session(
     let runtime_context_for_reader = wiring.runtime_context.clone();
     let stream_span = Span::current();
     let stream_output = wiring.stream_output.clone();
+    let prompt_finished = Arc::new(AtomicBool::new(false));
+    let prompt_finished_for_reader = Arc::clone(&prompt_finished);
     let stdout_handle: thread::JoinHandle<Box<dyn SemanticStreamParser>> = {
         let build_parser = wiring.build_parser;
         thread::spawn(move || {
@@ -708,6 +726,17 @@ pub(crate) fn run_kimi_wire_session(
                 {
                     debug!(?error, "failed to feed synthetic warning envelope");
                 }
+
+                // Signal the wait loop the moment the prompt response
+                // arrives. `close_stdin` is the graceful path (Kimi exits
+                // on EOF), and `prompt_finished` is the hard fallback so
+                // the wait loop forces exit if Kimi keeps the channel
+                // open after responding.
+                if is_prompt_response_line(trimmed) {
+                    info!("kimi prompt response received; closing wire stdin");
+                    writer_for_reader.close_stdin();
+                    prompt_finished_for_reader.store(true, Ordering::SeqCst);
+                }
             }
 
             parser
@@ -749,6 +778,7 @@ pub(crate) fn run_kimi_wire_session(
         &mut child,
         config.timeout.map(Duration::from_secs),
         &cancel_requested,
+        &prompt_finished,
         &writer,
     ) {
         Ok(code) => code,
@@ -860,6 +890,27 @@ fn handle_request_dispatch(
     synthetic
 }
 
+/// Return true when `line` is the JSON-RPC response (success or error) to
+/// the `prompt-2` request Claudine sent at session start.
+///
+/// The Kimi wire protocol is a persistent JSON-RPC channel: after the
+/// prompt response arrives, kimi sits idle waiting for further commands
+/// rather than exiting. For non-interactive Claudine sessions there are no
+/// further commands, so the reader thread closes stdin (signalling EOF)
+/// the moment this line is observed. Both `result` and `error` shapes are
+/// treated as terminal — an auth-expired error on `prompt-2`, for example,
+/// still ends the session.
+fn is_prompt_response_line(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    let id_matches = value.get("id").and_then(Value::as_str) == Some(PROMPT_REQUEST_ID);
+    if !id_matches {
+        return false;
+    }
+    value.get("result").is_some() || value.get("error").is_some()
+}
+
 /// Construct a synthetic `Notification` envelope with `level == "error"`
 /// so the Kimi semantic parser surfaces it as a
 /// [`SemanticEvent::Warning`] on the live stderr surface and JSONL log.
@@ -906,18 +957,30 @@ fn install_sigint_forwarder(_flag: Arc<AtomicBool>) -> Option<()> {
     None
 }
 
+/// Grace period after the `prompt-2` response arrives before SIGKILL.
+///
+/// Kimi's wire session is persistent — it does not exit on its own when a
+/// prompt completes. Stdin is already closed (EOF) at this point so a
+/// well-behaved Kimi build will quit promptly; the grace period covers
+/// any final stderr flush or async cleanup. After the grace period
+/// elapses, the child is killed unconditionally.
+const PROMPT_FINISHED_GRACE: Duration = Duration::from_millis(750);
+
 /// Poll the child for exit, sending `cancel` when the cancel flag is set
-/// or the wall-clock timeout elapses. After cancel is sent the child has
-/// up to 5 s to terminate before SIGKILL is used as a hard fallback.
+/// or the wall-clock timeout elapses, and forcibly terminating the child
+/// shortly after the prompt response arrives so the non-interactive
+/// wrapper does not hang on Kimi's persistent JSON-RPC session.
 fn wait_for_child_exit(
     child: &mut Child,
     timeout: Option<Duration>,
     cancel_flag: &Arc<AtomicBool>,
+    prompt_finished: &Arc<AtomicBool>,
     writer: &WireWriter,
 ) -> std::io::Result<i32> {
     let deadline = timeout.map(|d| Instant::now() + d);
     let mut cancel_sent = false;
     let mut cancel_sent_at: Option<Instant> = None;
+    let mut prompt_finished_at: Option<Instant> = None;
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -926,6 +989,27 @@ fn wait_for_child_exit(
 
         let timeout_elapsed = deadline.is_some_and(|d| Instant::now() >= d);
         let user_canceled = cancel_flag.load(Ordering::SeqCst);
+        let prompt_done = prompt_finished.load(Ordering::SeqCst);
+
+        if prompt_done && prompt_finished_at.is_none() {
+            prompt_finished_at = Some(Instant::now());
+        }
+
+        // Hard-stop fallback: Kimi's wire mode does not terminate when a
+        // prompt completes — stdin EOF is the expected signal but some
+        // builds keep async tasks alive. Once the grace period elapses,
+        // kill the child directly. Report exit code 0 because the prompt
+        // already completed; the semantic parser surfaces real errors
+        // (auth-expired, cancelled, etc.) from the response payload, not
+        // from the synthetic SIGKILL exit code.
+        if let Some(at) = prompt_finished_at
+            && Instant::now() >= at + PROMPT_FINISHED_GRACE
+        {
+            info!("kimi prompt finished; terminating child after grace period");
+            let _ = child.kill();
+            let _ = child.wait()?;
+            return Ok(0);
+        }
 
         if !cancel_sent && (timeout_elapsed || user_canceled) {
             let _cancel_span = info_span!("kimi_wire_cancel").entered();
@@ -1116,8 +1200,14 @@ mod tests {
         let text = String::from_utf8(captured).unwrap();
         let lines: Vec<&str> = text.split_terminator('\n').collect();
         assert_eq!(lines.len(), 2);
-        assert_eq!(serde_json::from_str::<Value>(lines[0]).unwrap(), json!({"a": 1}));
-        assert_eq!(serde_json::from_str::<Value>(lines[1]).unwrap(), json!({"b": 2}));
+        assert_eq!(
+            serde_json::from_str::<Value>(lines[0]).unwrap(),
+            json!({"a": 1})
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(lines[1]).unwrap(),
+            json!({"b": 2})
+        );
     }
 
     #[test]
@@ -1168,10 +1258,22 @@ mod tests {
 
     #[test]
     fn map_kimi_hook_event_covers_canonical_aliases() {
-        assert_eq!(map_kimi_hook_event("PreToolUse"), Some(AgenticEvent::BeforeTool));
-        assert_eq!(map_kimi_hook_event("PostToolUse"), Some(AgenticEvent::AfterTool));
-        assert_eq!(map_kimi_hook_event("Stop"), Some(AgenticEvent::TurnComplete));
-        assert_eq!(map_kimi_hook_event("UserPromptSubmit"), Some(AgenticEvent::BeforePrompt));
+        assert_eq!(
+            map_kimi_hook_event("PreToolUse"),
+            Some(AgenticEvent::BeforeTool)
+        );
+        assert_eq!(
+            map_kimi_hook_event("PostToolUse"),
+            Some(AgenticEvent::AfterTool)
+        );
+        assert_eq!(
+            map_kimi_hook_event("Stop"),
+            Some(AgenticEvent::TurnComplete)
+        );
+        assert_eq!(
+            map_kimi_hook_event("UserPromptSubmit"),
+            Some(AgenticEvent::BeforePrompt)
+        );
         assert!(map_kimi_hook_event("UnknownEvent").is_none());
     }
 
@@ -1363,7 +1465,10 @@ mod tests {
         });
         let trimmed = serde_json::to_string(&line).unwrap();
         let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
-        assert!(synthetic.is_none(), "notifications produce no synthetic envelopes");
+        assert!(
+            synthetic.is_none(),
+            "notifications produce no synthetic envelopes"
+        );
         assert!(buf.lock().unwrap().is_empty());
     }
 
@@ -1390,12 +1495,18 @@ mod tests {
         });
         let trimmed = serde_json::to_string(&line).unwrap();
         let synthetic = handle_request_dispatch(&trimmed, &writer, None, &runtime_context);
-        assert!(synthetic.is_none(), "tool call rejections are not diagnostics");
+        assert!(
+            synthetic.is_none(),
+            "tool call rejections are not diagnostics"
+        );
         let captured = buf.lock().unwrap().clone();
         let text = String::from_utf8(captured).unwrap();
         let response: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(response["id"], "req-tool");
-        assert_eq!(response["error"]["code"], KimiJsonRpcError::METHOD_NOT_FOUND);
+        assert_eq!(
+            response["error"]["code"],
+            KimiJsonRpcError::METHOD_NOT_FOUND
+        );
     }
 
     #[test]
@@ -1430,5 +1541,71 @@ mod tests {
         let result = HookDispatchResult::allow_default();
         assert!(matches!(result.outcome, HookOutcome::Allow { .. }));
         assert!(result.warning.is_none());
+    }
+
+    #[test]
+    fn is_prompt_response_line_matches_finished_status() {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","id":"{PROMPT_REQUEST_ID}","result":{{"status":"finished"}}}}"#
+        );
+        assert!(is_prompt_response_line(&line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_matches_error_response() {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","id":"{PROMPT_REQUEST_ID}","error":{{"code":-32004,"message":"auth"}}}}"#
+        );
+        assert!(is_prompt_response_line(&line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_rejects_other_ids() {
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","id":"{INITIALIZE_REQUEST_ID}","result":{{"protocol_version":"1.9"}}}}"#
+        );
+        assert!(!is_prompt_response_line(&line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_rejects_event_envelopes() {
+        let line = r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#;
+        assert!(!is_prompt_response_line(line));
+    }
+
+    #[test]
+    fn is_prompt_response_line_rejects_garbage() {
+        assert!(!is_prompt_response_line("not json"));
+    }
+
+    #[test]
+    fn close_stdin_drops_underlying_writer_and_redirects_to_sink() {
+        struct DropTracker(Arc<AtomicBool>);
+        impl Write for DropTracker {
+            fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+                Ok(data.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl Drop for DropTracker {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let writer = WireWriter::from_writer(Box::new(DropTracker(Arc::clone(&dropped))));
+        assert!(!dropped.load(Ordering::Relaxed));
+        writer.close_stdin();
+        assert!(
+            dropped.load(Ordering::Relaxed),
+            "close_stdin must drop the original ChildStdin so kimi sees EOF"
+        );
+        // Subsequent send_value calls succeed silently against the sink.
+        writer
+            .send_value(&json!({"after_close": true}))
+            .expect("send_value after close_stdin should succeed against sink");
     }
 }

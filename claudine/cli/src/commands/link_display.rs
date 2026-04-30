@@ -135,7 +135,7 @@ where
 }
 
 pub(crate) fn build_provider_header(provider_name: &str, resource: LinkableResource) -> String {
-    let Some(provider) = claudine::events::Provider::fuzzy_match_cli_name(provider_name) else {
+    let Some(provider) = claudine::provider::Provider::fuzzy_match_cli_name(provider_name) else {
         return format!("<b>{provider_name}</b>");
     };
 

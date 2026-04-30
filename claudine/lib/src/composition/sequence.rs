@@ -394,8 +394,8 @@ mod tests {
         let md = Markdown::with_frontmatter(fm, content);
         fs::write(&file, md.as_string()).unwrap();
 
-        let markdown = Markdown::try_from(file.as_path()).unwrap();
         let original_text = fs::read_to_string(&file).unwrap();
+        let markdown: Markdown = original_text.clone().into();
         ResolvedCompositionSource {
             original_ref: file.to_str().unwrap().to_string(),
             resolved_path: file,
@@ -733,8 +733,8 @@ template:
         let md_text = "---\nsequence: steps.yaml\n---\nBody\n";
         fs::write(&file, md_text).unwrap();
 
-        let markdown = darkmatter::markdown::Markdown::try_from(file.as_path()).unwrap();
         let original_text = fs::read_to_string(&file).unwrap();
+        let markdown: Markdown = original_text.clone().into();
         let source = ResolvedCompositionSource {
             original_ref: file.to_str().unwrap().to_string(),
             resolved_path: file,
@@ -763,8 +763,8 @@ template:
         );
         fs::write(&file, &md_text).unwrap();
 
-        let markdown = darkmatter::markdown::Markdown::try_from(file.as_path()).unwrap();
         let original_text = fs::read_to_string(&file).unwrap();
+        let markdown: Markdown = original_text.clone().into();
         let source = ResolvedCompositionSource {
             original_ref: file.to_str().unwrap().to_string(),
             resolved_path: file,

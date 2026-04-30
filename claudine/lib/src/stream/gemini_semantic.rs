@@ -26,8 +26,7 @@ use super::protocol::gemini::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 pub struct GeminiSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
     line_num: usize,
@@ -97,7 +96,7 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
         });
     }
 
-    fn handle_message(&mut self, msg: GeminiMessage, raw_kind: &str, _raw: Value) {
+    fn handle_message(&mut self, msg: GeminiMessage, raw_kind: &str) {
         if msg.role.as_deref() != Some("assistant") {
             // Gemini replays the operator's own prompt (role=user) and
             // occasional system messages back into the stream. These are
@@ -346,58 +345,74 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
         if line.is_empty() {
             return Ok(());
         }
-        let raw: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                super::trace_malformed_line(Provider::Gemini, self.line_num, &e.to_string());
-                self.emit_malformed_warning(&e.to_string());
-                return Ok(());
-            }
-        };
 
-        let raw_kind = raw
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        super::trace_parser_event(Provider::Gemini, &raw_kind, self.line_num);
+        // Try typed deserialization first to avoid `serde_json::Value` DOM
+        // allocation on the hot path. Fall back to `Value` only for unknown
+        // event types that must be preserved as `ProviderExtension`, or for
+        // `result` events that need the raw payload for `raw_summary`.
+        match serde_json::from_str::<GeminiEvent>(line) {
+            Ok(event) => {
+                let raw_kind = event.type_str().to_string();
+                super::trace_parser_event(Provider::Gemini, &raw_kind, self.line_num);
 
-        let parsed = serde_json::from_value::<GeminiEvent>(raw.clone());
-        // Any event other than a streaming assistant `message` is a logical
-        // break in the text stream: flush the delta buffer so buffered prose
-        // is rendered before the next semantic event (SessionStart,
-        // TurnComplete, ToolCall, etc.). Non-delta messages handle their own
-        // flush inside `handle_message`.
-        let is_streaming_message = matches!(
-            &parsed,
-            Ok(GeminiEvent::Message(m))
-                if m.role.as_deref() == Some("assistant") && m.delta.unwrap_or(false)
-        );
-        if !is_streaming_message {
-            self.flush_pending_text(&raw_kind);
-        }
+                // Any event other than a streaming assistant `message` is a
+                // logical break in the text stream: flush the delta buffer so
+                // buffered prose is rendered before the next semantic event.
+                let is_streaming_message = matches!(
+                    &event,
+                    GeminiEvent::Message(m)
+                        if m.role.as_deref() == Some("assistant") && m.delta.unwrap_or(false)
+                );
+                if !is_streaming_message {
+                    self.flush_pending_text(&raw_kind);
+                }
 
-        match parsed {
-            Ok(GeminiEvent::Init(init) | GeminiEvent::System(init)) => {
-                self.handle_init(init, &raw_kind);
-            }
-            Ok(GeminiEvent::Message(msg)) => {
-                self.handle_message(msg, &raw_kind, raw);
-            }
-            Ok(GeminiEvent::Error(err)) => {
-                self.handle_error(err, &raw_kind);
-            }
-            Ok(GeminiEvent::Result(result)) => {
-                self.handle_result(result, raw, &raw_kind);
-            }
-            Ok(GeminiEvent::ToolUse(tu)) => {
-                self.handle_tool_use(tu, &raw_kind);
-            }
-            Ok(GeminiEvent::ToolResult(tr)) => {
-                self.handle_tool_result(tr, &raw_kind);
+                match event {
+                    GeminiEvent::Init(init) | GeminiEvent::System(init) => {
+                        self.handle_init(init, &raw_kind);
+                    }
+                    GeminiEvent::Message(msg) => {
+                        self.handle_message(msg, &raw_kind);
+                    }
+                    GeminiEvent::Error(err) => {
+                        self.handle_error(err, &raw_kind);
+                    }
+                    GeminiEvent::Result(result) => {
+                        // Reconstruct the raw payload from the typed struct
+                        // without a second parse.
+                        let raw = serde_json::to_value(&result)
+                            .expect("GeminiResult serializes");
+                        self.handle_result(result, raw, &raw_kind);
+                    }
+                    GeminiEvent::ToolUse(tu) => {
+                        self.handle_tool_use(tu, &raw_kind);
+                    }
+                    GeminiEvent::ToolResult(tr) => {
+                        self.handle_tool_result(tr, &raw_kind);
+                    }
+                }
             }
             Err(_) => {
-                self.emit_provider_extension(&raw_kind, raw);
+                let raw: Map<String, Value> = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        super::trace_malformed_line(
+                            Provider::Gemini,
+                            self.line_num,
+                            &e.to_string(),
+                        );
+                        self.emit_malformed_warning(&e.to_string());
+                        return Ok(());
+                    }
+                };
+                let raw_kind = raw
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                super::trace_parser_event(Provider::Gemini, &raw_kind, self.line_num);
+                self.flush_pending_text(&raw_kind);
+                self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
         Ok(())

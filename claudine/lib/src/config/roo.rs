@@ -3,10 +3,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::error::Result;
-use crate::events::Provider;
-
 use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
+use crate::error::Result;
+use crate::provider::Provider;
 
 pub(crate) struct RooConfigurator;
 

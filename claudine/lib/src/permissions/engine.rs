@@ -2,9 +2,6 @@ use std::collections::HashMap;
 
 use tracing::info_span;
 
-use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
-
 use super::backend::{BackendCapabilities, ProviderPolicyBackend};
 use super::change::PolicyChange;
 use super::context::{CliPolicyInput, PolicyContext};
@@ -14,6 +11,8 @@ use super::providers::{
     KimiPolicyBackend, OpenCodePolicyBackend, QwenPolicyBackend, RooPolicyBackend,
 };
 use super::query::{ConfiguredPolicySnapshot, EffectivePolicySnapshot};
+use crate::error::{ClaudineError, Result};
+use crate::provider::Provider;
 
 /// Cross-provider permission policy engine.
 ///
@@ -28,7 +27,7 @@ use super::query::{ConfiguredPolicySnapshot, EffectivePolicySnapshot};
 /// engine.register(Box::new(my_claude_backend));
 ///
 /// let ctx = PolicyContext::new(std::env::current_dir()?);
-/// let snapshot = engine.configured(Provider::Claude, &ctx)?;
+/// let snapshot = engine.configured(Provider::Claude, &ctx).await?;
 ///
 /// let result = snapshot.can_read("/workspace/src/main.rs");
 /// assert!(result.is_allowed());
@@ -99,7 +98,7 @@ impl PolicyEngine {
     /// 3. Compose without CLI overrides
     /// 4. Canonicalize
     /// 5. Return snapshot
-    pub fn configured(
+    pub async fn configured(
         &self,
         provider: Provider,
         ctx: &PolicyContext,
@@ -107,10 +106,10 @@ impl PolicyEngine {
         let _span = info_span!("permissions_configured", %provider).entered();
         let backend = self.backend(provider)?;
 
-        let sources = backend.discover_sources(ctx)?;
-        let layers = backend.load_native_layers(ctx, &sources)?;
+        let sources = backend.discover_sources(ctx).await?;
+        let layers = backend.load_native_layers(ctx, &sources).await?;
         let native = backend.compose_native_policy(ctx, &layers, None)?;
-        let canonical = backend.canonicalize(ctx, &native)?;
+        let canonical = backend.canonicalize(ctx, &native).await?;
 
         Ok(ConfiguredPolicySnapshot::from_parts(
             provider, native, canonical, ctx,
@@ -127,7 +126,7 @@ impl PolicyEngine {
     /// 4. Compose with CLI overrides
     /// 5. Canonicalize
     /// 6. Return snapshot
-    pub fn effective(
+    pub async fn effective(
         &self,
         provider: Provider,
         ctx: &PolicyContext,
@@ -136,11 +135,11 @@ impl PolicyEngine {
         let _span = info_span!("permissions_effective", %provider).entered();
         let backend = self.backend(provider)?;
 
-        let sources = backend.discover_sources(ctx)?;
-        let layers = backend.load_native_layers(ctx, &sources)?;
+        let sources = backend.discover_sources(ctx).await?;
+        let layers = backend.load_native_layers(ctx, &sources).await?;
         let cli_overrides = backend.parse_cli_overrides(ctx, cli)?;
         let native = backend.compose_native_policy(ctx, &layers, Some(&cli_overrides))?;
-        let canonical = backend.canonicalize(ctx, &native)?;
+        let canonical = backend.canonicalize(ctx, &native).await?;
 
         Ok(EffectivePolicySnapshot::from_parts(
             provider,
@@ -184,30 +183,30 @@ pub struct ProviderPolicyHandle<'a> {
 
 impl ProviderPolicyHandle<'_> {
     /// Produces a configured policy snapshot.
-    pub fn configured(&self, ctx: &PolicyContext) -> Result<ConfiguredPolicySnapshot> {
-        self.engine.configured(self.provider, ctx)
+    pub async fn configured(&self, ctx: &PolicyContext) -> Result<ConfiguredPolicySnapshot> {
+        self.engine.configured(self.provider, ctx).await
     }
 
     /// Produces an effective policy snapshot.
-    pub fn effective(
+    pub async fn effective(
         &self,
         ctx: &PolicyContext,
         cli: CliPolicyInput<'_>,
     ) -> Result<EffectivePolicySnapshot> {
-        self.engine.effective(self.provider, ctx, cli)
+        self.engine.effective(self.provider, ctx, cli).await
     }
 
     /// Plans a policy change against the current native policy.
-    pub fn plan_change(
+    pub async fn plan_change(
         &self,
         ctx: &PolicyContext,
         change: &PolicyChange,
     ) -> Result<PolicyMutationPlan> {
         let backend = self.engine.backend(self.provider)?;
-        let sources = backend.discover_sources(ctx)?;
-        let layers = backend.load_native_layers(ctx, &sources)?;
+        let sources = backend.discover_sources(ctx).await?;
+        let layers = backend.load_native_layers(ctx, &sources).await?;
         let native = backend.compose_native_policy(ctx, &layers, None)?;
-        backend.plan_change(ctx, &native, change)
+        backend.plan_change(ctx, &native, change).await
     }
 
     /// Returns the provider this handle is scoped to.
@@ -223,6 +222,8 @@ impl ProviderPolicyHandle<'_> {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
+
     use super::*;
     use crate::permissions::backend::{BackendCapabilities, BackendFidelity};
     use crate::permissions::canonical::*;
@@ -283,6 +284,7 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl ProviderPolicyBackend for StubBackend {
         fn provider(&self) -> Provider {
             self.target_provider
@@ -292,7 +294,10 @@ mod tests {
             BackendCapabilities::full(BackendFidelity::Stub)
         }
 
-        fn discover_sources(&self, _ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+        async fn discover_sources(
+            &self,
+            _ctx: &PolicyContext,
+        ) -> Result<Vec<PolicySource>> {
             Ok(vec![PolicySource {
                 id: "user-config".to_owned(),
                 kind: PolicySourceKind::UserConfig,
@@ -302,7 +307,7 @@ mod tests {
             }])
         }
 
-        fn load_native_layers(
+        async fn load_native_layers(
             &self,
             _ctx: &PolicyContext,
             sources: &[PolicySource],
@@ -340,7 +345,7 @@ mod tests {
             ))
         }
 
-        fn canonicalize(
+        async fn canonicalize(
             &self,
             _ctx: &PolicyContext,
             _native: &NativeEffectivePolicy,
@@ -348,7 +353,7 @@ mod tests {
             Ok(self.policy.clone())
         }
 
-        fn plan_change(
+        async fn plan_change(
             &self,
             _ctx: &PolicyContext,
             _current: &NativeEffectivePolicy,
@@ -365,11 +370,11 @@ mod tests {
         PolicyContext::new(std::path::PathBuf::from("/workspace"))
     }
 
-    #[test]
-    fn engine_returns_error_for_missing_backend() {
+    #[tokio::test]
+    async fn engine_returns_error_for_missing_backend() {
         let engine = PolicyEngine::empty();
         let ctx = test_ctx();
-        let result = engine.configured(Provider::Claude, &ctx);
+        let result = engine.configured(Provider::Claude, &ctx).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -402,38 +407,39 @@ mod tests {
         assert_eq!(goose.fidelity, BackendFidelity::Partial);
     }
 
-    #[test]
-    fn engine_configured_snapshot_pipeline() {
+    #[tokio::test]
+    async fn engine_configured_snapshot_pipeline() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         assert_eq!(snapshot.provider, Provider::Claude);
         assert_eq!(snapshot.canonical.mode, PolicyMode::Configured);
     }
 
-    #[test]
-    fn engine_effective_snapshot_pipeline() {
+    #[tokio::test]
+    async fn engine_effective_snapshot_pipeline() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
         let snapshot = engine
             .effective(Provider::Claude, &ctx, CliPolicyInput::None)
+            .await
             .unwrap();
 
         assert_eq!(snapshot.provider, Provider::Claude);
     }
 
-    #[test]
-    fn snapshot_path_read_query() {
+    #[tokio::test]
+    async fn snapshot_path_read_query() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         let result = snapshot.can_read("/workspace/src/main.rs");
         assert!(result.is_allowed());
@@ -441,38 +447,38 @@ mod tests {
         assert_eq!(result.matched_rules.len(), 1);
     }
 
-    #[test]
-    fn snapshot_path_write_deny() {
+    #[tokio::test]
+    async fn snapshot_path_write_deny() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         let result = snapshot.can_write("/etc/hosts");
         assert!(result.is_denied());
     }
 
-    #[test]
-    fn snapshot_command_deny() {
+    #[tokio::test]
+    async fn snapshot_command_deny() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         let cmd = CommandQuery::from_raw("rm -rf /");
         let result = snapshot.can_execute(&cmd);
         assert!(result.is_denied());
     }
 
-    #[test]
-    fn snapshot_domain_query() {
+    #[tokio::test]
+    async fn snapshot_domain_query() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         let result = snapshot.can_access_domain("api.internal.corp");
         assert!(result.is_allowed());
@@ -481,13 +487,13 @@ mod tests {
         assert!(result.is_unknown());
     }
 
-    #[test]
-    fn snapshot_mcp_server_query() {
+    #[tokio::test]
+    async fn snapshot_mcp_server_query() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         let result = snapshot.can_use_mcp_server("filesystem");
         assert!(result.is_allowed());
@@ -496,57 +502,57 @@ mod tests {
         assert!(result.is_unknown());
     }
 
-    #[test]
-    fn snapshot_subagent_query() {
+    #[tokio::test]
+    async fn snapshot_subagent_query() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         // Wildcard rule matches any subagent with Ask effect
         let result = snapshot.can_spawn_subagent(Some("researcher"));
         assert!(result.is_ask());
     }
 
-    #[test]
-    fn snapshot_no_match_returns_unknown() {
+    #[tokio::test]
+    async fn snapshot_no_match_returns_unknown() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         let result = snapshot.can_read("/unknown/path");
         assert!(result.is_unknown());
     }
 
-    #[test]
-    fn provider_handle_convenience() {
+    #[tokio::test]
+    async fn provider_handle_convenience() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
         let handle = engine.provider(Provider::Claude);
 
-        let snapshot = handle.configured(&ctx).unwrap();
+        let snapshot = handle.configured(&ctx).await.unwrap();
         assert_eq!(snapshot.provider, Provider::Claude);
     }
 
-    #[test]
-    fn provider_handle_effective() {
+    #[tokio::test]
+    async fn provider_handle_effective() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
         let handle = engine.provider(Provider::Claude);
 
-        let snapshot = handle.effective(&ctx, CliPolicyInput::None).unwrap();
+        let snapshot = handle.effective(&ctx, CliPolicyInput::None).await.unwrap();
         assert_eq!(snapshot.provider, Provider::Claude);
     }
 
-    #[test]
-    fn mutation_plan_unsupported_for_stub() {
+    #[tokio::test]
+    async fn mutation_plan_unsupported_for_stub() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
@@ -556,7 +562,7 @@ mod tests {
         let change = PolicyChange::persistent(vec![PolicyChangeOp::GrantRead(
             std::path::PathBuf::from("/foo"),
         )]);
-        let plan = handle.plan_change(&ctx, &change).unwrap();
+        let plan = handle.plan_change(&ctx, &change).await.unwrap();
         assert!(!plan.supported);
         assert!(!plan.warnings.is_empty());
     }
@@ -583,14 +589,15 @@ mod tests {
         assert!(!engine.has_backend(Provider::Codex));
     }
 
-    #[test]
-    fn effective_snapshot_queries_work() {
+    #[tokio::test]
+    async fn effective_snapshot_queries_work() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Gemini)));
 
         let ctx = test_ctx();
         let snapshot = engine
             .effective(Provider::Gemini, &ctx, CliPolicyInput::None)
+            .await
             .unwrap();
 
         let result = snapshot.can_read("/workspace/file.txt");
@@ -600,13 +607,13 @@ mod tests {
         assert!(result.is_denied());
     }
 
-    #[test]
-    fn query_result_has_explanation() {
+    #[tokio::test]
+    async fn query_result_has_explanation() {
         let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
-        let snapshot = engine.configured(Provider::Claude, &ctx).unwrap();
+        let snapshot = engine.configured(Provider::Claude, &ctx).await.unwrap();
 
         let result = snapshot.can_read("/workspace/src/lib.rs");
         assert!(!result.explanation.summary.is_empty());

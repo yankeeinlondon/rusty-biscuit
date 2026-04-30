@@ -2,8 +2,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use crate::model_catalog::ModelCatalogService;
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 
 use super::error::CompositionError;
 use super::types::{
@@ -359,16 +359,7 @@ where
 /// Return the provider-specific environment variable names to check
 /// for model selection, in priority order.
 fn provider_env_vars(provider: Provider) -> &'static [&'static str] {
-    match provider {
-        Provider::Claude => &["CLAUDE_MODEL", "ANTHROPIC_MODEL"],
-        Provider::Codex => &["CODEX_MODEL", "OPENAI_MODEL"],
-        Provider::Gemini => &["GEMINI_MODEL"],
-        Provider::Goose => &["GOOSE_MODEL"],
-        Provider::KimiCode => &["KIMI_MODEL"],
-        Provider::OpenCode => &["OPENCODE_MODEL"],
-        Provider::QwenCode => &["QWEN_MODEL"],
-        Provider::RooCode => &["ROO_MODEL"],
-    }
+    provider_info(provider).model_env_vars
 }
 
 /// Resolve an agent hint in non-TTY mode.

@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::PathBuf;
 
+use async_trait::async_trait;
 use serde_json::{Value, json};
+use tokio::fs;
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
@@ -23,6 +23,7 @@ use crate::permissions::mutation::{
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone, Default)]
 struct QwenMcpServer {
@@ -61,6 +62,7 @@ struct QwenState {
 #[derive(Debug, Default)]
 pub(crate) struct QwenPolicyBackend;
 
+#[async_trait]
 impl ProviderPolicyBackend for QwenPolicyBackend {
     fn provider(&self) -> Provider {
         Provider::QwenCode
@@ -79,12 +81,12 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
         }
     }
 
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
         let mut sources = Vec::new();
 
         if let Some(system_root) = &ctx.system_root {
             let settings = system_root.join("etc/qwen-code/settings.json");
-            if settings.exists() {
+            if fs::try_exists(&settings).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "qwen-system".to_owned(),
                     kind: PolicySourceKind::SystemConfig,
@@ -99,7 +101,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
             && let Some(repo_root) = &ctx.repo_root
         {
             let settings = repo_root.join(".qwen/settings.json");
-            if settings.exists() {
+            if fs::try_exists(&settings).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "qwen-project".to_owned(),
                     kind: PolicySourceKind::RepoConfig,
@@ -112,7 +114,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
 
         if let Some(home) = &ctx.home_dir {
             let settings = home.join(".qwen/settings.json");
-            if settings.exists() {
+            if fs::try_exists(&settings).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "qwen-user".to_owned(),
                     kind: PolicySourceKind::UserConfig,
@@ -127,7 +129,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
         Ok(sources)
     }
 
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         _ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -140,7 +142,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
                     source.id
                 ))
             })?;
-            let content = fs::read_to_string(path)?;
+            let content = fs::read_to_string(path).await?;
             let value: Value = serde_json::from_str(&content).map_err(|error| {
                 ClaudineError::PolicyNativeParse {
                     source_id: source.id.clone(),
@@ -272,7 +274,7 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
         ))
     }
 
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
@@ -512,14 +514,14 @@ impl ProviderPolicyBackend for QwenPolicyBackend {
         Ok(policy)
     }
 
-    fn plan_change(
+    async fn plan_change(
         &self,
         ctx: &PolicyContext,
         current: &NativeEffectivePolicy,
         change: &PolicyChange,
     ) -> Result<PolicyMutationPlan> {
         let (source_id, path) = choose_target(ctx, current, change.target)?;
-        let before_text = fs::read_to_string(&path).ok();
+        let before_text = fs::read_to_string(&path).await.ok();
         let mut root = before_text
             .as_deref()
             .and_then(|text| serde_json::from_str::<Value>(text).ok())
@@ -1110,8 +1112,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         let repo = dir.path().join("repo");
-        fs::create_dir_all(home.join(".qwen")).unwrap();
-        fs::create_dir_all(repo.join(".qwen")).unwrap();
+        std::fs::create_dir_all(home.join(".qwen")).unwrap();
+        std::fs::create_dir_all(repo.join(".qwen")).unwrap();
         (
             dir,
             PolicyContext::new(repo.clone())
@@ -1124,11 +1126,11 @@ mod tests {
         )
     }
 
-    #[test]
-    fn qwen_backend_answers_workspace_command_and_mcp_queries() {
+    #[tokio::test]
+    async fn qwen_backend_answers_workspace_command_and_mcp_queries() {
         let (_dir, ctx) = setup_ctx();
         let path = ctx.repo_root.as_ref().unwrap().join(".qwen/settings.json");
-        fs::write(
+        tokio::fs::write(
             &path,
             serde_json::to_string_pretty(&json!({
                 "permissions": {
@@ -1149,13 +1151,14 @@ mod tests {
             }))
             .unwrap(),
         )
+        .await
         .unwrap();
 
         let backend = QwenPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::QwenCode, native, canonical, &ctx);
 
@@ -1181,8 +1184,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn qwen_cli_allowed_mcp_servers_deny_unlisted_servers() {
+    #[tokio::test]
+    async fn qwen_cli_allowed_mcp_servers_deny_unlisted_servers() {
         let (_dir, ctx) = setup_ctx();
         let backend = QwenPolicyBackend;
         let cli = vec![
@@ -1200,7 +1203,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::QwenCode, native, canonical, &ctx);
 
@@ -1214,8 +1217,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn qwen_mcp_round_trip_mutation_changes_query_result() {
+    #[tokio::test]
+    async fn qwen_mcp_round_trip_mutation_changes_query_result() {
         let (_dir, ctx) = setup_ctx();
         let backend = QwenPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1234,15 +1237,15 @@ mod tests {
             },
         ]);
 
-        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
-        fs::create_dir_all(edit.path.parent().unwrap()).unwrap();
-        fs::write(&edit.path, edit.after_preview.as_bytes()).unwrap();
+        tokio::fs::create_dir_all(edit.path.parent().unwrap()).await.unwrap();
+        tokio::fs::write(&edit.path, edit.after_preview.as_bytes()).await.unwrap();
 
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::QwenCode, native, canonical, &ctx);
 
@@ -1260,8 +1263,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn qwen_local_override_target_returns_error() {
+    #[tokio::test]
+    async fn qwen_local_override_target_returns_error() {
         let (_dir, ctx) = setup_ctx();
         let backend = QwenPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1278,7 +1281,7 @@ mod tests {
             persistence: crate::permissions::PolicyPersistence::Persistent,
         };
 
-        let result = backend.plan_change(&ctx, &current, &change);
+        let result = backend.plan_change(&ctx, &current, &change).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("LocalOverride"));

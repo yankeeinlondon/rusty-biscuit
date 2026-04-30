@@ -28,10 +28,13 @@ The [`core`](src/core) module provides cross-cutting primitives shared by every 
 - **`run_standalone`** — drives a single component in a dedicated terminal (fullscreen or inline)
 - **`KeyBindings`** — fully configurable key bindings with vim-compatible defaults (`h`/`j`/`k`/`l`)
 - **`ComponentTheme`** — centralized visual constants (glyphs, colors, styles)
-- **`FrameChrome`** / **`FrameChromeConfig`** — optional borders, margins, and height specs
+- **`FrameChrome`** / **`FrameChromeConfig`** — optional borders, margins, padding, and height specs
 - **`FuzzyFilter`** — fast fuzzy search over option labels via `nucleo-matcher`
 - **`ValidationState`** — uniform read access to submit-time validation errors
 - **`Label`** / **`LabelPosition`** / **`render_with_label`** — shared label placement
+- **`Padding`** — four-sided interior padding inside the border
+- **`TerminalStyle`** / **`TerminalBackground`** / **`NerdFontStatus`** — conservative terminal capability detection
+- **`ActiveChoiceColor`** / **`resolve_active_style`** — choice-list active-row styling driven by spec-aligned palettes (Grey/Green/Yellow/Red) tuned per-background, returned as a `ratatui::style::Style` with bold + contrast-correct foreground
 
 The [`prelude`](src/prelude.rs) module re-exports the most commonly used types for convenient glob imports.
 
@@ -93,11 +96,15 @@ The third parameter to `run_standalone` is `height: Option<HeightSpec>`:
 All components support configurable key bindings. The defaults are:
 
 - **Submit**: `Enter` (single components), `Ctrl-S` (InputTable)
-- **Cancel**: `Esc`
+- **Cancel / Reset**: `Esc` — behaviour varies by component:
+  - `ChooseOne`: restores the initial selection and submits (exit `0`)
+  - `ChooseMany`, `TextInput`, etc.: cancels the interaction (exit `1`)
+- **Ctrl-C**: always cancels with exit `130`
 - **Navigation**: arrow keys + vim keys (`h`/`j`/`k`/`l`)
-- **Toggle**: `Space` (BooleanSwitch, ChooseOne, ChooseMany)
+- **Toggle / Select**: `Space` (BooleanSwitch, ChooseOne, ChooseMany)
+- **Select all / Clear**: `Ctrl+A` / `Ctrl+D` (ChooseMany)
 
-Customize via `state.with_key_bindings(KeyBindings::default())` (introduced in Phase 2).
+Customize via `state.with_key_bindings(KeyBindings::default())`.
 
 ## Typed Values
 

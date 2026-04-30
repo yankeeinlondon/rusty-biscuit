@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::{AgenticEvent, EventMeta, Provider};
+use super::{AgenticEvent, EventMeta};
 use crate::actions::HookAction;
+use crate::provider::Provider;
 
 /// A resolved hook binding ready for execution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

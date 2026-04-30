@@ -36,8 +36,7 @@ use super::protocol::codex::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Native stream parser for Codex CLI emitting [`SemanticEvent`]s.
 pub struct CodexSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
@@ -132,7 +131,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         });
     }
 
-    fn handle_turn_completed(&mut self, tc: CodexTurnCompleted, raw: Value, raw_kind: &str) {
+    fn handle_turn_completed(&mut self, tc: CodexTurnCompleted, raw_kind: &str) {
         let provider_status = tc.provider_status().map(String::from);
 
         let step_usage = tc.usage.as_ref().map(|usage| {
@@ -160,6 +159,8 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         self.duration_ms = tc.duration_ms;
         self.cost_usd = tc.cost_usd;
         self.provider_status = provider_status.clone();
+        // Reconstruct the raw payload from the typed struct without a second parse.
+        let raw = serde_json::to_value(&tc).expect("CodexTurnCompleted serializes");
         self.raw_summary = Some(raw);
         super::trace_summary_update(
             Provider::Codex,
@@ -355,7 +356,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
     }
 
-    fn handle_item_started(&mut self, env: CodexItemEnvelope, raw_kind: &str, raw: Value) {
+    fn handle_item_started(&mut self, env: CodexItemEnvelope, raw_kind: &str) {
         let Some(item) = env.item else {
             return;
         };
@@ -381,8 +382,8 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
                 return;
             }
             CodexItem::AgentMessage(_) | CodexItem::Unknown => {
-                // Agent message arrives on completion; Unknown items fall through
-                // to ProviderExtension below.
+                // Agent message arrives on completion; Unknown items are handled
+                // by the caller when needed.
             }
             _ => {}
         }
@@ -404,15 +405,10 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
                 self.tool_items.insert(id, owned_fields);
             }
             self.sink.on_semantic_event(event);
-            return;
-        }
-
-        if matches!(item, CodexItem::Unknown) {
-            self.emit_provider_extension("item.started", raw);
         }
     }
 
-    fn handle_item_completed(&mut self, env: CodexItemEnvelope, raw_kind: &str, raw: Value) {
+    fn handle_item_completed(&mut self, env: CodexItemEnvelope, raw_kind: &str) {
         let Some(item) = env.item else {
             return;
         };
@@ -438,7 +434,8 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
             | CodexItem::ApprovalRequest(_)
             | CodexItem::UserInputRequest(_)
             | CodexItem::Unknown => {
-                // Permission items only fire on started; Unknown falls through.
+                // Permission items only fire on started; Unknown is handled by
+                // the caller when needed.
             }
             _ => {}
         }
@@ -458,15 +455,10 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
                 .expect("is_tool_item implies tool fields");
             let event = self.tool_result_from_fields(fields, raw_kind);
             self.sink.on_semantic_event(event);
-            return;
-        }
-
-        if matches!(item, CodexItem::Unknown) {
-            self.emit_provider_extension("item.completed", raw);
         }
     }
 
-    fn handle_item_updated(&mut self, env: CodexItemEnvelope, raw_kind: &str, _raw: Value) {
+    fn handle_item_updated(&mut self, env: CodexItemEnvelope, raw_kind: &str) {
         // `item.updated` carries partial-progress snapshots for long-running
         // items. Route by inner item type:
         //
@@ -536,57 +528,67 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
             return Ok(());
         }
 
-        let raw: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                super::trace_malformed_line(Provider::Codex, self.line_num, &e.to_string());
-                self.emit_malformed_warning(&e.to_string());
-                return Ok(());
-            }
-        };
-
-        let raw_kind = raw
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        super::trace_parser_event(Provider::Codex, &raw_kind, self.line_num);
-
-        match serde_json::from_value::<CodexEvent>(raw.clone()) {
-            Ok(CodexEvent::ThreadCreated(meta) | CodexEvent::ThreadStarted(meta)) => {
-                self.handle_thread_started(meta, &raw_kind);
-            }
-            Ok(CodexEvent::TurnStarted(_)) => {
-                self.handle_turn_started(&raw_kind);
-            }
-            Ok(CodexEvent::TurnCompleted(tc)) => {
-                self.handle_turn_completed(tc, raw, &raw_kind);
-            }
-            Ok(
-                CodexEvent::Error(err)
-                | CodexEvent::TurnError(err)
-                | CodexEvent::TurnFailed(err)
-                | CodexEvent::StreamError(err),
-            ) => {
-                self.handle_error(err, &raw_kind);
-            }
-            Ok(CodexEvent::ItemStarted(env)) => {
-                self.handle_item_started(env, &raw_kind, raw);
-            }
-            Ok(CodexEvent::ItemCompleted(env)) => {
-                self.handle_item_completed(env, &raw_kind, raw);
-            }
-            Ok(CodexEvent::ItemUpdated(env)) => {
-                self.handle_item_updated(env, &raw_kind, raw);
-            }
-            Ok(CodexEvent::ItemToolUse(fields) | CodexEvent::ToolUse(fields)) => {
-                self.emit_top_level_tool_use(fields, &raw_kind);
-            }
-            Ok(CodexEvent::ItemToolResult(fields) | CodexEvent::ToolResult(fields)) => {
-                self.emit_top_level_tool_result(fields, &raw_kind);
+        // Try typed deserialization first to avoid `serde_json::Value` DOM
+        // allocation on the hot path. Fall back to `Value` only for unknown
+        // event types that must be preserved as `ProviderExtension`, or for
+        // `turn.completed` which needs the raw payload for `raw_summary`.
+        match serde_json::from_str::<CodexEvent>(line) {
+            Ok(event) => {
+                let raw_kind = event.type_str().to_string();
+                super::trace_parser_event(Provider::Codex, &raw_kind, self.line_num);
+                match event {
+                    CodexEvent::ThreadCreated(meta) | CodexEvent::ThreadStarted(meta) => {
+                        self.handle_thread_started(meta, &raw_kind);
+                    }
+                    CodexEvent::TurnStarted(_) => {
+                        self.handle_turn_started(&raw_kind);
+                    }
+                    CodexEvent::TurnCompleted(tc) => {
+                        self.handle_turn_completed(tc, &raw_kind);
+                    }
+                    CodexEvent::Error(err)
+                    | CodexEvent::TurnError(err)
+                    | CodexEvent::TurnFailed(err)
+                    | CodexEvent::StreamError(err) => {
+                        self.handle_error(err, &raw_kind);
+                    }
+                    CodexEvent::ItemStarted(env) => {
+                        self.handle_item_started(env, &raw_kind);
+                    }
+                    CodexEvent::ItemCompleted(env) => {
+                        self.handle_item_completed(env, &raw_kind);
+                    }
+                    CodexEvent::ItemUpdated(env) => {
+                        self.handle_item_updated(env, &raw_kind);
+                    }
+                    CodexEvent::ItemToolUse(fields) | CodexEvent::ToolUse(fields) => {
+                        self.emit_top_level_tool_use(fields, &raw_kind);
+                    }
+                    CodexEvent::ItemToolResult(fields) | CodexEvent::ToolResult(fields) => {
+                        self.emit_top_level_tool_result(fields, &raw_kind);
+                    }
+                }
             }
             Err(_) => {
-                self.emit_provider_extension(&raw_kind, raw);
+                let raw: Map<String, Value> = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        super::trace_malformed_line(
+                            Provider::Codex,
+                            self.line_num,
+                            &e.to_string(),
+                        );
+                        self.emit_malformed_warning(&e.to_string());
+                        return Ok(());
+                    }
+                };
+                let raw_kind = raw
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                super::trace_parser_event(Provider::Codex, &raw_kind, self.line_num);
+                self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
 

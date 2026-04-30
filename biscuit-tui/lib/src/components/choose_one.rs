@@ -21,28 +21,40 @@
 //! ```
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::seq::SliceRandom;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Style,
     text::{Line, Span},
     widgets::StatefulWidget,
 };
 
 use crate::core::{
     ComponentTheme, EventOutcome, FuzzyFilter, HandleEvent, KeyBindings, Label, StandaloneState,
-    ValidationState, render_with_label,
+    TerminalStyle, ValidationState, render_with_label,
 };
 
-use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
+use super::choice_layout::ChoiceLayout;
+use super::choice_layout::navigate_row;
+use super::choice_render::ChoiceRenderContext;
 
-/// Minimum label width (in cells) at which the fuzzy filter renders
-/// per-character match highlighting. Narrower labels fall back to a
-/// single plain span so the row stays readable.
-const HIGHLIGHT_MIN_WIDTH: u16 = 12;
+use super::choose::{
+    ChoiceInput, ChoiceOption, HotkeyDisplayMode, HotkeySpec, Orientation, SelectionMode,
+};
+
+/// Duration that hotkey badges remain visible after a Ctrl/Alt chord on
+/// terminals that do not emit modifier-only key events.
+///
+/// Crossterm's modifier-only key events (`KeyEventKind::Press` with a
+/// `KeyCode::Modifier`) are not portable: most terminals only deliver
+/// the modifier alongside a chord (`Ctrl+R`), never on its own. To make
+/// badges discoverable in those environments, every Ctrl/Alt chord
+/// arms a deadline. While `Instant::now() < deadline` the badges
+/// remain visible; once it expires they hide again.
+pub(crate) const HOTKEY_DISPLAY_FALLBACK: Duration = Duration::from_millis(300);
 
 /// Mutable state for a [`ChooseOne`] widget.
 ///
@@ -57,8 +69,11 @@ pub struct ChooseOneState<V = String> {
     input: ChoiceInput<V>,
     hover: usize,
     selected: Option<usize>,
+    initial_selected: Option<usize>,
     scroll_offset: usize,
     hotkeys: HashMap<char, usize>,
+    ctrl_hotkeys: HashMap<char, usize>,
+    alt_hotkeys: HashMap<char, usize>,
     label: Option<Label>,
     theme: ComponentTheme,
     bindings: KeyBindings,
@@ -66,6 +81,10 @@ pub struct ChooseOneState<V = String> {
     filter: FuzzyFilter,
     filter_visible: bool,
     cached_labels: Vec<String>,
+    layout_cache: ChoiceLayout,
+    hotkey_display: HotkeyDisplayMode,
+    hotkey_display_deadline: Option<Instant>,
+    terminal_style: TerminalStyle,
 }
 
 impl<V: Clone + PartialEq> ChooseOneState<V> {
@@ -76,10 +95,16 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
     /// single-select component.
     pub fn new(mut input: ChoiceInput<V>) -> Self {
         input.selection_mode = SelectionMode::Single;
+        // Sort first (per the configured `with_sort`), then optionally
+        // shuffle, then build the hotkey map and cached labels. Library
+        // consumers and CLI consumers see the same ordering because
+        // `ChoiceInput` is the single authority on option ordering.
+        input.sort_options_in_place();
         if input.shuffle_options {
             input.options.shuffle(&mut rand::rng());
         }
         let hotkeys = build_hotkeys(&input.options);
+        let (ctrl_hotkeys, alt_hotkeys) = build_explicit_hotkeys(&input.options);
         let hover = first_enabled_index(&input.options).unwrap_or(0);
         let cached_labels: Vec<String> = input.options.iter().map(|o| o.label.clone()).collect();
         let mut filter = FuzzyFilter::new();
@@ -88,8 +113,11 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             input,
             hover,
             selected: None,
+            initial_selected: None,
             scroll_offset: 0,
             hotkeys,
+            ctrl_hotkeys,
+            alt_hotkeys,
             label: None,
             theme: ComponentTheme::default(),
             bindings: KeyBindings::default(),
@@ -97,6 +125,10 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             filter,
             filter_visible: false,
             cached_labels,
+            layout_cache: ChoiceLayout::default(),
+            hotkey_display: HotkeyDisplayMode::Hidden,
+            hotkey_display_deadline: None,
+            terminal_style: TerminalStyle::from_env(),
         }
     }
 
@@ -123,6 +155,66 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
         self
     }
 
+    /// Sets the [`ActiveChoiceColor`] used for the actively hovered
+    /// option. Sugar over mutating the underlying [`ChoiceInput`].
+    pub fn with_active_color(mut self, color: super::choose::ActiveChoiceColor) -> Self {
+        self.input.active_color = color;
+        self
+    }
+
+    /// Forces the hotkey badge display mode for the lifetime of this
+    /// state.
+    ///
+    /// Library callers and CLI front-ends use this to bypass the
+    /// modifier-detection + deadline-fallback path. Passing
+    /// [`HotkeyDisplayMode::Hidden`] disables badges entirely;
+    /// [`HotkeyDisplayMode::CtrlHeld`] and
+    /// [`HotkeyDisplayMode::AltHeld`] always render the matching
+    /// badge style. The forced value also clears any pending fallback
+    /// deadline so the override is unambiguous.
+    pub fn with_hotkey_display(mut self, mode: HotkeyDisplayMode) -> Self {
+        self.hotkey_display = mode;
+        self.hotkey_display_deadline = None;
+        self
+    }
+
+    /// Replaces the detected terminal style used for rendering choice
+    /// indicators and active-row contrast.
+    ///
+    /// [`ChooseOneState::new`] captures [`TerminalStyle::from_env`] by
+    /// default. Tests and embedding applications with their own
+    /// terminal capability detection can inject a deterministic style
+    /// through this builder.
+    pub fn with_terminal_style(mut self, terminal_style: TerminalStyle) -> Self {
+        self.terminal_style = terminal_style;
+        self
+    }
+
+    /// Returns the raw stored [`HotkeyDisplayMode`] without consulting
+    /// the fallback deadline. Tests use this to verify modifier-only
+    /// transitions; the renderer uses
+    /// [`current_hotkey_display`](Self::current_hotkey_display) so the
+    /// deadline can decay it back to [`HotkeyDisplayMode::Hidden`].
+    pub fn hotkey_display(&self) -> HotkeyDisplayMode {
+        self.hotkey_display
+    }
+
+    /// Resolves the effective [`HotkeyDisplayMode`] at `now` against
+    /// the fallback deadline.
+    ///
+    /// When `hotkey_display` is non-`Hidden` and no deadline is set
+    /// (modifier-only events were observed), the stored mode is
+    /// returned verbatim. When a deadline is set, the mode is returned
+    /// only while `now` precedes it; otherwise the resolver collapses
+    /// to [`HotkeyDisplayMode::Hidden`].
+    pub fn current_hotkey_display(&self, now: Instant) -> HotkeyDisplayMode {
+        match self.hotkey_display_deadline {
+            Some(deadline) if now < deadline => self.hotkey_display,
+            Some(_) => HotkeyDisplayMode::Hidden,
+            None => self.hotkey_display,
+        }
+    }
+
     /// Pre-selects an option by its stable identifier.
     pub fn with_initial_selection(mut self, id: &str) -> Self {
         if let Some((idx, _)) = self
@@ -133,6 +225,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             .find(|(_, option)| option.id == id)
         {
             self.selected = Some(idx);
+            self.initial_selected = Some(idx);
             self.hover = idx;
         }
         self
@@ -159,6 +252,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             .find(|(_, option)| option.value == *value)
         {
             self.selected = Some(idx);
+            self.initial_selected = Some(idx);
             self.hover = idx;
         }
         self
@@ -216,6 +310,16 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
     /// Returns the precomputed hotkey map keyed by lowercase char.
     pub fn hotkeys(&self) -> &HashMap<char, usize> {
         &self.hotkeys
+    }
+
+    /// Returns the explicit Ctrl hotkey map keyed by lowercase char.
+    pub fn ctrl_hotkeys(&self) -> &HashMap<char, usize> {
+        &self.ctrl_hotkeys
+    }
+
+    /// Returns the explicit Alt hotkey map keyed by lowercase char.
+    pub fn alt_hotkeys(&self) -> &HashMap<char, usize> {
+        &self.alt_hotkeys
     }
 
     /// Returns a reference to the key bindings.
@@ -311,7 +415,59 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
             } else {
                 rect
             };
-            draw_list(list_area, b, state);
+
+            let visible_indices: Vec<usize> = state.filter.visible().to_vec();
+            let body_rows = if state.validation_error.is_some() && list_area.height > 1 {
+                list_area.height - 1
+            } else {
+                list_area.height
+            };
+            let hotkey_display = state.current_hotkey_display(Instant::now());
+            let layout = {
+                let theme = state.theme.clone();
+                let ctx = ChoiceRenderContext::for_single(
+                    &theme,
+                    state.terminal_style,
+                    state.input.orientation,
+                )
+                .with_active_color(state.input.active_color)
+                .with_hotkey_display(hotkey_display);
+                ctx.compute_layout(list_area, &state.input.options, &visible_indices, |idx| {
+                    Some(idx) == state.selected
+                })
+            };
+            state.layout_cache = layout.clone();
+            let scroll_visible = {
+                let theme = state.theme.clone();
+                let ctx = ChoiceRenderContext::for_single(
+                    &theme,
+                    state.terminal_style,
+                    state.input.orientation,
+                )
+                .with_active_color(state.input.active_color)
+                .with_hotkey_display(hotkey_display);
+                ctx.visible_logical_rows(body_rows)
+            };
+            adjust_scroll(state, scroll_visible, &visible_indices, &layout);
+
+            let ctx = ChoiceRenderContext::for_single(
+                &state.theme,
+                state.terminal_style,
+                state.input.orientation,
+            )
+            .with_active_color(state.input.active_color)
+            .with_hotkey_display(hotkey_display);
+            ctx.render(
+                list_area,
+                b,
+                &state.input.options,
+                &visible_indices,
+                state.scroll_offset,
+                state.hover,
+                |idx| Some(idx) == state.selected,
+                Some(&mut state.filter),
+                state.validation_error.as_deref(),
+            );
         });
 
         if let Some(message) = state.validation_error.as_deref()
@@ -338,8 +494,40 @@ fn draw_search_prompt<V: Clone + PartialEq>(
 
 impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
+        // Modifier-only key events: terminals that emit explicit
+        // KeyCode::Modifier press/release events drive
+        // `hotkey_display` directly, bypassing the chord-fallback
+        // deadline path. We only consume the event if the modifier
+        // matched something; otherwise it falls through.
+        if let Some(mode) = modifier_only_mode(&event) {
+            match event.kind {
+                KeyEventKind::Press | KeyEventKind::Repeat => {
+                    state.hotkey_display = mode;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+                KeyEventKind::Release => {
+                    state.hotkey_display = HotkeyDisplayMode::Hidden;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+            }
+        }
+
+        // Chord fallback: any key event carrying Ctrl or Alt arms a
+        // brief deadline so badges become visible on terminals that
+        // never emit modifier-only events.
+        if event.modifiers.contains(KeyModifiers::CONTROL) {
+            state.hotkey_display = HotkeyDisplayMode::CtrlHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        } else if event.modifiers.contains(KeyModifiers::ALT) {
+            state.hotkey_display = HotkeyDisplayMode::AltHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        }
+
         // Cancel binding: when a fuzzy filter is active, the first
-        // press clears it; subsequent presses fall through to abort.
+        // press clears it; subsequent presses restore the initial
+        // selection and submit.
         if KeyBindings::matches(&state.bindings.cancel, &event) {
             if state.filter_visible && state.filter.is_active() {
                 state.filter.clear(&state.cached_labels);
@@ -353,7 +541,9 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
                 snap_hover_to_visible(state);
                 return EventOutcome::Consumed;
             }
-            return EventOutcome::Cancelled;
+            // Phase 5: Esc restores the initial selection and submits.
+            state.selected = state.initial_selected;
+            return EventOutcome::Submitted;
         }
 
         // When the search prompt is showing, route printable chars and
@@ -385,12 +575,47 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.up, &event) {
-            move_hover(state, -1);
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, -1),
+                Orientation::Horizontal => move_hover_row(state, -1),
+            }
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.down, &event) {
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, 1),
+                Orientation::Horizontal => move_hover_row(state, 1),
+            }
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.left, &event) {
+            move_hover(state, -1);
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.right, &event) {
             move_hover(state, 1);
             return EventOutcome::Consumed;
+        }
+
+        // Ctrl/Alt hotkeys select and submit (Phase 5).
+        match event.modifiers {
+            KeyModifiers::CONTROL => {
+                if let KeyCode::Char(c) = event.code
+                    && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
+                {
+                    select_at(state, idx);
+                    return EventOutcome::Submitted;
+                }
+            }
+            KeyModifiers::ALT => {
+                if let KeyCode::Char(c) = event.code
+                    && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
+                {
+                    select_at(state, idx);
+                    return EventOutcome::Submitted;
+                }
+            }
+            _ => {}
         }
 
         // Home/End/vim-style jumps, hotkey or filter-open, only when
@@ -441,8 +666,8 @@ fn submit<V: Clone + PartialEq>(state: &mut ChooseOneState<V>) -> EventOutcome {
     {
         return EventOutcome::Consumed;
     }
-    if state.selected.is_none()
-        && let Some(idx) = state.hover()
+    // Phase 5: Enter always selects the active enabled item.
+    if let Some(idx) = state.hover()
         && !state.input.options[idx].disabled
         && state.filter.visible().contains(&idx)
     {
@@ -496,6 +721,19 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
             state.hover = candidate;
             return;
         }
+    }
+}
+
+fn move_hover_row<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
+    if let Some(new_hover) = navigate_row(
+        &state.layout_cache,
+        &state.input.options,
+        state.hover,
+        delta,
+    ) {
+        state.hover = new_hover;
+    } else {
+        move_hover(state, delta);
     }
 }
 
@@ -553,6 +791,60 @@ pub(super) fn build_hotkeys<V>(options: &[ChoiceOption<V>]) -> HashMap<char, usi
     map
 }
 
+/// Detects whether `event` is a "modifier-only" key press for `Ctrl`
+/// or `Alt`.
+///
+/// Crossterm reports modifier-only key presses with
+/// [`KeyCode::Modifier`] (or, on some terminals, a bare modifier code
+/// arriving as a chord with itself). When such an event is observed
+/// we can drive the hotkey badges directly without the deadline-based
+/// fallback.
+///
+/// Returns `Some(CtrlHeld)` for Ctrl presses, `Some(AltHeld)` for Alt
+/// presses, and `None` for everything else.
+pub(super) fn modifier_only_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> {
+    match event.code {
+        KeyCode::Modifier(mod_key) => {
+            use crossterm::event::ModifierKeyCode;
+            match mod_key {
+                ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl => {
+                    Some(HotkeyDisplayMode::CtrlHeld)
+                }
+                ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt => {
+                    Some(HotkeyDisplayMode::AltHeld)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Builds separate maps for explicit Ctrl and Alt hotkeys declared on
+/// [`ChoiceOption::hotkey`].
+pub(super) fn build_explicit_hotkeys<V>(
+    options: &[ChoiceOption<V>],
+) -> (HashMap<char, usize>, HashMap<char, usize>) {
+    let mut ctrl = HashMap::new();
+    let mut alt = HashMap::new();
+    for (idx, option) in options.iter().enumerate() {
+        if option.disabled {
+            continue;
+        }
+        if let Some(hotkey) = option.hotkey {
+            match hotkey {
+                HotkeySpec::Ctrl(c) => {
+                    ctrl.entry(c.to_ascii_lowercase()).or_insert(idx);
+                }
+                HotkeySpec::Alt(c) => {
+                    alt.entry(c.to_ascii_lowercase()).or_insert(idx);
+                }
+            }
+        }
+    }
+    (ctrl, alt)
+}
+
 fn error_row_y<V: Clone + PartialEq>(
     inner_area: Rect,
     option_count: usize,
@@ -576,206 +868,36 @@ fn error_row_y<V: Clone + PartialEq>(
     }
 }
 
-fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut ChooseOneState<V>) {
-    use unicode_width::UnicodeWidthStr;
-
-    if area.width == 0 || area.height == 0 || state.input.options.is_empty() {
-        return;
-    }
-
-    // Reserve one row for a validation error when present.
-    let body_rows = if state.validation_error.is_some() && area.height > 1 {
-        area.height - 1
-    } else {
-        area.height
-    };
-    let visible = body_rows as usize;
-
-    // When filter is active and matches nothing, show a single dim
-    // "(no matches)" row instead of the list body.
-    if state.filter_visible && state.filter.visible().is_empty() {
-        let no_matches = Line::from(Span::styled(
-            state.theme.no_matches_text.clone(),
-            state.theme.no_matches_style,
-        ));
-        buf.set_line(area.x, area.y, &no_matches, area.width);
-        return;
-    }
-
-    let visible_indices: Vec<usize> = state.filter.visible().to_vec();
-    adjust_scroll(state, visible, &visible_indices);
-
-    let selected_indicator = state.theme.selected_indicator.clone();
-    let unselected_indicator = state.theme.unselected_indicator.clone();
-    let hover_style = state.theme.selected_style;
-    let disabled_style = state.theme.disabled_style;
-    let match_style = state.theme.search_match_style;
-    let filter_active = state.filter.is_active();
-
-    // Compute focus prefix width: indicator + 1 space, or collapse to single space if empty/whitespace
-    let focus_prefix_width = if state.theme.focus_indicator.trim().is_empty() {
-        1
-    } else {
-        state.theme.focus_indicator.width() + 1
-    };
-
-    for (row, &idx) in visible_indices
-        .iter()
-        .skip(state.scroll_offset)
-        .take(visible)
-        .enumerate()
-    {
-        let option_disabled = state.input.options[idx].disabled;
-        let option_label = state.input.options[idx].label.clone();
-        let indicator = if Some(idx) == state.selected {
-            &selected_indicator
-        } else {
-            &unselected_indicator
-        };
-
-        // Focus indicator prefix on hovered row, blank padding otherwise
-        let focus_prefix = if idx == state.hover {
-            if state.theme.focus_indicator.trim().is_empty() {
-                " ".to_string()
-            } else {
-                format!("{} ", state.theme.focus_indicator)
-            }
-        } else {
-            " ".repeat(focus_prefix_width)
-        };
-
-        let prefix = format!("{focus_prefix}{indicator} ");
-        let label_style = if option_disabled {
-            disabled_style
-        } else if idx == state.hover {
-            hover_style
-        } else if Some(idx) == state.selected {
-            state.theme.selected_label_style
-        } else {
-            Style::default()
-        };
-
-        let mut spans: Vec<Span<'static>> = vec![Span::raw(prefix)];
-        if filter_active && area.width >= HIGHLIGHT_MIN_WIDTH {
-            let highlights = state.filter.highlight_indices(&option_label);
-            spans.extend(build_highlighted_spans(
-                &option_label,
-                &highlights,
-                label_style,
-                match_style,
-            ));
-        } else {
-            spans.push(Span::styled(option_label, label_style));
-        }
-
-        let line = Line::from(spans);
-        let y = area.y + row as u16;
-        buf.set_line(area.x, y, &line, area.width);
-    }
-
-    // Paint overflow indicators at top-right / bottom-right when scrollable
-    let overflow_style = state
-        .theme
-        .selected_style
-        .add_modifier(ratatui::style::Modifier::DIM);
-
-    if state.scroll_offset > 0 && area.width > 0 {
-        // Top overflow indicator
-        let x = area.x + area.width - 1;
-        let y = area.y;
-        buf[(x, y)]
-            .set_symbol(&state.theme.overflow_up_indicator)
-            .set_style(overflow_style);
-    }
-
-    if state.scroll_offset + visible < visible_indices.len() && area.width > 0 && visible > 0 {
-        // Bottom overflow indicator
-        let x = area.x + area.width - 1;
-        let y = area.y + (visible - 1) as u16;
-        buf[(x, y)]
-            .set_symbol(&state.theme.overflow_down_indicator)
-            .set_style(overflow_style);
-    }
-}
-
-/// Splits `label` into `Span`s that highlight char-indexed matches
-/// with `match_style` and renders the remaining text with
-/// `base_style`. `highlights` must be sorted-ascending char offsets.
-fn build_highlighted_spans(
-    label: &str,
-    highlights: &[u32],
-    base_style: Style,
-    match_style: Style,
-) -> Vec<Span<'static>> {
-    if highlights.is_empty() {
-        return vec![Span::styled(label.to_string(), base_style)];
-    }
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut current = String::new();
-    let mut current_is_match = false;
-    for (char_idx, ch) in label.chars().enumerate() {
-        let is_match = highlights.binary_search(&(char_idx as u32)).is_ok();
-        if current.is_empty() {
-            current_is_match = is_match;
-            current.push(ch);
-            continue;
-        }
-        if is_match == current_is_match {
-            current.push(ch);
-        } else {
-            let style = if current_is_match {
-                match_style
-            } else {
-                base_style
-            };
-            spans.push(Span::styled(std::mem::take(&mut current), style));
-            current_is_match = is_match;
-            current.push(ch);
-        }
-    }
-    if !current.is_empty() {
-        let style = if current_is_match {
-            match_style
-        } else {
-            base_style
-        };
-        spans.push(Span::styled(current, style));
-    }
-    spans
-}
-
 fn adjust_scroll<V: Clone + PartialEq>(
     state: &mut ChooseOneState<V>,
-    visible: usize,
-    visible_indices: &[usize],
+    visible_rows: usize,
+    _visible_indices: &[usize],
+    layout: &ChoiceLayout,
 ) {
-    let visible_len = visible_indices.len();
-    if visible == 0 || visible_len == 0 {
+    let total_rows = layout.row_count();
+    if visible_rows == 0 || total_rows == 0 {
         state.scroll_offset = 0;
         return;
     }
-    // Translate `state.hover` into its position inside the filtered list
-    // so scroll tracking works whether or not a filter is active.
-    let hover_pos = visible_indices
-        .iter()
-        .position(|&i| i == state.hover)
-        .unwrap_or(0);
 
-    if hover_pos < state.scroll_offset {
-        state.scroll_offset = hover_pos;
-    } else if hover_pos >= state.scroll_offset + visible {
-        state.scroll_offset = hover_pos + 1 - visible;
+    let hover_row = layout.row_of(state.hover).unwrap_or(0);
+
+    if hover_row < state.scroll_offset {
+        state.scroll_offset = hover_row;
+    } else if hover_row >= state.scroll_offset + visible_rows {
+        state.scroll_offset = hover_row + 1 - visible_rows;
     }
-    if state.scroll_offset + visible > visible_len {
-        state.scroll_offset = visible_len.saturating_sub(visible);
+    if state.scroll_offset + visible_rows > total_rows {
+        state.scroll_offset = total_rows.saturating_sub(visible_rows);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Label, LabelPosition};
+    use crate::core::{Label, LabelPosition, NerdFontStatus, TerminalBackground};
     use crossterm::event::{KeyCode, KeyModifiers};
+    use ratatui::style::Color;
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -978,10 +1100,49 @@ mod tests {
     }
 
     #[test]
-    fn esc_cancels() {
+    fn esc_restores_initial_and_submits() {
         let mut state = ChooseOneState::new(fixture_input());
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
-        assert_eq!(outcome, EventOutcome::Cancelled);
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert!(state.selected_index().is_none());
+    }
+
+    #[test]
+    fn esc_after_navigation_restores_initial_selection() {
+        let input = fixture_input();
+        let mut state = ChooseOneState::new(input).with_initial_selection("r");
+        assert_eq!(state.selected_index(), Some(0));
+
+        // Navigate away and change selection.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_index(), Some(1));
+
+        // Esc restores the initial selection and submits.
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn esc_after_space_restores_initial_selection() {
+        let input = fixture_input();
+        let mut state = ChooseOneState::new(input).with_initial_selection("g");
+        assert_eq!(state.selected_index(), Some(1));
+
+        // Space selects the hovered option (which is also index 1 initially).
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_index(), Some(1));
+
+        // Navigate and Space again to change selection.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+        assert_eq!(state.selected_index(), Some(2));
+
+        // Esc restores the initial selection and submits.
+        let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(1));
     }
 
     #[test]
@@ -1043,8 +1204,46 @@ mod tests {
     }
 
     #[test]
+    fn explicit_ctrl_hotkey_selects_and_submits() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+            ChoiceOption::new("b", "Banana", "banana"),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn explicit_alt_hotkey_selects_and_submits() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("a", "Apple", "apple"),
+            ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(1));
+    }
+
+    #[test]
+    fn explicit_hotkey_is_case_insensitive() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('A')),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Submitted);
+    }
+
+    #[test]
     fn render_draws_indicator_and_label_per_row() {
-        let mut state = ChooseOneState::new(fixture_input());
+        let mut state =
+            ChooseOneState::new(fixture_input()).with_terminal_style(TerminalStyle::default());
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
@@ -1056,8 +1255,47 @@ mod tests {
     }
 
     #[test]
+    fn choose_one_render_uses_nerd_font_terminal_style() {
+        let mut state = ChooseOneState::new(fixture_input())
+            .with_initial_selection("r")
+            .with_terminal_style(TerminalStyle {
+                nerd_font: NerdFontStatus::Likely,
+                ..TerminalStyle::default()
+            });
+        let area = Rect::new(0, 0, 30, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        let selected_row = buffer_row(&buf, 0);
+        let unselected_row = buffer_row(&buf, 1);
+        assert!(
+            selected_row.contains('\u{f043e}'),
+            "expected Nerd Font selected radio glyph in {selected_row:?}"
+        );
+        assert!(
+            unselected_row.contains('\u{f4aa}'),
+            "expected Nerd Font unselected radio glyph in {unselected_row:?}"
+        );
+    }
+
+    #[test]
+    fn choose_one_render_uses_light_background_active_foreground() {
+        let mut state = ChooseOneState::new(fixture_input()).with_terminal_style(TerminalStyle {
+            background: TerminalBackground::Light,
+            ..TerminalStyle::default()
+        });
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        assert_eq!(buf[(1, 0)].style().fg, Some(Color::Black));
+        assert_eq!(buf[(1, 0)].style().bg, Some(Color::Indexed(252)));
+    }
+
+    #[test]
     fn render_with_label_above_draws_label_then_list() {
         let mut state = ChooseOneState::new(fixture_input())
+            .with_terminal_style(TerminalStyle::default())
             .with_label(Label::new("Colour", LabelPosition::Above));
         let area = Rect::new(0, 0, 20, 4);
         let mut buf = Buffer::empty(area);
@@ -1118,18 +1356,18 @@ mod tests {
     }
 
     #[test]
-    fn custom_cancel_binding_works() {
+    fn custom_cancel_binding_restores_and_submits() {
         let bindings = KeyBindings {
             cancel: vec![press(KeyCode::Char('q'))],
             ..KeyBindings::default()
         };
         let mut state = ChooseOneState::new(fixture_input()).with_key_bindings(bindings);
 
-        // q should cancel.
+        // q should restore initial selection and submit.
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Char('q')));
-        assert_eq!(outcome, EventOutcome::Cancelled);
+        assert_eq!(outcome, EventOutcome::Submitted);
 
-        // Esc should be ignored.
+        // Esc should be ignored (no longer bound to cancel).
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
         assert_eq!(outcome, EventOutcome::Ignored);
     }
@@ -1454,7 +1692,7 @@ mod tests {
     }
 
     #[test]
-    fn esc_clears_filter_first_then_aborts() {
+    fn esc_clears_filter_first_then_submits() {
         let mut state = ChooseOneState::new(filter_fixture_input());
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Char('b')));
         assert!(state.filter_visible());
@@ -1465,9 +1703,9 @@ mod tests {
         assert!(!state.filter_visible());
         assert_eq!(state.filter_pattern(), "");
 
-        // Second Esc: aborts.
+        // Second Esc: restores initial selection and submits.
         let outcome = ChooseOne::new().handle_event(&mut state, press(KeyCode::Esc));
-        assert_eq!(outcome, EventOutcome::Cancelled);
+        assert_eq!(outcome, EventOutcome::Submitted);
     }
 
     #[test]
@@ -1508,8 +1746,8 @@ mod tests {
     }
 
     #[test]
-    fn esc_with_empty_filter_still_hides_prompt_then_aborts() {
-        // Pattern is active, Esc clears + hides it, second Esc aborts.
+    fn esc_with_empty_filter_still_hides_prompt_then_restores() {
+        // Pattern is active, Esc clears + hides it, second Esc restores + submits.
         let mut state = ChooseOneState::new(filter_fixture_input());
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Char('b')));
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Backspace));
@@ -1548,23 +1786,326 @@ mod tests {
         assert_eq!(state.selected_index(), Some(hovered));
     }
 
+    // -----------------------------------------------------------------
+    // Phase 6 — Horizontal Layout & Navigation
+    // -----------------------------------------------------------------
+
+    fn horizontal_fixture_input() -> ChoiceInput<String> {
+        ChoiceInput::new("color", "Pick a color")
+            .with_orientation(Orientation::Horizontal)
+            .with_options(vec![
+                ChoiceOption::new("r", "Red", "red"),
+                ChoiceOption::new("g", "Green", "green"),
+                ChoiceOption::new("b", "Blue", "blue"),
+                ChoiceOption::new("y", "Yellow", "yellow"),
+            ])
+    }
+
     #[test]
-    fn build_highlighted_spans_styles_matched_chars_in_multibyte_label() {
-        // "Café" has a multi-byte 'é'. Char indices 0 and 1 (the 'C'
-        // and 'a') must be styled with `match_style` and the remainder
-        // ("fé") with `base_style`. This regression-tests that the
-        // char-index iteration on line ~716 does not slip into byte
-        // indexing when the suffix contains multi-byte chars.
-        use ratatui::style::{Color, Modifier};
-        let base_style = Style::default().fg(Color::White);
-        let match_style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
-        let spans = build_highlighted_spans("Café", &[0, 1], base_style, match_style);
-        assert_eq!(spans.len(), 2, "expected two spans, got {spans:?}");
-        assert_eq!(spans[0].content, "Ca");
-        assert_eq!(spans[0].style, match_style);
-        assert_eq!(spans[1].content, "fé");
-        assert_eq!(spans[1].style, base_style);
+    fn horizontal_render_packs_items_left_to_right() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Wide area: all 4 items should fit on one row.
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        // All options should be on row 0.
+        let row0 = buffer_row(&buf, 0);
+        assert!(row0.contains("Red"), "expected Red on row 0: {row0}");
+        assert!(row0.contains("Green"), "expected Green on row 0: {row0}");
+        assert!(row0.contains("Blue"), "expected Blue on row 0: {row0}");
+        assert!(row0.contains("Yellow"), "expected Yellow on row 0: {row0}");
+    }
+
+    #[test]
+    fn horizontal_render_no_triangular_pointer() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        // No ▶ pointer in horizontal mode.
+        let row0 = buffer_row(&buf, 0);
+        assert!(
+            !row0.contains('▶'),
+            "horizontal mode should not show triangular pointer: {row0}"
+        );
+    }
+
+    #[test]
+    fn horizontal_render_wraps_to_new_rows() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Narrow area: items should wrap to multiple rows.
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        // At least one option should be on row 1 due to wrapping.
+        let row1 = buffer_row(&buf, 1);
+        assert!(
+            row1.contains("Green") || row1.contains("Blue") || row1.contains("Yellow"),
+            "expected wrapped options on row 1: {row1}"
+        );
+    }
+
+    #[test]
+    fn choose_one_horizontal_badges_short_viewport_does_not_draw_past_area() {
+        let input: ChoiceInput<String> = ChoiceInput::new("color", "Pick a color")
+            .with_orientation(Orientation::Horizontal)
+            .with_options(vec![
+                ChoiceOption::new("a", "Alpha", "alpha").with_hotkey(HotkeySpec::Ctrl('a')),
+                ChoiceOption::new("b", "Bravo", "bravo").with_hotkey(HotkeySpec::Ctrl('b')),
+                ChoiceOption::new("c", "Charlie", "charlie").with_hotkey(HotkeySpec::Ctrl('c')),
+            ]);
+        let mut state = ChooseOneState::new(input).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        let area = Rect::new(0, 0, 12, 3);
+        let mut buf = Buffer::empty(area);
+
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        assert!(state.layout_cache.row_count() >= 3);
+        assert_eq!(state.scroll_offset, 0);
+        assert!(buffer_row(&buf, 0).contains("Alpha"));
+        assert!(buffer_row(&buf, 1).contains("^A"));
+        for y in 0..area.height {
+            let row = buffer_row(&buf, y);
+            assert!(
+                !row.contains("Bravo") && !row.contains("Charlie"),
+                "short viewport must not render hidden logical rows on y={y}: {row:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn horizontal_left_moves_to_previous_option() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Move to option 1.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+
+        // Left moves back to option 0.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Left));
+        assert_eq!(state.hover(), Some(0));
+    }
+
+    #[test]
+    fn horizontal_right_moves_to_next_option() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(2));
+    }
+
+    #[test]
+    fn horizontal_up_moves_to_closest_column_above() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Navigate to an option likely on row 1 after wrapping.
+        for _ in 0..3 {
+            ChooseOne::new().handle_event(&mut state, press(KeyCode::Right));
+        }
+        let hover_before = state.hover().unwrap();
+
+        // Up should move to the closest column in the row above.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Up));
+        let hover_after = state.hover().unwrap();
+        assert_ne!(hover_after, hover_before, "up should change hover");
+    }
+
+    #[test]
+    fn horizontal_down_moves_to_closest_column_below() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Start on row 0, move down to row 1.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        let hover_after = state.hover().unwrap();
+        assert_ne!(hover_after, 0, "down should change hover from 0");
+    }
+
+    #[test]
+    fn horizontal_stale_cache_fallback_to_sequential() {
+        let mut state = ChooseOneState::new(horizontal_fixture_input());
+        // Clear layout cache to simulate stale state.
+        state.layout_cache = ChoiceLayout::default();
+
+        // Up/Down should fallback to sequential movement when cache is empty.
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(1));
+
+        state.layout_cache = ChoiceLayout::default();
+        ChooseOne::new().handle_event(&mut state, press(KeyCode::Up));
+        assert_eq!(state.hover(), Some(0));
+    }
+
+    fn unsorted_input() -> ChoiceInput<String> {
+        ChoiceInput::new("fruit", "Pick").with_options(vec![
+            ChoiceOption::new("b", "Berry", "berry"),
+            ChoiceOption::new("a", "Apple", "apple"),
+            ChoiceOption::new("c", "Cherry", "cherry"),
+        ])
+    }
+
+    fn labels(state: &ChooseOneState) -> Vec<&str> {
+        state.options().iter().map(|o| o.label.as_str()).collect()
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_asc_orders_by_label() {
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Asc);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Apple", "Berry", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_desc_orders_by_label() {
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Desc);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Cherry", "Berry", "Apple"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_inverse_reverses_natural() {
+        // `SortOrder::Inverse` is the canonical reversing ordering used
+        // by both the library and the CLI `--sort inverse` surface.
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Inverse);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Cherry", "Apple", "Berry"]);
+    }
+
+    #[test]
+    fn state_new_with_sort_natural_is_no_op() {
+        let input = unsorted_input().with_sort(crate::core::SortOrder::Natural);
+        let state = ChooseOneState::new(input);
+        assert_eq!(labels(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_without_sort_preserves_input_order() {
+        // `with_sort` is never called, so the configured order is
+        // preserved exactly as given.
+        let state = ChooseOneState::new(unsorted_input());
+        assert_eq!(labels(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_sort_then_shuffle_does_not_panic() {
+        // Sorting and shuffling are independent: the constructor sorts
+        // first, then shuffles. Either ordering must be acceptable as a
+        // post-condition; this test pins that the combination simply
+        // does not panic and yields the same number of options.
+        let input = unsorted_input()
+            .with_sort(crate::core::SortOrder::Asc)
+            .with_shuffle_options(true);
+        let state = ChooseOneState::new(input);
+        assert_eq!(state.options().len(), 3);
+    }
+
+    // --- Phase 6: hotkey badge display state ---------------------------
+
+    fn ctrl_press(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn alt_press(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+    }
+
+    fn modifier_press(mod_key: crossterm::event::ModifierKeyCode) -> KeyEvent {
+        KeyEvent::new(KeyCode::Modifier(mod_key), KeyModifiers::NONE)
+    }
+
+    fn modifier_release(mod_key: crossterm::event::ModifierKeyCode) -> KeyEvent {
+        let mut event = KeyEvent::new(KeyCode::Modifier(mod_key), KeyModifiers::NONE);
+        event.kind = KeyEventKind::Release;
+        event
+    }
+
+    #[test]
+    fn hotkey_display_initially_hidden() {
+        let state = ChooseOneState::new(fixture_input());
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+    }
+
+    #[test]
+    fn hotkey_display_transitions_to_ctrl_held_on_ctrl_modifier_press() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state = ChooseOneState::new(fixture_input());
+        let outcome =
+            ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+    }
+
+    #[test]
+    fn hotkey_display_returns_to_hidden_on_ctrl_modifier_release() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        ChooseOne::new().handle_event(&mut state, modifier_release(ModifierKeyCode::LeftControl));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+    }
+
+    #[test]
+    fn hotkey_display_alt_modifier_transition_is_symmetric() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftAlt));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::AltHeld);
+        ChooseOne::new().handle_event(&mut state, modifier_release(ModifierKeyCode::LeftAlt));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+    }
+
+    #[test]
+    fn hotkey_display_briefly_visible_after_ctrl_chord_via_deadline() {
+        // Even on terminals that never emit modifier-only events, a
+        // Ctrl chord must arm the deadline so badges become discoverable.
+        let mut state = ChooseOneState::new(fixture_input());
+        let outcome = ChooseOne::new().handle_event(&mut state, ctrl_press('z'));
+        // The chord itself is unmapped (no Ctrl+Z hotkey is set on
+        // any option), but the modifier still arms the deadline.
+        assert!(outcome == EventOutcome::Ignored || outcome == EventOutcome::Consumed);
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        // Resolved at "now": still inside the fallback window.
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::CtrlHeld
+        );
+        // Resolved well past the fallback window: collapses to Hidden.
+        assert_eq!(
+            state.current_hotkey_display(
+                Instant::now() + HOTKEY_DISPLAY_FALLBACK + Duration::from_millis(50)
+            ),
+            HotkeyDisplayMode::Hidden
+        );
+    }
+
+    #[test]
+    fn hotkey_display_alt_chord_arms_deadline() {
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new().handle_event(&mut state, alt_press('q'));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::AltHeld);
+    }
+
+    #[test]
+    fn with_hotkey_display_forces_mode_and_clears_deadline() {
+        let state =
+            ChooseOneState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        // No deadline set → resolver returns the forced mode at any time.
+        assert_eq!(
+            state.current_hotkey_display(Instant::now() + Duration::from_secs(60)),
+            HotkeyDisplayMode::CtrlHeld
+        );
+    }
+
+    #[test]
+    fn current_hotkey_display_with_no_deadline_returns_stored_mode() {
+        let state = ChooseOneState::new(fixture_input());
+        // Default is Hidden / None → Hidden at any time.
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::Hidden
+        );
     }
 }

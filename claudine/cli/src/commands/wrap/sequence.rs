@@ -198,7 +198,7 @@ pub(crate) fn execute_sequence(
 
     // ── Phase 1b: resolve provider/model for every step ────────────────
     let clients = sniff::programs::InstalledAiClients::new();
-    let installed: Vec<claudine::events::Provider> = claudine::events::PROVIDERS_DISPLAY_ORDER
+    let installed: Vec<claudine::provider::Provider> = claudine::provider::PROVIDERS_DISPLAY_ORDER
         .into_iter()
         .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
         .collect();
@@ -337,7 +337,7 @@ pub(crate) fn execute_sequence(
                             .get(draft.provider_plan.default_index)
                             .map(|o| o.provider)
                     })
-                    .unwrap_or(claudine::events::Provider::Claude);
+                    .unwrap_or(claudine::provider::Provider::Claude);
                 let provider_reason = if explicit_provider.is_some() {
                     claudine::composition::ProviderResolutionReason::ExplicitFlag
                 } else {

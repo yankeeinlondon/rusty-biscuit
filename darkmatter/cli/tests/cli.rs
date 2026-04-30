@@ -1551,9 +1551,7 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
         .stderr(predicate::str::contains("MarkdownError"))
         .stderr(predicate::str::contains("frontmatter parse failed"))
         .stderr(predicate::str::contains("Position:"))
-        .stderr(predicate::str::contains(
-            "'@' magic lookup emits results",
-        ));
+        .stderr(predicate::str::contains("'@' magic lookup emits results"));
 }
 
 #[test]

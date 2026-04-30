@@ -6,8 +6,7 @@
 use std::collections::HashSet;
 
 use crate::config::claudine_config::{ModelOverrideMode, ProviderModelOverride};
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Merge a base catalog with user overrides.
 ///
 /// ## Returns

@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 
 use crate::error::Result;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Maximum number of backup files to retain per provider.
 const MAX_BACKUPS: usize = 10;
 

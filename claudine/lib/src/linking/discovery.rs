@@ -1,12 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::error::Result;
-use crate::events::Provider;
-
 #[cfg(test)]
 use super::paths::ProviderPaths;
 use super::paths::{ProviderSkillPaths, ResourceScope};
+use crate::error::Result;
+use crate::provider::Provider;
 
 /// A resource discovered during the scan phase.
 #[derive(Debug, Clone)]

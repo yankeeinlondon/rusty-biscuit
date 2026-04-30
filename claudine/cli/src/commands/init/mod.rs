@@ -22,13 +22,12 @@ use claudine::config::{
     get_configurator,
 };
 use claudine::dispatch::loader::{load_claudine_config, save_claudine_config};
-use claudine::events::{
-    AgenticEvent, CanonicalProviderSettings, EventBinding, Provider, recommended_sound,
-};
+use claudine::events::{AgenticEvent, CanonicalProviderSettings, EventBinding, recommended_sound};
 use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
     resolve_repo_root, select_canonical_provider, set_canonical_provider,
 };
+use claudine::provider::Provider;
 use claudine::services::ProtectConfig;
 
 use crate::log;
