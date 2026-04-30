@@ -13,6 +13,8 @@
 //! script blocks. The helper then locates that marker in stdout and parses
 //! the JSON payload into receipt metadata.
 
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;

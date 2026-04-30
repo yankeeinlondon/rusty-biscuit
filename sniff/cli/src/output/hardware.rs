@@ -423,8 +423,13 @@ fn build_device_line(
     } else {
         ""
     };
+    let name = if is_default_here {
+        format!("<b><yellow>{}</yellow></b>", dev.name)
+    } else {
+        dev.name.clone()
+    };
 
-    format!("{}{} {}{}", dev.name, name_suffix, parens, marker)
+    format!("{}{} {}{}", name, name_suffix, parens, marker)
 }
 
 /// Build a `Prose` item for the "none" placeholder child of an empty group.
@@ -771,7 +776,7 @@ mod audio_line_tests {
         let line = build_device_line(&macbook_speakers(), "", GroupSide::Output);
         assert_eq!(
             line,
-            "MacBook Pro Speakers (<dim>Built-in</dim>, <dim>44.1k</dim> <b>48k</b> <dim>96k</dim>) <b><yellow>*</yellow></b>"
+            "<b><yellow>MacBook Pro Speakers</yellow></b> (<dim>Built-in</dim>, <dim>44.1k</dim> <b>48k</b> <dim>96k</dim>) <b><yellow>*</yellow></b>"
         );
     }
 
@@ -787,7 +792,7 @@ mod audio_line_tests {
     #[test]
     fn name_suffix_is_appended_before_parens() {
         let line = build_device_line(&macbook_speakers(), "<dim>:1</dim>", GroupSide::Output);
-        assert!(line.starts_with("MacBook Pro Speakers<dim>:1</dim> ("));
+        assert!(line.starts_with("<b><yellow>MacBook Pro Speakers</yellow></b><dim>:1</dim> ("));
     }
 
     #[test]
@@ -798,7 +803,7 @@ mod audio_line_tests {
         let line = build_device_line(&dev, "", GroupSide::Output);
         assert_eq!(
             line,
-            "MacBook Pro Speakers (<dim>Built-in</dim>) <b><yellow>*</yellow></b>"
+            "<b><yellow>MacBook Pro Speakers</yellow></b> (<dim>Built-in</dim>) <b><yellow>*</yellow></b>"
         );
     }
 

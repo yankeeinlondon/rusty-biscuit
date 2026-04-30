@@ -368,6 +368,21 @@ mod tests {
     }
 
     #[test]
+    fn score_zero_for_interactive_when_daemon_is_not_dunst() {
+        // Daemon-mismatch edge case: even an interactive dispatch (which
+        // would normally win the highest dunstify score) must score 0 when
+        // the bus owner is not dunst, so election skips this helper and
+        // falls through to notify-send / native.
+        let helper = helper(false);
+        let mut request = notice_request();
+        request.actions.push(NotificationAction {
+            id: "ok".into(),
+            label: "OK".into(),
+        });
+        assert_eq!(helper.score(&request), 0);
+    }
+
+    #[test]
     fn score_70_for_notice_when_dunst() {
         let helper = helper(true);
         assert_eq!(helper.score(&notice_request()), SCORE_NOTICE_ONLY);

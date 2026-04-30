@@ -161,9 +161,7 @@ impl HelperBackend for NotifySendHelper {
     }
 
     fn score(&self, request: &DesktopNotificationRequest) -> u8 {
-        if request.actions.is_empty() {
-            SCORE_DEFAULT
-        } else if self.supports_actions() {
+        if request.actions.is_empty() || self.supports_actions() {
             SCORE_DEFAULT
         } else {
             SCORE_DROPPED_ACTIONS
@@ -379,5 +377,40 @@ mod tests {
         let request = notice_request();
         let result = NotifySendHelper::parse_output(&request, "\n", false);
         assert!(matches!(result, Err(HelperError::Parse(_))));
+    }
+
+    #[test]
+    fn old_libnotify_boundary_drops_actions_gracefully() {
+        // Step 3.2: Old libnotify graceful degradation test.
+        //
+        // libnotify 0.7.7 sits one patch below the 0.7.8 floor that added
+        // `-A id=Label` action callbacks. The helper must:
+        // - score 40 (still usable for the body, just without actions),
+        // - omit `-A` flags from the rendered argv,
+        // - mark the receipt with `dropped == "actions_libnotify_old"` so
+        //   downstream callers can surface a compatibility warning.
+        let helper =
+            NotifySendHelper::new(PathBuf::from("/usr/bin/notify-send"), Some((0, 7, 7)));
+        let mut request = notice_request();
+        request.actions.push(NotificationAction {
+            id: "ok".into(),
+            label: "OK".into(),
+        });
+
+        assert_eq!(helper.score(&request), SCORE_DROPPED_ACTIONS);
+
+        let rendered: Vec<String> = helper
+            .build_args(&request)
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        assert!(!rendered.contains(&"-A".to_string()));
+        assert!(!rendered.iter().any(|arg| arg == "ok=OK"));
+
+        let receipt = NotifySendHelper::parse_output(&request, "42\n", true).unwrap();
+        assert_eq!(
+            receipt.metadata.get("dropped").map(String::as_str),
+            Some("actions_libnotify_old"),
+        );
     }
 }

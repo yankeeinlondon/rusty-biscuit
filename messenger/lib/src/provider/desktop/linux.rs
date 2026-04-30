@@ -14,12 +14,12 @@
 //! - Uses D-Bus hints (`urgency`, `category`, `desktop-entry`, `image-path`,
 //!   `suppress-sound`) for best-effort enrichment.
 
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use notify_rust::{Hint, Notification, Timeout, Urgency as NotifyUrgency};
 
-use crate::dispatch::{NotificationIcon, NotificationUrgency};
 use crate::error::MessengerError;
 use crate::receipt::{DesktopPlatform, ProviderKind};
 
@@ -63,7 +63,10 @@ impl LinuxBackend {
     }
 
     /// Build the native (notify-rust) notification object from the request.
+    #[cfg(target_os = "linux")]
     fn build_native_notification(&self, request: &DesktopNotificationRequest) -> Notification {
+        use notify_rust::{Hint, Notification, Timeout};
+
         let mut notification = Notification::new();
         notification.summary(&request.title);
         notification.appname(&request.app_name);
@@ -74,10 +77,10 @@ impl LinuxBackend {
 
         if let Some(icon) = request.icon.as_ref() {
             match icon {
-                NotificationIcon::Named(name) => {
+                crate::dispatch::NotificationIcon::Named(name) => {
                     notification.icon(name);
                 }
-                NotificationIcon::Path(path) => {
+                crate::dispatch::NotificationIcon::Path(path) => {
                     notification.icon(&path.to_string_lossy());
                 }
             }
@@ -141,16 +144,26 @@ impl LinuxBackend {
         &self,
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, MessengerError> {
-        let mut notification = self.build_native_notification(request);
-        if let Some(replace_id) = request.replace_id.as_deref()
-            && let Ok(id_u32) = replace_id.parse::<u32>()
+        #[cfg(not(target_os = "linux"))]
         {
-            notification.id(id_u32);
+            let _ = request;
+            Err(ProviderKind::Desktop
+                .transport_error("native Linux notifications only available on Linux"))
         }
-        let handle = notification.show_async().await.map_err(|error| {
-            ProviderKind::Desktop.transport_error(format!("D-Bus notification failed: {error}"))
-        })?;
-        Ok(DesktopNotificationReceipt::new(handle.id().to_string()))
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut notification = self.build_native_notification(request);
+            if let Some(replace_id) = request.replace_id.as_deref()
+                && let Ok(id_u32) = replace_id.parse::<u32>()
+            {
+                notification.id(id_u32);
+            }
+            let handle = notification.show_async().await.map_err(|error| {
+                ProviderKind::Desktop.transport_error(format!("D-Bus notification failed: {error}"))
+            })?;
+            Ok(DesktopNotificationReceipt::new(handle.id().to_string()))
+        }
     }
 
     async fn native_replace(
@@ -158,18 +171,29 @@ impl LinuxBackend {
         id: &str,
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, MessengerError> {
-        let mut notification = self.build_native_notification(request);
-        let id_u32 = id.parse::<u32>().map_err(|_| {
-            ProviderKind::Desktop.transport_error(format!(
-                "invalid Linux notification id for replacement: {id}"
-            ))
-        })?;
-        notification.id(id_u32);
-        let handle = notification.show_async().await.map_err(|error| {
-            ProviderKind::Desktop
-                .transport_error(format!("D-Bus notification replace failed: {error}"))
-        })?;
-        Ok(DesktopNotificationReceipt::new(handle.id().to_string()).with_metadata("replaced", id))
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (id, request);
+            Err(ProviderKind::Desktop
+                .transport_error("native Linux notifications only available on Linux"))
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut notification = self.build_native_notification(request);
+            let id_u32 = id.parse::<u32>().map_err(|_| {
+                ProviderKind::Desktop.transport_error(format!(
+                    "invalid Linux notification id for replacement: {id}"
+                ))
+            })?;
+            notification.id(id_u32);
+            let handle = notification.show_async().await.map_err(|error| {
+                ProviderKind::Desktop
+                    .transport_error(format!("D-Bus notification replace failed: {error}"))
+            })?;
+            Ok(DesktopNotificationReceipt::new(handle.id().to_string())
+                .with_metadata("replaced", id))
+        }
     }
 }
 
@@ -249,11 +273,12 @@ impl DesktopBackend for LinuxBackend {
     }
 }
 
-fn map_urgency(urgency: NotificationUrgency) -> NotifyUrgency {
+#[cfg(target_os = "linux")]
+fn map_urgency(urgency: crate::dispatch::NotificationUrgency) -> notify_rust::Urgency {
     match urgency {
-        NotificationUrgency::Low => NotifyUrgency::Low,
-        NotificationUrgency::Normal => NotifyUrgency::Normal,
-        NotificationUrgency::Critical => NotifyUrgency::Critical,
+        crate::dispatch::NotificationUrgency::Low => notify_rust::Urgency::Low,
+        crate::dispatch::NotificationUrgency::Normal => notify_rust::Urgency::Normal,
+        crate::dispatch::NotificationUrgency::Critical => notify_rust::Urgency::Critical,
     }
 }
 
@@ -361,6 +386,7 @@ fn parse_libnotify_version(raw: &str) -> Option<(u32, u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dispatch::NotificationUrgency;
     use crate::provider::desktop::helpers::{HelperBackend, HelperCapabilities};
     use std::sync::Mutex;
 
@@ -371,6 +397,7 @@ mod tests {
     }
 
     impl FakeHelper {
+        #[allow(clippy::new_ret_no_self)]
         fn new(
             name: HelperName,
             score: u8,
@@ -464,7 +491,7 @@ mod tests {
         assert_eq!(receipt.notification_id, "dunst-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("Dunstify"),
+            Some("dunstify"),
         );
         assert!(!receipt.metadata.contains_key("helper_fallbacks"));
     }
@@ -490,14 +517,14 @@ mod tests {
         assert_eq!(receipt.notification_id, "send-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("NotifySend"),
+            Some("notify_send"),
         );
         let fallbacks = receipt
             .metadata
             .get("helper_fallbacks")
             .map(String::as_str)
             .unwrap_or("");
-        assert!(fallbacks.contains("Dunstify:exited"), "got `{fallbacks}`");
+        assert!(fallbacks.contains("dunstify:exited"), "got `{fallbacks}`");
     }
 
     #[tokio::test]
@@ -519,6 +546,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn daemon_mismatch_skips_dunstify_and_routes_to_notify_send() {
+        // Step 3.1: Daemon-mismatch edge-case test.
+        //
+        // A real `DunstifyHelper` configured with `daemon_is_dunst: false`
+        // must score 0 for any request — including an interactive one — so
+        // election filters it out and the working `notify-send`-shaped
+        // helper handles the dispatch. The receipt should not record any
+        // fallback because dunstify never even attempted to send.
+        use crate::provider::desktop::helpers::dunstify::DunstifyHelper;
+
+        let dunstify: Arc<dyn HelperBackend> = Arc::new(DunstifyHelper::new(
+            std::path::PathBuf::from("/nonexistent/dunstify"),
+            false,
+        ));
+        let working = FakeHelper::new(
+            HelperName::NotifySend,
+            60,
+            vec![Ok(DesktopNotificationReceipt::new("ns-fallback"))],
+        );
+        let backend =
+            LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![dunstify, working]);
+
+        let mut req = request();
+        req.actions.push(crate::dispatch::NotificationAction {
+            id: "ok".into(),
+            label: "OK".into(),
+        });
+        let receipt = backend.send(req).await.unwrap();
+        assert_eq!(receipt.notification_id, "ns-fallback");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("notify_send"),
+        );
+        // No dunstify attempt was made (it scored 0), so no fallback note.
+        assert!(!receipt.metadata.contains_key("helper_fallbacks"));
+    }
+
+    #[tokio::test]
     async fn replace_routes_to_hinted_helper() {
         let working = FakeHelper::new(
             HelperName::NotifySend,
@@ -531,7 +596,7 @@ mod tests {
         let receipt = backend.replace("99", request).await.unwrap();
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("NotifySend"),
+            Some("notify_send"),
         );
     }
 
@@ -549,19 +614,20 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn urgency_mapping_covers_all_variants() {
         assert!(matches!(
             map_urgency(NotificationUrgency::Low),
-            NotifyUrgency::Low
+            notify_rust::Urgency::Low
         ));
         assert!(matches!(
             map_urgency(NotificationUrgency::Normal),
-            NotifyUrgency::Normal
+            notify_rust::Urgency::Normal
         ));
         assert!(matches!(
             map_urgency(NotificationUrgency::Critical),
-            NotifyUrgency::Critical
+            notify_rust::Urgency::Critical
         ));
     }
 
@@ -569,5 +635,49 @@ mod tests {
     fn backend_reports_linux_platform() {
         let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), Vec::new());
         assert_eq!(backend.platform(), DesktopPlatform::Linux);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[tokio::test]
+    async fn native_send_returns_transport_error_on_non_linux() {
+        // Step 3.3: With no helpers registered on a non-Linux host, the
+        // native path is the only option left and must report a clear
+        // transport error rather than panicking. This keeps the backend
+        // safe to construct on macOS / Windows for cross-platform tests
+        // and CI matrix entries.
+        let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), Vec::new());
+        let result = backend.send(request()).await;
+        let error = result.expect_err("expected transport error on non-Linux host");
+        match error {
+            MessengerError::Transport { provider, message } => {
+                assert_eq!(provider, ProviderKind::Desktop);
+                assert!(
+                    message.contains("native Linux notifications only available on Linux"),
+                    "unexpected message: {message}",
+                );
+            }
+            other => panic!("expected MessengerError::Transport, got {other:?}"),
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[tokio::test]
+    async fn native_replace_returns_transport_error_on_non_linux() {
+        // Companion to the send-path test: replace must also surface a
+        // transport error rather than crashing when the native path is the
+        // only option on a non-Linux host.
+        let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), Vec::new());
+        let result = backend.replace("42", request()).await;
+        let error = result.expect_err("expected transport error on non-Linux host");
+        match error {
+            MessengerError::Transport { provider, message } => {
+                assert_eq!(provider, ProviderKind::Desktop);
+                assert!(
+                    message.contains("native Linux notifications only available on Linux"),
+                    "unexpected message: {message}",
+                );
+            }
+            other => panic!("expected MessengerError::Transport, got {other:?}"),
+        }
     }
 }

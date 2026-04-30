@@ -48,10 +48,16 @@ sniff repo dirty-package-areas !biscuit   # All dirty areas except biscuit
 sniff --json repo dirty-package-areas
 ```
 
-Returns a JSON array of area name strings:
+Returns a `{ scope, kind, names }` object. `scope` is `"dirty"`, `kind`
+is `"package_areas"`, and `names` is an array of area name strings
+(empty when the repo is not a monorepo):
 
 ```json
-["sniff", "homelab"]
+{
+  "scope": "dirty",
+  "kind": "package_areas",
+  "names": ["sniff", "homelab"]
+}
 ```
 
 ## Relationship to `dirty-packages`

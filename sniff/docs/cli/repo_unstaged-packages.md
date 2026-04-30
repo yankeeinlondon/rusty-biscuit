@@ -48,10 +48,16 @@ sniff repo unstaged-packages !test        # Unstaged packages excluding test
 sniff --json repo unstaged-packages
 ```
 
-Returns a JSON array of package name strings:
+Returns a `{ scope, kind, names }` object. `scope` is `"unstaged"`,
+`kind` is `"packages"`, and `names` is an array of package name strings
+(empty when the repo is not a monorepo):
 
 ```json
-["sniff-cli", "sniff"]
+{
+  "scope": "unstaged",
+  "kind": "packages",
+  "names": ["sniff-cli", "sniff"]
+}
 ```
 
 ## Related Subcommands

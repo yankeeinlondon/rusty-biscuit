@@ -130,10 +130,17 @@ sniff repo documentation-changes 2w --package sniff # Last 2 weeks, sniff packag
 sniff --json repo documentation-changes 1w
 ```
 
-Returns the same `CommitDescSet` object as `recent-commits` — JSON is not filtered down to documentation files, it always carries every changed file for the commit. The text-only rendering is the only view that prunes non-documentation files:
+Returns a filtered `CommitDescSet` so the JSON view matches what text
+mode shows — only commits with at least one documentation file are
+included, and within each kept commit the `files` array is reduced to
+documentation paths only. A top-level `"filter": "documentation"`
+field lets JSON consumers tell this output apart from a raw
+`recent-commits` payload (`recent-commits --json` does **not** include
+`filter`):
 
 ```json
 {
+  "filter": "documentation",
   "commits": [
     {
       "hash": "5e8f2a1b...",
@@ -141,8 +148,7 @@ Returns the same `CommitDescSet` object as `recent-commits` — JSON is not filt
       "packages": ["sniff"],
       "package_areas": ["sniff"],
       "files": [
-        { "path": "sniff/docs/cli/repo_recent-commits.md",        "kind": "modified" },
-        { "path": "sniff/lib/src/filesystem/git/recent_commits.rs", "kind": "modified" }
+        { "path": "sniff/docs/cli/repo_recent-commits.md", "kind": "modified" }
       ],
       "description": "docs(sniff): add CLI docs for recent-commits subcommand",
       "bullet_points": [

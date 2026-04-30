@@ -32,6 +32,8 @@
 //! notification: `helper_used` for helpers, `delivery=applescript` or
 //! `delivery=native` for the native backends.
 
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -605,7 +607,7 @@ mod tests {
         assert_eq!(receipt.notification_id, "tn-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("TerminalNotifier"),
+            Some("terminal_notifier"),
         );
         assert!(!receipt.metadata.contains_key("helper_fallbacks"));
     }
@@ -636,14 +638,14 @@ mod tests {
         assert_eq!(receipt.notification_id, "tn-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("TerminalNotifier"),
+            Some("terminal_notifier"),
         );
         let fallbacks = receipt
             .metadata
             .get("helper_fallbacks")
             .map(String::as_str)
             .unwrap_or("");
-        assert!(fallbacks.contains("Alerter:exited"), "got `{fallbacks}`");
+        assert!(fallbacks.contains("alerter:exited"), "got `{fallbacks}`");
     }
 
     #[tokio::test]
@@ -682,7 +684,7 @@ mod tests {
         let receipt = backend.replace("99", req).await.unwrap();
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("TerminalNotifier"),
+            Some("terminal_notifier"),
         );
     }
 

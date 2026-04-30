@@ -55,10 +55,18 @@ Filters apply to the full package set before checking dirty status. Use [`sniff 
 sniff --json repo dirty-packages
 ```
 
-Returns a JSON array of package name strings:
+Returns a `{ scope, kind, names }` object so JSON consumers can branch on
+lifecycle and granularity without hardcoding the subcommand name. `scope`
+is `"dirty"`, `kind` is `"packages"`, and `names` is an array of package
+name strings (empty when the repo is not a monorepo — JSON consumers
+never see a prose error string):
 
 ```json
-["sniff-cli", "sniff"]
+{
+  "scope": "dirty",
+  "kind": "packages",
+  "names": ["sniff-cli", "sniff"]
+}
 ```
 
 ## Usage in Scripts

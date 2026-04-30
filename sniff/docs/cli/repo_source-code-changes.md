@@ -141,10 +141,16 @@ sniff repo source-code-changes 2w --package sniff # Last 2 weeks, sniff package 
 sniff --json repo source-code-changes 1w
 ```
 
-Returns the same `CommitDescSet` object as `recent-commits` — JSON is not filtered down to source-code files, it always carries every changed file for the commit. The text-only rendering is the only view that prunes non-source-code files:
+Returns a filtered `CommitDescSet` so the JSON view matches what text
+mode shows — only commits with at least one source-code file are
+included, and within each kept commit the `files` array is reduced to
+source-code paths only. A top-level `"filter": "source_code"` field
+lets JSON consumers tell this output apart from a raw `recent-commits`
+payload (`recent-commits --json` does **not** include `filter`):
 
 ```json
 {
+  "filter": "source_code",
   "commits": [
     {
       "hash": "34b6d18a...",

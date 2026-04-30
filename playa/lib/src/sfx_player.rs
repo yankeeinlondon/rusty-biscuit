@@ -155,6 +155,14 @@ pub enum SfxPlaybackError {
     Timeout(u64),
 }
 
+impl SfxPlaybackError {
+    /// Whether callers should fall back to a host player instead of reporting
+    /// the native failure directly.
+    pub(crate) fn should_fallback_to_host(&self) -> bool {
+        matches!(self, Self::Decode(_))
+    }
+}
+
 /// Play sound effect bytes using native audio (rodio).
 ///
 /// Supports volume and speed control via `PlaybackOptions`. On macOS with

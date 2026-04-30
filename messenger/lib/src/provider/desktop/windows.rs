@@ -30,6 +30,8 @@
 //!
 //! [App User Model ID]: https://learn.microsoft.com/en-us/windows/win32/shell/appids
 
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -93,7 +95,18 @@ impl WindowsBackend {
                 field: WINDOWS_SETUP_REQUIRED,
             })?;
 
-        match shortcut_bootstrap_state(app_id) {
+        Self::evaluate_bootstrap(app_id, shortcut_bootstrap_state(app_id))
+    }
+
+    /// Decide whether the supplied bootstrap state allows a native send.
+    ///
+    /// Split out from [`Self::check_bootstrap`] so tests can inject the
+    /// outcome of the shortcut probe without touching the host filesystem.
+    fn evaluate_bootstrap(
+        app_id: &str,
+        state: ShortcutBootstrapState,
+    ) -> Result<&str, MessengerError> {
+        match state {
             ShortcutBootstrapState::Present | ShortcutBootstrapState::Unknown => Ok(app_id),
             ShortcutBootstrapState::Missing => Err(MessengerError::MissingConfiguration {
                 provider: ProviderKind::Desktop,
@@ -382,6 +395,7 @@ mod tests {
     }
 
     impl FakeHelper {
+        #[allow(clippy::new_ret_no_self)]
         fn new(
             name: HelperName,
             score: u8,
@@ -530,7 +544,7 @@ mod tests {
         assert_eq!(receipt.notification_id, "snore-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("SnoreToast"),
+            Some("snore_toast"),
         );
         assert!(!receipt.metadata.contains_key("helper_fallbacks"));
     }
@@ -555,14 +569,17 @@ mod tests {
         assert_eq!(receipt.notification_id, "burnt-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("BurntToast"),
+            Some("burnt_toast"),
         );
         let fallbacks = receipt
             .metadata
             .get("helper_fallbacks")
             .map(String::as_str)
             .unwrap_or("");
-        assert!(fallbacks.contains("SnoreToast:exited"), "got `{fallbacks}`");
+        assert!(
+            fallbacks.contains("snore_toast:exited"),
+            "got `{fallbacks}`"
+        );
     }
 
     #[tokio::test]
@@ -596,7 +613,7 @@ mod tests {
         let receipt = backend.replace("99", req).await.unwrap();
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("SnoreToast"),
+            Some("snore_toast"),
         );
     }
 
@@ -662,7 +679,7 @@ mod tests {
         assert_eq!(receipt.notification_id, "burnt-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("BurntToast"),
+            Some("burnt_toast"),
         );
     }
 
@@ -706,5 +723,98 @@ mod tests {
         });
         let receipt = backend.send(req).await.unwrap();
         assert_eq!(receipt.notification_id, "snore-1");
+    }
+
+    #[tokio::test]
+    async fn snoretoast_score_zero_falls_through_to_burnttoast() {
+        // Step 4.2: when SnoreToast scores 0 for a request (e.g. duplicate
+        // action labels make the label→id mapping ambiguous) the election
+        // must filter it out and prefer the next eligible helper rather
+        // than attempting a send that cannot round-trip.
+        let snore = FakeHelper::new(
+            HelperName::SnoreToast,
+            0,
+            vec![Ok(DesktopNotificationReceipt::new("ignored"))],
+        );
+        let burnt = FakeHelper::new(
+            HelperName::BurntToast,
+            40,
+            vec![Ok(DesktopNotificationReceipt::new("burnt-7"))],
+        );
+        let backend = WindowsBackend::with_helpers(config_with_app_id(), vec![snore, burnt]);
+
+        let mut req = request();
+        req.actions.push(NotificationAction {
+            id: "ok".into(),
+            label: "Same".into(),
+        });
+        req.actions.push(NotificationAction {
+            id: "cancel".into(),
+            label: "Same".into(),
+        });
+
+        let receipt = backend.send(req).await.unwrap();
+        assert_eq!(receipt.notification_id, "burnt-7");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("burnt_toast"),
+        );
+    }
+
+    #[test]
+    fn evaluate_bootstrap_rejects_missing_shortcut() {
+        // Step 4.3: even with a configured AppID, a missing Start Menu
+        // shortcut leaves WinRT unable to resolve the AUMID. The backend
+        // must surface `MissingConfiguration` with the canonical
+        // `WINDOWS_SETUP_REQUIRED` field so callers can guide the user
+        // through `messenger setup desktop`.
+        let result =
+            WindowsBackend::evaluate_bootstrap("Test.App", ShortcutBootstrapState::Missing);
+        let error = result.expect_err("missing shortcut should reject bootstrap");
+        assert!(matches!(
+            error,
+            MessengerError::MissingConfiguration {
+                provider: ProviderKind::Desktop,
+                field: WINDOWS_SETUP_REQUIRED,
+            }
+        ));
+    }
+
+    #[test]
+    fn evaluate_bootstrap_accepts_present_or_unknown_states() {
+        for state in [
+            ShortcutBootstrapState::Present,
+            ShortcutBootstrapState::Unknown,
+        ] {
+            let app_id = WindowsBackend::evaluate_bootstrap("Test.App", state)
+                .expect("present/unknown must resolve to the app id");
+            assert_eq!(app_id, "Test.App");
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn native_send_returns_transport_error_on_non_windows() {
+        // Step 4.5: with no helpers registered on a non-Windows host, the
+        // native WinRT path is the only option left. It must report a clear
+        // provider error rather than panicking, so the backend stays safe to
+        // construct on macOS/Linux for cross-platform tests and CI matrix
+        // entries. `shortcut_bootstrap_state` returns `Unknown` off-Windows,
+        // so `check_bootstrap` succeeds and we land in `send_toast`.
+        let backend = WindowsBackend::with_helpers(config_with_app_id(), Vec::new());
+        let result = backend.send(request()).await;
+        let error = result.expect_err("expected provider error on non-Windows host");
+        match error {
+            MessengerError::Provider {
+                provider, message, ..
+            } => {
+                assert_eq!(provider, ProviderKind::Desktop);
+                assert!(
+                    message.contains("Windows toast delivery is only available on Windows hosts"),
+                    "unexpected message: {message}",
+                );
+            }
+            other => panic!("expected MessengerError::Provider, got {other:?}"),
+        }
     }
 }

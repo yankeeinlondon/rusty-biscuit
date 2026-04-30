@@ -180,15 +180,21 @@ impl Playa {
 
         // Try native playback first (non-URL, non-forced-host)
         #[cfg(feature = "native-playback")]
-        if !self.force_host
-            && !matches!(self.audio.source_kind(), AudioSourceKind::Url)
-            && crate::native_player::play_native(self.audio.data_ref(), format, &self.options)
-                .is_ok()
-        {
-            if self.show_meta {
-                self.print_native_meta(format);
+        if !self.force_host && !matches!(self.audio.source_kind(), AudioSourceKind::Url) {
+            match crate::native_player::play_native(self.audio.data_ref(), format, &self.options) {
+                Ok(()) => {
+                    if self.show_meta {
+                        self.print_native_meta(format);
+                    }
+                    return Ok(());
+                }
+                Err(error) if !error.should_fallback_to_host() => {
+                    return Err(PlaybackError::AudioSubsystem {
+                        detail: error.to_string(),
+                    });
+                }
+                Err(_) => {}
             }
-            return Ok(());
         }
 
         // Host player fallback
@@ -237,18 +243,27 @@ impl Playa {
 
         // Try native playback first (non-URL, non-forced-host)
         #[cfg(feature = "native-playback")]
-        if !self.force_host
-            && !matches!(self.audio.source_kind(), AudioSourceKind::Url)
-            && crate::native_player::play_native(self.audio.data_ref(), format, &self.options)
-                .is_ok()
-        {
-            if self.show_meta {
-                self.print_native_meta(format);
+        if !self.force_host && !matches!(self.audio.source_kind(), AudioSourceKind::Url) {
+            match crate::native_player::play_native(self.audio.data_ref(), format, &self.options) {
+                Ok(()) => {
+                    if self.show_meta {
+                        self.print_native_meta(format);
+                    }
+                    if let Some(guard) = guard {
+                        guard.restore().await;
+                    }
+                    return Ok(());
+                }
+                Err(error) if !error.should_fallback_to_host() => {
+                    if let Some(guard) = guard {
+                        guard.restore().await;
+                    }
+                    return Err(PlaybackError::AudioSubsystem {
+                        detail: error.to_string(),
+                    });
+                }
+                Err(_) => {}
             }
-            if let Some(guard) = guard {
-                guard.restore().await;
-            }
-            return Ok(());
         }
 
         // Host player fallback

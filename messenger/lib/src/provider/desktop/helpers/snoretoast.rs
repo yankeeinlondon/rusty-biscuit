@@ -6,6 +6,8 @@
 //! via `-id`. Requires an App User Model ID; the backend supplies one at
 //! construction time.
 
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

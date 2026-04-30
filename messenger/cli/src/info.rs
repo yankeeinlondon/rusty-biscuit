@@ -227,7 +227,7 @@ fn compute_election_order(
             order.push(helper);
         }
     }
-    for helper in default_helper_order(os_type) {
+    for helper in default_helper_order(os_type, info) {
         if !order.contains(&helper) && info.is_installed(helper) {
             order.push(helper);
         }
@@ -243,10 +243,33 @@ fn helper_matches_os(helper: sniff::programs::NotificationHelper, os_type: OsTyp
     availability.is_empty() || availability.contains(&os_type)
 }
 
-fn default_helper_order(os_type: OsType) -> Vec<sniff::programs::NotificationHelper> {
+/// Default helper election order for a given host OS.
+///
+/// On Linux the order tracks the active D-Bus notification daemon: when the
+/// bus owner is dunst, `dunstify` ships richer features (action callbacks,
+/// stack tags, blocking `--wait`) and is preferred. When the daemon is
+/// anything else (GNOME Shell, mako, plasma, …) `dunstify`'s `--wait` /
+/// `-A` round-trips no longer work, so `notify-send` is the safer first
+/// pick. The fallback is consulted in order, so the deprioritized helper
+/// still appears in the list — election simply tries the better fit first.
+fn default_helper_order(
+    os_type: OsType,
+    info: &InstalledNotificationHelpers,
+) -> Vec<sniff::programs::NotificationHelper> {
     use sniff::programs::NotificationHelper as H;
     match os_type {
-        OsType::Linux => vec![H::Dunstify, H::NotifySend],
+        OsType::Linux => {
+            let daemon_is_dunst = info
+                .active_daemon
+                .as_ref()
+                .map(|daemon| daemon.name.eq_ignore_ascii_case("dunst"))
+                .unwrap_or(false);
+            if daemon_is_dunst {
+                vec![H::Dunstify, H::NotifySend]
+            } else {
+                vec![H::NotifySend, H::Dunstify]
+            }
+        }
         OsType::MacOS => vec![H::TerminalNotifier, H::Alerter],
         OsType::Windows => vec![H::SnoreToast, H::BurntToast],
         _ => Vec::new(),
@@ -485,5 +508,136 @@ mod tests {
     fn config_helpers_for_host_returns_empty_when_no_desktop_route() {
         let config = Config::default();
         assert!(config_helpers_for_host(&config, OsType::MacOS).is_empty());
+    }
+
+    /// Build a Linux [`InstalledNotificationHelpers`] populated with both
+    /// helpers and an explicit active daemon — used by the rendering tests
+    /// to drive deterministic output without touching the real D-Bus.
+    fn linux_helpers_with_daemon(
+        daemon_name: &str,
+    ) -> sniff::programs::InstalledNotificationHelpers {
+        use sniff::programs::ExecutableSource;
+        use sniff::programs::NotificationHelper as H;
+        use sniff::programs::notification_helpers::NotificationDaemon;
+        use std::path::PathBuf;
+
+        let mut info = sniff::programs::InstalledNotificationHelpers::default()
+            .with_program(
+                H::Dunstify,
+                PathBuf::from("/usr/bin/dunstify"),
+                ExecutableSource::Path,
+            )
+            .with_program(
+                H::NotifySend,
+                PathBuf::from("/usr/bin/notify-send"),
+                ExecutableSource::Path,
+            );
+        info.active_daemon = Some(NotificationDaemon {
+            name: daemon_name.into(),
+            vendor: Some("test-vendor".into()),
+            version: Some("1.0.0".into()),
+        });
+        info
+    }
+
+    #[test]
+    fn linux_election_order_prefers_dunstify_when_daemon_is_dunst() {
+        // Step 3.4: when the active daemon is dunst, dunstify wins because
+        // its `--wait` / `-A` round-trips work end-to-end against dunst.
+        let info = linux_helpers_with_daemon("dunst");
+        let order = compute_election_order(&info, OsType::Linux, &[]);
+        assert_eq!(order, vec!["dunstify".to_string(), "notify-send".to_string()]);
+    }
+
+    #[test]
+    fn linux_election_order_prefers_notify_send_when_daemon_is_not_dunst() {
+        // GNOME Shell, mako, plasma, … do not honour dunstify's blocking
+        // `--wait`, so notify-send delivers more reliably and ranks first.
+        for daemon in ["GNOME Shell", "mako", "Plasma"] {
+            let info = linux_helpers_with_daemon(daemon);
+            let order = compute_election_order(&info, OsType::Linux, &[]);
+            assert_eq!(
+                order,
+                vec!["notify-send".to_string(), "dunstify".to_string()],
+                "election order wrong for daemon {daemon}: {order:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn linux_election_order_prefers_notify_send_when_daemon_is_unknown() {
+        // No active daemon detected (D-Bus probe failed): treat dunstify as
+        // the riskier choice and let notify-send take the first slot.
+        use sniff::programs::ExecutableSource;
+        use sniff::programs::NotificationHelper as H;
+        use std::path::PathBuf;
+
+        let info = sniff::programs::InstalledNotificationHelpers::default()
+            .with_program(
+                H::Dunstify,
+                PathBuf::from("/usr/bin/dunstify"),
+                ExecutableSource::Path,
+            )
+            .with_program(
+                H::NotifySend,
+                PathBuf::from("/usr/bin/notify-send"),
+                ExecutableSource::Path,
+            );
+        let order = compute_election_order(&info, OsType::Linux, &[]);
+        assert_eq!(order, vec!["notify-send".to_string(), "dunstify".to_string()]);
+    }
+
+    #[test]
+    fn render_text_includes_active_daemon_row() {
+        // Step 3.4: the rendered `messenger info` text must surface the
+        // detected daemon (name + vendor + version) when present, so users
+        // can correlate why a particular helper sits where it does.
+        let report = InfoReport {
+            host_os: "Linux".into(),
+            active_daemon: Some(DaemonRecord {
+                name: "dunst".into(),
+                vendor: Some("knopwob".into()),
+                version: Some("1.9.2".into()),
+            }),
+            bundle_id: None,
+            app_id: None,
+            helpers: Vec::new(),
+            election_order: vec!["dunstify".into(), "notify-send".into()],
+            routes: Vec::new(),
+        };
+
+        let text = render_text(&report);
+        assert!(text.contains("Active daemon:"), "missing daemon row: {text}");
+        assert!(text.contains("dunst"), "missing daemon name: {text}");
+        assert!(text.contains("knopwob"), "missing vendor: {text}");
+        assert!(text.contains("1.9.2"), "missing version: {text}");
+    }
+
+    #[test]
+    fn render_text_election_order_lists_both_linux_helpers() {
+        let report = InfoReport {
+            host_os: "Linux".into(),
+            active_daemon: Some(DaemonRecord {
+                name: "dunst".into(),
+                vendor: None,
+                version: None,
+            }),
+            bundle_id: None,
+            app_id: None,
+            helpers: Vec::new(),
+            election_order: vec!["dunstify".into(), "notify-send".into()],
+            routes: Vec::new(),
+        };
+
+        let text = render_text(&report);
+        assert!(text.contains("dunstify"), "missing dunstify row: {text}");
+        assert!(text.contains("notify-send"), "missing notify-send row: {text}");
+        // The numbered prefix proves dunstify ranks ahead of notify-send.
+        let dunstify_pos = text.find("dunstify").expect("dunstify present");
+        let notify_pos = text.find("notify-send").expect("notify-send present");
+        assert!(
+            dunstify_pos < notify_pos,
+            "expected dunstify before notify-send: {text}",
+        );
     }
 }
