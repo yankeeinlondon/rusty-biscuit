@@ -250,8 +250,7 @@ pub fn parse_helper_name(name: &str) -> Option<sniff::programs::NotificationHelp
         return Some(helper);
     }
     let lower = trimmed.to_lowercase();
-    sniff::programs::NotificationHelper::iter()
-        .find(|h| h.binary_name().to_lowercase() == lower)
+    sniff::programs::NotificationHelper::iter().find(|h| h.binary_name().to_lowercase() == lower)
 }
 
 /// Resolve the helper preference list for a desktop send.

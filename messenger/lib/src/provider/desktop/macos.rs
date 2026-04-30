@@ -45,9 +45,7 @@ use super::MacOsNotificationStrategy;
 use super::backend::DesktopBackend;
 use super::helpers::alerter::AlerterHelper;
 use super::helpers::terminal_notifier::TerminalNotifierHelper;
-use super::helpers::{
-    HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers,
-};
+use super::helpers::{HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// macOS notification backend.
@@ -384,10 +382,7 @@ fn annotate_receipt_helper(
     }
 }
 
-fn annotate_native_receipt(
-    receipt: &mut DesktopNotificationReceipt,
-    attempts: &[HelperAttempt],
-) {
+fn annotate_native_receipt(receipt: &mut DesktopNotificationReceipt, attempts: &[HelperAttempt]) {
     receipt
         .metadata
         .insert("helper_used".to_string(), "native".to_string());
@@ -630,10 +625,8 @@ mod tests {
             80,
             vec![Ok(DesktopNotificationReceipt::new("tn-1"))],
         );
-        let backend = MacOsBackend::with_helpers(
-            MacOsDesktopConfig::default(),
-            vec![failing, working],
-        );
+        let backend =
+            MacOsBackend::with_helpers(MacOsDesktopConfig::default(), vec![failing, working]);
         let mut req = request("hi", Some("body"));
         req.actions.push(NotificationAction {
             id: "ok".into(),
@@ -665,10 +658,8 @@ mod tests {
             80,
             vec![Ok(DesktopNotificationReceipt::new("ignored"))],
         );
-        let backend = MacOsBackend::with_helpers(
-            MacOsDesktopConfig::default(),
-            vec![parse_failing, working],
-        );
+        let backend =
+            MacOsBackend::with_helpers(MacOsDesktopConfig::default(), vec![parse_failing, working]);
         let mut req = request("hi", Some("body"));
         req.actions.push(NotificationAction {
             id: "ok".into(),
@@ -685,8 +676,7 @@ mod tests {
             80,
             vec![Ok(DesktopNotificationReceipt::new("tn-1"))],
         );
-        let backend =
-            MacOsBackend::with_helpers(MacOsDesktopConfig::default(), vec![working]);
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), vec![working]);
         let mut req = request("hi", Some("body"));
         req.replace_helper_hint = Some(HelperName::TerminalNotifier);
         let receipt = backend.replace("99", req).await.unwrap();
@@ -706,10 +696,7 @@ mod tests {
             90,
             vec![Ok(DesktopNotificationReceipt::new("ignored"))],
         );
-        let backend = MacOsBackend::with_helpers(
-            MacOsDesktopConfig::default(),
-            vec![alerter],
-        );
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), vec![alerter]);
         let mut req = request("hi", Some("body"));
         req.replace_helper_hint = Some(HelperName::Alerter);
         let result = backend.replace("99", req).await;

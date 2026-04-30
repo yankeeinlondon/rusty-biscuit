@@ -39,9 +39,7 @@ use crate::receipt::{DesktopPlatform, ProviderKind};
 
 use super::WindowsDesktopConfig;
 use super::backend::DesktopBackend;
-use super::helpers::{
-    HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers,
-};
+use super::helpers::{HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// `field` tag used on [`MessengerError::MissingConfiguration`] errors returned
@@ -210,10 +208,7 @@ fn annotate_receipt_helper(
     }
 }
 
-fn annotate_native_receipt(
-    receipt: &mut DesktopNotificationReceipt,
-    attempts: &[HelperAttempt],
-) {
+fn annotate_native_receipt(receipt: &mut DesktopNotificationReceipt, attempts: &[HelperAttempt]) {
     receipt
         .metadata
         .insert("helper_used".to_string(), "native".to_string());
@@ -555,8 +550,7 @@ mod tests {
             40,
             vec![Ok(DesktopNotificationReceipt::new("burnt-1"))],
         );
-        let backend =
-            WindowsBackend::with_helpers(config_with_app_id(), vec![failing, working]);
+        let backend = WindowsBackend::with_helpers(config_with_app_id(), vec![failing, working]);
         let receipt = backend.send(request()).await.unwrap();
         assert_eq!(receipt.notification_id, "burnt-1");
         assert_eq!(
@@ -583,10 +577,8 @@ mod tests {
             40,
             vec![Ok(DesktopNotificationReceipt::new("ignored"))],
         );
-        let backend = WindowsBackend::with_helpers(
-            config_with_app_id(),
-            vec![parse_failing, working],
-        );
+        let backend =
+            WindowsBackend::with_helpers(config_with_app_id(), vec![parse_failing, working]);
         let result = backend.send(request()).await;
         assert!(matches!(result, Err(MessengerError::Provider { .. })));
     }
@@ -648,10 +640,7 @@ mod tests {
             vec![unscored],
         );
         let error = backend.send(request()).await.unwrap_err();
-        assert!(matches!(
-            error,
-            MessengerError::MissingConfiguration { .. }
-        ));
+        assert!(matches!(error, MessengerError::MissingConfiguration { .. }));
     }
 
     #[tokio::test]

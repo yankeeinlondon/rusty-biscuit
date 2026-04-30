@@ -45,10 +45,7 @@ impl SnoreToastHelper {
     /// image failed pre-validation (oversize, wrong format, missing). The
     /// helper's `send()` uses it to annotate the receipt with
     /// `dropped=image_too_large`.
-    pub(crate) fn build_args(
-        &self,
-        request: &DesktopNotificationRequest,
-    ) -> (Vec<OsString>, bool) {
+    pub(crate) fn build_args(&self, request: &DesktopNotificationRequest) -> (Vec<OsString>, bool) {
         let mut args: Vec<OsString> = Vec::new();
         let mut image_dropped = false;
 
@@ -451,10 +448,7 @@ mod tests {
         let helper = helper();
         let mut request = notice_request();
 
-        let temp = tempfile::Builder::new()
-            .suffix(".png")
-            .tempfile()
-            .unwrap();
+        let temp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         // Write a PNG header followed by enough padding to exceed 200 KiB.
         let mut bytes = minimal_png(64, 64);
         bytes.resize(MAX_IMAGE_BYTES as usize + 1, 0);
@@ -477,10 +471,7 @@ mod tests {
         let helper = helper();
         let mut request = notice_request();
 
-        let temp = tempfile::Builder::new()
-            .suffix(".png")
-            .tempfile()
-            .unwrap();
+        let temp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let bytes = minimal_png(2048, 2048);
         let mut file = temp.reopen().unwrap();
         file.write_all(&bytes).unwrap();
@@ -501,10 +492,7 @@ mod tests {
         let helper = helper();
         let mut request = notice_request();
 
-        let temp = tempfile::Builder::new()
-            .suffix(".png")
-            .tempfile()
-            .unwrap();
+        let temp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let bytes = minimal_png(64, 64);
         let mut file = temp.reopen().unwrap();
         file.write_all(&bytes).unwrap();
@@ -616,8 +604,7 @@ mod tests {
     #[test]
     fn parse_output_records_reply_for_exit_five() {
         let request = notice_request();
-        let receipt =
-            SnoreToastHelper::parse_output(&request, "hello there\n", 5, false).unwrap();
+        let receipt = SnoreToastHelper::parse_output(&request, "hello there\n", 5, false).unwrap();
         assert_eq!(
             receipt.metadata.get("activation_type").map(String::as_str),
             Some("reply"),

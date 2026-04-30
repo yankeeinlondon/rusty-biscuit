@@ -282,8 +282,10 @@ mod tests {
         let helper = helper(true);
         let request = notice_request();
         let args = helper.build_args(&request);
-        let rendered: Vec<String> =
-            args.iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let rendered: Vec<String> = args
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(
             rendered,
             vec![

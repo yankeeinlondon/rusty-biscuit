@@ -27,9 +27,7 @@ use super::LinuxDesktopConfig;
 use super::backend::DesktopBackend;
 use super::helpers::dunstify::DunstifyHelper;
 use super::helpers::notify_send::NotifySendHelper;
-use super::helpers::{
-    HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers,
-};
+use super::helpers::{HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// D-Bus notification backend for Linux / freedesktop.org desktops.
@@ -274,10 +272,7 @@ fn annotate_receipt_helper(
     }
 }
 
-fn annotate_native_receipt(
-    receipt: &mut DesktopNotificationReceipt,
-    attempts: &[HelperAttempt],
-) {
+fn annotate_native_receipt(receipt: &mut DesktopNotificationReceipt, attempts: &[HelperAttempt]) {
     receipt
         .metadata
         .insert("helper_used".to_string(), "native".to_string());
@@ -343,11 +338,9 @@ fn detect_linux_helpers() -> Vec<Arc<dyn HelperBackend>> {
 /// non-numeric prefix and grab the first dotted-numeric token. Unparseable
 /// strings yield `None` so the caller defaults to "no actions" behavior.
 fn parse_libnotify_version(raw: &str) -> Option<(u32, u32, u32)> {
-    let token = raw.split_whitespace().find(|word| {
-        word.chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
-    })?;
+    let token = raw
+        .split_whitespace()
+        .find(|word| word.chars().next().is_some_and(|c| c.is_ascii_digit()))?;
     let mut parts = token.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
@@ -491,10 +484,8 @@ mod tests {
             60,
             vec![Ok(DesktopNotificationReceipt::new("send-1"))],
         );
-        let backend = LinuxBackend::with_helpers(
-            LinuxDesktopConfig::default(),
-            vec![failing, working],
-        );
+        let backend =
+            LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![failing, working]);
         let receipt = backend.send(request()).await.unwrap();
         assert_eq!(receipt.notification_id, "send-1");
         assert_eq!(
@@ -521,10 +512,8 @@ mod tests {
             60,
             vec![Ok(DesktopNotificationReceipt::new("ignored"))],
         );
-        let backend = LinuxBackend::with_helpers(
-            LinuxDesktopConfig::default(),
-            vec![parse_failing, working],
-        );
+        let backend =
+            LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![parse_failing, working]);
         let result = backend.send(request()).await;
         assert!(matches!(result, Err(MessengerError::Provider { .. })));
     }
@@ -536,8 +525,7 @@ mod tests {
             60,
             vec![Ok(DesktopNotificationReceipt::new("send-1"))],
         );
-        let backend =
-            LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![working]);
+        let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![working]);
         let mut request = request();
         request.replace_helper_hint = Some(HelperName::NotifySend);
         let receipt = backend.replace("99", request).await.unwrap();
@@ -553,12 +541,12 @@ mod tests {
             super::parse_libnotify_version("notify-send 0.8.3"),
             Some((0, 8, 3)),
         );
-        assert_eq!(
-            super::parse_libnotify_version("0.7.8"),
-            Some((0, 7, 8)),
-        );
+        assert_eq!(super::parse_libnotify_version("0.7.8"), Some((0, 7, 8)),);
         assert_eq!(super::parse_libnotify_version("notify-send"), None);
-        assert_eq!(super::parse_libnotify_version("notify-send 1.0"), Some((1, 0, 0)));
+        assert_eq!(
+            super::parse_libnotify_version("notify-send 1.0"),
+            Some((1, 0, 0))
+        );
     }
 
     #[test]
