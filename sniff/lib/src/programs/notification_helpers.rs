@@ -43,14 +43,20 @@ impl InstalledNotificationHelpers {
     pub fn new() -> Self {
         let detector = CategoryDetector::new();
         let active_daemon = detect_active_daemon();
-        Self { detector, active_daemon }
+        Self {
+            detector,
+            active_daemon,
+        }
     }
 
     /// Detect installed notification helpers using a pre-built executable index.
     pub fn new_with_index(index: &ExecutableIndex) -> Self {
         let detector = CategoryDetector::new_with_index(index);
         let active_daemon = detect_active_daemon();
-        Self { detector, active_daemon }
+        Self {
+            detector,
+            active_daemon,
+        }
     }
 
     /// Returns true if the specified helper is installed.

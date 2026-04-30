@@ -347,9 +347,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             crate::args::RepoAction::Pr { status, .. } => {
-                let result =
-                    handle_pr_command(*status, cli.json, cli.plain, cli.verbose, base_dir.as_deref(),
-                    &perf).await;
+                let result = handle_pr_command(
+                    *status,
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                    base_dir.as_deref(),
+                    &perf,
+                )
+                .await;
                 perf.emit_stdout(None);
                 return result;
             }
@@ -978,19 +984,28 @@ async fn handle_pr_command(
         .map_err(|_| format!("No git repository found from {}", dir.display()))?;
 
     // 2. Resolve preferred remote URL (origin first, then first configured remote)
-    let remote_url = resolve_origin_or_first_remote(&repo)
-        .ok_or("No git remotes found for this repository")?;
+    let remote_url =
+        resolve_origin_or_first_remote(&repo).ok_or("No git remotes found for this repository")?;
 
     // 3. Parse the remote URL and construct the provider
     let parsed = GitRemote::parse_url(&remote_url).map_err(|e| {
-        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+        format!(
+            "Unsupported provider for remote URL '{}': {}",
+            remote_url, e
+        )
     })?;
     let remote = GitRemote::from_url(&remote_url).map_err(|e| {
-        format!("Unsupported provider for remote URL '{}': {}", remote_url, e)
+        format!(
+            "Unsupported provider for remote URL '{}': {}",
+            remote_url, e
+        )
     })?;
 
     // 4. Fetch pull requests
-    let prs = match remote.list_pull_requests(&parsed.owner, &parsed.repo, status).await {
+    let prs = match remote
+        .list_pull_requests(&parsed.owner, &parsed.repo, status)
+        .await
+    {
         Ok(prs) => prs,
         Err(sniff::SniffError::MissingCredentials { provider, env_var }) => {
             return Err(format!(
@@ -1006,22 +1021,21 @@ async fn handle_pr_command(
             )
             .into());
         }
-        Err(sniff::SniffError::RateLimited { provider, retry_after }) => {
+        Err(sniff::SniffError::RateLimited {
+            provider,
+            retry_after,
+        }) => {
             let retry_msg = retry_after
                 .map(|s| format!(", retry after {}s", s))
                 .unwrap_or_default();
-            return Err(format!(
-                "Rate limited by {} API{}",
-                provider, retry_msg
-            )
-            .into());
+            return Err(format!("Rate limited by {} API{}", provider, retry_msg).into());
         }
-        Err(sniff::SniffError::RemoteApi { status, provider, message }) => {
-            return Err(format!(
-                "{} API error (HTTP {}): {}",
-                provider, status, message
-            )
-            .into());
+        Err(sniff::SniffError::RemoteApi {
+            status,
+            provider,
+            message,
+        }) => {
+            return Err(format!("{} API error (HTTP {}): {}", provider, status, message).into());
         }
         Err(sniff::SniffError::RemoteInit { provider, message }) => {
             return Err(format!(
@@ -1033,7 +1047,8 @@ async fn handle_pr_command(
         Err(e) => {
             return Err(format!(
                 "Failed to list pull requests from {}: {}",
-                parsed.provider.display_name(), e
+                parsed.provider.display_name(),
+                e
             )
             .into());
         }
