@@ -56,3 +56,55 @@ desktop = [
 ]
 apns = ["dep:reqwest", "dep:jsonwebtoken"]
 fcm = ["dep:reqwest"]
+
+# Helper-stub binaries used by the desktop helper integration tests.
+# They are tiny (only `std`) and only built when the `desktop` feature is
+# enabled, so they do not affect the lib's normal compile graph.
+
+[[bin]]
+name = "stub_dunstify"
+path = "tests/bin/stub_dunstify/main.rs"
+required-features = ["desktop"]
+test = false
+doctest = false
+bench = false
+
+[[bin]]
+name = "stub_notify_send"
+path = "tests/bin/stub_notify_send/main.rs"
+required-features = ["desktop"]
+test = false
+doctest = false
+bench = false
+
+[[bin]]
+name = "stub_snoretoast"
+path = "tests/bin/stub_snoretoast/main.rs"
+required-features = ["desktop"]
+test = false
+doctest = false
+bench = false
+
+[[bin]]
+name = "stub_burnttoast"
+path = "tests/bin/stub_burnttoast/main.rs"
+required-features = ["desktop"]
+test = false
+doctest = false
+bench = false
+
+[[bin]]
+name = "stub_terminal_notifier"
+path = "tests/bin/stub_terminal_notifier/main.rs"
+required-features = ["desktop"]
+test = false
+doctest = false
+bench = false
+
+[[bin]]
+name = "stub_alerter"
+path = "tests/bin/stub_alerter/main.rs"
+required-features = ["desktop"]
+test = false
+doctest = false
+bench = false
