@@ -2,6 +2,19 @@
 phases: 6
 created: 2025-01-27
 start_phase: 1
+source_files_during_phase_1:
+  - biscuit-terminal/lib/src/discovery/detection.rs
+  - darkmatter/lib/src/terminal/supports.rs
+  - darkmatter/lib/src/terminal/mod.rs
+  - darkmatter/lib/src/terminal/tests.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/output/code_block.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - biscuit-terminal
+  - darkmatter
 ---
 
 # Execution Plan: Dim Markdown Syntax

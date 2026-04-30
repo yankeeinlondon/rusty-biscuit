@@ -1,6 +1,8 @@
 ---
 created: "2026-04-30"
 source_review: "review.md"
+phases: 6
+start_phase: 1
 scope:
   - biscuit-terminal/lib
   - tree-hugger/lib
@@ -68,11 +70,11 @@ Implementation:
 Tests:
 
 - Add unit coverage for `BlockContent::content_length` with:
-  - plain ASCII
-  - CSI color escapes
-  - OSC title escapes
-  - OSC terminated by ST (`ESC \`) if supported by the lower-level parser
-  - Unicode wide characters
+    - plain ASCII
+    - CSI color escapes
+    - OSC title escapes
+    - OSC terminated by ST (`ESC \`) if supported by the lower-level parser
+    - Unicode wide characters
 - Ensure existing `visible_width_*` tests remain green.
 
 Benchmark:
@@ -113,9 +115,9 @@ Implementation:
 Tests:
 
 - Add a filesystem unit test that creates mixed-case files and directories and asserts:
-  - directories before files
-  - case-insensitive alphabetical order
-  - stable behavior for existing dotfile/filter settings
+    - directories before files
+    - case-insensitive alphabetical order
+    - stable behavior for existing dotfile/filter settings
 
 Benchmark:
 
@@ -158,11 +160,11 @@ Implementation:
 Tests:
 
 - Unit tests for:
-  - no containing symbol
-  - single containing symbol
-  - nested symbols where the smallest containing span wins
-  - siblings with adjacent spans
-  - identical start bytes with different end bytes
+    - no containing symbol
+    - single containing symbol
+    - nested symbols where the smallest containing span wins
+    - siblings with adjacent spans
+    - identical start bytes with different end bytes
 - Existing bind pass tests must still pass.
 
 Benchmark:
@@ -314,11 +316,11 @@ Implementation:
 Tests:
 
 - Add byte-output tests for:
-  - two paragraphs with wrapping
-  - paragraph followed by table/code/image placeholder path
-  - nested blockquote
-  - list followed by paragraph
-  - long link fallback and OSC8 path if existing tests expose both modes
+    - two paragraphs with wrapping
+    - paragraph followed by table/code/image placeholder path
+    - nested blockquote
+    - list followed by paragraph
+    - long link fallback and OSC8 path if existing tests expose both modes
 - Existing terminal snapshot/unit tests must remain green.
 
 Benchmark:
@@ -362,10 +364,10 @@ Tests:
 
 - Existing `normalize_text_*` tests should remain green.
 - Add cases for:
-  - `word-\r\n   continued`
-  - multiple dehyphenations in one input
-  - trailing whitespace after a dehyphenated segment
-  - whitespace-only input
+    - `word-\r\n   continued`
+    - multiple dehyphenations in one input
+    - trailing whitespace after a dehyphenated segment
+    - whitespace-only input
 
 Benchmark:
 
