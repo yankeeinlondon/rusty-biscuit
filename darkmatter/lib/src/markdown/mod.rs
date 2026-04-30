@@ -1348,8 +1348,10 @@ title: Test
     /// Full pipeline: Markdown source `⌄dim⌄` → terminal output contains `\x1b[2m`.
     #[test]
     fn test_dim_full_pipeline_terminal() {
-        use crate::markdown::output::terminal::{for_terminal, TerminalOptions, DimMode, ColorDepth};
-        use crate::markdown::highlighting::{ThemePair, ColorMode};
+        use crate::markdown::highlighting::{ColorMode, ThemePair};
+        use crate::markdown::output::terminal::{
+            ColorDepth, DimMode, TerminalOptions, for_terminal,
+        };
 
         let md: Markdown = "This is ⌄dimmed⌄ text.".into();
         let options = TerminalOptions {
@@ -1384,7 +1386,7 @@ title: Test
     /// Full pipeline: Markdown source `⌄dim⌄` → HTML output contains literal `⌄dim⌄`.
     #[test]
     fn test_dim_full_pipeline_html() {
-        use crate::markdown::output::{as_html, HtmlOptions};
+        use crate::markdown::output::{HtmlOptions, as_html};
 
         let md: Markdown = "This is ⌄dimmed⌄ text.".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
@@ -1404,9 +1406,11 @@ title: Test
     /// both preserve the visible text content.
     #[test]
     fn test_dim_cross_format_consistency() {
-        use crate::markdown::output::terminal::{for_terminal, TerminalOptions, DimMode, ColorDepth};
-        use crate::markdown::output::{as_html, HtmlOptions};
-        use crate::markdown::highlighting::{ThemePair, ColorMode};
+        use crate::markdown::highlighting::{ColorMode, ThemePair};
+        use crate::markdown::output::terminal::{
+            ColorDepth, DimMode, TerminalOptions, for_terminal,
+        };
+        use crate::markdown::output::{HtmlOptions, as_html};
         use crate::testing::strip_ansi_codes;
 
         let md: Markdown = "The ⌄dimmed text⌄ here.".into();

@@ -29,7 +29,7 @@ use crate::markdown::block::{
 };
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
-use crate::markdown::inline::{InlineEvent, InlineTag, InlineStyleProcessor};
+use crate::markdown::inline::{InlineEvent, InlineStyleProcessor, InlineTag};
 use crate::markdown::output::code_block;
 use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
@@ -1027,7 +1027,11 @@ fn main() {}
     fn test_html_dim_renders_as_literal() {
         let md: Markdown = "This is ⌄dimmed⌄ text.".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
-        assert!(html.contains("⌄dimmed⌄"), "Should preserve ⌄ delimiters as literal, got: {}", html);
+        assert!(
+            html.contains("⌄dimmed⌄"),
+            "Should preserve ⌄ delimiters as literal, got: {}",
+            html
+        );
         assert!(!html.contains("<dim>"), "Should not have <dim> tag");
     }
 
@@ -1035,8 +1039,11 @@ fn main() {}
     fn test_html_dim_with_nested_strong() {
         let md: Markdown = "⌄dim and **strong**⌄".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
-        assert!(html.contains("<p>⌄dim and <strong>strong</strong>⌄</p>"),
-            "Should preserve delimiters around nested HTML, got: {}", html);
+        assert!(
+            html.contains("<p>⌄dim and <strong>strong</strong>⌄</p>"),
+            "Should preserve delimiters around nested HTML, got: {}",
+            html
+        );
     }
 
     #[test]
@@ -1044,7 +1051,11 @@ fn main() {}
         let md: Markdown = "Use `⌄code⌄` syntax.".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
         assert!(html.contains("<code>"), "Should contain code tag");
-        assert!(html.contains("⌄code⌄"), "Should preserve ⌄ in inline code, got: {}", html);
+        assert!(
+            html.contains("⌄code⌄"),
+            "Should preserve ⌄ in inline code, got: {}",
+            html
+        );
     }
 
     #[test]
@@ -1052,16 +1063,26 @@ fn main() {}
         let content = "```\n⌄dim\n```";
         let md: Markdown = content.into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
-        assert!(html.contains("⌄dim"), "Should preserve ⌄ in fenced code, got: {}", html);
+        assert!(
+            html.contains("⌄dim"),
+            "Should preserve ⌄ in fenced code, got: {}",
+            html
+        );
     }
 
     #[test]
     fn test_html_dim_escaping() {
         let md: Markdown = "⌄<script>alert('xss')</script>⌄".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
-        assert!(!html.contains("<script>alert"), "Should escape script inside dim span");
-        assert!(html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
-            "Should have escaped entities inside dim span, got: {}", html);
+        assert!(
+            !html.contains("<script>alert"),
+            "Should escape script inside dim span"
+        );
+        assert!(
+            html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
+            "Should have escaped entities inside dim span, got: {}",
+            html
+        );
         assert!(html.contains("⌄"), "Should preserve ⌄ delimiters");
     }
 

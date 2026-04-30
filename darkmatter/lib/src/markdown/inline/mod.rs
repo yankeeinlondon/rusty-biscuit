@@ -179,7 +179,11 @@ where
             }
 
             // Check for `⌄` (U+2304, Dim delimiter)
-            if bytes[i] == 0xE2 && i + 2 < bytes.len() && bytes[i + 1] == 0x8C && bytes[i + 2] == 0x84 {
+            if bytes[i] == 0xE2
+                && i + 2 < bytes.len()
+                && bytes[i + 1] == 0x8C
+                && bytes[i + 2] == 0x84
+            {
                 if is_escaped {
                     // Escaped: force literal by not creating a delimiter
                     i += 3;
@@ -263,8 +267,8 @@ where
                     // Try to find a matching opener on the stack
                     if let Some(stack_pos) = dim_opener_stack.iter().rposition(|_| true) {
                         let opener_idx = dim_opener_stack.remove(stack_pos);
-                        dim_role.insert(opener_idx, true);  // opener_idx is the opener
-                        dim_role.insert(idx, false);        // idx is the closer
+                        dim_role.insert(opener_idx, true); // opener_idx is the opener
+                        dim_role.insert(idx, false); // idx is the closer
                         paired = true;
                     }
                 }
@@ -307,7 +311,9 @@ where
                         }
                     } else {
                         // Unpaired delimiter: literal
-                        segments.push_back(InlineEvent::Standard(Event::Text(CowStr::from("\u{2304}"))));
+                        segments.push_back(InlineEvent::Standard(Event::Text(CowStr::from(
+                            "\u{2304}",
+                        ))));
                     }
                 }
             }
@@ -748,9 +754,12 @@ mod tests {
             content
         );
 
-        let has_dim = events
-            .iter()
-            .any(|e| matches!(e, InlineEvent::Start(InlineTag::Dim) | InlineEvent::End(InlineTag::Dim)));
+        let has_dim = events.iter().any(|e| {
+            matches!(
+                e,
+                InlineEvent::Start(InlineTag::Dim) | InlineEvent::End(InlineTag::Dim)
+            )
+        });
         assert!(!has_dim, "Escaped ⌄ should not produce Dim events");
     }
 
@@ -765,7 +774,10 @@ mod tests {
                 InlineEvent::Start(InlineTag::Dim) | InlineEvent::End(InlineTag::Dim)
             )
         });
-        assert!(!has_dim, "Code block content should not be processed for dim");
+        assert!(
+            !has_dim,
+            "Code block content should not be processed for dim"
+        );
     }
 
     #[test]
@@ -787,13 +799,22 @@ mod tests {
     fn test_dim_intraword() {
         // Intra-word: foo⌄bar⌄baz should NOT create dim spans
         let events = process_text("foo⌄bar⌄baz");
-        let has_dim = events
-            .iter()
-            .any(|e| matches!(e, InlineEvent::Start(InlineTag::Dim) | InlineEvent::End(InlineTag::Dim)));
-        assert!(!has_dim, "Intra-word dim delimiters should not produce Dim events");
+        let has_dim = events.iter().any(|e| {
+            matches!(
+                e,
+                InlineEvent::Start(InlineTag::Dim) | InlineEvent::End(InlineTag::Dim)
+            )
+        });
+        assert!(
+            !has_dim,
+            "Intra-word dim delimiters should not produce Dim events"
+        );
 
         let content = extract_text_content(&events);
-        assert!(content.contains("foo⌄bar⌄baz"), "Intra-word delimiters should remain literal");
+        assert!(
+            content.contains("foo⌄bar⌄baz"),
+            "Intra-word delimiters should remain literal"
+        );
     }
 
     #[test]

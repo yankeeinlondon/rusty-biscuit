@@ -34,7 +34,7 @@ use crate::markdown::{
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
-    inline::{InlineEvent, InlineTag, InlineStyleProcessor},
+    inline::{InlineEvent, InlineStyleProcessor, InlineTag},
     output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
@@ -1426,7 +1426,15 @@ pub fn write_terminal<W: std::io::Write>(
 
                     // Use LineWrapper for proper word wrapping
                     // Pass in_mark to enable background highlighting
-                    wrapper.emit_styled(&text, style, emit_italic, in_strikethrough, in_mark, in_dim, emit_dim);
+                    wrapper.emit_styled(
+                        &text,
+                        style,
+                        emit_italic,
+                        in_strikethrough,
+                        in_mark,
+                        in_dim,
+                        emit_dim,
+                    );
                 }
             }
 
@@ -1823,7 +1831,16 @@ fn render_table_cell_text(
 
     // Keep mark/highlight rendering on Darkmatter's style path.
     if state.in_mark {
-        return emit_prose_text(text, style, emit_italic, state.in_strikethrough, true, None, state.in_dim, emit_dim);
+        return emit_prose_text(
+            text,
+            style,
+            emit_italic,
+            state.in_strikethrough,
+            true,
+            None,
+            state.in_dim,
+            emit_dim,
+        );
     }
 
     // Use Prose selectively for semantic inline style serialization in table cells.
@@ -2193,7 +2210,15 @@ impl LineWrapper {
             if ch.is_whitespace() {
                 // Emit accumulated word first
                 if !current_word.is_empty() {
-                    self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark, in_dim, emit_dim);
+                    self.emit_word(
+                        &current_word,
+                        style,
+                        emit_italic,
+                        in_strikethrough,
+                        in_mark,
+                        in_dim,
+                        emit_dim,
+                    );
                     current_word.clear();
                 }
                 // Handle whitespace
@@ -2211,7 +2236,15 @@ impl LineWrapper {
                         }
                         // For marked text or blockquote, emit styled space to preserve background
                         if in_mark || self.blockquote_bg.is_some() {
-                            self.emit_word(" ", style, emit_italic, in_strikethrough, in_mark, in_dim, emit_dim);
+                            self.emit_word(
+                                " ",
+                                style,
+                                emit_italic,
+                                in_strikethrough,
+                                in_mark,
+                                in_dim,
+                                emit_dim,
+                            );
                         } else {
                             self.output.push(' ');
                             self.current_col += 1;
@@ -2225,7 +2258,15 @@ impl LineWrapper {
 
         // Emit any remaining word
         if !current_word.is_empty() {
-            self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark, in_dim, emit_dim);
+            self.emit_word(
+                &current_word,
+                style,
+                emit_italic,
+                in_strikethrough,
+                in_mark,
+                in_dim,
+                emit_dim,
+            );
         }
     }
 
@@ -3760,7 +3801,16 @@ fn main() {}
             font_style: FontStyle::UNDERLINE,
         };
 
-        let result = emit_prose_text("underline text", style, true, false, false, None, false, true);
+        let result = emit_prose_text(
+            "underline text",
+            style,
+            true,
+            false,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have underline escape code
         assert!(
@@ -3850,7 +3900,16 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("strikethrough text", style, true, true, false, None, false, true);
+        let result = emit_prose_text(
+            "strikethrough text",
+            style,
+            true,
+            true,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have strikethrough escape code
         assert!(
@@ -3885,7 +3944,16 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic strikethrough", style, true, true, false, None, false, true);
+        let result = emit_prose_text(
+            "bold italic strikethrough",
+            style,
+            true,
+            true,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have all three escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -6242,7 +6310,15 @@ fn line6() {}
 
         // Create wrapper with narrow width (no hyperlink support for this test)
         let mut wrapper = LineWrapper::new(20, false);
-        wrapper.emit_styled("Hello world this is a test", style, false, false, false, false, true);
+        wrapper.emit_styled(
+            "Hello world this is a test",
+            style,
+            false,
+            false,
+            false,
+            false,
+            true,
+        );
 
         let output = wrapper.into_output();
         let plain = strip_ansi_codes(&output);
@@ -6377,7 +6453,15 @@ fn line6() {}
 
         let mut wrapper = LineWrapper::new(40, true);
         wrapper.emit_styled("This has ", bold_style, true, false, false, false, true);
-        wrapper.emit_styled("mixed styles", italic_style, true, false, false, false, true);
+        wrapper.emit_styled(
+            "mixed styles",
+            italic_style,
+            true,
+            false,
+            false,
+            false,
+            true,
+        );
         wrapper.emit_styled(" in one line", bold_style, true, false, false, false, true);
 
         let output = wrapper.into_output();
@@ -6729,9 +6813,33 @@ fn bar() {}
             let mut wrapper = LineWrapper::new(width, true);
 
             // Simulate: "prefix ==highlighted== suffix"
-            wrapper.emit_styled("prefix text before ", base_style, false, false, false, false, true);
-            wrapper.emit_styled("highlighted text here", base_style, false, false, true, false, true); // in_mark=true
-            wrapper.emit_styled(" suffix text after", base_style, false, false, false, false, true);
+            wrapper.emit_styled(
+                "prefix text before ",
+                base_style,
+                false,
+                false,
+                false,
+                false,
+                true,
+            );
+            wrapper.emit_styled(
+                "highlighted text here",
+                base_style,
+                false,
+                false,
+                true,
+                false,
+                true,
+            ); // in_mark=true
+            wrapper.emit_styled(
+                " suffix text after",
+                base_style,
+                false,
+                false,
+                false,
+                false,
+                true,
+            );
 
             let output = wrapper.output();
             let plain = strip_ansi_codes(output);
@@ -7816,7 +7924,10 @@ flowchart LR
         // Delimiters should be stripped (inline processor removes them)
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("dimmed"));
-        assert!(!plain.contains("⌄"), "Delimiters should be stripped in terminal output");
+        assert!(
+            !plain.contains("⌄"),
+            "Delimiters should be stripped in terminal output"
+        );
     }
 
     #[test]
@@ -7861,7 +7972,10 @@ flowchart LR
         );
 
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("⌄code⌄"), "Inline code should preserve literal delimiters");
+        assert!(
+            plain.contains("⌄code⌄"),
+            "Inline code should preserve literal delimiters"
+        );
     }
 
     #[test]
@@ -7877,7 +7991,10 @@ flowchart LR
         );
 
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("⌄dim"), "Fenced code should preserve literal delimiters");
+        assert!(
+            plain.contains("⌄dim"),
+            "Fenced code should preserve literal delimiters"
+        );
     }
 
     #[test]
@@ -7921,7 +8038,10 @@ flowchart LR
         let plain = strip_ansi_codes(&output);
         // Table cell should contain the dimmed text without delimiters
         assert!(plain.contains("dim"), "Table cell should contain dim text");
-        assert!(!plain.contains("⌄"), "Table cell should not expose delimiters");
+        assert!(
+            !plain.contains("⌄"),
+            "Table cell should not expose delimiters"
+        );
     }
 
     #[test]
@@ -7933,7 +8053,10 @@ flowchart LR
         assert!(mode.should_emit_dim(), "DimMode::Always should emit dim");
 
         let mode = DimMode::Never;
-        assert!(!mode.should_emit_dim(), "DimMode::Never should not emit dim");
+        assert!(
+            !mode.should_emit_dim(),
+            "DimMode::Never should not emit dim"
+        );
     }
 
     #[test]
@@ -7955,10 +8078,7 @@ flowchart LR
         let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain dim code
-        assert!(
-            output.contains("\x1b[2m"),
-            "Should contain dim code"
-        );
+        assert!(output.contains("\x1b[2m"), "Should contain dim code");
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("one"));
