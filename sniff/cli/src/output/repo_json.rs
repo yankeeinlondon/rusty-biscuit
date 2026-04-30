@@ -88,10 +88,17 @@ pub(crate) fn build_with_outcome(
     base_dir: Option<&std::path::Path>,
 ) -> BuildOutcome {
     match repo_action {
-        // Bare `sniff repo` and `sniff repo structure --json` keep the full
-        // RepoInfo blob — this matches today's behavior and the spec.
-        None | Some(RepoAction::Structure { .. }) => {
-            BuildOutcome::pure(fallback_repo_value(result))
+        // Bare `sniff repo` keeps the full RepoInfo blob — this matches
+        // today's behavior and the spec.
+        None => BuildOutcome::pure(fallback_repo_value(result)),
+        // `sniff repo structure --json` honors `--filter` so JSON consumers
+        // get the same scoped package list as text mode. `--latest-versions`
+        // enrichment is applied in `commands.rs` *before* this builder is
+        // called, so `repo.packages` already carries the enriched
+        // `DependencyEntry` fields (`latest_version`, `is_updatable`,
+        // `has_major_update`); we serialize the repo as-is.
+        Some(RepoAction::Structure { filter, .. }) => {
+            BuildOutcome::pure(structure_value(result, filter))
         }
         // `git-status --json` returns the focused `GitInfo` object.
         // Package scoping is performed in `commands.rs` between detection
@@ -197,8 +204,20 @@ fn locator_root_outcome(rendered: String) -> BuildOutcome {
 /// Used by `commands.rs` from inside the early-return arms for `Package`
 /// and `PackageArea` so that JSON consumers always see `{ "name": "..." }`
 /// while exit codes continue to honour `--no-error` / `--on-error`.
+///
+/// ## Notes
+///
+/// When `rendered` is empty this returns `Some(1)` for `exit_code` so
+/// future callers that route empty-name results through `BuildOutcome`
+/// can surface the failure exit. The current callers in `commands.rs`
+/// continue to handle exit codes directly because they need to honour
+/// the `--no-error` / `--on-error` flags before exiting.
 pub(crate) fn name_outcome(rendered: String) -> BuildOutcome {
-    BuildOutcome::pure(json!({ "name": rendered }))
+    let exit_code = if rendered.is_empty() { Some(1) } else { None };
+    BuildOutcome {
+        value: json!({ "name": rendered }),
+        exit_code,
+    }
 }
 
 /// Build the JSON outcome for `has-merge-conflict --json`.
@@ -324,6 +343,41 @@ fn git_status_value(result: &SniffResult) -> Value {
     } else {
         json!({})
     }
+}
+
+/// Build the JSON value for `sniff repo structure --json`, applying
+/// the `--filter` argument to scope the `packages` array.
+///
+/// When no filter is provided the output mirrors [`fallback_repo_value`]
+/// exactly. With a filter, `repo.packages` is replaced with the matching
+/// subset; all other `RepoInfo` fields are preserved so downstream JSON
+/// consumers continue to see workspace tools, monorepo flags, root path,
+/// and aggregated dependency rollups.
+///
+/// `--latest-versions` enrichment is applied in `commands.rs` before this
+/// builder runs, so per-package `latest_version` / `is_updatable` /
+/// `has_major_update` fields automatically carry through.
+fn structure_value(result: &SniffResult, filter: &[String]) -> Value {
+    let Some(fs) = result.filesystem.as_ref() else {
+        return json!({});
+    };
+    let Some(repo) = fs.repo.as_ref() else {
+        return json!({});
+    };
+
+    if filter.is_empty() {
+        return serde_json::to_value(repo).unwrap_or(Value::Null);
+    }
+
+    let packages = repo.packages.as_deref().unwrap_or(&[]);
+    let filtered: Vec<Package> = filesystem::filter_packages(packages, filter)
+        .into_iter()
+        .cloned()
+        .collect();
+
+    let mut repo_clone = repo.clone();
+    repo_clone.packages = Some(filtered);
+    serde_json::to_value(&repo_clone).unwrap_or(Value::Null)
 }
 
 /// Build the legacy full-`RepoInfo` JSON value (today's behavior).
@@ -935,6 +989,17 @@ mod tests {
             assert_eq!(outcome.value, json!({ "name": "alpha" }));
             assert!(outcome.exit_code.is_none());
         }
+
+        #[test]
+        fn name_outcome_empty_sets_exit_code_one() {
+            let outcome = name_outcome(String::new());
+            assert_eq!(outcome.value, json!({ "name": "" }));
+            assert_eq!(
+                outcome.exit_code,
+                Some(1),
+                "empty name must surface failure exit code"
+            );
+        }
     }
 
     mod deps {
@@ -1232,6 +1297,158 @@ mod tests {
             let text_value = build(&result, Some(&text_action), None);
             let ui_value = build(&result, Some(&ui_action), None);
             assert_eq!(text_value, ui_value, "ui flag must not change JSON output");
+        }
+    }
+
+    mod structure {
+        //! Phase 3 — `repo structure --json --filter` builder.
+        //!
+        //! These tests pin the JSON shape so consumers can rely on
+        //! `--filter` scoping the `packages` array (matching text mode)
+        //! while every other `RepoInfo` field is preserved.
+
+        use super::*;
+        use sniff::filesystem::FilesystemInfo;
+        use sniff::filesystem::repo::Package;
+        use sniff::filesystem::repo::types::RepoInfo;
+
+        fn make_package(name: &str, area: &str) -> Package {
+            Package {
+                path: PathBuf::from(format!("/tmp/repo/{area}/{name}")),
+                relative: format!("{area}/{name}"),
+                package_area: area.to_string(),
+                name: name.to_string(),
+                ecosystem: sniff::filesystem::repo::PackageEcosystem::Unknown,
+                discovery_sources: vec![],
+                nested_packages: vec![],
+                primary_language: None,
+                secondary_languages: vec![],
+                languages: vec![],
+                frameworks: vec![],
+                file_associations: vec![],
+                configuration: vec![],
+                documentation: vec![],
+                editor_config: None,
+                command_runner: vec![],
+                package_managers: vec![],
+                version: None,
+                features: vec![],
+                depends_on: vec![],
+                used_by: vec![],
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                is_updatable: None,
+                has_major_update: None,
+                is_excluded: false,
+            }
+        }
+
+        fn fixture_with_two_packages() -> SniffResult {
+            let repo = RepoInfo {
+                is_monorepo: true,
+                monorepo_tool: None,
+                workspace_tools: Vec::new(),
+                root: PathBuf::from("/tmp/repo"),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                packages: Some(vec![
+                    make_package("alpha", "area-a"),
+                    make_package("beta", "area-b"),
+                ]),
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(FilesystemInfo {
+                    repo: Some(repo),
+                    ..Default::default()
+                }),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn structure_no_filter_matches_fallback() {
+            let result = fixture_with_two_packages();
+            let unfiltered = structure_value(&result, &[]);
+            let fallback = fallback_repo_value(&result);
+            assert_eq!(
+                unfiltered, fallback,
+                "no filter should match the unfiltered fallback shape"
+            );
+        }
+
+        #[test]
+        fn structure_with_filter_scopes_packages() {
+            let result = fixture_with_two_packages();
+            let value = structure_value(&result, &["alpha".to_string()]);
+            let pkgs = value["packages"]
+                .as_array()
+                .expect("packages must be array");
+            assert_eq!(pkgs.len(), 1, "filter should narrow to 1 package: {value}");
+            assert_eq!(pkgs[0]["name"], "alpha");
+        }
+
+        #[test]
+        fn structure_with_filter_preserves_other_repo_fields() {
+            // Filtering must NOT drop top-level RepoInfo metadata —
+            // is_monorepo / root must still be present. (`workspace_tools`
+            // and other Vec fields are `skip_serializing_if = "is_empty"`,
+            // so we don't assert on them in this fixture.)
+            let result = fixture_with_two_packages();
+            let value = structure_value(&result, &["alpha".to_string()]);
+            assert!(value.is_object(), "must be object: {value}");
+            assert_eq!(value["is_monorepo"], Value::Bool(true));
+            assert!(
+                value.get("root").is_some(),
+                "root must be preserved: {value}"
+            );
+        }
+
+        #[test]
+        fn structure_action_with_filter_returns_filtered_value() {
+            let result = fixture_with_two_packages();
+            let action = RepoAction::Structure {
+                filter: vec!["beta".to_string()],
+                latest_versions: false,
+            };
+            let value = build(&result, Some(&action), None);
+            let pkgs = value["packages"]
+                .as_array()
+                .expect("packages must be array");
+            assert_eq!(pkgs.len(), 1, "structure action must honor filter: {value}");
+            assert_eq!(pkgs[0]["name"], "beta");
+        }
+
+        #[test]
+        fn structure_without_filesystem_returns_empty_object() {
+            let result = SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: None,
+                performance: None,
+            };
+            let value = structure_value(&result, &["alpha".to_string()]);
+            assert_eq!(value, json!({}));
+        }
+
+        #[test]
+        fn structure_without_repo_returns_empty_object() {
+            let result = SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(FilesystemInfo::default()),
+                performance: None,
+            };
+            let value = structure_value(&result, &["alpha".to_string()]);
+            assert_eq!(value, json!({}));
         }
     }
 }

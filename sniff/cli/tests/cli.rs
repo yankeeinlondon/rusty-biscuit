@@ -3230,6 +3230,150 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
     );
 }
 
+#[test]
+fn test_repo_root_json_perf_stdout_is_valid_json() {
+    // `repo root --json --perf` must produce parseable JSON on stdout.
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["repo", "root", "--json", "--perf"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert!(stdout.contains("root"), "should contain root key");
+}
+
+#[test]
+fn test_repo_dirty_files_json_perf_stdout_is_valid_json() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-files",
+            "--json",
+            "--perf",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+}
+
+#[test]
+fn test_repo_recent_commits_json_perf_stdout_is_valid_json() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--json",
+            "--perf",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert!(stdout.contains("commits"), "should contain commits key");
+}
+
+#[test]
+fn test_repo_has_merge_conflict_json_perf_stdout_is_valid_json() {
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "has-merge-conflict",
+            "--json",
+            "--perf",
+        ])
+        .assert();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+}
+
+// ============================================================================
+// Phase 2 — Stable JSON shape for `package` / `package-area` / `root`
+// when the result resolves to empty.
+// ============================================================================
+//
+// JSON consumers must always see a stable object even when the lookup
+// resolves to nothing. Text mode emits prose via `handle_no_results`, but
+// JSON mode emits `{ "name": "" }` (or `{ "root": "" }`) and exits 1.
+
+#[test]
+fn test_package_json_empty_name_stable_shape() {
+    // A bare git repo with no packages — `repo package --json` must emit
+    // `{ "name": "" }` instead of prose / no output.
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package",
+            "--json",
+        ])
+        .assert();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String(String::new()));
+}
+
+#[test]
+fn test_package_area_json_empty_name_stable_shape() {
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-area",
+            "--json",
+        ])
+        .assert();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String(String::new()));
+}
+
+#[test]
+fn test_root_json_outside_git_repo_stable_shape() {
+    // Pointing `--base` at a non-git directory must still emit
+    // `{ "root": "" }` so JSON consumers see a stable shape rather than
+    // a Box<dyn Error> bubble.
+    let dir = tempfile::tempdir().unwrap();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            dir.path().to_str().unwrap(),
+            "repo",
+            "root",
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["root"], Value::String(String::new()));
+}
+
 // ============================================================================
 // `repo {dirty,staged,unstaged}-{packages,package-areas} --json` Shape Tests
 // ============================================================================
@@ -3805,5 +3949,72 @@ fn test_is_current_package_area_dirty_json_perf_attaches_performance_field() {
     assert!(
         value.get("performance").is_some(),
         "--perf must inject a `performance` field into boolean payloads: {value}"
+    );
+}
+
+/// Phase 3 — `repo structure --json --filter` must scope the `packages`
+/// array, matching text mode. Without `--filter` every workspace member is
+/// listed; with `--filter pkg-a` only the matching package remains. The
+/// non-`packages` `RepoInfo` fields (workspace tools, monorepo flag, root)
+/// stay intact in both cases.
+#[test]
+fn test_repo_structure_filter_json_filters_packages() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let assert_all = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "structure",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout_all = String::from_utf8(assert_all.get_output().stdout.clone()).unwrap();
+    let json_all: Value = serde_json::from_str(stdout_all.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout_all}\n---"));
+    let all_packages = json_all["packages"]
+        .as_array()
+        .expect("packages must be array");
+    assert_eq!(
+        all_packages.len(),
+        2,
+        "unfiltered structure should list all 2 monorepo packages: {json_all}"
+    );
+
+    let assert_filtered = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "structure",
+            "--json",
+            "pkg-a",
+        ])
+        .assert()
+        .success();
+    let stdout_filtered = String::from_utf8(assert_filtered.get_output().stdout.clone()).unwrap();
+    let json_filtered: Value = serde_json::from_str(stdout_filtered.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout_filtered}\n---"));
+    let filtered_packages = json_filtered["packages"]
+        .as_array()
+        .expect("packages must be array");
+    assert_eq!(
+        filtered_packages.len(),
+        1,
+        "filter pkg-a should narrow to 1 package: {json_filtered}"
+    );
+    assert_eq!(filtered_packages[0]["name"], "pkg-a");
+
+    // Non-packages fields must remain intact under the filter.
+    assert!(
+        json_filtered.get("root").is_some(),
+        "filtered structure must preserve `root`: {json_filtered}"
+    );
+    assert_eq!(
+        json_filtered["is_monorepo"],
+        Value::Bool(true),
+        "filtered structure must preserve `is_monorepo`: {json_filtered}"
     );
 }
