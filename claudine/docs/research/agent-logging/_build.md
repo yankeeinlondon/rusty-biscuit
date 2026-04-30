@@ -1,9 +1,11 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
-file: "claudine/docs/research/agent-logging/{{state.file}}"
+file: "{{ctx.repo_root}}/claudine/docs/research/agent-logging/{{state.file}}"
 grant:
     read:
         - "{{state.user_dir}}"
+agent: opencode
+model: zai-coding-plan/glm-5.1
 ---
 
 ## Skills

@@ -1,12 +1,14 @@
 {
     "cSpell.words": [
         "Anomalyco",
+        "ASOF",
         "boolish",
         "Braintrust",
         "clearsign",
         "collab",
         "darkmatter",
         "doctests",
+        "duckdb",
         "EACCES",
         "Explainability",
         "Firecrawl",
@@ -36,6 +38,7 @@
         "startswith",
         "TAVILY",
         "unconfigured",
+        "UNPIVOT",
         "worktrees",
         "xhigh",
         "ZENMUX"

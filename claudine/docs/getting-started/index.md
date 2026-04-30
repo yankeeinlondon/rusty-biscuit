@@ -107,7 +107,10 @@ Ok so now you _what_ you're supposed to do and if you're good at "instruction fo
         - If you are using the Qwen Agent then Qwen API Keys will be preserved
             - The same is true for Kimi Code and Codex
             - We do NOT do this for Anthropic keys with Claude Code because most people use it with a subscription and might have an API Key for other use cases. Including an API Key when claude starts makes it **skip** your subscription so we play it safe and remove it by default. You can _include_ it with `--include` if you want to
-- 
+
+- **Simple Non-Interactive Access**
+
+    A vast majority of developers rely on the interactive chat interface that an 
 
 ### Leveling up with Composition
 
