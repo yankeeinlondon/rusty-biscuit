@@ -22,23 +22,10 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase: []
 source_files_during_phase_2:
-  - messenger/lib/Cargo.toml
-  - messenger/lib/src/provider/desktop/mod.rs
-  - messenger/lib/src/provider/desktop/linux.rs
-  - messenger/lib/src/provider/desktop/windows.rs
-  - messenger/lib/src/tests/mod.rs
-  - messenger/lib/src/tests/validation.rs
   - messenger/lib/src/tests/desktop_helpers.rs
-  - messenger/lib/tests/bin/stub_dunstify/main.rs
-  - messenger/lib/tests/bin/stub_notify_send/main.rs
-  - messenger/lib/tests/bin/stub_snoretoast/main.rs
-  - messenger/lib/tests/bin/stub_burnttoast/main.rs
-  - messenger/lib/tests/bin/stub_terminal_notifier/main.rs
-  - messenger/lib/tests/bin/stub_alerter/main.rs
-  - messenger/justfile
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
-skills_files_updated_during_phase2: []
+skills_files_updated_during_phase_2: []
 source_files_during_phase_3:
   - messenger/lib/src/provider/desktop/helpers/dunstify.rs
   - messenger/lib/src/provider/desktop/helpers/notify_send.rs
