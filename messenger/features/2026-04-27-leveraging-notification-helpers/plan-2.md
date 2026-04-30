@@ -54,6 +54,14 @@ docs_updated_during_phase_4:
   - messenger/features/2026-04-27-leveraging-notification-helpers/plan-2.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - messenger/docs/user-guide.md
+  - messenger/lib/README.md
+  - messenger/features/2026-04-27-leveraging-notification-helpers/plan-2.md
+docs_created_during_phase_5:
+  - .github/workflows/messenger-desktop-tests.yml
+skills_files_updated_during_phase5: []
 packages:
   - messenger
 ---
