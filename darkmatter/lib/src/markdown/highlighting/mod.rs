@@ -27,7 +27,7 @@ use syntect::parsing::SyntaxSet;
 /// ```
 #[derive(Debug)]
 pub struct CodeHighlighter {
-    syntax_set: SyntaxSet,
+    syntax_set: &'static SyntaxSet,
     theme: SyntectTheme,
     theme_pair: ThemePair,
     color_mode: ColorMode,
@@ -57,7 +57,7 @@ impl CodeHighlighter {
 
     /// Returns a reference to the syntax set.
     pub fn syntax_set(&self) -> &SyntaxSet {
-        &self.syntax_set
+        self.syntax_set
     }
 
     /// Returns a reference to the current theme.
