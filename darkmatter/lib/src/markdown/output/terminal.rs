@@ -220,6 +220,66 @@ impl ItalicMode {
     }
 }
 
+/// Controls how dim/faint text is rendered to the terminal.
+///
+/// Different terminals have varying levels of support for dim text rendering.
+/// This enum allows explicit control over dim behavior.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, DimMode};
+///
+/// // Auto-detect (safe default)
+/// let mut options = TerminalOptions::default();
+/// assert!(matches!(options.dim_mode, DimMode::Auto));
+///
+/// // Force dim for pre-rendering to unknown terminals
+/// options.dim_mode = DimMode::Always;
+///
+/// // Disable dim for terminals known not to support it
+/// options.dim_mode = DimMode::Never;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DimMode {
+    /// Auto-detect dim support using terminal capabilities.
+    ///
+    /// Uses [`supports_dim()`](crate::terminal::supports_dim) to query
+    /// the terminal. This is the safest option for direct terminal output.
+    #[default]
+    Auto,
+
+    /// Always emit dim escape codes (`\x1b[2m`).
+    ///
+    /// Use this when pre-rendering content for a future terminal where
+    /// capabilities cannot be detected. Assumes dim support is available.
+    Always,
+
+    /// Never emit dim escape codes.
+    ///
+    /// Use this when rendering for terminals known not to support dim,
+    /// or when dim styling is not desired.
+    Never,
+}
+
+impl DimMode {
+    /// Resolves the mode to a boolean indicating whether to emit dim codes.
+    ///
+    /// ## Returns
+    ///
+    /// - `Auto`: Result of `supports_dim()` terminal capability check
+    /// - `Always`: `true`
+    /// - `Never`: `false`
+    #[allow(dead_code)]
+    fn should_emit_dim(&self) -> bool {
+        match self {
+            DimMode::Auto => crate::terminal::supports_dim(),
+            DimMode::Always => true,
+            DimMode::Never => false,
+        }
+    }
+}
+
 /// Controls how hyperlinks are rendered to the terminal.
 ///
 /// OSC 8 hyperlinks allow terminals to display clickable links, but not all
@@ -668,6 +728,12 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit italic escape codes (for pre-rendering)
     /// - `Never`: Never emit italic escape codes
     pub italic_mode: ItalicMode,
+    /// Controls how dim/faint text is rendered.
+    ///
+    /// - `Auto` (default): Detect terminal capability via `supports_dim()`
+    /// - `Always`: Always emit dim escape codes (for pre-rendering)
+    /// - `Never`: Never emit dim escape codes
+    pub dim_mode: DimMode,
     /// Maximum line width for text wrapping.
     ///
     /// If `None` (default), auto-detects from terminal size (defaults to 80 if detection fails).
@@ -706,6 +772,7 @@ impl Default for TerminalOptions {
             image_mode: TerminalImageMode::default(),
             base_path: None,
             italic_mode: ItalicMode::default(),
+            dim_mode: DimMode::default(),
             max_width: None,
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
@@ -2405,6 +2472,7 @@ mod tests {
             image_mode: TerminalImageMode::Never,
             base_path: None,
             italic_mode: ItalicMode::Always,
+            dim_mode: DimMode::Always,
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
