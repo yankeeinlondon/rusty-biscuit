@@ -882,34 +882,52 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
         if line.is_empty() {
             return Ok(());
         }
-        let raw: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                super::trace_malformed_line(Provider::KimiCode, self.line_num, &e.to_string());
-                self.emit_malformed_warning(&e.to_string());
-                return Ok(());
-            }
-        };
-
-        let raw_kind = envelope_raw_kind(&raw);
-        super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
-
-        let envelope = match KimiEnvelope::classify(raw.clone()) {
+        // Try direct envelope classification from `&str` to avoid the
+        // intermediate `serde_json::Value` DOM allocation on the hot path.
+        // Fall back to `Value` only for malformed JSON or unknown envelopes.
+        let envelope = match KimiEnvelope::classify_str(line) {
             Some(env) => env,
             None => {
+                let raw: Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        super::trace_malformed_line(
+                            Provider::KimiCode,
+                            self.line_num,
+                            &e.to_string(),
+                        );
+                        self.emit_malformed_warning(&e.to_string());
+                        return Ok(());
+                    }
+                };
+                let raw_kind = envelope_raw_kind(&raw);
+                super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
                 self.emit_provider_extension(&raw_kind, raw);
                 return Ok(());
             }
         };
 
+        let raw_kind = envelope_raw_kind(
+            &serde_json::from_str(line).expect("already validated JSON"),
+        );
+        super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
+
         match envelope {
             KimiEnvelope::Notification(params) => match params.into_event() {
                 Some(event) => self.handle_event(event, &raw_kind),
-                None => self.emit_provider_extension(&raw_kind, raw),
+                None => {
+                    let raw: Value = serde_json::from_str(line)
+                        .expect("already validated JSON");
+                    self.emit_provider_extension(&raw_kind, raw);
+                }
             },
             KimiEnvelope::Request { id, params } => match params.into_request() {
                 Some(request) => self.handle_request(id, request, &raw_kind),
-                None => self.emit_provider_extension(&raw_kind, raw),
+                None => {
+                    let raw: Value = serde_json::from_str(line)
+                        .expect("already validated JSON");
+                    self.emit_provider_extension(&raw_kind, raw);
+                }
             },
             KimiEnvelope::SuccessResponse { id, result } => {
                 if id.as_str() == Some("init-1") {

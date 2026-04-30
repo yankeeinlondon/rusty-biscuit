@@ -142,30 +142,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         Value::Object(m)
     }
 
-    fn handle_init(&mut self, init: ClaudeInit, raw_kind: &str, raw: &Value) {
-        // `system` events carry a `subtype` discriminator. Only `init` (and
-        // `null`/missing — legacy `init` envelopes) establish session state
-        // and emit a `SessionStart`. Everything else (notably `hook_started`
-        // and `hook_response`) is surfaced as a `ProviderExtension`. Hook
-        // events that arrive BEFORE `SessionStart` are buffered so the
-        // session-ID marker renders first (per the response-refinement
-        // spec). If the buffer saturates we flush inline to preserve live
-        // streaming.
-        let subtype = init.subtype.as_deref();
-        let is_session_init =
-            raw_kind == "init" || matches!(subtype, None | Some("init") | Some(""));
-        if !is_session_init {
-            let ext_kind = match subtype {
-                Some(s) if !s.is_empty() => format!("system/{s}"),
-                _ => "system".to_string(),
-            };
-            if !self.session_started && self.pre_init_hook_buffer.len() < MAX_PRE_INIT_HOOK_EVENTS {
-                self.pre_init_hook_buffer.push((ext_kind, raw.clone()));
-            } else {
-                self.emit_provider_extension(&ext_kind, raw.clone());
-            }
-            return;
-        }
+    fn handle_session_init(&mut self, init: ClaudeInit, raw_kind: &str) {
         self.session_id = init.session_id;
         self.model = init.model;
         self.api_key_source = init.api_key_source;
@@ -190,6 +167,19 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         let drained: Vec<(String, Value)> = std::mem::take(&mut self.pre_init_hook_buffer);
         for (ext_kind, payload) in drained {
             self.emit_provider_extension(&ext_kind, payload);
+        }
+    }
+
+    fn handle_non_session_init(&mut self, init: &ClaudeInit, raw: &Value) {
+        let subtype = init.subtype.as_deref();
+        let ext_kind = match subtype {
+            Some(s) if !s.is_empty() => format!("system/{s}"),
+            _ => "system".to_string(),
+        };
+        if !self.session_started && self.pre_init_hook_buffer.len() < MAX_PRE_INIT_HOOK_EVENTS {
+            self.pre_init_hook_buffer.push((ext_kind, raw.clone()));
+        } else {
+            self.emit_provider_extension(&ext_kind, raw.clone());
         }
     }
 
@@ -887,58 +877,78 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
             return Ok(());
         }
 
-        // Parse as Value first so we preserve the raw payload for
-        // `ProviderExtension` and the `result` raw summary.
-        let raw: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                super::trace_malformed_line(Provider::Claude, self.line_num, &e.to_string());
-                self.emit_malformed_warning(&e.to_string());
-                return Ok(());
-            }
-        };
-
-        let raw_kind = raw
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        super::trace_parser_event(Provider::Claude, &raw_kind, self.line_num);
-
-        // Typed dispatch first; known-but-untyped and shape-drifted events
-        // fall through to allowlist / ProviderExtension below.
-        match serde_json::from_value::<ClaudeEvent>(raw.clone()) {
-            Ok(ClaudeEvent::Init(init) | ClaudeEvent::System(init)) => {
-                self.handle_init(init, &raw_kind, &raw);
-            }
-            Ok(ClaudeEvent::Assistant(assistant)) => {
-                self.handle_assistant_message(assistant, &raw_kind);
-            }
-            Ok(ClaudeEvent::User(user)) => {
-                self.handle_user(user, &raw_kind);
-            }
-            Ok(ClaudeEvent::ContentBlockStart(cbs)) => {
-                self.handle_content_block_start(cbs, &raw_kind);
-            }
-            Ok(ClaudeEvent::ContentBlockDelta(d)) => {
-                self.handle_content_block_delta(d, &raw_kind);
-            }
-            Ok(ClaudeEvent::Error(err) | ClaudeEvent::AssistantError(err)) => {
-                self.handle_error(err, &raw_kind);
-            }
-            Ok(ClaudeEvent::Result(result)) => {
-                self.handle_result(result, raw, &raw_kind);
-            }
-            Ok(ClaudeEvent::RateLimit(rl)) => {
-                self.handle_rate_limit(rl, &raw_kind);
-            }
-            Ok(ClaudeEvent::ToolUse(tu)) => {
-                self.handle_tool_use(tu, &raw_kind);
-            }
-            Ok(ClaudeEvent::ToolResult(tr)) => {
-                self.handle_tool_result(tr, &raw_kind);
+        // Try typed deserialization first to avoid `serde_json::Value` DOM
+        // allocation on the hot path. Fall back to `Value` only for unknown
+        // event types that must be preserved as `ProviderExtension`, for
+        // `result` events that need the raw payload for `raw_summary`, or for
+        // non-session `system` events that carry hook payloads.
+        match serde_json::from_str::<ClaudeEvent>(line) {
+            Ok(event) => {
+                let raw_kind = event.type_str().to_string();
+                super::trace_parser_event(Provider::Claude, &raw_kind, self.line_num);
+                match event {
+                    ClaudeEvent::Init(init) | ClaudeEvent::System(init) => {
+                        let subtype = init.subtype.as_deref();
+                        let is_session_init = raw_kind == "init"
+                            || matches!(subtype, None | Some("init") | Some(""));
+                        if is_session_init {
+                            self.handle_session_init(init, &raw_kind);
+                        } else {
+                            let raw: Value = serde_json::from_str(line)
+                                .expect("already validated JSON");
+                            self.handle_non_session_init(&init, &raw);
+                        }
+                    }
+                    ClaudeEvent::Assistant(assistant) => {
+                        self.handle_assistant_message(assistant, &raw_kind);
+                    }
+                    ClaudeEvent::User(user) => {
+                        self.handle_user(user, &raw_kind);
+                    }
+                    ClaudeEvent::ContentBlockStart(cbs) => {
+                        self.handle_content_block_start(cbs, &raw_kind);
+                    }
+                    ClaudeEvent::ContentBlockDelta(d) => {
+                        self.handle_content_block_delta(d, &raw_kind);
+                    }
+                    ClaudeEvent::Error(err) | ClaudeEvent::AssistantError(err) => {
+                        self.handle_error(err, &raw_kind);
+                    }
+                    ClaudeEvent::Result(result) => {
+                        let raw: Value = serde_json::from_str(line)
+                            .expect("already validated JSON");
+                        self.handle_result(result, raw, &raw_kind);
+                    }
+                    ClaudeEvent::RateLimit(rl) => {
+                        self.handle_rate_limit(rl, &raw_kind);
+                    }
+                    ClaudeEvent::ToolUse(tu) => {
+                        self.handle_tool_use(tu, &raw_kind);
+                    }
+                    ClaudeEvent::ToolResult(tr) => {
+                        self.handle_tool_result(tr, &raw_kind);
+                    }
+                }
             }
             Err(_) => {
+                let raw: Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        super::trace_malformed_line(
+                            Provider::Claude,
+                            self.line_num,
+                            &e.to_string(),
+                        );
+                        self.emit_malformed_warning(&e.to_string());
+                        return Ok(());
+                    }
+                };
+                let raw_kind = raw
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                super::trace_parser_event(Provider::Claude, &raw_kind, self.line_num);
                 if Self::is_known_kind(&raw_kind) {
                     self.handle_unknown_known_kind(&raw_kind, raw);
                 } else {
