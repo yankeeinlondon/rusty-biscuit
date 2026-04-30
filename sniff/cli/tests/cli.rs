@@ -4018,3 +4018,135 @@ fn test_repo_structure_filter_json_filters_packages() {
         "filtered structure must preserve `is_monorepo`: {json_filtered}"
     );
 }
+
+// ============================================================================
+// Phase 4 — Targeted integration coverage for previously untested JSON paths
+// ============================================================================
+//
+// These tests exercise the success branches of locator and boolean
+// subcommands that were previously only covered by their empty/false
+// branches, plus the `--package` scoping path on `git-status --json`.
+
+/// `package-area --json` from inside a real package emits `{ "name": <area> }`
+/// where the area name is distinct from the package name (the fixture
+/// places `alpha-core` inside area `alpha`).
+#[test]
+fn test_package_area_json_resolves_to_real_area() {
+    let (_dir, path) = create_cli_monorepo_distinct_area_and_package();
+    let cwd = path.join("alpha/core");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            cwd.to_str().unwrap(),
+            "repo",
+            "package-area",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String("alpha".to_string()));
+}
+
+/// `package-area-root --json` from inside a known package area emits
+/// `{ "root": <abs path containing the area name> }`.
+#[test]
+fn test_package_area_root_json_when_present() {
+    let (_dir, path) = create_cli_monorepo_distinct_area_and_package();
+    let cwd = path.join("alpha/core");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            cwd.to_str().unwrap(),
+            "repo",
+            "package-area-root",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    let root = value["root"].as_str().expect("root must be a string");
+    assert!(
+        !root.is_empty(),
+        "package-area-root must be non-empty inside a real area, got: {value}"
+    );
+    assert!(
+        root.contains("alpha"),
+        "package-area-root should contain the `alpha` area segment, got: {root}"
+    );
+}
+
+/// `git-status --package <name> --json` must scope `file_changes` to the
+/// named package's path prefix while preserving the `GitInfo` shape (top-level
+/// `repo_root` key).
+#[test]
+fn test_git_status_json_with_package_scope() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--package",
+            "pkg-a",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+
+    assert!(
+        value.get("repo_root").is_some(),
+        "package-scoped git-status must keep GitInfo shape (repo_root): {value}"
+    );
+
+    if let Some(file_changes) = value["file_changes"].as_array() {
+        for fc in file_changes {
+            let p = fc["path"].as_str().unwrap_or("");
+            assert!(
+                !p.starts_with("pkg-b/"),
+                "pkg-a-scoped git-status must not contain pkg-b files, got: {p}"
+            );
+        }
+    }
+}
+
+/// `is-current-package-area-dirty --json` from inside a package area whose
+/// files are dirty must emit `{ "dirty": true }` and exit 0.
+#[test]
+fn test_is_current_package_area_dirty_json_true_branch() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a() {}");
+    std::fs::write(path.join("pkg-a/lib/src/lib.rs"), "pub fn a() { dirty }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.join("pkg-a/lib").to_str().unwrap(),
+            "repo",
+            "is-current-package-area-dirty",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .code(0);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(
+        value["dirty"],
+        Value::Bool(true),
+        "dirty area should emit dirty: true, got: {value}"
+    );
+}

@@ -2126,6 +2126,12 @@ pub fn render_repo_root(result: &sniff::SniffResult) -> String {
 ///
 /// Checks all dirty/untracked files against the area prefix, not just
 /// package-scoped files. JSON and text/exit-code call sites both consume this.
+///
+/// Pulls dirty paths from `git.file_changes` (always populated) plus the
+/// diff-rich `git.status.dirty` / `git.status.untracked` arrays (deep mode
+/// only). Without the `file_changes` source, non-deep callers would always
+/// see `false` because `status.dirty`/`status.untracked` are empty unless
+/// `--refresh-remotes` is set.
 pub(crate) fn current_package_area_is_dirty(
     result: &sniff::SniffResult,
     base_dir: Option<&Path>,
@@ -2148,6 +2154,11 @@ pub(crate) fn current_package_area_is_dirty(
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
+        )
+        .chain(
+            git.file_changes
+                .iter()
+                .map(|fc| fc.path.to_str().unwrap_or("")),
         )
         .any(|path| {
             if area_prefix.is_empty() {
