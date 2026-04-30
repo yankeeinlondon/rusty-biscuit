@@ -239,6 +239,17 @@ pub enum NativePlaybackError {
     Timeout(u64),
 }
 
+impl NativePlaybackError {
+    /// Whether callers should fall back to a host player instead of reporting
+    /// the native failure directly.
+    pub(crate) fn should_fallback_to_host(&self) -> bool {
+        matches!(
+            self,
+            Self::UnsupportedFormat(_) | Self::UrlNotSupported | Self::Decode(_)
+        )
+    }
+}
+
 /// Check whether a given audio format can be decoded natively via symphonia.
 ///
 /// Returns `true` for all formats where symphonia has both a demuxer and codec

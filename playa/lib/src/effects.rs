@@ -1377,10 +1377,15 @@ impl SoundEffect {
         // Try native playback first when available.
         #[cfg(feature = "sfx-native")]
         {
-            if crate::sfx_player::play_sfx(self.bytes(), options).is_ok() {
-                return Ok(());
+            match crate::sfx_player::play_sfx(self.bytes(), options) {
+                Ok(()) => return Ok(()),
+                Err(error) if !error.should_fallback_to_host() => {
+                    return Err(crate::PlaybackError::AudioSubsystem {
+                        detail: error.to_string(),
+                    });
+                }
+                Err(_) => {}
             }
-            // Fall through to host player on error.
         }
 
         let playa = crate::Playa::from_bytes(self.as_bytes().to_vec())

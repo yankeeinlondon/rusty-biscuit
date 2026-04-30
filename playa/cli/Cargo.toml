@@ -24,7 +24,9 @@ sfx-native-linux = ["sfx-native", "playa/sfx-native-linux"]
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+inquire = "0.9"
 playa = { path = "../lib", features = ["sound-effects"] }
 darkmatter = { path = "../../darkmatter/lib" }
 sniff = { path = "../../sniff/lib" }
+strum = { version = "0.28", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
