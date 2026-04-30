@@ -63,7 +63,8 @@ source_files_during_phase_5:
   - messenger/cli/src/setup.rs
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
-skills_files_updated_during_phase5: []
+skills_files_updated_during_phase_5:
+  - .opencode/skill/messenger/SKILL.md
 source_files_during_phase_6:
   - messenger/lib/src/lib.rs
   - messenger/lib/src/prelude.rs
