@@ -18,6 +18,7 @@ pub use supports::{
     UnderlineVariants,
     color_depth,
     supported_underline_variants,
+    supports_dim,
     supports_italics,
     supports_setting_foreground,
     supports_underline,

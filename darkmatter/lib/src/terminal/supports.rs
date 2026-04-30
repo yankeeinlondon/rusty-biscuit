@@ -154,6 +154,36 @@ pub fn supports_italics() -> bool {
     biscuit_terminal::discovery::detection::italics_support()
 }
 
+/// Returns whether the terminal supports dim/faint text rendering.
+///
+/// This function delegates to biscuit-terminal's `dim_support()` function,
+/// which uses a multi-layer detection strategy:
+///
+/// 1. **TERM=dumb**: Always returns `false`
+/// 2. **Color depth**: Returns `false` when `ColorDepth::None`
+/// 3. **TERM_PROGRAM**: Recognizes modern terminal emulators known to support dim
+/// 4. **TERM**: Falls back to pattern matching for common terminal types
+///
+/// ## Returns
+///
+/// - `true` if the terminal supports dim/faint text
+/// - `false` if stdout is not a TTY, TERM is "dumb", or no support is detected
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::terminal::supports_dim;
+///
+/// if supports_dim() {
+///     println!("\x1b[2mThis text is dim!\x1b[22m");
+/// } else {
+///     println!("This text has no dim styling");
+/// }
+/// ```
+pub fn supports_dim() -> bool {
+    biscuit_terminal::discovery::detection::dim_support()
+}
+
 /// Returns whether the terminal supports basic underline rendering.
 ///
 /// This function delegates to biscuit-terminal's `underline_support()` and

@@ -131,6 +131,17 @@ fn test_supports_italics_returns_bool() {
 }
 
 // =============================================================================
+// Dim support tests
+// =============================================================================
+
+#[test]
+fn test_supports_dim_returns_bool() {
+    // Just verify the function works and returns a boolean
+    let _supports = supports_dim();
+    // Function completes without panic, which is the test goal
+}
+
+// =============================================================================
 // Underline support tests
 // =============================================================================
 
