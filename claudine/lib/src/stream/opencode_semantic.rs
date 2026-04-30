@@ -472,7 +472,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                 }
             }
             Err(_) => {
-                let raw: Value = match serde_json::from_str(line) {
+                let raw: Map<String, Value> = match serde_json::from_str(line) {
                     Ok(v) => v,
                     Err(e) => {
                         super::trace_malformed_line(
@@ -490,7 +490,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                     .unwrap_or("")
                     .to_string();
                 super::trace_parser_event(Provider::OpenCode, &raw_kind, self.line_num);
-                self.emit_provider_extension(&raw_kind, raw);
+                self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
         Ok(())

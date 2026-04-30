@@ -131,7 +131,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         });
     }
 
-    fn handle_turn_completed(&mut self, tc: CodexTurnCompleted, raw: Value, raw_kind: &str) {
+    fn handle_turn_completed(&mut self, tc: CodexTurnCompleted, raw_kind: &str) {
         let provider_status = tc.provider_status().map(String::from);
 
         let step_usage = tc.usage.as_ref().map(|usage| {
@@ -159,6 +159,8 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         self.duration_ms = tc.duration_ms;
         self.cost_usd = tc.cost_usd;
         self.provider_status = provider_status.clone();
+        // Reconstruct the raw payload from the typed struct without a second parse.
+        let raw = serde_json::to_value(&tc).expect("CodexTurnCompleted serializes");
         self.raw_summary = Some(raw);
         super::trace_summary_update(
             Provider::Codex,
@@ -542,9 +544,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
                         self.handle_turn_started(&raw_kind);
                     }
                     CodexEvent::TurnCompleted(tc) => {
-                        let raw: Value = serde_json::from_str(line)
-                            .expect("already validated JSON");
-                        self.handle_turn_completed(tc, raw, &raw_kind);
+                        self.handle_turn_completed(tc, &raw_kind);
                     }
                     CodexEvent::Error(err)
                     | CodexEvent::TurnError(err)
@@ -570,7 +570,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
                 }
             }
             Err(_) => {
-                let raw: Value = match serde_json::from_str(line) {
+                let raw: Map<String, Value> = match serde_json::from_str(line) {
                     Ok(v) => v,
                     Err(e) => {
                         super::trace_malformed_line(
@@ -588,7 +588,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
                     .unwrap_or("")
                     .to_string();
                 super::trace_parser_event(Provider::Codex, &raw_kind, self.line_num);
-                self.emit_provider_extension(&raw_kind, raw);
+                self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
 

@@ -888,7 +888,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
         let envelope = match KimiEnvelope::classify_str(line) {
             Some(env) => env,
             None => {
-                let raw: Value = match serde_json::from_str(line) {
+                let raw: Map<String, Value> = match serde_json::from_str(line) {
                     Ok(v) => v,
                     Err(e) => {
                         super::trace_malformed_line(
@@ -900,16 +900,22 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
                         return Ok(());
                     }
                 };
-                let raw_kind = envelope_raw_kind(&raw);
+                let raw_kind = if raw.get("method").is_some() {
+                    "unknown_envelope".to_string()
+                } else if raw.get("result").is_some() {
+                    "response".to_string()
+                } else if raw.get("error").is_some() {
+                    "error_response".to_string()
+                } else {
+                    String::new()
+                };
                 super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
-                self.emit_provider_extension(&raw_kind, raw);
+                self.emit_provider_extension(&raw_kind, Value::Object(raw));
                 return Ok(());
             }
         };
 
-        let raw_kind = envelope_raw_kind(
-            &serde_json::from_str(line).expect("already validated JSON"),
-        );
+        let raw_kind = envelope.raw_kind();
         super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
 
         match envelope {
@@ -1008,26 +1014,6 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
         let _ = self.prompt_status_seen;
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::KimiCode);
         summary
-    }
-}
-
-fn envelope_raw_kind(value: &Value) -> String {
-    if let Some(method) = value.get("method").and_then(Value::as_str) {
-        let inner = value
-            .pointer("/params/type")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if inner.is_empty() {
-            method.to_string()
-        } else {
-            format!("{method}:{inner}")
-        }
-    } else if value.get("result").is_some() {
-        "response".into()
-    } else if value.get("error").is_some() {
-        "error_response".into()
-    } else {
-        String::new()
     }
 }
 
