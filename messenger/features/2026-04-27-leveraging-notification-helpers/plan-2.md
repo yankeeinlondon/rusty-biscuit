@@ -20,7 +20,7 @@ source_files_during_phase_1:
 docs_updated_during_phase_1:
   - messenger/features/2026-04-27-leveraging-notification-helpers/plan-2.md
 docs_created_during_phase_1: []
-skills_files_updated_during_phase: []
+skills_files_updated_during_phase_1: []
 source_files_during_phase_2:
   - messenger/lib/src/tests/desktop_helpers.rs
 docs_updated_during_phase_2: []
@@ -33,14 +33,14 @@ source_files_during_phase_3:
   - messenger/cli/src/info.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
-skills_files_updated_during_phase3: []
+skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
   - messenger/lib/src/provider/desktop/windows.rs
   - messenger/lib/src/tests/desktop_helpers.rs
 docs_updated_during_phase_4:
   - messenger/features/2026-04-27-leveraging-notification-helpers/plan-2.md
 docs_created_during_phase_4: []
-skills_files_updated_during_phase4: []
+skills_files_updated_during_phase_4: []
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
   - messenger/docs/user-guide.md
@@ -48,7 +48,7 @@ docs_updated_during_phase_5:
   - messenger/features/2026-04-27-leveraging-notification-helpers/plan-2.md
 docs_created_during_phase_5:
   - .github/workflows/messenger-desktop-tests.yml
-skills_files_updated_during_phase5: []
+skills_files_updated_during_phase_5: []
 packages:
   - messenger
 ---
