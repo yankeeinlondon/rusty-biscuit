@@ -43,6 +43,7 @@ Three-phase pipeline for document preparation:
 4. **Page Blocks** - `::block` / `::end-block` conditional regions; nest to arbitrary depth with stack-based pairing, lazy child evaluation (skipped parents never evaluate inner `when`), and code-fence protection at every depth
 5. **Interpolation** - `{{ variable }}` expressions expand to values
 6. **Shell Expansion** - `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
+7. **Shell Blocks** - `::shell-block` / `::end-block` directives execute multiple approved commands sequentially and render their combined output
 
 **Transclusion** (prepared serially, resolved concurrently):
 - `::file ./doc.md` - Markdown transclusion with recursive processing
@@ -140,6 +141,18 @@ This shortcut resolves:
 - Frontmatter shell expansion stores trimmed `stdout` only and treats malformed matching expressions as hard errors.
 - Independent top-level frontmatter shell commands execute concurrently after approval/policy resolution.
 - `--allow-shell-timeout` / `ComposeOptions::with_allow_shell_timeout(true)` convert timeouts into empty-string replacements plus compose warnings.
+
+### Shell Blocks
+
+`::shell-block` / `::end-block` directives execute multiple approved commands sequentially and render their combined output. Unlike `::shell`, shell blocks use key-value parameter syntax (`when_error="text"`, `timeout=5`).
+
+- Each non-empty line is a logical command; blank lines are ignored
+- Trailing backslash `\` joins with the next non-blank line
+- Commands are prepared (approval + policy checks) before any execute
+- Output is trimmed, empty outputs are dropped, and one blank line separates non-empty outputs
+- Error handling options (`when_error`, `when_exit_code`, `stderr_contains`, etc.) apply per command
+- Unhandled failures preserve partial output from earlier successful commands in the error
+- Shell blocks can nest inside page blocks; if the parent page block is skipped, commands never execute
 
 ## Detailed Topics
 
