@@ -30,6 +30,8 @@
 //!
 //! [App User Model ID]: https://learn.microsoft.com/en-us/windows/win32/shell/appids
 
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -39,9 +41,7 @@ use crate::receipt::{DesktopPlatform, ProviderKind};
 
 use super::WindowsDesktopConfig;
 use super::backend::DesktopBackend;
-use super::helpers::{
-    HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers,
-};
+use super::helpers::{HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// `field` tag used on [`MessengerError::MissingConfiguration`] errors returned
@@ -210,10 +210,7 @@ fn annotate_receipt_helper(
     }
 }
 
-fn annotate_native_receipt(
-    receipt: &mut DesktopNotificationReceipt,
-    attempts: &[HelperAttempt],
-) {
+fn annotate_native_receipt(receipt: &mut DesktopNotificationReceipt, attempts: &[HelperAttempt]) {
     receipt
         .metadata
         .insert("helper_used".to_string(), "native".to_string());
@@ -535,7 +532,7 @@ mod tests {
         assert_eq!(receipt.notification_id, "snore-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("SnoreToast"),
+            Some("snore_toast"),
         );
         assert!(!receipt.metadata.contains_key("helper_fallbacks"));
     }
@@ -555,20 +552,22 @@ mod tests {
             40,
             vec![Ok(DesktopNotificationReceipt::new("burnt-1"))],
         );
-        let backend =
-            WindowsBackend::with_helpers(config_with_app_id(), vec![failing, working]);
+        let backend = WindowsBackend::with_helpers(config_with_app_id(), vec![failing, working]);
         let receipt = backend.send(request()).await.unwrap();
         assert_eq!(receipt.notification_id, "burnt-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("BurntToast"),
+            Some("burnt_toast"),
         );
         let fallbacks = receipt
             .metadata
             .get("helper_fallbacks")
             .map(String::as_str)
             .unwrap_or("");
-        assert!(fallbacks.contains("SnoreToast:exited"), "got `{fallbacks}`");
+        assert!(
+            fallbacks.contains("snore_toast:exited"),
+            "got `{fallbacks}`"
+        );
     }
 
     #[tokio::test]
@@ -583,10 +582,8 @@ mod tests {
             40,
             vec![Ok(DesktopNotificationReceipt::new("ignored"))],
         );
-        let backend = WindowsBackend::with_helpers(
-            config_with_app_id(),
-            vec![parse_failing, working],
-        );
+        let backend =
+            WindowsBackend::with_helpers(config_with_app_id(), vec![parse_failing, working]);
         let result = backend.send(request()).await;
         assert!(matches!(result, Err(MessengerError::Provider { .. })));
     }
@@ -604,7 +601,7 @@ mod tests {
         let receipt = backend.replace("99", req).await.unwrap();
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("SnoreToast"),
+            Some("snore_toast"),
         );
     }
 
@@ -648,10 +645,7 @@ mod tests {
             vec![unscored],
         );
         let error = backend.send(request()).await.unwrap_err();
-        assert!(matches!(
-            error,
-            MessengerError::MissingConfiguration { .. }
-        ));
+        assert!(matches!(error, MessengerError::MissingConfiguration { .. }));
     }
 
     #[tokio::test]
@@ -673,7 +667,7 @@ mod tests {
         assert_eq!(receipt.notification_id, "burnt-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("BurntToast"),
+            Some("burnt_toast"),
         );
     }
 

@@ -14,12 +14,12 @@
 //! - Uses D-Bus hints (`urgency`, `category`, `desktop-entry`, `image-path`,
 //!   `suppress-sound`) for best-effort enrichment.
 
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use notify_rust::{Hint, Notification, Timeout, Urgency as NotifyUrgency};
 
-use crate::dispatch::{NotificationIcon, NotificationUrgency};
 use crate::error::MessengerError;
 use crate::receipt::{DesktopPlatform, ProviderKind};
 
@@ -27,9 +27,7 @@ use super::LinuxDesktopConfig;
 use super::backend::DesktopBackend;
 use super::helpers::dunstify::DunstifyHelper;
 use super::helpers::notify_send::NotifySendHelper;
-use super::helpers::{
-    HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers,
-};
+use super::helpers::{HelperAttempt, HelperBackend, HelperError, HelperName, elect_helpers};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// D-Bus notification backend for Linux / freedesktop.org desktops.
@@ -65,7 +63,10 @@ impl LinuxBackend {
     }
 
     /// Build the native (notify-rust) notification object from the request.
+    #[cfg(target_os = "linux")]
     fn build_native_notification(&self, request: &DesktopNotificationRequest) -> Notification {
+        use notify_rust::{Hint, Notification, Timeout};
+
         let mut notification = Notification::new();
         notification.summary(&request.title);
         notification.appname(&request.app_name);
@@ -76,10 +77,10 @@ impl LinuxBackend {
 
         if let Some(icon) = request.icon.as_ref() {
             match icon {
-                NotificationIcon::Named(name) => {
+                crate::dispatch::NotificationIcon::Named(name) => {
                     notification.icon(name);
                 }
-                NotificationIcon::Path(path) => {
+                crate::dispatch::NotificationIcon::Path(path) => {
                     notification.icon(&path.to_string_lossy());
                 }
             }
@@ -143,16 +144,26 @@ impl LinuxBackend {
         &self,
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, MessengerError> {
-        let mut notification = self.build_native_notification(request);
-        if let Some(replace_id) = request.replace_id.as_deref()
-            && let Ok(id_u32) = replace_id.parse::<u32>()
+        #[cfg(not(target_os = "linux"))]
         {
-            notification.id(id_u32);
+            let _ = request;
+            Err(ProviderKind::Desktop
+                .transport_error("native Linux notifications only available on Linux"))
         }
-        let handle = notification.show_async().await.map_err(|error| {
-            ProviderKind::Desktop.transport_error(format!("D-Bus notification failed: {error}"))
-        })?;
-        Ok(DesktopNotificationReceipt::new(handle.id().to_string()))
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut notification = self.build_native_notification(request);
+            if let Some(replace_id) = request.replace_id.as_deref()
+                && let Ok(id_u32) = replace_id.parse::<u32>()
+            {
+                notification.id(id_u32);
+            }
+            let handle = notification.show_async().await.map_err(|error| {
+                ProviderKind::Desktop.transport_error(format!("D-Bus notification failed: {error}"))
+            })?;
+            Ok(DesktopNotificationReceipt::new(handle.id().to_string()))
+        }
     }
 
     async fn native_replace(
@@ -160,18 +171,29 @@ impl LinuxBackend {
         id: &str,
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, MessengerError> {
-        let mut notification = self.build_native_notification(request);
-        let id_u32 = id.parse::<u32>().map_err(|_| {
-            ProviderKind::Desktop.transport_error(format!(
-                "invalid Linux notification id for replacement: {id}"
-            ))
-        })?;
-        notification.id(id_u32);
-        let handle = notification.show_async().await.map_err(|error| {
-            ProviderKind::Desktop
-                .transport_error(format!("D-Bus notification replace failed: {error}"))
-        })?;
-        Ok(DesktopNotificationReceipt::new(handle.id().to_string()).with_metadata("replaced", id))
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (id, request);
+            Err(ProviderKind::Desktop
+                .transport_error("native Linux notifications only available on Linux"))
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut notification = self.build_native_notification(request);
+            let id_u32 = id.parse::<u32>().map_err(|_| {
+                ProviderKind::Desktop.transport_error(format!(
+                    "invalid Linux notification id for replacement: {id}"
+                ))
+            })?;
+            notification.id(id_u32);
+            let handle = notification.show_async().await.map_err(|error| {
+                ProviderKind::Desktop
+                    .transport_error(format!("D-Bus notification replace failed: {error}"))
+            })?;
+            Ok(DesktopNotificationReceipt::new(handle.id().to_string())
+                .with_metadata("replaced", id))
+        }
     }
 }
 
@@ -251,11 +273,12 @@ impl DesktopBackend for LinuxBackend {
     }
 }
 
-fn map_urgency(urgency: NotificationUrgency) -> NotifyUrgency {
+#[cfg(target_os = "linux")]
+fn map_urgency(urgency: crate::dispatch::NotificationUrgency) -> notify_rust::Urgency {
     match urgency {
-        NotificationUrgency::Low => NotifyUrgency::Low,
-        NotificationUrgency::Normal => NotifyUrgency::Normal,
-        NotificationUrgency::Critical => NotifyUrgency::Critical,
+        crate::dispatch::NotificationUrgency::Low => notify_rust::Urgency::Low,
+        crate::dispatch::NotificationUrgency::Normal => notify_rust::Urgency::Normal,
+        crate::dispatch::NotificationUrgency::Critical => notify_rust::Urgency::Critical,
     }
 }
 
@@ -274,10 +297,7 @@ fn annotate_receipt_helper(
     }
 }
 
-fn annotate_native_receipt(
-    receipt: &mut DesktopNotificationReceipt,
-    attempts: &[HelperAttempt],
-) {
+fn annotate_native_receipt(receipt: &mut DesktopNotificationReceipt, attempts: &[HelperAttempt]) {
     receipt
         .metadata
         .insert("helper_used".to_string(), "native".to_string());
@@ -343,11 +363,9 @@ fn detect_linux_helpers() -> Vec<Arc<dyn HelperBackend>> {
 /// non-numeric prefix and grab the first dotted-numeric token. Unparseable
 /// strings yield `None` so the caller defaults to "no actions" behavior.
 fn parse_libnotify_version(raw: &str) -> Option<(u32, u32, u32)> {
-    let token = raw.split_whitespace().find(|word| {
-        word.chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
-    })?;
+    let token = raw
+        .split_whitespace()
+        .find(|word| word.chars().next().is_some_and(|c| c.is_ascii_digit()))?;
     let mut parts = token.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
@@ -368,6 +386,7 @@ fn parse_libnotify_version(raw: &str) -> Option<(u32, u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dispatch::NotificationUrgency;
     use crate::provider::desktop::helpers::{HelperBackend, HelperCapabilities};
     use std::sync::Mutex;
 
@@ -471,7 +490,7 @@ mod tests {
         assert_eq!(receipt.notification_id, "dunst-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("Dunstify"),
+            Some("dunstify"),
         );
         assert!(!receipt.metadata.contains_key("helper_fallbacks"));
     }
@@ -491,22 +510,20 @@ mod tests {
             60,
             vec![Ok(DesktopNotificationReceipt::new("send-1"))],
         );
-        let backend = LinuxBackend::with_helpers(
-            LinuxDesktopConfig::default(),
-            vec![failing, working],
-        );
+        let backend =
+            LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![failing, working]);
         let receipt = backend.send(request()).await.unwrap();
         assert_eq!(receipt.notification_id, "send-1");
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("NotifySend"),
+            Some("notify_send"),
         );
         let fallbacks = receipt
             .metadata
             .get("helper_fallbacks")
             .map(String::as_str)
             .unwrap_or("");
-        assert!(fallbacks.contains("Dunstify:exited"), "got `{fallbacks}`");
+        assert!(fallbacks.contains("dunstify:exited"), "got `{fallbacks}`");
     }
 
     #[tokio::test]
@@ -521,10 +538,8 @@ mod tests {
             60,
             vec![Ok(DesktopNotificationReceipt::new("ignored"))],
         );
-        let backend = LinuxBackend::with_helpers(
-            LinuxDesktopConfig::default(),
-            vec![parse_failing, working],
-        );
+        let backend =
+            LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![parse_failing, working]);
         let result = backend.send(request()).await;
         assert!(matches!(result, Err(MessengerError::Provider { .. })));
     }
@@ -536,14 +551,13 @@ mod tests {
             60,
             vec![Ok(DesktopNotificationReceipt::new("send-1"))],
         );
-        let backend =
-            LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![working]);
+        let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), vec![working]);
         let mut request = request();
         request.replace_helper_hint = Some(HelperName::NotifySend);
         let receipt = backend.replace("99", request).await.unwrap();
         assert_eq!(
             receipt.metadata.get("helper_used").map(String::as_str),
-            Some("NotifySend"),
+            Some("notify_send"),
         );
     }
 
@@ -553,27 +567,28 @@ mod tests {
             super::parse_libnotify_version("notify-send 0.8.3"),
             Some((0, 8, 3)),
         );
-        assert_eq!(
-            super::parse_libnotify_version("0.7.8"),
-            Some((0, 7, 8)),
-        );
+        assert_eq!(super::parse_libnotify_version("0.7.8"), Some((0, 7, 8)),);
         assert_eq!(super::parse_libnotify_version("notify-send"), None);
-        assert_eq!(super::parse_libnotify_version("notify-send 1.0"), Some((1, 0, 0)));
+        assert_eq!(
+            super::parse_libnotify_version("notify-send 1.0"),
+            Some((1, 0, 0))
+        );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn urgency_mapping_covers_all_variants() {
         assert!(matches!(
             map_urgency(NotificationUrgency::Low),
-            NotifyUrgency::Low
+            notify_rust::Urgency::Low
         ));
         assert!(matches!(
             map_urgency(NotificationUrgency::Normal),
-            NotifyUrgency::Normal
+            notify_rust::Urgency::Normal
         ));
         assert!(matches!(
             map_urgency(NotificationUrgency::Critical),
-            NotifyUrgency::Critical
+            notify_rust::Urgency::Critical
         ));
     }
 

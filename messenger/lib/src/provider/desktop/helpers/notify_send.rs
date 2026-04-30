@@ -132,10 +132,7 @@ impl NotifySendHelper {
 
         let mut metadata = BTreeMap::new();
         if actions_dropped && !request.actions.is_empty() {
-            metadata.insert(
-                "dropped".to_string(),
-                "actions_libnotify_old".to_string(),
-            );
+            metadata.insert("dropped".to_string(), "actions_libnotify_old".to_string());
         }
 
         Ok(DesktopNotificationReceipt {
@@ -164,9 +161,7 @@ impl HelperBackend for NotifySendHelper {
     }
 
     fn score(&self, request: &DesktopNotificationRequest) -> u8 {
-        if request.actions.is_empty() {
-            SCORE_DEFAULT
-        } else if self.supports_actions() {
+        if request.actions.is_empty() || self.supports_actions() {
             SCORE_DEFAULT
         } else {
             SCORE_DROPPED_ACTIONS
@@ -251,8 +246,10 @@ mod tests {
     fn build_args_notice_only_minimal() {
         let helper = helper_modern();
         let args = helper.build_args(&notice_request());
-        let rendered: Vec<String> =
-            args.iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let rendered: Vec<String> = args
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(
             rendered,
             vec![

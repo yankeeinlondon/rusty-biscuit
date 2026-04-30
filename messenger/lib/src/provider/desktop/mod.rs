@@ -9,12 +9,9 @@
 
 mod backend;
 pub(crate) mod helpers;
-#[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "macos")]
 mod macos;
 pub mod request;
-#[cfg(target_os = "windows")]
 mod windows;
 
 use std::path::PathBuf;
