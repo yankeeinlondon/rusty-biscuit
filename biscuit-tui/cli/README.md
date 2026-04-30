@@ -172,15 +172,25 @@ enabled options, and `Ctrl+D` to clear the selection.
 
 Generate shell completion scripts.
 
+**Install steps:**
+
 ```bash
-question completions bash > /usr/share/bash-completion/completions/question
-question completions zsh > /usr/share/zsh/site-functions/_question
-question completions fish > ~/.config/fish/completions/question.fish
+# zsh
+question completions zsh > "${fpath[1]}/_question"
+# Restart shell or: autoload -U compinit && compinit
+
+# bash
+question completions bash > /usr/local/etc/bash_completion.d/question
 ```
 
-**Options:**
+> **Note:** The `question` binary must be installed *before* the completion script is sourced. clap_complete calls `_question` against the binary's `--help` to generate dynamic completions.
 
-- `bash`, `zsh`, `fish`, `elvish`, `powershell` — target shell
+**Supported shells:**
+
+- `bash`, `zsh`, `fish`, `elvish`, `powershell`
+
+**Hotkey-prefix completion (zsh/bash only):**
+When typing positional options for `choose-one` or `choose-many`, entering `[` followed by `<TAB>` offers `[CTRL+`, `[ALT+`, and `[OPT+` as completion candidates. This is supported in zsh and bash via a dedicated positional completer; other shells fall back to standard clap_complete output.
 
 ### input-table
 

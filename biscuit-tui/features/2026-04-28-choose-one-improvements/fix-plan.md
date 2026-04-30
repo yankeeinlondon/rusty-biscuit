@@ -24,6 +24,13 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4:
   - .opencode/skill/biscuit-tui/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - cli/README.md
+  - docs/components/choose_one.md
+  - docs/components/choose_many.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - biscuit-tui
 ---

@@ -64,6 +64,24 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 - **Explicit Hotkeys**: Options can carry explicit `Ctrl` or `Alt` hotkeys (e.g., `[CTRL+R]`). These are parsed from option text and select + submit when pressed.
 - **Disabled Options**: Options can be marked as `disabled`. They are rendered dimmed, cannot be hovered or selected, and are skipped by navigation.
 
+## Keyboard Protocol & Hotkey Badges
+
+The `choose_one` runner attempts to enable the Kitty keyboard protocol on startup so that bare `Ctrl` and `Alt` presses are reported as distinct events. When this succeeds, holding `Ctrl` or `Alt` alone immediately surfaces coloured hotkey badges next to any option that carries a matching shortcut (e.g., `[CTRL+R]`). The badges disappear when the modifier is released.
+
+### Terminal Compatibility
+
+| Terminal | Bare Modifier Badges |
+| :--- | :--- |
+| Kitty | Yes |
+| WezTerm | Yes |
+| Ghostty | Yes |
+| foot | Yes |
+| Alacritty (≥ 0.13) | Yes |
+| iTerm2 (modern) | Yes |
+| Older terminals / Windows CMD | No — badges only flash on chord press (e.g. `Ctrl+R`) |
+
+On terminals that do not emit modifier-only key events, the component falls back to a deadline-based approach: a chord press (e.g., `Ctrl+R`) arms a short timer (~300 ms) during which the badges remain visible, giving the user a brief window to read the shortcuts before they fade.
+
 ## Helper Functions
 
 The `tui_chrome::helpers::choice_builders` module provides convenience functions for constructing `ChoiceInput<String>` from common sources:
