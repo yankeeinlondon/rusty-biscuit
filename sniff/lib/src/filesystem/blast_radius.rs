@@ -110,6 +110,8 @@ pub enum ChangeScope {
     Staged,
     /// Modified + Both only (excludes untracked).
     Unstaged,
+    /// Untracked files only (new files not yet under version control).
+    Untracked,
     /// Files changed in the HEAD commit.
     LastCommit,
 }
@@ -272,6 +274,7 @@ fn collect_working_tree_paths(repo: &Repository, scope: ChangeScope) -> Result<V
             ChangeScope::Dirty => is_staged || is_unstaged || is_untracked,
             ChangeScope::Staged => is_staged,
             ChangeScope::Unstaged => is_unstaged,
+            ChangeScope::Untracked => is_untracked,
             ChangeScope::LastCommit => unreachable!(),
         };
 
