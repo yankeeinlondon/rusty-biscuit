@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::Path;
+
+use async_trait::async_trait;
+use tokio::fs;
 
 use biscuit_file::serde_yaml_ng;
 use serde::Deserialize;
@@ -95,6 +97,7 @@ struct RooState {
 #[derive(Debug, Default)]
 pub(crate) struct RooPolicyBackend;
 
+#[async_trait]
 impl ProviderPolicyBackend for RooPolicyBackend {
     fn provider(&self) -> Provider {
         Provider::RooCode
@@ -113,7 +116,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
         }
     }
 
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
         let mut sources = Vec::new();
 
         if let Some(repo_root) = &ctx.repo_root {
@@ -150,7 +153,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
                 ),
             ] {
                 let path = repo_root.join(rel);
-                if path.exists() {
+                if fs::try_exists(&path).await.unwrap_or(false) {
                     sources.push(PolicySource {
                         id: id.to_owned(),
                         kind,
@@ -184,7 +187,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
                 ),
             ] {
                 let path = home.join(rel);
-                if path.exists() {
+                if fs::try_exists(&path).await.unwrap_or(false) {
                     sources.push(PolicySource {
                         id: id.to_owned(),
                         kind,
@@ -200,7 +203,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
         Ok(sources)
     }
 
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         _ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -213,7 +216,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
                     source.id
                 ))
             })?;
-            let content = fs::read_to_string(path)?;
+            let content = fs::read_to_string(path).await?;
             let payload = parse_roo_layer(source, path, &content)?;
             layers.push(NativePolicyLayer::new(source.clone(), payload));
         }
@@ -311,7 +314,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
         ))
     }
 
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
@@ -412,7 +415,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
         Ok(policy)
     }
 
-    fn plan_change(
+    async fn plan_change(
         &self,
         ctx: &PolicyContext,
         _current: &NativeEffectivePolicy,
@@ -425,7 +428,7 @@ impl ProviderPolicyBackend for RooPolicyBackend {
         let path = path.ok_or_else(|| {
             ClaudineError::PolicyAmbiguousContext("Roo CLI settings path is unavailable".to_owned())
         })?;
-        let before_text = fs::read_to_string(&path).ok();
+        let before_text = fs::read_to_string(&path).await.ok();
         let mut root = before_text
             .as_deref()
             .and_then(|text| serde_json::from_str::<Value>(text).ok())
@@ -944,8 +947,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         let repo = dir.path().join("repo");
-        fs::create_dir_all(home.join(".roo")).unwrap();
-        fs::create_dir_all(repo.join(".roo")).unwrap();
+        std::fs::create_dir_all(home.join(".roo")).unwrap();
+        std::fs::create_dir_all(repo.join(".roo")).unwrap();
         (
             dir,
             PolicyContext::new(repo.clone())
@@ -958,10 +961,10 @@ mod tests {
         )
     }
 
-    #[test]
-    fn roo_backend_models_mode_ignore_and_mcp_rules() {
+    #[tokio::test]
+    async fn roo_backend_models_mode_ignore_and_mcp_rules() {
         let (_dir, ctx) = setup_ctx();
-        fs::write(
+        tokio::fs::write(
             ctx.home_dir
                 .as_ref()
                 .unwrap()
@@ -972,8 +975,9 @@ mod tests {
             }))
             .unwrap(),
         )
+        .await
         .unwrap();
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root.as_ref().unwrap().join(".roomodes"),
             r#"
 customModes:
@@ -984,8 +988,9 @@ customModes:
       - mcp
 "#,
         )
+        .await
         .unwrap();
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root.as_ref().unwrap().join(".roo/mcp.json"),
             serde_json::to_string_pretty(&json!({
                 "mcpServers": {
@@ -997,18 +1002,20 @@ customModes:
             }))
             .unwrap(),
         )
+        .await
         .unwrap();
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root.as_ref().unwrap().join(".rooignore"),
             "secret/**\n",
         )
+        .await
         .unwrap();
 
         let backend = RooPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::RooCode, native, canonical, &ctx);
 
@@ -1044,8 +1051,8 @@ customModes:
         );
     }
 
-    #[test]
-    fn roo_cli_require_approval_forces_ask() {
+    #[tokio::test]
+    async fn roo_cli_require_approval_forces_ask() {
         let (_dir, ctx) = setup_ctx();
         let backend = RooPolicyBackend;
         let cli = vec![
@@ -1064,7 +1071,7 @@ customModes:
                 ),
             )
             .unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::RooCode, native, canonical, &ctx);
 

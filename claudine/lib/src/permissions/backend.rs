@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use super::canonical::CanonicalPolicy;
 use super::change::PolicyChange;
 use super::context::{CliPolicyInput, PolicyContext};
@@ -15,6 +17,7 @@ use crate::provider::Provider;
 /// 4. composing layers into a native effective policy
 /// 5. canonicalizing native policy into the shared model
 /// 6. planning mutations
+#[async_trait]
 pub trait ProviderPolicyBackend: Send + Sync {
     /// Returns the provider this backend handles.
     fn provider(&self) -> Provider;
@@ -23,10 +26,10 @@ pub trait ProviderPolicyBackend: Send + Sync {
     fn capabilities(&self) -> BackendCapabilities;
 
     /// Discovers relevant config sources on disk.
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>>;
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>>;
 
     /// Loads typed native policy layers from discovered sources.
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -48,14 +51,14 @@ pub trait ProviderPolicyBackend: Send + Sync {
     ) -> Result<NativeEffectivePolicy>;
 
     /// Canonicalizes a native effective policy into the shared model.
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
     ) -> Result<CanonicalPolicy>;
 
     /// Plans a mutation against the current native policy.
-    fn plan_change(
+    async fn plan_change(
         &self,
         ctx: &PolicyContext,
         current: &NativeEffectivePolicy,
