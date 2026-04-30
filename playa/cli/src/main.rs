@@ -10,14 +10,14 @@ use clap_complete::CompleteEnv;
 use sniff::programs::InstalledHeadlessAudio;
 use strum::IntoEnumIterator;
 
+use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::terminal::Terminal;
-use playa::{
-    AudioFileFormat, AudioPlayer, Codec, OutputChannel, PLAYER_LOOKUP, Playa, SampleRateRange,
-    SoundEffect, all_players,
-};
+use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
+use sniff::hardware::{AudioDeviceInfo, AudioDeviceKind, AudioDirection};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
@@ -1263,104 +1263,165 @@ fn strip_osc8_sequences(input: &str) -> String {
 
 #[cfg(feature = "sfx-native")]
 fn list_output_channels() {
-    match playa::get_output_channels() {
-        Ok(channels) => {
-            if channels.is_empty() {
-                println!("No native audio output channels found.");
-                return;
-            }
+    let devices = sniff::hardware::detect_audio_devices();
+    let output_devices: Vec<AudioDeviceInfo> = devices
+        .into_iter()
+        .filter(|device| {
+            matches!(
+                device.direction,
+                AudioDirection::Output | AudioDirection::InputOutput
+            )
+        })
+        .collect();
 
-            let terminal = Terminal::new();
-            print!("{}", render_output_channels(&channels, &terminal));
-        }
-        Err(e) => {
-            error_exit(&format!("failed to get output channels: {e}"), 1);
-        }
+    if output_devices.is_empty() {
+        println!("No native audio output channels found.");
+        return;
     }
+
+    let terminal = Terminal::new();
+    print!("{}", render_output_channels(&output_devices, &terminal));
 }
 
 #[cfg(feature = "sfx-native")]
-fn render_output_channels(channels: &[OutputChannel], terminal: &Terminal) -> String {
-    let mut output = String::from("Available Output Channels\n");
-    output.push_str("=========================\n\n");
+fn render_output_channels(devices: &[AudioDeviceInfo], terminal: &Terminal) -> String {
+    let suffixes = build_audio_device_name_suffixes(devices);
+    let mut ordered: Vec<(usize, &AudioDeviceInfo)> = devices.iter().enumerate().collect();
+    ordered.sort_by_key(|(_, device)| device.name.to_lowercase());
 
-    let mut list = UnorderedList::empty();
-    for channel in channels {
-        list.add(Prose::new(format_output_channel(channel)));
+    let mut children = UnorderedList::empty();
+    for (idx, device) in ordered {
+        children.add(Prose::new(format_output_device_line(
+            device,
+            &suffixes[idx],
+        )));
     }
 
-    output.push_str(&list.display(terminal));
+    let mut output_group = UnorderedList::empty();
+    output_group.add(Prose::new("<b>Output</b>"));
+    output_group.add(children);
+
+    let mut outer = UnorderedList::empty();
+    outer.add(output_group);
+
+    let mut doc = Compose::default();
+    doc.add_prose(Prose::new("<b><uu>Audio Devices</uu></b>"));
+    doc.add_text("\n\n");
+    doc.add_unordered_list(outer);
+
+    let mut output = String::from("\n");
+    output.push_str(&doc.display(terminal).to_string());
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push('\n');
+
+    let footer = Status::from_prose(
+        "<i><dim>items with <b><yellow>*</yellow></b> are the <b>default</b> for the output</dim></i>",
+    )
+    .state(StatusState::Info)
+    .theme(StatusTheme::Circular);
+    output.push_str(&footer.display(terminal).to_string());
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+
     output
 }
 
 #[cfg(feature = "sfx-native")]
-fn format_output_channel(channel: &OutputChannel) -> String {
-    let mut styled_name = channel.name.clone();
-    let mut markers = Vec::new();
-
-    if channel.is_default_audio && channel.is_default_sfx {
-        styled_name = format!("<bold><italic>{}</italic></bold>", styled_name);
-    } else if channel.is_default_audio {
-        styled_name = format!("<bold>{}</bold>", styled_name);
-    } else if channel.is_default_sfx {
-        styled_name = format!("<italic>{}</italic>", styled_name);
+fn build_audio_device_name_suffixes(devices: &[AudioDeviceInfo]) -> Vec<String> {
+    let mut groups: std::collections::HashMap<&str, Vec<usize>> = std::collections::HashMap::new();
+    for (idx, device) in devices.iter().enumerate() {
+        groups.entry(device.name.as_str()).or_default().push(idx);
     }
 
-    if channel.is_default_audio {
-        markers.push("default audio");
-    }
-    if channel.is_default_sfx {
-        markers.push("default sfx");
-    }
+    let mut suffixes = vec![String::new(); devices.len()];
+    for indices in groups.into_values() {
+        if indices.len() < 2 {
+            continue;
+        }
 
-    let mut text = if markers.is_empty() {
-        format!("{} <dim>[{}]</dim>", styled_name, channel.id)
-    } else {
-        format!(
-            "{} <dim>[{}] ({})</dim>",
-            styled_name,
-            channel.id,
-            markers.join(", ")
-        )
-    };
-
-    if !channel.sample_rates.is_empty() {
-        text.push_str(&format!(
-            "\n  <dim>sample rates: {}</dim>",
-            format_sample_rate_ranges(&channel.sample_rates)
-        ));
+        let mut ordered = indices;
+        ordered.sort_by(|a, b| devices[*a].uid.cmp(&devices[*b].uid));
+        for (rank, idx) in ordered.iter().enumerate() {
+            suffixes[*idx] = format!("<dim>:{}</dim>", rank + 1);
+        }
     }
 
-    text
+    suffixes
 }
 
 #[cfg(feature = "sfx-native")]
-fn format_sample_rate_ranges(ranges: &[SampleRateRange]) -> String {
-    ranges
+fn format_output_device_line(device: &AudioDeviceInfo, name_suffix: &str) -> String {
+    let kind = style_audio_device_kind(device.kind);
+    let rates = format_audio_device_rates(device);
+    let marker = if device.is_default_output {
+        " <b><yellow>*</yellow></b>"
+    } else {
+        ""
+    };
+    let name = if device.is_default_output {
+        format!("<b><yellow>{}</yellow></b>", device.name)
+    } else {
+        device.name.clone()
+    };
+
+    let parens = if rates.is_empty() {
+        format!("({kind})")
+    } else {
+        format!("({kind}, {rates})")
+    };
+
+    format!("{}{} {}{}", name, name_suffix, parens, marker)
+}
+
+#[cfg(feature = "sfx-native")]
+fn style_audio_device_kind(kind: AudioDeviceKind) -> String {
+    match kind {
+        AudioDeviceKind::BuiltIn => "<dim>Built-in</dim>".to_string(),
+        AudioDeviceKind::Usb => "<blue>USB</blue>".to_string(),
+        AudioDeviceKind::Bluetooth => "<blue>Bluetooth</blue>".to_string(),
+        AudioDeviceKind::Thunderbolt => "<yellow>Thunderbolt</yellow>".to_string(),
+        AudioDeviceKind::Hdmi => "<yellow>HDMI</yellow>".to_string(),
+        AudioDeviceKind::Virtual => "<dim><i>Virtual</i></dim>".to_string(),
+        AudioDeviceKind::Unknown => "Unknown".to_string(),
+    }
+}
+
+#[cfg(feature = "sfx-native")]
+fn format_audio_device_rates(device: &AudioDeviceInfo) -> String {
+    let mut rates = device.available_sample_rates.clone();
+    if device.sample_rate > 0.0 {
+        rates.push(device.sample_rate);
+    }
+
+    rates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    rates.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+
+    rates
         .iter()
-        .map(|range| {
-            if range.min_hz == range.max_hz {
-                format_sample_rate(range.min_hz)
+        .map(|rate| {
+            let label = format_sample_rate_khz(*rate);
+            if device.sample_rate > 0.0 && (*rate - device.sample_rate).abs() < 0.01 {
+                format!("<b>{label}</b>")
             } else {
-                format!(
-                    "{}-{}",
-                    format_sample_rate(range.min_hz),
-                    format_sample_rate(range.max_hz)
-                )
+                format!("<dim>{label}</dim>")
             }
         })
         .collect::<Vec<_>>()
-        .join(", ")
+        .join(" ")
 }
 
 #[cfg(feature = "sfx-native")]
-fn format_sample_rate(rate_hz: u32) -> String {
-    if rate_hz % 1000 == 0 {
-        format!("{} kHz", rate_hz / 1000)
-    } else if rate_hz % 100 == 0 {
-        format!("{:.1} kHz", rate_hz as f64 / 1000.0)
+fn format_sample_rate_khz(rate_hz: f64) -> String {
+    let khz = rate_hz / 1000.0;
+    if (khz.fract()).abs() < 0.01 {
+        format!("{}k", khz as u32)
+    } else if (khz * 10.0).fract().abs() < 0.01 {
+        format!("{khz:.1}k")
     } else {
-        format!("{rate_hz} Hz")
+        format!("{khz:.2}k")
     }
 }
 
@@ -1531,35 +1592,30 @@ mod tests {
     #[cfg(feature = "sfx-native")]
     #[test]
     fn output_channels_render_with_terminal_width() {
-        let channels = vec![OutputChannel {
+        let devices = vec![AudioDeviceInfo {
             name: "Schiit Bifrost 2 Unison USB".to_string(),
-            id: "schiit-bifrost-2-unison-usb".to_string(),
-            is_default_audio: true,
-            is_default_sfx: true,
-            sample_rates: vec![
-                SampleRateRange {
-                    min_hz: 44_100,
-                    max_hz: 44_100,
-                },
-                SampleRateRange {
-                    min_hz: 48_000,
-                    max_hz: 192_000,
-                },
-            ],
+            uid: "bifrost".to_string(),
+            kind: AudioDeviceKind::Usb,
+            direction: AudioDirection::Output,
+            is_default_input: false,
+            is_default_output: true,
+            sample_rate: 48_000.0,
+            available_sample_rates: vec![44_100.0, 48_000.0, 88_200.0, 96_000.0],
+            input_channels: 0,
+            output_channels: 2,
         }];
         let terminal = Terminal::new_optimistic(160);
 
-        let rendered = strip_ansi_codes(&render_output_channels(&channels, &terminal));
+        let rendered = strip_ansi_codes(&render_output_channels(&devices, &terminal));
 
+        assert!(rendered.contains("Audio Devices"), "{rendered}");
+        assert!(rendered.contains("- Output"), "{rendered}");
         assert!(
-            rendered.contains(
-                "- Schiit Bifrost 2 Unison USB [schiit-bifrost-2-unison-usb] \
-                 (default audio, default sfx)\n"
-            ),
+            rendered.contains("- Schiit Bifrost 2 Unison USB (USB, 44.1k 48k 88.2k 96k) *"),
             "{rendered}"
         );
         assert!(
-            rendered.contains("sample rates: 44.1 kHz, 48 kHz-192 kHz"),
+            rendered.contains("items with * are the default for the output"),
             "{rendered}"
         );
     }
