@@ -51,6 +51,29 @@ pub enum CodexEvent {
     ToolResult(CodexToolItemFields),
 }
 
+impl CodexEvent {
+    /// Returns the JSON `type` discriminator for this event variant.
+    pub const fn type_str(&self) -> &'static str {
+        match self {
+            CodexEvent::ThreadCreated(_) => "thread.created",
+            CodexEvent::ThreadStarted(_) => "thread.started",
+            CodexEvent::TurnStarted(_) => "turn.started",
+            CodexEvent::TurnCompleted(_) => "turn.completed",
+            CodexEvent::Error(_) => "error",
+            CodexEvent::TurnError(_) => "turn.error",
+            CodexEvent::TurnFailed(_) => "turn.failed",
+            CodexEvent::StreamError(_) => "stream.error",
+            CodexEvent::ItemStarted(_) => "item.started",
+            CodexEvent::ItemCompleted(_) => "item.completed",
+            CodexEvent::ItemUpdated(_) => "item.updated",
+            CodexEvent::ItemToolUse(_) => "item.tool_use",
+            CodexEvent::ToolUse(_) => "tool_use",
+            CodexEvent::ItemToolResult(_) => "item.tool_result",
+            CodexEvent::ToolResult(_) => "tool_result",
+        }
+    }
+}
+
 /// `thread.created` / `thread.started` payload. Some Codex builds emit
 /// `thread_id`, others use `id`.
 #[derive(Debug, Default, Deserialize)]

@@ -35,6 +35,26 @@ pub enum QwenEvent {
     ToolResponse(QwenTool),
 }
 
+impl QwenEvent {
+    /// Returns the JSON `type` discriminator for this event variant.
+    pub const fn type_str(&self) -> &'static str {
+        match self {
+            QwenEvent::Init(_) => "init",
+            QwenEvent::System(_) => "system",
+            QwenEvent::Message(_) => "message",
+            QwenEvent::AssistantMessage(_) => "assistant_message",
+            QwenEvent::Assistant(_) => "assistant",
+            QwenEvent::Error(_) => "error",
+            QwenEvent::Result(_) => "result",
+            QwenEvent::Summary(_) => "summary",
+            QwenEvent::ToolUse(_) => "tool_use",
+            QwenEvent::ToolCall(_) => "tool_call",
+            QwenEvent::ToolResult(_) => "tool_result",
+            QwenEvent::ToolResponse(_) => "tool_response",
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct QwenInit {
     #[serde(default)]
