@@ -37,6 +37,15 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - darkmatter/docs/topics/output-formats.md
+  - darkmatter/lib/README.md
+docs_created_during_phase_6:
+  - darkmatter/docs/topics/html.md
+skills_files_updated_during_phase_6:
+  - .opencode/skill/biscuit-terminal/SKILL.md
+  - .opencode/skill/biscuit-terminal/discovery.md
 packages:
   - biscuit-terminal
   - darkmatter
