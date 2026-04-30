@@ -244,4 +244,36 @@ Shell completions are an important way of making the CLI easy to use:
 - the various options formats `--csv`, `--list`, etc. should all be represented
 - if a user starts a string in a position where it is seen as a option, when they type `[` the `[CTRL+`, `[ALT+`, `[OPT+` should be available
 - all subcommands should be represented when in the first position after `question` command
--
+
+## Keyboard Protocol Requirements
+
+### Modifier-only Badge Visibility
+
+Bare `Ctrl` / `Alt` press MUST surface hotkey badges on terminals that support the kitty keyboard protocol. On terminals that do not support the protocol, the chord-fallback path covers chord presses (e.g., `Ctrl+f`); bare modifiers may legitimately do nothing on those terminals. The runner MUST attempt to enable the protocol and silently fall back if rejected.
+
+### Required Keyboard Protocol Flags
+
+The runner MUST push the following keyboard enhancement flags when preparing the terminal:
+
+- `REPORT_EVENT_TYPES` — required for modifier-only press/release events.
+- `DISAMBIGUATE_ESCAPE_CODES` — desirable so that `Esc` can be distinguished from CSI sequence prefixes.
+
+Both flags MUST be popped on terminal restore. The push/pop pair MUST be symmetric: if the push succeeds, the pop is executed; if the push fails, no pop is attempted.
+
+## Completion Contract
+
+### Hotkey-prefix Completion
+
+Typing `[` followed by `<TAB>` (quoted or unquoted) in any positional argument position MUST offer `[CTRL+`, `[ALT+`, `[OPT+` as the **only** completion candidates. No command or file fallback pollution is permitted.
+
+### Post-separator Flag Completion
+
+Tab completion MUST continue to suggest remaining option flags after a literal `--` separator, for the lifetime of the command line. The completion script MUST NOT treat `--` as a terminator that disables further option suggestions.
+
+## Verification Gates
+
+All completion claims MUST be verified by PTY-driven shell tests (zsh + bash).
+
+All keyboard-modifier claims MUST be verified by an integration test that exercises the real `prepare_terminal` sequence under a PTY.
+
+No completion or keyboard-modifier feature may be marked "production ready" without the corresponding PTY test passing.
