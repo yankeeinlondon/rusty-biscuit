@@ -723,8 +723,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::events::{AgenticEvent, EventMeta, Provider};
-
+    use crate::events::{AgenticEvent, EventMeta};
+    use crate::provider::Provider;
     fn sample_meta() -> EventMeta {
         let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
         meta.timestamp = Utc.with_ymd_and_hms(2026, 4, 3, 10, 0, 0).unwrap();

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use claudine::config::claudine_config::{
     DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
 };
-use claudine::events::Provider;
 use claudine::model_catalog::ModelCatalogService;
+use claudine::provider::Provider;
 
 #[test]
 fn config_overrides_propagate_to_catalog_validation() {

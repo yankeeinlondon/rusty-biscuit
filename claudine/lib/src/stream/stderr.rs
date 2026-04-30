@@ -201,7 +201,7 @@ pub fn format_cost(cost: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use crate::stream::summary::StreamExecutionSummary;
     use crate::stream::token_usage::NormalizedTokenUsage;
 

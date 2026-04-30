@@ -6,7 +6,7 @@ use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
 use super::types::ResolutionMode;
-use crate::events::Provider;
+use crate::provider::Provider;
 use thiserror::Error;
 
 /// Errors that can occur during composition workflows.

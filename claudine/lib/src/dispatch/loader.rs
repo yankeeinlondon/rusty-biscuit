@@ -510,6 +510,7 @@ mod tests {
     use crate::actions::*;
     use crate::config::claudine_config::DefaultSounds;
     use crate::events::*;
+    use crate::provider::Provider;
 
     use std::collections::HashMap;
 

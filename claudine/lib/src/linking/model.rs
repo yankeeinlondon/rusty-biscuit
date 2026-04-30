@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Scope classification for a detected resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceScope {

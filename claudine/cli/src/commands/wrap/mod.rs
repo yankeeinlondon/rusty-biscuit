@@ -11,7 +11,8 @@ pub(crate) mod wire_io;
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
 use claudine::composition::lifecycle::LifecycleSignal;
-use claudine::events::{EnvironmentContext, Provider};
+use claudine::events::EnvironmentContext;
+use claudine::provider::{OutputFormatSelector, Provider, provider_info};
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
@@ -575,6 +576,15 @@ fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
 
+fn has_flag_value(args: &[String], flag: &str, value: &str) -> bool {
+    args.iter().enumerate().any(|(index, arg)| {
+        if let Some(inline) = arg.strip_prefix(&format!("{flag}=")) {
+            return inline == value;
+        }
+        arg == flag && args.get(index + 1).is_some_and(|next| next == value)
+    })
+}
+
 /// Reject retired composition flags that should no longer be forwarded to
 /// wrapped providers. Users should migrate to `claudine compose` or
 /// `claudine inline-compose`.
@@ -605,16 +615,25 @@ fn reject_retired_composition_flags(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bool {
-    match provider {
-        Provider::Codex => has_flag(args, "--json"),
-        Provider::Claude | Provider::Gemini | Provider::KimiCode | Provider::QwenCode => {
-            has_flag(args, "--output-format")
-                || args.iter().any(|arg| arg.starts_with("--output-format="))
-        }
-        Provider::OpenCode => args.iter().any(|arg| arg == "json"),
-        _ => false,
-    }
+pub(crate) fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bool {
+    let args_before_separator = args
+        .iter()
+        .position(|arg| arg == "--")
+        .map_or(args, |separator| &args[..separator]);
+
+    provider_info(provider)
+        .output_formats
+        .iter()
+        .any(|format| match format.selector {
+            OutputFormatSelector::Default | OutputFormatSelector::TransportFlag { .. } => false,
+            OutputFormatSelector::Flag { flag } => has_flag(args_before_separator, flag),
+            OutputFormatSelector::FlagValue { flag } => {
+                has_flag_value(args_before_separator, flag, format.native_name)
+            }
+            OutputFormatSelector::Positional { token } => {
+                args_before_separator.iter().any(|arg| arg == token)
+            }
+        })
 }
 
 /// Shared wrapper args for provider subcommands.
@@ -1883,30 +1902,15 @@ fn materialize_passthrough_harness_seed(
     })
 }
 
-fn provider_agent_id(provider: Provider) -> Option<claudine::agents::AgentId> {
-    match provider {
-        Provider::Claude => Some(claudine::agents::AgentId::ClaudeCode),
-        Provider::Codex => Some(claudine::agents::AgentId::Codex),
-        Provider::Gemini => Some(claudine::agents::AgentId::GeminiCli),
-        Provider::Goose => Some(claudine::agents::AgentId::Goose),
-        Provider::KimiCode => Some(claudine::agents::AgentId::KimiCode),
-        Provider::OpenCode => Some(claudine::agents::AgentId::OpenCode),
-        Provider::QwenCode => Some(claudine::agents::AgentId::QwenCli),
-        Provider::RooCode => Some(claudine::agents::AgentId::RooCode),
-        _ => None,
-    }
-}
-
 fn find_wrapper_harness_source(
     provider: Provider,
     repo_root: Option<&Path>,
     cwd: &Path,
 ) -> Option<PathBuf> {
-    let agent = claudine::agents::agent_for(provider_agent_id(provider)?);
+    let capabilities = claudine::provider::provider_info(provider).agent_capabilities();
     let search_root = repo_root.unwrap_or(cwd);
 
-    agent
-        .capabilities()
+    capabilities
         .runtime
         .system_prompt
         .memory_files
@@ -4047,6 +4051,123 @@ mod tests {
         assert_eq!(edited, None);
     }
 
+    fn string_args(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn native_output_codex_json_flag_is_detected_from_catalog() {
+        assert!(has_explicit_native_output_request(
+            Provider::Codex,
+            &string_args(&["exec", "--json"])
+        ));
+    }
+
+    #[test]
+    fn native_output_output_format_values_are_detected_from_catalog() {
+        for provider in [Provider::Claude, Provider::Gemini, Provider::QwenCode] {
+            assert!(
+                has_explicit_native_output_request(
+                    provider,
+                    &string_args(&["--output-format", "json"])
+                ),
+                "{provider:?} should detect separated json output format"
+            );
+            assert!(
+                has_explicit_native_output_request(
+                    provider,
+                    &string_args(&["--output-format=stream-json"])
+                ),
+                "{provider:?} should detect inline stream-json output format"
+            );
+        }
+    }
+
+    #[test]
+    fn native_output_opencode_format_json_is_detected_from_catalog() {
+        assert!(has_explicit_native_output_request(
+            Provider::OpenCode,
+            &string_args(&["run", "--format", "json"])
+        ));
+    }
+
+    #[test]
+    fn native_output_kimi_wire_transport_is_not_user_output_request() {
+        assert!(!has_explicit_native_output_request(
+            Provider::KimiCode,
+            &string_args(&["--wire"])
+        ));
+    }
+
+    #[test]
+    fn native_output_unknown_provider_flags_do_not_match_catalog() {
+        assert!(!has_explicit_native_output_request(
+            Provider::Codex,
+            &string_args(&["--output-format", "json"])
+        ));
+        assert!(!has_explicit_native_output_request(
+            Provider::OpenCode,
+            &string_args(&["json"])
+        ));
+        assert!(!has_explicit_native_output_request(
+            Provider::KimiCode,
+            &string_args(&["--print"])
+        ));
+    }
+
+    #[test]
+    fn native_output_detection_matches_provider_catalog() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            for format in provider_info(provider).output_formats {
+                let args = match format.selector {
+                    OutputFormatSelector::Default | OutputFormatSelector::TransportFlag { .. } => {
+                        continue;
+                    }
+                    OutputFormatSelector::Flag { flag } => string_args(&[flag]),
+                    OutputFormatSelector::FlagValue { flag } => {
+                        vec![flag.to_string(), format.native_name.to_string()]
+                    }
+                    OutputFormatSelector::Positional { token } => string_args(&[token]),
+                };
+
+                assert!(
+                    has_explicit_native_output_request(provider, &args),
+                    "{provider:?} should detect catalog selector {:?} for {}",
+                    format.selector,
+                    format.native_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_output_detection_source_has_no_provider_branch() {
+        let source = include_str!("mod.rs");
+        let start = source
+            .find("fn has_explicit_native_output_request")
+            .expect("helper should exist");
+        let end = source[start..]
+            .find("/// Shared wrapper args")
+            .map(|offset| start + offset)
+            .expect("helper should stay before shared wrapper args docs");
+        let helper_source = &source[start..end];
+
+        assert!(
+            !helper_source.contains("match provider")
+                && !helper_source.contains("Provider::Claude")
+                && !helper_source.contains("Provider::Codex")
+                && !helper_source.contains("Provider::Gemini")
+                && !helper_source.contains("Provider::KimiCode")
+                && !helper_source.contains("Provider::OpenCode")
+                && !helper_source.contains("Provider::QwenCode")
+                && !helper_source.contains("Provider::Goose")
+                && !helper_source.contains("Provider::RooCode")
+                && helper_source.contains("provider_info(provider)")
+                && helper_source.contains(".output_formats"),
+            "native-output detection must remain catalog-derived: {helper_source}"
+        );
+    }
+
     #[test]
     fn extract_wrapper_flags_lifts_reserved_aliases_from_passthrough() {
         let mut args = vec![
@@ -4422,7 +4543,7 @@ mod tests {
 
     #[test]
     fn format_summary_prose_appends_badge_markup() {
-        use claudine::events::Provider;
+        use claudine::provider::Provider;
         use claudine::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
         use claudine::stream::summary::StreamExecutionSummary;
         let summary = StreamExecutionSummary {
@@ -4445,7 +4566,7 @@ mod tests {
 
     #[test]
     fn format_summary_prose_without_badges_has_no_badge_markup() {
-        use claudine::events::Provider;
+        use claudine::provider::Provider;
         use claudine::stream::summary::StreamExecutionSummary;
         let summary = StreamExecutionSummary {
             provider: Provider::Claude,

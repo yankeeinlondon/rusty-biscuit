@@ -37,8 +37,7 @@ use super::protocol::opencode::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
     line_num: usize,
@@ -420,68 +419,78 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
         if line.is_empty() {
             return Ok(());
         }
-        let raw: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                super::trace_malformed_line(Provider::OpenCode, self.line_num, &e.to_string());
-                self.emit_malformed_warning(&e.to_string());
-                return Ok(());
-            }
-        };
 
-        let raw_kind = raw
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        super::trace_parser_event(Provider::OpenCode, &raw_kind, self.line_num);
-
-        match serde_json::from_value::<OpenCodeEvent>(raw.clone()) {
-            Ok(OpenCodeEvent::Init(init) | OpenCodeEvent::SessionStart(init)) => {
-                self.handle_init(init, &raw_kind);
-            }
-            Ok(OpenCodeEvent::StepStart(step)) => {
-                self.handle_step_start(step, &raw_kind);
-            }
-            Ok(
-                OpenCodeEvent::Text(text)
-                | OpenCodeEvent::TextDelta(text)
-                | OpenCodeEvent::AssistantText(text),
-            ) => {
-                self.handle_text(text, &raw_kind);
-            }
-            Ok(OpenCodeEvent::Reasoning(reasoning)) => {
-                self.handle_reasoning(reasoning, &raw_kind);
-            }
-            Ok(OpenCodeEvent::TaskStarted(task)) => {
-                self.handle_task_started(task, &raw_kind);
-            }
-            Ok(OpenCodeEvent::TaskCompleted(task)) => {
-                self.handle_task_completed(task, &raw_kind);
-            }
-            Ok(OpenCodeEvent::TaskProgress(progress)) => {
-                self.handle_task_progress(progress, &raw_kind);
-            }
-            Ok(OpenCodeEvent::StepFinish(sf)) => {
-                self.handle_step_finish(sf, &raw_kind);
-            }
-            Ok(OpenCodeEvent::StepComplete(sc) | OpenCodeEvent::TurnComplete(sc)) => {
-                self.handle_step_complete(sc, &raw_kind);
-            }
-            Ok(OpenCodeEvent::Error(err) | OpenCodeEvent::StepError(err)) => {
-                self.handle_error(err, &raw_kind);
-            }
-            Ok(OpenCodeEvent::ToolUse(tool)) => {
-                self.handle_tool_use_completed(tool, &raw_kind);
-            }
-            Ok(OpenCodeEvent::ToolStart(tool)) => {
-                self.handle_tool_use(tool, &raw_kind);
-            }
-            Ok(OpenCodeEvent::ToolResult(tool) | OpenCodeEvent::ToolEnd(tool)) => {
-                self.handle_tool_result(tool, &raw_kind);
+        // Try typed deserialization first to avoid `serde_json::Value` DOM
+        // allocation on the hot path. Fall back to `Value` only for unknown
+        // event types that must be preserved as `ProviderExtension`.
+        match serde_json::from_str::<OpenCodeEvent>(line) {
+            Ok(event) => {
+                let raw_kind = event.type_str().to_string();
+                super::trace_parser_event(Provider::OpenCode, &raw_kind, self.line_num);
+                match event {
+                    OpenCodeEvent::Init(init) | OpenCodeEvent::SessionStart(init) => {
+                        self.handle_init(init, &raw_kind);
+                    }
+                    OpenCodeEvent::StepStart(step) => {
+                        self.handle_step_start(step, &raw_kind);
+                    }
+                    OpenCodeEvent::Text(text)
+                    | OpenCodeEvent::TextDelta(text)
+                    | OpenCodeEvent::AssistantText(text) => {
+                        self.handle_text(text, &raw_kind);
+                    }
+                    OpenCodeEvent::Reasoning(reasoning) => {
+                        self.handle_reasoning(reasoning, &raw_kind);
+                    }
+                    OpenCodeEvent::TaskStarted(task) => {
+                        self.handle_task_started(task, &raw_kind);
+                    }
+                    OpenCodeEvent::TaskCompleted(task) => {
+                        self.handle_task_completed(task, &raw_kind);
+                    }
+                    OpenCodeEvent::TaskProgress(progress) => {
+                        self.handle_task_progress(progress, &raw_kind);
+                    }
+                    OpenCodeEvent::StepFinish(sf) => {
+                        self.handle_step_finish(sf, &raw_kind);
+                    }
+                    OpenCodeEvent::StepComplete(sc) | OpenCodeEvent::TurnComplete(sc) => {
+                        self.handle_step_complete(sc, &raw_kind);
+                    }
+                    OpenCodeEvent::Error(err) | OpenCodeEvent::StepError(err) => {
+                        self.handle_error(err, &raw_kind);
+                    }
+                    OpenCodeEvent::ToolUse(tool) => {
+                        self.handle_tool_use_completed(tool, &raw_kind);
+                    }
+                    OpenCodeEvent::ToolStart(tool) => {
+                        self.handle_tool_use(tool, &raw_kind);
+                    }
+                    OpenCodeEvent::ToolResult(tool) | OpenCodeEvent::ToolEnd(tool) => {
+                        self.handle_tool_result(tool, &raw_kind);
+                    }
+                }
             }
             Err(_) => {
-                self.emit_provider_extension(&raw_kind, raw);
+                let raw: Map<String, Value> = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        super::trace_malformed_line(
+                            Provider::OpenCode,
+                            self.line_num,
+                            &e.to_string(),
+                        );
+                        self.emit_malformed_warning(&e.to_string());
+                        return Ok(());
+                    }
+                };
+                let raw_kind = raw
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                super::trace_parser_event(Provider::OpenCode, &raw_kind, self.line_num);
+                self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
         Ok(())

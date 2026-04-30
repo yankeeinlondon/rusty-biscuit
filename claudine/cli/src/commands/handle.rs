@@ -6,10 +6,11 @@ use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
 use tracing::{debug, info_span};
 
-use claudine::events::{Provider, detect_environment_fast};
+use claudine::events::detect_environment_fast;
 
 use crate::cli_utils::parse_provider;
 use crate::provider_values::provider_value_parser;
+use claudine::provider::Provider;
 
 /// Default overall execution deadline for a single `claudine handle` invocation.
 ///

@@ -127,9 +127,10 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use tempfile::tempdir;
 
-    use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+    use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
 
     use super::*;
+    use crate::provider::Provider;
 
     #[test]
     fn reporting_filters_support_package_area_and_package() {

@@ -1,6 +1,7 @@
 use biscuit_terminal::components::table::table::TableCellContent;
 use chrono::NaiveDate;
-use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::events::AgenticEvent;
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use color_eyre::eyre::{Result, eyre};
 
 pub(crate) fn parse_provider(name: &str) -> Result<Provider> {

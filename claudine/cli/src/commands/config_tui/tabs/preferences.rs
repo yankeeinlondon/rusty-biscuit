@@ -455,8 +455,7 @@ mod tests {
     use super::*;
     use claudine::config::AgentInfo;
     use claudine::config::claudine_config::ClaudineConfig;
-    use claudine::events::Provider;
-
+    use claudine::provider::Provider;
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }

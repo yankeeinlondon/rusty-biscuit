@@ -61,6 +61,20 @@ impl KimiEnvelope {
     /// fallback path the way provider parsers do for unknown event types.
     pub fn classify(value: Value) -> Option<Self> {
         let raw = serde_json::from_value::<KimiRawEnvelope>(value).ok()?;
+        Self::from_raw(raw)
+    }
+
+    /// Classify a raw JSON line directly into a typed wire envelope.
+    ///
+    /// This avoids the intermediate `serde_json::Value` DOM allocation that
+    /// [`Self::classify`] requires, making it suitable for the hot path in
+    /// the semantic stream parser.
+    pub fn classify_str(line: &str) -> Option<Self> {
+        let raw: KimiRawEnvelope = serde_json::from_str(line).ok()?;
+        Self::from_raw(raw)
+    }
+
+    fn from_raw(raw: KimiRawEnvelope) -> Option<Self> {
         match (raw.method.as_deref(), raw.id, raw.result, raw.error) {
             (Some("event"), _id, _r, _e) => {
                 let params = raw.params.unwrap_or(Value::Null);
@@ -77,6 +91,21 @@ impl KimiEnvelope {
             }
             (None, Some(id), None, Some(error)) => Some(KimiEnvelope::ErrorResponse { id, error }),
             _ => None,
+        }
+    }
+
+    /// Returns the raw kind string for this envelope, matching the format
+    /// produced by the legacy `envelope_raw_kind(Value)` helper.
+    pub fn raw_kind(&self) -> String {
+        match self {
+            KimiEnvelope::Notification(params) => {
+                format!("event:{}", params.event_type)
+            }
+            KimiEnvelope::Request { params, .. } => {
+                format!("request:{}", params.request_type)
+            }
+            KimiEnvelope::SuccessResponse { .. } => "response".into(),
+            KimiEnvelope::ErrorResponse { .. } => "error_response".into(),
         }
     }
 }

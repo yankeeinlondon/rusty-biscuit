@@ -4,8 +4,37 @@ use claudine::actions::HookAction;
 use claudine::config::claudine_config::{ClaudineConfig, DefaultSounds};
 use claudine::dispatch::loader::{CanonicalRuntimeConfig, compile_canonical_runtime};
 use claudine::dispatch::{dispatch_canonical_with_runtime, write_dispatch_event_to};
-use claudine::events::{AgenticEvent, EventMeta, Provider};
+use claudine::events::{AgenticEvent, EventMeta};
+use claudine::provider::Provider;
+use serial_test::serial;
 use tempfile::TempDir;
+
+/// RAII guard that sets `PLAYA_DRY_RUN=1` for its lifetime so the
+/// dispatch pipeline never opens a real audio device during the test.
+///
+/// Pair with `#[serial]` so concurrent tests cannot observe inconsistent
+/// env-var state.
+struct PlayaDryRunGuard;
+
+impl PlayaDryRunGuard {
+    fn enable() -> Self {
+        // SAFETY: tests using this guard are marked #[serial] so no
+        // parallel test reads or writes the env var concurrently.
+        unsafe {
+            std::env::set_var("PLAYA_DRY_RUN", "1");
+        }
+        Self
+    }
+}
+
+impl Drop for PlayaDryRunGuard {
+    fn drop(&mut self) {
+        // SAFETY: same as `enable` above.
+        unsafe {
+            std::env::remove_var("PLAYA_DRY_RUN");
+        }
+    }
+}
 
 fn make_config_with_action(event: AgenticEvent, action: HookAction) -> CanonicalRuntimeConfig {
     let mut actions = HashMap::new();
@@ -19,10 +48,14 @@ fn make_config_with_action(event: AgenticEvent, action: HookAction) -> Canonical
     compile_canonical_runtime(config, None).unwrap()
 }
 
-/// Dispatching a `SoundEffect` action for an event that has no audio device
-/// available (in CI) completes without error and returns no blocking response.
+/// Dispatching a `SoundEffect` action completes without error and returns
+/// no blocking response.  Real audio playback is suppressed via
+/// `PLAYA_DRY_RUN=1` so a wedged audio device cannot stall the test.
 #[tokio::test]
+#[serial]
 async fn dispatch_sound_effect_action() {
+    let _guard = PlayaDryRunGuard::enable();
+
     let runtime = make_config_with_action(
         AgenticEvent::HumanInTheLoop,
         HookAction::SoundEffect {

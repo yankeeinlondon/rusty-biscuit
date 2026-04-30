@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::events::Provider;
-
 use super::capabilities::{
     ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourceSupport,
     capabilities_for,
 };
+use crate::provider::Provider;
 
 /// Scope for linking operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

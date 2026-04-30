@@ -55,6 +55,33 @@ pub enum OpenCodeEvent {
     TaskProgress(OpenCodeTaskProgress),
 }
 
+impl OpenCodeEvent {
+    /// Returns the JSON `type` discriminator for this event variant.
+    pub const fn type_str(&self) -> &'static str {
+        match self {
+            OpenCodeEvent::Init(_) => "init",
+            OpenCodeEvent::SessionStart(_) => "session_start",
+            OpenCodeEvent::StepStart(_) => "step_start",
+            OpenCodeEvent::Text(_) => "text",
+            OpenCodeEvent::TextDelta(_) => "text_delta",
+            OpenCodeEvent::AssistantText(_) => "assistant_text",
+            OpenCodeEvent::StepFinish(_) => "step_finish",
+            OpenCodeEvent::StepComplete(_) => "step_complete",
+            OpenCodeEvent::TurnComplete(_) => "turn_complete",
+            OpenCodeEvent::Error(_) => "error",
+            OpenCodeEvent::StepError(_) => "step_error",
+            OpenCodeEvent::ToolUse(_) => "tool_use",
+            OpenCodeEvent::ToolStart(_) => "tool_start",
+            OpenCodeEvent::ToolResult(_) => "tool_result",
+            OpenCodeEvent::ToolEnd(_) => "tool_end",
+            OpenCodeEvent::Reasoning(_) => "reasoning",
+            OpenCodeEvent::TaskStarted(_) => "task_started",
+            OpenCodeEvent::TaskCompleted(_) => "task_completed",
+            OpenCodeEvent::TaskProgress(_) => "task_progress",
+        }
+    }
+}
+
 /// `init` / `session_start` payload.
 #[derive(Debug, Default, Deserialize)]
 pub struct OpenCodeInit {

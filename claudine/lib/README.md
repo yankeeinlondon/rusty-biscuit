@@ -4,23 +4,24 @@ Core library for the Claudine cross-agent event handling, skill linking, and MCP
 
 ## Architecture
 
-The library is organized into seventeen top-level modules plus the shared error type:
+The library is organized into eighteen top-level modules plus the shared error type:
 
 ```
 claudine/lib/src/
 ├── actions/        → Hook action types and response model
 ├── adapters/       → Provider-specific event parsers
-├── agents/         → Agent capability catalog and registry
+├── agents/         → Agent capability catalog and registry (forwarding facades over `provider/`)
 ├── badges.rs       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/    → Markdown frontmatter composition (inline, direct, and sequence pipelines)
 ├── config/         → Agent detection and hook registration
 ├── dispatch/       → Event processing pipeline
-├── events/         → Normalized event model and types
+├── events/         → Normalized 16-event lifecycle model (`AgenticEvent`, `EventMeta`, matrices)
 ├── harness/        → Typed pre/post validations, timeouts, handlers, and shell policy
 ├── linking/        → Cross-provider skill and command synchronization
 ├── messaging/      → Outbound messaging routes, resolution, and provider dispatch
 ├── mcp/            → MCP catalog, defaults, import/export, session, and injection
 ├── permissions/    → Provider-agnostic policy engine (queries, mutations, canonical model)
+├── provider/       → Central provider catalog: `Provider` enum, `ProviderInfo`, behavior traits
 ├── reporting/      → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/       → Cross-provider runtime policy services (Protect)
 ├── stream/         → Structured stream parsing for 6 providers + typed protocol models + summary/reporting
@@ -56,26 +57,38 @@ Types for hook actions that execute when events fire, and response types for blo
 
 Key types:
 - `AgenticEvent` — 16-variant enum with snake_case serde, descriptions, payload schemas, return schemas, and abbreviations
-- `Provider` — 8-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, RooCode) with slug, docs URL, event support queries, and native event name mappings
-- `EventSupportLevel` — `Hook` | `NonHook` | `NotSupported` per provider-event pair
 - `EventMeta` — Normalized event metadata (provider, event, tool name, error, prompt, session ID, timestamps, environment context)
 - `ResolvedHook` — A fully resolved hook binding ready for execution (event, meta, provider, actions, can_block)
 - `ClaudineConfig` — Canonical configuration type
 - `EventBinding` — Event binding configuration
 - `GlobalSettings` / `TtsSettings` / `LinkingSettings` / `CanonicalProviderSettings` — Settings types
 - `EnvironmentContext` — Auto-detected OS, hardware, git, and repo context (via `sniff`)
+- `event_support_matrix()` / `event_native_mapping_matrix()` — structured matrices that drive `claudine hooks --support` and `claudine hooks --mapping`. Both source every cell directly from `crate::provider::provider_info(provider).event_mapping`.
+
+The `Provider` enum and `EventSupportLevel` type are owned by [`crate::provider`](#provider-catalog-provider) — the centralized providers refactor (Phase 8) removed the legacy `crate::events::Provider` re-export.
+
+### Provider Catalog (`provider`)
+
+Central catalog for the 8-variant `Provider` enum and all per-provider static facts. `provider_info(p) -> &'static ProviderInfo` is the single registry every per-domain dispatch flows through.
+
+Key types:
+- `Provider` — 8-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, RooCode)
+- `PROVIDERS_DISPLAY_ORDER` — `[Provider; 8]` array used by every matrix-style report
+- `ProviderInfo` — full per-provider record: identity (`display_name`, `slug`, `binary`, `agent_offset`, `cli_aliases`, `docs_url`, `usage_dashboard_url`, `sniff_binding`), event mapping, four behavior trait objects, agent and resource accessors, and the Phase 5 typed catalog (`PathTemplate`, `OutputFormatSupport`, `EntrypointSpec`, `SystemPromptSpec`, `YoloSupport`, `ReasoningSupport`, `KnownGap`, `AcpSupport`, `PromptArgConventions`)
+- `EventSupportLevel` — `Hook` | `NonHook` | `Acp` | `NotSupported` per provider-event pair
+- `EventMappingTable` / `EventMapping` — per-provider event row table; the source of truth for support level, native names, parse aliases, and which rows participate in standard hook registration
+- `ProviderBehavior`, `McpBehavior`, `AdapterBehavior`, `ConfiguratorBehavior` — focused behavior traits implemented as zero-sized provider structs and stored as `&'static dyn Trait` on `ProviderInfo`
+- `AcpSupport`, `AcpServerMode`, `AcpEvent` — typed ACP capability descriptor surfaced by `claudine hooks --capture-method`
+
+Adding a ninth provider is a matter of: adding the `Provider` variant, creating one `provider/<name>.rs` file with a `<NAME>_INFO: ProviderInfo` constant, registering it in `provider/registry.rs`, and adding a CLI-side `WrapperProfile` entry. See [`docs/topics/building-an-agent-wrapper.md`](../docs/topics/building-an-agent-wrapper.md) for the full checklist.
 
 ### Agents (`agents`)
 
-Comprehensive capability catalog for all 8 supported agentic CLIs:
+Capability model shared across all 8 supported agentic CLIs. After Phase 8 of the centralized-providers refactor this module is a thin forwarding layer over [`crate::provider`](#provider-catalog-provider):
 
-- `Agent` trait — shared interface for capability descriptors (`id()`, `capabilities()`, `supports_skills()`, `supports_custom_slash_commands()`, `supports_subagents()`, `validate()`)
+- `Agent` trait — shared interface for capability descriptors (`id()`, `capabilities()`, `supports_skills()`, `supports_custom_slash_commands()`, `supports_subagents()`, `validate()`). Implemented directly on `crate::provider::ProviderInfo` so `agent_for(provider)` and `provider_info(provider)` return references to the same `'static` record.
 - `AgentCapabilities` — full capability model covering meta, docs, config, runtime, skills, commands, subagents, scripts, and confidence
-- `AgentId` — 8-variant enum with string slugs and aliases for CLI parsing
-- `agent_for(id)` / `all_agents()` / `parse_agent_id(input)` — registry functions
-- Per-agent implementations: `ClaudeCodeAgent`, `CodexAgent`, `GeminiCliAgent`, `GooseAgent`, `KimiCodeAgent`, `OpenCodeAgent`, `QwenCliAgent`, `RooCodeAgent`
-
-Each agent descriptor captures: model selection, non-interactive mode, system prompt, permissions, reasoning style, logging, billing, skill paths, command paths, subagent paths, and script support.
+- `agent_for(provider)` / `all_agents()` / `parse_agent_id(input)` — forwarding facades over `crate::provider::provider_info(provider)` and `Provider::parse_cli_name(input)`
 
 ### Adapters (`adapters`)
 

@@ -1,7 +1,11 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use claudine::events::Provider;
+use claudine::provider::Provider;
+use claudine::provider::{
+    EntrypointMode, OutputFormatSelector, PROVIDER_COUNT, PromptArgConventions, YoloSupport,
+    provider_info,
+};
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail, eyre};
@@ -214,65 +218,17 @@ impl PromptSource {
 }
 
 // ---------------------------------------------------------------------------
-// PromptArgConventions — per-provider prompt-argv parsing knowledge
+// PromptArgConventions — re-exported from claudine::provider
 // ---------------------------------------------------------------------------
-
-/// Describes how a provider's native CLI represents a prompt on argv.
-///
-/// Used by `extract_prompt_source_from_passthrough` to find a prompt in
-/// raw passthrough arguments without embedding per-provider logic in a
-/// central match.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct PromptArgConventions {
-    /// Value-taking flags that carry the prompt string when present,
-    /// e.g. `&["-p", "--prompt"]` for Gemini, `&["-t", "--text"]` for
-    /// Goose. Empty for providers that accept only a positional prompt.
-    pub prompt_flags: &'static [&'static str],
-    /// An optional entrypoint subcommand that must be skipped when
-    /// scanning for a positional prompt, e.g. `Some("exec")` for Codex
-    /// or `Some("run")` for OpenCode / Goose. `None` for providers that
-    /// have no subcommand entrypoint.
-    pub entrypoint: Option<&'static str>,
-    /// Additional value-taking flags whose values must not be mistaken
-    /// for a positional prompt, e.g. `&["-m", "--model", "--output-format"]`.
-    pub value_taking_flags: &'static [&'static str],
-}
-
-impl PromptArgConventions {
-    /// Conventions for a provider that accepts only a positional prompt
-    /// after an entrypoint subcommand (e.g. Codex `exec`, OpenCode `run`).
-    pub(crate) const fn positional_after(entrypoint: &'static str) -> Self {
-        Self {
-            prompt_flags: &[],
-            entrypoint: Some(entrypoint),
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
-    }
-}
-
-/// Value-taking flags recognized by the prompt extractor across every
-/// wrapped provider. This is intentionally the UNION of every provider's
-/// value-taking flags, not a per-provider list — the extractor's job is
-/// to avoid mistaking a flag's value for a positional prompt, and
-/// over-skipping an unknown flag's value is harmless. Per-provider
-/// `prompt_arg_conventions` implementations can swap in a narrower list
-/// if a future provider needs it.
-const COMMON_VALUE_TAKING_FLAGS: &[&str] = &[
-    "-m",
-    "--model",
-    "-o",
-    "--output",
-    "--output-format",
-    "--output-last-message",
-    "--approval-mode",
-    "--config",
-    "-c",
-    "--profile",
-    "--system-prompt",
-    "--sandbox-image",
-    "--auth-type",
-    "--format",
-];
+//
+// Phase 6 of the centralized providers refactor moved the type into the
+// lib crate so per-provider data lives alongside the rest of the provider
+// catalog. The CLI re-exports it under the same name for source
+// compatibility with prior callers.
+//
+// `WrapperProfile::prompt_arg_conventions` now defaults to reading from
+// `provider_info(self.provider()).prompt_arg_conventions`, so individual
+// wrapper impls no longer override it.
 
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -322,21 +278,78 @@ pub(crate) trait WrapperProfile: Send + Sync {
     fn provider(&self) -> Provider;
 
     /// The binary name to exec (e.g. `"claude"`, `"codex"`).
-    fn binary(&self) -> &'static str;
+    ///
+    /// Defaults to `provider_info(self.provider()).binary`. Per-provider
+    /// overrides are unnecessary because the binary name lives in the
+    /// central provider catalog.
+    fn binary(&self) -> &'static str {
+        provider_info(self.provider()).binary
+    }
 
     /// The value injected as the `AGENT` environment variable.
-    fn agent_env(&self) -> &'static str;
+    ///
+    /// Defaults to `provider_info(self.provider()).binary`. Every wrapped
+    /// provider currently sets `AGENT` to its binary name; the default
+    /// matches that convention.
+    fn agent_env(&self) -> &'static str {
+        provider_info(self.provider()).binary
+    }
 
     // -- YOLO mode ----------------------------------------------------------
 
     /// Apply YOLO/auto-approve mode to `args` and `env_overrides`.
     ///
     /// Returns `Ok(Some(warning))` when YOLO is unsupported for this provider.
+    ///
+    /// Default implementation derives behavior from the central provider
+    /// catalog's [`YoloSupport`] descriptor.
     fn apply_yolo(
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>>;
+    ) -> Result<Option<String>> {
+        match provider_info(self.provider()).yolo {
+            YoloSupport::DirectFlag { native_flag } => {
+                if !has_flag(args, native_flag) {
+                    args.push(native_flag.to_string());
+                }
+                Ok(None)
+            }
+            YoloSupport::DirectFlagWithAlias {
+                native_flag,
+                aliases,
+            } => {
+                if !has_any_flag(args, native_flag, aliases) {
+                    args.push(native_flag.to_string());
+                }
+                Ok(None)
+            }
+            YoloSupport::EnvVar { env_var, value } => {
+                if !env_overrides
+                    .iter()
+                    .any(|(k, v)| k == env_var && v == value)
+                {
+                    env_overrides.push((env_var.to_string(), value.to_string()));
+                }
+                Ok(None)
+            }
+            YoloSupport::NonInteractiveOnly {
+                non_interactive_flag,
+            } => {
+                if !has_flag(args, non_interactive_flag) {
+                    args.push(non_interactive_flag.to_string());
+                }
+                Ok(Some(format!(
+                    "{} YOLO mode is non-interactive only",
+                    self.provider()
+                )))
+            }
+            YoloSupport::None => Ok(Some(format!(
+                "{} does not support YOLO mode",
+                self.provider()
+            ))),
+        }
+    }
 
     /// Apply YOLO handling with awareness of interactive vs non-interactive
     /// mode. Default delegates to the mode-unaware [`apply_yolo`]; overriders
@@ -355,12 +368,43 @@ pub(crate) trait WrapperProfile: Send + Sync {
     }
 
     /// Whether this provider supports YOLO mode at all.
-    fn has_supported_yolo(&self) -> bool;
+    ///
+    /// Defaults to `provider_info(self.provider()).yolo != YoloSupport::None`.
+    fn has_supported_yolo(&self) -> bool {
+        !matches!(provider_info(self.provider()).yolo, YoloSupport::None)
+    }
 
     /// Reject native YOLO flags passed directly in passthrough args.
     ///
     /// Error messages may contain `<blue>` Prose tags for styled rendering.
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()>;
+    ///
+    /// Default implementation rejects [`YoloSupport::DirectFlag`] and
+    /// [`YoloSupport::DirectFlagWithAlias`] native flags.
+    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
+        match provider_info(self.provider()).yolo {
+            YoloSupport::DirectFlag { native_flag } if has_flag(args, native_flag) => {
+                bail!(
+                    "do not pass <blue>{native_flag}</blue> directly to claudine {}; \
+                     use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
+                     Claudine uses this CLI convention for all agents it provides a wrapper to.",
+                    self.provider()
+                );
+            }
+            YoloSupport::DirectFlagWithAlias {
+                native_flag,
+                aliases,
+            } if has_any_flag(args, native_flag, aliases) => {
+                bail!(
+                    "do not pass <blue>{native_flag}</blue> directly to claudine {}; \
+                     use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
+                     Claudine uses this CLI convention for all agents it provides a wrapper to.",
+                    self.provider()
+                );
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 
     // -- Non-interactive mode -----------------------------------------------
 
@@ -374,8 +418,32 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// conditional on the mode (Claude: `--print`; Kimi: `--print`) can
     /// decide here.
     ///
-    /// Default: no-op.
-    fn apply_entrypoint(&self, _args: &mut Vec<String>, _non_interactive: bool) {}
+    /// Default implementation reads from the central catalog's
+    /// [`EntrypointSpec`] list.
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        let info = provider_info(self.provider());
+        let target_mode = if non_interactive {
+            EntrypointMode::NonInteractive
+        } else {
+            EntrypointMode::Interactive
+        };
+        if let Some(ep) = info
+            .entrypoints
+            .iter()
+            .find(|ep| matches!(ep.mode, EntrypointMode::Both) || ep.mode == target_mode)
+        {
+            if let Some(sub) = ep.subcommand
+                && args.first().is_none_or(|first| first != sub)
+            {
+                args.insert(0, sub.to_string());
+            }
+            for flag in ep.required_flags {
+                if !has_flag(args, flag) {
+                    args.push(flag.to_string());
+                }
+            }
+        }
+    }
 
     /// Reject mode-conflict flags (e.g. `-i` / `--prompt-interactive`)
     /// when the pipeline is running in non-interactive mode. Runs only
@@ -412,12 +480,44 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     /// Map the universal `--output <format>` to provider-specific flags.
     ///
-    /// Default: returns a warning that the provider doesn't support it.
-    fn apply_output_format(&self, _args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        Some(format!(
-            "{} does not support --output {format}; this flag was skipped",
-            self.provider()
-        ))
+    /// Default implementation reads from the central catalog's
+    /// [`OutputFormatSupport`] list.
+    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
+        let info = provider_info(self.provider());
+        let provider_format = match format {
+            OutputFormat::Json => claudine::provider::OutputFormat::Json,
+            OutputFormat::Text => claudine::provider::OutputFormat::Text,
+            OutputFormat::Stream => claudine::provider::OutputFormat::Stream,
+        };
+        let Some(support) = info
+            .output_formats
+            .iter()
+            .find(|s| s.format == provider_format)
+        else {
+            return Some(format!(
+                "{} does not support --output {format}; this flag was skipped",
+                self.provider()
+            ));
+        };
+
+        match support.selector {
+            OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => None,
+            OutputFormatSelector::Flag { flag } | OutputFormatSelector::TransportFlag { flag } => {
+                if !has_flag(args, flag) {
+                    args.push(flag.to_string());
+                }
+                None
+            }
+            OutputFormatSelector::FlagValue { flag } => {
+                if !has_flag(args, flag)
+                    && !args.iter().any(|arg| arg.starts_with(&format!("{flag}=")))
+                {
+                    args.push(flag.to_string());
+                    args.push(support.native_name.to_string());
+                }
+                None
+            }
+        }
     }
 
     // -- Universal --system-prompt flag --------------------------------------
@@ -543,13 +643,19 @@ pub(crate) trait WrapperProfile: Send + Sync {
     // -- Structured stream support -------------------------------------------
 
     /// Whether this provider supports internal structured streaming.
+    ///
+    /// Defaults to `provider_info(self.provider()).stream_protocol.is_some()`
+    /// so providers with a structured stream protocol declared in the
+    /// central catalog inherit the correct value automatically.
     fn supports_structured_stream(&self) -> bool {
-        false
+        provider_info(self.provider()).stream_protocol.is_some()
     }
 
     /// The stream protocol this provider uses.
+    ///
+    /// Defaults to `provider_info(self.provider()).stream_protocol`.
     fn stream_protocol(&self) -> Option<StreamProtocol> {
-        None
+        provider_info(self.provider()).stream_protocol
     }
 
     // -- Resume support -------------------------------------------------------
@@ -566,8 +672,14 @@ pub(crate) trait WrapperProfile: Send + Sync {
     }
 
     /// Whether this provider supports resuming sessions.
+    ///
+    /// Defaults to `provider_info(self.provider()).agent_capabilities().runtime.non_interactive.resume_supported`.
     fn supports_resume(&self) -> bool {
-        false
+        provider_info(self.provider())
+            .agent_capabilities()
+            .runtime
+            .non_interactive
+            .resume_supported
     }
 
     // -- Structured stream support -------------------------------------------
@@ -589,16 +701,12 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Describe how this provider represents a prompt on argv.
     ///
     /// Used by `extract_prompt_source_from_passthrough` to locate and
-    /// remove a prompt from raw passthrough args. Every provider that
-    /// supports non-interactive mode must implement this; the default
-    /// returns "positional-only, no entrypoint" which works for Claude
-    /// (prompt as bare positional, no subcommand).
+    /// remove a prompt from raw passthrough args. The default reads the
+    /// provider's `PromptArgConventions` from the central provider
+    /// catalog so per-provider overrides are not required for ordinary
+    /// cases.
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &[],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
+        provider_info(self.provider()).prompt_arg_conventions
     }
 }
 
@@ -622,23 +730,39 @@ static QWEN: QwenWrapper = QwenWrapper;
 static OPENCODE: OpencodeWrapper = OpencodeWrapper;
 static GOOSE: GooseWrapper = GooseWrapper;
 
+/// Wrapper registry indexed by `Provider as usize`.
+///
+/// The array length is tied to [`PROVIDER_COUNT`], so adding a new
+/// [`Provider`] variant forces a compile error here until the slot is
+/// addressed. There is intentionally no wildcard fallback.
+///
+/// ## Documented "no wrapper" exceptions
+///
+/// - [`Provider::RooCode`] — Roo Code runs exclusively as a VS Code
+///   extension, so there is no standalone CLI binary to wrap. Any future
+///   provider that is intentionally unwrapped must be added to this table
+///   *and* to the `NO_WRAPPER` allow-list referenced by
+///   `wrapper_registry_covers_every_provider_and_documents_exceptions`.
+///
+/// Slot order MUST match `Provider as usize` — see
+/// `claudine::provider::identity::PROVIDERS_DISPLAY_ORDER`.
+static WRAPPER_REGISTRY: [Option<&'static dyn WrapperProfile>; PROVIDER_COUNT] = [
+    /* 0: Claude   */ Some(&CLAUDE),
+    /* 1: Codex    */ Some(&CODEX),
+    /* 2: Gemini   */ Some(&GEMINI),
+    /* 3: Goose    */ Some(&GOOSE),
+    /* 4: KimiCode */ Some(&KIMI),
+    /* 5: OpenCode */ Some(&OPENCODE),
+    /* 6: QwenCode */ Some(&QWEN),
+    /* 7: RooCode  */ None,
+];
+
 /// Look up the wrapper profile for a given provider.
 ///
-/// Returns `None` for `Provider::RooCode` because Roo Code is a VS Code
-/// extension that cannot be wrapped as a standalone CLI process.
+/// Returns `None` only for the documented "no wrapper" exceptions listed on
+/// [`WRAPPER_REGISTRY`].
 pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn WrapperProfile> {
-    match provider {
-        Provider::Claude => Some(&CLAUDE),
-        Provider::Codex => Some(&CODEX),
-        Provider::Gemini => Some(&GEMINI),
-        Provider::KimiCode => Some(&KIMI),
-        Provider::QwenCode => Some(&QWEN),
-        Provider::OpenCode => Some(&OPENCODE),
-        Provider::Goose => Some(&GOOSE),
-        // Roo Code runs exclusively as a VS Code extension; there is no
-        // standalone CLI binary to wrap.
-        Provider::RooCode | _ => None,
-    }
+    WRAPPER_REGISTRY[provider as usize]
 }
 
 // ---------------------------------------------------------------------------
@@ -648,59 +772,6 @@ pub(crate) fn profile_for_provider(provider: Provider) -> Option<&'static dyn Wr
 impl WrapperProfile for ClaudeWrapper {
     fn provider(&self) -> Provider {
         Provider::Claude
-    }
-    fn binary(&self) -> &'static str {
-        "claude"
-    }
-    fn agent_env(&self) -> &'static str {
-        "claude"
-    }
-
-    fn apply_yolo(
-        &self,
-        args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        let flag = "--dangerously-skip-permissions";
-        if !has_flag(args, flag) {
-            args.push(flag.to_string());
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
-        let flag = "--dangerously-skip-permissions";
-        if has_flag(args, flag) {
-            bail!(
-                "do not pass <blue>{flag}</blue> directly to claudine claude; \
-                 use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
-                 Claudine uses this CLI convention for all agents it provides a wrapper to."
-            );
-        }
-        Ok(())
-    }
-
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if non_interactive && !has_flag(args, "--print") {
-            args.push("--print".to_string());
-        }
-    }
-
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        let value = match format {
-            OutputFormat::Json => "json",
-            OutputFormat::Text => "text",
-            OutputFormat::Stream => "stream-json",
-        };
-        if !has_flag(args, "--output-format") {
-            args.push("--output-format".to_string());
-            args.push(value.to_string());
-        }
-        None
     }
 
     fn apply_system_prompt(
@@ -764,19 +835,10 @@ impl WrapperProfile for ClaudeWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::StreamJson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // Claude needs --print --verbose alongside stream-json for reliable
+        // structured output. The typed catalog does not model "extra flags
+        // required for structured streaming", so this override is kept.
         push_stream_json_flags(args, &["--print", "--verbose"]);
     }
 }
@@ -789,47 +851,11 @@ impl WrapperProfile for CodexWrapper {
     fn provider(&self) -> Provider {
         Provider::Codex
     }
-    fn binary(&self) -> &'static str {
-        "codex"
-    }
-    fn agent_env(&self) -> &'static str {
-        "codex"
-    }
-
-    fn apply_yolo(
-        &self,
-        args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        let flag = "--dangerously-bypass-approvals-and-sandbox";
-        let aliases: &[&str] = &["--yolo"];
-        if !has_any_flag(args, flag, aliases) {
-            args.push(flag.to_string());
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
-        let flag = "--dangerously-bypass-approvals-and-sandbox";
-        let aliases: &[&str] = &["--yolo"];
-        if has_any_flag(args, flag, aliases) {
-            bail!(
-                "do not pass <blue>{flag}</blue> directly to claudine codex; \
-                 use Claudine's <blue>--yolo</blue> or <blue>-y</blue> switches instead. \
-                 Claudine uses this CLI convention for all agents it provides a wrapper to."
-            );
-        }
-        Ok(())
-    }
 
     fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        // Codex `exec` is the non-interactive entrypoint; interactive
-        // sessions use the default TUI (no `exec`). Only inject when
-        // the caller is running non-interactively.
+        // The typed entrypoint catalog records `exec` but not Codex's native
+        // `e` alias. Keep this override so callers that already supplied
+        // `e` are not rewritten to `exec e ...`.
         if !non_interactive {
             return;
         }
@@ -840,20 +866,6 @@ impl WrapperProfile for CodexWrapper {
             .is_some_and(|first| first == entrypoint || aliases.contains(&first.as_str()))
         {
             args.insert(0, entrypoint.to_string());
-        }
-    }
-
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        match format {
-            OutputFormat::Json => {
-                if !has_flag(args, "--json") {
-                    args.push("--json".to_string());
-                }
-                None
-            }
-            _ => Some(format!(
-                "Codex only supports --output json; {format} was skipped"
-            )),
         }
     }
 
@@ -937,18 +949,6 @@ impl WrapperProfile for CodexWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::Jsonl)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Codex uses `exec --json` for structured output.
         // The `exec` subcommand is expected to already be present.
@@ -964,10 +964,6 @@ impl WrapperProfile for CodexWrapper {
     fn supports_interactive_inline_closure(&self) -> bool {
         true
     }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions::positional_after("exec")
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -978,18 +974,16 @@ impl WrapperProfile for GeminiWrapper {
     fn provider(&self) -> Provider {
         Provider::Gemini
     }
-    fn binary(&self) -> &'static str {
-        "gemini"
-    }
-    fn agent_env(&self) -> &'static str {
-        "gemini"
-    }
 
     fn apply_yolo(
         &self,
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
+        // Gemini accepts both `--approval-mode yolo` and
+        // `--approval-mode=yolo`, while the typed catalog only records the
+        // native setting. Keep this override to preserve conflict checks for
+        // existing separated-value argv.
         let flag = "--approval-mode";
         let value = "yolo";
         let aliases: &[&str] = &["--yolo", "-y"];
@@ -1006,10 +1000,6 @@ impl WrapperProfile for GeminiWrapper {
         args.push(flag.to_string());
         args.push(value.to_string());
         Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
@@ -1083,32 +1073,6 @@ impl WrapperProfile for GeminiWrapper {
         Ok(())
     }
 
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        match format {
-            OutputFormat::Json => {
-                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
-                    args.push("--output-format".to_string());
-                    args.push("json".to_string());
-                }
-                None
-            }
-            OutputFormat::Text => {
-                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
-                    args.push("--output-format".to_string());
-                    args.push("text".to_string());
-                }
-                None
-            }
-            OutputFormat::Stream => {
-                if !has_flag(args, "-o") && !has_flag(args, "--output-format") {
-                    args.push("--output-format".to_string());
-                    args.push("stream-json".to_string());
-                }
-                None
-            }
-        }
-    }
-
     fn apply_system_prompt(
         &self,
         prompt: &PreparedSystemPrompt,
@@ -1159,73 +1123,23 @@ impl WrapperProfile for GeminiWrapper {
         ))
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::StreamJson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // Gemini uses the catalog-default --output-format stream-json via
+        // push_stream_json_flags, with no extra flags. This override is kept
+        // because structured-stream setup is not modeled in the output-format
+        // catalog (it is a transport concern, not an output format concern).
         push_stream_json_flags(args, &[]);
     }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["-p", "--prompt"],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
-    }
 }
-
-// ---------------------------------------------------------------------------
-// Kimi
 // ---------------------------------------------------------------------------
 
 impl WrapperProfile for KimiWrapper {
     fn provider(&self) -> Provider {
         Provider::KimiCode
     }
-    fn binary(&self) -> &'static str {
-        "kimi"
-    }
-    fn agent_env(&self) -> &'static str {
-        "kimi"
-    }
-
-    fn apply_yolo(
-        &self,
-        args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        if !has_flag(args, "--yolo") {
-            args.push("--yolo".to_string());
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
-        // Kimi's native YOLO flag is also `--yolo`, which is extracted by
-        // Claudine's flag extraction before reaching here. No additional
-        // rejection needed.
-        let _ = args;
-        Ok(())
-    }
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["KIMI_API_KEY"]
-    }
-
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if non_interactive && !has_flag(args, "--wire") {
-            args.push("--wire".to_string());
-        }
     }
 
     fn apply_system_prompt(
@@ -1296,18 +1210,6 @@ impl WrapperProfile for KimiWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::WireJsonRpc)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // Wire mode is the structured-stream channel for Kimi: a single
         // `--wire` flag selects the JSON-RPC line protocol on stdin/stdout
@@ -1315,14 +1217,6 @@ impl WrapperProfile for KimiWrapper {
         // pair used by other providers.
         if !has_flag(args, "--wire") {
             args.push("--wire".to_string());
-        }
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["--prompt"],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
         }
     }
 }
@@ -1335,19 +1229,15 @@ impl WrapperProfile for QwenWrapper {
     fn provider(&self) -> Provider {
         Provider::QwenCode
     }
-    fn binary(&self) -> &'static str {
-        "qwen"
-    }
-    fn agent_env(&self) -> &'static str {
-        "qwen"
-    }
 
     fn apply_yolo(
         &self,
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
-        // Qwen supports both --yolo and --approval-mode; check for conflicts.
+        // Qwen's catalog records the direct `--yolo` flag, but the runtime
+        // also accepts `--approval-mode yolo`. Keep this override to reject
+        // conflicting approval modes before appending the catalog flag.
         if let Some(value) = option_value(args, "--approval-mode")
             && !value.eq_ignore_ascii_case("yolo")
         {
@@ -1357,10 +1247,6 @@ impl WrapperProfile for QwenWrapper {
             args.push("--yolo".to_string());
         }
         Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
@@ -1452,28 +1338,11 @@ impl WrapperProfile for QwenWrapper {
         ])
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::StreamJson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // Qwen uses the catalog-default --output-format stream-json via
+        // push_stream_json_flags, with no extra flags. Structured-stream
+        // setup is not modeled in the output-format catalog.
         push_stream_json_flags(args, &[]);
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["-p", "--prompt"],
-            entrypoint: None,
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
-        }
     }
 }
 
@@ -1484,12 +1353,6 @@ impl WrapperProfile for QwenWrapper {
 impl WrapperProfile for OpencodeWrapper {
     fn provider(&self) -> Provider {
         Provider::OpenCode
-    }
-    fn binary(&self) -> &'static str {
-        "opencode"
-    }
-    fn agent_env(&self) -> &'static str {
-        "opencode"
     }
 
     fn apply_yolo(
@@ -1509,6 +1372,9 @@ impl WrapperProfile for OpencodeWrapper {
         _env_overrides: &mut Vec<(String, String)>,
         interactive: bool,
     ) -> Result<Option<String>> {
+        // OpenCode only honors this flag under `run`; the typed catalog can
+        // mark it non-interactive-only, but the wrapper still needs to emit a
+        // refined warning and avoid mutating interactive TUI argv.
         if interactive {
             return Ok(Some(
                 "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
@@ -1519,14 +1385,6 @@ impl WrapperProfile for OpencodeWrapper {
             args.push("--dangerously-skip-permissions".to_string());
         }
         Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
-        Ok(())
     }
 
     fn apply_system_prompt(
@@ -1563,42 +1421,19 @@ impl WrapperProfile for OpencodeWrapper {
         Ok(app)
     }
 
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if !non_interactive {
-            return;
-        }
-        let entrypoint = "run";
-        if args.first().is_none_or(|first| first != entrypoint) {
-            args.insert(0, entrypoint.to_string());
-        }
-    }
-
     fn apply_model(
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
+        // OpenCode requires both the CLI --model flag AND the MODEL env var.
+        // The typed catalog has no field for dual-delivery model side effects,
+        // so this override is kept to set both surfaces.
         args.push("--model".to_string());
         args.push(model.to_string());
-        // OpenCode also needs the MODEL env var set.
         env_overrides.push(("MODEL".to_string(), model.to_string()));
         None
-    }
-
-    fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
-        match format {
-            OutputFormat::Json => {
-                if !has_flag(args, "--format") {
-                    args.push("--format".to_string());
-                    args.push("json".to_string());
-                }
-                None
-            }
-            _ => Some(format!(
-                "OpenCode only supports --format json; {format} was skipped"
-            )),
-        }
     }
 
     fn prompt_delivery(
@@ -1656,15 +1491,11 @@ impl WrapperProfile for OpencodeWrapper {
         }
     }
 
-    fn supports_structured_stream(&self) -> bool {
-        true
-    }
-
-    fn stream_protocol(&self) -> Option<StreamProtocol> {
-        Some(StreamProtocol::Ndjson)
-    }
-
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
+        // OpenCode uses --format json (cataloged) plus --print-logs and
+        // --log-level ERROR for reliable structured streaming. The extra
+        // flags are transport-level concerns not modeled in the output-format
+        // catalog, so this override is kept.
         args.push("--format".to_string());
         args.push("json".to_string());
         args.push("--print-logs".to_string());
@@ -1674,10 +1505,6 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
         opencode_default_tui_noise_prefixes()
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions::positional_after("run")
     }
 }
 
@@ -1702,34 +1529,6 @@ pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
 impl WrapperProfile for GooseWrapper {
     fn provider(&self) -> Provider {
         Provider::Goose
-    }
-    fn binary(&self) -> &'static str {
-        "goose"
-    }
-    fn agent_env(&self) -> &'static str {
-        "goose"
-    }
-
-    fn apply_yolo(
-        &self,
-        _args: &mut Vec<String>,
-        env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
-        let key = "GOOSE_MODE";
-        let value = "auto";
-        if !env_overrides.iter().any(|(k, v)| k == key && v == value) {
-            env_overrides.push((key.to_string(), value.to_string()));
-        }
-        Ok(None)
-    }
-
-    fn has_supported_yolo(&self) -> bool {
-        true
-    }
-
-    fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
-        // Goose YOLO is via env var, not a CLI flag. Nothing to reject.
-        Ok(())
     }
 
     fn apply_system_prompt(
@@ -1756,22 +1555,15 @@ impl WrapperProfile for GooseWrapper {
         Ok(app)
     }
 
-    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
-        if !non_interactive {
-            return;
-        }
-        let entrypoint = "run";
-        if args.first().is_none_or(|first| first != entrypoint) {
-            args.insert(0, entrypoint.to_string());
-        }
-    }
-
     fn apply_model(
         &self,
         _args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
+        // Goose selects models via the GOOSE_MODEL env var, not a CLI flag.
+        // The typed catalog has no model-delivery-mechanism field, so this
+        // override routes through env only.
         env_overrides.push(("GOOSE_MODEL".to_string(), model.to_string()));
         None
     }
@@ -1794,14 +1586,6 @@ impl WrapperProfile for GooseWrapper {
                 "-t".to_string(),
                 prompt.to_string(),
             ]))
-        }
-    }
-
-    fn prompt_arg_conventions(&self) -> PromptArgConventions {
-        PromptArgConventions {
-            prompt_flags: &["-t", "--text"],
-            entrypoint: Some("run"),
-            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
         }
     }
 }
@@ -2687,26 +2471,197 @@ mod tests {
         assert!(message.contains("--yolo"));
     }
 
+    /// Documented "no wrapper" providers. Must stay in lock-step with the
+    /// `None` slots in [`WRAPPER_REGISTRY`].
+    const NO_WRAPPER: &[Provider] = &[Provider::RooCode];
+
     #[test]
     fn roo_code_has_no_wrapper_profile() {
         assert!(profile_for_provider(Provider::RooCode).is_none());
     }
 
+    /// Phase 3 invariant: the array-backed [`WRAPPER_REGISTRY`] either
+    /// returns a wrapper whose `provider()` matches the lookup key, or
+    /// returns `None` for a provider explicitly listed in [`NO_WRAPPER`].
+    /// A future [`Provider`] variant fails compilation at the array
+    /// declaration; this test then guards the `None`/`Some` decision.
     #[test]
-    fn all_wrapped_providers_have_profiles() {
-        let wrapped = [
-            Provider::Claude,
-            Provider::Codex,
-            Provider::Gemini,
-            Provider::KimiCode,
-            Provider::QwenCode,
-            Provider::OpenCode,
-            Provider::Goose,
-        ];
-        for provider in wrapped {
+    fn wrapper_registry_covers_every_provider_and_documents_exceptions() {
+        use claudine::provider::PROVIDERS_DISPLAY_ORDER;
+
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            let result = profile_for_provider(provider);
+            if NO_WRAPPER.contains(&provider) {
+                assert!(
+                    result.is_none(),
+                    "{provider:?}: documented as no-wrapper but registry returned Some"
+                );
+            } else {
+                let profile = result.unwrap_or_else(|| {
+                    panic!(
+                        "{provider:?}: registry must provide a wrapper unless explicitly \
+                         listed in NO_WRAPPER"
+                    )
+                });
+                assert_eq!(
+                    profile.provider(),
+                    provider,
+                    "{provider:?}: registry slot returned a profile for the wrong provider"
+                );
+            }
+        }
+    }
+
+    /// The registry array length is wired to [`PROVIDER_COUNT`], so adding
+    /// a new [`Provider`] variant forces a compile error at the declaration.
+    /// This runtime assertion documents the invariant for readers and
+    /// catches accidental drift if the static is ever rebuilt by hand.
+    #[test]
+    fn wrapper_registry_length_matches_provider_count() {
+        assert_eq!(WRAPPER_REGISTRY.len(), PROVIDER_COUNT);
+    }
+
+    fn provider_output_format(format: OutputFormat) -> claudine::provider::OutputFormat {
+        match format {
+            OutputFormat::Json => claudine::provider::OutputFormat::Json,
+            OutputFormat::Text => claudine::provider::OutputFormat::Text,
+            OutputFormat::Stream => claudine::provider::OutputFormat::Stream,
+        }
+    }
+
+    fn catalog_output_args(provider: Provider, format: OutputFormat) -> Option<Vec<String>> {
+        let support = provider_info(provider)
+            .output_formats
+            .iter()
+            .find(|support| support.format == provider_output_format(format))?;
+
+        let args = match support.selector {
+            OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => Vec::new(),
+            OutputFormatSelector::Flag { flag } | OutputFormatSelector::TransportFlag { flag } => {
+                vec![flag.to_string()]
+            }
+            OutputFormatSelector::FlagValue { flag } => {
+                vec![flag.to_string(), support.native_name.to_string()]
+            }
+        };
+        Some(args)
+    }
+
+    #[test]
+    fn apply_output_format_matches_provider_catalog_for_every_provider() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let Some(profile) = profile_for_provider(provider) else {
+                continue;
+            };
+            for format in [OutputFormat::Json, OutputFormat::Text, OutputFormat::Stream] {
+                let mut args = Vec::new();
+                let warning = profile.apply_output_format(&mut args, format);
+                match catalog_output_args(provider, format) {
+                    Some(expected) => {
+                        assert!(
+                            warning.is_none(),
+                            "{provider:?} should support cataloged output format {format}"
+                        );
+                        assert_eq!(args, expected, "{provider:?} --output {format}");
+                    }
+                    None => {
+                        assert!(
+                            warning.is_some(),
+                            "{provider:?} should warn for uncataloged output format {format}"
+                        );
+                        assert!(args.is_empty(), "{provider:?} --output {format}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn catalog_entrypoint_args(provider: Provider, non_interactive: bool) -> Vec<String> {
+        let info = provider_info(provider);
+        let target_mode = if non_interactive {
+            EntrypointMode::NonInteractive
+        } else {
+            EntrypointMode::Interactive
+        };
+        let mut args = Vec::new();
+        if let Some(ep) = info
+            .entrypoints
+            .iter()
+            .find(|ep| matches!(ep.mode, EntrypointMode::Both) || ep.mode == target_mode)
+        {
+            if let Some(sub) = ep.subcommand {
+                args.push(sub.to_string());
+            }
+            args.extend(ep.required_flags.iter().map(|flag| (*flag).to_string()));
+        }
+        args
+    }
+
+    #[test]
+    fn apply_entrypoint_matches_provider_catalog_for_every_provider() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let Some(profile) = profile_for_provider(provider) else {
+                continue;
+            };
+            let mut args = Vec::new();
+            profile.apply_entrypoint(&mut args, true);
+            assert_eq!(
+                args,
+                catalog_entrypoint_args(provider, true),
+                "{provider:?} non-interactive entrypoint"
+            );
+        }
+    }
+
+    fn catalog_yolo_applied(
+        provider: Provider,
+        args: &[String],
+        env: &[(String, String)],
+        warning: &Option<String>,
+    ) -> bool {
+        match provider_info(provider).yolo {
+            YoloSupport::None => warning.is_some() && args.is_empty() && env.is_empty(),
+            YoloSupport::DirectFlag { native_flag } => {
+                warning.is_none() && yolo_flag_present(args, native_flag)
+            }
+            YoloSupport::DirectFlagWithAlias { native_flag, .. } => {
+                warning.is_none() && yolo_flag_present(args, native_flag)
+            }
+            YoloSupport::NonInteractiveOnly {
+                non_interactive_flag,
+            } => warning.is_none() && args.iter().any(|arg| arg == non_interactive_flag),
+            YoloSupport::EnvVar { env_var, value } => {
+                warning.is_none() && env.iter().any(|(k, v)| k == env_var && v == value)
+            }
+        }
+    }
+
+    fn yolo_flag_present(args: &[String], native_flag: &str) -> bool {
+        if args.iter().any(|arg| arg == native_flag) {
+            return true;
+        }
+        let Some((flag, value)) = native_flag.split_once('=') else {
+            return false;
+        };
+        args.windows(2)
+            .any(|window| window[0] == flag && window[1] == value)
+    }
+
+    #[test]
+    fn apply_yolo_matches_provider_catalog_for_every_provider() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let Some(profile) = profile_for_provider(provider) else {
+                continue;
+            };
+            let mut args = Vec::new();
+            let mut env = Vec::new();
+            let warning = profile
+                .apply_yolo_for_mode(&mut args, &mut env, false)
+                .expect("YOLO application should not fail from empty args");
+
             assert!(
-                profile_for_provider(provider).is_some(),
-                "Missing profile for {provider:?}"
+                catalog_yolo_applied(provider, &args, &env, &warning),
+                "{provider:?} yolo mismatch: args={args:?}, env={env:?}, warning={warning:?}"
             );
         }
     }
@@ -3188,6 +3143,214 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    // -- has_explicit_native_output_request tests (Phase 3, Task 4) ---------
+
+    fn detect_native_output(provider: Provider, args: &[&str]) -> bool {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        super::super::has_explicit_native_output_request(provider, &args)
+    }
+
+    #[test]
+    fn codex_json_flag_disables_structured_parsing() {
+        assert!(detect_native_output(Provider::Codex, &["--json"]));
+    }
+
+    #[test]
+    fn claude_output_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Claude,
+            &["--output-format", "json"]
+        ));
+    }
+
+    #[test]
+    fn claude_output_format_equals_stream_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Claude,
+            &["--output-format=stream-json"]
+        ));
+    }
+
+    #[test]
+    fn gemini_output_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Gemini,
+            &["--output-format", "json"]
+        ));
+    }
+
+    #[test]
+    fn gemini_output_format_equals_stream_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::Gemini,
+            &["--output-format=stream-json"]
+        ));
+    }
+
+    #[test]
+    fn qwen_output_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::QwenCode,
+            &["--output-format", "json"]
+        ));
+    }
+
+    #[test]
+    fn qwen_output_format_equals_stream_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::QwenCode,
+            &["--output-format=stream-json"]
+        ));
+    }
+
+    #[test]
+    fn opencode_format_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::OpenCode,
+            &["--format", "json"]
+        ));
+    }
+
+    #[test]
+    fn opencode_format_equals_json_disables_structured_parsing() {
+        assert!(detect_native_output(
+            Provider::OpenCode,
+            &["--format=json"]
+        ));
+    }
+
+    #[test]
+    fn kimi_wire_transport_flag_does_not_count_as_native_output_request() {
+        assert!(!detect_native_output(Provider::KimiCode, &["--wire"]));
+    }
+
+    #[test]
+    fn unknown_provider_flags_do_not_match() {
+        assert!(!detect_native_output(Provider::Claude, &["--unknown-flag"]));
+        assert!(!detect_native_output(Provider::Codex, &["--unknown-flag"]));
+        assert!(!detect_native_output(
+            Provider::OpenCode,
+            &["--unknown-flag"]
+        ));
+    }
+
+    #[test]
+    fn goose_no_output_flags_always_false() {
+        assert!(!detect_native_output(Provider::Goose, &[]));
+        assert!(!detect_native_output(
+            Provider::Goose,
+            &["--some-random-flag"]
+        ));
+    }
+
+    #[test]
+    fn empty_args_always_false() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            assert!(
+                !detect_native_output(provider, &[]),
+                "{provider:?}: empty args should not trigger native output detection"
+            );
+        }
+    }
+
+    #[test]
+    fn flags_after_double_dash_separator_are_ignored() {
+        assert!(!detect_native_output(
+            Provider::Codex,
+            &["--", "--json"]
+        ));
+        assert!(!detect_native_output(
+            Provider::Claude,
+            &["--", "--output-format", "json"]
+        ));
+    }
+
+    // -- Parity: explicit_native_output_detection_matches_provider_catalog (Phase 3, Task 7)
+
+    #[test]
+    fn explicit_native_output_detection_matches_provider_catalog() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            let info = provider_info(provider);
+            for support in info.output_formats {
+                match support.selector {
+                    OutputFormatSelector::Flag { flag } => {
+                        let args: Vec<String> = vec![flag.to_string()];
+                        assert!(
+                            super::super::has_explicit_native_output_request(provider, &args),
+                            "{provider:?}: catalog Flag {flag} must be detected as native output"
+                        );
+                    }
+                    OutputFormatSelector::FlagValue { flag } => {
+                        let separated: Vec<String> =
+                            vec![flag.to_string(), support.native_name.to_string()];
+                        assert!(
+                            super::super::has_explicit_native_output_request(
+                                provider, &separated
+                            ),
+                            "{provider:?}: catalog FlagValue {flag} {} must be detected as native output",
+                            support.native_name
+                        );
+                        let inline: Vec<String> =
+                            vec![format!("{flag}={}", support.native_name)];
+                        assert!(
+                            super::super::has_explicit_native_output_request(provider, &inline),
+                            "{provider:?}: catalog FlagValue {flag}={} (inline) must be detected as native output",
+                            support.native_name
+                        );
+                    }
+                    OutputFormatSelector::TransportFlag { flag } => {
+                        let args: Vec<String> = vec![flag.to_string()];
+                        assert!(
+                            !super::super::has_explicit_native_output_request(provider, &args),
+                            "{provider:?}: catalog TransportFlag {flag} must NOT be detected as native output"
+                        );
+                    }
+                    OutputFormatSelector::Default | OutputFormatSelector::Positional { .. } => {}
+                }
+            }
+        }
+    }
+
+    /// Source guard: the default `apply_output_format` and `apply_entrypoint`
+    /// implementations must read from the catalog. If a future change adds
+    /// a raw `match provider` block inside either default method body,
+    /// this test catches it. The existing mod.rs source guard covers
+    /// `has_explicit_native_output_request` already.
+    #[test]
+    fn output_detection_and_application_uses_catalog_not_raw_dispatch() {
+        let source = include_str!("mod.rs");
+
+        let helper_start = source
+            .find("fn has_explicit_native_output_request")
+            .expect("helper should exist in mod.rs");
+        let helper_end = source[helper_start..]
+            .find("\n\n///")
+            .map(|offset| helper_start + offset)
+            .unwrap_or(source.len());
+        let helper_body = &source[helper_start..helper_end];
+
+        assert!(
+            helper_body.contains("provider_info(provider)")
+                && helper_body.contains(".output_formats"),
+            "has_explicit_native_output_request must read from the provider catalog"
+        );
+
+        for variant in [
+            "Provider::Claude",
+            "Provider::Codex",
+            "Provider::Gemini",
+            "Provider::KimiCode",
+            "Provider::OpenCode",
+            "Provider::QwenCode",
+            "Provider::Goose",
+        ] {
+            assert!(
+                !helper_body.contains(variant),
+                "has_explicit_native_output_request must not contain {variant} — use catalog data"
+            );
         }
     }
 }
