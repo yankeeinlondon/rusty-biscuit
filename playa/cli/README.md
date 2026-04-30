@@ -64,6 +64,7 @@ playa --meta audio.wav
 | `effect <NAME>` | Play a built-in sound effect by name |
 | `list-effects [FILTER]` | List available sound effects, optionally filtered |
 | `players` | Show table of available players and their capabilities |
+| `output-channels` | Show output audio devices in the same grouped format as `sniff audio-devices` |
 | `duck-info` | Show audio ducking backend info (requires `audio-ducking` feature) |
 
 ## Playback Options
