@@ -152,59 +152,50 @@ where
     }
 
     /// Find all delimiters (`==` and `⌄`) in the text, classifying each.
+    ///
+    /// Mark (`==`) escapes are handled by pulldown-cmark before this layer
+    /// (`\==` is pre-stripped to `==` text). Dim (`⌄`) escapes are honored
+    /// here: a preceding backslash forces the delimiter to remain literal.
     fn find_delimiters(text: &str) -> Vec<InlineDelimiter> {
-        let mut delimiters = Vec::new();
         let bytes = text.as_bytes();
-        let mut i = 0;
+        let mut delimiters = Vec::new();
 
-        while i < bytes.len() {
-            // Check for escaped backslash before any delimiter
-            let is_escaped = i > 0 && bytes[i - 1] == b'\\';
-
-            // Check for `==` (Mark delimiter)
-            if i + 1 < bytes.len() && bytes[i] == b'=' && bytes[i + 1] == b'=' {
-                if is_escaped {
-                    // Escaped: skip the backslash, treat == as literal
-                    // The backslash will be consumed when we emit text before it
-                }
-                delimiters.push(InlineDelimiter {
-                    kind: InlineDelimiterKind::Mark,
-                    byte_start: i,
-                    byte_end: i + 2,
-                    can_open: true,
-                    can_close: true,
-                });
-                i += 2;
+        // Scan `==` delimiters. Adjacent pairs share a byte (e.g. `===` in
+        // `====` should still produce two non-overlapping delimiters), so we
+        // skip ahead by 2 bytes after each match.
+        let mut last_mark_end = 0;
+        for (start, _) in text.match_indices("==") {
+            if start < last_mark_end {
                 continue;
             }
-
-            // Check for `⌄` (U+2304, Dim delimiter)
-            if bytes[i] == 0xE2
-                && i + 2 < bytes.len()
-                && bytes[i + 1] == 0x8C
-                && bytes[i + 2] == 0x84
-            {
-                if is_escaped {
-                    // Escaped: force literal by not creating a delimiter
-                    i += 3;
-                    continue;
-                }
-
-                let (can_open, can_close) = Self::classify_dim_delimiter(text, i);
-                delimiters.push(InlineDelimiter {
-                    kind: InlineDelimiterKind::Dim,
-                    byte_start: i,
-                    byte_end: i + 3,
-                    can_open,
-                    can_close,
-                });
-                i += 3;
-                continue;
-            }
-
-            i += 1;
+            delimiters.push(InlineDelimiter {
+                kind: InlineDelimiterKind::Mark,
+                byte_start: start,
+                byte_end: start + 2,
+                can_open: true,
+                can_close: true,
+            });
+            last_mark_end = start + 2;
         }
 
+        // Scan `⌄` (U+2304) delimiters, honoring `\⌄` escapes.
+        for (start, _) in text.match_indices('\u{2304}') {
+            let is_escaped = start > 0 && bytes[start - 1] == b'\\';
+            if is_escaped {
+                continue;
+            }
+            let (can_open, can_close) = Self::classify_dim_delimiter(text, start);
+            delimiters.push(InlineDelimiter {
+                kind: InlineDelimiterKind::Dim,
+                byte_start: start,
+                byte_end: start + '\u{2304}'.len_utf8(),
+                can_open,
+                can_close,
+            });
+        }
+
+        // Merge by byte position so the emit pass walks left-to-right.
+        delimiters.sort_by_key(|d| d.byte_start);
         delimiters
     }
 
@@ -254,34 +245,12 @@ where
         let mut in_mark = false;
         let mut last_mark_start_idx: Option<usize> = None;
 
-        // Pair dim delimiters using a stack.
-        // Each entry is (delim_idx, is_ambiguous) where is_ambiguous means both can_open and can_close.
-        let mut dim_opener_stack: Vec<usize> = Vec::new();
-        // Maps delimiter index to true if it's an opener, false if closer.
-        let mut dim_role: std::collections::HashMap<usize, bool> = std::collections::HashMap::new();
+        // Stack of segment indices for unmatched dim openers. When a closer is
+        // found we pop the most recent opener; if it never pops, it gets
+        // back-patched to a literal `⌄` after the walk.
+        let mut dim_opener_segments: Vec<usize> = Vec::new();
 
-        for (idx, delim) in delimiters.iter().enumerate() {
-            if let InlineDelimiterKind::Dim = delim.kind {
-                let mut paired = false;
-                if delim.can_close {
-                    // Try to find a matching opener on the stack
-                    if let Some(stack_pos) = dim_opener_stack.iter().rposition(|_| true) {
-                        let opener_idx = dim_opener_stack.remove(stack_pos);
-                        dim_role.insert(opener_idx, true); // opener_idx is the opener
-                        dim_role.insert(idx, false); // idx is the closer
-                        paired = true;
-                    }
-                }
-                if !paired && delim.can_open {
-                    dim_opener_stack.push(idx);
-                }
-                // If neither can_open nor can_close, or can_close but no match, stays unpaired (literal)
-            }
-        }
-        // Unpaired openers stay on the stack — they remain literal.
-
-        // Build segments in a single pass.
-        for (idx, delim) in delimiters.iter().enumerate() {
+        for delim in &delimiters {
             // Emit text before this delimiter
             if delim.byte_start > current_pos {
                 let before = &s[current_pos..delim.byte_start];
@@ -292,7 +261,6 @@ where
 
             match delim.kind {
                 InlineDelimiterKind::Mark => {
-                    // Toggle mark state
                     if in_mark {
                         segments.push_back(InlineEvent::End(InlineTag::Mark));
                         last_mark_start_idx = None;
@@ -303,17 +271,25 @@ where
                     in_mark = !in_mark;
                 }
                 InlineDelimiterKind::Dim => {
-                    if let Some(is_opener) = dim_role.get(&idx) {
-                        if *is_opener {
-                            segments.push_back(InlineEvent::Start(InlineTag::Dim));
-                        } else {
-                            segments.push_back(InlineEvent::End(InlineTag::Dim));
-                        }
-                    } else {
-                        // Unpaired delimiter: literal
-                        segments.push_back(InlineEvent::Standard(Event::Text(CowStr::from(
+                    let mut paired = false;
+                    if delim.can_close
+                        && let Some(opener_seg_idx) = dim_opener_segments.pop()
+                    {
+                        segments[opener_seg_idx] = InlineEvent::Start(InlineTag::Dim);
+                        segments.push_back(InlineEvent::End(InlineTag::Dim));
+                        paired = true;
+                    }
+                    if !paired {
+                        // Tentatively emit a literal; if a later closer pairs
+                        // with this delimiter, the slot is back-patched into
+                        // Start(Dim).
+                        let seg_idx = segments.len();
+                        segments.push_back(InlineEvent::Standard(Event::Text(CowStr::Borrowed(
                             "\u{2304}",
                         ))));
+                        if delim.can_open {
+                            dim_opener_segments.push(seg_idx);
+                        }
                     }
                 }
             }
@@ -329,10 +305,9 @@ where
             ))));
         }
 
-        // If we ended with an unclosed mark, convert Start(Mark) back to literal "=="
+        // Unclosed mark: convert Start(Mark) back to literal "=="
         if in_mark && let Some(start_idx) = last_mark_start_idx {
-            segments[start_idx] =
-                InlineEvent::Standard(Event::Text(CowStr::from("==".to_string())));
+            segments[start_idx] = InlineEvent::Standard(Event::Text(CowStr::Borrowed("==")));
         }
 
         self.pending = segments;
@@ -747,20 +722,28 @@ mod tests {
         let parser = Parser::new_ext(r"before \⌄ after", Options::ENABLE_STRIKETHROUGH);
         let events: Vec<InlineEvent<'_>> = InlineStyleProcessor::new(parser).collect();
         let content = extract_text_content(&events);
-        // The backslash-escaped ⌄ should appear literally
-        assert!(
-            content.contains("⌄") || content.contains(r"\⌄"),
-            "Escaped dim delimiter should include ⌄ in some form, got: {}",
+        // The backslash-escaped ⌄ must remain literal: exactly one ⌄ codepoint
+        // appears in the emitted text and no Dim events are produced.
+        let dim_count = content.matches('\u{2304}').count();
+        assert_eq!(
+            dim_count, 1,
+            "Escaped dim delimiter should produce exactly one literal ⌄, got: {}",
             content
         );
 
-        let has_dim = events.iter().any(|e| {
-            matches!(
-                e,
-                InlineEvent::Start(InlineTag::Dim) | InlineEvent::End(InlineTag::Dim)
-            )
-        });
-        assert!(!has_dim, "Escaped ⌄ should not produce Dim events");
+        let dim_event_count = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    InlineEvent::Start(InlineTag::Dim) | InlineEvent::End(InlineTag::Dim)
+                )
+            })
+            .count();
+        assert_eq!(
+            dim_event_count, 0,
+            "Escaped ⌄ should produce zero Dim events"
+        );
     }
 
     #[test]

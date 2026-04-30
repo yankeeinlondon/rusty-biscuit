@@ -8045,17 +8045,90 @@ flowchart LR
     }
 
     #[test]
-    fn test_terminal_dim_mode_auto_with_support() {
-        // DimMode::Auto with a terminal that supports dim should produce \x1b[2m
-        // We can't easily mock terminal detection, but we can at least verify
-        // the mode resolves correctly
-        let mode = DimMode::Always;
-        assert!(mode.should_emit_dim(), "DimMode::Always should emit dim");
-
-        let mode = DimMode::Never;
+    fn test_dim_mode_always_and_never_resolve() {
+        // Static modes resolve without consulting terminal capabilities.
         assert!(
-            !mode.should_emit_dim(),
+            DimMode::Always.should_emit_dim(),
+            "DimMode::Always should emit dim"
+        );
+        assert!(
+            !DimMode::Never.should_emit_dim(),
             "DimMode::Never should not emit dim"
+        );
+    }
+
+    /// RAII helper for setting an env var for the duration of a test.
+    ///
+    /// Pairs with `#[serial]` to avoid concurrent env mutation across threads.
+    struct ScopedEnv {
+        key: String,
+        original: Option<String>,
+    }
+
+    impl ScopedEnv {
+        fn set(key: &str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: callers must mark their tests `#[serial]`.
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key: key.to_string(),
+                original,
+            }
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            // SAFETY: callers must mark their tests `#[serial]`.
+            unsafe {
+                match &self.original {
+                    Some(v) => std::env::set_var(&self.key, v),
+                    None => std::env::remove_var(&self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_terminal_dim_mode_auto_with_dumb_terminal() {
+        // With TERM=dumb (and stdout not a TTY in tests), supports_dim()
+        // returns false, so DimMode::Auto must NOT emit `\x1b[2m`.
+        let _env = ScopedEnv::set("TERM", "dumb");
+
+        let md: Markdown = "This has ⌄dim⌄ text.".into();
+        let mut options = test_options();
+        options.dim_mode = DimMode::Auto;
+        let output = for_terminal(&md, options).unwrap();
+
+        assert!(
+            !output.contains("\x1b[2m"),
+            "DimMode::Auto with TERM=dumb must not emit \\x1b[2m, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_cross_event_remains_literal() {
+        // Cross-text-event dim spans (delimiters split across pulldown-cmark
+        // events by an intervening tag like **strong**) currently degrade to
+        // literal `⌄` characters. This test pins that behavior so any future
+        // pairing-state lift is intentional.
+        let md: Markdown = "⌄dim and **strong**⌄".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        assert!(
+            !output.contains("\x1b[2m"),
+            "Cross-event dim must not currently emit dim SGR, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        let dim_count = plain.matches('\u{2304}').count();
+        assert_eq!(
+            dim_count, 2,
+            "Both delimiters must remain literal across the strong span, got: {:?}",
+            plain
         );
     }
 
