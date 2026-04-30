@@ -2,7 +2,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument};
 use which::which;
 
 /// Finds a program by name in the system PATH.
@@ -46,17 +46,24 @@ use super::macos_bundle::find_macos_app_bundle;
 use super::macos_bundle::get_app_bundle_name;
 use super::types::ExecutableSource;
 
-/// Pre-built index of executables available on PATH and macOS app bundles.
+/// Lazy lookup index for executables on PATH, macOS app bundles, and Windows
+/// fallback layers.
 ///
-/// Built once during system detection, then used for O(1) lookups instead of
-/// per-program filesystem traversal. Significantly reduces overhead when detecting
-/// multiple programs in parallel.
+/// Unlike the previous eager implementation, this index does **not** scan all
+/// PATH directories upfront. Instead, it delegates PATH lookups to the `which`
+/// crate on demand, avoiding the startup cost of indexing thousands of
+/// executables when only a handful are ever queried.
+///
+/// macOS app bundles and Windows registry/install-root indexes are still
+/// pre-built because they are bounded (tens of entries) and expensive to
+/// probe repeatedly.
 ///
 /// ## Performance
 ///
-/// Building the index scans all PATH directories once (typically 10-20 dirs) and
-/// all known macOS app bundles (15-20 apps on macOS). Subsequent lookups are O(1)
-/// HashMap accesses instead of repeated filesystem scans.
+/// Building the index only scans macOS app bundles (15-20 apps) and Windows
+/// fallback sources. PATH is not touched during construction. Each lookup
+/// iterates PATH only until the target binary is found, matching the
+/// behavior of the `which` crate.
 ///
 /// ## Examples
 ///
@@ -70,9 +77,7 @@ use super::types::ExecutableSource;
 /// ```
 #[derive(Debug, Clone)]
 pub struct ExecutableIndex {
-    /// Maps binary name to resolved path (first occurrence wins = PATH precedence)
-    path_executables: HashMap<String, PathBuf>,
-    /// Number of PATH directories scanned while building the index.
+    /// Number of PATH directories available (counted from the environment).
     path_dir_count: usize,
     /// Maps binary name to app bundle path (macOS only).
     #[cfg(target_os = "macos")]
@@ -83,22 +88,16 @@ pub struct ExecutableIndex {
 }
 
 impl ExecutableIndex {
-    /// Build the index by scanning all PATH directories and macOS app bundles once.
+    /// Build the index by scanning macOS app bundles and Windows fallback sources.
     ///
-    /// ## Process
-    ///
-    /// 1. Scans all directories in the PATH environment variable
-    /// 2. Indexes all executables (first occurrence wins for PATH precedence)
-    /// 3. On macOS: scans known app bundles in /Applications and ~/Applications
-    ///
-    /// ## Returns
-    ///
-    /// A fully populated index ready for O(1) lookups.
+    /// PATH is **not** scanned during construction; lookups are delegated to
+    /// the `which` crate on demand.
     #[instrument(skip_all)]
     pub fn build() -> Self {
         Self::build_with_bundles(true)
     }
 
+    /// Build an index with PATH lookup only (no bundle or Windows indexes).
     #[instrument(skip_all)]
     pub fn build_path_only() -> Self {
         Self::build_with_bundles(false)
@@ -108,48 +107,13 @@ impl ExecutableIndex {
         #[cfg(not(target_os = "macos"))]
         let _ = include_bundles;
 
-        let mut path_executables = HashMap::new();
-        let mut path_dir_count = 0;
+        let path_dir_count = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).count())
+            .unwrap_or(0);
 
-        if let Some(path_var) = std::env::var_os("PATH") {
-            for dir in std::env::split_paths(&path_var) {
-                path_dir_count += 1;
-                trace!(dir = %dir.display(), "scanning PATH directory");
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let path = entry.path();
-
-                        // Only index executable files (matches `which` semantics)
-                        if !is_executable(&path) {
-                            continue;
-                        }
-
-                        if let Some(name) = entry.file_name().to_str() {
-                            let name = name.to_string();
-
-                            // First occurrence wins (matches PATH precedence)
-                            path_executables
-                                .entry(name.clone())
-                                .or_insert_with(|| path.clone());
-
-                            // On Windows, also index without the extension so that
-                            // a lookup for "git" can match "git.exe"
-                            #[cfg(windows)]
-                            if let Some(normalized) = strip_windows_ext(&name) {
-                                path_executables
-                                    .entry(normalized)
-                                    .or_insert_with(|| path.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        debug!(path_count = path_executables.len(), "PATH scan complete");
+        debug!(path_dir_count, "lazy PATH index created");
 
         Self {
-            path_executables,
             path_dir_count,
             #[cfg(target_os = "macos")]
             bundle_executables: if include_bundles {
@@ -166,19 +130,19 @@ impl ExecutableIndex {
         }
     }
 
-    /// Look up a program - checks PATH first, then macOS bundles.
+    /// Look up a program - checks PATH first, then macOS bundles / Windows fallbacks.
     ///
-    /// Matches the behavior of [`find_program_with_source`] but uses the pre-built
-    /// index instead of filesystem traversal.
+    /// PATH lookups are performed on demand via the `which` crate rather than
+    /// using a pre-built cache.
     ///
     /// ## Returns
     ///
     /// - `Some((PathBuf, ExecutableSource))` - Path and how it was found
     /// - `None` - Program not found anywhere
     pub fn find_with_source(&self, program: &str) -> Option<(PathBuf, ExecutableSource)> {
-        // Layer 1: PATH (authoritative — matches `CreateProcess`).
-        if let Some(path) = self.path_executables.get(program) {
-            return Some((path.clone(), ExecutableSource::Path));
+        // Layer 1: PATH (authoritative — delegated to `which`).
+        if let Ok(path) = which(program) {
+            return Some((path, ExecutableSource::Path));
         }
 
         // Layer 2: macOS bundles.
@@ -209,7 +173,7 @@ impl ExecutableIndex {
     /// - `Some(PathBuf)` - Path to the executable if found in PATH
     /// - `None` - Program not found in PATH
     pub fn find(&self, program: &str) -> Option<PathBuf> {
-        self.path_executables.get(program).cloned()
+        which(program).ok()
     }
 
     pub fn path_dir_count(&self) -> usize {

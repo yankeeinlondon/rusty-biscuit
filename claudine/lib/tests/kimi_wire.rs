@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use claudine::stream::{ParserConfig, create_semantic_parser};

@@ -1,6 +1,5 @@
-use super::{AgenticEvent, EventSupportLevel, Provider};
-
-pub use super::provider::PROVIDERS_DISPLAY_ORDER;
+use super::AgenticEvent;
+use crate::provider::{EventSupportLevel, Provider, provider_info};
 
 /// A single support cell in the provider/event support matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +41,11 @@ pub struct EventNativeMappingRow {
 }
 
 /// Build a structured support matrix for the requested providers.
+///
+/// Sources every cell directly from the provider's
+/// [`EventMappingTable`](crate::provider::EventMappingTable) so the matrix
+/// rendering shares the same data spine as configurators, adapters, and
+/// reporting.
 pub fn event_support_matrix(providers: &[Provider]) -> Vec<EventSupportRow> {
     AgenticEvent::ALL
         .into_iter()
@@ -51,7 +55,7 @@ pub fn event_support_matrix(providers: &[Provider]) -> Vec<EventSupportRow> {
                 .iter()
                 .map(|provider| EventSupportCell {
                     provider: *provider,
-                    level: provider.event_support_level(&event),
+                    level: provider_info(*provider).event_mapping.support_level(event),
                 })
                 .collect(),
         })
@@ -59,6 +63,11 @@ pub fn event_support_matrix(providers: &[Provider]) -> Vec<EventSupportRow> {
 }
 
 /// Build a structured native-name mapping matrix for the requested providers.
+///
+/// Sources every cell directly from the provider's
+/// [`EventMappingTable`](crate::provider::EventMappingTable). Empty native
+/// names map to [`NativeEventName::NoSpecificName`] and missing rows /
+/// `NotSupported` rows map to [`NativeEventName::Unsupported`].
 pub fn event_native_mapping_matrix(providers: &[Provider]) -> Vec<EventNativeMappingRow> {
     AgenticEvent::ALL
         .into_iter()
@@ -67,7 +76,7 @@ pub fn event_native_mapping_matrix(providers: &[Provider]) -> Vec<EventNativeMap
             cells: providers
                 .iter()
                 .map(|provider| {
-                    let native = match provider.native_event_name(&event) {
+                    let native = match provider_info(*provider).event_mapping.native_name(event) {
                         None => NativeEventName::Unsupported,
                         Some("") => NativeEventName::NoSpecificName,
                         Some(name) => NativeEventName::Named(name),

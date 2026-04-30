@@ -25,6 +25,21 @@ pub enum GeminiEvent {
     ToolResult(GeminiToolResult),
 }
 
+impl GeminiEvent {
+    /// Returns the JSON `type` discriminator for this event variant.
+    pub const fn type_str(&self) -> &'static str {
+        match self {
+            GeminiEvent::Init(_) => "init",
+            GeminiEvent::System(_) => "system",
+            GeminiEvent::Message(_) => "message",
+            GeminiEvent::Error(_) => "error",
+            GeminiEvent::Result(_) => "result",
+            GeminiEvent::ToolUse(_) => "tool_use",
+            GeminiEvent::ToolResult(_) => "tool_result",
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct GeminiInit {
     #[serde(default)]

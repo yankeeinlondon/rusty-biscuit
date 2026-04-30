@@ -39,7 +39,7 @@ Provider knowledge is intentionally fragmented across several modules so that ea
 
 ### `Provider` enum — the canonical identifier
 
-The `Provider` enum in [`claudine/lib/src/events/provider.rs`](../../lib/src/events/provider.rs) is the canonical identifier used everywhere else. It is the *minimum* surface a new provider must implement; nothing else compiles until this entry exists.
+The `Provider` enum in [`claudine/lib/src/provider/identity.rs`](../../lib/src/provider/identity.rs) is the canonical identifier used everywhere else. It is the *minimum* surface a new provider must implement; nothing else compiles until this entry exists. The `impl Provider` blocks (CLI aliases, sniff binding, payload detection, slug, skills support, doc URLs, agent offset, event-mapping accessors, and `Display`) live alongside the enum in [`claudine/lib/src/provider/methods.rs`](../../lib/src/provider/methods.rs).
 
 Per-variant data attached directly to `Provider`:
 
@@ -56,7 +56,7 @@ Display order is fixed in `PROVIDERS_DISPLAY_ORDER` so matrix-style reporting is
 
 ### Agent capability catalog
 
-The richer descriptive metadata lives under [`claudine/lib/src/agents/`](../../lib/src/agents/). Each provider gets one file with a `*_capabilities()` function returning an `AgentCapabilities` struct (see the model in [`agents/model.rs`](../../lib/src/agents/model.rs)). Existing examples: [`claude_code.rs`](../../lib/src/agents/claude_code.rs), [`codex.rs`](../../lib/src/agents/codex.rs), [`gemini_cli.rs`](../../lib/src/agents/gemini_cli.rs), [`goose.rs`](../../lib/src/agents/goose.rs), [`kimi_code.rs`](../../lib/src/agents/kimi_code.rs), [`opencode.rs`](../../lib/src/agents/opencode.rs), [`qwen_cli.rs`](../../lib/src/agents/qwen_cli.rs), [`roo_code.rs`](../../lib/src/agents/roo_code.rs).
+The richer descriptive metadata lives under [`claudine/lib/src/provider/`](../../lib/src/provider/). Phase 2 of the centralized providers refactor moved the per-provider data construction from `agents/<provider>.rs` thin facade structs into one `<NAME>_INFO: ProviderInfo` constant per provider (`provider/claude.rs`, `provider/codex.rs`, …, `provider/roo.rs`). The shared shape is still defined in [`agents/model.rs`](../../lib/src/agents/model.rs), and `crate::agents::Agent` is implemented directly on `ProviderInfo` so legacy `agents::agent_for(provider)` returns the same `'static` reference as `provider::provider_info(provider)`.
 
 `AgentCapabilities` aggregates:
 
@@ -76,16 +76,16 @@ The richer descriptive metadata lives under [`claudine/lib/src/agents/`](../../l
 - `SkillsCapabilities`, `SlashCommandCapabilities`, `SubagentCapabilities`, `ScriptCapabilities` — each carries a `CapabilityStatus`, a `PathDiscovery` (user / project / admin / extension paths plus precedence rules), an optional `FrontmatterContract`, and the activation/invocation enums.
 - `ConfidenceProfile` — a coarse `Confidence::{High, Medium, Low}` per area plus a `gaps: Vec<&'static str>` of explicit research debt.
 
-A static descriptor is registered through [`agents/registry.rs`](../../lib/src/agents/registry.rs) (`agent_for(AgentId)`, `all_agents()`, `parse_agent_id()`), and the descriptor file is the single source of truth surfaced by `claudine providers`, `claudine hooks --variables`, and the `init` wizard.
+The central `ProviderInfo` registry lives in [`provider/registry.rs`](../../lib/src/provider/registry.rs) (`provider_info(Provider)`, `all_providers()`). The legacy [`agents/registry.rs`](../../lib/src/agents/registry.rs) `agent_for(Provider)` / `all_agents()` / `parse_agent_id()` API remains, but is now a thin forwarding layer that returns the same `'static ProviderInfo` reference.
 
 ### Hook events and native-name mappings
 
 Event metadata lives in [`claudine/lib/src/events/`](../../lib/src/events/). The 16-variant `AgenticEvent` enum in [`events/agentic_event.rs`](../../lib/src/events/agentic_event.rs) is the unified lifecycle vocabulary. New providers do not extend this enum; they project their native events onto it.
 
-Two pieces of per-provider event metadata are required:
+Two pieces of per-provider event metadata are required, and both are now served through `ProviderInfo.event_mapping` ([`provider/event_mapping.rs`](../../lib/src/provider/event_mapping.rs)):
 
-- **Support level** — `Provider::event_support_level()` returns `EventSupportLevel::{Hook, NonHook, NotSupported}` for each `AgenticEvent`. `Hook` means "registerable via config-file modification"; `NonHook` means "captured via wrapper, wire-mode proxy, or stream parsing"; `NotSupported` is unreachable. The matrix is keyed off the `Provider`/`AgenticEvent` pair in a single `match`.
-- **Native names** — `Provider::native_event_name()` returns the provider's own string identifier for each event. For providers that share registration logic with parsing (currently Claude, Gemini, OpenCode), this is sourced from a `SharedNativeEventMapping` table (`CLAUDE_SHARED_NATIVE_MAPPINGS`, `GEMINI_SHARED_NATIVE_MAPPINGS`, `OPENCODE_SHARED_NATIVE_MAPPINGS`) so registration and adapter parsing cannot drift apart. Other providers fall through to the per-variant match in `native_event_name()`.
+- **Support level** — `EventMappingTable::support_level(event)` returns `EventSupportLevel::{Hook, NonHook, Acp, NotSupported}` for each `AgenticEvent`. `Hook` means "registerable via config-file modification"; `NonHook` means "captured via wrapper, wire-mode proxy, or stream parsing"; `Acp` means "captured via the Agent Client Protocol surface"; `NotSupported` is unreachable. `Provider::event_support_level()` is a thin forwarder.
+- **Native names** — `EventMappingTable::native_name(event)` returns the provider's own string identifier for each event, and `EventMappingTable::registration_native_name(event)` filters that to rows that participate in standard hook registration. The same table also carries parse aliases used by `event_from_native_name()`. Each provider's mapping table is owned by its `provider/<name>.rs` module so registration and adapter parsing cannot drift apart.
 
 `event_support_matrix()` and `event_native_mapping_matrix()` in [`events/matrix.rs`](../../lib/src/events/matrix.rs) build the structured tables that back `claudine hooks --support` and `claudine hooks --mapping`.
 
@@ -171,112 +171,82 @@ The seam between user input and the wrapper is the argv pre-parser in [`claudine
 
 ### ACP support
 
-Claudine does not currently consume Agent Client Protocol (ACP) anywhere. There is no `supports_acp()` method on `Provider` and no `AcpCapability` field on `AgentCapabilities`. The only places ACP appears in the codebase are documentary:
+Phase 7 of the centralized providers refactor introduced first-class ACP metadata. `ProviderInfo.acp` is an [`AcpSupport`](../../lib/src/provider/acp.rs) descriptor (`server_mode`, `client_supported`, `events`) and `EventSupportLevel::Acp` is a real variant in [`provider/event_mapping.rs`](../../lib/src/provider/event_mapping.rs). Goose's `request_permission` and Kimi's `ApprovalRequest` are mapped as `Acp` rows; an invariant test asserts that any `Acp` row implies a non-`NotSupported` `AcpSupport::server_mode`.
 
-- The Kimi Code agent descriptor lists `"ACP server mode"` in `scripts.hook_or_notify_mechanisms`.
-- The Goose `event_support_level` comment notes that `HumanInTheLoop` is captured via the `request_permission` ACP stream message — but the actual capture is wrapper-based, not ACP-based.
+`claudine hooks --capture-method` surfaces this metadata at the CLI surface; runtime ACP consumption (proxy, server) is still pending.
 
-If/when ACP is added, the natural home is a new `AcpCapabilities` sub-struct on `RuntimeCapabilities` plus a new `EventSupportLevel::Acp` variant.
+### Migration History
 
-### Future Improvements to Metadata
+The centralized-providers refactor (`features/2026-04-26-centralized-providers/`) closed nearly all of the gaps that this document originally listed as "future improvements":
 
-The following gaps were observed while preparing this document. Each represents work that would either reduce drift, simplify onboarding a new provider, or surface today's implicit knowledge as code:
+- **Phase 0** unified `AgentId` and `Provider` into a single `Provider` enum.
+- **Phase 1** introduced `crate::provider`, the `ProviderInfo` struct, and the four behavior traits (`ProviderBehavior`, `McpBehavior`, `AdapterBehavior`, `ConfiguratorBehavior`). `provider_info(p)` is the single registry that all per-domain dispatch flows through.
+- **Phase 2** moved `AgentCapabilities` and `ProviderCapabilities` data into per-provider `provider/<name>.rs` modules; `agents/<name>.rs` thin facades and the per-variant agent constructors were retired.
+- **Phase 3** consolidated event support level, native names, parse aliases, and registration metadata into the per-provider `EventMappingTable`. The `SharedNativeEventMapping` constants and the giant `Provider::event_support_level` / `Provider::native_event_name` matches were replaced by table lookups.
+- **Phase 4** routed stream parser construction, MCP operations, inbound payload parsing, and hook configurator dispatch through the four behavior traits.
+- **Phase 5** replaced descriptive `Vec<&'static str>` capability fields with typed catalog data: `PathTemplate`, `OutputFormatSupport`, `EntrypointSpec`, `SystemPromptSpec`, `YoloSupport`, `ReasoningSupport`, and `KnownGap`.
+- **Phase 6** thinned `WrapperProfile` so ordinary behavior reads from `provider_info` and the composition flag drift surface is derived from clap at runtime.
+- **Phase 7** added the `AcpSupport` descriptor, the `EventSupportLevel::Acp` variant, and the `claudine hooks --capture-method` output.
+- **Phase 8** consolidated the `impl Provider` blocks (CLI aliases, sniff binding, payload detection, slug, doc URLs, agent offset, event mapping accessors, `Display`) into [`provider/methods.rs`](../../lib/src/provider/methods.rs) and retired the per-provider thin facade structs that previously lived in `agents/<name>.rs`. The `AgentId` alias and the `crate::events::Provider` and `events::PROVIDERS_DISPLAY_ORDER` re-exports remain in place as `#[deprecated]` shims and will be removed in the post-Phase-8 cleanup release, matching the deprecation window described in the design's §"Deprecation Mechanics" (see [`claudine/lib/src/events/provider.rs`](../../lib/src/events/provider.rs) and [`claudine/lib/src/agents/mod.rs`](../../lib/src/agents/mod.rs)). All in-repo consumers now import from `crate::provider::*`.
 
-1. **No central provider registry.** Per-provider metadata is intentionally split across `agents/`, `events/`, `linking/capabilities.rs`, `stream/`, `mcp/`, `model_catalog/`, and `cli/.../wrap/profile.rs`. A nine-provider audit currently means visiting at least seven files. A thin "is everything wired?" trait or build-time test that asserts each `Provider` variant has an entry in every module would catch drift early.
-2. **`AgentCapabilities` is descriptive, not executable.** Fields like `entrypoints: Vec<&'static str>` are human-readable strings (`"codex exec"`). The wrapper profile re-encodes the same information as runtime behavior. A typed bridge (e.g. `entrypoint_subcommand: Option<&'static str>`) would let the wrapper consume the catalog directly.
-3. **No first-class ACP support.** See above. A typed `AcpCapabilities { server_mode_supported, client_supported, events_via_acp }` would let `event_support_level` distinguish ACP-based capture from generic `NonHook`.
-4. **Logging is documented but not consumed.** `LoggingCapabilities.session_locations` is a `Vec<&'static str>` of glob-like patterns. There is no `log_path_for_session()` helper that resolves them. `claudine logs` operates exclusively on Claudine's own JSONL — surfacing native session logs would benefit from typed templates.
-5. **Output-format support is asymmetric across surfaces.** `NonInteractiveCapabilities.output_formats` carries strings like `"jsonl (--json)"`, while `WrapperProfile::apply_output_format()` is a runtime function. A typed `enum NativeOutputFormat { Text, Json, StreamJson, Jsonl, … }` plus per-provider mapping would replace both.
-6. **Native event names live in a giant `match`.** `Provider::native_event_name()` is one match per `Provider × AgenticEvent` pair. Three providers (Claude, Gemini, OpenCode) are already migrated to `SharedNativeEventMapping` tables; the remaining five would benefit from the same data-driven table to make event-name research self-evident in code review.
-7. **Confidence/gaps fields are advisory.** `ConfidenceProfile.gaps` is a `Vec<&'static str>` of free-form sentences. A more structured form (`gaps: Vec<KnownGap>` referencing files or trackers) would make audits scriptable.
-8. **`PromptArgConventions` is duplicated knowledge.** The struct in `profile.rs` overlaps with `NonInteractiveCapabilities.entrypoints` and could be promoted into the agent catalog.
-9. **Sniff coverage is implicit.** `Provider::sniff_ai_cli()` returns a `sniff::programs::AiCli`. There is no compile-time guarantee that a new `Provider` variant has a corresponding `AiCli` variant — it's a runtime panic risk if someone forgets to update `sniff` first.
-10. **No discoverable model catalog source flag.** `provider_sources.rs` uses a hard-coded match instead of a `ModelSource` field on `Provider` or `AgentCapabilities`. The fact that "OpenCode shells out to `opencode models`" is buried in a function rather than declared.
+Open items that remain advisory rather than typed:
+
+- `LoggingCapabilities` documents native session/log locations as descriptive strings; resolution helpers for native session paths are still TBD.
+- `ConfidenceProfile.gaps` is now a typed `Vec<KnownGap>` on `ProviderInfo.known_gaps`, but `RuntimeCapabilities` retains free-form `notes` fields where the spec explicitly allows them.
 
 ## Checklist
 
-The following sequence is the minimum required to add a new provider end-to-end. Items marked **(metadata only)** are pure data; everything else involves writing or modifying behavior.
+After the centralized-providers refactor, adding a ninth provider has a much smaller surface area. The minimum required edits are:
 
 ### 1. Identifier and detection
 
 - [ ] Add a variant to `sniff::programs::AiCli` (in the `sniff` package) and ship it before opening the Claudine PR.
-- [ ] Add a variant to `enum Provider` in [`events/provider.rs`](../../lib/src/events/provider.rs) with `#[non_exhaustive]` already present.
-- [ ] Append the variant to `PROVIDERS_DISPLAY_ORDER` in display order (matrix tests will fail otherwise).
-- [ ] Implement (extend the `match` in) every method on `Provider`:
+- [ ] Add a variant to `enum Provider` in [`provider/identity.rs`](../../lib/src/provider/identity.rs) and append it to `PROVIDERS_DISPLAY_ORDER`.
+- [ ] Extend the `match` arms in [`provider/methods.rs`](../../lib/src/provider/methods.rs): `cli_aliases()`, `as_slug()`, `agent_offset()`, `sniff_ai_cli()`, `docs_url()`, `usage_dashboard_url()`, `supports_skills()`, `Display`, and `detect_from_payload()` (if the provider has a recognizably distinct payload shape).
 
-    - `cli_aliases()`
-    - `as_slug()`
-    - `agent_offset()`
-    - `sniff_ai_cli()`
-    - `docs_url()`
-    - `usage_dashboard_url()`
-    - `supports_skills()`
-    - `event_support_level()` and `native_event_name()`
-    - `shared_native_mappings()` (populate a `*_SHARED_NATIVE_MAPPINGS` table — strongly preferred over inline matches)
+### 2. Central provider definition
 
-- [ ] Update `detect_from_payload()` if the provider has a recognizably distinct payload shape.
-- [ ] Add a `Display` arm and a snake-case serialization test.
+- [ ] Create [`provider/<name>.rs`](../../lib/src/provider/) modeled on existing entries. Populate the `<NAME>_INFO: ProviderInfo` constant with:
 
-### 2. Capability catalog **(metadata only)**
+    - Identity (`display_name`, `slug`, `binary`, `agent_offset`, `cli_aliases`, `docs_url`, `usage_dashboard_url`, `sniff_binding`, `supports_skills`).
+    - `event_mapping: &EventMappingTable` describing every supported `AgenticEvent` row (support level, native name, parse aliases, registration target).
+    - The four behavior fields (`behavior`, `mcp`, `adapter`, `configurator`). Implement only what the provider supports; defaults return typed `NotSupported`.
+    - The `agent_capabilities_fn` and `resource_support_fn` accessors backed by per-provider `LazyLock<AgentCapabilities>` / `LazyLock<ProviderCapabilities>`.
+    - Phase 5 typed catalog data: `session_log_paths`, `session_locations`, `config_paths`, `memory_files`, `output_formats`, `entrypoints`, `system_prompt`, `yolo`, `reasoning`, `known_gaps`, `acp`, `prompt_arg_conventions`.
 
-- [ ] Add an `AgentId` variant in [`agents/model.rs`](../../lib/src/agents/model.rs) and append to `AgentId::ALL`.
-- [ ] Update `AgentId::as_str()` and `AgentId::aliases()`.
-- [ ] Create `agents/<provider>.rs` modeled on the existing files. Populate `AgentMeta`, `AgentDocs`, `ConfigCapabilities`, `RuntimeCapabilities` (model, non-interactive, system prompt, permissions, reasoning, logging, billing), `SkillsCapabilities`, `SlashCommandCapabilities`, `SubagentCapabilities`, `ScriptCapabilities`, `ConfidenceProfile`. Use `Confidence::Low` and explicit `gaps` strings for anything unverified.
-- [ ] Wire the new agent into [`agents/registry.rs`](../../lib/src/agents/registry.rs) (`OnceLock`, `agent_for`, `all_agents`).
-- [ ] Re-export the agent struct from [`agents/mod.rs`](../../lib/src/agents/mod.rs).
+- [ ] Register `&<NAME>_INFO` in [`provider/registry.rs`](../../lib/src/provider/registry.rs).
+- [ ] The exhaustiveness tests in [`provider/tests.rs`](../../lib/src/provider/tests.rs) auto-detect the new variant; rerun them.
 
-### 3. Hook integration
+### 3. Stream parsing (if applicable)
 
-- [ ] Create `adapters/<provider>.rs` to parse inbound hook payloads into `AgenticEvent`s.
-- [ ] Create `config/<provider>.rs` implementing `AgentConfigurator`. If the provider has no config-file hook surface, override `supports_config_registration() -> false`.
-- [ ] Wire both into `adapters/mod.rs` and `config/mod.rs`.
-- [ ] Update `ClaudineConfig` defaults if the provider needs unusual sample wiring.
-
-### 4. Wrapper profile
-
-- [ ] Create a `<Provider>Wrapper` unit struct in [`cli/src/commands/wrap/profile.rs`](../../cli/src/commands/wrap/profile.rs).
-- [ ] Implement the `WrapperProfile` trait, paying particular attention to `apply_yolo`, `apply_entrypoint`, `apply_system_prompt`, `prompt_delivery`, `prompt_arg_conventions`, `apply_structured_stream`, `stdout_noise_prefixes`, and `build_resume_args`.
-- [ ] Register the wrapper in `profile_for_provider()`.
-- [ ] Add the matching `--<provider>` boolean to the argv normalizer's Rule 1 in [`cli/src/argv.rs`](../../cli/src/argv.rs).
-- [ ] Add the new `claudine <provider>` subcommand.
-- [ ] Update `COMPOSITION_FLAGS_WITH_VALUE` if the provider introduces new value-bearing flags.
-
-### 5. Stream parsing
-
-- [ ] Add a `stream/protocol/<provider>.rs` module with a tagged `*Event` enum (every field `#[serde(default)]`, no `deny_unknown_fields`).
-- [ ] Add a `stream/<provider>_semantic.rs` parser implementing `SemanticStreamParser` with a two-pass `feed_line` (`Value` first, then typed deserialize).
-- [ ] Update `stream_protocol_for()` and `create_semantic_parser()` in [`stream/mod.rs`](../../lib/src/stream/mod.rs).
+- [ ] Add [`stream/protocol/<provider>.rs`](../../lib/src/stream/protocol/) with a tagged `*Event` enum (every field `#[serde(default)]`, no `deny_unknown_fields`).
+- [ ] Add `stream/<provider>_semantic.rs` implementing `SemanticStreamParser` with a two-pass `feed_line` (`Value` first, then typed deserialize).
+- [ ] Implement `ProviderBehavior::create_semantic_parser` on the new provider's behavior struct in `provider/<name>.rs`.
 - [ ] Ship the `unknown_event_type_fails_typed` test alongside per-variant deserialization tests.
 
-### 6. Linking and resource portability
+### 4. Wrapper profile (if a CLI binary exists)
 
-- [ ] Add a `<provider>_capabilities()` arm in [`linking/capabilities.rs`](../../lib/src/linking/capabilities.rs) and `capabilities_for()` / `all_capabilities()`.
-- [ ] Add the corresponding `*_SCHEMA: ResourcePropertySchema` constants and reference the cross-referencing doc path.
-- [ ] Update the cross-referencing matrix tests so they cover the new provider.
+- [ ] Create a `<Provider>Wrapper` unit struct in [`cli/src/commands/wrap/profile.rs`](../../cli/src/commands/wrap/profile.rs). Lean on the trait's catalog-derived defaults wherever the provider's behavior matches the catalog; only override the irreducible quirks.
+- [ ] Register the wrapper in `wrapper_for(Provider)`.
+- [ ] Add the matching `--<provider>` boolean to the argv normalizer's Rule 1 in [`cli/src/argv.rs`](../../cli/src/argv.rs).
+- [ ] Add the new `claudine <provider>` subcommand.
 
-### 7. MCP support (optional)
+### 5. MCP and model catalog (optional)
 
-- [ ] If the provider exposes MCP, implement import/export logic in [`mcp/import.rs`](../../lib/src/mcp/import.rs) and [`mcp/export.rs`](../../lib/src/mcp/export.rs) and update `mcp/state.rs`.
-- [ ] If runtime injection is feasible (shadow `HOME`, env-var-based config, etc.), wire it into [`mcp/inject.rs`](../../lib/src/mcp/inject.rs); otherwise rely on the export-and-apply fallback.
+- [ ] If the provider exposes MCP, implement `McpBehavior` on the provider's behavior struct.
+- [ ] If a static or dynamic model catalog applies, extend [`model_catalog/provider_sources.rs`](../../lib/src/model_catalog/provider_sources.rs).
 
-### 8. Model catalog
+### 6. Documentation
 
-- [ ] If a static list applies, extend `static_catalog_for_provider()` in [`model_catalog/provider_sources.rs`](../../lib/src/model_catalog/provider_sources.rs).
-- [ ] If a dynamic source applies, extend `fetch_provider_catalog()`.
-- [ ] Otherwise leave the empty default — user overrides will populate the catalog.
-
-### 9. Documentation
-
-- [ ] Add `claudine/docs/research/hooks/<provider>.md`.
-- [ ] Add `claudine/docs/research/cross-referencing/<provider>.md`.
-- [ ] Update `claudine/docs/topics/composition.md`, `claudine/docs/mcp-support.md`, and the `.claude/skills/claudine/` skill catalog if behavior diverges.
+- [ ] Add `claudine/docs/research/hooks/<provider>.md` and `claudine/docs/research/cross-referencing/<provider>.md`.
+- [ ] Update `.claude/skills/claudine/` if architecture or workflow guidance changes.
 - [ ] Refresh provider tables in the README and any `--describe` / `--mapping` output snapshots.
 
-### 10. Verification
+### 7. Verification
 
-- [ ] `just test` (claudine area), with focus on `events::matrix`, `linking::capabilities::tests`, `stream::protocol::*::tests`, and `argv::tests`.
+- [ ] `just test` (claudine area), with focus on `events::matrix`, `provider::tests`, `linking::capabilities::tests`, `stream::protocol::*::tests`, and `argv::tests`.
 - [ ] `just lint` and `just doctest`.
-- [ ] Smoke-test `claudine providers`, `claudine hooks --support`, `claudine hooks --mapping`, `claudine hooks --describe`, and `claudine init --quick` to confirm the new provider appears in matrix output.
+- [ ] Smoke-test `claudine providers`, `claudine hooks --support`, `claudine hooks --mapping`, `claudine hooks --describe`, `claudine hooks --capture-method`, and `claudine init --quick` to confirm the new provider appears in matrix output.
 - [ ] If the binary is installed, run `claudine <provider>` against a trivial prompt to validate the wrapper end-to-end.
 
 ## Things to Look Out For
@@ -361,17 +331,18 @@ Linker conflict reports rely on this metadata being accurate; getting it wrong p
 
 ### Roo Code is the canonical edge case
 
-Roo Code is included in `Provider`, `AgentId`, and the linking matrix but has no `WrapperProfile` — `profile_for_provider(Provider::RooCode)` returns `None` because it runs as a VS Code extension. Treat it as a reminder: not every provider has a binary. If a new provider follows the same pattern (Cursor agent panel, IntelliJ plugin, Zed assistant, …), do the metadata work and skip the wrapper rather than writing a no-op profile.
+Roo Code is included in `Provider` and the linking matrix but has no `WrapperProfile` — the CLI's `wrapper_for(Provider::RooCode)` registry returns `None` because it runs as a VS Code extension. Treat it as a reminder: not every provider has a binary. If a new provider follows the same pattern (Cursor agent panel, IntelliJ plugin, Zed assistant, …), do the metadata work in `provider/<name>.rs` and skip the wrapper rather than writing a no-op profile.
 
 ### Test coverage is the safety net
 
 The most important regression tests for any new provider:
 
-- `events::matrix::tests::support_matrix_matches_provider_api` — catches missing `event_support_level` arms.
-- `linking::capabilities::tests::all_providers_have_capabilities` — catches missing `capabilities_for` arms.
+- `provider::tests` — registry self-consistency, sniff binding round-trip, and `ProviderInfo` field exhaustiveness.
+- `events::matrix::tests::support_matrix_matches_provider_api` — catches missing event mapping rows.
+- `linking::capabilities::tests::all_providers_have_capabilities` — catches missing `resource_support` arms.
 - `stream::protocol::<provider>::tests::unknown_event_type_fails_typed` — pins the format-evolution contract.
 - `argv::tests::composition_flags_with_value_matches_clap_surface` — catches drift between the pre-parser and the clap surface.
-- The matrix snapshot tests under `claudine/cli/tests/` — catch unintended changes to `--support`, `--mapping`, and `--describe` output.
+- The matrix snapshot tests under `claudine/cli/tests/` — catch unintended changes to `--support`, `--mapping`, `--describe`, and `--capture-method` output.
 
 If any of these fail in CI, the failure is almost always pointing at a real omission. Resist the urge to update the snapshot without first verifying the new behavior is correct.
 ```

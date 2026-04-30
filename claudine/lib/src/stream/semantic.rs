@@ -19,9 +19,8 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::events::Provider;
-
 use super::token_usage::NormalizedTokenUsage;
+use crate::provider::Provider;
 
 /// Typed classification of an error surfaced through [`SemanticEvent::Error`].
 ///
@@ -208,6 +207,12 @@ impl SemanticEvent {
 /// [`SemanticEvent::Warning`] rather than propagated as an error.
 pub trait SemanticEventSink: Send {
     fn on_semantic_event(&mut self, event: SemanticEvent);
+}
+
+impl<S: SemanticEventSink + ?Sized> SemanticEventSink for Box<S> {
+    fn on_semantic_event(&mut self, event: SemanticEvent) {
+        (**self).on_semantic_event(event);
+    }
 }
 
 /// No-op sink that discards all events.

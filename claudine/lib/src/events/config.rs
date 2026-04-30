@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::provider::Provider;
 use crate::actions::{HookAction, LogTarget};
 use crate::messaging::ScopedMessagingSettings;
+use crate::provider::Provider;
 use crate::services::protect::ProtectConfig;
 
 /// Global settings that apply to all event bindings.

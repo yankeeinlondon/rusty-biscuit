@@ -11,7 +11,8 @@ pub(crate) mod wire_io;
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
 use claudine::composition::lifecycle::LifecycleSignal;
-use claudine::events::{EnvironmentContext, Provider};
+use claudine::events::EnvironmentContext;
+use claudine::provider::{OutputFormatSelector, Provider, provider_info};
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
@@ -575,6 +576,15 @@ fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
 
+fn has_flag_value(args: &[String], flag: &str, value: &str) -> bool {
+    args.iter().enumerate().any(|(index, arg)| {
+        if let Some(inline) = arg.strip_prefix(&format!("{flag}=")) {
+            return inline == value;
+        }
+        arg == flag && args.get(index + 1).is_some_and(|next| next == value)
+    })
+}
+
 /// Reject retired composition flags that should no longer be forwarded to
 /// wrapped providers. Users should migrate to `claudine compose` or
 /// `claudine inline-compose`.
@@ -605,16 +615,25 @@ fn reject_retired_composition_flags(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bool {
-    match provider {
-        Provider::Codex => has_flag(args, "--json"),
-        Provider::Claude | Provider::Gemini | Provider::KimiCode | Provider::QwenCode => {
-            has_flag(args, "--output-format")
-                || args.iter().any(|arg| arg.starts_with("--output-format="))
-        }
-        Provider::OpenCode => args.iter().any(|arg| arg == "json"),
-        _ => false,
-    }
+pub(crate) fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bool {
+    let args_before_separator = args
+        .iter()
+        .position(|arg| arg == "--")
+        .map_or(args, |separator| &args[..separator]);
+
+    provider_info(provider)
+        .output_formats
+        .iter()
+        .any(|format| match format.selector {
+            OutputFormatSelector::Default | OutputFormatSelector::TransportFlag { .. } => false,
+            OutputFormatSelector::Flag { flag } => has_flag(args_before_separator, flag),
+            OutputFormatSelector::FlagValue { flag } => {
+                has_flag_value(args_before_separator, flag, format.native_name)
+            }
+            OutputFormatSelector::Positional { token } => {
+                args_before_separator.iter().any(|arg| arg == token)
+            }
+        })
 }
 
 /// Shared wrapper args for provider subcommands.
@@ -1565,212 +1584,215 @@ fn run_provider_wrapper_inner(
     // Execute the provider. Composition and harness execution are handled by
     // `claudine compose` / `claudine inline-compose` through the wrapper-grade
     // composition executor; the wrapper path handles plain prompt passthrough.
-    let (exit_code, stderr_capture) =
-        if let Some((source_path, base_prompt, initial_materialized, shell_options)) =
-            wrapper_harness
-        {
-            let mut prompt_state = HarnessPromptState {
-                mode: HarnessPromptMode::Passthrough,
-                original_ref: source_path.display().to_string(),
-                source_path,
-                base_prompt: Some(base_prompt),
-                overlay: indexmap::IndexMap::new(),
-                prompt_tail: Vec::new(),
-                next_prompt_override: None,
-                next_resume_session_id: None,
-            };
+    let (exit_code, stderr_capture) = if let Some((
+        source_path,
+        base_prompt,
+        initial_materialized,
+        shell_options,
+    )) = wrapper_harness
+    {
+        let mut prompt_state = HarnessPromptState {
+            mode: HarnessPromptMode::Passthrough,
+            original_ref: source_path.display().to_string(),
+            source_path,
+            base_prompt: Some(base_prompt),
+            overlay: indexmap::IndexMap::new(),
+            prompt_tail: Vec::new(),
+            next_prompt_override: None,
+            next_resume_session_id: None,
+        };
 
-            let mut harness_base_args = child_args.clone();
-            if !use_structured {
-                profile.prepare_captured_output(&mut harness_base_args);
-            }
+        let mut harness_base_args = child_args.clone();
+        if !use_structured {
+            profile.prepare_captured_output(&mut harness_base_args);
+        }
 
-            let source_path_for_lifecycle = prompt_state.source_path.clone();
-            let default_lifecycle = claudine::composition::LifecycleConfig::default();
-            let default_lifecycle_settings = claudine::events::GlobalSettings::default();
-            let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
-                user: None,
-                repo: None,
-            };
-            let default_lifecycle_ctx = claudine::composition::LifecycleRuntimeContext {
-                settings: &default_lifecycle_settings,
-                messaging: &default_lifecycle_messaging,
-                term: &term,
-                source_path: &source_path_for_lifecycle,
-                repo_root: env_plan.repo_root.as_deref(),
-            };
-            let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
+        let source_path_for_lifecycle = prompt_state.source_path.clone();
+        let default_lifecycle = claudine::composition::LifecycleConfig::default();
+        let default_lifecycle_settings = claudine::events::GlobalSettings::default();
+        let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
+            user: None,
+            repo: None,
+        };
+        let default_lifecycle_ctx = claudine::composition::LifecycleRuntimeContext {
+            settings: &default_lifecycle_settings,
+            messaging: &default_lifecycle_messaging,
+            term: &term,
+            source_path: &source_path_for_lifecycle,
+            repo_root: env_plan.repo_root.as_deref(),
+        };
+        let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
-            let (harness_code, harness_perf) = run_harness_loop(
-                provider,
-                profile,
-                binary_path.as_path(),
-                child_cwd,
-                effective_non_interactive,
-                args.timeout,
-                cli_step_timeout_secs,
-                &harness_base_args,
-                &env_plan.env,
-                &mut prompt_state,
-                env_plan.repo_root.as_deref(),
-                shell_options,
-                use_structured,
-                structured_codex_output.as_ref(),
-                stdout_noise,
-                stderr_noise,
-                profile.suppress_structured_stderr_on_success(),
-                !silent_requested,
-                stream_verbosity,
-                detail_requested,
-                &env_context,
-                &dispatch_context,
-                Some(initial_materialized),
-                &term,
-                &default_lifecycle,
-                &default_lifecycle_ctx,
-                &default_lifecycle_emitter,
-                true,
-            )?;
-            if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
-                collector.set_agent_perf(perf);
-            }
-            (harness_code, None)
-        } else if use_structured {
-            let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-            let parser_config = claudine::stream::ParserConfig {
-                model: args.model.clone(),
-            };
-            let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
-                provider,
-                env_context.clone(),
-                child_cwd,
-                stream_verbosity,
-                summary_details.clone(),
-            )
-            .with_context_extra(dispatch_context.clone());
-            let live_metrics = sink.live_metrics();
-            let stream_output = sink.stream_output();
-            // Snapshot the sink's section-stream handle before the sink is
-            // moved into the parser closure. Post-stream trailer and
-            // Codex-final-stdout emission uses this handle so every section
-            // transition shares the same tracker state.
-            let section_stream = sink.section_stream();
-            let (build_parser, stderr_bridge) =
-                build_structured_plumbing(provider, sink, parser_config);
-            let mut _spawned = false;
-            let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
-                let runtime_context =
-                    match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env_context) {
-                        Ok(runtime) => runtime,
-                        Err(error) => {
-                            tracing::warn!(%provider, "failed to preload wire runtime config: {error}");
-                            claudine::dispatch::DispatchRuntimeContext::default()
-                        }
-                    };
-                let _ = stderr_bridge;
-                wire_io::run_kimi_wire_session(
-                    wire_io::WireSessionConfig {
-                        binary: binary_path.as_path(),
-                        args: &child_args,
-                        env: &env_plan.env,
-                        cwd: child_cwd,
-                        prompt: wire_prompt,
-                        timeout: args.timeout,
-                        client_name: env!("CARGO_PKG_NAME"),
-                        client_version: env!("CARGO_PKG_VERSION"),
-                        capabilities: wire_io::WireClientCapabilities::default_for_claudine(),
-                        env_context: env_context.clone(),
-                    },
-                    wire_io::WireSessionWiring {
-                        build_parser,
-                        stream_output,
-                        live_metrics,
-                        runtime_context,
-                    },
-                    &mut _spawned,
-                )?
-            } else {
-                exec::run_child_stream_semantic(
-                    binary_path.as_path(),
-                    &child_args,
-                    &env_plan.env,
-                    child_cwd,
-                    args.timeout,
-                    cli_step_timeout_secs,
-                    stderr_noise,
-                    profile.suppress_structured_stderr_on_success(),
-                    stream_verbosity != Verbosity::Silent,
-                    stdin_seed.as_deref(),
+        let (harness_code, harness_perf) = run_harness_loop(
+            provider,
+            profile,
+            binary_path.as_path(),
+            child_cwd,
+            effective_non_interactive,
+            args.timeout,
+            cli_step_timeout_secs,
+            &harness_base_args,
+            &env_plan.env,
+            &mut prompt_state,
+            env_plan.repo_root.as_deref(),
+            shell_options,
+            use_structured,
+            structured_codex_output.as_ref(),
+            stdout_noise,
+            stderr_noise,
+            profile.suppress_structured_stderr_on_success(),
+            !silent_requested,
+            stream_verbosity,
+            detail_requested,
+            &env_context,
+            &dispatch_context,
+            Some(initial_materialized),
+            &term,
+            &default_lifecycle,
+            &default_lifecycle_ctx,
+            &default_lifecycle_emitter,
+            true,
+        )?;
+        if let (Some(collector), Some(perf)) = (perf_collector.as_mut(), harness_perf) {
+            collector.set_agent_perf(perf);
+        }
+        (harness_code, None)
+    } else if use_structured {
+        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+        let parser_config = claudine::stream::ParserConfig {
+            model: args.model.clone(),
+        };
+        let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
+            provider,
+            env_context.clone(),
+            child_cwd,
+            stream_verbosity,
+            summary_details.clone(),
+        )
+        .with_context_extra(dispatch_context.clone());
+        let live_metrics = sink.live_metrics();
+        let stream_output = sink.stream_output();
+        // Snapshot the sink's section-stream handle before the sink is
+        // moved into the parser closure. Post-stream trailer and
+        // Codex-final-stdout emission uses this handle so every section
+        // transition shares the same tracker state.
+        let section_stream = sink.section_stream();
+        let (build_parser, stderr_bridge) =
+            build_structured_plumbing(provider, sink, parser_config);
+        let mut _spawned = false;
+        let stream_result = if let Some(wire_prompt) = wire_prompt.clone() {
+            let runtime_context =
+                match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env_context) {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        tracing::warn!(%provider, "failed to preload wire runtime config: {error}");
+                        claudine::dispatch::DispatchRuntimeContext::default()
+                    }
+                };
+            let _ = stderr_bridge;
+            wire_io::run_kimi_wire_session(
+                wire_io::WireSessionConfig {
+                    binary: binary_path.as_path(),
+                    args: &child_args,
+                    env: &env_plan.env,
+                    cwd: child_cwd,
+                    prompt: wire_prompt,
+                    timeout: args.timeout,
+                    client_name: env!("CARGO_PKG_NAME"),
+                    client_version: env!("CARGO_PKG_VERSION"),
+                    capabilities: wire_io::WireClientCapabilities::default_for_claudine(),
+                    env_context: env_context.clone(),
+                },
+                wire_io::WireSessionWiring {
                     build_parser,
-                    &mut _spawned,
-                    live_metrics,
                     stream_output,
-                    stderr_bridge,
-                    None,
-                )?
-            };
-            let mut summary = stream_result.data;
-            let api_duration_ms = summary.duration_ms;
-            if let Some(collector) = perf_collector.as_mut() {
-                collector.set_agent_perf(stream_result.telemetry.into_agent_perf(api_duration_ms));
-            }
-            if let Some(ref sid) = summary.session_id {
-                wrapper_span.record("session_id", tracing::field::display(sid));
-            }
-            if let Some(codex_output) = structured_codex_output.as_ref() {
-                codex_output.apply_to_summary(&mut summary);
-            }
-            if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-                section_stream.enter_final_stdout();
-                let text = &summary.assistant_text;
-                if std::io::stdout().is_terminal() {
-                    let rendered = crate::output::render_assistant_markdown(text, &term);
-                    std::io::stdout().write_all(rendered.as_bytes())?;
-                    if !rendered.ends_with('\n') {
-                        std::io::stdout().write_all(b"\n")?;
-                    }
-                } else {
-                    std::io::stdout().write_all(text.as_bytes())?;
-                    if !text.ends_with('\n') {
-                        std::io::stdout().write_all(b"\n")?;
-                    }
-                }
-                std::io::stdout().flush()?;
-            }
-
-            emit_stream_summary(
-                &summary,
-                profile,
-                &env_context,
-                stream_verbosity,
-                detail_requested,
-                &summary_details.lock().unwrap().clone(),
-                Some(&section_stream),
-            );
-
-            let stderr_text = summary.stderr_text.clone();
-            (summary.exit_code, stderr_text)
+                    live_metrics,
+                    runtime_context,
+                },
+                &mut _spawned,
+            )?
         } else {
-            // Legacy path: forward I/O to terminal
-            let mut _spawned = false;
-            let result = exec::run_child(
+            exec::run_child_stream_semantic(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
                 child_cwd,
                 args.timeout,
-                exec::ChildIoOptions {
-                    stdout_noise_prefixes: stdout_noise,
-                    stderr_noise_prefixes: stderr_noise,
-                    stdin_seed: stdin_seed.as_deref(),
-                },
+                cli_step_timeout_secs,
+                stderr_noise,
+                profile.suppress_structured_stderr_on_success(),
+                stream_verbosity != Verbosity::Silent,
+                stdin_seed.as_deref(),
+                build_parser,
                 &mut _spawned,
-            )?;
-            if let Some(collector) = perf_collector.as_mut() {
-                collector.set_agent_perf(result.telemetry.into_agent_perf(None));
-            }
-            (result.data, None)
+                live_metrics,
+                stream_output,
+                stderr_bridge,
+                None,
+            )?
         };
+        let mut summary = stream_result.data;
+        let api_duration_ms = summary.duration_ms;
+        if let Some(collector) = perf_collector.as_mut() {
+            collector.set_agent_perf(stream_result.telemetry.into_agent_perf(api_duration_ms));
+        }
+        if let Some(ref sid) = summary.session_id {
+            wrapper_span.record("session_id", tracing::field::display(sid));
+        }
+        if let Some(codex_output) = structured_codex_output.as_ref() {
+            codex_output.apply_to_summary(&mut summary);
+        }
+        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+            section_stream.enter_final_stdout();
+            let text = &summary.assistant_text;
+            if std::io::stdout().is_terminal() {
+                let rendered = crate::output::render_assistant_markdown(text, &term);
+                std::io::stdout().write_all(rendered.as_bytes())?;
+                if !rendered.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            } else {
+                std::io::stdout().write_all(text.as_bytes())?;
+                if !text.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            }
+            std::io::stdout().flush()?;
+        }
+
+        emit_stream_summary(
+            &summary,
+            profile,
+            &env_context,
+            stream_verbosity,
+            detail_requested,
+            &summary_details.lock().unwrap().clone(),
+            Some(&section_stream),
+        );
+
+        let stderr_text = summary.stderr_text.clone();
+        (summary.exit_code, stderr_text)
+    } else {
+        // Legacy path: forward I/O to terminal
+        let mut _spawned = false;
+        let result = exec::run_child(
+            binary_path.as_path(),
+            &child_args,
+            &env_plan.env,
+            child_cwd,
+            args.timeout,
+            exec::ChildIoOptions {
+                stdout_noise_prefixes: stdout_noise,
+                stderr_noise_prefixes: stderr_noise,
+                stdin_seed: stdin_seed.as_deref(),
+            },
+            &mut _spawned,
+        )?;
+        if let Some(collector) = perf_collector.as_mut() {
+            collector.set_agent_perf(result.telemetry.into_agent_perf(None));
+        }
+        (result.data, None)
+    };
 
     // MCP injector cleanup: remove temp files written during injection
     if let Some((injector, injection_result)) = mcp_cleanup
@@ -1880,30 +1902,15 @@ fn materialize_passthrough_harness_seed(
     })
 }
 
-fn provider_agent_id(provider: Provider) -> Option<claudine::agents::AgentId> {
-    match provider {
-        Provider::Claude => Some(claudine::agents::AgentId::ClaudeCode),
-        Provider::Codex => Some(claudine::agents::AgentId::Codex),
-        Provider::Gemini => Some(claudine::agents::AgentId::GeminiCli),
-        Provider::Goose => Some(claudine::agents::AgentId::Goose),
-        Provider::KimiCode => Some(claudine::agents::AgentId::KimiCode),
-        Provider::OpenCode => Some(claudine::agents::AgentId::OpenCode),
-        Provider::QwenCode => Some(claudine::agents::AgentId::QwenCli),
-        Provider::RooCode => Some(claudine::agents::AgentId::RooCode),
-        _ => None,
-    }
-}
-
 fn find_wrapper_harness_source(
     provider: Provider,
     repo_root: Option<&Path>,
     cwd: &Path,
 ) -> Option<PathBuf> {
-    let agent = claudine::agents::agent_for(provider_agent_id(provider)?);
+    let capabilities = claudine::provider::provider_info(provider).agent_capabilities();
     let search_root = repo_root.unwrap_or(cwd);
 
-    agent
-        .capabilities()
+    capabilities
         .runtime
         .system_prompt
         .memory_files
@@ -4044,6 +4051,123 @@ mod tests {
         assert_eq!(edited, None);
     }
 
+    fn string_args(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn native_output_codex_json_flag_is_detected_from_catalog() {
+        assert!(has_explicit_native_output_request(
+            Provider::Codex,
+            &string_args(&["exec", "--json"])
+        ));
+    }
+
+    #[test]
+    fn native_output_output_format_values_are_detected_from_catalog() {
+        for provider in [Provider::Claude, Provider::Gemini, Provider::QwenCode] {
+            assert!(
+                has_explicit_native_output_request(
+                    provider,
+                    &string_args(&["--output-format", "json"])
+                ),
+                "{provider:?} should detect separated json output format"
+            );
+            assert!(
+                has_explicit_native_output_request(
+                    provider,
+                    &string_args(&["--output-format=stream-json"])
+                ),
+                "{provider:?} should detect inline stream-json output format"
+            );
+        }
+    }
+
+    #[test]
+    fn native_output_opencode_format_json_is_detected_from_catalog() {
+        assert!(has_explicit_native_output_request(
+            Provider::OpenCode,
+            &string_args(&["run", "--format", "json"])
+        ));
+    }
+
+    #[test]
+    fn native_output_kimi_wire_transport_is_not_user_output_request() {
+        assert!(!has_explicit_native_output_request(
+            Provider::KimiCode,
+            &string_args(&["--wire"])
+        ));
+    }
+
+    #[test]
+    fn native_output_unknown_provider_flags_do_not_match_catalog() {
+        assert!(!has_explicit_native_output_request(
+            Provider::Codex,
+            &string_args(&["--output-format", "json"])
+        ));
+        assert!(!has_explicit_native_output_request(
+            Provider::OpenCode,
+            &string_args(&["json"])
+        ));
+        assert!(!has_explicit_native_output_request(
+            Provider::KimiCode,
+            &string_args(&["--print"])
+        ));
+    }
+
+    #[test]
+    fn native_output_detection_matches_provider_catalog() {
+        for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+            for format in provider_info(provider).output_formats {
+                let args = match format.selector {
+                    OutputFormatSelector::Default | OutputFormatSelector::TransportFlag { .. } => {
+                        continue;
+                    }
+                    OutputFormatSelector::Flag { flag } => string_args(&[flag]),
+                    OutputFormatSelector::FlagValue { flag } => {
+                        vec![flag.to_string(), format.native_name.to_string()]
+                    }
+                    OutputFormatSelector::Positional { token } => string_args(&[token]),
+                };
+
+                assert!(
+                    has_explicit_native_output_request(provider, &args),
+                    "{provider:?} should detect catalog selector {:?} for {}",
+                    format.selector,
+                    format.native_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_output_detection_source_has_no_provider_branch() {
+        let source = include_str!("mod.rs");
+        let start = source
+            .find("fn has_explicit_native_output_request")
+            .expect("helper should exist");
+        let end = source[start..]
+            .find("/// Shared wrapper args")
+            .map(|offset| start + offset)
+            .expect("helper should stay before shared wrapper args docs");
+        let helper_source = &source[start..end];
+
+        assert!(
+            !helper_source.contains("match provider")
+                && !helper_source.contains("Provider::Claude")
+                && !helper_source.contains("Provider::Codex")
+                && !helper_source.contains("Provider::Gemini")
+                && !helper_source.contains("Provider::KimiCode")
+                && !helper_source.contains("Provider::OpenCode")
+                && !helper_source.contains("Provider::QwenCode")
+                && !helper_source.contains("Provider::Goose")
+                && !helper_source.contains("Provider::RooCode")
+                && helper_source.contains("provider_info(provider)")
+                && helper_source.contains(".output_formats"),
+            "native-output detection must remain catalog-derived: {helper_source}"
+        );
+    }
+
     #[test]
     fn extract_wrapper_flags_lifts_reserved_aliases_from_passthrough() {
         let mut args = vec![
@@ -4419,7 +4543,7 @@ mod tests {
 
     #[test]
     fn format_summary_prose_appends_badge_markup() {
-        use claudine::events::Provider;
+        use claudine::provider::Provider;
         use claudine::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
         use claudine::stream::summary::StreamExecutionSummary;
         let summary = StreamExecutionSummary {
@@ -4442,7 +4566,7 @@ mod tests {
 
     #[test]
     fn format_summary_prose_without_badges_has_no_badge_markup() {
-        use claudine::events::Provider;
+        use claudine::provider::Provider;
         use claudine::stream::summary::StreamExecutionSummary;
         let summary = StreamExecutionSummary {
             provider: Provider::Claude,

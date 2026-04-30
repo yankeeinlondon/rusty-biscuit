@@ -17,8 +17,7 @@ use super::protocol::qwen::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 pub struct QwenSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
     line_num: usize,
@@ -83,22 +82,7 @@ impl<S: SemanticEventSink> QwenSemanticStreamParser<S> {
         });
     }
 
-    fn handle_message(
-        &mut self,
-        msg: QwenMessage,
-        from_assistant_type: bool,
-        raw_kind: &str,
-        raw: Value,
-    ) {
-        if !from_assistant_type && msg.role.as_deref() != Some("assistant") {
-            self.sink
-                .on_semantic_event(SemanticEvent::ProviderExtension {
-                    provider: Provider::QwenCode,
-                    kind: "message.non_assistant".into(),
-                    payload: raw,
-                });
-            return;
-        }
+    fn handle_message(&mut self, msg: QwenMessage, raw_kind: &str) {
         let Some(text) = msg.resolved_text() else {
             return;
         };
@@ -260,51 +244,75 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
         if line.is_empty() {
             return Ok(());
         }
-        let raw: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                super::trace_malformed_line(Provider::QwenCode, self.line_num, &e.to_string());
-                self.emit_malformed_warning(&e.to_string());
-                return Ok(());
-            }
-        };
-        let raw_kind = raw
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        super::trace_parser_event(Provider::QwenCode, &raw_kind, self.line_num);
 
-        match serde_json::from_value::<QwenEvent>(raw.clone()) {
-            Ok(QwenEvent::Init(init)) => {
-                self.handle_init(init, &raw_kind);
-            }
-            Ok(QwenEvent::System(sys)) => {
-                if sys.is_session_start() {
-                    self.handle_init(sys.into_init(), &raw_kind);
-                } else {
-                    self.emit_provider_extension(&raw_kind, raw);
+        // Try typed deserialization first to avoid `serde_json::Value` DOM
+        // allocation on the hot path. Fall back to `Value` only for unknown
+        // event types, non-assistant messages, or `result`/`summary` events
+        // that need the raw payload for `raw_summary`.
+        match serde_json::from_str::<QwenEvent>(line) {
+            Ok(event) => {
+                let raw_kind = event.type_str().to_string();
+                super::trace_parser_event(Provider::QwenCode, &raw_kind, self.line_num);
+                match event {
+                    QwenEvent::Init(init) => {
+                        self.handle_init(init, &raw_kind);
+                    }
+                    QwenEvent::System(sys) => {
+                        if sys.is_session_start() {
+                            self.handle_init(sys.into_init(), &raw_kind);
+                        } else {
+                            let raw: Value = serde_json::from_str(line)
+                                .expect("already validated JSON");
+                            self.emit_provider_extension(&raw_kind, raw);
+                        }
+                    }
+                    QwenEvent::Message(msg) | QwenEvent::AssistantMessage(msg) => {
+                        if msg.role.as_deref() != Some("assistant") {
+                            let raw: Value = serde_json::from_str(line)
+                                .expect("already validated JSON");
+                            self.emit_provider_extension(&raw_kind, raw);
+                        } else {
+                            self.handle_message(msg, &raw_kind);
+                        }
+                    }
+                    QwenEvent::Assistant(msg) => {
+                        self.handle_message(msg, &raw_kind);
+                    }
+                    QwenEvent::Error(err) => {
+                        self.handle_error(err, &raw_kind);
+                    }
+                    QwenEvent::Result(result) | QwenEvent::Summary(result) => {
+                        let raw: Value = serde_json::from_str(line)
+                            .expect("already validated JSON");
+                        self.handle_result(result, raw, &raw_kind);
+                    }
+                    QwenEvent::ToolUse(tool) | QwenEvent::ToolCall(tool) => {
+                        self.handle_tool_use(tool, &raw_kind);
+                    }
+                    QwenEvent::ToolResult(tool) | QwenEvent::ToolResponse(tool) => {
+                        self.handle_tool_result(tool, &raw_kind);
+                    }
                 }
             }
-            Ok(QwenEvent::Message(msg) | QwenEvent::AssistantMessage(msg)) => {
-                self.handle_message(msg, false, &raw_kind, raw);
-            }
-            Ok(QwenEvent::Assistant(msg)) => {
-                self.handle_message(msg, true, &raw_kind, raw);
-            }
-            Ok(QwenEvent::Error(err)) => {
-                self.handle_error(err, &raw_kind);
-            }
-            Ok(QwenEvent::Result(result) | QwenEvent::Summary(result)) => {
-                self.handle_result(result, raw, &raw_kind);
-            }
-            Ok(QwenEvent::ToolUse(tool) | QwenEvent::ToolCall(tool)) => {
-                self.handle_tool_use(tool, &raw_kind);
-            }
-            Ok(QwenEvent::ToolResult(tool) | QwenEvent::ToolResponse(tool)) => {
-                self.handle_tool_result(tool, &raw_kind);
-            }
             Err(_) => {
+                let raw: Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        super::trace_malformed_line(
+                            Provider::QwenCode,
+                            self.line_num,
+                            &e.to_string(),
+                        );
+                        self.emit_malformed_warning(&e.to_string());
+                        return Ok(());
+                    }
+                };
+                let raw_kind = raw
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                super::trace_parser_event(Provider::QwenCode, &raw_kind, self.line_num);
                 self.emit_provider_extension(&raw_kind, raw);
             }
         }

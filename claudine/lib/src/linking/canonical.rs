@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use crate::events::{CanonicalProviderSettings, Provider};
+use crate::events::CanonicalProviderSettings;
 
 use super::capabilities::{LinkableResource, ResourceFormat, capabilities_for};
 use super::paths::ResourceScope;
+use crate::provider::Provider;
 
 /// Result of canonical provider selection for a `(scope, resource)` pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

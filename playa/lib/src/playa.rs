@@ -11,6 +11,14 @@ use crate::types::{AudioFormat, PlaybackOptions};
 #[cfg(feature = "audio-ducking")]
 use crate::ducking::{DuckConfig, DuckGuard, create_backend};
 
+/// Returns `true` if the process-wide dry-run env var is enabled.
+fn dry_run_env_enabled() -> bool {
+    matches!(
+        std::env::var("PLAYA_DRY_RUN").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
+    )
+}
+
 /// Builder for audio playback with optional metadata display.
 ///
 /// `Playa` provides a fluent builder interface for configuring and playing audio.
@@ -39,6 +47,7 @@ pub struct Playa {
     options: PlaybackOptions,
     show_meta: bool,
     force_host: bool,
+    dry_run: bool,
     #[cfg(feature = "audio-ducking")]
     duck_config: Option<DuckConfig>,
 }
@@ -51,6 +60,7 @@ impl Playa {
             options: PlaybackOptions::default(),
             show_meta: false,
             force_host: false,
+            dry_run: false,
             #[cfg(feature = "audio-ducking")]
             duck_config: None,
         }
@@ -105,6 +115,20 @@ impl Playa {
         self
     }
 
+    /// Skip all audio output.
+    ///
+    /// `play()` and `play_async()` log at debug level and return
+    /// `Ok(())` without opening any device, decoding any bytes, or
+    /// spawning any subprocess. Equivalent to setting the
+    /// `PLAYA_DRY_RUN=1` environment variable.
+    ///
+    /// Useful in tests, headless CI, and sandboxed builds where audio
+    /// output is unavailable or undesirable.
+    pub fn dry_run(mut self) -> Self {
+        self.dry_run = true;
+        self
+    }
+
     /// Enable audio ducking during playback.
     ///
     /// When enabled, system audio will be attenuated to the configured floor
@@ -147,6 +171,11 @@ impl Playa {
     /// Note: If ducking is configured, use [`play_async`] instead as ducking
     /// requires an async runtime.
     pub fn play(self) -> Result<(), PlaybackError> {
+        if self.dry_run || dry_run_env_enabled() {
+            tracing::debug!("playa: dry-run enabled, skipping playback");
+            return Ok(());
+        }
+
         let format = self.audio.format();
 
         // Try native playback first (non-URL, non-forced-host)
@@ -191,6 +220,11 @@ impl Playa {
     /// Requires the `audio-ducking` feature flag for ducking support.
     #[cfg(feature = "audio-ducking")]
     pub async fn play_async(self) -> Result<(), PlaybackError> {
+        if self.dry_run || dry_run_env_enabled() {
+            tracing::debug!("playa: dry-run enabled, skipping async playback");
+            return Ok(());
+        }
+
         let format = self.audio.format();
 
         // Set up ducking BEFORE playback (covers both native and host paths)
@@ -383,31 +417,69 @@ mod tests {
         assert_eq!(format_file_format(AudioFileFormat::Ogg), ".ogg");
     }
 
+    /// Minimal valid WAV header that `Audio::from_bytes` will accept.
+    fn minimal_wav() -> Vec<u8> {
+        let mut h = Vec::new();
+        h.extend_from_slice(b"RIFF");
+        h.extend_from_slice(&36u32.to_le_bytes()); // file size - 8
+        h.extend_from_slice(b"WAVE");
+        h.extend_from_slice(b"fmt ");
+        h.extend_from_slice(&16u32.to_le_bytes()); // chunk size
+        h.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        h.extend_from_slice(&1u16.to_le_bytes()); // mono
+        h.extend_from_slice(&44100u32.to_le_bytes()); // sample rate
+        h.extend_from_slice(&88200u32.to_le_bytes()); // byte rate
+        h.extend_from_slice(&2u16.to_le_bytes()); // block align
+        h.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        h.extend_from_slice(b"data");
+        h.extend_from_slice(&0u32.to_le_bytes()); // data size
+        h
+    }
+
     #[test]
     fn force_host_builder_sets_flag() {
-        // We can't easily construct a Playa without valid audio, but we can
-        // test the builder method indirectly by checking the struct field.
-        // Use from_bytes with minimal WAV header.
-        let wav_header: Vec<u8> = {
-            let mut h = Vec::new();
-            h.extend_from_slice(b"RIFF");
-            h.extend_from_slice(&36u32.to_le_bytes()); // file size - 8
-            h.extend_from_slice(b"WAVE");
-            h.extend_from_slice(b"fmt ");
-            h.extend_from_slice(&16u32.to_le_bytes()); // chunk size
-            h.extend_from_slice(&1u16.to_le_bytes()); // PCM
-            h.extend_from_slice(&1u16.to_le_bytes()); // mono
-            h.extend_from_slice(&44100u32.to_le_bytes()); // sample rate
-            h.extend_from_slice(&88200u32.to_le_bytes()); // byte rate
-            h.extend_from_slice(&2u16.to_le_bytes()); // block align
-            h.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
-            h.extend_from_slice(b"data");
-            h.extend_from_slice(&0u32.to_le_bytes()); // data size
-            h
-        };
-        let playa = Playa::from_bytes(wav_header).unwrap();
+        let playa = Playa::from_bytes(minimal_wav()).unwrap();
         assert!(!playa.force_host);
         let playa = playa.force_host();
         assert!(playa.force_host);
     }
+
+    #[test]
+    fn builder_dry_run_skips_playback() {
+        let result = Playa::from_bytes(minimal_wav())
+            .expect("minimal WAV should be accepted")
+            .dry_run()
+            .play();
+        assert!(result.is_ok(), "dry-run play should succeed: {result:?}");
+    }
+
+    #[test]
+    fn env_var_dry_run_skips_playback() {
+        // Tests that mutate process env vars share a serial guard so they
+        // do not race other tests in this binary.
+        let _guard = ENV_LOCK.lock().expect("env lock poisoned");
+
+        // SAFETY: we hold the env mutex; no other test in this binary
+        // reads or writes PLAYA_DRY_RUN concurrently.
+        unsafe {
+            std::env::set_var("PLAYA_DRY_RUN", "1");
+        }
+
+        let result = Playa::from_bytes(minimal_wav())
+            .expect("minimal WAV should be accepted")
+            .play();
+
+        // SAFETY: same as above.
+        unsafe {
+            std::env::remove_var("PLAYA_DRY_RUN");
+        }
+
+        assert!(
+            result.is_ok(),
+            "env var dry-run play should succeed: {result:?}"
+        );
+    }
+
+    /// Process-local mutex shared by tests that read/write env vars.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

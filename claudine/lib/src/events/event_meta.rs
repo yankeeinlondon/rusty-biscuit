@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use super::agentic_event::AgenticEvent;
 use super::environment::EnvironmentContext;
-use super::provider::Provider;
+use crate::provider::Provider;
 
 /// Normalized metadata attached to every fired event.
 ///

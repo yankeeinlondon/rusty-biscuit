@@ -61,6 +61,20 @@ impl KimiEnvelope {
     /// fallback path the way provider parsers do for unknown event types.
     pub fn classify(value: Value) -> Option<Self> {
         let raw = serde_json::from_value::<KimiRawEnvelope>(value).ok()?;
+        Self::from_raw(raw)
+    }
+
+    /// Classify a raw JSON line directly into a typed wire envelope.
+    ///
+    /// This avoids the intermediate `serde_json::Value` DOM allocation that
+    /// [`Self::classify`] requires, making it suitable for the hot path in
+    /// the semantic stream parser.
+    pub fn classify_str(line: &str) -> Option<Self> {
+        let raw: KimiRawEnvelope = serde_json::from_str(line).ok()?;
+        Self::from_raw(raw)
+    }
+
+    fn from_raw(raw: KimiRawEnvelope) -> Option<Self> {
         match (raw.method.as_deref(), raw.id, raw.result, raw.error) {
             (Some("event"), _id, _r, _e) => {
                 let params = raw.params.unwrap_or(Value::Null);
@@ -75,9 +89,7 @@ impl KimiEnvelope {
             (None, Some(id), Some(result), None) => {
                 Some(KimiEnvelope::SuccessResponse { id, result })
             }
-            (None, Some(id), None, Some(error)) => {
-                Some(KimiEnvelope::ErrorResponse { id, error })
-            }
+            (None, Some(id), None, Some(error)) => Some(KimiEnvelope::ErrorResponse { id, error }),
             _ => None,
         }
     }
@@ -938,7 +950,10 @@ mod tests {
         };
         assert_eq!(id.as_str(), Some("prompt-2"));
         let parsed: KimiPromptResult = serde_json::from_value(result).unwrap();
-        assert_eq!(parsed.status.as_deref(), Some(KimiPromptResult::STATUS_FINISHED));
+        assert_eq!(
+            parsed.status.as_deref(),
+            Some(KimiPromptResult::STATUS_FINISHED)
+        );
     }
 
     #[test]
@@ -1370,7 +1385,10 @@ mod tests {
             }
         }
         assert!(notif > 0, "expected at least one notification");
-        assert!(success >= 2, "expected initialize and prompt success responses, got {success}");
+        assert!(
+            success >= 2,
+            "expected initialize and prompt success responses, got {success}"
+        );
         assert_eq!(requests, 0, "greet fixture should have no server requests");
         assert_eq!(errors, 0, "greet fixture should have no error responses");
     }
@@ -1424,7 +1442,10 @@ mod tests {
                 last_prompt_status = parsed.status;
             }
         }
-        assert_eq!(last_prompt_status.as_deref(), Some(KimiPromptResult::STATUS_FINISHED));
+        assert_eq!(
+            last_prompt_status.as_deref(),
+            Some(KimiPromptResult::STATUS_FINISHED)
+        );
     }
 
     #[test]

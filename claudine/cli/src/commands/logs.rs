@@ -9,7 +9,7 @@ use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, WordWrap};
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::reporting::{
     DailySummary, DateRange, ErrorsReport, LabeledCount, ProviderSplit, ReportingFilters,
     ReportingStore, ReposReport, SessionDetailReport, SessionsReport, SyncRequest, SyncSummary,

@@ -1,5 +1,4 @@
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Provider-agnostic canonical policy model.
 ///
 /// Produced by canonicalizing provider-native policy state. Every rule

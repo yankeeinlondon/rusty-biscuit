@@ -41,6 +41,26 @@ pub enum ClaudeEvent {
     User(ClaudeUser),
 }
 
+impl ClaudeEvent {
+    /// Returns the JSON `type` discriminator for this event variant.
+    pub const fn type_str(&self) -> &'static str {
+        match self {
+            ClaudeEvent::Init(_) => "init",
+            ClaudeEvent::System(_) => "system",
+            ClaudeEvent::Assistant(_) => "assistant",
+            ClaudeEvent::ContentBlockStart(_) => "content_block_start",
+            ClaudeEvent::ContentBlockDelta(_) => "content_block_delta",
+            ClaudeEvent::Error(_) => "error",
+            ClaudeEvent::AssistantError(_) => "assistant.error",
+            ClaudeEvent::Result(_) => "result",
+            ClaudeEvent::RateLimit(_) => "rate_limit_event",
+            ClaudeEvent::ToolUse(_) => "tool_use",
+            ClaudeEvent::ToolResult(_) => "tool_result",
+            ClaudeEvent::User(_) => "user",
+        }
+    }
+}
+
 /// Session metadata emitted by Claude Code's `init` and `system` events.
 #[derive(Debug, Default, Deserialize)]
 pub struct ClaudeInit {

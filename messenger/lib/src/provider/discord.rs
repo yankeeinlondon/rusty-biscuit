@@ -18,6 +18,19 @@ pub struct DiscordConfig {
     pub bot_token: SecretString,
 }
 
+/// Install the `ring` crypto provider as the process-wide rustls default.
+///
+/// `twilight-http` uses `rustls` internally and rustls 0.23 requires a
+/// process-wide `CryptoProvider` to be installed before any TLS handshake.
+/// Auto-install only happens when exactly one of `aws-lc-rs` or `ring` is
+/// enabled at compile time, which cargo feature unification across transitive
+/// crates can break. Installing explicitly is deterministic and idempotent —
+/// `install_default()` returns `Err` if a provider is already installed,
+/// which we intentionally swallow.
+fn install_default_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Discord provider adapter using the Discord REST API via twilight-http.
 pub struct DiscordProvider {
     client: Client,
@@ -25,6 +38,7 @@ pub struct DiscordProvider {
 
 impl DiscordProvider {
     pub fn new(config: DiscordConfig) -> Self {
+        install_default_crypto_provider();
         let client = Client::new(config.bot_token.expose_secret().to_string());
         Self { client }
     }

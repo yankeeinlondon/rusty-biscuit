@@ -32,8 +32,7 @@ use super::protocol::kimi::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{ContextUsage, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
-use crate::events::Provider;
-
+use crate::provider::Provider;
 const CONTEXT_PRESSURE_WARN_PERCENT: f64 = 80.0;
 
 /// In-flight tool-call accumulator. Holds the tool name, the optional id, and
@@ -73,6 +72,16 @@ pub struct KimiSemanticStreamParser<S: SemanticEventSink> {
     tool_uses: HashMap<String, String>,
     pending_tool_call: Option<PendingToolCall>,
     next_pending_slot: u64,
+    /// Accumulator for consecutive `think` ContentPart deltas. Kimi streams
+    /// thinking prose token-by-token; emitting a `Reasoning` event per
+    /// token would render each token as its own one-line `BlockQuote`.
+    /// Tokens accumulate here and flush as one `Reasoning` event when a
+    /// non-think part, tool call, turn boundary, or finish arrives.
+    pending_thinking: String,
+    /// `raw_kind` to attach to the flushed `Reasoning` event. Captured
+    /// from the first chunk of the current run so the emitted event
+    /// preserves the originating envelope kind (e.g. `content_part`).
+    pending_thinking_kind: Option<String>,
     /// Toggles to `true` once the parser observes a `prompt` response so the
     /// summary's `provider_status` reflects the canonical status string
     /// (`finished` / `cancelled` / `max_steps_reached` / `steered`).
@@ -101,6 +110,8 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             tool_uses: HashMap::new(),
             pending_tool_call: None,
             next_pending_slot: 0,
+            pending_thinking: String::new(),
+            pending_thinking_kind: None,
             prompt_status_seen: false,
         }
     }
@@ -279,15 +290,18 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
         match event {
             KimiWireEvent::TurnBegin(turn) => {
                 self.flush_pending_tool_call(raw_kind);
+                self.flush_pending_thinking();
                 let mut extra = self.base_extra(raw_kind);
                 if let Some(text) = turn.user_input_text() {
                     extra.insert("user_input".into(), Value::from(text));
                 }
-                self.sink
-                    .on_semantic_event(SemanticEvent::TurnStart { extra: Value::Object(extra) });
+                self.sink.on_semantic_event(SemanticEvent::TurnStart {
+                    extra: Value::Object(extra),
+                });
             }
             KimiWireEvent::TurnEnd(_) => {
                 self.flush_pending_tool_call(raw_kind);
+                self.flush_pending_thinking();
                 self.flush_pending_text();
                 self.num_turns = self.num_turns.saturating_add(1);
                 let mut extra = self.base_extra(raw_kind);
@@ -478,19 +492,13 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 self.flush_pending_tool_call(raw_kind);
                 let mut extra = self.info_extra_with_kind(raw_kind, "subagent_event");
                 if let Some(parent) = &sub.parent_tool_call_id {
-                    extra.insert(
-                        "parent_tool_call_id".into(),
-                        Value::from(parent.as_str()),
-                    );
+                    extra.insert("parent_tool_call_id".into(), Value::from(parent.as_str()));
                 }
                 if let Some(agent_id) = &sub.agent_id {
                     extra.insert("agent_id".into(), Value::from(agent_id.as_str()));
                 }
                 if let Some(subagent_type) = &sub.subagent_type {
-                    extra.insert(
-                        "subagent_type".into(),
-                        Value::from(subagent_type.as_str()),
-                    );
+                    extra.insert("subagent_type".into(), Value::from(subagent_type.as_str()));
                 }
                 if let Some(nested) = sub.event.clone() {
                     extra.insert("event".into(), nested);
@@ -581,16 +589,10 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 let mut extra = self.info_extra_with_kind(raw_kind, "auto_approved");
                 extra.insert("request_id".into(), id);
                 if let Some(req_id) = &approval.id {
-                    extra.insert(
-                        "approval_id".into(),
-                        Value::from(req_id.as_str()),
-                    );
+                    extra.insert("approval_id".into(), Value::from(req_id.as_str()));
                 }
                 if let Some(tool_call_id) = &approval.tool_call_id {
-                    extra.insert(
-                        "tool_call_id".into(),
-                        Value::from(tool_call_id.as_str()),
-                    );
+                    extra.insert("tool_call_id".into(), Value::from(tool_call_id.as_str()));
                 }
                 if let Some(sender) = &approval.sender {
                     extra.insert("sender".into(), Value::from(sender.as_str()));
@@ -599,10 +601,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                     extra.insert("action".into(), Value::from(action.as_str()));
                 }
                 if let Some(description) = &approval.description {
-                    extra.insert(
-                        "description".into(),
-                        Value::from(description.as_str()),
-                    );
+                    extra.insert("description".into(), Value::from(description.as_str()));
                 }
                 if let Some(shell) = approval.shell_command() {
                     extra.insert("shell_command".into(), Value::from(shell));
@@ -732,12 +731,12 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
             if text.is_empty() {
                 return;
             }
-            let extra = self.base_extra(raw_kind);
-            self.sink.on_semantic_event(SemanticEvent::Reasoning {
-                text: text.to_string(),
-                extra: Value::Object(extra),
-            });
+            self.pending_thinking.push_str(text);
+            if self.pending_thinking_kind.is_none() {
+                self.pending_thinking_kind = Some(raw_kind.to_string());
+            }
         } else if part.is_text() {
+            self.flush_pending_thinking();
             let Some(text) = part.resolved_text() else {
                 return;
             };
@@ -752,6 +751,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
                 extra: Value::Object(extra),
             });
         } else {
+            self.flush_pending_thinking();
             let mut extra = self.info_extra_with_kind(raw_kind, "content_media");
             extra.insert("part_type".into(), Value::from(part.part_type.as_str()));
             self.sink.on_semantic_event(SemanticEvent::Info {
@@ -771,10 +771,36 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
         self.pending_text.clear();
     }
 
+    /// Emit accumulated thinking tokens as a single `Reasoning` event.
+    ///
+    /// Kimi's wire protocol streams thinking prose token-by-token; the
+    /// live sink renders each `Reasoning` event as its own `BlockQuote`,
+    /// so emitting per-token would produce one tiny BlockQuote per token.
+    /// The parser instead accumulates consecutive `think` parts into
+    /// `pending_thinking` and flushes them as one event whenever the
+    /// thinking run ends — i.e. when a `text` part, tool call, turn
+    /// boundary, or finish arrives.
+    fn flush_pending_thinking(&mut self) {
+        if self.pending_thinking.is_empty() {
+            return;
+        }
+        let text = std::mem::take(&mut self.pending_thinking);
+        let raw_kind = self
+            .pending_thinking_kind
+            .take()
+            .unwrap_or_else(|| "content_part".to_string());
+        let extra = self.base_extra(&raw_kind);
+        self.sink.on_semantic_event(SemanticEvent::Reasoning {
+            text,
+            extra: Value::Object(extra),
+        });
+    }
+
     fn handle_tool_call(&mut self, mut call: KimiToolCall, raw_kind: &str) {
         // A new ToolCall envelope flushes any in-flight call so accumulated
         // arguments don't leak across tools.
         self.flush_pending_tool_call(raw_kind);
+        self.flush_pending_thinking();
         let id = call.resolved_tool_id().map(str::to_owned);
         let name = call.resolved_tool_name().map(str::to_owned);
         let initial = call.take_arguments_string().unwrap_or_default();
@@ -798,9 +824,7 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
 
     fn handle_tool_result(&mut self, mut result: KimiToolResult, raw_kind: &str) {
         let tool_id = result.resolved_tool_id().map(str::to_owned);
-        let tool_name = tool_id
-            .as_ref()
-            .and_then(|id| self.tool_uses.remove(id));
+        let tool_name = tool_id.as_ref().and_then(|id| self.tool_uses.remove(id));
         let status = result.derived_status().to_string();
         let is_error = result.is_error();
         let output = result.take_output();
@@ -858,34 +882,52 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
         if line.is_empty() {
             return Ok(());
         }
-        let raw: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                super::trace_malformed_line(Provider::KimiCode, self.line_num, &e.to_string());
-                self.emit_malformed_warning(&e.to_string());
-                return Ok(());
-            }
-        };
-
-        let raw_kind = envelope_raw_kind(&raw);
-        super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
-
-        let envelope = match KimiEnvelope::classify(raw.clone()) {
+        // Try direct envelope classification from `&str` to avoid the
+        // intermediate `serde_json::Value` DOM allocation on the hot path.
+        // Fall back to `Value` only for malformed JSON or unknown envelopes.
+        let envelope = match KimiEnvelope::classify_str(line) {
             Some(env) => env,
             None => {
+                let raw: Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        super::trace_malformed_line(
+                            Provider::KimiCode,
+                            self.line_num,
+                            &e.to_string(),
+                        );
+                        self.emit_malformed_warning(&e.to_string());
+                        return Ok(());
+                    }
+                };
+                let raw_kind = envelope_raw_kind(&raw);
+                super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
                 self.emit_provider_extension(&raw_kind, raw);
                 return Ok(());
             }
         };
 
+        let raw_kind = envelope_raw_kind(
+            &serde_json::from_str(line).expect("already validated JSON"),
+        );
+        super::trace_parser_event(Provider::KimiCode, &raw_kind, self.line_num);
+
         match envelope {
             KimiEnvelope::Notification(params) => match params.into_event() {
                 Some(event) => self.handle_event(event, &raw_kind),
-                None => self.emit_provider_extension(&raw_kind, raw),
+                None => {
+                    let raw: Value = serde_json::from_str(line)
+                        .expect("already validated JSON");
+                    self.emit_provider_extension(&raw_kind, raw);
+                }
             },
             KimiEnvelope::Request { id, params } => match params.into_request() {
                 Some(request) => self.handle_request(id, request, &raw_kind),
-                None => self.emit_provider_extension(&raw_kind, raw),
+                None => {
+                    let raw: Value = serde_json::from_str(line)
+                        .expect("already validated JSON");
+                    self.emit_provider_extension(&raw_kind, raw);
+                }
             },
             KimiEnvelope::SuccessResponse { id, result } => {
                 if id.as_str() == Some("init-1") {
@@ -921,6 +963,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
         // between messages, and the trailing assistant message at end-of-run
         // should not gain a trailing newline.
         self.flush_pending_tool_call("finish");
+        self.flush_pending_thinking();
         self.pending_text.clear();
         super::trace_parser_finish(
             Provider::KimiCode,
@@ -1087,7 +1130,11 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(collected.iter().any(|e| matches!(e, SemanticEvent::TurnStart { .. })));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::TurnStart { .. }))
+        );
     }
 
     #[test]
@@ -1126,8 +1173,71 @@ mod tests {
                 r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"pondering"}}}"#,
             )
             .unwrap();
+        // Thinking tokens are accumulated; a turn boundary triggers the flush.
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}"#,
+            )
+            .unwrap();
         assert!(events.lock().unwrap().iter().any(|e| matches!(e,
                 SemanticEvent::Reasoning { text, .. } if text == "pondering")));
+    }
+
+    #[test]
+    fn content_part_think_chunks_coalesce_into_one_reasoning_event() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        for chunk in ["The", " user", " said", " hi"] {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","method":"event","params":{{"type":"ContentPart","payload":{{"type":"think","think":"{chunk}"}}}}}}"#,
+            );
+            parser.feed_line(&line).unwrap();
+        }
+        // No flush yet — accumulator still buffering.
+        let mid = events.lock().unwrap().clone();
+        assert!(
+            !mid.iter().any(|e| matches!(e, SemanticEvent::Reasoning { .. })),
+            "thinking tokens must not emit per-token Reasoning events; got {mid:?}"
+        );
+        // A non-think content part flushes the accumulator.
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"Hi!"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let reasoning_texts: Vec<&str> = collected
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::Reasoning { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reasoning_texts,
+            vec!["The user said hi"],
+            "consecutive think chunks must coalesce into a single Reasoning event"
+        );
+    }
+
+    #[test]
+    fn pending_thinking_flushes_on_finish() {
+        let (events, mut parser) = new_parser();
+        feed_initialize(&mut parser);
+        parser
+            .feed_line(
+                r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"think","think":"trailing thoughts"}}}"#,
+            )
+            .unwrap();
+        let _ = parser.finish(0);
+        assert!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "trailing thoughts")),
+            "finish must flush any pending thinking accumulator"
+        );
     }
 
     #[test]
@@ -1159,7 +1269,11 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(!collected.iter().any(|e| matches!(e, SemanticEvent::Warning { .. })));
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Warning { .. }))
+        );
     }
 
     #[test]
@@ -1186,7 +1300,9 @@ mod tests {
         let tool_call = collected
             .iter()
             .find_map(|e| match e {
-                SemanticEvent::ToolCall { name, id, input, .. } => Some((name.clone(), id.clone(), input.clone())),
+                SemanticEvent::ToolCall {
+                    name, id, input, ..
+                } => Some((name.clone(), id.clone(), input.clone())),
                 _ => None,
             })
             .expect("tool_call");
@@ -1194,7 +1310,11 @@ mod tests {
         assert_eq!(tool_call.1.as_deref(), Some("tool_1"));
         let input = tool_call.2.expect("input");
         assert_eq!(input.get("command").and_then(Value::as_str), Some("ls"));
-        assert!(collected.iter().any(|e| matches!(e, SemanticEvent::ToolResult { .. })));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+        );
     }
 
     #[test]
@@ -1240,8 +1360,14 @@ mod tests {
             })
             .expect("info");
         assert!(info.0.contains("Auto-approved"));
-        assert_eq!(info.1.get("kind").and_then(Value::as_str), Some("auto_approved"));
-        assert_eq!(info.1.get("shell_command").and_then(Value::as_str), Some("ls"));
+        assert_eq!(
+            info.1.get("kind").and_then(Value::as_str),
+            Some("auto_approved")
+        );
+        assert_eq!(
+            info.1.get("shell_command").and_then(Value::as_str),
+            Some("ls")
+        );
     }
 
     #[test]
@@ -1254,8 +1380,10 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(collected.iter().any(|e| matches!(e,
-                SemanticEvent::Warning { message, .. } if message.contains("Unexpected question"))));
+        assert!(
+            collected.iter().any(|e| matches!(e,
+                SemanticEvent::Warning { message, .. } if message.contains("Unexpected question")))
+        );
     }
 
     #[test]
@@ -1290,7 +1418,10 @@ mod tests {
             })
             .expect("info");
         assert!(info.0.contains("Hook request"));
-        assert_eq!(info.1.get("event").and_then(Value::as_str), Some("PreToolUse"));
+        assert_eq!(
+            info.1.get("event").and_then(Value::as_str),
+            Some("PreToolUse")
+        );
     }
 
     #[test]
@@ -1319,9 +1450,12 @@ mod tests {
         let err = collected
             .iter()
             .find_map(|e| match e {
-                SemanticEvent::Error { message, kind, terminal, .. } => {
-                    Some((message.clone(), *kind, *terminal))
-                }
+                SemanticEvent::Error {
+                    message,
+                    kind,
+                    terminal,
+                    ..
+                } => Some((message.clone(), *kind, *terminal)),
                 _ => None,
             })
             .expect("error");
@@ -1442,7 +1576,9 @@ mod tests {
         assert!(collected.iter().any(|e| matches!(e,
                 SemanticEvent::Info { message, .. } if message.contains("Hello"))));
         assert!(
-            !collected.iter().any(|e| matches!(e, SemanticEvent::Warning { .. })),
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Warning { .. })),
             "info-level notification must not surface as Warning"
         );
     }
@@ -1543,7 +1679,11 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(collected.iter().any(|e| matches!(e, SemanticEvent::TurnComplete { .. })));
+        assert!(
+            collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::TurnComplete { .. }))
+        );
         let summary = parser.finish(0);
         assert_eq!(summary.num_turns, Some(1));
     }

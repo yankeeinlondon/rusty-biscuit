@@ -1,0 +1,7 @@
+sequence:
+    - name: boolean_switch
+    - name: choose_many
+    - name: choose_one
+    - name: text_area_input
+    - name: text_input
+    - name: input_table

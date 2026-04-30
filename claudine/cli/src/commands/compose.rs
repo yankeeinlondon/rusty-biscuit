@@ -12,7 +12,7 @@ use clap::Args;
 use claudine::composition::{
     self, CompositionExecutionRequest, CompositionMode, OutputFormat as CompositionOutputFormat,
 };
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
 use tracing::info_span;

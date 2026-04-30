@@ -2,8 +2,7 @@ use biscuit_file::YamlParseError;
 use darkmatter::markdown::MarkdownError;
 use std::path::PathBuf;
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// All errors that can occur within the Claudine library.
 #[derive(Debug, thiserror::Error)]
 pub enum ClaudineError {
@@ -161,7 +160,7 @@ pub enum ClaudineError {
     // --- PolicyEngine errors ---
     /// Policy engine backend is not registered for this provider.
     #[error("policy engine: no backend for {0}")]
-    PolicyBackendUnavailable(crate::events::Provider),
+    PolicyBackendUnavailable(crate::provider::Provider),
 
     /// Policy engine source discovery failed.
     #[error("policy engine source discovery: {0}")]
@@ -180,7 +179,7 @@ pub enum ClaudineError {
     #[error("policy engine CLI parse for {provider}: {message}")]
     PolicyCliParse {
         /// Provider.
-        provider: crate::events::Provider,
+        provider: crate::provider::Provider,
         /// Parse error message.
         message: String,
     },
@@ -189,7 +188,7 @@ pub enum ClaudineError {
     #[error("policy engine unsupported query for {provider}: {query}")]
     PolicyUnsupportedQuery {
         /// Provider.
-        provider: crate::events::Provider,
+        provider: crate::provider::Provider,
         /// Query description.
         query: String,
     },
@@ -198,7 +197,7 @@ pub enum ClaudineError {
     #[error("policy engine unsupported mutation for {provider}: {op}")]
     PolicyUnsupportedMutation {
         /// Provider.
-        provider: crate::events::Provider,
+        provider: crate::provider::Provider,
         /// Operation description.
         op: String,
     },
