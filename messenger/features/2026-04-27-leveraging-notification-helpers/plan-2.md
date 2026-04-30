@@ -1,5 +1,6 @@
 ---
 phases: 5
+start_phase: 2
 created: 2026-04-29
 source: review-1.md
 related:
@@ -20,6 +21,24 @@ docs_updated_during_phase_1:
   - messenger/features/2026-04-27-leveraging-notification-helpers/plan-2.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase: []
+source_files_during_phase_2:
+  - messenger/lib/Cargo.toml
+  - messenger/lib/src/provider/desktop/mod.rs
+  - messenger/lib/src/provider/desktop/linux.rs
+  - messenger/lib/src/provider/desktop/windows.rs
+  - messenger/lib/src/tests/mod.rs
+  - messenger/lib/src/tests/validation.rs
+  - messenger/lib/src/tests/desktop_helpers.rs
+  - messenger/lib/tests/bin/stub_dunstify/main.rs
+  - messenger/lib/tests/bin/stub_notify_send/main.rs
+  - messenger/lib/tests/bin/stub_snoretoast/main.rs
+  - messenger/lib/tests/bin/stub_burnttoast/main.rs
+  - messenger/lib/tests/bin/stub_terminal_notifier/main.rs
+  - messenger/lib/tests/bin/stub_alerter/main.rs
+  - messenger/justfile
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - messenger
 ---
