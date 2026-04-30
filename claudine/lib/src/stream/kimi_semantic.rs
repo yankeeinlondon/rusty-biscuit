@@ -922,16 +922,14 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
             KimiEnvelope::Notification(params) => match params.into_event() {
                 Some(event) => self.handle_event(event, &raw_kind),
                 None => {
-                    let raw: Value = serde_json::from_str(line)
-                        .expect("already validated JSON");
+                    let raw: Value = serde_json::from_str(line).expect("already validated JSON");
                     self.emit_provider_extension(&raw_kind, raw);
                 }
             },
             KimiEnvelope::Request { id, params } => match params.into_request() {
                 Some(request) => self.handle_request(id, request, &raw_kind),
                 None => {
-                    let raw: Value = serde_json::from_str(line)
-                        .expect("already validated JSON");
+                    let raw: Value = serde_json::from_str(line).expect("already validated JSON");
                     self.emit_provider_extension(&raw_kind, raw);
                 }
             },
@@ -1182,7 +1180,8 @@ mod tests {
         // No flush yet — accumulator still buffering.
         let mid = events.lock().unwrap().clone();
         assert!(
-            !mid.iter().any(|e| matches!(e, SemanticEvent::Reasoning { .. })),
+            !mid.iter()
+                .any(|e| matches!(e, SemanticEvent::Reasoning { .. })),
             "thinking tokens must not emit per-token Reasoning events; got {mid:?}"
         );
         // A non-think content part flushes the accumulator.
