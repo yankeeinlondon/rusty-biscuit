@@ -1340,4 +1340,108 @@ title: Test
         assert!(md.content().contains("## B"));
         assert!(!md.content().contains("## C"));
     }
+
+    // =========================================================================
+    // Dim (⌄text⌄) integration tests
+    // =========================================================================
+
+    /// Full pipeline: Markdown source `⌄dim⌄` → terminal output contains `\x1b[2m`.
+    #[test]
+    fn test_dim_full_pipeline_terminal() {
+        use crate::markdown::output::terminal::{for_terminal, TerminalOptions, DimMode, ColorDepth};
+        use crate::markdown::highlighting::{ThemePair, ColorMode};
+
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let options = TerminalOptions {
+            code_theme: ThemePair::OneHalf,
+            prose_theme: ThemePair::OneHalf,
+            color_mode: ColorMode::Dark,
+            include_line_numbers: false,
+            color_depth: Some(ColorDepth::TrueColor),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            base_path: None,
+            italic_mode: crate::markdown::output::terminal::ItalicMode::Always,
+            dim_mode: DimMode::Always,
+            max_width: Some(80),
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+        };
+        let output = for_terminal(&md, options).unwrap();
+
+        assert!(
+            output.contains("\x1b[2m"),
+            "Terminal output should contain dim ANSI code \\x1b[2m, got: {:?}",
+            output
+        );
+
+        // Delimiters should be stripped by the inline processor
+        assert!(
+            !output.contains("⌄"),
+            "Terminal output should not contain ⌄ delimiters"
+        );
+    }
+
+    /// Full pipeline: Markdown source `⌄dim⌄` → HTML output contains literal `⌄dim⌄`.
+    #[test]
+    fn test_dim_full_pipeline_html() {
+        use crate::markdown::output::{as_html, HtmlOptions};
+
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+
+        assert!(
+            html.contains("⌄dimmed⌄"),
+            "HTML output should preserve ⌄ delimiters as literal, got: {}",
+            html
+        );
+        assert!(
+            !html.contains("<dim>"),
+            "HTML output should not contain <dim> tag"
+        );
+    }
+
+    /// Cross-format consistency: terminal-rendered `⌄text⌄` and HTML `⌄text⌄`
+    /// both preserve the visible text content.
+    #[test]
+    fn test_dim_cross_format_consistency() {
+        use crate::markdown::output::terminal::{for_terminal, TerminalOptions, DimMode, ColorDepth};
+        use crate::markdown::output::{as_html, HtmlOptions};
+        use crate::markdown::highlighting::{ThemePair, ColorMode};
+        use crate::testing::strip_ansi_codes;
+
+        let md: Markdown = "The ⌄dimmed text⌄ here.".into();
+
+        // Terminal output
+        let terminal_options = TerminalOptions {
+            code_theme: ThemePair::OneHalf,
+            prose_theme: ThemePair::OneHalf,
+            color_mode: ColorMode::Dark,
+            include_line_numbers: false,
+            color_depth: Some(ColorDepth::TrueColor),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            base_path: None,
+            italic_mode: crate::markdown::output::terminal::ItalicMode::Always,
+            dim_mode: DimMode::Always,
+            max_width: Some(80),
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+        };
+        let terminal_output = for_terminal(&md, terminal_options).unwrap();
+        let terminal_plain = strip_ansi_codes(&terminal_output);
+
+        // HTML output
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+
+        // Both should contain the visible text "dimmed text"
+        assert!(
+            terminal_plain.contains("dimmed text"),
+            "Terminal plain text should contain 'dimmed text', got: {:?}",
+            terminal_plain
+        );
+        assert!(
+            html.contains("dimmed text"),
+            "HTML should contain 'dimmed text', got: {}",
+            html
+        );
+    }
 }
