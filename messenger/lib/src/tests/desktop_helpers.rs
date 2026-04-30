@@ -626,9 +626,11 @@ mod backend_fallback {
 
     use super::*;
     use crate::provider::desktop::LinuxDesktopConfig;
+    use crate::provider::desktop::MacOsDesktopConfig;
     use crate::provider::desktop::WindowsDesktopConfig;
     use crate::provider::desktop::backend::DesktopBackend;
     use crate::provider::desktop::linux::LinuxBackend;
+    use crate::provider::desktop::macos::MacOsBackend;
     use crate::provider::desktop::windows::WindowsBackend;
     use serial_test::serial;
 
@@ -738,5 +740,84 @@ mod backend_fallback {
             .map(String::as_str)
             .unwrap_or("");
         assert!(fallbacks.contains("snore_toast"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn linux_backend_dunstify_timeout_falls_through_to_notify_send() {
+        let dunstify_path = stub_path("stub_dunstify");
+        let notify_path = stub_path("stub_notify_send");
+        // Dunstify notice-only timeout is 3000ms; sleep for 4000ms to trigger it.
+        let _env = EnvGuard::set(&[
+            ("STUB_DUNSTIFY_SLEEP_MS", "4000"),
+            ("STUB_NOTIFY_SEND_ID", "ns-timeout"),
+        ]);
+
+        let helpers: Vec<Arc<dyn HelperBackend>> = vec![
+            Arc::new(dunstify_helper(&dunstify_path)),
+            Arc::new(notify_send_helper(&notify_path)),
+        ];
+        let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), helpers);
+
+        let receipt = backend.send(notice_request()).await.unwrap();
+        assert_eq!(receipt.notification_id, "ns-timeout");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("notify_send"),
+        );
+        let fallbacks = receipt
+            .metadata
+            .get("helper_fallbacks")
+            .map(String::as_str)
+            .unwrap_or("");
+        assert!(fallbacks.contains("dunstify"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn macos_backend_routes_through_terminal_notifier_stub() {
+        let tn_path = stub_path("stub_terminal_notifier");
+        let helpers: Vec<Arc<dyn HelperBackend>> =
+            vec![Arc::new(terminal_notifier_helper(&tn_path))];
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), helpers);
+
+        let mut request = notice_request();
+        request.group_id = Some("mac-group".into());
+        let receipt = backend.send(request).await.unwrap();
+        assert_eq!(receipt.notification_id, "mac-group");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("terminal_notifier"),
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn macos_backend_falls_through_to_alerter_when_terminal_notifier_fails() {
+        let tn_path = stub_path("stub_terminal_notifier");
+        let alerter_path = stub_path("stub_alerter");
+        // Notice-only request so terminal-notifier scores 80 and is elected first.
+        let _env = EnvGuard::set(&[
+            ("STUB_TERMINAL_NOTIFIER_EXIT", "1"),
+            ("STUB_ALERTER_TYPE", "closed"),
+        ]);
+
+        let helpers: Vec<Arc<dyn HelperBackend>> = vec![
+            Arc::new(terminal_notifier_helper(&tn_path)),
+            Arc::new(alerter_helper(&alerter_path)),
+        ];
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), helpers);
+
+        let receipt = backend.send(notice_request()).await.unwrap();
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("alerter"),
+        );
+        let fallbacks = receipt
+            .metadata
+            .get("helper_fallbacks")
+            .map(String::as_str)
+            .unwrap_or("");
+        assert!(fallbacks.contains("terminal_notifier"));
     }
 }
