@@ -139,6 +139,11 @@ The `choose_one` component is exposed via the `question choose-one` command. It 
 - `--options <TEXT>` — hidden alias for `--csv` (backward compatibility)
 - Piped stdin (automatic when stdin is not a TTY)
 
+TOML files must use a top-level `options` array. Entries may be strings,
+inline tables (`options = [{ label = "Red", value = "apple" }]`), or
+array-of-tables records (`[[options]]`) with `label`, `value`, `hotkey`, and
+`disabled` fields.
+
 **Selection & filtering:**
 - `--selected <VALUE>`: Pre-select a specific value.
 - `--required`: Fail if no item is selected.
