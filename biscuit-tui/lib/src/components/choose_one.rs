@@ -84,6 +84,7 @@ pub struct ChooseOneState<V = String> {
     layout_cache: ChoiceLayout,
     hotkey_display: HotkeyDisplayMode,
     hotkey_display_deadline: Option<Instant>,
+    terminal_style: TerminalStyle,
 }
 
 impl<V: Clone + PartialEq> ChooseOneState<V> {
@@ -127,6 +128,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             layout_cache: ChoiceLayout::default(),
             hotkey_display: HotkeyDisplayMode::Hidden,
             hotkey_display_deadline: None,
+            terminal_style: TerminalStyle::from_env(),
         }
     }
 
@@ -173,6 +175,18 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
     pub fn with_hotkey_display(mut self, mode: HotkeyDisplayMode) -> Self {
         self.hotkey_display = mode;
         self.hotkey_display_deadline = None;
+        self
+    }
+
+    /// Replaces the detected terminal style used for rendering choice
+    /// indicators and active-row contrast.
+    ///
+    /// [`ChooseOneState::new`] captures [`TerminalStyle::from_env`] by
+    /// default. Tests and embedding applications with their own
+    /// terminal capability detection can inject a deterministic style
+    /// through this builder.
+    pub fn with_terminal_style(mut self, terminal_style: TerminalStyle) -> Self {
+        self.terminal_style = terminal_style;
         self
     }
 
@@ -408,14 +422,12 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
             } else {
                 list_area.height
             };
-            let visible = body_rows as usize;
-
             let hotkey_display = state.current_hotkey_display(Instant::now());
             let layout = {
                 let theme = state.theme.clone();
                 let ctx = ChoiceRenderContext::for_single(
                     &theme,
-                    TerminalStyle::default(),
+                    state.terminal_style,
                     state.input.orientation,
                 )
                 .with_active_color(state.input.active_color)
@@ -425,11 +437,22 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
                 })
             };
             state.layout_cache = layout.clone();
-            adjust_scroll(state, visible, &visible_indices, &layout);
+            let scroll_visible = {
+                let theme = state.theme.clone();
+                let ctx = ChoiceRenderContext::for_single(
+                    &theme,
+                    state.terminal_style,
+                    state.input.orientation,
+                )
+                .with_active_color(state.input.active_color)
+                .with_hotkey_display(hotkey_display);
+                ctx.visible_logical_rows(body_rows)
+            };
+            adjust_scroll(state, scroll_visible, &visible_indices, &layout);
 
             let ctx = ChoiceRenderContext::for_single(
                 &state.theme,
-                TerminalStyle::default(),
+                state.terminal_style,
                 state.input.orientation,
             )
             .with_active_color(state.input.active_color)
@@ -872,8 +895,9 @@ fn adjust_scroll<V: Clone + PartialEq>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Label, LabelPosition};
+    use crate::core::{Label, LabelPosition, NerdFontStatus, TerminalBackground};
     use crossterm::event::{KeyCode, KeyModifiers};
+    use ratatui::style::Color;
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -1218,7 +1242,8 @@ mod tests {
 
     #[test]
     fn render_draws_indicator_and_label_per_row() {
-        let mut state = ChooseOneState::new(fixture_input());
+        let mut state =
+            ChooseOneState::new(fixture_input()).with_terminal_style(TerminalStyle::default());
         ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
@@ -1230,8 +1255,47 @@ mod tests {
     }
 
     #[test]
+    fn choose_one_render_uses_nerd_font_terminal_style() {
+        let mut state = ChooseOneState::new(fixture_input())
+            .with_initial_selection("r")
+            .with_terminal_style(TerminalStyle {
+                nerd_font: NerdFontStatus::Likely,
+                ..TerminalStyle::default()
+            });
+        let area = Rect::new(0, 0, 30, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        let selected_row = buffer_row(&buf, 0);
+        let unselected_row = buffer_row(&buf, 1);
+        assert!(
+            selected_row.contains('\u{f043e}'),
+            "expected Nerd Font selected radio glyph in {selected_row:?}"
+        );
+        assert!(
+            unselected_row.contains('\u{f4aa}'),
+            "expected Nerd Font unselected radio glyph in {unselected_row:?}"
+        );
+    }
+
+    #[test]
+    fn choose_one_render_uses_light_background_active_foreground() {
+        let mut state = ChooseOneState::new(fixture_input()).with_terminal_style(TerminalStyle {
+            background: TerminalBackground::Light,
+            ..TerminalStyle::default()
+        });
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        assert_eq!(buf[(1, 0)].style().fg, Some(Color::Black));
+        assert_eq!(buf[(1, 0)].style().bg, Some(Color::Indexed(252)));
+    }
+
+    #[test]
     fn render_with_label_above_draws_label_then_list() {
         let mut state = ChooseOneState::new(fixture_input())
+            .with_terminal_style(TerminalStyle::default())
             .with_label(Label::new("Colour", LabelPosition::Above));
         let area = Rect::new(0, 0, 20, 4);
         let mut buf = Buffer::empty(area);
@@ -1782,6 +1846,34 @@ mod tests {
             row1.contains("Green") || row1.contains("Blue") || row1.contains("Yellow"),
             "expected wrapped options on row 1: {row1}"
         );
+    }
+
+    #[test]
+    fn choose_one_horizontal_badges_short_viewport_does_not_draw_past_area() {
+        let input: ChoiceInput<String> = ChoiceInput::new("color", "Pick a color")
+            .with_orientation(Orientation::Horizontal)
+            .with_options(vec![
+                ChoiceOption::new("a", "Alpha", "alpha").with_hotkey(HotkeySpec::Ctrl('a')),
+                ChoiceOption::new("b", "Bravo", "bravo").with_hotkey(HotkeySpec::Ctrl('b')),
+                ChoiceOption::new("c", "Charlie", "charlie").with_hotkey(HotkeySpec::Ctrl('c')),
+            ]);
+        let mut state = ChooseOneState::new(input).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        let area = Rect::new(0, 0, 12, 3);
+        let mut buf = Buffer::empty(area);
+
+        ChooseOne::new().render(area, &mut buf, &mut state);
+
+        assert!(state.layout_cache.row_count() >= 3);
+        assert_eq!(state.scroll_offset, 0);
+        assert!(buffer_row(&buf, 0).contains("Alpha"));
+        assert!(buffer_row(&buf, 1).contains("^A"));
+        for y in 0..area.height {
+            let row = buffer_row(&buf, y);
+            assert!(
+                !row.contains("Bravo") && !row.contains("Charlie"),
+                "short viewport must not render hidden logical rows on y={y}: {row:?}"
+            );
+        }
     }
 
     #[test]

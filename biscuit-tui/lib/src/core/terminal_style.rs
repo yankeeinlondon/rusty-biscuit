@@ -12,6 +12,9 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::components::ActiveChoiceColor;
 
+#[cfg(test)]
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Detected background luminance of the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TerminalBackground {
@@ -65,6 +68,8 @@ impl TerminalStyle {
     /// framework that queried the OS) can construct [`TerminalStyle`]
     /// directly and skip this function.
     pub fn from_env() -> Self {
+        #[cfg(test)]
+        let _env_lock = ENV_LOCK.lock().expect("terminal style env lock poisoned");
         let background = detect_background();
         let nerd_font = detect_nerd_font();
         Self {
@@ -168,6 +173,11 @@ fn detect_nerd_font() -> NerdFontStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::MutexGuard;
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().expect("terminal style env lock poisoned")
+    }
 
     #[test]
     fn default_terminal_style_is_unknown() {
@@ -178,24 +188,28 @@ mod tests {
 
     #[test]
     fn detect_background_dark_from_colorfgbg() {
+        let _lock = env_lock();
         let _guard = env_guard("COLORFGBG", "15;0");
         assert_eq!(detect_background(), TerminalBackground::Dark);
     }
 
     #[test]
     fn detect_background_light_from_colorfgbg() {
+        let _lock = env_lock();
         let _guard = env_guard("COLORFGBG", "0;15");
         assert_eq!(detect_background(), TerminalBackground::Light);
     }
 
     #[test]
     fn detect_background_unknown_when_empty() {
+        let _lock = env_lock();
         let _guard = env_guard("COLORFGBG", "");
         assert_eq!(detect_background(), TerminalBackground::Unknown);
     }
 
     #[test]
     fn detect_nerd_font_from_env_var() {
+        let _lock = env_lock();
         let _guard = env_guard("NERD_FONT", "1");
         assert_eq!(detect_nerd_font(), NerdFontStatus::Likely);
     }
@@ -245,6 +259,7 @@ mod tests {
 
     #[test]
     fn detect_nerd_font_from_term_program_wezterm() {
+        let _lock = env_lock();
         let _guard1 = env_guard("NERD_FONT", "");
         let _guard2 = env_guard("TERM_PROGRAM", "WezTerm");
         assert_eq!(detect_nerd_font(), NerdFontStatus::Likely);

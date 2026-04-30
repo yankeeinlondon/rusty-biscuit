@@ -113,6 +113,31 @@ const NF_CHECK_SELECTED: &str = "\u{f14a}";
 const NF_CHECK_UNSELECTED: &str = "\u{f0131}";
 
 impl<'a> ChoiceRenderContext<'a> {
+    /// Returns how many terminal rows each logical choice row occupies.
+    pub(crate) fn row_height(&self) -> u16 {
+        match self.orientation {
+            Orientation::Vertical => 1,
+            Orientation::Horizontal => {
+                if self.hotkey_display == HotkeyDisplayMode::Hidden {
+                    1
+                } else {
+                    2
+                }
+            }
+        }
+    }
+
+    /// Converts terminal body rows into logical choice rows.
+    pub(crate) fn visible_logical_rows(&self, body_rows: u16) -> usize {
+        if body_rows == 0 {
+            return 0;
+        }
+        match self.orientation {
+            Orientation::Vertical => body_rows as usize,
+            Orientation::Horizontal => usize::from((body_rows / self.row_height()).max(1)),
+        }
+    }
+
     /// Creates a context for single-selection (radio-style) indicators.
     ///
     /// Uses Nerd Font glyphs when [`TerminalStyle::nerd_font`] is
@@ -216,12 +241,7 @@ impl<'a> ChoiceRenderContext<'a> {
                         (indicator_width + 1 + label_width + 1) as u16 + badge_pad + badge_w
                     })
                     .collect();
-                let row_height = if self.hotkey_display == HotkeyDisplayMode::Hidden {
-                    1
-                } else {
-                    2
-                };
-                ChoiceLayout::horizontal(visible_indices, &widths, area, row_height)
+                ChoiceLayout::horizontal(visible_indices, &widths, area, self.row_height())
             }
         }
     }
@@ -256,7 +276,7 @@ impl<'a> ChoiceRenderContext<'a> {
         } else {
             area.height
         };
-        let visible_count = body_rows as usize;
+        let visible_count = self.visible_logical_rows(body_rows);
 
         // When filter is active and matches nothing, show a single dim
         // "(no matches)" row instead of the list body.
@@ -480,11 +500,7 @@ impl<'a> ChoiceRenderContext<'a> {
                 (indicator_width + 1 + label_width + 1) as u16 + badge_pad + badge_w
             })
             .collect();
-        let row_height: u16 = if self.hotkey_display == HotkeyDisplayMode::Hidden {
-            1
-        } else {
-            2
-        };
+        let row_height = self.row_height();
         let layout = ChoiceLayout::horizontal(visible_indices, &widths, area, row_height);
 
         // scroll_offset is row offset in horizontal mode
@@ -589,7 +605,7 @@ impl<'a> ChoiceRenderContext<'a> {
 
         if end_row < layout.row_count() && area.width > 0 && shown_rows > 0 {
             let x = area.x + area.width - 1;
-            let y = area.y + (shown_rows - 1) as u16;
+            let y = area.y + (shown_rows - 1) as u16 * row_height;
             buf[(x, y)]
                 .set_symbol(&self.theme.overflow_down_indicator)
                 .set_style(overflow_style);
@@ -1471,5 +1487,50 @@ mod tests {
             find_badge_x(&buf, 4, CTRL_BADGE_BG).is_none(),
             "option row y=4 must not carry badge background (collision)"
         );
+    }
+
+    #[test]
+    fn horizontal_badges_visible_count_uses_logical_rows() {
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_single(
+            &theme,
+            TerminalStyle::default(),
+            Orientation::Horizontal,
+        )
+        .with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        let options: Vec<ChoiceOption<String>> = vec![
+            ChoiceOption::new("a", "Alpha", "alpha").with_hotkey(HotkeySpec::Ctrl('a')),
+            ChoiceOption::new("b", "Bravo", "bravo").with_hotkey(HotkeySpec::Ctrl('b')),
+            ChoiceOption::new("c", "Charlie", "charlie").with_hotkey(HotkeySpec::Ctrl('c')),
+        ];
+        let area = Rect::new(0, 0, 12, 3);
+        let mut buf = Buffer::empty(area);
+
+        ctx.render(
+            area,
+            &mut buf,
+            &options,
+            &[0, 1, 2],
+            0,
+            0,
+            |_idx| false,
+            None,
+            None,
+        );
+
+        assert_eq!(ctx.row_height(), 2);
+        assert_eq!(ctx.visible_logical_rows(area.height), 1);
+        assert!(buffer_row(&buf, 0).contains("Alpha"));
+        assert!(
+            find_badge_x(&buf, 1, CTRL_BADGE_BG).is_some(),
+            "first logical row badge should render on y=1"
+        );
+        for y in 0..area.height {
+            let row = buffer_row(&buf, y);
+            assert!(
+                !row.contains("Bravo") && !row.contains("Charlie"),
+                "short viewport must not render hidden logical rows on y={y}: {row:?}"
+            );
+        }
     }
 }
