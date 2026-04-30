@@ -94,7 +94,7 @@ fn choose_one_selected_and_initial_conflict() {
     cargo_bin_cmd!("question")
         .args([
             "choose-one",
-            "--options",
+            "--csv",
             "a,b",
             "--selected",
             "a",
@@ -216,6 +216,164 @@ fn choose_many_border_flag_reaches_event_loop() {
         .failure()
         .code(1)
         .stderr(predicate::str::contains("question:"));
+}
+
+// Phase 4: `--sort` exposes `inverse` as the canonical clap value.
+// `reverse` remains accepted as a hidden alias for backward
+// compatibility but must not appear in `--help` or completions.
+
+#[test]
+fn sort_inverse_is_accepted_and_reaches_event_loop() {
+    // The CLI must accept `--sort inverse` as the canonical value and
+    // pass it through to the event loop. Without a TTY the loop bails
+    // out with code 1 — that signal is enough to confirm clap parsed
+    // the value successfully.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "Alpha", "Beta", "Gamma", "--sort", "inverse"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn sort_inverse_is_accepted_for_choose_many() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "a", "b", "c", "--sort", "inverse"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn sort_reverse_is_a_hidden_alias_still_accepted() {
+    // `reverse` is a hidden compatibility alias for `inverse`. Clap
+    // must accept it without an "invalid value" diagnostic — we assert
+    // the failure mode is the no-TTY exit (code 1) rather than a clap
+    // parse failure.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "Alpha", "Beta", "Gamma", "--sort", "reverse"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"))
+        .stderr(predicate::str::contains("invalid value").not());
+}
+
+#[test]
+fn sort_rejects_unknown_value() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--sort", "wonky"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
+}
+
+#[test]
+fn choose_one_help_lists_inverse_not_reverse_for_sort() {
+    // The clap-rendered `--help` for `--sort` must list `inverse` as a
+    // canonical value. `reverse` is a hidden alias so it must not
+    // appear anywhere in the long-form possible-values list. clap's
+    // long-help renders the values as `<value>: <doc>` bullets, so we
+    // anchor on `inverse:` to confirm `inverse` is the canonical
+    // variant the user sees.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("inverse:"))
+        .stdout(predicate::str::contains("natural:"))
+        .stdout(predicate::str::contains("asc:"))
+        .stdout(predicate::str::contains("desc:"))
+        .stdout(predicate::str::contains("reverse").not());
+}
+
+#[test]
+fn choose_many_help_lists_inverse_not_reverse_for_sort() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("inverse:"))
+        .stdout(predicate::str::contains("natural:"))
+        .stdout(predicate::str::contains("asc:"))
+        .stdout(predicate::str::contains("desc:"))
+        .stdout(predicate::str::contains("reverse").not());
+}
+
+// Phase 5: `--active-color` exposes the four `ActiveChoiceColor`
+// variants. Default is `grey`; the renderer maps each to a palette
+// tuned for dark / light / unknown terminals.
+
+#[test]
+fn cli_accepts_active_color_grey() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "Alpha", "Beta", "--active-color", "grey"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+}
+
+#[test]
+fn cli_accepts_active_color_green() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "Alpha", "Beta", "--active-color", "green"])
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
+fn cli_accepts_active_color_yellow() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "Alpha", "Beta", "--active-color", "yellow"])
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
+fn cli_accepts_active_color_red() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "Alpha", "Beta", "--active-color", "red"])
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
+fn cli_active_color_rejects_unknown_value() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "a", "b", "--active-color", "purple"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
+}
+
+#[test]
+fn choose_one_help_lists_active_color_values() {
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--active-color"))
+        .stdout(predicate::str::contains("grey:"))
+        .stdout(predicate::str::contains("green:"))
+        .stdout(predicate::str::contains("yellow:"))
+        .stdout(predicate::str::contains("red:"));
+}
+
+#[test]
+fn choose_many_help_lists_active_color_values() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--active-color"))
+        .stdout(predicate::str::contains("grey:"))
+        .stdout(predicate::str::contains("green:"));
 }
 
 #[test]
@@ -418,6 +576,141 @@ fn choose_one_positional_args() {
         .stderr(predicate::str::contains("question:"));
 }
 
+// --- Phase 3: object-record source smoke tests ----------------------------
+
+fn write_fixture(name: &str, body: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(name);
+    std::fs::write(&path, body).expect("write fixture");
+    path
+}
+
+#[test]
+fn choose_one_file_json_object_array_reaches_event_loop() {
+    // Object-shaped JSON file with `value` and `hotkey` parses without
+    // error; the event loop is reached (exit 1 because no TTY).
+    let path = write_fixture(
+        "choose_cli_phase3_one.json",
+        r#"[{"label":"Red","value":"apple","hotkey":"CTRL+R"},{"label":"Blue","value":"sky"}]"#,
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_one_file_yaml_object_array_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase3_one.yaml",
+        "- label: Red\n  value: apple\n  hotkey: CTRL+R\n- label: Blue\n  value: sky\n",
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_one_file_toml_options_array_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase2_one.toml",
+        "options = [{ label = \"Red\", value = \"apple\", hotkey = \"CTRL+R\" }, { label = \"Blue\", value = \"sky\" }]\n",
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_one_file_csv_three_columns_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase3_one.csv",
+        "Red,apple,CTRL+R\nBlue,sky,ALT+B\n",
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_one_file_jsonl_object_lines_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase3_one.jsonl",
+        "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n{\"label\":\"Blue\",\"value\":\"sky\"}\n",
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_one_file_ndjson_object_lines_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase3_one.ndjson",
+        "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n",
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_many_file_json_object_array_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase3_many.json",
+        r#"[{"label":"Red","value":"apple"},{"label":"Blue","value":"sky"}]"#,
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_one_md_frontmatter_object_array_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase3_one.md",
+        "---\nitems:\n  - label: Red\n    value: apple\n    hotkey: CTRL+R\n  - label: Blue\n    value: sky\n---\n",
+    );
+    cargo_bin_cmd!("question")
+        .args([
+            "choose-one",
+            "--md",
+            path.to_string_lossy().as_ref(),
+            "items",
+        ])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
 // --- PTY-backed keystroke flows --------------------------------------------
 //
 // These tests spawn `question` under a real PTY so that crossterm can
@@ -464,15 +757,50 @@ mod pty {
     }
 
     #[test]
-    fn esc_exits_with_code_1() {
+    fn esc_restores_initial_and_exits_with_code_0() {
         if !interactive_enabled() {
             eprintln!("skipping: set QUESTION_INTERACTIVE_PTY=1 to enable");
             return;
         }
-        let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma"]);
+        // Spec (2026-04-28-choose-one-improvements): Esc on `ChooseOne`
+        // restores the initial selection and submits with exit code 0.
+        // Pre-select `beta` so the test can also confirm the restored
+        // value reaches stdout.
+        let mut p = spawn_question(&[
+            "choose-one",
+            "--selected",
+            "beta",
+            "alpha",
+            "beta",
+            "gamma",
+        ]);
         std::thread::sleep(Duration::from_millis(200));
+        // Move the hover off the initial selection, then Esc.
+        p.write_all(b"\x1b[B").expect("send Down");
         p.write_all(b"\x1b").expect("send Esc");
-        assert_eq!(wait_exit_code(&p), 1, "Esc must exit with code 1");
+
+        let mut buf = Vec::new();
+        let mut scratch = [0u8; 1024];
+        loop {
+            match p.read(&mut scratch) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&scratch[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+        let output = String::from_utf8_lossy(&buf).into_owned();
+        assert_eq!(
+            wait_exit_code(&p),
+            0,
+            "Esc must exit with code 0 by restoring the initial selection",
+        );
+        // Strip ANSI/cursor noise — just confirm the restored value
+        // appears somewhere in the post-prompt stdout drain.
+        assert!(
+            output.contains("beta"),
+            "expected restored initial value 'beta' in stdout, got {output:?}",
+        );
     }
 
     #[test]
@@ -531,14 +859,7 @@ mod pty {
         // only exercises the resolver; this smoke test proves the full
         // CLI wiring composes a runnable prompt at the terminal's row
         // count and accepts a fallback-submit-on-active Enter.
-        let mut p = spawn_question(&[
-            "choose-one",
-            "alpha",
-            "beta",
-            "gamma",
-            "--height",
-            "100%",
-        ]);
+        let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma", "--height", "100%"]);
         std::thread::sleep(Duration::from_millis(200));
         p.write_all(b"\r").expect("send Enter");
         assert_eq!(

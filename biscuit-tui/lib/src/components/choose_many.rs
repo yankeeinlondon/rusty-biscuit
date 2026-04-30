@@ -23,32 +23,29 @@
 //! ```
 
 use std::collections::HashMap;
+use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::seq::SliceRandom;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Style,
     text::{Line, Span},
     widgets::StatefulWidget,
 };
 
 use crate::core::{
     ComponentTheme, EventOutcome, FuzzyFilter, HandleEvent, KeyBindings, Label, StandaloneState,
-    ValidationState, render_with_label,
+    TerminalStyle, ValidationState, render_with_label,
 };
 
-use super::choose::{ChoiceInput, ChoiceOption, SelectionMode};
-use super::choose_one::{build_hotkeys, first_enabled_index, last_enabled_index};
-
-const CHECKED_GLYPH: &str = "☑";
-const UNCHECKED_GLYPH: &str = "☐";
-
-/// Minimum label width (in cells) at which the fuzzy filter renders
-/// per-character match highlighting. Narrower labels fall back to a
-/// single plain span so the row stays readable.
-const HIGHLIGHT_MIN_WIDTH: u16 = 12;
+use super::choice_layout::{ChoiceLayout, navigate_row};
+use super::choice_render::ChoiceRenderContext;
+use super::choose::{ChoiceInput, ChoiceOption, HotkeyDisplayMode, Orientation, SelectionMode};
+use super::choose_one::{
+    HOTKEY_DISPLAY_FALLBACK, build_hotkeys, first_enabled_index, last_enabled_index,
+    modifier_only_mode,
+};
 
 /// Mutable state for a [`ChooseMany`] widget.
 ///
@@ -73,6 +70,10 @@ pub struct ChooseManyState<V = String> {
     filter: FuzzyFilter,
     filter_visible: bool,
     cached_labels: Vec<String>,
+    layout_cache: ChoiceLayout,
+    hotkey_display: HotkeyDisplayMode,
+    hotkey_display_deadline: Option<Instant>,
+    terminal_style: TerminalStyle,
 }
 
 impl<V: Clone + PartialEq> ChooseManyState<V> {
@@ -81,6 +82,11 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     /// The selection mode is forced to [`SelectionMode::Multiple`].
     pub fn new(mut input: ChoiceInput<V>) -> Self {
         input.selection_mode = SelectionMode::Multiple;
+        // Sort first (per the configured `with_sort`), then optionally
+        // shuffle, then allocate per-option selection state. Library
+        // consumers and CLI consumers see the same ordering because
+        // `ChoiceInput` is the single authority on option ordering.
+        input.sort_options_in_place();
         if input.shuffle_options {
             input.options.shuffle(&mut rand::rng());
         }
@@ -103,6 +109,10 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             filter,
             filter_visible: false,
             cached_labels,
+            layout_cache: ChoiceLayout::default(),
+            hotkey_display: HotkeyDisplayMode::Hidden,
+            hotkey_display_deadline: None,
+            terminal_style: TerminalStyle::from_env(),
         }
     }
 
@@ -127,6 +137,50 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
         self.bindings = bindings;
         self
+    }
+
+    /// Sets the [`ActiveChoiceColor`] used for the actively hovered
+    /// option. Sugar over mutating the underlying [`ChoiceInput`].
+    pub fn with_active_color(mut self, color: super::choose::ActiveChoiceColor) -> Self {
+        self.input.active_color = color;
+        self
+    }
+
+    /// Forces the hotkey badge display mode for the lifetime of this
+    /// state. See [`ChooseOneState::with_hotkey_display`] for details.
+    pub fn with_hotkey_display(mut self, mode: HotkeyDisplayMode) -> Self {
+        self.hotkey_display = mode;
+        self.hotkey_display_deadline = None;
+        self
+    }
+
+    /// Replaces the detected terminal style used for rendering choice
+    /// indicators and active-row contrast.
+    ///
+    /// [`ChooseManyState::new`] captures [`TerminalStyle::from_env`] by
+    /// default. Tests and embedding applications with their own
+    /// terminal capability detection can inject a deterministic style
+    /// through this builder.
+    pub fn with_terminal_style(mut self, terminal_style: TerminalStyle) -> Self {
+        self.terminal_style = terminal_style;
+        self
+    }
+
+    /// Returns the raw stored [`HotkeyDisplayMode`] without consulting
+    /// the fallback deadline.
+    pub fn hotkey_display(&self) -> HotkeyDisplayMode {
+        self.hotkey_display
+    }
+
+    /// Resolves the effective [`HotkeyDisplayMode`] at `now` against
+    /// the fallback deadline. See
+    /// [`ChooseOneState::current_hotkey_display`] for details.
+    pub fn current_hotkey_display(&self, now: Instant) -> HotkeyDisplayMode {
+        match self.hotkey_display_deadline {
+            Some(deadline) if now < deadline => self.hotkey_display,
+            Some(_) => HotkeyDisplayMode::Hidden,
+            None => self.hotkey_display,
+        }
     }
 
     /// Pre-selects options by their stable identifiers.
@@ -373,7 +427,59 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
             } else {
                 rect
             };
-            draw_list(list_area, b, state);
+
+            let visible_indices: Vec<usize> = state.filter.visible().to_vec();
+            let body_rows = if state.validation_error.is_some() && list_area.height > 1 {
+                list_area.height - 1
+            } else {
+                list_area.height
+            };
+            let hotkey_display = state.current_hotkey_display(Instant::now());
+            let layout = {
+                let theme = state.theme.clone();
+                let ctx = ChoiceRenderContext::for_multiple(
+                    &theme,
+                    state.terminal_style,
+                    state.input.orientation,
+                )
+                .with_active_color(state.input.active_color)
+                .with_hotkey_display(hotkey_display);
+                ctx.compute_layout(list_area, &state.input.options, &visible_indices, |idx| {
+                    state.selected.get(idx).copied().unwrap_or(false)
+                })
+            };
+            state.layout_cache = layout.clone();
+            let scroll_visible = {
+                let theme = state.theme.clone();
+                let ctx = ChoiceRenderContext::for_multiple(
+                    &theme,
+                    state.terminal_style,
+                    state.input.orientation,
+                )
+                .with_active_color(state.input.active_color)
+                .with_hotkey_display(hotkey_display);
+                ctx.visible_logical_rows(body_rows)
+            };
+            adjust_scroll(state, scroll_visible, &visible_indices, &layout);
+
+            let ctx = ChoiceRenderContext::for_multiple(
+                &state.theme,
+                state.terminal_style,
+                state.input.orientation,
+            )
+            .with_active_color(state.input.active_color)
+            .with_hotkey_display(hotkey_display);
+            ctx.render(
+                list_area,
+                b,
+                &state.input.options,
+                &visible_indices,
+                state.scroll_offset,
+                state.hover,
+                |idx| state.selected.get(idx).copied().unwrap_or(false),
+                Some(&mut state.filter),
+                state.validation_error.as_deref(),
+            );
         });
 
         if let Some(message) = state.validation_error.as_deref()
@@ -400,6 +506,33 @@ fn draw_search_prompt<V: Clone + PartialEq>(
 
 impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
+        // Modifier-only key events drive hotkey badge display
+        // directly. See `ChooseOne::handle_event` for details.
+        if let Some(mode) = modifier_only_mode(&event) {
+            match event.kind {
+                KeyEventKind::Press | KeyEventKind::Repeat => {
+                    state.hotkey_display = mode;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+                KeyEventKind::Release => {
+                    state.hotkey_display = HotkeyDisplayMode::Hidden;
+                    state.hotkey_display_deadline = None;
+                    return EventOutcome::Consumed;
+                }
+            }
+        }
+
+        // Chord fallback for terminals that never emit modifier-only
+        // events.
+        if event.modifiers.contains(KeyModifiers::CONTROL) {
+            state.hotkey_display = HotkeyDisplayMode::CtrlHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        } else if event.modifiers.contains(KeyModifiers::ALT) {
+            state.hotkey_display = HotkeyDisplayMode::AltHeld;
+            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        }
+
         // Cancel binding: when the fuzzy filter is visible, the first
         // press clears + hides it; subsequent presses fall through to
         // abort.
@@ -410,6 +543,9 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
                 snap_hover_to_visible(state);
                 return EventOutcome::Consumed;
             }
+            // Spec: "The default key-bindings for ChooseMany should stay as they
+            // are." ESC returns Cancelled (exit code 1) — unlike ChooseOne which
+            // restores and submits.
             return EventOutcome::Cancelled;
         }
 
@@ -442,10 +578,24 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.up, &event) {
-            move_hover(state, -1);
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, -1),
+                Orientation::Horizontal => move_hover_row(state, -1),
+            }
             return EventOutcome::Consumed;
         }
         if KeyBindings::matches(&state.bindings.down, &event) {
+            match state.input.orientation {
+                Orientation::Vertical => move_hover(state, 1),
+                Orientation::Horizontal => move_hover_row(state, 1),
+            }
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.left, &event) {
+            move_hover(state, -1);
+            return EventOutcome::Consumed;
+        }
+        if KeyBindings::matches(&state.bindings.right, &event) {
             move_hover(state, 1);
             return EventOutcome::Consumed;
         }
@@ -506,13 +656,8 @@ fn submit<V: Clone + PartialEq>(state: &mut ChooseManyState<V>) -> EventOutcome 
     {
         return EventOutcome::Consumed;
     }
-    if state.selected_count() == 0
-        && let Some(idx) = state.hover()
-        && !state.input.options[idx].disabled
-        && state.filter.visible().contains(&idx)
-    {
-        state.selected[idx] = true;
-    }
+    // Phase 5: Enter submits the selected set exactly as-is — no
+    // fallback auto-selection of the active row.
     let count = state.selected_count();
     if state.input.required && count == 0 {
         state.validation_error = Some("Please make a selection".into());
@@ -581,6 +726,19 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, delta: i32) 
     }
 }
 
+fn move_hover_row<V: Clone + PartialEq>(state: &mut ChooseManyState<V>, delta: i32) {
+    if let Some(new_hover) = navigate_row(
+        &state.layout_cache,
+        &state.input.options,
+        state.hover,
+        delta,
+    ) {
+        state.hover = new_hover;
+    } else {
+        move_hover(state, delta);
+    }
+}
+
 /// Snaps `state.hover` to the first enabled index in `filter.visible()`
 /// when the current hover is no longer visible. Leaves the hover
 /// unchanged when every visible option is disabled or when the current
@@ -636,201 +794,37 @@ fn error_row_y<V: Clone + PartialEq>(
     }
 }
 
-fn draw_list<V: Clone + PartialEq>(area: Rect, buf: &mut Buffer, state: &mut ChooseManyState<V>) {
-    use unicode_width::UnicodeWidthStr;
-
-    if area.width == 0 || area.height == 0 || state.input.options.is_empty() {
-        return;
-    }
-
-    let body_rows = if state.validation_error.is_some() && area.height > 1 {
-        area.height - 1
-    } else {
-        area.height
-    };
-    let visible = body_rows as usize;
-
-    // When filter is active and matches nothing, show a single dim
-    // "(no matches)" row instead of the list body.
-    if state.filter_visible && state.filter.visible().is_empty() {
-        let no_matches = Line::from(Span::styled(
-            state.theme.no_matches_text.clone(),
-            state.theme.no_matches_style,
-        ));
-        buf.set_line(area.x, area.y, &no_matches, area.width);
-        return;
-    }
-
-    let visible_indices: Vec<usize> = state.filter.visible().to_vec();
-    adjust_scroll(state, visible, &visible_indices);
-
-    let hover_style = state.theme.selected_style;
-    let disabled_style = state.theme.disabled_style;
-    let match_style = state.theme.search_match_style;
-    let filter_active = state.filter.is_active();
-
-    // Compute focus prefix width: indicator + 1 space, or collapse to single space if empty/whitespace
-    let focus_prefix_width = if state.theme.focus_indicator.trim().is_empty() {
-        1
-    } else {
-        state.theme.focus_indicator.width() + 1
-    };
-
-    for (row, &idx) in visible_indices
-        .iter()
-        .skip(state.scroll_offset)
-        .take(visible)
-        .enumerate()
-    {
-        let option_disabled = state.input.options[idx].disabled;
-        let option_label = state.input.options[idx].label.clone();
-        let indicator = if state.selected[idx] {
-            CHECKED_GLYPH
-        } else {
-            UNCHECKED_GLYPH
-        };
-
-        // Focus indicator prefix on hovered row, blank padding otherwise
-        let focus_prefix = if idx == state.hover {
-            if state.theme.focus_indicator.trim().is_empty() {
-                " ".to_string()
-            } else {
-                format!("{} ", state.theme.focus_indicator)
-            }
-        } else {
-            " ".repeat(focus_prefix_width)
-        };
-
-        let prefix = format!("{focus_prefix}{indicator} ");
-        let label_style = if option_disabled {
-            disabled_style
-        } else if idx == state.hover {
-            hover_style
-        } else if state.selected[idx] {
-            state.theme.selected_label_style
-        } else {
-            Style::default()
-        };
-
-        let mut spans: Vec<Span<'static>> = vec![Span::raw(prefix)];
-        if filter_active && area.width >= HIGHLIGHT_MIN_WIDTH {
-            let highlights = state.filter.highlight_indices(&option_label);
-            spans.extend(build_highlighted_spans(
-                &option_label,
-                &highlights,
-                label_style,
-                match_style,
-            ));
-        } else {
-            spans.push(Span::styled(option_label, label_style));
-        }
-
-        let line = Line::from(spans);
-        let y = area.y + row as u16;
-        buf.set_line(area.x, y, &line, area.width);
-    }
-
-    // Paint overflow indicators at top-right / bottom-right when scrollable
-    let overflow_style = state
-        .theme
-        .selected_style
-        .add_modifier(ratatui::style::Modifier::DIM);
-
-    if state.scroll_offset > 0 && area.width > 0 {
-        // Top overflow indicator
-        let x = area.x + area.width - 1;
-        let y = area.y;
-        buf[(x, y)]
-            .set_symbol(&state.theme.overflow_up_indicator)
-            .set_style(overflow_style);
-    }
-
-    if state.scroll_offset + visible < visible_indices.len() && area.width > 0 && visible > 0 {
-        // Bottom overflow indicator
-        let x = area.x + area.width - 1;
-        let y = area.y + (visible - 1) as u16;
-        buf[(x, y)]
-            .set_symbol(&state.theme.overflow_down_indicator)
-            .set_style(overflow_style);
-    }
-}
-
-/// Splits `label` into `Span`s that highlight char-indexed matches
-/// with `match_style` and renders the remaining text with
-/// `base_style`. `highlights` must be sorted-ascending char offsets.
-fn build_highlighted_spans(
-    label: &str,
-    highlights: &[u32],
-    base_style: Style,
-    match_style: Style,
-) -> Vec<Span<'static>> {
-    if highlights.is_empty() {
-        return vec![Span::styled(label.to_string(), base_style)];
-    }
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut current = String::new();
-    let mut current_is_match = false;
-    for (char_idx, ch) in label.chars().enumerate() {
-        let is_match = highlights.binary_search(&(char_idx as u32)).is_ok();
-        if current.is_empty() {
-            current_is_match = is_match;
-            current.push(ch);
-            continue;
-        }
-        if is_match == current_is_match {
-            current.push(ch);
-        } else {
-            let style = if current_is_match {
-                match_style
-            } else {
-                base_style
-            };
-            spans.push(Span::styled(std::mem::take(&mut current), style));
-            current_is_match = is_match;
-            current.push(ch);
-        }
-    }
-    if !current.is_empty() {
-        let style = if current_is_match {
-            match_style
-        } else {
-            base_style
-        };
-        spans.push(Span::styled(current, style));
-    }
-    spans
-}
-
 fn adjust_scroll<V: Clone + PartialEq>(
     state: &mut ChooseManyState<V>,
-    visible: usize,
-    visible_indices: &[usize],
+    visible_rows: usize,
+    _visible_indices: &[usize],
+    layout: &ChoiceLayout,
 ) {
-    let visible_len = visible_indices.len();
-    if visible == 0 || visible_len == 0 {
+    let total_rows = layout.row_count();
+    if visible_rows == 0 || total_rows == 0 {
         state.scroll_offset = 0;
         return;
     }
-    let hover_pos = visible_indices
-        .iter()
-        .position(|&i| i == state.hover)
-        .unwrap_or(0);
 
-    if hover_pos < state.scroll_offset {
-        state.scroll_offset = hover_pos;
-    } else if hover_pos >= state.scroll_offset + visible {
-        state.scroll_offset = hover_pos + 1 - visible;
+    let hover_row = layout.row_of(state.hover).unwrap_or(0);
+
+    if hover_row < state.scroll_offset {
+        state.scroll_offset = hover_row;
+    } else if hover_row >= state.scroll_offset + visible_rows {
+        state.scroll_offset = hover_row + 1 - visible_rows;
     }
-    if state.scroll_offset + visible > visible_len {
-        state.scroll_offset = visible_len.saturating_sub(visible);
+    if state.scroll_offset + visible_rows > total_rows {
+        state.scroll_offset = total_rows.saturating_sub(visible_rows);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::choose::HotkeySpec;
     use super::*;
-    use crate::core::{Label, LabelPosition};
+    use crate::core::{Label, LabelPosition, NerdFontStatus, TerminalBackground};
     use crossterm::event::{KeyCode, KeyModifiers};
+    use ratatui::style::Color;
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -954,9 +948,9 @@ mod tests {
     }
 
     #[test]
-    fn fallback_submit_selects_active_when_none_chosen() {
-        // When no option is explicitly selected, Enter toggles the hovered
-        // option on as a fallback and then submits.
+    fn enter_does_not_auto_select_when_none_chosen() {
+        // Phase 5: Enter submits the selected set exactly as-is — no
+        // fallback auto-selection of the active row.
         let mut state = ChooseManyState::new(fixture_input());
         ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
         assert_eq!(state.hover(), Some(1));
@@ -964,8 +958,8 @@ mod tests {
 
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Enter));
         assert_eq!(outcome, EventOutcome::Submitted);
-        assert!(state.is_selected(1));
-        assert_eq!(state.selected_count(), 1);
+        assert!(!state.is_selected(1));
+        assert_eq!(state.selected_count(), 0);
     }
 
     #[test]
@@ -1041,7 +1035,8 @@ mod tests {
 
     #[test]
     fn render_draws_checkbox_glyphs_per_row() {
-        let mut state = ChooseManyState::new(fixture_input());
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_terminal_style(TerminalStyle::default());
         ChooseMany::new().handle_event(&mut state, press(KeyCode::Char(' ')));
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
@@ -1053,8 +1048,47 @@ mod tests {
     }
 
     #[test]
+    fn choose_many_render_uses_nerd_font_terminal_style() {
+        let mut state = ChooseManyState::new(fixture_input())
+            .with_initial_selection(&["p"])
+            .with_terminal_style(TerminalStyle {
+                nerd_font: NerdFontStatus::Likely,
+                ..TerminalStyle::default()
+            });
+        let area = Rect::new(0, 0, 30, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+
+        let selected_row = buffer_row(&buf, 0);
+        let unselected_row = buffer_row(&buf, 1);
+        assert!(
+            selected_row.contains('\u{f14a}'),
+            "expected Nerd Font selected checkbox glyph in {selected_row:?}"
+        );
+        assert!(
+            unselected_row.contains('\u{f0131}'),
+            "expected Nerd Font unselected checkbox glyph in {unselected_row:?}"
+        );
+    }
+
+    #[test]
+    fn choose_many_render_uses_light_background_active_foreground() {
+        let mut state = ChooseManyState::new(fixture_input()).with_terminal_style(TerminalStyle {
+            background: TerminalBackground::Light,
+            ..TerminalStyle::default()
+        });
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+
+        assert_eq!(buf[(1, 0)].style().fg, Some(Color::Black));
+        assert_eq!(buf[(1, 0)].style().bg, Some(Color::Indexed(252)));
+    }
+
+    #[test]
     fn render_with_label_above_draws_label_then_list() {
         let mut state = ChooseManyState::new(fixture_input())
+            .with_terminal_style(TerminalStyle::default())
             .with_label(Label::new("Toppings", LabelPosition::Above));
         let area = Rect::new(0, 0, 20, 4);
         let mut buf = Buffer::empty(area);
@@ -1621,23 +1655,199 @@ mod tests {
         assert!(state.selected_count() > 0);
     }
 
+    // -----------------------------------------------------------------
+    // Phase 6 — Horizontal Layout & Navigation
+    // -----------------------------------------------------------------
+
+    fn horizontal_fixture_input_many() -> ChoiceInput<String> {
+        ChoiceInput::new("toppings", "Pick toppings")
+            .with_orientation(Orientation::Horizontal)
+            .with_options(vec![
+                ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+                ChoiceOption::new("m", "Mushrooms", "mushrooms"),
+                ChoiceOption::new("o", "Olives", "olives"),
+                ChoiceOption::new("e", "Extra", "extra"),
+            ])
+    }
+
     #[test]
-    fn build_highlighted_spans_styles_matched_chars_in_multibyte_label() {
-        // "Café" has a multi-byte 'é'. Char indices 0 and 1 (the 'C'
-        // and 'a') must be styled with `match_style` and the remainder
-        // ("fé") with `base_style`. This regression-tests that the
-        // char-index iteration on line ~773 does not slip into byte
-        // indexing when the suffix contains multi-byte chars.
-        use ratatui::style::{Color, Modifier};
-        let base_style = Style::default().fg(Color::White);
-        let match_style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
-        let spans = build_highlighted_spans("Café", &[0, 1], base_style, match_style);
-        assert_eq!(spans.len(), 2, "expected two spans, got {spans:?}");
-        assert_eq!(spans[0].content, "Ca");
-        assert_eq!(spans[0].style, match_style);
-        assert_eq!(spans[1].content, "fé");
-        assert_eq!(spans[1].style, base_style);
+    fn horizontal_many_render_packs_items_left_to_right() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+
+        let row0 = buffer_row(&buf, 0);
+        assert!(
+            row0.contains("Pepperoni"),
+            "expected Pepperoni on row 0: {row0}"
+        );
+        assert!(
+            row0.contains("Mushrooms"),
+            "expected Mushrooms on row 0: {row0}"
+        );
+    }
+
+    #[test]
+    fn horizontal_many_render_no_triangular_pointer() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        ChooseMany::new().render(area, &mut buf, &mut state);
+
+        let row0 = buffer_row(&buf, 0);
+        assert!(
+            !row0.contains('▶'),
+            "horizontal mode should not show triangular pointer: {row0}"
+        );
+    }
+
+    #[test]
+    fn choose_many_horizontal_badges_short_viewport_does_not_draw_past_area() {
+        let input: ChoiceInput<String> = ChoiceInput::new("toppings", "Pick toppings")
+            .with_orientation(Orientation::Horizontal)
+            .with_options(vec![
+                ChoiceOption::new("a", "Alpha", "alpha").with_hotkey(HotkeySpec::Ctrl('a')),
+                ChoiceOption::new("b", "Bravo", "bravo").with_hotkey(HotkeySpec::Ctrl('b')),
+                ChoiceOption::new("c", "Charlie", "charlie").with_hotkey(HotkeySpec::Ctrl('c')),
+            ]);
+        let mut state =
+            ChooseManyState::new(input).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        let area = Rect::new(0, 0, 12, 3);
+        let mut buf = Buffer::empty(area);
+
+        ChooseMany::new().render(area, &mut buf, &mut state);
+
+        assert!(state.layout_cache.row_count() >= 3);
+        assert_eq!(state.scroll_offset, 0);
+        assert!(buffer_row(&buf, 0).contains("Alpha"));
+        assert!(buffer_row(&buf, 1).contains("^A"));
+        for y in 0..area.height {
+            let row = buffer_row(&buf, y);
+            assert!(
+                !row.contains("Bravo") && !row.contains("Charlie"),
+                "short viewport must not render hidden logical rows on y={y}: {row:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn horizontal_many_left_moves_to_previous_option() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Left));
+        assert_eq!(state.hover(), Some(0));
+    }
+
+    #[test]
+    fn horizontal_many_right_moves_to_next_option() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Right));
+        assert_eq!(state.hover(), Some(1));
+    }
+
+    #[test]
+    fn horizontal_many_up_down_use_row_navigation() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        // Move to option likely on a different row.
+        for _ in 0..3 {
+            ChooseMany::new().handle_event(&mut state, press(KeyCode::Right));
+        }
+        let hover_before = state.hover().unwrap();
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Up));
+        let hover_after = state.hover().unwrap();
+        assert_ne!(hover_after, hover_before, "up should change hover");
+    }
+
+    #[test]
+    fn horizontal_many_stale_cache_fallback_to_sequential() {
+        let mut state = ChooseManyState::new(horizontal_fixture_input_many());
+        state.layout_cache = ChoiceLayout::default();
+
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Down));
+        assert_eq!(state.hover(), Some(1));
+
+        state.layout_cache = ChoiceLayout::default();
+        ChooseMany::new().handle_event(&mut state, press(KeyCode::Up));
+        assert_eq!(state.hover(), Some(0));
+    }
+
+    fn unsorted_input_many() -> ChoiceInput<String> {
+        ChoiceInput::new("fruit", "Pick").with_options(vec![
+            ChoiceOption::new("b", "Berry", "berry"),
+            ChoiceOption::new("a", "Apple", "apple"),
+            ChoiceOption::new("c", "Cherry", "cherry"),
+        ])
+    }
+
+    fn labels_many(state: &ChooseManyState) -> Vec<&str> {
+        state.options().iter().map(|o| o.label.as_str()).collect()
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_asc_orders_by_label() {
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Asc);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Apple", "Berry", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_desc_orders_by_label() {
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Desc);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Cherry", "Berry", "Apple"]);
+    }
+
+    #[test]
+    fn state_new_applies_with_sort_inverse_reverses_natural() {
+        // `SortOrder::Inverse` is the canonical reversing ordering used
+        // by both the library and the CLI `--sort inverse` surface.
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Inverse);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Cherry", "Apple", "Berry"]);
+    }
+
+    #[test]
+    fn state_new_with_sort_natural_is_no_op() {
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Natural);
+        let state = ChooseManyState::new(input);
+        assert_eq!(labels_many(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_without_sort_preserves_input_order() {
+        // `with_sort` is never called, so the configured order is
+        // preserved exactly as given.
+        let state = ChooseManyState::new(unsorted_input_many());
+        assert_eq!(labels_many(&state), vec!["Berry", "Apple", "Cherry"]);
+    }
+
+    #[test]
+    fn state_new_sort_allocates_selection_vec_with_correct_length() {
+        // The per-option `selected` vec must match the post-sort options
+        // list exactly. A stale length here would index out of bounds
+        // when toggling.
+        let input = unsorted_input_many().with_sort(crate::core::SortOrder::Asc);
+        let state = ChooseManyState::new(input);
+        assert_eq!(state.options().len(), 3);
+        assert!(!state.is_selected(0));
+        assert!(!state.is_selected(1));
+        assert!(!state.is_selected(2));
+    }
+
+    #[test]
+    fn state_new_sort_then_shuffle_does_not_panic() {
+        // Sorting and shuffling are independent: the constructor sorts
+        // first, then shuffles. Either ordering must be acceptable as a
+        // post-condition; this test pins that the combination simply
+        // does not panic and yields the same number of options.
+        let input = unsorted_input_many()
+            .with_sort(crate::core::SortOrder::Asc)
+            .with_shuffle_options(true);
+        let state = ChooseManyState::new(input);
+        assert_eq!(state.options().len(), 3);
     }
 }

@@ -123,7 +123,10 @@ pub(crate) enum OutputFormat {
 pub(crate) enum PromptDelivery {
     Stdin(String),
     AppendArgs(Vec<String>),
-    InsertArgs { index: usize, args: Vec<String> },
+    InsertArgs {
+        index: usize,
+        args: Vec<String>,
+    },
     /// Wire-mode JSON-RPC prompt delivery: the prompt is sent as the
     /// `params.user_input` of a JSON-RPC `prompt` request after
     /// `initialize` completes. Used by Kimi non-interactive runs which
