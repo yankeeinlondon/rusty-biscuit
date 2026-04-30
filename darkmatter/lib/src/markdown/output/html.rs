@@ -29,7 +29,7 @@ use crate::markdown::block::{
 };
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
-use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
+use crate::markdown::inline::{InlineEvent, InlineTag, InlineStyleProcessor};
 use crate::markdown::output::code_block;
 use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
@@ -138,7 +138,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     // Parse markdown content with GFM strikethrough extension and wrap with MarkProcessor
     // and RuleProcessor for horizontal rules with attributes
     let parser = Parser::new_ext(md.content(), Options::ENABLE_STRIKETHROUGH);
-    let events = RuleProcessor::new(MarkProcessor::new(parser));
+    let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
 
     // Track state for code blocks
     let mut in_code_block = false;
@@ -159,6 +159,12 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             }
             InlineEvent::End(InlineTag::Mark) => {
                 output.push_str("</mark>");
+            }
+            InlineEvent::Start(InlineTag::Dim) => {
+                output.push('⌄');
+            }
+            InlineEvent::End(InlineTag::Dim) => {
+                output.push('⌄');
             }
             // Handle horizontal rule with attributes
             InlineEvent::HorizontalRule(attrs) => {

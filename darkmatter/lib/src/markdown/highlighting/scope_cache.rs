@@ -24,6 +24,7 @@ pub struct ScopeCache {
     pub list: Scope,
     pub base: Scope,
     pub mark: Scope,
+    pub faint: Scope,
 }
 
 impl ScopeCache {
@@ -54,6 +55,8 @@ impl ScopeCache {
                 .expect("Invalid hardcoded scope: markup.list.markdown"),
             mark: Scope::new("markup.mark.markdown")
                 .expect("Invalid hardcoded scope: markup.mark.markdown"),
+            faint: Scope::new("markup.faint.markdown")
+                .expect("Invalid hardcoded scope: markup.faint.markdown"),
         }
     }
 
@@ -82,6 +85,7 @@ impl ScopeCache {
     pub fn scope_for_inline_tag(&self, tag: InlineTag) -> Scope {
         match tag {
             InlineTag::Mark => self.mark,
+            InlineTag::Dim => self.faint,
         }
     }
 }
@@ -198,5 +202,19 @@ mod tests {
     fn test_mark_scope_valid() {
         let cache = ScopeCache::global();
         assert!(!cache.mark.to_string().is_empty());
+    }
+
+    #[test]
+    fn test_scope_for_inline_tag_dim() {
+        let cache = ScopeCache::global();
+        let scope = cache.scope_for_inline_tag(InlineTag::Dim);
+        assert_eq!(scope, cache.faint);
+        assert_eq!(scope.to_string(), "markup.faint.markdown");
+    }
+
+    #[test]
+    fn test_faint_scope_valid() {
+        let cache = ScopeCache::global();
+        assert!(!cache.faint.to_string().is_empty());
     }
 }

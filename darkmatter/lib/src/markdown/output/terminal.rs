@@ -34,7 +34,7 @@ use crate::markdown::{
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
-    inline::{InlineEvent, InlineTag, MarkProcessor},
+    inline::{InlineEvent, InlineTag, InlineStyleProcessor},
     output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
@@ -881,7 +881,7 @@ pub fn write_terminal<W: std::io::Write>(
         md.content(),
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     );
-    let events = RuleProcessor::new(MarkProcessor::new(parser));
+    let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -975,6 +975,13 @@ pub fn write_terminal<W: std::io::Write>(
             InlineEvent::End(InlineTag::Mark) => {
                 in_mark = false;
                 scope_stack.pop();
+            }
+
+            InlineEvent::Start(InlineTag::Dim) => {
+                // Phase 3: will add full dim rendering with SGR 2
+            }
+            InlineEvent::End(InlineTag::Dim) => {
+                // Phase 3: will add full dim rendering with SGR 2
             }
 
             // Handle horizontal rule with attributes
