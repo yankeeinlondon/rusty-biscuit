@@ -45,6 +45,12 @@ impl CliPerf {
         self.emit(detailed, true);
     }
 
+    /// Emit perf output, routing to stderr when JSON has been printed to
+    /// stdout so the JSON payload stays machine-parseable.
+    pub fn emit_for_json(&self, detailed: Option<&PerformanceReport>) {
+        self.emit(detailed, true)
+    }
+
     fn emit(&self, detailed: Option<&PerformanceReport>, to_stderr: bool) {
         let Some(start) = self.start else { return };
         let report = detailed.cloned().unwrap_or_else(|| PerformanceReport {
@@ -257,7 +263,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "documents": matched_docs.iter().map(|d| &d.relative).collect::<Vec<_>>(),
                 });
                 println!("{}", serde_json::to_string_pretty(&json_val)?);
-                perf.emit_stdout(None);
+                perf.emit_for_json(None);
             } else {
                 // Extract document paths and render
                 let repo = git2::Repository::discover(&base)
@@ -325,12 +331,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if remote.contains("://") || remote.starts_with("git@") {
                     let result =
                         handle_remote_url(remote, cli.json, cli.plain, cli.verbose, &perf).await;
-                    perf.emit_stdout(None);
+                    perf.emit_for_json(None);
                     return result;
                 } else if is_owner_repo_shorthand(remote) {
                     let result =
                         handle_shorthand(remote, cli.json, cli.plain, cli.verbose, &perf).await;
-                    perf.emit_stdout(None);
+                    perf.emit_for_json(None);
                     return result;
                 } else {
                     let url =
@@ -342,7 +348,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         })?;
                     let result =
                         handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf).await;
-                    perf.emit_stdout(None);
+                    perf.emit_for_json(None);
                     return result;
                 }
             }
@@ -390,7 +396,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         cli.plain,
                     );
                 }
-                perf.emit_stdout(None);
+                perf.emit_for_json(None);
                 return Ok(());
             }
             crate::args::RepoAction::UnstagedFiles { package: _ }
@@ -483,9 +489,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let dir = base_dir
                     .as_deref()
                     .unwrap_or_else(|| std::path::Path::new("."));
-                let repo = git2::Repository::discover(dir)
-                    .map_err(|e| format!("Not a git repository: {}", e))?;
+                let repo = match git2::Repository::discover(dir) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        if cli.json {
+                            let json = serde_json::json!({ "root": "" });
+                            println!("{}", serde_json::to_string_pretty(&json)?);
+                            perf.emit_for_json(None);
+                            std::process::exit(1);
+                        }
+                        return Err(format!("Not a git repository: {}", e).into());
+                    }
+                };
                 let Some(workdir) = repo.workdir() else {
+                    if cli.json {
+                        let json = serde_json::json!({ "root": "" });
+                        println!("{}", serde_json::to_string_pretty(&json)?);
+                        perf.emit_for_json(None);
+                        std::process::exit(1);
+                    }
                     perf.emit_stderr(None);
                     std::process::exit(1);
                 };
@@ -494,7 +516,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "root": workdir.display().to_string(),
                     });
                     println!("{}", serde_json::to_string_pretty(&json)?);
-                    perf.emit_stdout(None);
+                    perf.emit_for_json(None);
                 } else {
                     println!("{}", workdir.display());
                     perf.emit_stderr(None);
@@ -520,7 +542,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if cli.json {
                     let outcome = output::repo_json::has_merge_conflict_outcome(has_conflict);
                     println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                    perf.emit_stdout(None);
+                    perf.emit_for_json(None);
                     std::process::exit(outcome.exit_code.unwrap_or(0));
                 }
                 perf.emit_stderr(None);
@@ -807,12 +829,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // text-only concern, JSON consumers only want the bare name.
                 let plain_name = output::render_repo_package(&result, base_dir.as_deref(), 0);
                 if plain_name.is_empty() {
+                    if cli.json {
+                        let outcome = output::repo_json::name_outcome(String::new());
+                        println!("{}", serde_json::to_string_pretty(&outcome.value)?);
+                        perf.emit_for_json(result.performance.as_ref());
+                        std::process::exit(if *no_error { 0 } else { 1 });
+                    }
                     return handle_no_results(*no_error, on_error, cli.plain, &perf);
                 }
                 if cli.json {
                     let outcome = output::repo_json::name_outcome(plain_name);
                     println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                    perf.emit_stdout(result.performance.as_ref());
+                    perf.emit_for_json(result.performance.as_ref());
                     return Ok(());
                 }
                 let rendered = if cli.verbose > 0 {
@@ -827,12 +855,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::args::RepoAction::PackageArea { no_error, on_error } => {
                 let rendered = output::render_repo_package_area(&result, base_dir.as_deref());
                 if rendered.is_empty() {
+                    if cli.json {
+                        let outcome = output::repo_json::name_outcome(String::new());
+                        println!("{}", serde_json::to_string_pretty(&outcome.value)?);
+                        perf.emit_for_json(result.performance.as_ref());
+                        std::process::exit(if *no_error { 0 } else { 1 });
+                    }
                     return handle_no_results(*no_error, on_error, cli.plain, &perf);
                 }
                 if cli.json {
                     let outcome = output::repo_json::name_outcome(rendered);
                     println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                    perf.emit_stdout(result.performance.as_ref());
+                    perf.emit_for_json(result.performance.as_ref());
                     return Ok(());
                 }
                 println!("{rendered}");
@@ -890,11 +924,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // so we route the human-readable text to stderr instead — keeping
         // stdout strictly machine-parseable while preserving the legacy
         // verbose-style perf section for terminals.
-        if result.performance.is_some() {
-            perf.emit_stderr(result.performance.as_ref());
-        } else {
-            perf.emit_stdout(result.performance.as_ref());
-        }
+        perf.emit_for_json(result.performance.as_ref());
         if let Some(code) = exit_code {
             std::process::exit(code);
         }
@@ -1119,7 +1149,7 @@ async fn handle_pr_command(
         }
     }
 
-    perf.emit_stdout(None);
+    perf.emit_for_json(None);
     Ok(())
 }
 
@@ -1569,7 +1599,7 @@ fn handle_file_list_command(
             "paths": result.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         });
         println!("{}", serde_json::to_string_pretty(&json_val)?);
-        perf.emit_stdout(None);
+        perf.emit_for_json(None);
     } else {
         let format = path_list_format(args);
         let rendered =

@@ -91,7 +91,7 @@ pub(crate) fn handle_recent_commits_command(
         match mode {
             RecentCommitsMode::RecentCommits => {
                 println!("{}", serde_json::to_string_pretty(&commit_set)?);
-                perf.emit_stdout(None);
+                perf.emit_for_json(None);
                 return Ok(());
             }
             RecentCommitsMode::SourceCodeChanges | RecentCommitsMode::DocumentationChanges => {
@@ -114,7 +114,7 @@ pub(crate) fn handle_recent_commits_command(
                     obj.insert("filter".into(), serde_json::json!(filter_label));
                 }
                 println!("{}", serde_json::to_string_pretty(&value)?);
-                perf.emit_stdout(None);
+                perf.emit_for_json(None);
                 return Ok(());
             }
         }
