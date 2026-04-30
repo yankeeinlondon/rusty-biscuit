@@ -460,52 +460,6 @@ pub fn render_hash_section(
 /// - **Status**: Recent commits (with conventional commit parsing), staged/modified/untracked files
 /// - **Meta**: Remote tracking status, branches, git config
 ///
-/// Format a file path with the directory dimmed and filename bold, plus optional action.
-fn format_file_line(path: &std::path::Path, verbose: u8, action: &FileAction) -> String {
-    let path_str = path.display().to_string();
-    let (dir, name) = split_path(&path_str);
-    let action_suffix = if verbose > 0 {
-        format!(" <dim>(<i>{}</i>)</dim>", action.label())
-    } else {
-        String::new()
-    };
-    if dir.is_empty() {
-        format!("<b>{name}</b>{action_suffix}")
-    } else {
-        format!("<dim>{dir}</dim><b>{name}</b>{action_suffix}")
-    }
-}
-
-/// Render files matching a specific status filter (staged, unstaged, or untracked).
-pub fn render_git_file_list(
-    git: &sniff::filesystem::git::GitInfo,
-    status_filter: &sniff::filesystem::git::FileStatus,
-    verbose: u8,
-) -> String {
-    use sniff::filesystem::git::FileStatus;
-
-    let mut out = String::new();
-    let terminal = Terminal::default();
-    let files: Vec<_> = git
-        .file_changes
-        .iter()
-        .filter(|f| match status_filter {
-            FileStatus::Staged => f.status == FileStatus::Staged || f.status == FileStatus::Both,
-            FileStatus::Modified => {
-                f.status == FileStatus::Modified || f.status == FileStatus::Both
-            }
-            _ => f.status == *status_filter,
-        })
-        .collect();
-
-    for file in &files {
-        let line = format_file_line(&file.path, verbose, &file.action);
-        write!(out, "{}", Prose::new(&line).display(&terminal)).unwrap();
-    }
-
-    out
-}
-
 fn build_git_status_items(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
@@ -1632,6 +1586,78 @@ fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
     names
 }
 
+/// Pure selector returning dirty package names, honoring the repo `filter`.
+///
+/// Returns an empty vector when the repo is not a monorepo, when no packages
+/// are detected, or when no dirty paths exist. The result is sorted and
+/// de-duplicated.
+///
+/// ## Notes
+///
+/// This is the JSON-friendly counterpart to [`render_dirty_packages`]: it
+/// never produces prose error strings, so JSON consumers see an empty array
+/// instead of the "only intended to be used in a monorepo" message.
+pub(crate) fn select_dirty_package_names(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+) -> Vec<String> {
+    let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
+        return Vec::new();
+    };
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+
+    let names = dirty_package_names(result);
+    if repo_filter.is_empty() {
+        return names;
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    let filtered = filter_packages(packages, repo_filter);
+    let filtered_names: std::collections::HashSet<&str> =
+        filtered.iter().map(|p| p.name.as_str()).collect();
+    names
+        .into_iter()
+        .filter(|n| filtered_names.contains(n.as_str()))
+        .collect()
+}
+
+/// Pure selector returning dirty package area names, honoring the repo `filter`.
+///
+/// Returns an empty vector when the repo is not a monorepo or when no
+/// packages are detected. The result is sorted and de-duplicated.
+pub(crate) fn select_dirty_package_area_names(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+) -> Vec<String> {
+    let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
+        return Vec::new();
+    };
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+
+    let dirty_names = dirty_package_names(result);
+    let dirty_set: std::collections::HashSet<&str> =
+        dirty_names.iter().map(|n| n.as_str()).collect();
+
+    let filtered = filter_packages(packages, repo_filter);
+    let mut areas: Vec<String> = filtered
+        .iter()
+        .filter(|p| dirty_set.contains(p.name.as_str()))
+        .map(|p| p.package_area.clone())
+        .collect();
+    areas.sort();
+    areas.dedup();
+    areas
+}
+
 /// Render package names with uncommitted changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
@@ -1640,24 +1666,7 @@ pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: &[String]
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            let names = dirty_package_names(result);
-            let names: Vec<&str> = if !repo_filter.is_empty() {
-                if let Some(ref packages) = repo.packages {
-                    let filtered = filter_packages(packages, repo_filter);
-                    let filtered_names: std::collections::HashSet<&str> =
-                        filtered.iter().map(|p| p.name.as_str()).collect();
-                    names
-                        .iter()
-                        .filter(|n| filtered_names.contains(n.as_str()))
-                        .map(|n| n.as_str())
-                        .collect()
-                } else {
-                    vec![]
-                }
-            } else {
-                names.iter().map(|n| n.as_str()).collect()
-            };
-            names.join(", ")
+            select_dirty_package_names(result, repo_filter).join(", ")
         }
         _ => String::from(
             "- the \"--dirty-packages\" switch is only intended to be used in a monorepo",
@@ -1673,23 +1682,7 @@ pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: &[St
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            if let Some(ref packages) = repo.packages {
-                let dirty_names = dirty_package_names(result);
-                let dirty_set: std::collections::HashSet<&str> =
-                    dirty_names.iter().map(|n| n.as_str()).collect();
-
-                let filtered = filter_packages(packages, repo_filter);
-                let mut areas: Vec<&str> = filtered
-                    .iter()
-                    .filter(|p| dirty_set.contains(p.name.as_str()))
-                    .map(|p| p.package_area.as_str())
-                    .collect();
-                areas.sort();
-                areas.dedup();
-                areas.join(", ")
-            } else {
-                String::new()
-            }
+            select_dirty_package_area_names(result, repo_filter).join(", ")
         }
         _ => String::from(
             "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo",
@@ -1750,6 +1743,68 @@ fn staged_package_names(result: &sniff::SniffResult) -> Vec<String> {
     names
 }
 
+/// Pure selector returning staged package names, honoring the repo `filter`.
+///
+/// Returns an empty vector when the repo is not a monorepo or when nothing
+/// is staged. The result is sorted and de-duplicated.
+pub(crate) fn select_staged_package_names(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+) -> Vec<String> {
+    let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
+        return Vec::new();
+    };
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+
+    let names = staged_package_names(result);
+    if repo_filter.is_empty() {
+        return names;
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    let filtered = filter_packages(packages, repo_filter);
+    let filtered_names: std::collections::HashSet<&str> =
+        filtered.iter().map(|p| p.name.as_str()).collect();
+    names
+        .into_iter()
+        .filter(|n| filtered_names.contains(n.as_str()))
+        .collect()
+}
+
+/// Pure selector returning staged package area names, honoring the repo `filter`.
+pub(crate) fn select_staged_package_area_names(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+) -> Vec<String> {
+    let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
+        return Vec::new();
+    };
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+
+    let staged_names = staged_package_names(result);
+    let staged_set: std::collections::HashSet<&str> =
+        staged_names.iter().map(|n| n.as_str()).collect();
+
+    let filtered = filter_packages(packages, repo_filter);
+    let mut areas: Vec<String> = filtered
+        .iter()
+        .filter(|p| staged_set.contains(p.name.as_str()))
+        .map(|p| p.package_area.clone())
+        .collect();
+    areas.sort();
+    areas.dedup();
+    areas
+}
+
 /// Render package names with staged files as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
@@ -1758,24 +1813,7 @@ pub fn render_staged_packages(result: &sniff::SniffResult, repo_filter: &[String
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            let names = staged_package_names(result);
-            let names: Vec<&str> = if !repo_filter.is_empty() {
-                if let Some(ref packages) = repo.packages {
-                    let filtered = filter_packages(packages, repo_filter);
-                    let filtered_names: std::collections::HashSet<&str> =
-                        filtered.iter().map(|p| p.name.as_str()).collect();
-                    names
-                        .iter()
-                        .filter(|n| filtered_names.contains(n.as_str()))
-                        .map(|n| n.as_str())
-                        .collect()
-                } else {
-                    vec![]
-                }
-            } else {
-                names.iter().map(|n| n.as_str()).collect()
-            };
-            names.join(", ")
+            select_staged_package_names(result, repo_filter).join(", ")
         }
         _ => String::from(
             "- the \"staged-packages\" subcommand is only intended to be used in a monorepo",
@@ -1791,23 +1829,7 @@ pub fn render_staged_package_areas(result: &sniff::SniffResult, repo_filter: &[S
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            if let Some(ref packages) = repo.packages {
-                let staged_names = staged_package_names(result);
-                let staged_set: std::collections::HashSet<&str> =
-                    staged_names.iter().map(|n| n.as_str()).collect();
-
-                let filtered = filter_packages(packages, repo_filter);
-                let mut areas: Vec<&str> = filtered
-                    .iter()
-                    .filter(|p| staged_set.contains(p.name.as_str()))
-                    .map(|p| p.package_area.as_str())
-                    .collect();
-                areas.sort();
-                areas.dedup();
-                areas.join(", ")
-            } else {
-                String::new()
-            }
+            select_staged_package_area_names(result, repo_filter).join(", ")
         }
         _ => String::from(
             "- the \"staged-package-areas\" subcommand is only intended to be used in a monorepo",
@@ -1871,6 +1893,65 @@ fn unstaged_package_names(result: &sniff::SniffResult) -> Vec<String> {
     names
 }
 
+/// Pure selector returning unstaged package names, honoring the repo `filter`.
+pub(crate) fn select_unstaged_package_names(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+) -> Vec<String> {
+    let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
+        return Vec::new();
+    };
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+
+    let names = unstaged_package_names(result);
+    if repo_filter.is_empty() {
+        return names;
+    }
+
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+    let filtered = filter_packages(packages, repo_filter);
+    let filtered_names: std::collections::HashSet<&str> =
+        filtered.iter().map(|p| p.name.as_str()).collect();
+    names
+        .into_iter()
+        .filter(|n| filtered_names.contains(n.as_str()))
+        .collect()
+}
+
+/// Pure selector returning unstaged package area names, honoring the repo `filter`.
+pub(crate) fn select_unstaged_package_area_names(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+) -> Vec<String> {
+    let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
+        return Vec::new();
+    };
+    if !repo.is_monorepo {
+        return Vec::new();
+    }
+    let Some(packages) = repo.packages.as_ref() else {
+        return Vec::new();
+    };
+
+    let unstaged_names = unstaged_package_names(result);
+    let unstaged_set: std::collections::HashSet<&str> =
+        unstaged_names.iter().map(|n| n.as_str()).collect();
+
+    let filtered = filter_packages(packages, repo_filter);
+    let mut areas: Vec<String> = filtered
+        .iter()
+        .filter(|p| unstaged_set.contains(p.name.as_str()))
+        .map(|p| p.package_area.clone())
+        .collect();
+    areas.sort();
+    areas.dedup();
+    areas
+}
+
 /// Render package names with unstaged changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
@@ -1879,24 +1960,7 @@ pub fn render_unstaged_packages(result: &sniff::SniffResult, repo_filter: &[Stri
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            let names = unstaged_package_names(result);
-            let names: Vec<&str> = if !repo_filter.is_empty() {
-                if let Some(ref packages) = repo.packages {
-                    let filtered = filter_packages(packages, repo_filter);
-                    let filtered_names: std::collections::HashSet<&str> =
-                        filtered.iter().map(|p| p.name.as_str()).collect();
-                    names
-                        .iter()
-                        .filter(|n| filtered_names.contains(n.as_str()))
-                        .map(|n| n.as_str())
-                        .collect()
-                } else {
-                    vec![]
-                }
-            } else {
-                names.iter().map(|n| n.as_str()).collect()
-            };
-            names.join(", ")
+            select_unstaged_package_names(result, repo_filter).join(", ")
         }
         _ => String::from(
             "- the \"unstaged-packages\" subcommand is only intended to be used in a monorepo",
@@ -1915,23 +1979,7 @@ pub fn render_unstaged_package_areas(
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            if let Some(ref packages) = repo.packages {
-                let unstaged_names = unstaged_package_names(result);
-                let unstaged_set: std::collections::HashSet<&str> =
-                    unstaged_names.iter().map(|n| n.as_str()).collect();
-
-                let filtered = filter_packages(packages, repo_filter);
-                let mut areas: Vec<&str> = filtered
-                    .iter()
-                    .filter(|p| unstaged_set.contains(p.name.as_str()))
-                    .map(|p| p.package_area.as_str())
-                    .collect();
-                areas.sort();
-                areas.dedup();
-                areas.join(", ")
-            } else {
-                String::new()
-            }
+            select_unstaged_package_area_names(result, repo_filter).join(", ")
         }
         _ => String::from(
             "- the \"unstaged-package-areas\" subcommand is only intended to be used in a monorepo",
@@ -2027,30 +2075,26 @@ pub fn render_repo_root(result: &sniff::SniffResult) -> String {
         .unwrap_or_default()
 }
 
-/// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise.
+/// Pure helper: returns whether the current package area has uncommitted
+/// changes, or `None` when the area cannot be resolved.
 ///
-/// No text output is produced — only the exit code signals the result.
-/// Checks all dirty/untracked files against the area prefix, not just package-scoped files.
-pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+/// Checks all dirty/untracked files against the area prefix, not just
+/// package-scoped files. JSON and text/exit-code call sites both consume this.
+///
+/// Pulls dirty paths from `git.file_changes` (always populated) plus the
+/// diff-rich `git.status.dirty` / `git.status.untracked` arrays (deep mode
+/// only). Without the `file_changes` source, non-deep callers would always
+/// see `false` because `status.dirty`/`status.untracked` are empty unless
+/// `--refresh-remotes` is set.
+pub(crate) fn current_package_area_is_dirty(
+    result: &sniff::SniffResult,
+    base_dir: Option<&Path>,
+) -> Option<bool> {
+    let fs = result.filesystem.as_ref()?;
+    let repo = fs.repo.as_ref()?;
     let dir = resolve_dir(base_dir);
-    let fs = match result.filesystem.as_ref() {
-        Some(fs) => fs,
-        None => std::process::exit(1),
-    };
-    let repo = match fs.repo.as_ref() {
-        Some(r) => r,
-        None => std::process::exit(1),
-    };
-
-    let area = match repo.package_area_for_dir(&dir) {
-        Some(a) => a,
-        None => std::process::exit(1),
-    };
-
-    let git = match fs.git.as_ref() {
-        Some(g) => g,
-        None => std::process::exit(1),
-    };
+    let area = repo.package_area_for_dir(&dir)?;
+    let git = fs.git.as_ref()?;
 
     let area_prefix = if area == "root" { "" } else { area };
 
@@ -2065,6 +2109,11 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
         )
+        .chain(
+            git.file_changes
+                .iter()
+                .map(|fc| fc.path.to_str().unwrap_or("")),
+        )
         .any(|path| {
             if area_prefix.is_empty() {
                 // Root area: dirty if file is not inside any non-root area
@@ -2077,10 +2126,18 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
             }
         });
 
-    if has_dirty {
-        std::process::exit(0);
+    Some(has_dirty)
+}
+
+/// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise.
+///
+/// No text output is produced — only the exit code signals the result.
+/// Checks all dirty/untracked files against the area prefix, not just package-scoped files.
+pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: Option<&Path>) {
+    match current_package_area_is_dirty(result, base_dir) {
+        Some(true) => std::process::exit(0),
+        Some(false) | None => std::process::exit(1),
     }
-    std::process::exit(1);
 }
 
 /// Returns true if a file path has a source code extension.
@@ -2090,37 +2147,24 @@ fn is_source_code_file(path: &str) -> bool {
     sniff::filesystem::blast_radius::is_source_code_path(Path::new(path))
 }
 
-/// Exit 0 if the current package area has source code file changes, exit 1 otherwise.
+/// Pure helper: returns `(has_changes, count, area_name)` for the current
+/// package area, or `None` when the area cannot be resolved.
 ///
-/// With `verbose >= 1`, prints a human-readable message before exiting.
-pub fn print_package_area_has_source_code_changes(
+/// JSON consumers only need the boolean. The text/verbose path uses the count
+/// and area name to print a human-readable summary.
+pub(crate) fn package_area_source_code_change_count(
     result: &sniff::SniffResult,
     base_dir: Option<&Path>,
-    verbose: u8,
-) {
+) -> Option<(bool, usize, String)> {
+    let fs = result.filesystem.as_ref()?;
+    let repo = fs.repo.as_ref()?;
     let dir = resolve_dir(base_dir);
-    let fs = match result.filesystem.as_ref() {
-        Some(fs) => fs,
-        None => std::process::exit(1),
-    };
-    let repo = match fs.repo.as_ref() {
-        Some(r) => r,
-        None => std::process::exit(1),
-    };
-
-    let area = match repo.package_area_for_dir(&dir) {
-        Some(a) => a,
-        None => std::process::exit(1),
-    };
-
-    let git = match fs.git.as_ref() {
-        Some(g) => g,
-        None => std::process::exit(1),
-    };
+    let area = repo.package_area_for_dir(&dir)?;
+    let git = fs.git.as_ref()?;
 
     let area_prefix = if area == "root" { "" } else { area };
 
-    let source_change_count = git
+    let count = git
         .status
         .dirty
         .iter()
@@ -2144,12 +2188,28 @@ pub fn print_package_area_has_source_code_changes(
         })
         .count();
 
+    Some((count > 0, count, area.to_string()))
+}
+
+/// Exit 0 if the current package area has source code file changes, exit 1 otherwise.
+///
+/// With `verbose >= 1`, prints a human-readable message before exiting.
+pub fn print_package_area_has_source_code_changes(
+    result: &sniff::SniffResult,
+    base_dir: Option<&Path>,
+    verbose: u8,
+) {
+    let Some((has_changes, count, area)) = package_area_source_code_change_count(result, base_dir)
+    else {
+        std::process::exit(1);
+    };
+
     if verbose > 0 {
-        if source_change_count > 0 {
+        if count > 0 {
             println!(
                 "{} source file{} changed in the {} package area",
-                source_change_count,
-                if source_change_count == 1 { "" } else { "s" },
+                count,
+                if count == 1 { "" } else { "s" },
                 area,
             );
         } else {
@@ -2157,7 +2217,7 @@ pub fn print_package_area_has_source_code_changes(
         }
     }
 
-    if source_change_count > 0 {
+    if has_changes {
         std::process::exit(0);
     }
     std::process::exit(1);
@@ -3836,6 +3896,348 @@ mod tests {
             let names: Vec<&str> = result.iter().map(|p| p.name.as_str()).collect();
             assert!(names.contains(&"biscuit-hash"));
             assert!(names.contains(&"darkmatter-lib"));
+        }
+    }
+
+    mod select_package_family {
+        use super::*;
+        use sniff::SniffResult;
+        use sniff::filesystem::FilesystemInfo;
+        use sniff::filesystem::git::types::DirtyFile;
+        use sniff::filesystem::repo::types::RepoInfo;
+
+        fn make_dirty_file(path: &str) -> DirtyFile {
+            DirtyFile {
+                filepath: PathBuf::from(path),
+                absolute_filepath: PathBuf::from(format!("/repo/{path}")),
+                diff: String::new(),
+                last_local_commit: String::new(),
+                origin_commit: None,
+            }
+        }
+
+        fn make_repo(packages: Vec<Package>, is_monorepo: bool) -> RepoInfo {
+            RepoInfo {
+                is_monorepo,
+                monorepo_tool: None,
+                workspace_tools: Vec::new(),
+                root: PathBuf::from("/repo"),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                packages: if packages.is_empty() {
+                    None
+                } else {
+                    Some(packages)
+                },
+            }
+        }
+
+        fn build_result(repo: RepoInfo, mut git: GitInfo) -> SniffResult {
+            git.repo_root = repo.root.clone();
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn dirty_packages_returns_empty_when_not_monorepo() {
+            let packages = vec![make_package("alpha", "alpha", &[])];
+            let repo = make_repo(packages, false);
+            let mut git = make_git_info(vec![]);
+            git.status.dirty = vec![make_dirty_file("alpha/src/main.rs")];
+            let result = build_result(repo, git);
+
+            let names = select_dirty_package_names(&result, &[]);
+            assert!(
+                names.is_empty(),
+                "expected empty for non-monorepo, got {names:?}"
+            );
+        }
+
+        #[test]
+        fn dirty_packages_picks_up_modified_files() {
+            let packages = vec![
+                make_package("alpha", "area-a", &[]),
+                make_package("beta", "area-b", &[]),
+            ];
+            // Adjust relative paths so prefix matching works
+            let mut packages = packages;
+            packages[0].relative = "area-a/alpha".to_string();
+            packages[1].relative = "area-b/beta".to_string();
+
+            let repo = make_repo(packages, true);
+            let mut git = make_git_info(vec![]);
+            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            let result = build_result(repo, git);
+
+            let names = select_dirty_package_names(&result, &[]);
+            assert_eq!(names, vec!["alpha".to_string()]);
+        }
+
+        #[test]
+        fn dirty_package_areas_picks_up_modified_files() {
+            let mut packages = vec![
+                make_package("alpha", "area-a", &[]),
+                make_package("beta", "area-b", &[]),
+            ];
+            packages[0].relative = "area-a/alpha".to_string();
+            packages[1].relative = "area-b/beta".to_string();
+
+            let repo = make_repo(packages, true);
+            let mut git = make_git_info(vec![]);
+            git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
+            let result = build_result(repo, git);
+
+            let areas = select_dirty_package_area_names(&result, &[]);
+            assert_eq!(areas, vec!["area-a".to_string()]);
+        }
+
+        #[test]
+        fn dirty_packages_honors_filter() {
+            let mut packages = vec![
+                make_package("alpha", "area-a", &[]),
+                make_package("beta", "area-b", &[]),
+            ];
+            packages[0].relative = "area-a/alpha".to_string();
+            packages[1].relative = "area-b/beta".to_string();
+
+            let repo = make_repo(packages, true);
+            let mut git = make_git_info(vec![]);
+            git.status.dirty = vec![
+                make_dirty_file("area-a/alpha/src/main.rs"),
+                make_dirty_file("area-b/beta/src/lib.rs"),
+            ];
+            let result = build_result(repo, git);
+
+            let names = select_dirty_package_names(&result, &["@area-a".to_string()]);
+            assert_eq!(names, vec!["alpha".to_string()]);
+        }
+
+        #[test]
+        fn staged_packages_picks_up_staged_changes() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+
+            let repo = make_repo(packages, true);
+            let git = make_git_info(vec![FileChange {
+                path: PathBuf::from("area-a/alpha/src/main.rs"),
+                status: FileStatus::Staged,
+                action: FileAction::Modified,
+                lines_added: 1,
+                lines_removed: 0,
+            }]);
+            let result = build_result(repo, git);
+
+            let names = select_staged_package_names(&result, &[]);
+            assert_eq!(names, vec!["alpha".to_string()]);
+
+            let areas = select_staged_package_area_names(&result, &[]);
+            assert_eq!(areas, vec!["area-a".to_string()]);
+        }
+
+        #[test]
+        fn unstaged_packages_picks_up_modified_changes() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+
+            let repo = make_repo(packages, true);
+            let git = make_git_info(vec![FileChange {
+                path: PathBuf::from("area-a/alpha/src/main.rs"),
+                status: FileStatus::Modified,
+                action: FileAction::Modified,
+                lines_added: 1,
+                lines_removed: 0,
+            }]);
+            let result = build_result(repo, git);
+
+            let names = select_unstaged_package_names(&result, &[]);
+            assert_eq!(names, vec!["alpha".to_string()]);
+
+            let areas = select_unstaged_package_area_names(&result, &[]);
+            assert_eq!(areas, vec!["area-a".to_string()]);
+        }
+
+        #[test]
+        fn staged_and_unstaged_return_empty_when_not_monorepo() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages, false);
+            let git = make_git_info(vec![FileChange {
+                path: PathBuf::from("area-a/alpha/src/main.rs"),
+                status: FileStatus::Both,
+                action: FileAction::Modified,
+                lines_added: 1,
+                lines_removed: 0,
+            }]);
+            let result = build_result(repo, git);
+
+            assert!(select_staged_package_names(&result, &[]).is_empty());
+            assert!(select_unstaged_package_names(&result, &[]).is_empty());
+            assert!(select_staged_package_area_names(&result, &[]).is_empty());
+            assert!(select_unstaged_package_area_names(&result, &[]).is_empty());
+        }
+    }
+
+    mod boolean_helpers {
+        //! Phase 4 — pure helpers that back `is-current-package-area-dirty`
+        //! and `package-area-has-source-code-changes`.
+        //!
+        //! The text/exit-code call sites map `None`/`Some(false)` to
+        //! `exit(1)` and `Some(true)` to `exit(0)`. These tests pin the
+        //! pure data path so the JSON arms can rely on it without
+        //! re-implementing scope detection.
+
+        use super::*;
+        use sniff::SniffResult;
+        use sniff::filesystem::FilesystemInfo;
+        use sniff::filesystem::git::types::DirtyFile;
+        use sniff::filesystem::repo::types::RepoInfo;
+
+        fn make_repo(packages: Vec<Package>) -> RepoInfo {
+            RepoInfo {
+                is_monorepo: true,
+                monorepo_tool: None,
+                workspace_tools: Vec::new(),
+                root: PathBuf::from("/repo"),
+                dependencies: None,
+                dev_dependencies: None,
+                peer_dependencies: None,
+                optional_dependencies: None,
+                packages: if packages.is_empty() {
+                    None
+                } else {
+                    Some(packages)
+                },
+            }
+        }
+
+        fn dirty_file(path: &str) -> DirtyFile {
+            DirtyFile {
+                filepath: PathBuf::from(path),
+                absolute_filepath: PathBuf::from(format!("/repo/{path}")),
+                diff: String::new(),
+                last_local_commit: String::new(),
+                origin_commit: None,
+            }
+        }
+
+        fn build_result(repo: RepoInfo, dirty_paths: &[&str]) -> SniffResult {
+            let mut git = make_git_info(vec![]);
+            git.repo_root = repo.root.clone();
+            git.status.dirty = dirty_paths.iter().map(|p| dirty_file(p)).collect();
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn current_package_area_is_dirty_some_true_when_dirty_in_area() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_result(repo, &["area-a/alpha/src/main.rs"]);
+
+            let answer =
+                current_package_area_is_dirty(&result, Some(&PathBuf::from("/repo/area-a/alpha")));
+            assert_eq!(answer, Some(true));
+        }
+
+        #[test]
+        fn current_package_area_is_dirty_some_false_when_clean() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_result(repo, &[]);
+
+            let answer =
+                current_package_area_is_dirty(&result, Some(&PathBuf::from("/repo/area-a/alpha")));
+            assert_eq!(answer, Some(false));
+        }
+
+        #[test]
+        fn current_package_area_is_dirty_none_when_outside_repo() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_result(repo, &["area-a/alpha/src/main.rs"]);
+
+            let answer =
+                current_package_area_is_dirty(&result, Some(&PathBuf::from("/somewhere-else")));
+            assert_eq!(answer, None);
+        }
+
+        #[test]
+        fn package_area_source_code_change_count_counts_source_files_only() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_result(
+                repo,
+                &[
+                    "area-a/alpha/src/main.rs",
+                    "area-a/alpha/README.md",
+                    "area-a/alpha/src/lib.rs",
+                ],
+            );
+
+            let answer = package_area_source_code_change_count(
+                &result,
+                Some(&PathBuf::from("/repo/area-a/alpha")),
+            );
+            let (has, count, area) = answer.expect("area should resolve");
+            assert!(has);
+            assert_eq!(count, 2);
+            assert_eq!(area, "area-a");
+        }
+
+        #[test]
+        fn package_area_source_code_change_count_false_when_only_docs_dirty() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_result(repo, &["area-a/alpha/README.md"]);
+
+            let (has, count, _area) = package_area_source_code_change_count(
+                &result,
+                Some(&PathBuf::from("/repo/area-a/alpha")),
+            )
+            .expect("area should resolve");
+            assert!(!has);
+            assert_eq!(count, 0);
+        }
+
+        #[test]
+        fn package_area_source_code_change_count_none_when_outside_repo() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let result = build_result(repo, &["area-a/alpha/src/main.rs"]);
+
+            let answer = package_area_source_code_change_count(
+                &result,
+                Some(&PathBuf::from("/somewhere-else")),
+            );
+            assert!(answer.is_none());
         }
     }
 

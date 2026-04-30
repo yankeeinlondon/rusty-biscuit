@@ -48,10 +48,16 @@ sniff repo staged-packages !vendor      # Staged packages excluding vendor
 sniff --json repo staged-packages
 ```
 
-Returns a JSON array of package name strings:
+Returns a `{ scope, kind, names }` object. `scope` is `"staged"`, `kind`
+is `"packages"`, and `names` is an array of package name strings
+(empty when the repo is not a monorepo):
 
 ```json
-["sniff-cli", "sniff"]
+{
+  "scope": "staged",
+  "kind": "packages",
+  "names": ["sniff-cli", "sniff"]
+}
 ```
 
 ## Related Subcommands

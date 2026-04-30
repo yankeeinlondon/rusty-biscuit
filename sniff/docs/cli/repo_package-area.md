@@ -91,3 +91,16 @@ if [ -n "$AREA" ]; then
     echo "Working in area: $AREA"
 fi
 ```
+
+## JSON Output (`--json`)
+
+```bash
+sniff --json repo package-area
+```
+
+Returns a `{ name: "<area>" }` object. Exit code semantics still
+honour `--no-error` / `--on-error`.
+
+```json
+{ "name": "sniff" }
+```

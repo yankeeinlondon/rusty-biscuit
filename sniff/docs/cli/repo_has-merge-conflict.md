@@ -70,6 +70,21 @@ Produces no output. Use the exit code in shell conditionals.
  fi
  ```
 
+ ## JSON Output (`--json`)
+
+```bash
+sniff --json repo has-merge-conflict
+```
+
+Returns a `{ has_merge_conflict: bool }` object alongside the exit
+code. Exit code mirrors the boolean: `0` when `true`, `1` when
+`false`. With `--verbose`, conflicted file paths still go to STDERR;
+JSON consumers should rely on the boolean instead.
+
+```json
+{ "has_merge_conflict": false }
+```
+
  ## Related Subcommands
 
  | Subcommand | Output |

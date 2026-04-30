@@ -3065,19 +3065,17 @@ impl CategoryEnum for AiCli {
 }
 
 // Notification helper installation methods
-pub(crate) static TERMINAL_NOTIFIER_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::Brew("terminal-notifier"),
-];
-pub(crate) static ALERTER_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::Brew("vjeantet/tap/alerter"),
-];
+pub(crate) static TERMINAL_NOTIFIER_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Brew("terminal-notifier")];
+pub(crate) static ALERTER_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Brew("vjeantet/tap/alerter")];
 pub(crate) static SNORETOAST_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Chocolatey("snoretoast"),
     InstallationMethod::Scoop("snoretoast"),
 ];
-pub(crate) static BURNTTOAST_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::RemoteBash("https://raw.githubusercontent.com/Windos/BurntToast/main/install.ps1"),
-];
+pub(crate) static BURNTTOAST_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
+    "https://raw.githubusercontent.com/Windos/BurntToast/main/install.ps1",
+)];
 pub(crate) static DUNSTIFY_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Apt("dunst"),
     InstallationMethod::Dnf("dunst"),
