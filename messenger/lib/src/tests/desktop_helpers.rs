@@ -388,6 +388,44 @@ mod snoretoast_stub {
         let error = result.expect_err("expected SnoreToast stub to fail");
         assert!(matches!(error, HelperError::Exited { status: 4, .. }));
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn oversized_png_is_dropped_but_send_still_succeeds() {
+        // Step 4.1: a 2048×2048 PNG exceeds Windows toast limits. The helper
+        // must drop the image from argv, annotate the receipt with
+        // `dropped=image_too_large`, and still complete the send — image
+        // failures degrade gracefully rather than aborting the notification.
+        use std::io::Write;
+
+        let stub = stub_path("stub_snoretoast");
+        let _env = EnvGuard::set(&[("STUB_SNORETOAST_EXIT", "1")]);
+
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.extend_from_slice(&13u32.to_be_bytes());
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&2048u32.to_be_bytes());
+        bytes.extend_from_slice(&2048u32.to_be_bytes());
+        bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
+        bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        let temp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        let mut file = temp.reopen().unwrap();
+        file.write_all(&bytes).unwrap();
+        file.flush().unwrap();
+
+        let helper = snoretoast_helper(&stub);
+        let mut request = notice_request();
+        request.image = Some(temp.path().to_path_buf());
+        request.replace_id = Some("oversize-1".into());
+
+        let receipt = helper.send(&request).await.unwrap();
+        assert_eq!(receipt.notification_id, "oversize-1");
+        assert_eq!(
+            receipt.metadata.get("dropped").map(String::as_str),
+            Some("image_too_large"),
+        );
+    }
 }
 
 mod burnttoast_stub {
