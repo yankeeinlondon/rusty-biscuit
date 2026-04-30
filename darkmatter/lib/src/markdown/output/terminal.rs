@@ -52,6 +52,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::UnicodeWidthStr;
 use biscuit_terminal::utils::layout::Alignment;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::Scope;
@@ -1250,13 +1251,14 @@ pub fn write_terminal<W: std::io::Write>(
                 if in_table {
                     scope_stack.pop();
                     let style = table_link_style(&prose_highlighter, &scope_stack);
-                    current_cell.push_str(&render_table_link(
+                    push_table_link(
+                        &mut current_cell,
                         &current_link_text,
                         &current_link_url,
                         style,
                         emit_italic,
                         emit_hyperlinks,
-                    ));
+                    );
                 } else {
                     // Pop link scope to get parent scopes, then query theme for link styling
                     // (The link scope was pushed in Start(Link))
@@ -1398,7 +1400,8 @@ pub fn write_terminal<W: std::io::Write>(
                         in_dim,
                         blockquote_depth > 0,
                     );
-                    current_cell.push_str(&render_table_cell_text(
+                    push_table_cell_text(
+                        &mut current_cell,
                         &text,
                         style,
                         emit_italic,
@@ -1411,7 +1414,7 @@ pub fn write_terminal<W: std::io::Write>(
                             in_dim,
                         },
                         &render_terminal,
-                    ));
+                    );
                 } else {
                     let style = resolve_prose_text_style(
                         &prose_highlighter,
@@ -1446,7 +1449,7 @@ pub fn write_terminal<W: std::io::Write>(
                     current_alt.push('`');
                 } else if in_table {
                     let style = prose_highlighter.style_for_inline_code(&scope_stack);
-                    current_cell.push_str(&emit_inline_code(&code, style));
+                    push_inline_code(&mut current_cell, &code, style);
                 } else {
                     // Inline code with styling (no backticks in terminal output)
                     let style = prose_highlighter.style_for_inline_code(&scope_stack);
@@ -1647,71 +1650,106 @@ fn emit_prose_text(
     in_dim: bool,
     emit_dim: bool,
 ) -> String {
+    let mut result = String::new();
+    push_prose_text(
+        &mut result,
+        text,
+        style,
+        emit_italic,
+        in_strikethrough,
+        in_mark,
+        blockquote_bg,
+        in_dim,
+        emit_dim,
+    );
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_prose_text(
+    output: &mut String,
+    text: &str,
+    style: Style,
+    emit_italic: bool,
+    in_strikethrough: bool,
+    in_mark: bool,
+    blockquote_bg: Option<Color>,
+    in_dim: bool,
+    emit_dim: bool,
+) {
     use syntect::highlighting::FontStyle;
 
     let fg = style.foreground;
-    let mut result = String::new();
 
     // Apply font styles (bold=1, dim=2, italic=3, underline=4, strikethrough=9)
     if style.font_style.contains(FontStyle::BOLD) {
-        result.push_str("\x1b[1m");
+        output.push_str("\x1b[1m");
     }
     if emit_dim && in_dim {
-        result.push_str("\x1b[2m");
+        output.push_str("\x1b[2m");
     }
     if emit_italic && style.font_style.contains(FontStyle::ITALIC) {
-        result.push_str("\x1b[3m");
+        output.push_str("\x1b[3m");
     }
     if style.font_style.contains(FontStyle::UNDERLINE) {
-        result.push_str("\x1b[4m");
+        output.push_str("\x1b[4m");
     }
     if in_strikethrough {
-        result.push_str("\x1b[9m");
+        output.push_str("\x1b[9m");
     }
 
     // Apply background color for highlighted/marked text
     // Uses a yellow background similar to <mark> in HTML
     if in_mark {
         // Yellow highlight background (255, 243, 184) - matches CSS var(--highlight-bg, #fff3b8)
-        result.push_str("\x1b[48;2;255;243;184m");
+        output.push_str("\x1b[48;2;255;243;184m");
         // Use dark text for contrast on yellow background
-        result.push_str(&format!("\x1b[38;2;0;0;0m{}\x1b[0m", text));
+        let _ = write!(output, "\x1b[38;2;0;0;0m{}\x1b[0m", text);
     } else if let Some(bg) = blockquote_bg {
         // Apply blockquote background color with foreground color
-        result.push_str(&format!(
+        let _ = write!(
+            output,
             "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
             bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
-        ));
+        );
     } else {
         // Apply foreground color and text
-        result.push_str(&format!(
+        let _ = write!(
+            output,
             "\x1b[38;2;{};{};{}m{}\x1b[0m",
             fg.r, fg.g, fg.b, text
-        ));
+        );
     }
-    result
 }
 
 /// Emits inline code with both foreground and background colors.
 ///
 /// Uses the style's background color if available, otherwise uses a subtle gray.
 fn emit_inline_code(text: &str, style: Style) -> String {
+    let mut result = String::new();
+    push_inline_code(&mut result, text, style);
+    result
+}
+
+fn push_inline_code(output: &mut String, text: &str, style: Style) {
     let fg = style.foreground;
     let bg = style.background;
 
     // Check if background is meaningful (not transparent/zero alpha)
     if bg.a > 0 && (bg.r > 0 || bg.g > 0 || bg.b > 0) {
         // Use provided background
-        format!(
+        let _ = write!(
+            output,
             "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
             bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
-        )
+        );
     } else {
         // Use a subtle dark gray background for contrast
-        format!(
+        let _ = write!(
+            output,
             "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
             50, 50, 55, fg.r, fg.g, fg.b, text
-        )
+        );
     }
 }
 
@@ -1786,25 +1824,41 @@ fn table_link_style(prose_highlighter: &ProseHighlighter<'_>, scope_stack: &[Sco
 }
 
 /// Renders a table-cell hyperlink while honoring hyperlink mode behavior.
-fn render_table_link(
+fn push_table_link(
+    output: &mut String,
     text: &str,
     url: &str,
     style: Style,
     emit_italic: bool,
     emit_hyperlinks: bool,
-) -> String {
+) {
     if emit_hyperlinks {
-        format!(
-            "\x1b]8;;{}\x07{}\x1b]8;;\x07",
-            url,
-            emit_prose_text(text, style, emit_italic, false, false, None, false, true)
-        )
+        let _ = write!(output, "\x1b]8;;{}\x07", url);
+        push_prose_text(
+            output,
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+            false,
+            true,
+        );
+        output.push_str("\x1b]8;;\x07");
     } else {
-        format!(
-            "{} [{}]",
-            emit_prose_text(text, style, emit_italic, false, false, None, false, true),
-            url
-        )
+        push_prose_text(
+            output,
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+            false,
+            true,
+        );
+        let _ = write!(output, " [{}]", url);
     }
 }
 
@@ -1817,21 +1871,23 @@ struct TableCellInlineState {
     in_dim: bool,
 }
 
-fn render_table_cell_text(
+fn push_table_cell_text(
+    output: &mut String,
     text: &str,
     style: Style,
     emit_italic: bool,
     emit_dim: bool,
     state: TableCellInlineState,
     terminal: &Terminal,
-) -> String {
+) {
     if text.is_empty() {
-        return String::new();
+        return;
     }
 
     // Keep mark/highlight rendering on Darkmatter's style path.
     if state.in_mark {
-        return emit_prose_text(
+        push_prose_text(
+            output,
             text,
             style,
             emit_italic,
@@ -1841,6 +1897,7 @@ fn render_table_cell_text(
             state.in_dim,
             emit_dim,
         );
+        return;
     }
 
     // Use Prose selectively for semantic inline style serialization in table cells.
@@ -1877,11 +1934,17 @@ fn render_table_cell_text(
         if !text.contains('<') && !text.contains('{') {
             let prose = Prose::new(serialized).render(terminal);
             let fg = style.foreground;
-            return format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, prose);
+            let _ = write!(
+                output,
+                "\x1b[38;2;{};{};{}m{}\x1b[0m",
+                fg.r, fg.g, fg.b, prose
+            );
+            return;
         }
     }
 
-    emit_prose_text(
+    push_prose_text(
+        output,
         text,
         style,
         emit_italic,
@@ -1890,7 +1953,7 @@ fn render_table_cell_text(
         None,
         state.in_dim,
         emit_dim,
-    )
+    );
 }
 
 /// Renders a buffered markdown table via `biscuit-terminal::Table`.
@@ -2291,7 +2354,8 @@ impl LineWrapper {
         }
 
         // Emit the styled word with blockquote background if applicable
-        self.output.push_str(&emit_prose_text(
+        push_prose_text(
+            &mut self.output,
             word,
             style,
             emit_italic,
@@ -2300,7 +2364,7 @@ impl LineWrapper {
             self.blockquote_bg,
             in_dim,
             emit_dim,
-        ));
+        );
         self.current_col += word_width;
     }
 
@@ -2322,7 +2386,8 @@ impl LineWrapper {
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
         // Note: markers don't use blockquote background (they have their own styling)
-        self.output.push_str(&emit_prose_text(
+        push_prose_text(
+            &mut self.output,
             text,
             style,
             emit_italic,
@@ -2331,7 +2396,7 @@ impl LineWrapper {
             None,
             false,
             true,
-        ));
+        );
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -2355,7 +2420,8 @@ impl LineWrapper {
 
             // Emit styled text INSIDE the hyperlink
             // Note: We don't use word wrapping for links - they stay on one line
-            self.output.push_str(&emit_prose_text(
+            push_prose_text(
+                &mut self.output,
                 text,
                 style,
                 emit_italic,
@@ -2364,7 +2430,7 @@ impl LineWrapper {
                 None,
                 false,
                 true,
-            ));
+            );
 
             // OSC8 hyperlink end: ESC ] 8 ; ; BEL
             self.output.push_str("\x1b]8;;\x07");
@@ -2372,7 +2438,8 @@ impl LineWrapper {
             self.current_col += UnicodeWidthStr::width(text);
         } else {
             // Fallback format: styled text followed by [url]
-            self.output.push_str(&emit_prose_text(
+            push_prose_text(
+                &mut self.output,
                 text,
                 style,
                 emit_italic,
@@ -2381,7 +2448,7 @@ impl LineWrapper {
                 None,
                 false,
                 true,
-            ));
+            );
             self.current_col += UnicodeWidthStr::width(text);
 
             // Append URL in brackets (unstyled)
@@ -2401,7 +2468,7 @@ impl LineWrapper {
             self.emit_newline_with_prefix();
         }
 
-        self.output.push_str(&emit_inline_code(code, style));
+        push_inline_code(&mut self.output, code, style);
         self.current_col += code_width;
     }
 
