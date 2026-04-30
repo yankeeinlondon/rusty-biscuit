@@ -23,39 +23,19 @@
 //!   by the platform backend; only `Unsupported` and `Parse` are propagated
 //!   directly to the caller.
 
-// Phase 2 wires the Linux backend; Phase 3 wires macOS; Phase 4 wires
-// Windows. On platforms not yet covered by a backend integration, the
-// helper trait, capabilities struct, and error variants are present but
-// unused. Suppress the dead-code lint there so unfinished platforms stay
-// CI-clean without per-item annotations.
-#![cfg_attr(
-    not(any(target_os = "linux", target_os = "macos", target_os = "windows")),
-    allow(dead_code)
-)]
-
-pub(crate) mod election;
-pub(crate) mod process;
-
-#[cfg(target_os = "linux")]
-pub(crate) mod dunstify;
-#[cfg(target_os = "linux")]
-pub(crate) mod notify_send;
-
-#[cfg(target_os = "macos")]
 pub(crate) mod alerter;
-#[cfg(target_os = "macos")]
-pub(crate) mod terminal_notifier;
-
-#[cfg(target_os = "windows")]
 pub(crate) mod burnttoast;
-#[cfg(target_os = "windows")]
+pub(crate) mod dunstify;
+pub(crate) mod election;
+pub(crate) mod notify_send;
+pub(crate) mod process;
 pub(crate) mod snoretoast;
+pub(crate) mod terminal_notifier;
 
 use async_trait::async_trait;
 
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub(crate) use election::{HelperAttempt, elect_helpers};
 
 /// Public identifier for a notification helper.

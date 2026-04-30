@@ -378,10 +378,10 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
                         self.handle_error(err, &raw_kind);
                     }
                     GeminiEvent::Result(result) => {
-                        // `result` events need the raw JSON for `raw_summary`.
-                        // The JSON is already validated, so this parse is safe.
-                        let raw = serde_json::from_str(line)
-                            .expect("already validated JSON");
+                        // Reconstruct the raw payload from the typed struct
+                        // without a second parse.
+                        let raw = serde_json::to_value(&result)
+                            .expect("GeminiResult serializes");
                         self.handle_result(result, raw, &raw_kind);
                     }
                     GeminiEvent::ToolUse(tu) => {
@@ -393,7 +393,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
                 }
             }
             Err(_) => {
-                let raw: Value = match serde_json::from_str(line) {
+                let raw: Map<String, Value> = match serde_json::from_str(line) {
                     Ok(v) => v,
                     Err(e) => {
                         super::trace_malformed_line(
@@ -412,7 +412,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
                     .to_string();
                 super::trace_parser_event(Provider::Gemini, &raw_kind, self.line_num);
                 self.flush_pending_text(&raw_kind);
-                self.emit_provider_extension(&raw_kind, raw);
+                self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
         Ok(())

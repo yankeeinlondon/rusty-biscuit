@@ -45,7 +45,7 @@ fn title_only_is_invalid_for_non_desktop_providers() {
     ] {
         assert!(
             matches!(
-                validate_message_for_provider(&message, provider),
+                crate::validate_message_for_provider(&message, provider),
                 Err(MessengerError::InvalidMessage(_))
             ),
             "title-only must be invalid for {provider}"

@@ -5,8 +5,8 @@
 //! The parser falls back to `Value`-based skipping for any event type that
 //! is not enumerated here.
 
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// Tagged enum over all Codex CLI stream event variants dispatched by the
 /// parser. Unknown event types fail typed deserialization and are handled by
@@ -16,7 +16,7 @@ use serde_json::Value;
 /// `tool_result`) carry tool fields directly, without a nested item type tag,
 /// so they use [`CodexToolItemFields`] rather than the tagged [`CodexItem`]
 /// enum.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum CodexEvent {
     #[serde(rename = "thread.created")]
@@ -76,7 +76,7 @@ impl CodexEvent {
 
 /// `thread.created` / `thread.started` payload. Some Codex builds emit
 /// `thread_id`, others use `id`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexThreadMeta {
     #[serde(default)]
     pub thread_id: Option<String>,
@@ -92,11 +92,11 @@ impl CodexThreadMeta {
 
 /// Placeholder struct for `turn.started` events. Empty today so that unknown
 /// fields are silently tolerated.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexTurnStarted {}
 
 /// `turn.completed` event — carries token usage, duration, and stop reason.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexTurnCompleted {
     #[serde(default)]
     pub usage: Option<CodexUsage>,
@@ -108,6 +108,10 @@ pub struct CodexTurnCompleted {
     pub status: Option<String>,
     #[serde(default)]
     pub stop_reason: Option<String>,
+    /// Dynamic fallback for unknown fields so the raw payload can be
+    /// reconstructed without a second parse.
+    #[serde(flatten, default)]
+    pub extra: Map<String, Value>,
 }
 
 impl CodexTurnCompleted {
@@ -119,7 +123,7 @@ impl CodexTurnCompleted {
 /// Token usage block reported by `turn.completed`. Codex builds differ on
 /// whether they send `cached_input_tokens` or `cache_read_input_tokens`; both
 /// are captured and the parser selects the first populated value.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexUsage {
     #[serde(default)]
     pub input_tokens: Option<u64>,
@@ -141,7 +145,7 @@ impl CodexUsage {
 
 /// Error envelope. Codex builds emit errors either with flat
 /// `error_type`/`error_message` fields or with a nested `error` object.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexErrorEnvelope {
     #[serde(default)]
     pub error_type: Option<String>,
@@ -168,7 +172,7 @@ impl CodexErrorEnvelope {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexErrorDetail {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -177,7 +181,7 @@ pub struct CodexErrorDetail {
 }
 
 /// Envelope around a nested `item` for `item.started` / `item.completed`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexItemEnvelope {
     #[serde(default)]
     pub item: Option<CodexItem>,
@@ -191,7 +195,7 @@ pub struct CodexItemEnvelope {
 /// so a single bad variant can't fail the whole envelope.
 ///
 /// [`Unknown`]: CodexItem::Unknown
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CodexItem {
     AgentMessage(CodexAgentMessage),
@@ -223,7 +227,7 @@ pub enum CodexItem {
 /// iterate [`resolved_entries`] to get one entry per touched path.
 ///
 /// [`resolved_entries`]: CodexFileChange::resolved_entries
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexFileChange {
     #[serde(default)]
     pub id: Option<String>,
@@ -248,7 +252,7 @@ pub struct CodexFileChange {
 }
 
 /// Single entry inside [`CodexFileChange::changes`].
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexFileChangeEntry {
     #[serde(default)]
     pub path: Option<String>,
@@ -334,7 +338,7 @@ impl CodexFileChange {
 /// Typed `plan_update` / `todo_list` item. Codex emits plan-tracking data under
 /// various shapes; this struct accepts the common fields and lets anything else
 /// survive through `extra` on the resulting [`super::super::semantic::SemanticEvent::PlanUpdate`].
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexPlanUpdate {
     #[serde(default)]
     pub id: Option<String>,
@@ -481,7 +485,7 @@ impl CodexItem {
 /// Single text part inside an `agent_message.content` array. Codex emits
 /// `{type: "text", text: "..."}` entries; the `type` field is preserved as
 /// `kind` for diagnostics but is not required.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexContentPart {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
@@ -492,7 +496,7 @@ pub struct CodexContentPart {
 /// Typed `agent_message` body. Either `text` (legacy / synthesized form)
 /// or `content` (the canonical array of [`CodexContentPart`]) carries the
 /// assistant text. The parser concatenates whichever is populated.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexAgentMessage {
     #[serde(default)]
     pub id: Option<String>,
@@ -524,7 +528,7 @@ impl CodexAgentMessage {
 /// Permission/approval/user-input item shape. Codex carries `id` and
 /// `name` for these and the parser uses `name` as the tool name placeholder
 /// when fanning out to the permission sink hook.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexPermissionItem {
     #[serde(default)]
     pub id: Option<String>,
@@ -535,7 +539,7 @@ pub struct CodexPermissionItem {
 /// Reasoning item shape. Codex emits a `text` field plus an optional
 /// `summary` payload that is opaque today. The parser does not currently
 /// surface reasoning traces beyond logging.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexReasoning {
     #[serde(default)]
     pub text: Option<String>,
@@ -546,7 +550,7 @@ pub struct CodexReasoning {
 /// Shared tool item payload reused by every tool-bearing variant of
 /// [`CodexItem`] and by the top-level `item.tool_use` / `tool_use` /
 /// `item.tool_result` / `tool_result` event variants on [`CodexEvent`].
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct CodexToolItemFields {
     #[serde(default)]
     pub id: Option<String>,
