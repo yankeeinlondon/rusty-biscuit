@@ -3761,7 +3761,7 @@ fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
         let workspace = tempdir().unwrap();
         let path_dir = workspace.path().join("bin");
         fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+        seed_minimal_config(workspace.path());
 
         // Stub binary so PATH resolution succeeds in dry-run mode.
         // Dry-run never actually spawns the child, so the stub body
@@ -3771,7 +3771,7 @@ fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
 
         let output = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+            .env("HOME", workspace.path())
             .env("OPENCODE_MODEL", "test-model")
             .env("PATH", &path_dir)
             .args([provider_slug, "--dry-run", "hello"])
@@ -3814,7 +3814,7 @@ fn sequence_composition_dry_run_for_every_provider() {
         let workspace = tempdir().unwrap();
         let path_dir = workspace.path().join("bin");
         fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+        seed_minimal_config(workspace.path());
 
         write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
 
