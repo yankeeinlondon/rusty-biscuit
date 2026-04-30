@@ -460,52 +460,6 @@ pub fn render_hash_section(
 /// - **Status**: Recent commits (with conventional commit parsing), staged/modified/untracked files
 /// - **Meta**: Remote tracking status, branches, git config
 ///
-/// Format a file path with the directory dimmed and filename bold, plus optional action.
-fn format_file_line(path: &std::path::Path, verbose: u8, action: &FileAction) -> String {
-    let path_str = path.display().to_string();
-    let (dir, name) = split_path(&path_str);
-    let action_suffix = if verbose > 0 {
-        format!(" <dim>(<i>{}</i>)</dim>", action.label())
-    } else {
-        String::new()
-    };
-    if dir.is_empty() {
-        format!("<b>{name}</b>{action_suffix}")
-    } else {
-        format!("<dim>{dir}</dim><b>{name}</b>{action_suffix}")
-    }
-}
-
-/// Render files matching a specific status filter (staged, unstaged, or untracked).
-pub fn render_git_file_list(
-    git: &sniff::filesystem::git::GitInfo,
-    status_filter: &sniff::filesystem::git::FileStatus,
-    verbose: u8,
-) -> String {
-    use sniff::filesystem::git::FileStatus;
-
-    let mut out = String::new();
-    let terminal = Terminal::default();
-    let files: Vec<_> = git
-        .file_changes
-        .iter()
-        .filter(|f| match status_filter {
-            FileStatus::Staged => f.status == FileStatus::Staged || f.status == FileStatus::Both,
-            FileStatus::Modified => {
-                f.status == FileStatus::Modified || f.status == FileStatus::Both
-            }
-            _ => f.status == *status_filter,
-        })
-        .collect();
-
-    for file in &files {
-        let line = format_file_line(&file.path, verbose, &file.action);
-        write!(out, "{}", Prose::new(&line).display(&terminal)).unwrap();
-    }
-
-    out
-}
-
 fn build_git_status_items(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,

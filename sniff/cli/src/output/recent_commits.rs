@@ -104,11 +104,13 @@ pub(crate) fn handle_recent_commits_command(
                     }
                     RecentCommitsMode::RecentCommits => unreachable!(),
                 };
-                let filtered = filter_commit_set(&commit_set, centric_filter);
+                let mut filtered = filter_commit_set(&commit_set, centric_filter);
                 if filtered.commits.is_empty() {
                     let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
                     return handle_no_results(no_error, &Some(msg), plain, perf);
                 }
+                // Trim full package metadata for brevity in filtered commit views.
+                filtered.packages = None;
                 let mut value = serde_json::to_value(&filtered)?;
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("filter".into(), serde_json::json!(filter_label));

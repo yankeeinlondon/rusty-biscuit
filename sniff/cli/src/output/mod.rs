@@ -31,7 +31,7 @@ pub struct TextOutput {
 }
 
 pub use filesystem::{
-    PathListFormat, render_docs_output, render_git_file_list, render_git_section,
+    PathListFormat, render_docs_output, render_git_section,
     render_hash_section, render_path_list,
 };
 pub use just::{filter_justfiles_for_json, render_just_text};

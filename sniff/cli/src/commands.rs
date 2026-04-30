@@ -399,58 +399,47 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 perf.emit_for_json(None);
                 return Ok(());
             }
-            crate::args::RepoAction::UnstagedFiles { package: _ }
-            | crate::args::RepoAction::UntrackedFiles { package: _ } => {
-                let status_filter = match action {
-                    crate::args::RepoAction::UnstagedFiles { .. } => {
-                        sniff::filesystem::git::FileStatus::Modified
-                    }
-                    crate::args::RepoAction::UntrackedFiles { .. } => {
-                        sniff::filesystem::git::FileStatus::Untracked
-                    }
-                    _ => unreachable!(),
+            crate::args::RepoAction::UnstagedFiles { package } => {
+                let args = crate::args::FileListArgs {
+                    package: package.clone(),
+                    package_area: None,
+                    list: false,
+                    csv: false,
+                    no_path: false,
+                    no_error: false,
+                    on_error: None,
+                    filter: Vec::new(),
                 };
-                // Use the existing file-list logic
-                let mut plan = DetectionPlan::new()
-                    .without_os()
-                    .without_hardware()
-                    .without_network();
-                if let Some(ref base) = base_dir {
-                    plan = plan.base_dir(base.clone());
-                }
-                let result = detect_with_plan(plan)?;
-                if let Some(ref fs) = result.filesystem
-                    && let Some(ref git) = fs.git
-                {
-                    let files: Vec<_> = git
-                        .file_changes
-                        .iter()
-                        .filter(|f| match status_filter {
-                            sniff::filesystem::git::FileStatus::Modified => {
-                                f.status == sniff::filesystem::git::FileStatus::Modified
-                                    || f.status == sniff::filesystem::git::FileStatus::Both
-                            }
-                            _ => f.status == status_filter,
-                        })
-                        .collect();
-                    if files.is_empty() {
-                        perf.emit_stderr(result.performance.as_ref());
-                        std::process::exit(1);
-                    }
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&files)?);
-                    } else {
-                        output::emit_text(
-                            &output::render_git_file_list(git, &status_filter, cli.verbose),
-                            cli.plain,
-                        );
-                    }
-                } else {
-                    perf.emit_stderr(None);
-                    std::process::exit(1);
-                }
-                perf.emit_stderr(result.performance.as_ref());
-                return Ok(());
+                return handle_file_list_command(
+                    &args,
+                    ChangeScope::Unstaged,
+                    ChangedPathKind::AllFiles,
+                    cli.json,
+                    cli.plain,
+                    base_dir.as_deref(),
+                    &perf,
+                );
+            }
+            crate::args::RepoAction::UntrackedFiles { package } => {
+                let args = crate::args::FileListArgs {
+                    package: package.clone(),
+                    package_area: None,
+                    list: false,
+                    csv: false,
+                    no_path: false,
+                    no_error: false,
+                    on_error: None,
+                    filter: Vec::new(),
+                };
+                return handle_file_list_command(
+                    &args,
+                    ChangeScope::Untracked,
+                    ChangedPathKind::AllFiles,
+                    cli.json,
+                    cli.plain,
+                    base_dir.as_deref(),
+                    &perf,
+                );
             }
             crate::args::RepoAction::StagedFiles(args)
             | crate::args::RepoAction::DirtySourceCode(args)
@@ -1438,7 +1427,8 @@ fn handle_repo_packages(
 
     if json {
         let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
-        println!("{}", serde_json::to_string(&names)?);
+        let json_val = serde_json::json!({ "names": names });
+        println!("{}", serde_json::to_string(&json_val)?);
         perf.emit_stderr(None);
         return Ok(());
     }
@@ -1499,7 +1489,8 @@ fn handle_repo_package_areas(
 
     if json {
         let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
-        println!("{}", serde_json::to_string(&names)?);
+        let json_val = serde_json::json!({ "names": names });
+        println!("{}", serde_json::to_string(&json_val)?);
         perf.emit_stderr(None);
         return Ok(());
     }
