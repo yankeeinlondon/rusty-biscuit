@@ -1438,6 +1438,65 @@ fn test_repo_staged_files_json_uses_new_shape() {
 }
 
 #[test]
+fn test_repo_unstaged_files_json_uses_new_shape() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    // Modify without staging
+    std::fs::write(path.join("src/main.rs"), "fn main() { updated }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "unstaged-files",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
+    assert_eq!(json["scope"], "unstaged", "scope should be lowercase");
+    assert_eq!(json["kind"], "all_files", "kind should be snake_case");
+    let paths = json["paths"].as_array().expect("paths should be an array");
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.as_str().unwrap().contains("main.rs"))
+    );
+}
+
+#[test]
+fn test_repo_untracked_files_json_uses_new_shape() {
+    let (_dir, path) = create_test_repo();
+    // Create a new file without adding it to git
+    std::fs::write(path.join("new_file.rs"), "// new").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "untracked-files",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
+    assert_eq!(json["scope"], "untracked", "scope should be lowercase");
+    assert_eq!(json["kind"], "all_files", "kind should be snake_case");
+    let paths = json["paths"].as_array().expect("paths should be an array");
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.as_str().unwrap().contains("new_file.rs"))
+    );
+}
+
+#[test]
 fn test_repo_dirty_files_returns_all_file_types() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");
@@ -2126,6 +2185,44 @@ fn test_documentation_changes_json_filters_commits_and_files() {
                 "documentation filter must not keep .rs files: {path_str}"
             );
         }
+    }
+}
+
+#[test]
+fn test_filtered_commit_json_trims_packages() {
+    // `source-code-changes` and `documentation-changes` should NOT include
+    // the full `packages` metadata for brevity.
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "README.md", "# readme");
+
+    for (subcommand, label) in [
+        ("source-code-changes", "source_code"),
+        ("documentation-changes", "documentation"),
+    ] {
+        let assert = cargo_bin_cmd!("sniff")
+            .args([
+                "--base",
+                path.to_str().unwrap(),
+                "repo",
+                subcommand,
+                "--json",
+            ])
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        let value: Value =
+            serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+
+        assert_eq!(
+            value["filter"], label,
+            "{subcommand} --json must include `filter: {label}`"
+        );
+        assert!(
+            value.get("packages").is_none(),
+            "{subcommand} --json must NOT include full `packages` metadata: {value}"
+        );
     }
 }
 
@@ -2971,8 +3068,12 @@ fn test_repo_packages_json_output() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
-    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json["names"].as_array().expect("names must be array");
+    assert_eq!(
+        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["pkg-a", "pkg-b"]
+    );
 }
 
 // ============================================================================
@@ -3195,8 +3296,12 @@ fn test_repo_package_areas_json_output() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
-    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json["names"].as_array().expect("names must be array");
+    assert_eq!(
+        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["pkg-a", "pkg-b"]
+    );
 }
 
 #[test]
@@ -3216,8 +3321,12 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
-    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json["names"].as_array().expect("names must be array");
+    assert_eq!(
+        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["pkg-a", "pkg-b"]
+    );
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
