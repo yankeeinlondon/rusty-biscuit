@@ -6,12 +6,13 @@
 
 use std::process::ExitCode;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 use tui_chrome::HeightSpec;
 
 mod choice_normalize;
 mod commands;
+mod completions;
 mod option_sources;
 mod output;
 
@@ -86,12 +87,9 @@ fn dispatch(cli: Cli) -> std::io::Result<i32> {
         Commands::ChooseMany(args) => run_choose_many(args, cli.output, cli.height),
         Commands::InputTable(args) => run_input_table(args, cli.output, cli.height),
         Commands::Completions { shell } => {
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "question",
-                &mut std::io::stdout(),
-            );
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            completions::write_completions::<Cli, _>(shell, "question", &mut lock)?;
             Ok(0)
         }
     }

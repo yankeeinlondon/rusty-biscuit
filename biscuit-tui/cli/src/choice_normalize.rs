@@ -3,8 +3,9 @@
 //! Handles hotkey prefix parsing, label/value convention transforms,
 //! `::` delimiter splitting, and numeric hotkey assignment. Object
 //! sources (JSON/YAML/TOML/CSV/markdown frontmatter object arrays)
-//! flow through with their `value` and `hotkey` preserved; string
-//! sources fall back to the legacy prefix/delimiter parsing.
+//! flow through with their explicit label, `value`, and `hotkey`
+//! preserved; string sources fall back to the legacy prefix/delimiter
+//! parsing.
 
 use tui_chrome::{ChoiceOption, HotkeySpec};
 
@@ -45,6 +46,8 @@ pub struct ParsedOption {
     pub value: String,
     pub hotkey: Option<HotkeySpec>,
     pub disabled: bool,
+    pub explicit_label: bool,
+    pub explicit_value: bool,
 }
 
 /// Parses a raw option string, extracting any hotkey prefix and splitting
@@ -70,6 +73,8 @@ pub fn parse_option(raw: &str) -> ParsedOption {
             value: value.to_string(),
             hotkey,
             disabled: false,
+            explicit_label: true,
+            explicit_value: true,
         }
     } else {
         ParsedOption {
@@ -78,6 +83,8 @@ pub fn parse_option(raw: &str) -> ParsedOption {
             value: rest.to_string(),
             hotkey,
             disabled: false,
+            explicit_label: false,
+            explicit_value: false,
         }
     }
 }
@@ -240,7 +247,9 @@ pub fn assign_numeric_hotkeys(options: &mut [ParsedOption]) {
 ///    first `::` to produce `(label, value)`. The legacy `--delimiter`
 ///    char is consulted as a fallback when `::` is not present.
 /// 4. Apply `--label-convention` and `--value-convention` transforms
-///    to the resulting label and value.
+///    only to sides that were inferred from plain string options.
+///    Object-supplied fields, `::` splits, and legacy delimiter splits
+///    are explicit and are not convention-transformed.
 /// 5. When `--numeric-hot-keys` is set, fill in any remaining
 ///    `hotkey == None` slots with `Ctrl+1..0` then `Alt+1..0`.
 ///
@@ -286,8 +295,16 @@ pub fn normalize_options(
     Ok(parsed
         .into_iter()
         .map(|opt| {
-            let label = apply_convention(&opt.label, label_convention);
-            let value = apply_convention(&opt.value, value_convention);
+            let label = if opt.explicit_label {
+                opt.label
+            } else {
+                apply_convention(&opt.label, label_convention)
+            };
+            let value = if opt.explicit_value {
+                opt.value
+            } else {
+                apply_convention(&opt.value, value_convention)
+            };
             // The id mirrors the (post-convention) value so callers
             // resolve `--selected` against the same string they will
             // see written back on submit.
@@ -329,18 +346,18 @@ fn raw_option_to_parsed(
     // Value: object-supplied wins outright; otherwise honour `::`,
     // then the legacy `--delimiter`. When neither is present the
     // value mirrors the label.
-    let (label, value) = if let Some(value) = raw.value {
-        (label_after_prefix, value)
+    let (label, value, explicit_label, explicit_value) = if let Some(value) = raw.value {
+        (label_after_prefix, value, true, true)
     } else if let Some((lbl, val)) = label_after_prefix.split_once("::") {
-        (lbl.trim().to_string(), val.trim().to_string())
+        (lbl.trim().to_string(), val.trim().to_string(), true, true)
     } else if let Some(delim) = delimiter {
         if let Some((lbl, val)) = label_after_prefix.split_once(delim) {
-            (lbl.trim().to_string(), val.trim().to_string())
+            (lbl.trim().to_string(), val.trim().to_string(), true, true)
         } else {
-            (label_after_prefix.clone(), label_after_prefix)
+            (label_after_prefix.clone(), label_after_prefix, false, false)
         }
     } else {
-        (label_after_prefix.clone(), label_after_prefix)
+        (label_after_prefix.clone(), label_after_prefix, false, false)
     };
 
     Ok(ParsedOption {
@@ -349,6 +366,8 @@ fn raw_option_to_parsed(
         value,
         hotkey,
         disabled: raw.disabled.unwrap_or(false),
+        explicit_label,
+        explicit_value,
     })
 }
 
@@ -496,6 +515,8 @@ mod tests {
                 value: "a".into(),
                 hotkey: None,
                 disabled: false,
+                explicit_label: false,
+                explicit_value: false,
             },
             ParsedOption {
                 raw: "b".into(),
@@ -503,6 +524,8 @@ mod tests {
                 value: "b".into(),
                 hotkey: None,
                 disabled: false,
+                explicit_label: false,
+                explicit_value: false,
             },
         ];
         assign_numeric_hotkeys(&mut options);
@@ -518,6 +541,8 @@ mod tests {
             value: "a".into(),
             hotkey: None,
             disabled: false,
+            explicit_label: false,
+            explicit_value: false,
         }];
         assign_numeric_hotkeys(&mut options);
         assert_eq!(options[0].hotkey, Some(HotkeySpec::Ctrl('1')));
@@ -532,6 +557,8 @@ mod tests {
                 value: format!("{}", i),
                 hotkey: None,
                 disabled: false,
+                explicit_label: false,
+                explicit_value: false,
             })
             .collect();
         assign_numeric_hotkeys(&mut options);
@@ -546,6 +573,8 @@ mod tests {
             value: "a".into(),
             hotkey: Some(HotkeySpec::Ctrl('x')),
             disabled: false,
+            explicit_label: false,
+            explicit_value: false,
         }];
         assign_numeric_hotkeys(&mut options);
         assert_eq!(options[0].hotkey, Some(HotkeySpec::Ctrl('x')));
@@ -580,6 +609,74 @@ mod tests {
         .unwrap();
         assert_eq!(result[0].label, "Hello World");
         assert_eq!(result[0].value, "hello-world");
+    }
+
+    #[test]
+    fn normalize_options_delimited_value_skips_value_convention() {
+        let options = vec![raw("Red Delicious::Apple")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::SnakeCase,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].label, "Red Delicious");
+        assert_eq!(result[0].value, "Apple");
+        assert_eq!(result[0].id, "Apple");
+    }
+
+    #[test]
+    fn normalize_options_delimited_label_skips_label_convention() {
+        let options = vec![raw("red delicious::Apple")];
+        let result = normalize_options(
+            options,
+            NamingConvention::TitleCase,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].label, "red delicious");
+        assert_eq!(result[0].value, "Apple");
+    }
+
+    #[test]
+    fn normalize_options_object_value_skips_value_convention() {
+        let options = vec![RawOption {
+            label: "Red Delicious".into(),
+            value: Some("Apple".into()),
+            hotkey: None,
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::SnakeCase,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].label, "Red Delicious");
+        assert_eq!(result[0].value, "Apple");
+        assert_eq!(result[0].id, "Apple");
+    }
+
+    #[test]
+    fn normalize_options_legacy_delimiter_skips_conventions() {
+        let options = vec![raw("red delicious:Apple")];
+        let result = normalize_options(
+            options,
+            NamingConvention::TitleCase,
+            NamingConvention::SnakeCase,
+            false,
+            Some(':'),
+        )
+        .unwrap();
+        assert_eq!(result[0].label, "red delicious");
+        assert_eq!(result[0].value, "Apple");
+        assert_eq!(result[0].id, "Apple");
     }
 
     #[test]

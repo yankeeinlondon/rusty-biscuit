@@ -88,6 +88,11 @@ printf "%s\n" "Red" "Green" "Blue" | question choose-one
 - `--md <PATH> <PROP>` — YAML frontmatter array property from a Markdown file
 - Piped stdin (automatic when stdin is not a TTY)
 
+TOML files must use a top-level `options` array. Entries may be strings,
+inline tables (`options = [{ label = "Red", value = "apple" }]`), or
+array-of-tables records (`[[options]]`) with `label`, `value`, `hotkey`, and
+`disabled` fields.
+
 **Selection & filtering:**
 
 - `--delimiter <CHAR>` — split each option on the first delimiter into `label` and returned `value`

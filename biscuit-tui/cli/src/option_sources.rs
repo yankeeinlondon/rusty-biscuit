@@ -248,7 +248,14 @@ fn parse_yaml(body: &str) -> Result<Vec<RawOption>, SourceError> {
 
 fn parse_toml(body: &str) -> Result<Vec<RawOption>, SourceError> {
     let value: toml::Value = toml::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
-    extract_toml_string_array(&value)
+    match &value {
+        toml::Value::Table(table) => {
+            let options = table.get("options").ok_or(SourceError::NotAnArray)?;
+            extract_toml_options_array(options)
+        }
+        toml::Value::Array(_) => extract_toml_options_array(&value),
+        _ => Err(SourceError::NotAnArray),
+    }
 }
 
 fn parse_csv_file(body: &str) -> Result<Vec<RawOption>, SourceError> {
@@ -387,7 +394,7 @@ fn yaml_mapping_to_raw_option(map: &serde_yaml_ng::Mapping) -> Result<RawOption,
     })
 }
 
-fn extract_toml_string_array(value: &toml::Value) -> Result<Vec<RawOption>, SourceError> {
+fn extract_toml_options_array(value: &toml::Value) -> Result<Vec<RawOption>, SourceError> {
     let arr = value.as_array().ok_or(SourceError::NotAnArray)?;
     let mut results = Vec::new();
     for item in arr {
@@ -603,12 +610,74 @@ mod tests {
     }
 
     #[test]
-    fn parse_file_toml_array_top_level_must_be_table() {
+    fn parse_file_toml_options_string_array() {
         let dir = std::env::temp_dir();
         let path = dir.join("test_options.toml");
         std::fs::write(&path, "options = [\"Red\", \"Green\", \"Blue\"]\n").unwrap();
-        // TOML files must have a top-level key, not just an array
-        // So this test should expect NotAnArray
+        let result = parse_file(&path).unwrap();
+        assert_eq!(labels(&result), vec!["Red", "Green", "Blue"]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_toml_options_inline_table_array_preserves_fields() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_options_inline.toml");
+        std::fs::write(
+            &path,
+            "options = [{ label = \"Red\", value = \"apple\", hotkey = \"CTRL+R\", disabled = true }, { label = \"Blue\", value = \"sky\", hotkey = \"ALT+B\" }]\n",
+        )
+        .unwrap();
+        let result = parse_file(&path).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+        assert_eq!(result[0].disabled, Some(true));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert_eq!(result[1].hotkey.as_deref(), Some("ALT+B"));
+        assert_eq!(result[1].disabled, None);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_toml_array_of_tables_preserves_fields() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_options_array_of_tables.toml");
+        std::fs::write(
+            &path,
+            "[[options]]\nlabel = \"Red\"\nvalue = \"apple\"\nhotkey = \"CTRL+R\"\ndisabled = true\n\n[[options]]\nlabel = \"Blue\"\nvalue = \"sky\"\nhotkey = \"ALT+B\"\n",
+        )
+        .unwrap();
+        let result = parse_file(&path).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[0].hotkey.as_deref(), Some("CTRL+R"));
+        assert_eq!(result[0].disabled, Some(true));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        assert_eq!(result[1].hotkey.as_deref(), Some("ALT+B"));
+        assert_eq!(result[1].disabled, None);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_toml_missing_options_key_is_not_array() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_options_missing.toml");
+        std::fs::write(&path, "items = [\"Red\", \"Green\"]\n").unwrap();
+        let result = parse_file(&path);
+        assert!(matches!(result, Err(SourceError::NotAnArray)));
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_toml_options_non_array_is_not_array() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_options_non_array.toml");
+        std::fs::write(&path, "options = \"Red\"\n").unwrap();
         let result = parse_file(&path);
         assert!(matches!(result, Err(SourceError::NotAnArray)));
         std::fs::remove_file(&path).unwrap();
@@ -726,24 +795,8 @@ mod tests {
 
     #[test]
     fn toml_table_preserves_value_and_hotkey() {
-        let body = "[[options]]\nlabel = \"Red\"\nvalue = \"apple\"\nhotkey = \"CTRL+R\"\n[[options]]\nlabel = \"Blue\"\nvalue = \"sky\"\nhotkey = \"ALT+B\"\n";
-        // Full TOML is wrapped under `options`; tests for this go via `parse_file` with extension dispatch,
-        // but `parse_toml` itself takes the raw `Value`. Provide a minimal table-of-options under a key.
-        // For this test we instead use a direct array under a key and access via a wrapper file.
-        let dir = std::env::temp_dir();
-        let path = dir.join("test_options_objects.toml");
-        std::fs::write(&path, body).unwrap();
-        // top-level is a table containing `options` array; calling parse_toml on the wrapper fails because
-        // we want an array. Instead use parse_file with custom call: it returns NotAnArray since the top-level
-        // of TOML files cannot be a bare array. We must encode the array under a known top-level vector.
-        // For this test, we wrap by reading body directly and stripping the table header to get an array.
-        let _ = std::fs::remove_file(&path);
-
-        // Direct test: wrap the array as a TOML array of inline tables.
         let body2 = "options = [{ label = \"Red\", value = \"apple\", hotkey = \"CTRL+R\" }, { label = \"Blue\", value = \"sky\", hotkey = \"ALT+B\" }]\n";
-        let value: toml::Value = toml::from_str(body2).unwrap();
-        let arr = value.get("options").unwrap();
-        let result = extract_toml_string_array(arr).unwrap();
+        let result = parse_toml(body2).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].label, "Red");
         assert_eq!(result[0].value.as_deref(), Some("apple"));

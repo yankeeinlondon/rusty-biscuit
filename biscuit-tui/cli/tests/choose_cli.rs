@@ -617,6 +617,21 @@ fn choose_one_file_yaml_object_array_reaches_event_loop() {
 }
 
 #[test]
+fn choose_one_file_toml_options_array_reaches_event_loop() {
+    let path = write_fixture(
+        "choose_cli_phase2_one.toml",
+        "options = [{ label = \"Red\", value = \"apple\", hotkey = \"CTRL+R\" }, { label = \"Blue\", value = \"sky\" }]\n",
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("question:"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn choose_one_file_csv_three_columns_reaches_event_loop() {
     let path = write_fixture(
         "choose_cli_phase3_one.csv",
@@ -742,15 +757,50 @@ mod pty {
     }
 
     #[test]
-    fn esc_exits_with_code_1() {
+    fn esc_restores_initial_and_exits_with_code_0() {
         if !interactive_enabled() {
             eprintln!("skipping: set QUESTION_INTERACTIVE_PTY=1 to enable");
             return;
         }
-        let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma"]);
+        // Spec (2026-04-28-choose-one-improvements): Esc on `ChooseOne`
+        // restores the initial selection and submits with exit code 0.
+        // Pre-select `beta` so the test can also confirm the restored
+        // value reaches stdout.
+        let mut p = spawn_question(&[
+            "choose-one",
+            "--selected",
+            "beta",
+            "alpha",
+            "beta",
+            "gamma",
+        ]);
         std::thread::sleep(Duration::from_millis(200));
+        // Move the hover off the initial selection, then Esc.
+        p.write_all(b"\x1b[B").expect("send Down");
         p.write_all(b"\x1b").expect("send Esc");
-        assert_eq!(wait_exit_code(&p), 1, "Esc must exit with code 1");
+
+        let mut buf = Vec::new();
+        let mut scratch = [0u8; 1024];
+        loop {
+            match p.read(&mut scratch) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&scratch[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+        let output = String::from_utf8_lossy(&buf).into_owned();
+        assert_eq!(
+            wait_exit_code(&p),
+            0,
+            "Esc must exit with code 0 by restoring the initial selection",
+        );
+        // Strip ANSI/cursor noise — just confirm the restored value
+        // appears somewhere in the post-prompt stdout drain.
+        assert!(
+            output.contains("beta"),
+            "expected restored initial value 'beta' in stdout, got {output:?}",
+        );
     }
 
     #[test]
