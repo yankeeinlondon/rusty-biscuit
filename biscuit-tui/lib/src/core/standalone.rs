@@ -14,7 +14,10 @@
 use std::io::{self, Stdout, Write};
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{
+        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -361,7 +364,8 @@ where
 {
     let hint = state.help_hint().to_string();
     let fullscreen = height.is_none();
-    prepare_terminal(fullscreen)?;
+    let kbd_pushed = prepare_terminal(fullscreen)?;
+    let mut guard = TerminalGuard::new(fullscreen, kbd_pushed);
 
     let resolved_rows = match height {
         Some(spec) => Some(resolve_height_spec(spec)?),
@@ -391,7 +395,8 @@ where
         &chrome,
     );
 
-    restore_terminal(fullscreen);
+    guard.dismiss();
+    restore_terminal(fullscreen, kbd_pushed);
 
     loop_exit_to_result(loop_result?)
 }
@@ -409,21 +414,80 @@ fn loop_exit_to_result<V>(exit: LoopExit<V>) -> io::Result<V> {
     }
 }
 
-fn prepare_terminal(fullscreen: bool) -> io::Result<()> {
+/// Prepares the terminal for raw-mode TUI rendering.
+///
+/// Enables raw mode, enters the alternate screen when `fullscreen` is
+/// true, and attempts to push kitty keyboard enhancement flags so
+/// that modifier-only key events are reported.
+///
+/// Returns `Ok(true)` when the keyboard enhancement flags were
+/// successfully pushed. The caller must pass this flag back to
+/// [`restore_terminal`] so the flags are popped symmetrically.
+fn prepare_terminal(fullscreen: bool) -> io::Result<bool> {
     enable_raw_mode()?;
+    let mut out: Stdout = io::stdout();
     if fullscreen {
-        let mut out: Stdout = io::stdout();
         execute!(out, EnterAlternateScreen)?;
-        out.flush().ok();
     }
-    Ok(())
+    let kbd_pushed = execute!(
+        out,
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                | KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+        )
+    )
+    .is_ok();
+    out.flush().ok();
+    Ok(kbd_pushed)
 }
 
-fn restore_terminal(fullscreen: bool) {
+/// Restores the terminal after a standalone prompt.
+///
+/// Pops keyboard enhancement flags when `kbd_pushed` is true, leaves
+/// the alternate screen when `fullscreen` is true, and disables raw
+/// mode.
+fn restore_terminal(fullscreen: bool, kbd_pushed: bool) {
+    if kbd_pushed {
+        let _ = execute!(
+            io::stdout(),
+            PopKeyboardEnhancementFlags
+        );
+    }
     if fullscreen {
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
     }
     let _ = disable_raw_mode();
+}
+
+/// Guard that calls [`restore_terminal`] on drop.
+///
+/// Ensures the terminal is restored even when the caller panics.
+struct TerminalGuard {
+    fullscreen: bool,
+    kbd_pushed: bool,
+    done: bool,
+}
+
+impl TerminalGuard {
+    fn new(fullscreen: bool, kbd_pushed: bool) -> Self {
+        Self {
+            fullscreen,
+            kbd_pushed,
+            done: false,
+        }
+    }
+
+    fn dismiss(&mut self) {
+        self.done = true;
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        if !self.done {
+            restore_terminal(self.fullscreen, self.kbd_pushed);
+        }
+    }
 }
 
 fn is_ctrl_c(key: &KeyEvent) -> bool {
