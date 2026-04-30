@@ -290,21 +290,21 @@ fn build_deps_package_entry(pkg: &Package) -> Value {
     map.insert("name".into(), Value::String(pkg.name.clone()));
     map.insert(
         "depends_on".into(),
-        serde_json::to_value(&pkg.depends_on).unwrap_or_else(|_| Value::Array(vec![])),
+        serde_json::to_value(&pkg.depends_on).expect("Vec<String> serializes"),
     );
     map.insert(
         "used_by".into(),
-        serde_json::to_value(&pkg.used_by).unwrap_or_else(|_| Value::Array(vec![])),
+        serde_json::to_value(&pkg.used_by).expect("Vec<String> serializes"),
     );
     map.insert(
         "dependencies".into(),
         serde_json::to_value(pkg.dependencies.as_deref().unwrap_or(&[]))
-            .unwrap_or_else(|_| Value::Array(vec![])),
+            .expect("DependencyEntry serializes"),
     );
     map.insert(
         "dev_dependencies".into(),
         serde_json::to_value(pkg.dev_dependencies.as_deref().unwrap_or(&[]))
-            .unwrap_or_else(|_| Value::Array(vec![])),
+            .expect("DependencyEntry serializes"),
     );
 
     // Only include optional families when they have entries — matches the
@@ -315,7 +315,7 @@ fn build_deps_package_entry(pkg: &Package) -> Value {
     {
         map.insert(
             "peer_dependencies".into(),
-            serde_json::to_value(peer).unwrap_or_else(|_| Value::Array(vec![])),
+            serde_json::to_value(peer).expect("DependencyEntry serializes"),
         );
     }
     if let Some(optional) = pkg.optional_dependencies.as_deref()
@@ -323,7 +323,7 @@ fn build_deps_package_entry(pkg: &Package) -> Value {
     {
         map.insert(
             "optional_dependencies".into(),
-            serde_json::to_value(optional).unwrap_or_else(|_| Value::Array(vec![])),
+            serde_json::to_value(optional).expect("DependencyEntry serializes"),
         );
     }
 
