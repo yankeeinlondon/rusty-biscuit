@@ -4,9 +4,6 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::serde_yaml_ng;
 
-use crate::error::Result;
-use crate::events::Provider;
-
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capabilities_for};
 use super::compatibility::{
     fix_frontmatter_indentation_tabs, frontmatter_has_indentation_tabs,
@@ -15,6 +12,8 @@ use super::compatibility::{
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_skill_link};
+use crate::error::Result;
+use crate::provider::Provider;
 
 /// Scope classification for a discovered agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

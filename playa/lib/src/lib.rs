@@ -47,7 +47,7 @@ mod effects;
 pub use crate::effects::SoundEffect;
 
 pub use crate::audio::{Audio, AudioData, AudioSourceKind};
-pub use crate::channels::OutputChannel;
+pub use crate::channels::{OutputChannel, SampleRateRange};
 
 #[cfg(feature = "sfx-native")]
 pub use crate::channels::get_output_channels;

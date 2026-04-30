@@ -1,12 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::error::Result;
-use crate::events::Provider;
-
 use super::atomic::atomic_write;
 use super::claudine_command;
 use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
+use crate::error::Result;
+use crate::provider::Provider;
 
 /// Plugin filename in the plugins directory.
 const PLUGIN_FILENAME: &str = "claudine-bridge.ts";

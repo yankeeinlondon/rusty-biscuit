@@ -7,7 +7,7 @@ use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::stream::semantic::SemanticErrorKind;
 
 use crate::log;

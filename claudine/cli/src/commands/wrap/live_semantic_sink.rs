@@ -39,9 +39,8 @@ use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Margin, WordWrap};
-use claudine::events::{
-    AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
-};
+use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
+use claudine::provider::{Provider, provider_info};
 use claudine::stream::path_link::format_file_link;
 use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
@@ -1244,15 +1243,7 @@ fn error_kind_presentation(kind: SemanticErrorKind) -> (&'static str, Color) {
 }
 
 fn provider_short(p: Provider) -> &'static str {
-    match p {
-        Provider::Claude => "claude",
-        Provider::Codex => "codex",
-        Provider::Gemini => "gemini",
-        Provider::KimiCode => "kimi",
-        Provider::OpenCode => "opencode",
-        Provider::QwenCode => "qwen",
-        _ => "unknown",
-    }
+    provider_info(p).short_name
 }
 
 /// Produce a terse one-line human summary of a [`SemanticEvent::ProviderExtension`]

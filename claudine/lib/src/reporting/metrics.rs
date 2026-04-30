@@ -134,7 +134,7 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use crate::reporting::types::SessionInfo;
 
     #[test]

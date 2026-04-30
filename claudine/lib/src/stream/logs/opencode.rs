@@ -116,6 +116,11 @@ static RESET_AT_RE: LazyLock<Regex> = LazyLock::new(|| {
 static ANSI_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[A-Za-z]").expect("ansi regex must compile"));
 
+static STATUS_CODE_RES: LazyLock<[Regex; 2]> = LazyLock::new(|| [
+    Regex::new(r#""statusCode":(\d{3})"#).expect("status-code regex 1 must compile"),
+    Regex::new(r"statusCode=(\d{3})").expect("status-code regex 2 must compile"),
+]);
+
 /// Parse a single OpenCode stderr line into either a structured record
 /// or a raw passthrough string.
 pub fn parse_line(line: &str) -> ParsedOpenCodeStderrLine {
@@ -509,10 +514,8 @@ fn contains_any_ci(haystack: &str, needles: &[&str]) -> bool {
 }
 
 fn extract_status_code(haystack: &str) -> Option<u16> {
-    let patterns = [r#""statusCode":(\d{3})"#, r"statusCode=(\d{3})"];
-    for pattern in patterns {
-        if let Ok(re) = Regex::new(pattern)
-            && let Some(caps) = re.captures(haystack)
+    for re in STATUS_CODE_RES.iter() {
+        if let Some(caps) = re.captures(haystack)
             && let Some(m) = caps.get(1)
             && let Ok(code) = m.as_str().parse::<u16>()
         {
@@ -720,7 +723,13 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 ref error_name,
                 ref message,
                 is_fatal,
-            } => self.on_api_failure(&record, status_code, error_name.clone(), message.clone(), is_fatal),
+            } => self.on_api_failure(
+                &record,
+                status_code,
+                error_name.clone(),
+                message.clone(),
+                is_fatal,
+            ),
             LogClassification::AuthFailure { ref message } => {
                 self.on_auth_failure(&record, message.clone())
             }
@@ -1859,7 +1868,7 @@ mod tests {
 
     #[test]
     fn merge_stderr_state_applies_diagnostics_without_emitting_config_badge() {
-        use crate::events::Provider;
+        use crate::provider::Provider;
         use crate::stream::badges::BadgeCategory;
         use crate::stream::summary::StreamExecutionSummary;
 
@@ -1900,7 +1909,7 @@ mod tests {
 
     #[test]
     fn merge_stderr_state_merges_rate_limit_and_yields_rate_limit_badge() {
-        use crate::events::Provider;
+        use crate::provider::Provider;
         use crate::stream::badges::BadgeCategory;
         use crate::stream::summary::StreamExecutionSummary;
         use chrono::TimeZone;
@@ -1944,7 +1953,7 @@ mod tests {
 
     #[test]
     fn merge_stderr_state_without_records_does_not_attach_diagnostics() {
-        use crate::events::Provider;
+        use crate::provider::Provider;
         use crate::stream::summary::StreamExecutionSummary;
 
         let state = Arc::new(Mutex::new(SharedStderrState::default()));
@@ -1993,5 +2002,45 @@ mod tests {
             rx.try_recv().is_err(),
             "early-termination signal NOT expected for non-fatal rate limit",
         );
+    }
+
+    #[test]
+    fn extract_status_code_finds_json_variant() {
+        assert_eq!(
+            extract_status_code(r#""statusCode":429"#),
+            Some(429)
+        );
+        assert_eq!(
+            extract_status_code(r#""statusCode":500"#),
+            Some(500)
+        );
+    }
+
+    #[test]
+    fn extract_status_code_finds_key_value_variant() {
+        assert_eq!(
+            extract_status_code("statusCode=429"),
+            Some(429)
+        );
+        assert_eq!(
+            extract_status_code("statusCode=503"),
+            Some(503)
+        );
+    }
+
+    #[test]
+    fn extract_status_code_prefers_first_match() {
+        // When both patterns appear, the first (JSON) match wins
+        let haystack = r#""statusCode":200 statusCode=500"#;
+        assert_eq!(extract_status_code(haystack), Some(200));
+    }
+
+    #[test]
+    fn extract_status_code_returns_none_for_missing_code() {
+        assert_eq!(extract_status_code("no status here"), None);
+        assert_eq!(extract_status_code(""), None);
+        assert_eq!(extract_status_code("statusCode=99"), None);   // too short
+        assert_eq!(extract_status_code("statusCode=9999"), Some(999)); // matches first 3 digits
+        assert_eq!(extract_status_code("other=500"), None);       // wrong key
     }
 }

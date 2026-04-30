@@ -23,7 +23,7 @@ use claudine::composition::{
     build_picker_plan, resolve_target_non_tty_with_catalog,
 };
 use claudine::config::claudine_config::ProviderModelOverride;
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;

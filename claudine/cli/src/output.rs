@@ -11,7 +11,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, SEQUENCE, VERBOSE, YOLO};
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use std::path::Path;
 
 use crate::commands::wrap::McpRuntimeInfo;

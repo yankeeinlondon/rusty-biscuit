@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use crate::events::Provider;
-
 use super::capabilities::LinkableResource;
 use super::discovery::DiscoveredSkill;
 use super::paths::{ProviderSkillPaths, ResourceScope};
+use crate::provider::Provider;
 
 /// Status of a resource across providers after analysis.
 #[derive(Debug, Clone)]

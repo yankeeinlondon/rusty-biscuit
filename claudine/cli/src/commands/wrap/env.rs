@@ -46,7 +46,7 @@ pub(crate) struct PackageContext {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_child_env(
     profile: &dyn WrapperProfile,
-    provider: claudine::events::Provider,
+    provider: claudine::provider::Provider,
     include: &[String],
     yolo: bool,
     interactive: bool,
@@ -85,7 +85,7 @@ pub(crate) fn build_child_env(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_child_env_with_launch(
     profile: &dyn WrapperProfile,
-    provider: claudine::events::Provider,
+    provider: claudine::provider::Provider,
     include: &[String],
     yolo: bool,
     interactive: bool,
@@ -837,12 +837,12 @@ mod tests {
 
     #[test]
     fn build_child_env_uses_interactive_without_claudine_duplicate() {
-        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
         let cwd = tempfile::tempdir().unwrap();
 
         let plan = build_child_env(
             profile,
-            claudine::events::Provider::Claude,
+            claudine::provider::Provider::Claude,
             &[],
             false,
             true,
@@ -902,13 +902,13 @@ mod tests {
         // (used for guardrails, MCP, harness path resolution). The
         // child process must still spawn in the user's launch directory
         // — never in whatever repo the document happens to live in.
-        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
         let cwd = tempfile::tempdir().unwrap();
         let hint_dir = tempfile::tempdir().unwrap();
 
         let plan = build_child_env(
             profile,
-            claudine::events::Provider::Claude,
+            claudine::provider::Provider::Claude,
             &[],
             false,
             false,
@@ -927,12 +927,12 @@ mod tests {
 
     #[test]
     fn repo_root_hint_none_falls_back_to_cwd_detection() {
-        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
         let cwd = tempfile::tempdir().unwrap();
 
         let plan = build_child_env(
             profile,
-            claudine::events::Provider::Claude,
+            claudine::provider::Provider::Claude,
             &[],
             false,
             false,

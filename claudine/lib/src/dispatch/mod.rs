@@ -13,7 +13,8 @@ use tracing::{debug, info, info_span, warn};
 use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
+use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, ResolvedHook};
+use crate::provider::Provider;
 use crate::services::protect::decision::ProtectDecision;
 use crate::services::protect::observe::extract_protect_request;
 use crate::services::protect::report::format_blocked_message;
@@ -397,7 +398,8 @@ pub async fn dispatch_canonical_with_runtime(
 ///
 /// ```no_run
 /// # use claudine::dispatch::write_dispatch_event_to;
-/// # use claudine::events::{EventMeta, Provider, AgenticEvent};
+/// # use claudine::events::{AgenticEvent, EventMeta};
+/// # use claudine::provider::Provider;
 /// # use std::path::Path;
 /// let meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
 /// write_dispatch_event_to(&meta, Path::new("/tmp/test.jsonl")).unwrap();
@@ -659,6 +661,7 @@ mod tests {
     use crate::actions::*;
     use crate::config::claudine_config::{ClaudineConfig, TtsValue, VoiceSelection};
     use crate::events::*;
+    use crate::provider::Provider;
     use serde_json::json;
     use std::collections::HashMap;
 

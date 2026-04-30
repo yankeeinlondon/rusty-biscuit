@@ -49,16 +49,17 @@ build *args="":
 
 # Test both library and CLI
 test:
-    @just _test messenger
+    @just _test messenger --features desktop
     @just _test messenger-cli
 
 # Lint both the library and CLI
 lint:
-    @just _lint messenger
+    @echo "Linting {{ BOLD }}messenger{{ RESET }} (features: desktop)"
+    @cargo clippy -p messenger --features desktop --all-targets -- -D warnings
     @just _lint messenger-cli
 
 lint-fix:
-    @just _lint messenger || just _lint_fix messenger
+    @cargo clippy -p messenger --features desktop --all-targets -- -D warnings || just _lint_fix messenger
     @just _lint messenger-cli || just _lint_fix messenger-cli
 
 # Install the CLI (enables native playback on macOS/Windows; Linux requires libasound2-dev)

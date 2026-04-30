@@ -55,6 +55,7 @@ rodio = { version = "0.22", optional = true, default-features = false, features 
 sniff = { path = "../../sniff/lib" }
 thiserror = "2.0"
 tokio = { version = "1", features = ["process", "io-util", "fs", "rt", "time", "sync"], optional = true }
+tracing = "0.1"
 url = "2.5"
 
 [build-dependencies]

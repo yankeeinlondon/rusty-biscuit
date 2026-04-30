@@ -57,8 +57,7 @@ use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     ModelHint, PreparedComposition, ResolvedCompositionSource,
 };
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the
@@ -306,7 +305,7 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use darkmatter::markdown::Frontmatter;
     use serde_json::json;
     use std::fs;
@@ -325,9 +324,9 @@ mod tests {
         let md = Markdown::with_frontmatter(fm, content);
         fs::write(&file, md.as_string()).unwrap();
 
-        // Re-parse from disk to match real workflow
-        let markdown = Markdown::try_from(file.as_path()).unwrap();
+        // Read once and construct Markdown from the string to avoid double I/O
         let original_text = fs::read_to_string(&file).unwrap();
+        let markdown: Markdown = original_text.clone().into();
         ResolvedCompositionSource {
             original_ref: file.to_str().unwrap().to_string(),
             resolved_path: file,

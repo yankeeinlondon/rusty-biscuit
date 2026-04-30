@@ -4,6 +4,7 @@ use clap::Args;
 use color_eyre::eyre::Result;
 use tracing::info_span;
 
+use crate::log;
 use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
 use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
 use claudine::actions::HookAction;
@@ -13,9 +14,8 @@ use claudine::config::claudine_config::{
 use claudine::config::{
     ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
 };
-use claudine::events::{AgenticEvent, Provider, recommended_sound};
-
-use crate::log;
+use claudine::events::{AgenticEvent, recommended_sound};
+use claudine::provider::Provider;
 
 #[derive(Debug, Args)]
 pub struct InitArgs {

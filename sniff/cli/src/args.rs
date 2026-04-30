@@ -1854,10 +1854,19 @@ mod tests {
                 Ok(_) => panic!("Expected parsing to fail for invalid status"),
                 Err(err) => {
                     let msg = err.to_string();
-                    assert!(msg.contains("invalid PR state 'invalid'"), "Error should mention invalid state: {msg}");
+                    assert!(
+                        msg.contains("invalid PR state 'invalid'"),
+                        "Error should mention invalid state: {msg}"
+                    );
                     assert!(msg.contains("open"), "Error should mention 'open': {msg}");
-                    assert!(msg.contains("closed"), "Error should mention 'closed': {msg}");
-                    assert!(msg.contains("merged"), "Error should mention 'merged': {msg}");
+                    assert!(
+                        msg.contains("closed"),
+                        "Error should mention 'closed': {msg}"
+                    );
+                    assert!(
+                        msg.contains("merged"),
+                        "Error should mention 'merged': {msg}"
+                    );
                     assert!(msg.contains("draft"), "Error should mention 'draft': {msg}");
                     assert!(msg.contains("all"), "Error should mention 'all': {msg}");
                 }

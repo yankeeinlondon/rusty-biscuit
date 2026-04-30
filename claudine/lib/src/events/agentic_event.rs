@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::provider::PROVIDERS_DISPLAY_ORDER;
+use crate::provider::PROVIDERS_DISPLAY_ORDER;
 
 /// Normalized event names across all supported agentic CLI providers.
 ///

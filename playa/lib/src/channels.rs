@@ -34,6 +34,17 @@ pub struct OutputChannel {
     pub is_default_audio: bool,
     /// Whether this is the default device for sound effects
     pub is_default_sfx: bool,
+    /// Supported output sample-rate ranges reported by the audio backend.
+    pub sample_rates: Vec<SampleRateRange>,
+}
+
+/// A supported sample-rate range for a native output channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SampleRateRange {
+    /// Lowest supported sample rate in Hz.
+    pub min_hz: u32,
+    /// Highest supported sample rate in Hz.
+    pub max_hz: u32,
 }
 
 #[cfg(feature = "sfx-native")]
@@ -123,17 +134,36 @@ fn get_output_channels_inner()
 
             let is_default_audio = Some(&base_name) == default_audio_name.as_ref() && *count == 1;
             let is_default_sfx = Some(&base_name) == sfx_device_name.as_ref() && *count == 1;
+            let sample_rates = supported_sample_rates(&device);
 
             channels.push(OutputChannel {
                 name,
                 id,
                 is_default_audio,
                 is_default_sfx,
+                sample_rates,
             });
         }
     }
 
     Ok(channels)
+}
+
+#[cfg(feature = "sfx-native")]
+fn supported_sample_rates(device: &rodio::Device) -> Vec<SampleRateRange> {
+    let Ok(configs) = device.supported_output_configs() else {
+        return Vec::new();
+    };
+
+    let mut ranges = std::collections::BTreeSet::new();
+    for config in configs {
+        ranges.insert(SampleRateRange {
+            min_hz: config.min_sample_rate(),
+            max_hz: config.max_sample_rate(),
+        });
+    }
+
+    ranges.into_iter().collect()
 }
 
 /// Finds an output device by its slugified id or exact name using a caller
