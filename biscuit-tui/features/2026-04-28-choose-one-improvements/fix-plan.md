@@ -7,6 +7,11 @@ docs_updated_during_phase_1:
   - tech-design.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - cli/tests/completions_shell.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - biscuit-tui
 ---
@@ -35,7 +40,7 @@ defects shipped:
   `cli/src/completions.rs:104-141` only asserts that `_question_hotkey_overlay`
   and `[CTRL+ [ALT+ [OPT+` appear *somewhere in the file*. No real shell ever
   ran the script.
-- **Hotkey-display tests synthesise `KeyEvent { code: Modifier(LeftControl), kind: Press }` directly**,
+- **Hotkey-display tests synthesize `KeyEvent { code: Modifier(LeftControl), kind: Press }` directly**,
   bypassing the runner's terminal setup. The library code path is unit-tested,
   but the runner path that would have surfaced the missing
   `KeyboardEnhancementFlags` push was never integration-tested.
