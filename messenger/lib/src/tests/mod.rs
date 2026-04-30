@@ -1,6 +1,8 @@
 #[cfg(feature = "apns")]
 mod apns_integration;
 mod builders;
+#[cfg(feature = "desktop")]
+mod desktop_helpers;
 #[cfg(feature = "discord")]
 mod discord_webhook_integration;
 #[cfg(feature = "fcm")]
