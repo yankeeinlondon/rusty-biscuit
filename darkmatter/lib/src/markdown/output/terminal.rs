@@ -880,8 +880,9 @@ pub fn write_terminal<W: std::io::Write>(
 
     // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
     // and RuleProcessor for horizontal rules with attributes
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(md.content());
     let parser = Parser::new_ext(
-        md.content(),
+        &preprocessed,
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     );
     let events = RuleProcessor::new(InlineStyleProcessor::new(parser));

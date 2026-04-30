@@ -51,8 +51,36 @@ pub use types::{HorizontalRuleAttrs, InlineEvent, InlineTag};
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 use std::collections::VecDeque;
 
+const ESCAPED_MARK_SENTINEL: &str = "\u{E000}\u{E001}";
+
 /// Backwards-compatible alias for [`InlineStyleProcessor`].
 pub type MarkProcessor<'a, I> = InlineStyleProcessor<'a, I>;
+
+pub(crate) fn preprocess_escaped_markers(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut chars = content.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        if ch == '\\' && content.get(i..i + 3) == Some("\\==") {
+            let preceding_backslashes = content[..i]
+                .bytes()
+                .rev()
+                .take_while(|&b| b == b'\\')
+                .count();
+            if preceding_backslashes % 2 == 0 {
+                result.push_str(ESCAPED_MARK_SENTINEL);
+                chars.next();
+                chars.next();
+                continue;
+            }
+        }
+        result.push(ch);
+    }
+    result
+}
+
+pub(crate) fn has_sentinel(text: &str) -> bool {
+    text.contains(ESCAPED_MARK_SENTINEL)
+}
 
 /// Kinds of inline delimiters the processor can detect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,13 +184,11 @@ where
     /// Mark (`==`) escapes are handled by pulldown-cmark before this layer
     /// (`\==` is pre-stripped to `==` text). Dim (`⌄`) escapes are honored
     /// here: a preceding backslash forces the delimiter to remain literal.
-    fn find_delimiters(text: &str) -> Vec<InlineDelimiter> {
+    fn find_delimiters(text: &str) -> (Vec<InlineDelimiter>, Vec<usize>) {
         let bytes = text.as_bytes();
         let mut delimiters = Vec::new();
+        let mut escaped_dim_positions = Vec::new();
 
-        // Scan `==` delimiters. Adjacent pairs share a byte (e.g. `===` in
-        // `====` should still produce two non-overlapping delimiters), so we
-        // skip ahead by 2 bytes after each match.
         let mut last_mark_end = 0;
         for (start, _) in text.match_indices("==") {
             if start < last_mark_end {
@@ -178,10 +204,10 @@ where
             last_mark_end = start + 2;
         }
 
-        // Scan `⌄` (U+2304) delimiters, honoring `\⌄` escapes.
         for (start, _) in text.match_indices('\u{2304}') {
             let is_escaped = start > 0 && bytes[start - 1] == b'\\';
             if is_escaped {
+                escaped_dim_positions.push(start - 1);
                 continue;
             }
             let (can_open, can_close) = Self::classify_dim_delimiter(text, start);
@@ -194,9 +220,8 @@ where
             });
         }
 
-        // Merge by byte position so the emit pass walks left-to-right.
         delimiters.sort_by_key(|d| d.byte_start);
-        delimiters
+        (delimiters, escaped_dim_positions)
     }
 
     /// Classify a `⌄` delimiter at the given byte position.
@@ -230,13 +255,33 @@ where
     fn process_text(&mut self, text: CowStr<'a>) -> bool {
         let s = text.as_ref();
 
-        // Fast path: no markers present
-        if !s.contains("==") && !s.contains('\u{2304}') {
+        let needs_sentinel_handling = has_sentinel(s);
+        let has_dim = s.contains('\u{2304}');
+        let has_mark = s.contains("==");
+
+        if !has_mark && !has_dim && !needs_sentinel_handling {
             return false;
         }
 
-        let delimiters = Self::find_delimiters(s);
-        if delimiters.is_empty() {
+        if needs_sentinel_handling && !has_mark && !has_dim {
+            let replaced = s.replace(ESCAPED_MARK_SENTINEL, "==");
+            self.pending
+                .push_back(InlineEvent::Standard(Event::Text(CowStr::from(replaced))));
+            return true;
+        }
+
+        let work_text: CowStr<'a> = if needs_sentinel_handling {
+            CowStr::from(s.replace(ESCAPED_MARK_SENTINEL, "\u{E000}\u{E001}"))
+        } else {
+            text
+        };
+        let s = work_text.as_ref();
+
+        let sentinel_bytes = ESCAPED_MARK_SENTINEL.as_bytes();
+        let sentinel_len = sentinel_bytes.len();
+
+        let (delimiters, escaped_dim_positions) = Self::find_delimiters(s);
+        if delimiters.is_empty() && escaped_dim_positions.is_empty() && !needs_sentinel_handling {
             return false;
         }
 
@@ -244,19 +289,38 @@ where
         let mut current_pos = 0;
         let mut in_mark = false;
         let mut last_mark_start_idx: Option<usize> = None;
-
-        // Stack of segment indices for unmatched dim openers. When a closer is
-        // found we pop the most recent opener; if it never pops, it gets
-        // back-patched to a literal `⌄` after the walk.
         let mut dim_opener_segments: Vec<usize> = Vec::new();
 
+        let mut escape_iter = escaped_dim_positions.iter().peekable();
+
         for delim in &delimiters {
-            // Emit text before this delimiter
+            while let Some(&&esc_pos) = escape_iter.peek() {
+                if esc_pos >= delim.byte_start {
+                    break;
+                }
+                if esc_pos >= current_pos {
+                    Self::emit_text_segment(
+                        &mut segments,
+                        s,
+                        current_pos,
+                        esc_pos,
+                        sentinel_bytes,
+                        sentinel_len,
+                    );
+                    current_pos = esc_pos + 1;
+                }
+                escape_iter.next();
+            }
+
             if delim.byte_start > current_pos {
-                let before = &s[current_pos..delim.byte_start];
-                segments.push_back(InlineEvent::Standard(Event::Text(CowStr::from(
-                    before.to_string(),
-                ))));
+                Self::emit_text_segment(
+                    &mut segments,
+                    s,
+                    current_pos,
+                    delim.byte_start,
+                    sentinel_bytes,
+                    sentinel_len,
+                );
             }
 
             match delim.kind {
@@ -280,9 +344,6 @@ where
                         paired = true;
                     }
                     if !paired {
-                        // Tentatively emit a literal; if a later closer pairs
-                        // with this delimiter, the slot is back-patched into
-                        // Start(Dim).
                         let seg_idx = segments.len();
                         segments.push_back(InlineEvent::Standard(Event::Text(CowStr::Borrowed(
                             "\u{2304}",
@@ -297,21 +358,65 @@ where
             current_pos = delim.byte_end;
         }
 
-        // Handle remaining text after last delimiter
-        if current_pos < s.len() {
-            let remaining = &s[current_pos..];
-            segments.push_back(InlineEvent::Standard(Event::Text(CowStr::from(
-                remaining.to_string(),
-            ))));
+        while let Some(&&esc_pos) = escape_iter.peek() {
+            if esc_pos >= current_pos {
+                Self::emit_text_segment(
+                    &mut segments,
+                    s,
+                    current_pos,
+                    esc_pos,
+                    sentinel_bytes,
+                    sentinel_len,
+                );
+                current_pos = esc_pos + 1;
+            }
+            escape_iter.next();
         }
 
-        // Unclosed mark: convert Start(Mark) back to literal "=="
+        if current_pos < s.len() {
+            Self::emit_text_segment(
+                &mut segments,
+                s,
+                current_pos,
+                s.len(),
+                sentinel_bytes,
+                sentinel_len,
+            );
+        }
+
         if in_mark && let Some(start_idx) = last_mark_start_idx {
             segments[start_idx] = InlineEvent::Standard(Event::Text(CowStr::Borrowed("==")));
         }
 
         self.pending = segments;
         true
+    }
+
+    fn emit_text_segment(
+        segments: &mut VecDeque<InlineEvent<'a>>,
+        s: &str,
+        start: usize,
+        end: usize,
+        sentinel_bytes: &[u8],
+        sentinel_len: usize,
+    ) {
+        let raw = &s[start..end];
+        if raw.is_empty() {
+            return;
+        }
+        if raw.as_bytes().get(..sentinel_len) == Some(sentinel_bytes) {
+            segments.push_back(InlineEvent::Standard(Event::Text(CowStr::Borrowed("=="))));
+            let rest = &raw[sentinel_len..];
+            if !rest.is_empty() {
+                segments.push_back(InlineEvent::Standard(Event::Text(CowStr::from(
+                    rest.to_string(),
+                ))));
+            }
+        } else {
+            segments.push_back(InlineEvent::Standard(Event::Text(CowStr::from(
+                raw.to_string(),
+            ))));
+        }
     }
 }
 
@@ -871,5 +976,46 @@ mod tests {
         assert_eq!(mark_end_count, 1);
         assert_eq!(dim_start_count, 1);
         assert_eq!(dim_end_count, 1);
+    }
+
+    #[test]
+    fn test_bug1_escaped_dim_backslash_not_stripped() {
+        let parser = Parser::new_ext(r"Escaped: \⌄dim⌄", Options::ENABLE_STRIKETHROUGH);
+        let events: Vec<InlineEvent<'_>> = InlineStyleProcessor::new(parser).collect();
+        let content = extract_text_content(&events);
+        // Bug: currently contains "\⌄dim⌄" — should be "⌄dim⌄" (backslash stripped)
+        assert!(
+            !content.contains('\\'),
+            "Escaped \\⌄ should strip the backslash, got: {:?}",
+            content
+        );
+    }
+
+    #[test]
+    fn test_bug2_escaped_mark_still_triggers() {
+        for input in &[r"\==highlight==", r"before \==highlight== after"] {
+            let preprocessed = super::preprocess_escaped_markers(input);
+            let parser = Parser::new_ext(&preprocessed, Options::ENABLE_STRIKETHROUGH);
+            let events: Vec<InlineEvent<'_>> = InlineStyleProcessor::new(parser).collect();
+            let has_mark = events
+                .iter()
+                .any(|e| matches!(e, InlineEvent::Start(InlineTag::Mark)));
+            assert!(
+                !has_mark,
+                "Input {:?}: escaped \\== should NOT trigger mark highlighting",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn test_double_backslash_then_marker() {
+        let preprocessed = super::preprocess_escaped_markers(r"\\==text==");
+        let parser = Parser::new_ext(&preprocessed, Options::ENABLE_STRIKETHROUGH);
+        let events: Vec<InlineEvent<'_>> = InlineStyleProcessor::new(parser).collect();
+        let content = extract_text_content(&events);
+        assert!(content.contains('\\'), "Should contain literal backslash, got: {:?}", content);
+        let has_mark = events.iter().any(|e| matches!(e, InlineEvent::Start(InlineTag::Mark)));
+        assert!(has_mark, "\\\\==text== should still produce mark for 'text'");
     }
 }

@@ -137,7 +137,8 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
 
     // Parse markdown content with GFM strikethrough extension and wrap with MarkProcessor
     // and RuleProcessor for horizontal rules with attributes
-    let parser = Parser::new_ext(md.content(), Options::ENABLE_STRIKETHROUGH);
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(md.content());
+    let parser = Parser::new_ext(&preprocessed, Options::ENABLE_STRIKETHROUGH);
     let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
 
     // Track state for code blocks
