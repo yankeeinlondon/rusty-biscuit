@@ -1014,8 +1014,17 @@ mod tests {
         let parser = Parser::new_ext(&preprocessed, Options::ENABLE_STRIKETHROUGH);
         let events: Vec<InlineEvent<'_>> = InlineStyleProcessor::new(parser).collect();
         let content = extract_text_content(&events);
-        assert!(content.contains('\\'), "Should contain literal backslash, got: {:?}", content);
-        let has_mark = events.iter().any(|e| matches!(e, InlineEvent::Start(InlineTag::Mark)));
-        assert!(has_mark, "\\\\==text== should still produce mark for 'text'");
+        assert!(
+            content.contains('\\'),
+            "Should contain literal backslash, got: {:?}",
+            content
+        );
+        let has_mark = events
+            .iter()
+            .any(|e| matches!(e, InlineEvent::Start(InlineTag::Mark)));
+        assert!(
+            has_mark,
+            "\\\\==text== should still produce mark for 'text'"
+        );
     }
 }
