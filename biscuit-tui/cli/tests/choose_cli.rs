@@ -757,7 +757,21 @@ mod pty {
 
     fn wait_exit_code_within(session: &mut OsSession, timeout: Duration) -> i32 {
         let deadline = Instant::now() + timeout;
+        let mut scratch = [0u8; 4096];
         loop {
+            // The child's `restore_terminal` writes a few CSI sequences
+            // (pop kitty flags, leave alt screen, show cursor) just
+            // before exit. Those writes block the slave's stdout if the
+            // PTY master buffer is full, which prevents the process
+            // from ever reaching `exit`. Drain the master FD on every
+            // poll iteration so the child can flush and exit cleanly.
+            loop {
+                match session.try_read(&mut scratch) {
+                    Ok(0) => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
             match session.get_process().status() {
                 Ok(WaitStatus::Exited(_, code)) => return code,
                 Ok(WaitStatus::Signaled(_, signal, _)) => {
