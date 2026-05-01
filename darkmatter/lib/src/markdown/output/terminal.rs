@@ -1641,6 +1641,7 @@ pub fn write_terminal<W: std::io::Write>(
 /// * `in_dim` - Whether to apply dim/faint formatting
 /// * `emit_dim` - Whether to emit dim escape codes
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn emit_prose_text(
     text: &str,
     style: Style,
@@ -1726,6 +1727,7 @@ fn push_prose_text(
 /// Emits inline code with both foreground and background colors.
 ///
 /// Uses the style's background color if available, otherwise uses a subtle gray.
+#[cfg(test)]
 fn emit_inline_code(text: &str, style: Style) -> String {
     let mut result = String::new();
     push_inline_code(&mut result, text, style);
