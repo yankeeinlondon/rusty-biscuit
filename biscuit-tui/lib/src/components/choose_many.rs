@@ -43,8 +43,8 @@ use super::choice_layout::{ChoiceLayout, navigate_row};
 use super::choice_render::ChoiceRenderContext;
 use super::choose::{ChoiceInput, ChoiceOption, HotkeyDisplayMode, Orientation, SelectionMode};
 use super::choose_one::{
-    HOTKEY_DISPLAY_FALLBACK, build_hotkeys, first_enabled_index, last_enabled_index,
-    modifier_only_mode,
+    HOTKEY_DISPLAY_FALLBACK, build_effective_hotkeys, build_hotkeys, first_enabled_index,
+    last_enabled_index, modifier_only_mode,
 };
 
 /// Mutable state for a [`ChooseMany`] widget.
@@ -63,6 +63,8 @@ pub struct ChooseManyState<V = String> {
     hover: usize,
     scroll_offset: usize,
     hotkeys: HashMap<char, usize>,
+    ctrl_hotkeys: HashMap<char, usize>,
+    alt_hotkeys: HashMap<char, usize>,
     label: Option<Label>,
     theme: ComponentTheme,
     bindings: KeyBindings,
@@ -92,6 +94,7 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
         }
         let selected = vec![false; input.options.len()];
         let hotkeys = build_hotkeys(&input.options);
+        let (ctrl_hotkeys, alt_hotkeys) = build_effective_hotkeys(&input.options);
         let hover = first_enabled_index(&input.options).unwrap_or(0);
         let cached_labels: Vec<String> = input.options.iter().map(|o| o.label.clone()).collect();
         let mut filter = FuzzyFilter::new();
@@ -102,6 +105,8 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             hover,
             scroll_offset: 0,
             hotkeys,
+            ctrl_hotkeys,
+            alt_hotkeys,
             label: None,
             theme: ComponentTheme::default(),
             bindings: KeyBindings::default(),
@@ -608,6 +613,28 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
             return EventOutcome::Consumed;
         }
 
+        match event.modifiers {
+            KeyModifiers::CONTROL => {
+                if let KeyCode::Char(c) = event.code
+                    && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
+                {
+                    jump_to(state, idx);
+                    toggle_at(state, idx);
+                    return EventOutcome::Consumed;
+                }
+            }
+            KeyModifiers::ALT => {
+                if let KeyCode::Char(c) = event.code
+                    && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
+                {
+                    jump_to(state, idx);
+                    toggle_at(state, idx);
+                    return EventOutcome::Consumed;
+                }
+            }
+            _ => {}
+        }
+
         // Home/End/vim-style jumps + hotkey/filter-open, only when the
         // search prompt is hidden.
         if !state.filter_visible && event.modifiers.is_empty() {
@@ -866,6 +893,30 @@ mod tests {
     fn hotkey_toggles_matching_option() {
         let mut state = ChooseManyState::new(fixture_input());
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('m')));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.is_selected(1));
+        assert_eq!(state.hover(), Some(1));
+    }
+
+    #[test]
+    fn default_ctrl_hotkey_toggles_matching_option() {
+        let mut state = ChooseManyState::new(fixture_input());
+        let event = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL);
+        let outcome = ChooseMany::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert!(state.is_selected(1));
+        assert_eq!(state.hover(), Some(1));
+    }
+
+    #[test]
+    fn explicit_alt_hotkey_toggles_matching_option() {
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+            ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+            ChoiceOption::new("m", "Mushrooms", "mushrooms").with_hotkey(HotkeySpec::Alt('x')),
+        ]);
+        let mut state = ChooseManyState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
+        let outcome = ChooseMany::new().handle_event(&mut state, event);
         assert_eq!(outcome, EventOutcome::Consumed);
         assert!(state.is_selected(1));
         assert_eq!(state.hover(), Some(1));

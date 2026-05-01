@@ -15,8 +15,8 @@ use std::io::{self, Stdout, Write};
 
 use crossterm::{
     event::{
-        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -143,9 +143,10 @@ pub enum LoopExit<V> {
 /// - The initial draw happens before the first event read. After that,
 ///   the terminal only redraws when an event is [`EventOutcome::Consumed`]
 ///   or when the terminal emits a resize. [`EventOutcome::Ignored`] and
-///   key release events skip the redraw.
-/// - Key release events (sent by crossterm on some platforms) are
-///   silently skipped.
+///   ordinary key release events skip the redraw.
+/// - Ordinary key release events (sent by crossterm on some platforms)
+///   are silently skipped. Modifier-only release events are dispatched so
+///   components can clear transient modifier-held state.
 /// - `Ctrl-C` is mapped to [`LoopExit::CtrlC`] at the runner layer so
 ///   that every component honours it without needing its own binding.
 pub fn drive_event_loop<C, S, B, F>(
@@ -202,7 +203,7 @@ where
 
         match read_event()? {
             Event::Key(key) => {
-                if key.kind == KeyEventKind::Release {
+                if !should_dispatch_key_event(&key) {
                     continue;
                 }
                 if is_ctrl_c(&key) {
@@ -282,7 +283,7 @@ where
 
         match read_event()? {
             Event::Key(key) => {
-                if key.kind == KeyEventKind::Release {
+                if !should_dispatch_key_event(&key) {
                     continue;
                 }
                 if is_ctrl_c(&key) {
@@ -448,10 +449,7 @@ fn prepare_terminal(fullscreen: bool) -> io::Result<bool> {
 /// mode.
 fn restore_terminal(fullscreen: bool, kbd_pushed: bool) {
     if kbd_pushed {
-        let _ = execute!(
-            io::stdout(),
-            PopKeyboardEnhancementFlags
-        );
+        let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
     }
     if fullscreen {
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
@@ -495,6 +493,13 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
         && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
+fn should_dispatch_key_event(key: &KeyEvent) -> bool {
+    match key.kind {
+        KeyEventKind::Press | KeyEventKind::Repeat => true,
+        KeyEventKind::Release => matches!(key.code, KeyCode::Modifier(_)),
+    }
+}
+
 /// Resolves a [`HeightSpec`] to an absolute row count.
 ///
 /// `Cells` pass through the [`HeightSpec::resolve`] clamp against the
@@ -515,6 +520,7 @@ fn resolve_height_spec(spec: HeightSpec) -> io::Result<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::ModifierKeyCode;
     use ratatui::{backend::TestBackend, buffer::Buffer, layout::Rect, style::Style};
 
     /// Minimal widget used for Phase 1 integration tests.
@@ -570,8 +576,62 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct ModifierProbe;
+
+    #[derive(Debug, Default)]
+    struct ModifierProbeState {
+        badge_visible: bool,
+        dispatched: Vec<KeyEvent>,
+        render_count: usize,
+    }
+
+    impl StatefulWidget for ModifierProbe {
+        type State = ModifierProbeState;
+
+        fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+            state.render_count += 1;
+            let label = if state.badge_visible {
+                "badges-visible"
+            } else {
+                "badges-hidden"
+            };
+            buf.set_string(area.x, area.y, label, Style::default());
+        }
+    }
+
+    impl HandleEvent for ModifierProbe {
+        fn handle_event(&self, state: &mut ModifierProbeState, event: KeyEvent) -> EventOutcome {
+            match event.code {
+                KeyCode::Enter => EventOutcome::Submitted,
+                KeyCode::Modifier(_) => {
+                    state.dispatched.push(event);
+                    state.badge_visible = event.kind != KeyEventKind::Release;
+                    EventOutcome::Consumed
+                }
+                _ => EventOutcome::Ignored,
+            }
+        }
+    }
+
+    impl StandaloneState for ModifierProbeState {
+        type Value = bool;
+
+        fn value(&self) -> Self::Value {
+            self.badge_visible
+        }
+    }
+
     fn key_event(code: KeyCode) -> Event {
         Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn key_event_with_kind(code: KeyCode, kind: KeyEventKind) -> Event {
+        Event::Key(KeyEvent::new_with_kind(code, KeyModifiers::NONE, kind))
+    }
+
+    fn modifier_event(modifier: ModifierKeyCode, kind: KeyEventKind) -> Event {
+        key_event_with_kind(KeyCode::Modifier(modifier), kind)
     }
 
     fn run(events: Vec<Event>) -> io::Result<LoopExit<String>> {
@@ -652,11 +712,7 @@ mod tests {
 
     #[test]
     fn key_release_events_are_skipped() {
-        let release = Event::Key(KeyEvent::new_with_kind(
-            KeyCode::Char('q'),
-            KeyModifiers::NONE,
-            KeyEventKind::Release,
-        ));
+        let release = key_event_with_kind(KeyCode::Char('q'), KeyEventKind::Release);
         let events = vec![
             release,
             key_event(KeyCode::Char('b')),
@@ -664,6 +720,84 @@ mod tests {
         ];
         let result = run(events).expect("drive loop");
         assert_eq!(result, LoopExit::Submitted("b".to_string()));
+    }
+
+    #[test]
+    fn modifier_release_events_reach_standalone_loop_and_redraw_hidden_badges() {
+        let backend = TestBackend::new(24, 3);
+        let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
+        let mut state = ModifierProbeState::default();
+        let events = vec![
+            modifier_event(ModifierKeyCode::LeftControl, KeyEventKind::Press),
+            modifier_event(ModifierKeyCode::LeftControl, KeyEventKind::Release),
+            key_event(KeyCode::Enter),
+        ];
+        let mut iter = events.into_iter();
+        let result = drive_event_loop(&mut terminal, ModifierProbe, &mut state, || {
+            iter.next()
+                .ok_or_else(|| io::Error::other("no more events"))
+        });
+
+        assert_eq!(result.expect("drive loop"), LoopExit::Submitted(false));
+        assert_eq!(state.dispatched.len(), 2);
+        assert_eq!(state.dispatched[0].kind, KeyEventKind::Press);
+        assert_eq!(state.dispatched[1].kind, KeyEventKind::Release);
+        assert_eq!(state.render_count, 3);
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].symbol(),
+            "b",
+            "final redraw should render badges-hidden after modifier release",
+        );
+    }
+
+    #[test]
+    fn modifier_release_events_reach_chrome_loop_and_redraw_hidden_badges() {
+        use crate::core::frame::{BorderStyle, FrameChromeConfig};
+
+        let backend = TestBackend::new(28, 5);
+        let mut terminal = Terminal::new(backend).expect("TestBackend terminal");
+        let mut state = ModifierProbeState::default();
+        let chrome = FrameChromeConfig {
+            border: BorderStyle::Rounded,
+            border_label: Some("Hotkeys".to_string()),
+            ..Default::default()
+        };
+        let events = vec![
+            modifier_event(ModifierKeyCode::LeftAlt, KeyEventKind::Press),
+            modifier_event(ModifierKeyCode::LeftAlt, KeyEventKind::Release),
+            key_event(KeyCode::Enter),
+        ];
+        let mut iter = events.into_iter();
+        let result = drive_event_loop_with_chrome(
+            &mut terminal,
+            ModifierProbe,
+            &mut state,
+            || {
+                iter.next()
+                    .ok_or_else(|| io::Error::other("no more events"))
+            },
+            None,
+            &chrome,
+        );
+
+        assert_eq!(result.expect("drive loop"), LoopExit::Submitted(false));
+        assert_eq!(state.dispatched.len(), 2);
+        assert_eq!(state.dispatched[0].kind, KeyEventKind::Press);
+        assert_eq!(state.dispatched[1].kind, KeyEventKind::Release);
+        assert_eq!(state.render_count, 3);
+
+        let row_text = |y: u16| -> String {
+            let buf = terminal.backend().buffer();
+            let mut row = String::new();
+            for x in buf.area.left()..buf.area.right() {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            row
+        };
+        assert!(
+            (1..4).any(|y| row_text(y).contains("badges-hidden")),
+            "final chrome redraw should render badges-hidden after modifier release",
+        );
     }
 
     #[test]

@@ -130,6 +130,24 @@ impl<V> ChoiceOption<V> {
         self
     }
 
+    /// Returns the keyboard shortcut that should behave as this
+    /// option's hotkey.
+    ///
+    /// Disabled options never have a hotkey. Explicit hotkeys take
+    /// priority. Otherwise, the first ASCII alphanumeric label
+    /// character becomes a default Ctrl hotkey.
+    pub fn effective_hotkey(&self) -> Option<HotkeySpec> {
+        if self.disabled {
+            return None;
+        }
+        self.hotkey.or_else(|| {
+            self.label
+                .chars()
+                .find(|c| c.is_ascii_alphanumeric())
+                .map(|c| HotkeySpec::Ctrl(c.to_ascii_lowercase()))
+        })
+    }
+
     /// Projects the option's value into a new type `U`.
     ///
     /// Useful for CLI callers that start with `ChoiceOption<String>`
@@ -339,6 +357,33 @@ mod tests {
         let option: ChoiceOption =
             ChoiceOption::new("r", "Red", "red").with_hotkey(HotkeySpec::Ctrl('r'));
         assert_eq!(option.hotkey, Some(HotkeySpec::Ctrl('r')));
+    }
+
+    #[test]
+    fn effective_hotkey_defaults_to_first_usable_label_char() {
+        let option: ChoiceOption = ChoiceOption::new("r", "  Red", "red");
+        assert_eq!(option.effective_hotkey(), Some(HotkeySpec::Ctrl('r')));
+    }
+
+    #[test]
+    fn effective_hotkey_uses_explicit_hotkey_first() {
+        let option: ChoiceOption =
+            ChoiceOption::new("r", "Red", "red").with_hotkey(HotkeySpec::Alt('x'));
+        assert_eq!(option.effective_hotkey(), Some(HotkeySpec::Alt('x')));
+    }
+
+    #[test]
+    fn effective_hotkey_ignores_disabled_options() {
+        let option: ChoiceOption = ChoiceOption::new("r", "Red", "red")
+            .with_hotkey(HotkeySpec::Ctrl('r'))
+            .disabled();
+        assert_eq!(option.effective_hotkey(), None);
+    }
+
+    #[test]
+    fn effective_hotkey_ignores_labels_without_usable_chars() {
+        let option: ChoiceOption = ChoiceOption::new("dash", " -- ", "dash");
+        assert_eq!(option.effective_hotkey(), None);
     }
 
     #[test]

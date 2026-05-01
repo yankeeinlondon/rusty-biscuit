@@ -104,7 +104,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
             input.options.shuffle(&mut rand::rng());
         }
         let hotkeys = build_hotkeys(&input.options);
-        let (ctrl_hotkeys, alt_hotkeys) = build_explicit_hotkeys(&input.options);
+        let (ctrl_hotkeys, alt_hotkeys) = build_effective_hotkeys(&input.options);
         let hover = first_enabled_index(&input.options).unwrap_or(0);
         let cached_labels: Vec<String> = input.options.iter().map(|o| o.label.clone()).collect();
         let mut filter = FuzzyFilter::new();
@@ -312,12 +312,12 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
         &self.hotkeys
     }
 
-    /// Returns the explicit Ctrl hotkey map keyed by lowercase char.
+    /// Returns the effective Ctrl hotkey map keyed by lowercase char.
     pub fn ctrl_hotkeys(&self) -> &HashMap<char, usize> {
         &self.ctrl_hotkeys
     }
 
-    /// Returns the explicit Alt hotkey map keyed by lowercase char.
+    /// Returns the effective Alt hotkey map keyed by lowercase char.
     pub fn alt_hotkeys(&self) -> &HashMap<char, usize> {
         &self.alt_hotkeys
     }
@@ -820,18 +820,14 @@ pub(super) fn modifier_only_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> 
     }
 }
 
-/// Builds separate maps for explicit Ctrl and Alt hotkeys declared on
-/// [`ChoiceOption::hotkey`].
-pub(super) fn build_explicit_hotkeys<V>(
+/// Builds separate maps for effective Ctrl and Alt hotkeys.
+pub(super) fn build_effective_hotkeys<V>(
     options: &[ChoiceOption<V>],
 ) -> (HashMap<char, usize>, HashMap<char, usize>) {
     let mut ctrl = HashMap::new();
     let mut alt = HashMap::new();
     for (idx, option) in options.iter().enumerate() {
-        if option.disabled {
-            continue;
-        }
-        if let Some(hotkey) = option.hotkey {
+        if let Some(hotkey) = option.effective_hotkey() {
             match hotkey {
                 HotkeySpec::Ctrl(c) => {
                     ctrl.entry(c.to_ascii_lowercase()).or_insert(idx);
@@ -1214,6 +1210,58 @@ mod tests {
         let outcome = ChooseOne::new().handle_event(&mut state, event);
         assert_eq!(outcome, EventOutcome::Submitted);
         assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn default_ctrl_hotkeys_map_plain_enabled_options() {
+        let state = ChooseOneState::new(fixture_input());
+        assert_eq!(state.ctrl_hotkeys().get(&'r'), Some(&0));
+        assert_eq!(state.ctrl_hotkeys().get(&'g'), Some(&1));
+        assert_eq!(state.ctrl_hotkeys().get(&'b'), Some(&2));
+        assert!(state.alt_hotkeys().is_empty());
+    }
+
+    #[test]
+    fn default_ctrl_hotkey_selects_and_submits() {
+        let mut state = ChooseOneState::new(fixture_input());
+        let event = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+        assert_eq!(outcome, EventOutcome::Submitted);
+        assert_eq!(state.selected_index(), Some(1));
+        assert_eq!(state.selected_value(), Some(&"green".to_string()));
+    }
+
+    #[test]
+    fn explicit_alt_hotkey_overrides_default_ctrl_hotkey() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("r", "Red", "red").with_hotkey(HotkeySpec::Alt('x')),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        assert!(state.ctrl_hotkeys().get(&'r').is_none());
+        assert_eq!(state.alt_hotkeys().get(&'x'), Some(&0));
+
+        let ctrl = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        assert_eq!(
+            ChooseOne::new().handle_event(&mut state, ctrl),
+            EventOutcome::Ignored
+        );
+        let alt = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
+        assert_eq!(
+            ChooseOne::new().handle_event(&mut state, alt),
+            EventOutcome::Submitted
+        );
+        assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn disabled_options_do_not_get_default_ctrl_hotkeys() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("r", "Red", "red").disabled(),
+            ChoiceOption::new("g", "Green", "green"),
+        ]);
+        let state = ChooseOneState::new(input);
+        assert!(state.ctrl_hotkeys().get(&'r').is_none());
+        assert_eq!(state.ctrl_hotkeys().get(&'g'), Some(&1));
     }
 
     #[test]
