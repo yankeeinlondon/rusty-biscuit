@@ -276,3 +276,6 @@ _ensure-build-deps:
 # sync a just recipe from one justfile to all others that have it
 sync-recipe recipe source:
     @./scripts/sync-recipe.sh "{{ recipe }}" "{{ source }}"
+
+audio-reset:
+    sudo killall coreaudiod
