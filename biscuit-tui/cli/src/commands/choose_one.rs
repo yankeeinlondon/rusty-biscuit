@@ -222,6 +222,19 @@ mod tests {
     }
 
     #[test]
+    fn build_choice_input_from_list_strips_markdown_bullets() {
+        let args = ChooseOneArgs {
+            list: Some("- Red\n* Green\n1) Blue\n".into()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        let values: Vec<&str> = input.options.iter().map(|o| o.value.as_str()).collect();
+        assert_eq!(labels, vec!["Red", "Green", "Blue"]);
+        assert_eq!(values, vec!["Red", "Green", "Blue"]);
+    }
+
+    #[test]
     fn build_choice_input_from_positional_args() {
         let args = ChooseOneArgs {
             positional: vec!["alpha".into(), "beta".into(), "gamma".into()],

@@ -27,8 +27,7 @@ pub fn write_completions<C: CommandFactory, W: Write>(
     let mut buf: Vec<u8> = Vec::new();
     clap_complete::generate(shell, &mut cmd, bin, &mut buf);
 
-    let mut script =
-        String::from_utf8(buf).expect("clap_complete produces valid UTF-8");
+    let mut script = String::from_utf8(buf).expect("clap_complete produces valid UTF-8");
 
     match shell {
         Shell::Zsh => {
@@ -76,6 +75,18 @@ fn zsh_positional_completer() -> &'static str {
 # When the current word starts with `[`, offers hotkey-prefix candidates
 # exclusively so they are not mixed with command/file fallback pollution.
 _question_choice_positional() {
+    if [[ "$PREFIX" == --* ]]; then
+        local -a option_candidates
+        option_candidates=(
+            --csv --list --rows --file --md
+            --numeric-hot-keys --no-filter --required
+            --border --border-label --border-style
+            --sort --selected --label --label-position
+            --delimiter --active-color --hotkey-badges
+        )
+        _describe -t option-flags 'option flag' option_candidates
+        return
+    fi
     if [[ "$PREFIX" == \[* || -z "$PREFIX" ]]; then
         local -a candidates
         candidates=( '[CTRL+' '[ALT+' '[OPT+' )
@@ -100,8 +111,22 @@ fn bash_wrapper(bin: &str) -> String {
 # path/command fallback pollution).  Otherwise delegate to `_{bin}`.
 _{bin}_complete() {{
     local cur="${{COMP_WORDS[COMP_CWORD]}}"
-    if [[ "$cur" == \[* ]]; then
-        COMPREPLY=( $(compgen -W "[CTRL+ [ALT+ [OPT+" -- "$cur") )
+    local line="${{COMP_LINE:-${{READLINE_LINE:-}}}}"
+    if [[ ( "${{COMP_WORDS[1]}}" == "choose-one" || "${{COMP_WORDS[1]}}" == "choose-many" ) && "${{COMP_CWORD}}" -eq 2 && -z "$cur" ]]; then
+        COMPREPLY=( "[CTRL+" "[ALT+" "[OPT+" )
+        return 0
+    fi
+    if [[ "$line" == *" ["* || "$line" == *" \\["* || "$line" == *" '["* || "$line" == *" \"["* ]]; then
+        COMPREPLY=( "[CTRL+" "[ALT+" "[OPT+" )
+        return 0
+    fi
+    if [[ "$cur" == \\[* ]]; then
+        COMPREPLY=( "\\[CTRL+" "\\[ALT+" "\\[OPT+" )
+        return 0
+    fi
+    local hotkey_cur="$cur"
+    if [[ "$hotkey_cur" == \[* ]]; then
+        COMPREPLY=( $(compgen -W "[CTRL+ [ALT+ [OPT+" -- "$hotkey_cur") )
         return 0
     fi
     _{bin} "$@"
@@ -149,6 +174,10 @@ mod tests {
             "bash wrapper should advertise the hotkey prefixes",
         );
         assert!(
+            text.contains("COMP_LINE"),
+            "bash wrapper should inspect the current command line for hotkey-prefix words",
+        );
+        assert!(
             text.contains("complete -F _question_complete"),
             "bash wrapper must bind `complete` to the wrapper",
         );
@@ -170,6 +199,10 @@ mod tests {
         assert!(
             text.contains("'[CTRL+' '[ALT+' '[OPT+'"),
             "zsh positional completer should advertise the hotkey prefixes",
+        );
+        assert!(
+            text.contains("--numeric-hot-keys --no-filter --required"),
+            "zsh positional completer should advertise option flags for -- prefixes",
         );
     }
 

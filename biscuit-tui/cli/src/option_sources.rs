@@ -172,15 +172,30 @@ fn parse_csv(csv: &str) -> Vec<RawOption> {
 }
 
 fn parse_list(text: &str) -> Vec<RawOption> {
-    text.lines()
-        .map(|line| line.trim_end_matches('\r'))
-        .filter(|line| !line.is_empty())
+    parse_line_labels(text)
+        .into_iter()
+        .map(|line| strip_simple_markdown_list_prefix(line).unwrap_or(line))
         .map(RawOption::from)
         .collect()
 }
 
 fn parse_rows(text: &str) -> Vec<RawOption> {
-    parse_list(text)
+    parse_line_labels(text)
+        .into_iter()
+        .map(RawOption::from)
+        .collect()
+}
+
+fn parse_line_labels(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(|line| line.trim_end_matches('\r'))
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+fn strip_simple_markdown_list_prefix(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    strip_bullet_prefix(trimmed).or_else(|| strip_numbered_prefix(trimmed))
 }
 
 fn parse_file(path: &Path) -> Result<Vec<RawOption>, SourceError> {
@@ -466,12 +481,16 @@ fn parse_markdown_list(body: &str) -> Vec<RawOption> {
 }
 
 fn strip_bullet_prefix(line: &str) -> Option<&str> {
-    for marker in ["- ", "* ", "+ "] {
-        if let Some(rest) = line.strip_prefix(marker) {
-            return Some(rest);
-        }
+    let mut chars = line.chars();
+    let marker = chars.next()?;
+    if !matches!(marker, '-' | '*' | '+') {
+        return None;
     }
-    None
+    let rest = chars.as_str();
+    rest.chars()
+        .next()
+        .is_some_and(char::is_whitespace)
+        .then(|| rest.trim_start())
 }
 
 fn strip_numbered_prefix(line: &str) -> Option<&str> {
@@ -482,8 +501,10 @@ fn strip_numbered_prefix(line: &str) -> Option<&str> {
     let (digits, rest) = line.split_at(digit_count);
     let _: u32 = digits.parse().ok()?;
     let rest = rest.strip_prefix('.').or_else(|| rest.strip_prefix(')'))?;
-    let rest = rest.strip_prefix(' ')?;
-    Some(rest)
+    rest.chars()
+        .next()
+        .is_some_and(char::is_whitespace)
+        .then(|| rest.trim_start())
 }
 
 fn parse_dictionary(body: &str) -> Result<Vec<RawOption>, SourceError> {
@@ -587,6 +608,39 @@ mod tests {
     fn parse_list_splits_lines() {
         let result = parse_list("alpha\nbeta\n\ngamma\n");
         assert_eq!(labels(&result), vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn parse_list_strips_markdown_bullets_after_indentation() {
+        let result = parse_list("  - Apple\n\t* Banana\n+ Cherry\n");
+        assert_eq!(labels(&result), vec!["Apple", "Banana", "Cherry"]);
+    }
+
+    #[test]
+    fn parse_list_strips_markdown_ordered_markers_after_indentation() {
+        let result = parse_list("  1. Apple\n2) Banana\n10.\tCherry\n");
+        assert_eq!(labels(&result), vec!["Apple", "Banana", "Cherry"]);
+    }
+
+    #[test]
+    fn parse_list_preserves_plain_lines_and_non_marker_hyphens() {
+        let result = parse_list("plain\n--flag\nnorth-east\n-Not a bullet\n1.Not ordered\n");
+        assert_eq!(
+            labels(&result),
+            vec![
+                "plain",
+                "--flag",
+                "north-east",
+                "-Not a bullet",
+                "1.Not ordered"
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_rows_preserves_markdown_like_prefixes_raw() {
+        let result = parse_rows("- Red::apple\n1) Blue::sky\n");
+        assert_eq!(labels(&result), vec!["- Red::apple", "1) Blue::sky"]);
     }
 
     #[test]
