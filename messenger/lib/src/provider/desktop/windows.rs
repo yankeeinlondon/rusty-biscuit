@@ -2,7 +2,7 @@
 //!
 //! Three delivery strategies are wired behind a single backend:
 //!
-//! - **Helpers** (`snoretoast`, `burnttoast`) — opportunistic layer probed
+//! - **Helpers** (`snoretoast`, `burnttoast`) — primary delivery path probed
 //!   via `sniff` at construction time. Helpers ship interactive action
 //!   buttons and inline replies (snoretoast) that the bare WinRT toast path
 //!   does not surface. Helpers also tolerate hosts that lack a packaged app
@@ -815,6 +815,54 @@ mod tests {
                 );
             }
             other => panic!("expected MessengerError::Provider, got {other:?}"),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn native_fallback_attempts_winrt_when_bootstrap_present() {
+        // On a real Windows host with a valid Start Menu shortcut, the
+        // WinRT native path must be attempted when no helpers are registered.
+        // We create a fake shortcut so bootstrap passes, then assert the
+        // backend does not return MissingConfiguration.
+        use std::io::Write;
+
+        let temp = tempfile::tempdir().unwrap();
+        let shortcut_dir = temp
+            .path()
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu")
+            .join("Programs");
+        std::fs::create_dir_all(&shortcut_dir).unwrap();
+        std::fs::File::create(shortcut_dir.join("RustyBiscuit.MessengerTests.lnk"))
+            .unwrap()
+            .write_all(b"fake")
+            .unwrap();
+
+        // SAFETY: tests run sequentially in the same test binary, so
+        // temporarily overriding APPDATA does not race with other tests.
+        unsafe {
+            std::env::set_var("APPDATA", temp.path());
+        }
+        let backend = WindowsBackend::with_helpers(config_with_app_id(), Vec::new());
+        let result = backend.send(request()).await;
+        unsafe {
+            std::env::remove_var("APPDATA");
+        }
+
+        // Bootstrap must pass — we should never see MissingConfiguration.
+        assert!(
+            !matches!(result, Err(MessengerError::MissingConfiguration { .. })),
+            "expected bootstrap to pass with fake shortcut, got {result:?}"
+        );
+
+        // If WinRT succeeds, the receipt marks native delivery.
+        if let Ok(receipt) = result {
+            assert_eq!(
+                receipt.metadata.get("helper_used").map(String::as_str),
+                Some("native"),
+            );
         }
     }
 }
