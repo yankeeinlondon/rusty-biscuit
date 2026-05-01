@@ -640,4 +640,96 @@ mod tests {
             "expected dunstify before notify-send: {text}",
         );
     }
+
+    #[test]
+    fn snapshot_text_rendering() {
+        let report = InfoReport {
+            host_os: "Linux".into(),
+            active_daemon: Some(DaemonRecord {
+                name: "dunst".into(),
+                vendor: Some("knopwob".into()),
+                version: Some("1.9.2".into()),
+            }),
+            bundle_id: None,
+            app_id: None,
+            helpers: vec![
+                HelperRecord {
+                    name: "dunstify".into(),
+                    binary_name: "dunstify".into(),
+                    installed: true,
+                    path: Some("/usr/bin/dunstify".into()),
+                    version: Some("1.2.0".into()),
+                    install_hint: None,
+                    website: "https://dunst-project.org".into(),
+                    description: "Customizable notification daemon".into(),
+                },
+                HelperRecord {
+                    name: "notify-send".into(),
+                    binary_name: "notify-send".into(),
+                    installed: false,
+                    path: None,
+                    version: None,
+                    install_hint: Some("sudo apt install libnotify-bin".into()),
+                    website: "https://gitlab.gnome.org/GNOME/libnotify".into(),
+                    description: "Sends desktop notifications".into(),
+                },
+            ],
+            election_order: vec!["dunstify".into(), "notify-send".into()],
+            routes: vec![
+                RouteRecord {
+                    name: "desktop".into(),
+                    provider: "Desktop".into(),
+                    is_default: true,
+                },
+            ],
+        };
+        let text = render_text(&report);
+        insta::assert_snapshot!(text);
+    }
+
+    #[test]
+    fn snapshot_json_rendering() {
+        let report = InfoReport {
+            host_os: "Linux".into(),
+            active_daemon: Some(DaemonRecord {
+                name: "dunst".into(),
+                vendor: Some("knopwob".into()),
+                version: Some("1.9.2".into()),
+            }),
+            bundle_id: None,
+            app_id: None,
+            helpers: vec![
+                HelperRecord {
+                    name: "dunstify".into(),
+                    binary_name: "dunstify".into(),
+                    installed: true,
+                    path: Some("/usr/bin/dunstify".into()),
+                    version: Some("1.2.0".into()),
+                    install_hint: None,
+                    website: "https://dunst-project.org".into(),
+                    description: "Customizable notification daemon".into(),
+                },
+                HelperRecord {
+                    name: "notify-send".into(),
+                    binary_name: "notify-send".into(),
+                    installed: false,
+                    path: None,
+                    version: None,
+                    install_hint: Some("sudo apt install libnotify-bin".into()),
+                    website: "https://gitlab.gnome.org/GNOME/libnotify".into(),
+                    description: "Sends desktop notifications".into(),
+                },
+            ],
+            election_order: vec!["dunstify".into(), "notify-send".into()],
+            routes: vec![
+                RouteRecord {
+                    name: "desktop".into(),
+                    provider: "Desktop".into(),
+                    is_default: true,
+                },
+            ],
+        };
+        let json = render_json(&report).unwrap();
+        insta::assert_snapshot!(json);
+    }
 }
