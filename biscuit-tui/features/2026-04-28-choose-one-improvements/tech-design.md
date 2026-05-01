@@ -341,9 +341,15 @@ Reject duplicate hotkeys at CLI parsing time with a clear config error. Library
 construction should use first-wins semantics to avoid panicking in embedded
 apps.
 
-Pure modifier key press/release visibility is terminal-dependent. Crossterm does
-not reliably report "Ctrl is held" or "Alt is held" as standalone events across
-all terminals. Implement hotkey badges with two layers:
+Pure modifier key press/release visibility is terminal-dependent. The runner MUST
+attempt to enable the kitty keyboard protocol by pushing
+`KeyboardEnhancementFlags::REPORT_EVENT_TYPES |
+KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES` in `prepare_terminal`.
+If the push succeeds, crossterm will emit standalone modifier press/release
+events; if it fails, the runner silently degrades. The flags MUST be popped in
+`restore_terminal` only when the push succeeded.
+
+Implement hotkey badges with two layers:
 
 - When a real `KeyEventKind::Press`/`Release` modifier-only event is available,
   set `hotkey_display` to `CtrlHeld` or `AltHeld` while held.
@@ -444,6 +450,17 @@ Completion metadata should include:
 - source flags: `--csv`, `--list`, `--rows`, `--file`, `--md`,
 - hotkey prefix suggestions when the current token starts with `[`.
 
+The hotkey prefix completion MUST be implemented so that typing `[` followed by
+`<TAB>` (quoted or unquoted) in any positional argument position offers
+`[CTRL+`, `[ALT+`, `[OPT+` as the **only** candidates, with no command or file
+fallback pollution. Post-processing of the generated script replaces the
+positional catch-all `:_default` with a dedicated `_question_choice_positional`
+function for `choose-one` and `choose-many`.
+
+The completion script MUST also preserve option flag suggestions after a literal
+`--` separator. This is achieved by removing `-S` from `_arguments_options` in
+the generated zsh script.
+
 The hotkey prefix completion may require a custom generator. If that becomes too
 large, ship static shell completions for the standard clap surface first and add
 prefix-aware completions in a follow-up.
@@ -489,6 +506,27 @@ enough. Add a small number of render buffer tests for:
 CLI integration can use `assert_cmd` for non-interactive parsing paths and a
 synthetic event source for interactive paths. Do not rely on an actual terminal
 for CI.
+
+### Verification Gates
+
+All completion claims MUST be verified by PTY-driven shell tests (zsh + bash).
+These tests spawn a real shell, install the completion script into a temp
+`fpath` directory, and assert candidate lists for:
+
+- `question choose-one "[<TAB>` → exactly `[CTRL+`, `[ALT+`, `[OPT+`.
+- `question choose-one [<TAB>` → same.
+- `question choose-one a b c d --border --border-label X --<TAB>` → candidate
+  set includes `--csv`, `--list`, `--numeric-hot-keys`, `--no-filter`,
+  `--required`, etc. Not empty.
+- `question <TAB>` → subcommand list.
+
+All keyboard-modifier claims MUST be verified by an integration test that
+exercises the real `prepare_terminal` sequence under a PTY. A bare `Ctrl` press
+via the kitty protocol bytes MUST advance `ChooseOneState`'s
+`current_hotkey_display` to `CtrlHeld`.
+
+No completion or keyboard-modifier feature may be marked "production ready"
+without the corresponding PTY test passing.
 
 ## Performance Notes
 

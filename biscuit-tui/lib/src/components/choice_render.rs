@@ -236,7 +236,8 @@ impl<'a> ChoiceRenderContext<'a> {
                     .iter()
                     .map(|&idx| {
                         let label_width = options[idx].label.width();
-                        let badge_w = badge_width(options[idx].hotkey, self.hotkey_display);
+                        let badge_w =
+                            badge_width(options[idx].effective_hotkey(), self.hotkey_display);
                         let badge_pad = if badge_w > 0 { 1 } else { 0 };
                         (indicator_width + 1 + label_width + 1) as u16 + badge_pad + badge_w
                     })
@@ -427,7 +428,7 @@ impl<'a> ChoiceRenderContext<'a> {
             // Inline hotkey badge in vertical mode (Phase 6). Drawn
             // after the trailing blank so it never bleeds into the
             // active highlight.
-            if let Some(spec) = option.hotkey
+            if let Some(spec) = option.effective_hotkey()
                 && let Some(badge) = badge_span(spec, self.hotkey_display)
             {
                 // Add a separating space so the badge does not abut the
@@ -495,7 +496,7 @@ impl<'a> ChoiceRenderContext<'a> {
             .iter()
             .map(|&idx| {
                 let label_width = options[idx].label.width();
-                let badge_w = badge_width(options[idx].hotkey, self.hotkey_display);
+                let badge_w = badge_width(options[idx].effective_hotkey(), self.hotkey_display);
                 let badge_pad = if badge_w > 0 { 1 } else { 0 };
                 (indicator_width + 1 + label_width + 1) as u16 + badge_pad + badge_w
             })
@@ -582,7 +583,7 @@ impl<'a> ChoiceRenderContext<'a> {
                 // next option row in the same render area. Navigation
                 // uses option-major rows from `layout`, so the badge
                 // sub-row is invisible to row navigation logic.
-                if let Some(spec) = option.hotkey
+                if let Some(spec) = option.effective_hotkey()
                     && let Some(badge) = badge_span(spec, self.hotkey_display)
                     && screen_y + 1 < area.y + area.height
                 {
@@ -1339,7 +1340,7 @@ mod tests {
     }
 
     #[test]
-    fn badge_only_appears_for_options_with_explicit_hotkey() {
+    fn badge_appears_for_options_with_default_hotkey() {
         let theme = default_theme();
         let ctx = ChoiceRenderContext::for_single(
             &theme,
@@ -1362,9 +1363,57 @@ mod tests {
             None,
         );
 
-        // Row 2 (Blue) has no hotkey — neither badge background appears.
-        assert!(find_badge_x(&buf, 2, CTRL_BADGE_BG).is_none());
+        // Row 2 (Blue) has no explicit hotkey, but receives default Ctrl+B.
+        assert!(find_badge_x(&buf, 2, CTRL_BADGE_BG).is_some());
         assert!(find_badge_x(&buf, 2, ALT_BADGE_BG).is_none());
+    }
+
+    #[test]
+    fn disabled_options_do_not_render_default_badges() {
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_single(
+            &theme,
+            TerminalStyle::default(),
+            Orientation::Vertical,
+        )
+        .with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        let options = vec![ChoiceOption::<String>::new("b", "Blue", "blue").disabled()];
+        let area = Rect::new(0, 0, 30, 1);
+        let mut buf = Buffer::empty(area);
+        ctx.render(
+            area,
+            &mut buf,
+            &options,
+            &[0],
+            0,
+            0,
+            |_idx| false,
+            None,
+            None,
+        );
+
+        assert!(find_badge_x(&buf, 0, CTRL_BADGE_BG).is_none());
+    }
+
+    #[test]
+    fn horizontal_layout_measures_default_badges() {
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_single(
+            &theme,
+            TerminalStyle::default(),
+            Orientation::Horizontal,
+        )
+        .with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        let options = vec![
+            ChoiceOption::<String>::new("a", "Alpha", "alpha"),
+            ChoiceOption::<String>::new("b", "Bravo", "bravo"),
+        ];
+        let area = Rect::new(0, 0, 12, 4);
+        let layout = ctx.compute_layout(area, &options, &[0, 1], |_idx| false);
+
+        assert_eq!(layout.row_count(), 2);
+        assert_eq!(layout.item_rects[0].width, 11);
+        assert_eq!(layout.item_rects[1].y, 2);
     }
 
     #[test]

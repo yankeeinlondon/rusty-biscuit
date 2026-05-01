@@ -247,6 +247,7 @@ cli/src/
 ├── output.rs            # OutputMode (raw/json/null)
 ├── option_sources.rs    # Source resolution: --csv, --list, --rows, --file, --md, stdin
 ├── choice_normalize.rs  # Hotkey parsing, naming conventions, delimiter splitting
+├── completions.rs       # Shell completion generation with hotkey-prefix support (bash/zsh)
 └── commands/
     ├── mod.rs
     ├── text_input.rs
