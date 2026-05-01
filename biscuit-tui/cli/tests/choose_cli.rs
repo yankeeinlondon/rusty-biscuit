@@ -726,10 +726,15 @@ fn choose_one_md_frontmatter_object_array_reaches_event_loop() {
 
 #[cfg(unix)]
 mod pty {
-    use std::io::{Read, Write};
-    use std::time::Duration;
+    use std::io::Write;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
 
-    use expectrl::{process::unix::WaitStatus, session::OsSession, spawn};
+    use expectrl::{
+        Session,
+        process::unix::{Signal, WaitStatus},
+        session::OsSession,
+    };
 
     fn interactive_enabled() -> bool {
         std::env::var_os("QUESTION_INTERACTIVE_PTY").is_some()
@@ -737,23 +742,92 @@ mod pty {
 
     fn spawn_question(args: &[&str]) -> OsSession {
         let binary = assert_cmd::cargo::cargo_bin("question");
-        let mut cmd = binary.display().to_string();
-        for arg in args {
-            cmd.push(' ');
-            cmd.push('"');
-            cmd.push_str(arg);
-            cmd.push('"');
-        }
-        let mut p = spawn(&cmd).expect("spawn question under PTY");
+        let mut command = Command::new(binary);
+        command.args(args);
+        let mut p = Session::spawn(command).expect("spawn question under PTY");
         p.set_expect_timeout(Some(Duration::from_secs(5)));
         p
     }
 
-    fn wait_exit_code(session: &OsSession) -> i32 {
-        match session.get_process().wait().expect("wait for child") {
-            WaitStatus::Exited(_, code) => code,
-            other => panic!("unexpected wait status: {other:?}"),
+    /// Polls for child exit with a hard deadline so a wedged PTY can
+    /// never deadlock the test runner.
+    fn wait_exit_code(session: &mut OsSession) -> i32 {
+        wait_exit_code_within(session, Duration::from_secs(5))
+    }
+
+    fn wait_exit_code_within(session: &mut OsSession, timeout: Duration) -> i32 {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match session.get_process().status() {
+                Ok(WaitStatus::Exited(_, code)) => return code,
+                Ok(WaitStatus::Signaled(_, signal, _)) => {
+                    return 128 + (signal as i32);
+                }
+                Ok(WaitStatus::StillAlive) => {
+                    if Instant::now() >= deadline {
+                        // Send SIGKILL and poll non-blockingly for the
+                        // exit status. We deliberately avoid the
+                        // blocking `wait()` here because on some
+                        // platforms `waitpid` can deadlock against the
+                        // open PTY master FD until it is dropped.
+                        let _ = session.get_process_mut().kill(Signal::SIGKILL);
+                        let reap_deadline = Instant::now() + Duration::from_millis(500);
+                        while Instant::now() < reap_deadline {
+                            if !matches!(
+                                session.get_process().status(),
+                                Ok(WaitStatus::StillAlive)
+                            ) {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        panic!("child did not exit within {timeout:?}");
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Ok(other) => panic!("unexpected wait status: {other:?}"),
+                Err(e) => panic!("wait failed: {e}"),
+            }
         }
+    }
+
+    /// Drains the PTY's master side until the child exits or the
+    /// deadline elapses — whichever comes first. Returns whatever bytes
+    /// were read so far. Replaces the previous unbounded `loop { read }`
+    /// which deadlocked when a child exited without the master FD ever
+    /// reporting EOF.
+    fn drain_until_exit(session: &mut OsSession, timeout: Duration) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut scratch = [0u8; 1024];
+        let deadline = Instant::now() + timeout;
+        loop {
+            match session.try_read(&mut scratch) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&scratch[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(_) => break,
+            }
+            if !matches!(
+                session.get_process().status(),
+                Ok(WaitStatus::StillAlive)
+            ) {
+                // Child exited — one final non-blocking drain, then stop.
+                while let Ok(n) = session.try_read(&mut scratch) {
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&scratch[..n]);
+                }
+                break;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        buf
     }
 
     #[test]
@@ -779,19 +853,10 @@ mod pty {
         p.write_all(b"\x1b[B").expect("send Down");
         p.write_all(b"\x1b").expect("send Esc");
 
-        let mut buf = Vec::new();
-        let mut scratch = [0u8; 1024];
-        loop {
-            match p.read(&mut scratch) {
-                Ok(0) => break,
-                Ok(n) => buf.extend_from_slice(&scratch[..n]),
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
-            }
-        }
+        let buf = drain_until_exit(&mut p, Duration::from_secs(5));
         let output = String::from_utf8_lossy(&buf).into_owned();
         assert_eq!(
-            wait_exit_code(&p),
+            wait_exit_code(&mut p),
             0,
             "Esc must exit with code 0 by restoring the initial selection",
         );
@@ -812,7 +877,7 @@ mod pty {
         let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma"]);
         std::thread::sleep(Duration::from_millis(200));
         p.write_all(b"\x03").expect("send Ctrl+C");
-        assert_eq!(wait_exit_code(&p), 130, "Ctrl+C must exit with code 130");
+        assert_eq!(wait_exit_code(&mut p), 130, "Ctrl+C must exit with code 130");
     }
 
     #[test]
@@ -826,20 +891,11 @@ mod pty {
         p.write_all(b"\x01").expect("send Ctrl+A");
         p.write_all(b"\r").expect("send Enter");
 
-        let mut buf = Vec::new();
-        // Drain the PTY's stdout until the child exits — read returns
-        // zero once the master side reports EOF.
-        let mut scratch = [0u8; 1024];
-        loop {
-            match p.read(&mut scratch) {
-                Ok(0) => break,
-                Ok(n) => buf.extend_from_slice(&scratch[..n]),
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
-            }
-        }
+        // Bounded drain — never block past the deadline even if the
+        // child exits without the master FD reporting EOF.
+        let buf = drain_until_exit(&mut p, Duration::from_secs(5));
         let output = String::from_utf8_lossy(&buf).into_owned();
-        assert_eq!(wait_exit_code(&p), 0, "submit must exit with code 0");
+        assert_eq!(wait_exit_code(&mut p), 0, "submit must exit with code 0");
         for value in ["alpha", "beta", "gamma"] {
             assert!(
                 output.contains(value),
@@ -863,7 +919,7 @@ mod pty {
         std::thread::sleep(Duration::from_millis(200));
         p.write_all(b"\r").expect("send Enter");
         assert_eq!(
-            wait_exit_code(&p),
+            wait_exit_code(&mut p),
             0,
             "--height 100% must submit the active option with code 0",
         );

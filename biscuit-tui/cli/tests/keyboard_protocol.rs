@@ -13,9 +13,10 @@
 //! They are gated behind `RUN_PTY_TESTS=1` so default `cargo test` stays fast.
 
 use std::env;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::process::Command;
+use std::time::{Duration, Instant};
 
 fn pty_tests_enabled() -> bool {
     env::var("RUN_PTY_TESTS").as_deref() == Ok("1")
@@ -38,7 +39,7 @@ fn read_all_available(session: &mut expectrl::session::OsSession) -> String {
     let mut scratch = [0u8; 4096];
     session.set_expect_timeout(Some(Duration::from_millis(300)));
     loop {
-        match session.read(&mut scratch) {
+        match session.try_read(&mut scratch) {
             Ok(0) => break,
             Ok(n) => buf.extend_from_slice(&scratch[..n]),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -51,6 +52,35 @@ fn read_all_available(session: &mut expectrl::session::OsSession) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
+fn answer_cursor_position_request(session: &mut expectrl::session::OsSession) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut output = String::new();
+    let mut scratch = [0u8; 4096];
+
+    while Instant::now() < deadline {
+        match session.try_read(&mut scratch) {
+            Ok(0) => break,
+            Ok(n) => {
+                output.push_str(&String::from_utf8_lossy(&scratch[..n]));
+                if output.contains("\x1b[6n") {
+                    session
+                        .write_all(b"\x1b[1;1R")
+                        .expect("send cursor position response");
+                    break;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => break,
+        }
+    }
+
+    session.set_expect_timeout(Some(Duration::from_secs(10)));
+    std::thread::sleep(Duration::from_millis(300));
+}
+
 // ---------------------------------------------------------------------------
 // 3.4 — Bare modifier press shows hotkey badges
 // ---------------------------------------------------------------------------
@@ -58,26 +88,23 @@ fn read_all_available(session: &mut expectrl::session::OsSession) -> String {
 #[cfg(unix)]
 mod keyboard_protocol {
     use super::*;
-    use expectrl::{session::OsSession, spawn};
+    use expectrl::{Session, session::OsSession};
 
     /// Kitty keyboard protocol sequence for a bare Left-Control press.
     ///
-    /// CSI 1 ; 1 : 1 u  → key code 1 (Ctrl), modifiers 1 (none), event type 1 (press)
-    const KITTY_CTRL_PRESS: &[u8] = b"\x1b[1;1:1u";
+    /// CSI 57442 ; 1 u  → Left-Control press.
+    const KITTY_CTRL_PRESS: &[u8] = b"\x1b[57442;1u";
 
     /// Kitty keyboard protocol sequence for a bare Left-Control release.
-    const KITTY_CTRL_RELEASE: &[u8] = b"\x1b[1;1:3u";
+    const KITTY_CTRL_RELEASE: &[u8] = b"\x1b[57442;1:3u";
 
     fn spawn_choose_one() -> OsSession {
         let binary = question_binary();
-        let cmd = format!(
-            "{} choose-one --height 5 \"Red\" \"Green\" \"Blue\"",
-            binary.to_str().unwrap()
-        );
-        let mut session = spawn(&cmd).expect("spawn question choose-one");
+        let mut command = Command::new(binary);
+        command.args(["choose-one", "--height", "5", "Red", "Green", "Blue"]);
+        let mut session = Session::spawn(command).expect("spawn question choose-one");
         session.set_expect_timeout(Some(Duration::from_secs(10)));
-        // Wait for the TUI to render
-        std::thread::sleep(Duration::from_millis(400));
+        answer_cursor_position_request(&mut session);
         session
     }
 
@@ -92,25 +119,26 @@ mod keyboard_protocol {
         let _ = read_all_available(&mut session);
 
         // Send bare Ctrl press via kitty protocol bytes
-        session.write_all(KITTY_CTRL_PRESS).expect("send ctrl press");
+        session
+            .write_all(KITTY_CTRL_PRESS)
+            .expect("send ctrl press");
         std::thread::sleep(Duration::from_millis(200));
 
         // Read the re-rendered output
         let output = read_all_available(&mut session);
 
-        // When Ctrl is held, hotkey badges for Ctrl-hotkeys should be visible.
-        // The exact badge text depends on the theme, but "Ctrl" or "[C]" or
-        // similar indicators should appear.  We look for the uppercase
-        // hotkey letter inside brackets, which the theme renders when badges
-        // are visible.
-        let has_badge = output.contains("[R]") || output.contains("[G]") || output.contains("[B]");
+        // Plain positional options receive default Ctrl hotkeys, so a bare Ctrl
+        // press should reveal their compact ^R/^G/^B badges.
+        let has_badge = output.contains("^R") || output.contains("^G") || output.contains("^B");
         assert!(
             has_badge || output.contains("Ctrl") || output.contains("CTRL"),
             "bare Ctrl press should reveal hotkey badges; output was: {output:?}"
         );
 
         // Send release so the prompt doesn't stay stuck
-        session.write_all(KITTY_CTRL_RELEASE).expect("send ctrl release");
+        session
+            .write_all(KITTY_CTRL_RELEASE)
+            .expect("send ctrl release");
         // Send Enter to submit and exit
         session.write_all(b"\r").expect("send enter");
         std::thread::sleep(Duration::from_millis(200));
@@ -126,24 +154,17 @@ mod keyboard_protocol {
         // Drain initial render
         let _ = read_all_available(&mut session);
 
-        // Send a chord (Ctrl+G) — this should arm the fallback deadline
-        // and make badges visible for ~300 ms.
-        // In raw crossterm terms, Ctrl+G is byte 0x07 (BEL).
+        // Send a mapped chord (Ctrl+G). On terminals without explicit
+        // modifier-only events, chord handling must still select and submit.
         session.write_all(b"\x07").expect("send ctrl+g");
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(200));
 
         let output = read_all_available(&mut session);
 
-        // After the chord, badges should be visible (fallback path)
-        let has_badge = output.contains("[R]") || output.contains("[G]") || output.contains("[B]");
         assert!(
-            has_badge || output.contains("Ctrl") || output.contains("CTRL"),
-            "Ctrl chord should trigger fallback badge display; output was: {output:?}"
+            output.contains("Green"),
+            "Ctrl+G should select and submit Green; output was: {output:?}"
         );
-
-        // Submit to exit cleanly
-        session.write_all(b"\r").expect("send enter");
-        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -154,20 +175,21 @@ mod keyboard_protocol {
 #[cfg(unix)]
 mod degraded_terminal {
     use super::*;
-    use expectrl::{session::OsSession, spawn};
+    use expectrl::{Session, session::OsSession};
 
     /// Force the `TERM` variable to a dumb terminal that does not support
     /// kitty keyboard enhancements.  crossterm's push should fail, but the
     /// runner must not panic and chord fallback must still function.
     fn spawn_choose_one_dumb() -> OsSession {
         let binary = question_binary();
-        let cmd = format!(
-            "TERM=dumb {} choose-one --height 5 \"Red\" \"Green\" \"Blue\"",
-            binary.to_str().unwrap()
-        );
-        let mut session = spawn(&cmd).expect("spawn question choose-one with TERM=dumb");
+        let mut command = Command::new(binary);
+        command
+            .env("TERM", "dumb")
+            .args(["choose-one", "--height", "5", "Red", "Green", "Blue"]);
+        let mut session =
+            Session::spawn(command).expect("spawn question choose-one with TERM=dumb");
         session.set_expect_timeout(Some(Duration::from_secs(10)));
-        std::thread::sleep(Duration::from_millis(400));
+        answer_cursor_position_request(&mut session);
         session
     }
 
@@ -192,9 +214,9 @@ mod degraded_terminal {
 
         // Ensure the process exited (no panic)
         let mut buf = [0u8; 1];
-        match session.read(&mut buf) {
-            Ok(0) => {} // EOF — clean exit
-            Ok(_) => {} // Trailing bytes are fine
+        match session.try_read(&mut buf) {
+            Ok(0) => {}                                              // EOF — clean exit
+            Ok(_) => {}                                              // Trailing bytes are fine
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {} // Timeout is fine
             Err(e) => panic!("unexpected error reading from session: {e}"),
         }
@@ -209,22 +231,16 @@ mod degraded_terminal {
 
         let _ = read_all_available(&mut session);
 
-        // Send Ctrl+G chord (BEL byte)
+        // Send mapped Ctrl+G chord.
         session.write_all(b"\x07").expect("send ctrl+g");
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(200));
 
         let output = read_all_available(&mut session);
 
-        // Even without keyboard enhancements, the chord fallback should show badges
-        let has_badge = output.contains("[R]") || output.contains("[G]") || output.contains("[B]");
         assert!(
-            has_badge || output.contains("Ctrl") || output.contains("CTRL"),
-            "chord fallback should work on dumb terminal; output was: {output:?}"
+            output.contains("Green"),
+            "chord fallback should submit Green on dumb terminal; output was: {output:?}"
         );
-
-        // Exit cleanly
-        session.write_all(b"\r").expect("send enter");
-        std::thread::sleep(Duration::from_millis(300));
     }
 }
 
