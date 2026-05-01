@@ -29,7 +29,7 @@ use crate::markdown::block::{
 };
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
-use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
+use crate::markdown::inline::{InlineEvent, InlineStyleProcessor, InlineTag};
 use crate::markdown::output::code_block;
 use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
@@ -137,8 +137,9 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
 
     // Parse markdown content with GFM strikethrough extension and wrap with MarkProcessor
     // and RuleProcessor for horizontal rules with attributes
-    let parser = Parser::new_ext(md.content(), Options::ENABLE_STRIKETHROUGH);
-    let events = RuleProcessor::new(MarkProcessor::new(parser));
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(md.content());
+    let parser = Parser::new_ext(&preprocessed, Options::ENABLE_STRIKETHROUGH);
+    let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
 
     // Track state for code blocks
     let mut in_code_block = false;
@@ -159,6 +160,12 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             }
             InlineEvent::End(InlineTag::Mark) => {
                 output.push_str("</mark>");
+            }
+            InlineEvent::Start(InlineTag::Dim) => {
+                output.push('⌄');
+            }
+            InlineEvent::End(InlineTag::Dim) => {
+                output.push('⌄');
             }
             // Handle horizontal rule with attributes
             InlineEvent::HorizontalRule(attrs) => {
@@ -1014,6 +1021,70 @@ fn main() {}
         assert!(html.contains("<strong>"), "Should preserve strong");
         assert!(html.contains("<mark>"), "Should have mark");
         assert!(html.contains("<em>"), "Should preserve em");
+    }
+
+    // Dim tests
+    #[test]
+    fn test_html_dim_renders_as_literal() {
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            html.contains("⌄dimmed⌄"),
+            "Should preserve ⌄ delimiters as literal, got: {}",
+            html
+        );
+        assert!(!html.contains("<dim>"), "Should not have <dim> tag");
+    }
+
+    #[test]
+    fn test_html_dim_with_nested_strong() {
+        let md: Markdown = "⌄dim and **strong**⌄".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            html.contains("<p>⌄dim and <strong>strong</strong>⌄</p>"),
+            "Should preserve delimiters around nested HTML, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_html_dim_in_inline_code() {
+        let md: Markdown = "Use `⌄code⌄` syntax.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<code>"), "Should contain code tag");
+        assert!(
+            html.contains("⌄code⌄"),
+            "Should preserve ⌄ in inline code, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_html_dim_in_fenced_code() {
+        let content = "```\n⌄dim\n```";
+        let md: Markdown = content.into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            html.contains("⌄dim"),
+            "Should preserve ⌄ in fenced code, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_html_dim_escaping() {
+        let md: Markdown = "⌄<script>alert('xss')</script>⌄".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            !html.contains("<script>alert"),
+            "Should escape script inside dim span"
+        );
+        assert!(
+            html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
+            "Should have escaped entities inside dim span, got: {}",
+            html
+        );
+        assert!(html.contains("⌄"), "Should preserve ⌄ delimiters");
     }
 
     // Mermaid rendering tests - regression tests for mermaid code block rendering bug

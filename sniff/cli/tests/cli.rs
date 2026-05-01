@@ -672,11 +672,34 @@ fn test_git_status_subcommand_json_output() {
     let json_str = std::str::from_utf8(&output).unwrap();
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
-    // repo git-status --json outputs the RepoInfo structure
+    // `repo git-status --json` returns a focused `GitInfo` object — not the
+    // full `RepoInfo` blob. Top-level keys mirror `GitInfo` fields.
     assert!(json.is_object(), "git-status JSON should be an object");
     assert!(
-        json.get("is_monorepo").is_some() || json.get("packages").is_some(),
-        "git-status JSON should contain repo fields"
+        json.get("repo_root").is_some(),
+        "git-status JSON should have top-level `repo_root`: {json}"
+    );
+    assert!(
+        json.get("status").is_some(),
+        "git-status JSON should have top-level `status`: {json}"
+    );
+    assert!(
+        json.get("recent").is_some(),
+        "git-status JSON should have top-level `recent`: {json}"
+    );
+    assert!(
+        json.get("branches").is_some(),
+        "git-status JSON should have top-level `branches`: {json}"
+    );
+
+    // RepoInfo-only fields must not leak into git-status JSON.
+    assert!(
+        json.get("is_monorepo").is_none(),
+        "git-status JSON should NOT contain RepoInfo `is_monorepo`: {json}"
+    );
+    assert!(
+        json.get("packages").is_none(),
+        "git-status JSON should NOT contain RepoInfo `packages`: {json}"
     );
 }
 
@@ -1017,14 +1040,17 @@ fn test_repo_help_mentions_latest_versions() {
 }
 
 #[test]
-fn test_git_status_json_contains_repo_fields() {
-    // Verify JSON output contains repo-level fields
+fn test_git_status_json_is_git_info() {
+    // Verify JSON output is a `GitInfo` object — not the full `RepoInfo`
+    // blob. The top-level `repo_root` field is unique to `GitInfo`'s shape
+    // (RepoInfo serializes its root field as `root`).
     cargo_bin_cmd!("sniff")
         .args(["repo", "git-status", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("is_monorepo"))
-        .stdout(predicate::str::contains("packages"));
+        .stdout(predicate::str::contains("repo_root"))
+        .stdout(predicate::str::contains("\"is_monorepo\"").not())
+        .stdout(predicate::str::contains("\"packages\"").not());
 }
 
 #[test]
@@ -1408,6 +1434,65 @@ fn test_repo_staged_files_json_uses_new_shape() {
         paths
             .iter()
             .any(|p| p.as_str().unwrap().contains("main.rs"))
+    );
+}
+
+#[test]
+fn test_repo_unstaged_files_json_uses_new_shape() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    // Modify without staging
+    std::fs::write(path.join("src/main.rs"), "fn main() { updated }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "unstaged-files",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
+    assert_eq!(json["scope"], "unstaged", "scope should be lowercase");
+    assert_eq!(json["kind"], "all_files", "kind should be snake_case");
+    let paths = json["paths"].as_array().expect("paths should be an array");
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.as_str().unwrap().contains("main.rs"))
+    );
+}
+
+#[test]
+fn test_repo_untracked_files_json_uses_new_shape() {
+    let (_dir, path) = create_test_repo();
+    // Create a new file without adding it to git
+    std::fs::write(path.join("new_file.rs"), "// new").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "untracked-files",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
+    assert_eq!(json["scope"], "untracked", "scope should be lowercase");
+    assert_eq!(json["kind"], "all_files", "kind should be snake_case");
+    let paths = json["paths"].as_array().expect("paths should be an array");
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.as_str().unwrap().contains("new_file.rs"))
     );
 }
 
@@ -2001,6 +2086,181 @@ fn test_repo_documentation_changes_with_json() {
     assert!(
         stdout.contains("\"commits\""),
         "JSON should have commits array"
+    );
+}
+
+#[test]
+fn test_source_code_changes_json_filters_commits_and_files() {
+    // Two commits: one touches a source file, one touches only docs.
+    // `source-code-changes --json` must keep only the source commit and
+    // tag the payload with `"filter": "source_code"`.
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "README.md", "# readme");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+
+    assert_eq!(
+        value["filter"], "source_code",
+        "source-code-changes --json must include `filter: source_code`: {value}"
+    );
+
+    let commits = value["commits"].as_array().expect("commits must be array");
+    // Only the source-touching commit should remain after filtering.
+    assert_eq!(
+        commits.len(),
+        1,
+        "expected exactly one commit after source-code filtering: {value}"
+    );
+
+    // All files left in the kept commit must look like source code.
+    for commit in commits {
+        let files = commit["files"].as_array().expect("files must be array");
+        assert!(!files.is_empty(), "filtered commit must keep its files");
+        for file in files {
+            let path_str = file["path"].as_str().expect("path is a string");
+            assert!(
+                !path_str.ends_with(".md"),
+                "source-code filter must not keep markdown: {path_str}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_documentation_changes_json_filters_commits_and_files() {
+    // Two commits: one touches a source file, one touches docs.
+    // `documentation-changes --json` must keep only doc commits and tag
+    // the payload with `"filter": "documentation"`.
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "README.md", "# readme");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "documentation-changes",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+
+    assert_eq!(
+        value["filter"], "documentation",
+        "documentation-changes --json must include `filter: documentation`: {value}"
+    );
+
+    let commits = value["commits"].as_array().expect("commits must be array");
+    assert!(
+        !commits.is_empty(),
+        "expected at least one doc commit: {value}"
+    );
+
+    for commit in commits {
+        let files = commit["files"].as_array().expect("files must be array");
+        assert!(!files.is_empty(), "filtered commit must keep its files");
+        for file in files {
+            let path_str = file["path"].as_str().expect("path is a string");
+            assert!(
+                !path_str.ends_with(".rs"),
+                "documentation filter must not keep .rs files: {path_str}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_filtered_commit_json_trims_packages() {
+    // `source-code-changes` and `documentation-changes` should NOT include
+    // the full `packages` metadata for brevity.
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "README.md", "# readme");
+
+    for (subcommand, label) in [
+        ("source-code-changes", "source_code"),
+        ("documentation-changes", "documentation"),
+    ] {
+        let assert = cargo_bin_cmd!("sniff")
+            .args([
+                "--base",
+                path.to_str().unwrap(),
+                "repo",
+                subcommand,
+                "--json",
+            ])
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        let value: Value =
+            serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+
+        assert_eq!(
+            value["filter"], label,
+            "{subcommand} --json must include `filter: {label}`"
+        );
+        assert!(
+            value.get("packages").is_none(),
+            "{subcommand} --json must NOT include full `packages` metadata: {value}"
+        );
+    }
+}
+
+#[test]
+fn test_recent_commits_json_unchanged() {
+    // Regression guard — `recent-commits --json` must NOT include the
+    // `filter` field that the filtered variants add.
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "README.md", "# readme");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+
+    let obj = value.as_object().expect("payload must be a JSON object");
+    assert!(
+        !obj.contains_key("filter"),
+        "recent-commits --json must NOT include `filter`: {value}"
+    );
+    assert!(
+        obj.contains_key("commits"),
+        "recent-commits --json must include `commits`"
+    );
+    assert!(
+        obj.contains_key("period_label"),
+        "recent-commits --json must include `period_label`"
     );
 }
 
@@ -2808,8 +3068,12 @@ fn test_repo_packages_json_output() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
-    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json["names"].as_array().expect("names must be array");
+    assert_eq!(
+        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["pkg-a", "pkg-b"]
+    );
 }
 
 // ============================================================================
@@ -3032,8 +3296,12 @@ fn test_repo_package_areas_json_output() {
         .assert()
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
-    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json["names"].as_array().expect("names must be array");
+    assert_eq!(
+        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["pkg-a", "pkg-b"]
+    );
 }
 
 #[test]
@@ -3053,8 +3321,12 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let names: Vec<String> = serde_json::from_str(&stdout).expect("output should be a JSON array");
-    assert_eq!(names, vec!["pkg-a".to_string(), "pkg-b".to_string()]);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json["names"].as_array().expect("names must be array");
+    assert_eq!(
+        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["pkg-a", "pkg-b"]
+    );
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
@@ -3064,6 +3336,310 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
     assert!(
         stderr.contains("Performance") || stderr.contains("Total"),
         "stderr should contain performance timing text, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_repo_root_json_perf_stdout_is_valid_json() {
+    // `repo root --json --perf` must produce parseable JSON on stdout.
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["repo", "root", "--json", "--perf"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert!(stdout.contains("root"), "should contain root key");
+}
+
+#[test]
+fn test_repo_dirty_files_json_perf_stdout_is_valid_json() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-files",
+            "--json",
+            "--perf",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+}
+
+#[test]
+fn test_repo_recent_commits_json_perf_stdout_is_valid_json() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--json",
+            "--perf",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert!(stdout.contains("commits"), "should contain commits key");
+}
+
+#[test]
+fn test_repo_has_merge_conflict_json_perf_stdout_is_valid_json() {
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "has-merge-conflict",
+            "--json",
+            "--perf",
+        ])
+        .assert();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let _: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+}
+
+// ============================================================================
+// Phase 2 — Stable JSON shape for `package` / `package-area` / `root`
+// when the result resolves to empty.
+// ============================================================================
+//
+// JSON consumers must always see a stable object even when the lookup
+// resolves to nothing. Text mode emits prose via `handle_no_results`, but
+// JSON mode emits `{ "name": "" }` (or `{ "root": "" }`) and exits 1.
+
+#[test]
+fn test_package_json_empty_name_stable_shape() {
+    // A bare git repo with no packages — `repo package --json` must emit
+    // `{ "name": "" }` instead of prose / no output.
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package",
+            "--json",
+        ])
+        .assert();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String(String::new()));
+}
+
+#[test]
+fn test_package_area_json_empty_name_stable_shape() {
+    let (_dir, path) = create_test_repo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-area",
+            "--json",
+        ])
+        .assert();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String(String::new()));
+}
+
+#[test]
+fn test_root_json_outside_git_repo_stable_shape() {
+    // Pointing `--base` at a non-git directory must still emit
+    // `{ "root": "" }` so JSON consumers see a stable shape rather than
+    // a Box<dyn Error> bubble.
+    let dir = tempfile::tempdir().unwrap();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            dir.path().to_str().unwrap(),
+            "repo",
+            "root",
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["root"], Value::String(String::new()));
+}
+
+// ============================================================================
+// `repo {dirty,staged,unstaged}-{packages,package-areas} --json` Shape Tests
+// ============================================================================
+//
+// Phase 3 of the `incorrect-json` feature: every package/area family
+// subcommand returns `{ scope, kind, names }` instead of the full RepoInfo
+// blob. Non-monorepo repos return an empty `names` array, NOT a prose
+// "only intended to be used in a monorepo" error string.
+
+fn assert_package_family_shape_when_non_monorepo(
+    subcommand: &str,
+    expected_scope: &str,
+    expected_kind: &str,
+) {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    // Modify so there's something to scan.
+    std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            subcommand,
+            "--json",
+        ])
+        .assert();
+
+    // Accept either exit code: text mode exits 1 on empty rendered output,
+    // but JSON mode is structurally well-formed regardless.
+    let output = assert.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let json: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("expected JSON for `{subcommand}`, got: {stdout:?} ({e})"));
+    assert_eq!(
+        json["scope"], expected_scope,
+        "scope mismatch for {subcommand}"
+    );
+    assert_eq!(
+        json["kind"], expected_kind,
+        "kind mismatch for {subcommand}"
+    );
+    let names = json["names"]
+        .as_array()
+        .unwrap_or_else(|| panic!("expected `names` array for {subcommand}, got: {stdout}"));
+    // Non-monorepo: empty array, not prose error.
+    assert!(
+        names.is_empty(),
+        "non-monorepo repo should produce empty names; got {names:?}"
+    );
+}
+
+#[test]
+fn test_dirty_packages_json_shape() {
+    assert_package_family_shape_when_non_monorepo("dirty-packages", "dirty", "packages");
+}
+
+#[test]
+fn test_dirty_package_areas_json_shape() {
+    assert_package_family_shape_when_non_monorepo("dirty-package-areas", "dirty", "package_areas");
+}
+
+#[test]
+fn test_staged_packages_json_shape() {
+    assert_package_family_shape_when_non_monorepo("staged-packages", "staged", "packages");
+}
+
+#[test]
+fn test_staged_package_areas_json_shape() {
+    assert_package_family_shape_when_non_monorepo(
+        "staged-package-areas",
+        "staged",
+        "package_areas",
+    );
+}
+
+#[test]
+fn test_unstaged_packages_json_shape() {
+    assert_package_family_shape_when_non_monorepo("unstaged-packages", "unstaged", "packages");
+}
+
+#[test]
+fn test_unstaged_package_areas_json_shape() {
+    assert_package_family_shape_when_non_monorepo(
+        "unstaged-package-areas",
+        "unstaged",
+        "package_areas",
+    );
+}
+
+#[test]
+fn test_dirty_packages_json_does_not_emit_prose_error_for_non_monorepo() {
+    // Regression: the legacy text-mode renderer returns
+    // "- the \"--dirty-packages\" switch is only intended to be used in a monorepo"
+    // for non-monorepos. JSON consumers must NEVER see that prose string —
+    // they must see an empty `names` array.
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-packages",
+            "--json",
+        ])
+        .assert()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("only intended to be used in a monorepo"),
+        "JSON output leaked the prose error string: {stdout}"
+    );
+    let json: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_eq!(json["names"], Value::Array(vec![]));
+}
+
+// ============================================================================
+// Phase 5 — `deps --json` builder
+// ============================================================================
+
+/// `sniff repo deps --json` must return a `{ packages: [...] }` object,
+/// not the full `RepoInfo` blob.
+///
+/// The created test repo is a non-monorepo so `packages` will be empty;
+/// the assertion focuses on the top-level shape (object with `packages`
+/// array) and the absence of `RepoInfo`-only fields like `is_monorepo`.
+#[test]
+fn test_repo_deps_json_shape() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "deps", "--json"])
+        .assert()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("expected JSON, got: {stdout:?} ({e})"));
+
+    assert!(
+        json.is_object(),
+        "deps --json must return an object, got: {json}"
+    );
+    assert!(
+        json["packages"].is_array(),
+        "deps --json must have `packages` array, got: {json}"
+    );
+    // Must NOT leak full RepoInfo blob fields.
+    assert!(
+        json.get("is_monorepo").is_none(),
+        "deps --json must not include `is_monorepo`: {json}"
     );
 }
 
@@ -3082,4 +3658,604 @@ fn test_repo_pr_help_documents_bitbucket_draft_limitation() {
         .success()
         .stdout(predicate::str::contains("--status"))
         .stdout(predicate::str::contains("Bitbucket"));
+}
+
+// ============================================================================
+// Phase 4 — locator and boolean JSON shapes
+// ============================================================================
+
+/// `has-merge-conflict --json` on a clean repo must:
+///   - exit 1 (no conflict)
+///   - emit `{ "has_merge_conflict": false }` on stdout
+#[test]
+fn test_has_merge_conflict_json_false() {
+    let (_dir, path) = create_test_repo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "has-merge-conflict",
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["has_merge_conflict"], Value::Bool(false));
+}
+
+/// `is-current-package-area-dirty --json` always emits a `{ "dirty": <bool> }`
+/// object, even when invoked outside any package area (where text mode would
+/// also exit 1).
+///
+/// Note: the underlying detection only consults `RepoStatus.dirty` /
+/// `RepoStatus.untracked`, which are populated only when `--refresh-remotes`
+/// (deep git mode) is in effect. This test pins the JSON contract for the
+/// `false` case; the `true` case is exercised at the pure-helper layer in
+/// `output::filesystem::tests::boolean_helpers`.
+#[test]
+fn test_is_current_package_area_dirty_json_outside_area_emits_false() {
+    let (_dir, path) = create_test_repo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "is-current-package-area-dirty",
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["dirty"], Value::Bool(false));
+}
+
+/// `is-current-package-area-dirty --json` on a clean monorepo package area
+/// must exit 1 and emit `{ "dirty": false }`.
+#[test]
+fn test_is_current_package_area_dirty_json_clean() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.join("pkg-a").to_str().unwrap(),
+            "repo",
+            "is-current-package-area-dirty",
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["dirty"], Value::Bool(false));
+}
+
+/// `package-area-has-source-code-changes --json` on a clean monorepo
+/// package emits `{ "has_source_code_changes": false }` and exits 1.
+///
+/// Note: like the dirty check, the underlying detection consults
+/// `RepoStatus.dirty` / `RepoStatus.untracked`, which are populated only
+/// in deep git mode (`--refresh-remotes`). The `true` case is exercised
+/// at the pure-helper layer in
+/// `output::filesystem::tests::boolean_helpers`.
+#[test]
+fn test_package_area_has_source_code_changes_json_clean() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.join("pkg-a").to_str().unwrap(),
+            "repo",
+            "package-area-has-source-code-changes",
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["has_source_code_changes"], Value::Bool(false));
+}
+
+/// `package-root --json` inside a known package emits `{ "root": "<abs path>" }`.
+#[test]
+fn test_package_root_json_when_present() {
+    let (_dir, path) = create_cli_monorepo();
+    let pkg_a_lib = path.join("pkg-a/lib");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            pkg_a_lib.to_str().unwrap(),
+            "repo",
+            "package-root",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    let root = value["root"].as_str().expect("root must be a string");
+    assert!(
+        !root.is_empty(),
+        "package-root must be non-empty inside a real package, got: {value}"
+    );
+    assert!(
+        root.contains("pkg-a"),
+        "package-root should resolve to the pkg-a directory, got: {root}"
+    );
+}
+
+/// `package --json` inside a known package emits `{ "name": <pkg> }`.
+#[test]
+fn test_package_name_json() {
+    let (_dir, path) = create_cli_monorepo();
+    let pkg_a_lib = path.join("pkg-a/lib");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            pkg_a_lib.to_str().unwrap(),
+            "repo",
+            "package",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String("pkg-a".to_string()));
+}
+
+// ============================================================================
+// Phase 7 — End-to-end regression: every `repo` subcommand emits a
+// distinguishable JSON shape, and `--perf` keeps working alongside the
+// new shapes.
+// ============================================================================
+
+/// Build a monorepo fixture whose package name differs from its area name.
+///
+/// Used by the Phase 7 distinctness matrix: the legacy `create_cli_monorepo`
+/// helper places each package in `<area>/lib`, so `package` and `package-area`
+/// resolve to the same string and produce identical `{ "name": ... }`
+/// payloads. The `incorrect-json` contract is about distinct *shapes per
+/// subcommand* under realistic input — pick a fixture where the values
+/// differ so the matrix exercises real-world distinctness without needing
+/// shape-only comparisons.
+fn create_cli_monorepo_distinct_area_and_package() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test").unwrap();
+
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["alpha/core", "alpha/cli", "beta/core"]
+"#,
+    )
+    .unwrap();
+
+    let members = [
+        ("alpha/core", "alpha-core"),
+        ("alpha/cli", "alpha-cli"),
+        ("beta/core", "beta-core"),
+    ];
+    for (rel, name) in &members {
+        let pkg = dir.path().join(rel);
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2024"
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/lib.rs"), "pub fn entry() {}").unwrap();
+    }
+
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial monorepo", &tree, &[])
+        .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Distinctness matrix for `sniff repo <subcommand> --json`.
+///
+/// The `incorrect-json` feature was triggered by every subcommand returning
+/// the same `RepoInfo` blob. This test pins the contract: no two subcommands
+/// in the matrix produce identical stdout payloads under a realistic
+/// monorepo fixture.
+///
+/// The matrix deliberately covers every subcommand whose JSON shape changed
+/// in Phases 2-6 (`git-status`, `deps`, the package/area family, the
+/// locator family, the boolean family, and the commit-family filtered
+/// variants). Bare `repo` and `repo structure` are intentionally excluded —
+/// they're meant to be identical (`structure` is the canonical alias).
+///
+/// The fixture is a monorepo where package names differ from area names
+/// (`alpha-core` in area `alpha`, etc.) so `package` vs `package-area` and
+/// `package-root` vs `package-area-root` resolve to different strings.
+///
+/// Some subcommands exit `1` when they have nothing to report; we accept
+/// either exit code and only compare stdout.
+#[test]
+fn test_repo_subcommand_json_shapes_are_distinct() {
+    let (_dir, path) = create_cli_monorepo_distinct_area_and_package();
+    test_commit_file(&path, "alpha/core/src/lib.rs", "pub fn changed() {}");
+    test_commit_file(&path, "README.md", "# readme");
+
+    // Match groups intentionally avoid `structure` / bare `repo`. Each entry
+    // is a tuple of (label, args after `repo`).
+    let cases: &[(&str, &[&str])] = &[
+        ("git-status", &["git-status"]),
+        ("deps", &["deps"]),
+        ("dirty-packages", &["dirty-packages"]),
+        ("dirty-package-areas", &["dirty-package-areas"]),
+        ("staged-packages", &["staged-packages"]),
+        ("staged-package-areas", &["staged-package-areas"]),
+        ("unstaged-packages", &["unstaged-packages"]),
+        ("unstaged-package-areas", &["unstaged-package-areas"]),
+        ("package-root", &["package-root"]),
+        ("package-area-root", &["package-area-root"]),
+        ("package", &["package"]),
+        ("package-area", &["package-area"]),
+        (
+            "is-current-package-area-dirty",
+            &["is-current-package-area-dirty"],
+        ),
+        (
+            "package-area-has-source-code-changes",
+            &["package-area-has-source-code-changes"],
+        ),
+        ("has-merge-conflict", &["has-merge-conflict"]),
+        ("source-code-changes", &["source-code-changes"]),
+        ("documentation-changes", &["documentation-changes"]),
+    ];
+
+    // Run from inside `alpha/core` so locator/boolean subcommands resolve
+    // to a real package and area.
+    let cwd = path.join("alpha/core");
+    let mut payloads: Vec<(String, String)> = Vec::with_capacity(cases.len());
+
+    for (label, sub_args) in cases {
+        let mut args: Vec<&str> = vec!["--base", cwd.to_str().unwrap(), "repo"];
+        args.extend_from_slice(sub_args);
+        args.push("--json");
+        let output = cargo_bin_cmd!("sniff")
+            .args(&args)
+            .assert()
+            .get_output()
+            .clone();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        // Every JSON payload must parse — that's a baseline contract even
+        // for empty boolean/locator outputs.
+        let _: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+            panic!(
+                "stdout for `{label}` was not JSON: {e}\n--- stdout ---\n{stdout}\n--------------"
+            )
+        });
+        payloads.push(((*label).to_string(), stdout));
+    }
+
+    // Cross-product distinctness check. We compare on raw stdout — the
+    // shape, keys, and values combined are what consumers see.
+    for i in 0..payloads.len() {
+        for j in (i + 1)..payloads.len() {
+            let (left_label, left) = &payloads[i];
+            let (right_label, right) = &payloads[j];
+            assert_ne!(
+                left.trim(),
+                right.trim(),
+                "subcommands `{left_label}` and `{right_label}` returned identical JSON \
+                 — every repo subcommand must emit a distinct shape:\n--- {left_label} ---\n{left}\n--- {right_label} ---\n{right}"
+            );
+        }
+    }
+}
+
+/// `--perf --json` on a `git-status` invocation must inject a top-level
+/// `performance` field into the existing object shape, leaving the rest of
+/// the `GitInfo` payload intact.
+///
+/// Object-shaped payloads receive the perf data via `attach_performance`
+/// inserting a sibling key — they are NOT wrapped in `{ data, performance }`.
+#[test]
+fn test_git_status_json_perf_attaches_performance_field() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--json",
+            "--perf",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+
+    // `GitInfo` fields stay at the top level.
+    assert!(
+        value.get("repo_root").is_some(),
+        "git-status payload should still expose `repo_root`: {value}"
+    );
+    // `performance` should be a sibling key (not wrapped under `data`).
+    assert!(
+        value.get("performance").is_some(),
+        "--perf must inject a `performance` field into object-shaped payloads: {value}"
+    );
+    assert!(
+        value.get("data").is_none(),
+        "object-shaped payloads must NOT be wrapped in `{{ data, ... }}`: {value}"
+    );
+}
+
+/// `--perf --json` on a boolean subcommand still emits the boolean object
+/// alongside the `performance` field, and still honours the boolean's
+/// exit-code semantics (clean repo → exit 1 for `is-current-package-area-dirty`).
+#[test]
+fn test_is_current_package_area_dirty_json_perf_attaches_performance_field() {
+    let (_dir, path) = create_cli_monorepo();
+    let pkg_a = path.join("pkg-a/lib");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            pkg_a.to_str().unwrap(),
+            "repo",
+            "is-current-package-area-dirty",
+            "--json",
+            "--perf",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+
+    assert_eq!(
+        value["dirty"],
+        Value::Bool(false),
+        "boolean payload must remain intact alongside --perf: {value}"
+    );
+    assert!(
+        value.get("performance").is_some(),
+        "--perf must inject a `performance` field into boolean payloads: {value}"
+    );
+}
+
+/// Phase 3 — `repo structure --json --filter` must scope the `packages`
+/// array, matching text mode. Without `--filter` every workspace member is
+/// listed; with `--filter pkg-a` only the matching package remains. The
+/// non-`packages` `RepoInfo` fields (workspace tools, monorepo flag, root)
+/// stay intact in both cases.
+#[test]
+fn test_repo_structure_filter_json_filters_packages() {
+    let (_dir, path) = create_cli_monorepo();
+
+    let assert_all = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "structure",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout_all = String::from_utf8(assert_all.get_output().stdout.clone()).unwrap();
+    let json_all: Value = serde_json::from_str(stdout_all.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout_all}\n---"));
+    let all_packages = json_all["packages"]
+        .as_array()
+        .expect("packages must be array");
+    assert_eq!(
+        all_packages.len(),
+        2,
+        "unfiltered structure should list all 2 monorepo packages: {json_all}"
+    );
+
+    let assert_filtered = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "structure",
+            "--json",
+            "pkg-a",
+        ])
+        .assert()
+        .success();
+    let stdout_filtered = String::from_utf8(assert_filtered.get_output().stdout.clone()).unwrap();
+    let json_filtered: Value = serde_json::from_str(stdout_filtered.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout_filtered}\n---"));
+    let filtered_packages = json_filtered["packages"]
+        .as_array()
+        .expect("packages must be array");
+    assert_eq!(
+        filtered_packages.len(),
+        1,
+        "filter pkg-a should narrow to 1 package: {json_filtered}"
+    );
+    assert_eq!(filtered_packages[0]["name"], "pkg-a");
+
+    // Non-packages fields must remain intact under the filter.
+    assert!(
+        json_filtered.get("root").is_some(),
+        "filtered structure must preserve `root`: {json_filtered}"
+    );
+    assert_eq!(
+        json_filtered["is_monorepo"],
+        Value::Bool(true),
+        "filtered structure must preserve `is_monorepo`: {json_filtered}"
+    );
+}
+
+// ============================================================================
+// Phase 4 — Targeted integration coverage for previously untested JSON paths
+// ============================================================================
+//
+// These tests exercise the success branches of locator and boolean
+// subcommands that were previously only covered by their empty/false
+// branches, plus the `--package` scoping path on `git-status --json`.
+
+/// `package-area --json` from inside a real package emits `{ "name": <area> }`
+/// where the area name is distinct from the package name (the fixture
+/// places `alpha-core` inside area `alpha`).
+#[test]
+fn test_package_area_json_resolves_to_real_area() {
+    let (_dir, path) = create_cli_monorepo_distinct_area_and_package();
+    let cwd = path.join("alpha/core");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            cwd.to_str().unwrap(),
+            "repo",
+            "package-area",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["name"], Value::String("alpha".to_string()));
+}
+
+/// `package-area-root --json` from inside a known package area emits
+/// `{ "root": <abs path containing the area name> }`.
+#[test]
+fn test_package_area_root_json_when_present() {
+    let (_dir, path) = create_cli_monorepo_distinct_area_and_package();
+    let cwd = path.join("alpha/core");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            cwd.to_str().unwrap(),
+            "repo",
+            "package-area-root",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    let root = value["root"].as_str().expect("root must be a string");
+    assert!(
+        !root.is_empty(),
+        "package-area-root must be non-empty inside a real area, got: {value}"
+    );
+    assert!(
+        root.contains("alpha"),
+        "package-area-root should contain the `alpha` area segment, got: {root}"
+    );
+}
+
+/// `git-status --package <name> --json` must scope `file_changes` to the
+/// named package's path prefix while preserving the `GitInfo` shape (top-level
+/// `repo_root` key).
+#[test]
+fn test_git_status_json_with_package_scope() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "--package",
+            "pkg-a",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+
+    assert!(
+        value.get("repo_root").is_some(),
+        "package-scoped git-status must keep GitInfo shape (repo_root): {value}"
+    );
+
+    if let Some(file_changes) = value["file_changes"].as_array() {
+        for fc in file_changes {
+            let p = fc["path"].as_str().unwrap_or("");
+            assert!(
+                !p.starts_with("pkg-b/"),
+                "pkg-a-scoped git-status must not contain pkg-b files, got: {p}"
+            );
+        }
+    }
+}
+
+/// `is-current-package-area-dirty --json` from inside a package area whose
+/// files are dirty must emit `{ "dirty": true }` and exit 0.
+#[test]
+fn test_is_current_package_area_dirty_json_true_branch() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a() {}");
+    std::fs::write(path.join("pkg-a/lib/src/lib.rs"), "pub fn a() { dirty }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.join("pkg-a/lib").to_str().unwrap(),
+            "repo",
+            "is-current-package-area-dirty",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .code(0);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(
+        value["dirty"],
+        Value::Bool(true),
+        "dirty area should emit dirty: true, got: {value}"
+    );
 }

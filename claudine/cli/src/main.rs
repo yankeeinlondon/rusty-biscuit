@@ -105,7 +105,9 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
 }
 
 fn main() -> Result<()> {
-    rustls::crypto::ring::default_provider().install_default().ok();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     color_eyre::install()?;
 
     match run() {

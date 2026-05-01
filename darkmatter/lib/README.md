@@ -7,6 +7,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 - **Rendering**
     - **Multi-format output**: Terminal (ANSI), HTML, [MDAST](https://github.com/syntax-tree/mdast) JSON, and Regular or Enriched Markdown
     - **Syntax highlighting**: 200+ languages via `syntect` and `two-face` with curated theme pairs
+    - **Inline formatting extensions**: `==highlighted==` (mark) and `⌄dimmed⌄` (faint/dim) syntax beyond standard CommonMark/GFM
     - **Mermaid Diagrams:** Render [Mermaid](https://mermaid.js.org/) code blocks into both HTML (using dynamic runtime engine) and Markdown (as inline images)
     - **Visualization of Graph Structures:** Render [DOT](https://graphviz.org/doc/info/lang.html) based graph schemas as vector or raster based images.
     - **Tables:** Richly formatted tables with dynamic sizing and business logic; renders to both HTML and Terminal

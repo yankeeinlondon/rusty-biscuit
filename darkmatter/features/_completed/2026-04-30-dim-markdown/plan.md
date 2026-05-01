@@ -2,6 +2,53 @@
 phases: 6
 created: 2025-01-27
 start_phase: 1
+source_files_during_phase_1:
+  - biscuit-terminal/lib/src/discovery/detection.rs
+  - darkmatter/lib/src/terminal/supports.rs
+  - darkmatter/lib/src/terminal/mod.rs
+  - darkmatter/lib/src/terminal/tests.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/output/code_block.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/inline/types.rs
+  - darkmatter/lib/src/markdown/inline/mod.rs
+  - darkmatter/lib/src/markdown/highlighting/scope_cache.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/output/html.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_3:
+  - darkmatter/lib/src/markdown/output/terminal.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/output/html.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/mod.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - darkmatter/docs/topics/output-formats.md
+  - darkmatter/lib/README.md
+docs_created_during_phase_6:
+  - darkmatter/docs/topics/html.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/biscuit-terminal/SKILL.md
+  - .claude/skills/biscuit-terminal/discovery.md
+packages:
+  - biscuit-terminal
+  - darkmatter
 ---
 
 # Execution Plan: Dim Markdown Syntax
@@ -332,7 +379,7 @@ Implement the `⌄text⌄` dim markdown syntax. This is a terminal-first inline 
 
 ### Step 6.3 — Update `.claude/skills/darkmatter/SKILL.md`
 
-**File:** `.opencode/skill/darkmatter/SKILL.md`
+**File:** `.claude/skills/darkmatter/SKILL.md`
 
 **Work:**
 - Add `⌄dim⌄` to the list of supported inline syntax extensions.
@@ -340,7 +387,7 @@ Implement the `⌄text⌄` dim markdown syntax. This is a terminal-first inline 
 
 ### Step 6.4 — Update `.claude/skills/biscuit-terminal/SKILL.md`
 
-**File:** `.opencode/skill/biscuit-terminal/SKILL.md`
+**File:** `.claude/skills/biscuit-terminal/SKILL.md`
 
 **Work:**
 - Add `dim_support()` to the detection capability list.
@@ -402,5 +449,5 @@ Implement the `⌄text⌄` dim markdown syntax. This is a terminal-first inline 
 - `darkmatter/lib/README.md`
 
 ### Skills
-- `.opencode/skill/darkmatter/SKILL.md`
-- `.opencode/skill/biscuit-terminal/SKILL.md`
+- `.claude/skills/darkmatter/SKILL.md`
+- `.claude/skills/biscuit-terminal/SKILL.md`

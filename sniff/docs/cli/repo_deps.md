@@ -89,20 +89,44 @@ When a filter is active, text mode shows all matched packages (including isolate
 sniff --json repo deps [filter]
 ```
 
-Returns the full repo data at the top level, equivalent to `sniff --json repo`. Each package object in the `packages` array includes:
+Returns a focused `{ packages: [...] }` object — **not** the full
+`RepoInfo` blob. Each entry uses a deliberately narrow allowlist of
+fields so future additions to the `Package` struct (languages,
+documentation, configuration, etc.) cannot silently leak into the
+public `deps --json` contract:
 
 ```json
 {
-  "name": "sniff-cli",
-  "package_area": "sniff",
-  "relative": "sniff/cli",
-  "depends_on": ["sniff-lib"],
-  "used_by": [],
-  ...
+  "packages": [
+    {
+      "name": "sniff-lib",
+      "depends_on": [],
+      "used_by": ["sniff-cli"],
+      "dependencies": [
+        { "name": "serde", "targeted_version": "1.0", "actual_version": "1.0.210" }
+      ],
+      "dev_dependencies": [
+        { "name": "tempfile", "targeted_version": "3.0", "actual_version": "3.12.0" }
+      ]
+    },
+    {
+      "name": "sniff-cli",
+      "depends_on": ["sniff-lib"],
+      "used_by": [],
+      "dependencies": [
+        { "name": "clap", "targeted_version": "4.4", "actual_version": "4.5.13" },
+        { "name": "sniff-lib", "targeted_version": "0.1", "actual_version": null }
+      ],
+      "dev_dependencies": []
+    }
+  ]
 }
 ```
 
-The `depends_on` and `used_by` fields are omitted from JSON when they are empty (controlled by `#[serde(default, skip_serializing_if = "Vec::is_empty")]`). The `--ui` flag has no effect on JSON output.
+`depends_on` and `used_by` always appear (as arrays, possibly empty).
+`peer_dependencies` and `optional_dependencies` are omitted when empty
+to keep Cargo-only output uncluttered. The `--ui` flag has no effect
+on JSON output.
 
 ## Plain Output
 

@@ -39,6 +39,7 @@ The `content_length` method recompiles two regular expressions inside a `map` cl
 This method is called frequently by high-level components (Table, Filesystem, Prose) to determine layout. For a document with hundreds of lines, these regexes are compiled hundreds of times per render cycle, leading to significant CPU waste.
 
 **Evidence**
+
 ```rust
 pub fn content_length(self) -> Vec<u32> {
     self.lines.into_iter().map(|line| {
@@ -51,6 +52,7 @@ pub fn content_length(self) -> Vec<u32> {
 
 **Recommendation**
 Move the regexes to a `static` `LazyLock` (or `OnceLock` in Rust 1.70+):
+
 ```rust
 static ANSI_CSI_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").unwrap());
 static ANSI_OSC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\].*?\x07").unwrap());
@@ -76,6 +78,7 @@ The `bind_pass` resolves symbol owners by performing a linear scan over all symb
 If a file has 1,000 symbols and 5,000 references (common in large modules), this performs 5,000,000 comparisons. The complexity is $O(S \times R)$ where $S$ is symbols and $R$ is references.
 
 **Evidence**
+
 ```rust
 fn find_owner_symbol(symbols: &[SymbolRecord], start_byte: u32, end_byte: u32) -> Option<usize> {
     symbols.iter().enumerate().filter(|(_, symbol)| {
@@ -108,6 +111,7 @@ The directory walker performs a case-insensitive sort by calling `to_lowercase()
 In a directory with $N$ entries, `sort_by` performs $O(N \log N)$ comparisons. Each comparison here allocates two new strings. For a directory with 1,000 files, this could trigger ~20,000 allocations just for sorting.
 
 **Evidence**
+
 ```rust
 raw_entries.sort_by(|a, b| {
     // ...
@@ -140,6 +144,7 @@ The filesystem component performs synchronous `libc::getpwuid` and `getgrgid` ca
 These calls can involve disk I/O or network requests (NIS/LDAP/SSS). Repeating them for thousands of files in a tree is extremely inefficient.
 
 **Evidence**
+
 ```rust
 #[cfg(unix)]
 fn get_username_from_uid(uid: u32) -> Option<String> {
@@ -173,6 +178,7 @@ Cache must be managed or cleared if the application is extremely long-lived and 
 This clone happens every time a `CodeHighlighter` is created. `CodeHighlighter` is created once per `write_terminal` call. If an application renders many small markdown snippets, it will spend a significant amount of time copying this large data structure.
 
 **Evidence**
+
 ```rust
 pub(super) fn load_syntax_set() -> SyntaxSet {
     SYNTAX_SET.clone()
@@ -202,6 +208,7 @@ The rendering loop uses `format!` and small `String` appends (via `emit_prose_te
 For large documents, this creates thousands of small allocations and one massive allocation at the end. This is hard on the allocator and increases the peak memory footprint.
 
 **Evidence**
+
 ```rust
 fn emit_word(&mut self, word: &str, ...) {
     self.output.push_str(&emit_prose_text(word, ...));
@@ -209,8 +216,8 @@ fn emit_word(&mut self, word: &str, ...) {
 ```
 
 **Recommendation**
-1.  Change `emit_prose_text` and similar functions to take a `&mut String` or `&mut W: Write` instead of returning a new `String`.
-2.  Allow `LineWrapper` to flush its buffer to the underlying `writer` periodically (e.g., after every paragraph or top-level block), provided it doesn't break wrapping logic.
+1. Change `emit_prose_text` and similar functions to take a `&mut String` or `&mut W: Write` instead of returning a new `String`.
+2. Allow `LineWrapper` to flush its buffer to the underlying `writer` periodically (e.g., after every paragraph or top-level block), provided it doesn't break wrapping logic.
 
 **Expected impact**
 Significant reduction in allocation count and peak memory usage.
@@ -232,6 +239,7 @@ The `normalize_text` function performs two separate passes over the extracted PD
 For large PDF documents, this doubles the work and allocation overhead for text processing.
 
 **Evidence**
+
 ```rust
 pub fn normalize_text(text: &str) -> String {
     let dehyphenated = { ... }; // Pass 1
@@ -263,9 +271,9 @@ Slightly more complex single-pass logic.
 
 ## Benchmarking and Profiling Recommendations
 
-1.  **Layout Hot Path:** Use `hyperfine` to measure the time taken to render a large directory tree (e.g., `bf ls -R .`) before and after the regex/sorting changes.
-2.  **Markdown Stress Test:** Create a large (1MB+) markdown file and use `cargo bench` (Criterion) to profile `darkmatter::for_terminal`. Look for the percentage of time spent in `SyntaxSet::clone` and `format!`.
-3.  **Symbol Indexing:** Benchmark `tree-hugger` on a large Rust file (e.g., `terminal.rs` itself) with `cargo flamegraph` to see if `find_owner_symbol` dominates the `bind_pass`.
+1. **Layout Hot Path:** Use `hyperfine` to measure the time taken to render a large directory tree (e.g., `bf ls -R .`) before and after the regex/sorting changes.
+2. **Markdown Stress Test:** Create a large (1MB+) markdown file and use `cargo bench` (Criterion) to profile `darkmatter::for_terminal`. Look for the percentage of time spent in `SyntaxSet::clone` and `format!`.
+3. **Symbol Indexing:** Benchmark `tree-hugger` on a large Rust file (e.g., `terminal.rs` itself) with `cargo flamegraph` to see if `find_owner_symbol` dominates the `bind_pass`.
 
 ## Non-Issues / Things I Would Not Change Yet
 
@@ -274,7 +282,7 @@ Slightly more complex single-pass logic.
 
 ## Suggested Implementation Order
 
-1.  **Highest impact / lowest risk:** Cache regexes in `block_constraint.rs` and pre-calculate lowercase names in `filesystem.rs`.
-2.  **High impact but requires design care:** Optimize `tree-hugger` symbol lookup and change `CodeHighlighter` to use static references.
-3.  **Medium-impact cleanup:** Implement UID/GID caching in `filesystem.rs` and single-pass normalization in `biscuit-file`.
-4.  **Benchmarking and validation:** Validate the `darkmatter` allocation overhead with a flamegraph before committing to a larger refactor of `LineWrapper`.
+1. **Highest impact / lowest risk:** Cache regexes in `block_constraint.rs` and pre-calculate lowercase names in `filesystem.rs`.
+2. **High impact but requires design care:** Optimize `tree-hugger` symbol lookup and change `CodeHighlighter` to use static references.
+3. **Medium-impact cleanup:** Implement UID/GID caching in `filesystem.rs` and single-pass normalization in `biscuit-file`.
+4. **Benchmarking and validation:** Validate the `darkmatter` allocation overhead with a flamegraph before committing to a larger refactor of `LineWrapper`.

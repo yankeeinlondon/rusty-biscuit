@@ -30,8 +30,8 @@ lazy_static! {
 /// let rust_syntax = syntax_set.find_syntax_by_extension("rs");
 /// assert!(rust_syntax.is_some());
 /// ```
-pub(super) fn load_syntax_set() -> SyntaxSet {
-    SYNTAX_SET.clone()
+pub(super) fn load_syntax_set() -> &'static SyntaxSet {
+    &SYNTAX_SET
 }
 
 #[cfg(test)]
@@ -79,5 +79,15 @@ mod tests {
         let syntax_set = load_syntax_set();
         let syntax = syntax_set.find_syntax_by_extension("yaml");
         assert!(syntax.is_some());
+    }
+
+    #[test]
+    fn test_syntax_set_pointer_stability() {
+        let a = load_syntax_set();
+        let b = load_syntax_set();
+        assert!(
+            std::ptr::eq(a, b),
+            "load_syntax_set should return the same static instance"
+        );
     }
 }

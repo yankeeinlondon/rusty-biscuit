@@ -1128,6 +1128,101 @@ pub fn italics_support() -> bool {
     false
 }
 
+/// Detect if the terminal supports dim/faint text rendering.
+///
+/// This function uses a multi-layer detection strategy:
+///
+/// 1. **Terminfo** (authoritative): Checks for `EnterDimMode` (`dim`) capability
+/// 2. **TERM_PROGRAM**: Recognizes modern terminal emulators known to support dim
+/// 3. **TERM**: Falls back to pattern matching for common terminal types
+///
+/// ## Returns
+///
+/// - `true` if the terminal supports dim/faint text
+/// - `false` if stdout is not a TTY, TERM is "dumb", or no support is detected
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::dim_support;
+///
+/// if dim_support() {
+///     println!("\x1b[2mThis text is dim!\x1b[22m");
+/// } else {
+///     println!("This text has no dim styling");
+/// }
+/// ```
+pub fn dim_support() -> bool {
+    use std::io::IsTerminal;
+
+    // If stdout is not a TTY, don't use styling
+    if !std::io::stdout().is_terminal() {
+        return false;
+    }
+
+    // Check for dumb terminal
+    let term = env::var("TERM").unwrap_or_default();
+    if term == "dumb" {
+        return false;
+    }
+
+    // 1. Query terminfo for EnterDimMode capability (authoritative)
+    if let Ok(term_info) = TermInfo::from_env()
+        && term_info
+            .utf8_string_cap(StringCapability::EnterDimMode)
+            .is_some()
+    {
+        return true;
+    }
+
+    // 2. Check TERM_PROGRAM for known terminal emulators that support dim
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        let dominated = matches!(
+            term_program.as_str(),
+            "iTerm.app"
+                | "Apple_Terminal"
+                | "Alacritty"
+                | "kitty"
+                | "WezTerm"
+                | "vscode"
+                | "Hyper"
+                | "Tabby"
+                | "Rio"
+                | "ghostty"
+                | "Warp"
+                | "WarpTerminal"
+        );
+        if dominated {
+            return true;
+        }
+    }
+
+    // 3. Check for Windows Terminal (uses WT_SESSION env var)
+    if env::var("WT_SESSION").is_ok() {
+        return true;
+    }
+
+    // 4. Fallback: check TERM for patterns indicating modern terminals
+    let dominated = matches!(
+        term.as_str(),
+        "xterm-256color"
+            | "xterm-direct"
+            | "alacritty"
+            | "alacritty-direct"
+            | "kitty"
+            | "kitty-direct"
+            | "wezterm"
+            | "tmux-256color"
+            | "screen-256color"
+            | "ghostty"
+    );
+    if dominated {
+        return true;
+    }
+
+    false
+}
+
 // Re-export OSC support functions from osc_queries module for API compatibility
 pub use crate::discovery::osc_queries::{osc10_support, osc11_support, osc12_support};
 

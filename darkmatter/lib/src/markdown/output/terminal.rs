@@ -34,7 +34,7 @@ use crate::markdown::{
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
-    inline::{InlineEvent, InlineTag, MarkProcessor},
+    inline::{InlineEvent, InlineStyleProcessor, InlineTag},
     output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
@@ -52,6 +52,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::UnicodeWidthStr;
 use biscuit_terminal::utils::layout::Alignment;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::Scope;
@@ -216,6 +217,65 @@ impl ItalicMode {
             ItalicMode::Auto => crate::terminal::supports_italics(),
             ItalicMode::Always => true,
             ItalicMode::Never => false,
+        }
+    }
+}
+
+/// Controls how dim/faint text is rendered to the terminal.
+///
+/// Different terminals have varying levels of support for dim text rendering.
+/// This enum allows explicit control over dim behavior.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, DimMode};
+///
+/// // Auto-detect (safe default)
+/// let mut options = TerminalOptions::default();
+/// assert!(matches!(options.dim_mode, DimMode::Auto));
+///
+/// // Force dim for pre-rendering to unknown terminals
+/// options.dim_mode = DimMode::Always;
+///
+/// // Disable dim for terminals known not to support it
+/// options.dim_mode = DimMode::Never;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DimMode {
+    /// Auto-detect dim support using terminal capabilities.
+    ///
+    /// Uses [`supports_dim()`](crate::terminal::supports_dim) to query
+    /// the terminal. This is the safest option for direct terminal output.
+    #[default]
+    Auto,
+
+    /// Always emit dim escape codes (`\x1b[2m`).
+    ///
+    /// Use this when pre-rendering content for a future terminal where
+    /// capabilities cannot be detected. Assumes dim support is available.
+    Always,
+
+    /// Never emit dim escape codes.
+    ///
+    /// Use this when rendering for terminals known not to support dim,
+    /// or when dim styling is not desired.
+    Never,
+}
+
+impl DimMode {
+    /// Resolves the mode to a boolean indicating whether to emit dim codes.
+    ///
+    /// ## Returns
+    ///
+    /// - `Auto`: Result of `supports_dim()` terminal capability check
+    /// - `Always`: `true`
+    /// - `Never`: `false`
+    fn should_emit_dim(&self) -> bool {
+        match self {
+            DimMode::Auto => crate::terminal::supports_dim(),
+            DimMode::Always => true,
+            DimMode::Never => false,
         }
     }
 }
@@ -668,6 +728,12 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit italic escape codes (for pre-rendering)
     /// - `Never`: Never emit italic escape codes
     pub italic_mode: ItalicMode,
+    /// Controls how dim/faint text is rendered.
+    ///
+    /// - `Auto` (default): Detect terminal capability via `supports_dim()`
+    /// - `Always`: Always emit dim escape codes (for pre-rendering)
+    /// - `Never`: Never emit dim escape codes
+    pub dim_mode: DimMode,
     /// Maximum line width for text wrapping.
     ///
     /// If `None` (default), auto-detects from terminal size (defaults to 80 if detection fails).
@@ -706,6 +772,7 @@ impl Default for TerminalOptions {
             image_mode: TerminalImageMode::default(),
             base_path: None,
             italic_mode: ItalicMode::default(),
+            dim_mode: DimMode::default(),
             max_width: None,
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
@@ -785,6 +852,9 @@ pub fn write_terminal<W: std::io::Write>(
     // Resolve italic mode once at start (avoids repeated capability detection)
     let emit_italic = options.italic_mode.should_emit_italic();
 
+    // Resolve dim mode once at start (avoids repeated capability detection)
+    let emit_dim = options.dim_mode.should_emit_dim();
+
     // Resolve hyperlink mode once at start (avoids repeated capability detection)
     let emit_hyperlinks = options.hyperlink_mode.should_emit_osc8();
 
@@ -810,11 +880,12 @@ pub fn write_terminal<W: std::io::Write>(
 
     // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
     // and RuleProcessor for horizontal rules with attributes
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(md.content());
     let parser = Parser::new_ext(
-        md.content(),
+        &preprocessed,
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     );
-    let events = RuleProcessor::new(MarkProcessor::new(parser));
+    let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -876,6 +947,7 @@ pub fn write_terminal<W: std::io::Write>(
     let mut in_strong = false;
     let mut in_strikethrough = false;
     let mut in_mark = false;
+    let mut in_dim = false;
 
     // Track hyperlinks for OSC8 terminal escape sequences
     let mut in_link = false;
@@ -907,6 +979,16 @@ pub fn write_terminal<W: std::io::Write>(
             }
             InlineEvent::End(InlineTag::Mark) => {
                 in_mark = false;
+                scope_stack.pop();
+            }
+
+            InlineEvent::Start(InlineTag::Dim) => {
+                in_dim = true;
+                let scope = ScopeCache::global().scope_for_inline_tag(InlineTag::Dim);
+                scope_stack.push(scope);
+            }
+            InlineEvent::End(InlineTag::Dim) => {
+                in_dim = false;
                 scope_stack.pop();
             }
 
@@ -1170,13 +1252,14 @@ pub fn write_terminal<W: std::io::Write>(
                 if in_table {
                     scope_stack.pop();
                     let style = table_link_style(&prose_highlighter, &scope_stack);
-                    current_cell.push_str(&render_table_link(
+                    push_table_link(
+                        &mut current_cell,
                         &current_link_text,
                         &current_link_url,
                         style,
                         emit_italic,
                         emit_hyperlinks,
-                    ));
+                    );
                 } else {
                     // Pop link scope to get parent scopes, then query theme for link styling
                     // (The link scope was pushed in Start(Link))
@@ -1315,20 +1398,24 @@ pub fn write_terminal<W: std::io::Write>(
                         in_strong,
                         in_strikethrough,
                         in_mark,
+                        in_dim,
                         blockquote_depth > 0,
                     );
-                    current_cell.push_str(&render_table_cell_text(
+                    push_table_cell_text(
+                        &mut current_cell,
                         &text,
                         style,
                         emit_italic,
+                        emit_dim,
                         TableCellInlineState {
                             in_strikethrough,
                             in_mark,
                             in_emphasis,
                             in_strong,
+                            in_dim,
                         },
                         &render_terminal,
-                    ));
+                    );
                 } else {
                     let style = resolve_prose_text_style(
                         &prose_highlighter,
@@ -1337,12 +1424,21 @@ pub fn write_terminal<W: std::io::Write>(
                         in_strong,
                         in_strikethrough,
                         in_mark,
+                        in_dim,
                         blockquote_depth > 0,
                     );
 
                     // Use LineWrapper for proper word wrapping
                     // Pass in_mark to enable background highlighting
-                    wrapper.emit_styled(&text, style, emit_italic, in_strikethrough, in_mark);
+                    wrapper.emit_styled(
+                        &text,
+                        style,
+                        emit_italic,
+                        in_strikethrough,
+                        in_mark,
+                        in_dim,
+                        emit_dim,
+                    );
                 }
             }
 
@@ -1354,7 +1450,7 @@ pub fn write_terminal<W: std::io::Write>(
                     current_alt.push('`');
                 } else if in_table {
                     let style = prose_highlighter.style_for_inline_code(&scope_stack);
-                    current_cell.push_str(&emit_inline_code(&code, style));
+                    push_inline_code(&mut current_cell, &code, style);
                 } else {
                     // Inline code with styling (no backticks in terminal output)
                     let style = prose_highlighter.style_for_inline_code(&scope_stack);
@@ -1542,6 +1638,10 @@ pub fn write_terminal<W: std::io::Write>(
 /// * `in_strikethrough` - Whether to apply strikethrough formatting
 /// * `in_mark` - Whether to apply highlight background color
 /// * `blockquote_bg` - Optional background color for blockquote context
+/// * `in_dim` - Whether to apply dim/faint formatting
+/// * `emit_dim` - Whether to emit dim escape codes
+#[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn emit_prose_text(
     text: &str,
     style: Style,
@@ -1549,73 +1649,115 @@ fn emit_prose_text(
     in_strikethrough: bool,
     in_mark: bool,
     blockquote_bg: Option<Color>,
+    in_dim: bool,
+    emit_dim: bool,
 ) -> String {
+    let mut result = String::new();
+    push_prose_text(
+        &mut result,
+        text,
+        style,
+        emit_italic,
+        in_strikethrough,
+        in_mark,
+        blockquote_bg,
+        in_dim,
+        emit_dim,
+    );
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_prose_text(
+    output: &mut String,
+    text: &str,
+    style: Style,
+    emit_italic: bool,
+    in_strikethrough: bool,
+    in_mark: bool,
+    blockquote_bg: Option<Color>,
+    in_dim: bool,
+    emit_dim: bool,
+) {
     use syntect::highlighting::FontStyle;
 
     let fg = style.foreground;
-    let mut result = String::new();
 
-    // Apply font styles (bold=1, italic=3, underline=4, strikethrough=9)
+    // Apply font styles (bold=1, dim=2, italic=3, underline=4, strikethrough=9)
     if style.font_style.contains(FontStyle::BOLD) {
-        result.push_str("\x1b[1m");
+        output.push_str("\x1b[1m");
+    }
+    if emit_dim && in_dim {
+        output.push_str("\x1b[2m");
     }
     if emit_italic && style.font_style.contains(FontStyle::ITALIC) {
-        result.push_str("\x1b[3m");
+        output.push_str("\x1b[3m");
     }
     if style.font_style.contains(FontStyle::UNDERLINE) {
-        result.push_str("\x1b[4m");
+        output.push_str("\x1b[4m");
     }
     if in_strikethrough {
-        result.push_str("\x1b[9m");
+        output.push_str("\x1b[9m");
     }
 
     // Apply background color for highlighted/marked text
     // Uses a yellow background similar to <mark> in HTML
     if in_mark {
         // Yellow highlight background (255, 243, 184) - matches CSS var(--highlight-bg, #fff3b8)
-        result.push_str("\x1b[48;2;255;243;184m");
+        output.push_str("\x1b[48;2;255;243;184m");
         // Use dark text for contrast on yellow background
-        result.push_str(&format!("\x1b[38;2;0;0;0m{}\x1b[0m", text));
+        let _ = write!(output, "\x1b[38;2;0;0;0m{}\x1b[0m", text);
     } else if let Some(bg) = blockquote_bg {
         // Apply blockquote background color with foreground color
-        result.push_str(&format!(
+        let _ = write!(
+            output,
             "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
             bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
-        ));
+        );
     } else {
         // Apply foreground color and text
-        result.push_str(&format!(
+        let _ = write!(
+            output,
             "\x1b[38;2;{};{};{}m{}\x1b[0m",
             fg.r, fg.g, fg.b, text
-        ));
+        );
     }
-    result
 }
 
 /// Emits inline code with both foreground and background colors.
 ///
 /// Uses the style's background color if available, otherwise uses a subtle gray.
+#[cfg(test)]
 fn emit_inline_code(text: &str, style: Style) -> String {
+    let mut result = String::new();
+    push_inline_code(&mut result, text, style);
+    result
+}
+
+fn push_inline_code(output: &mut String, text: &str, style: Style) {
     let fg = style.foreground;
     let bg = style.background;
 
     // Check if background is meaningful (not transparent/zero alpha)
     if bg.a > 0 && (bg.r > 0 || bg.g > 0 || bg.b > 0) {
         // Use provided background
-        format!(
+        let _ = write!(
+            output,
             "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
             bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
-        )
+        );
     } else {
         // Use a subtle dark gray background for contrast
-        format!(
+        let _ = write!(
+            output,
             "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
             50, 50, 55, fg.r, fg.g, fg.b, text
-        )
+        );
     }
 }
 
 /// Resolves prose text style from the scope stack and semantic inline states.
+#[allow(clippy::too_many_arguments)]
 fn resolve_prose_text_style(
     prose_highlighter: &ProseHighlighter<'_>,
     scope_stack: &[Scope],
@@ -1623,18 +1765,20 @@ fn resolve_prose_text_style(
     in_strong: bool,
     in_strikethrough: bool,
     in_mark: bool,
+    in_dim: bool,
     in_blockquote: bool,
 ) -> Style {
     use syntect::highlighting::FontStyle;
 
-    let mut style = if in_emphasis || in_strong || in_strikethrough || in_mark {
+    let mut style = if in_emphasis || in_strong || in_strikethrough || in_mark || in_dim {
         // Compute style from parent scopes (exclude inline formatting scopes)
         // to preserve the parent's color.
         let parent_depth = scope_stack.len()
             - (in_emphasis as usize)
             - (in_strong as usize)
             - (in_strikethrough as usize)
-            - (in_mark as usize);
+            - (in_mark as usize)
+            - (in_dim as usize);
         let parent_scopes = &scope_stack[..parent_depth.max(1)];
         prose_highlighter.style_for_tag(&Tag::Paragraph, parent_scopes)
     } else if scope_stack.len() > 1 {
@@ -1683,25 +1827,41 @@ fn table_link_style(prose_highlighter: &ProseHighlighter<'_>, scope_stack: &[Sco
 }
 
 /// Renders a table-cell hyperlink while honoring hyperlink mode behavior.
-fn render_table_link(
+fn push_table_link(
+    output: &mut String,
     text: &str,
     url: &str,
     style: Style,
     emit_italic: bool,
     emit_hyperlinks: bool,
-) -> String {
+) {
     if emit_hyperlinks {
-        format!(
-            "\x1b]8;;{}\x07{}\x1b]8;;\x07",
-            url,
-            emit_prose_text(text, style, emit_italic, false, false, None)
-        )
+        let _ = write!(output, "\x1b]8;;{}\x07", url);
+        push_prose_text(
+            output,
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+            false,
+            true,
+        );
+        output.push_str("\x1b]8;;\x07");
     } else {
-        format!(
-            "{} [{}]",
-            emit_prose_text(text, style, emit_italic, false, false, None),
-            url
-        )
+        push_prose_text(
+            output,
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+            false,
+            true,
+        );
+        let _ = write!(output, " [{}]", url);
     }
 }
 
@@ -1711,27 +1871,41 @@ struct TableCellInlineState {
     in_mark: bool,
     in_emphasis: bool,
     in_strong: bool,
+    in_dim: bool,
 }
 
-fn render_table_cell_text(
+fn push_table_cell_text(
+    output: &mut String,
     text: &str,
     style: Style,
     emit_italic: bool,
+    emit_dim: bool,
     state: TableCellInlineState,
     terminal: &Terminal,
-) -> String {
+) {
     if text.is_empty() {
-        return String::new();
+        return;
     }
 
     // Keep mark/highlight rendering on Darkmatter's style path.
     if state.in_mark {
-        return emit_prose_text(text, style, emit_italic, state.in_strikethrough, true, None);
+        push_prose_text(
+            output,
+            text,
+            style,
+            emit_italic,
+            state.in_strikethrough,
+            true,
+            None,
+            state.in_dim,
+            emit_dim,
+        );
+        return;
     }
 
     // Use Prose selectively for semantic inline style serialization in table cells.
     // This keeps table layout logic in biscuit-terminal while Darkmatter owns markdown parsing.
-    if state.in_strong || state.in_emphasis || state.in_strikethrough {
+    if state.in_strong || state.in_emphasis || state.in_strikethrough || state.in_dim {
         let mut serialized = String::new();
         if state.in_strong {
             serialized.push_str("<bold>");
@@ -1742,7 +1916,13 @@ fn render_table_cell_text(
         if state.in_strikethrough {
             serialized.push_str("<strikethrough>");
         }
+        if state.in_dim && emit_dim {
+            serialized.push_str("<dim>");
+        }
         serialized.push_str(text);
+        if state.in_dim && emit_dim {
+            serialized.push_str("</dim>");
+        }
         if state.in_strikethrough {
             serialized.push_str("</strikethrough>");
         }
@@ -1757,18 +1937,26 @@ fn render_table_cell_text(
         if !text.contains('<') && !text.contains('{') {
             let prose = Prose::new(serialized).render(terminal);
             let fg = style.foreground;
-            return format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, prose);
+            let _ = write!(
+                output,
+                "\x1b[38;2;{};{};{}m{}\x1b[0m",
+                fg.r, fg.g, fg.b, prose
+            );
+            return;
         }
     }
 
-    emit_prose_text(
+    push_prose_text(
+        output,
         text,
         style,
         emit_italic,
         state.in_strikethrough,
         false,
         None,
-    )
+        state.in_dim,
+        emit_dim,
+    );
 }
 
 /// Renders a buffered markdown table via `biscuit-terminal::Table`.
@@ -2067,6 +2255,9 @@ impl LineWrapper {
     /// * `emit_italic` - Whether to emit italic escape codes
     /// * `in_strikethrough` - Whether to apply strikethrough formatting
     /// * `in_mark` - Whether to apply highlight background
+    /// * `in_dim` - Whether to apply dim/faint formatting
+    /// * `emit_dim` - Whether to emit dim escape codes
+    #[allow(clippy::too_many_arguments)]
     fn emit_styled(
         &mut self,
         text: &str,
@@ -2074,6 +2265,8 @@ impl LineWrapper {
         emit_italic: bool,
         in_strikethrough: bool,
         in_mark: bool,
+        in_dim: bool,
+        emit_dim: bool,
     ) {
         // Split into segments, preserving whitespace
         // We iterate over whitespace-separated words, handling spaces between them
@@ -2083,7 +2276,15 @@ impl LineWrapper {
             if ch.is_whitespace() {
                 // Emit accumulated word first
                 if !current_word.is_empty() {
-                    self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark);
+                    self.emit_word(
+                        &current_word,
+                        style,
+                        emit_italic,
+                        in_strikethrough,
+                        in_mark,
+                        in_dim,
+                        emit_dim,
+                    );
                     current_word.clear();
                 }
                 // Handle whitespace
@@ -2101,7 +2302,15 @@ impl LineWrapper {
                         }
                         // For marked text or blockquote, emit styled space to preserve background
                         if in_mark || self.blockquote_bg.is_some() {
-                            self.emit_word(" ", style, emit_italic, in_strikethrough, in_mark);
+                            self.emit_word(
+                                " ",
+                                style,
+                                emit_italic,
+                                in_strikethrough,
+                                in_mark,
+                                in_dim,
+                                emit_dim,
+                            );
                         } else {
                             self.output.push(' ');
                             self.current_col += 1;
@@ -2115,11 +2324,20 @@ impl LineWrapper {
 
         // Emit any remaining word
         if !current_word.is_empty() {
-            self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark);
+            self.emit_word(
+                &current_word,
+                style,
+                emit_italic,
+                in_strikethrough,
+                in_mark,
+                in_dim,
+                emit_dim,
+            );
         }
     }
 
     /// Emits a single word, wrapping if necessary.
+    #[allow(clippy::too_many_arguments)]
     fn emit_word(
         &mut self,
         word: &str,
@@ -2127,6 +2345,8 @@ impl LineWrapper {
         emit_italic: bool,
         in_strikethrough: bool,
         in_mark: bool,
+        in_dim: bool,
+        emit_dim: bool,
     ) {
         let word_width = UnicodeWidthStr::width(word);
 
@@ -2137,14 +2357,17 @@ impl LineWrapper {
         }
 
         // Emit the styled word with blockquote background if applicable
-        self.output.push_str(&emit_prose_text(
+        push_prose_text(
+            &mut self.output,
             word,
             style,
             emit_italic,
             in_strikethrough,
             in_mark,
             self.blockquote_bg,
-        ));
+            in_dim,
+            emit_dim,
+        );
         self.current_col += word_width;
     }
 
@@ -2166,14 +2389,17 @@ impl LineWrapper {
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
         // Note: markers don't use blockquote background (they have their own styling)
-        self.output.push_str(&emit_prose_text(
+        push_prose_text(
+            &mut self.output,
             text,
             style,
             emit_italic,
             false,
             false,
             None,
-        ));
+            false,
+            true,
+        );
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -2197,14 +2423,17 @@ impl LineWrapper {
 
             // Emit styled text INSIDE the hyperlink
             // Note: We don't use word wrapping for links - they stay on one line
-            self.output.push_str(&emit_prose_text(
+            push_prose_text(
+                &mut self.output,
                 text,
                 style,
                 emit_italic,
                 false,
                 false,
                 None,
-            ));
+                false,
+                true,
+            );
 
             // OSC8 hyperlink end: ESC ] 8 ; ; BEL
             self.output.push_str("\x1b]8;;\x07");
@@ -2212,14 +2441,17 @@ impl LineWrapper {
             self.current_col += UnicodeWidthStr::width(text);
         } else {
             // Fallback format: styled text followed by [url]
-            self.output.push_str(&emit_prose_text(
+            push_prose_text(
+                &mut self.output,
                 text,
                 style,
                 emit_italic,
                 false,
                 false,
                 None,
-            ));
+                false,
+                true,
+            );
             self.current_col += UnicodeWidthStr::width(text);
 
             // Append URL in brackets (unstyled)
@@ -2239,7 +2471,7 @@ impl LineWrapper {
             self.emit_newline_with_prefix();
         }
 
-        self.output.push_str(&emit_inline_code(code, style));
+        push_inline_code(&mut self.output, code, style);
         self.current_col += code_width;
     }
 
@@ -2405,6 +2637,7 @@ mod tests {
             image_mode: TerminalImageMode::Never,
             base_path: None,
             italic_mode: ItalicMode::Always,
+            dim_mode: DimMode::Always,
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
@@ -3499,7 +3732,7 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("Hello", style, true, false, false, None);
+        let result = emit_prose_text("Hello", style, true, false, false, None, false, true);
 
         // Should have foreground
         assert!(result.contains("\x1b[38;2;255;128;64m"));
@@ -3534,7 +3767,7 @@ fn main() {}
         };
 
         // With emit_italic=true, should emit italic code
-        let result = emit_prose_text("italic text", style, true, false, false, None);
+        let result = emit_prose_text("italic text", style, true, false, false, None, false, true);
 
         // Should have italic escape code
         assert!(
@@ -3572,7 +3805,7 @@ fn main() {}
         };
 
         // With emit_italic=false, should NOT emit italic code
-        let result = emit_prose_text("italic text", style, false, false, false, None);
+        let result = emit_prose_text("italic text", style, false, false, false, None, false, true);
 
         // Should NOT have italic escape code
         assert!(
@@ -3605,7 +3838,7 @@ fn main() {}
             font_style: FontStyle::BOLD,
         };
 
-        let result = emit_prose_text("bold text", style, true, false, false, None);
+        let result = emit_prose_text("bold text", style, true, false, false, None, false, true);
 
         // Should have bold escape code
         assert!(
@@ -3638,7 +3871,16 @@ fn main() {}
             font_style: FontStyle::UNDERLINE,
         };
 
-        let result = emit_prose_text("underline text", style, true, false, false, None);
+        let result = emit_prose_text(
+            "underline text",
+            style,
+            true,
+            false,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have underline escape code
         assert!(
@@ -3669,7 +3911,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, true, false, false, None);
+        let result = emit_prose_text("bold italic", style, true, false, false, None, false, true);
 
         // Should have both escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -3697,7 +3939,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, false, false, false, None);
+        let result = emit_prose_text("bold italic", style, false, false, false, None, false, true);
 
         // Should have bold but NOT italic
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -3728,7 +3970,16 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("strikethrough text", style, true, true, false, None);
+        let result = emit_prose_text(
+            "strikethrough text",
+            style,
+            true,
+            true,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have strikethrough escape code
         assert!(
@@ -3763,7 +4014,16 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic strikethrough", style, true, true, false, None);
+        let result = emit_prose_text(
+            "bold italic strikethrough",
+            style,
+            true,
+            true,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have all three escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -6120,7 +6380,15 @@ fn line6() {}
 
         // Create wrapper with narrow width (no hyperlink support for this test)
         let mut wrapper = LineWrapper::new(20, false);
-        wrapper.emit_styled("Hello world this is a test", style, false, false, false);
+        wrapper.emit_styled(
+            "Hello world this is a test",
+            style,
+            false,
+            false,
+            false,
+            false,
+            true,
+        );
 
         let output = wrapper.into_output();
         let plain = strip_ansi_codes(&output);
@@ -6254,9 +6522,17 @@ fn line6() {}
         };
 
         let mut wrapper = LineWrapper::new(40, true);
-        wrapper.emit_styled("This has ", bold_style, true, false, false);
-        wrapper.emit_styled("mixed styles", italic_style, true, false, false);
-        wrapper.emit_styled(" in one line", bold_style, true, false, false);
+        wrapper.emit_styled("This has ", bold_style, true, false, false, false, true);
+        wrapper.emit_styled(
+            "mixed styles",
+            italic_style,
+            true,
+            false,
+            false,
+            false,
+            true,
+        );
+        wrapper.emit_styled(" in one line", bold_style, true, false, false, false, true);
 
         let output = wrapper.into_output();
 
@@ -6607,9 +6883,33 @@ fn bar() {}
             let mut wrapper = LineWrapper::new(width, true);
 
             // Simulate: "prefix ==highlighted== suffix"
-            wrapper.emit_styled("prefix text before ", base_style, false, false, false);
-            wrapper.emit_styled("highlighted text here", base_style, false, false, true); // in_mark=true
-            wrapper.emit_styled(" suffix text after", base_style, false, false, false);
+            wrapper.emit_styled(
+                "prefix text before ",
+                base_style,
+                false,
+                false,
+                false,
+                false,
+                true,
+            );
+            wrapper.emit_styled(
+                "highlighted text here",
+                base_style,
+                false,
+                false,
+                true,
+                false,
+                true,
+            ); // in_mark=true
+            wrapper.emit_styled(
+                " suffix text after",
+                base_style,
+                false,
+                false,
+                false,
+                false,
+                true,
+            );
 
             let output = wrapper.output();
             let plain = strip_ansi_codes(output);
@@ -7654,5 +7954,365 @@ flowchart LR
             matches!(options.hyperlink_mode, HyperlinkMode::Auto),
             "Default hyperlink_mode should be Auto"
         );
+    }
+
+    // =========================================================================
+    // Dim (⌄text⌄) tests
+    // =========================================================================
+
+    #[test]
+    fn test_terminal_dim_basic() {
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim ANSI code \x1b[2m
+        assert!(
+            output.contains("\x1b[2m"),
+            "Should contain dim ANSI code, got: {:?}",
+            output
+        );
+
+        // Content should be present when stripped
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed"));
+    }
+
+    #[test]
+    fn test_terminal_dim_never_strips_delimiters() {
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let mut options = test_options();
+        options.dim_mode = DimMode::Never;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should NOT contain dim ANSI code
+        assert!(
+            !output.contains("\x1b[2m"),
+            "DimMode::Never should not produce \x1b[2m, got: {:?}",
+            output
+        );
+
+        // Delimiters should be stripped (inline processor removes them)
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed"));
+        assert!(
+            !plain.contains("⌄"),
+            "Delimiters should be stripped in terminal output"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_nested_bold() {
+        let md: Markdown = "This is **⌄bold dim⌄** text.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain both bold and dim codes
+        assert!(output.contains("\x1b[1m"), "Should contain bold code");
+        assert!(output.contains("\x1b[2m"), "Should contain dim code");
+
+        // Neither style should leak into following text
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("bold dim"));
+        assert!(plain.contains("text."));
+    }
+
+    #[test]
+    fn test_terminal_dim_unclosed() {
+        let md: Markdown = "This has ⌄unclosed dim markers.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Unclosed markers should render literally
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("⌄unclosed"),
+            "Unclosed dim markers should render literally, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_in_inline_code() {
+        let md: Markdown = "Use `⌄code⌄` syntax.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Inline code should NOT be dimmed
+        assert!(
+            !output.contains("\x1b[2m"),
+            "Inline code should not trigger dim, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("⌄code⌄"),
+            "Inline code should preserve literal delimiters"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_in_fenced_code() {
+        let md: Markdown = "```\n⌄dim\n```".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Fenced code should NOT be dimmed
+        assert!(
+            !output.contains("\x1b[2m"),
+            "Fenced code should not trigger dim, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("⌄dim"),
+            "Fenced code should preserve literal delimiters"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_in_list() {
+        let md: Markdown = "- ⌄dimmed item⌄\n- normal item".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim code
+        assert!(
+            output.contains("\x1b[2m"),
+            "Dim should work in list items, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed item"));
+        assert!(plain.contains("normal item"));
+    }
+
+    #[test]
+    fn test_terminal_dim_in_blockquote() {
+        let md: Markdown = "> ⌄dimmed quote⌄".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim code
+        assert!(
+            output.contains("\x1b[2m"),
+            "Dim should work in blockquotes, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed quote"));
+    }
+
+    #[test]
+    fn test_terminal_dim_table_cell() {
+        let md: Markdown = "| Header |\n|--------|\n| ⌄dim⌄ |".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Table cell should contain the dimmed text without delimiters
+        assert!(plain.contains("dim"), "Table cell should contain dim text");
+        assert!(
+            !plain.contains("⌄"),
+            "Table cell should not expose delimiters"
+        );
+    }
+
+    #[test]
+    fn test_dim_mode_always_and_never_resolve() {
+        // Static modes resolve without consulting terminal capabilities.
+        assert!(
+            DimMode::Always.should_emit_dim(),
+            "DimMode::Always should emit dim"
+        );
+        assert!(
+            !DimMode::Never.should_emit_dim(),
+            "DimMode::Never should not emit dim"
+        );
+    }
+
+    /// RAII helper for setting an env var for the duration of a test.
+    ///
+    /// Pairs with `#[serial]` to avoid concurrent env mutation across threads.
+    struct ScopedEnv {
+        key: String,
+        original: Option<String>,
+    }
+
+    impl ScopedEnv {
+        fn set(key: &str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: callers must mark their tests `#[serial]`.
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key: key.to_string(),
+                original,
+            }
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            // SAFETY: callers must mark their tests `#[serial]`.
+            unsafe {
+                match &self.original {
+                    Some(v) => std::env::set_var(&self.key, v),
+                    None => std::env::remove_var(&self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_terminal_dim_mode_auto_with_dumb_terminal() {
+        // With TERM=dumb (and stdout not a TTY in tests), supports_dim()
+        // returns false, so DimMode::Auto must NOT emit `\x1b[2m`.
+        let _env = ScopedEnv::set("TERM", "dumb");
+
+        let md: Markdown = "This has ⌄dim⌄ text.".into();
+        let mut options = test_options();
+        options.dim_mode = DimMode::Auto;
+        let output = for_terminal(&md, options).unwrap();
+
+        assert!(
+            !output.contains("\x1b[2m"),
+            "DimMode::Auto with TERM=dumb must not emit \\x1b[2m, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_cross_event_remains_literal() {
+        // Cross-text-event dim spans (delimiters split across pulldown-cmark
+        // events by an intervening tag like **strong**) currently degrade to
+        // literal `⌄` characters. This test pins that behavior so any future
+        // pairing-state lift is intentional.
+        let md: Markdown = "⌄dim and **strong**⌄".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        assert!(
+            !output.contains("\x1b[2m"),
+            "Cross-event dim must not currently emit dim SGR, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        let dim_count = plain.matches('\u{2304}').count();
+        assert_eq!(
+            dim_count, 2,
+            "Both delimiters must remain literal across the strong span, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_empty() {
+        let md: Markdown = "This has ⌄⌄ empty dim.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Empty dim (⌄⌄) creates start + end events with no content between
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("empty dim"),
+            "Text after empty dim should render"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_multiple() {
+        let md: Markdown = "This has ⌄one⌄ and ⌄two⌄ dims.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim code
+        assert!(output.contains("\x1b[2m"), "Should contain dim code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("one"));
+        assert!(plain.contains("two"));
+    }
+
+    #[test]
+    fn test_emit_prose_text_dim() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            font_style: FontStyle::empty(),
+        };
+
+        // With in_dim=true and emit_dim=true, should emit dim code
+        let result = emit_prose_text("dim text", style, true, false, false, None, true, true);
+        assert!(
+            result.contains("\x1b[2m"),
+            "Dim text should include \x1b[2m escape code, got: {:?}",
+            result
+        );
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+        assert!(result.contains("\x1b[0m"));
+    }
+
+    #[test]
+    fn test_emit_prose_text_dim_suppressed() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            font_style: FontStyle::empty(),
+        };
+
+        // With emit_dim=false, should NOT emit dim code
+        let result = emit_prose_text("dim text", style, true, false, false, None, true, false);
+        assert!(
+            !result.contains("\x1b[2m"),
+            "Dim text with emit_dim=false should NOT include \x1b[2m, got: {:?}",
+            result
+        );
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+    }
+
+    #[test]
+    fn test_emit_prose_text_bold_dim() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            font_style: FontStyle::BOLD,
+        };
+
+        let result = emit_prose_text("bold dim", style, true, false, false, None, true, true);
+
+        // Should have both bold and dim escape codes
+        assert!(result.contains("\x1b[1m"), "Should have bold");
+        assert!(result.contains("\x1b[2m"), "Should have dim");
     }
 }

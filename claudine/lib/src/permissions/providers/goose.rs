@@ -236,7 +236,9 @@ mod tests {
     async fn goose_backend_returns_partial_snapshot_instead_of_missing_backend() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
-        tokio::fs::create_dir_all(home.join(".config/goose")).await.unwrap();
+        tokio::fs::create_dir_all(home.join(".config/goose"))
+            .await
+            .unwrap();
         tokio::fs::write(home.join(".config/goose/config.yaml"), "provider: openai\n")
             .await
             .unwrap();

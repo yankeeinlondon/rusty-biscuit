@@ -73,6 +73,21 @@ sniff repo package-area-has-source-code-changes -b /path/to/homelab/lib
   run: cargo test
 ```
 
+## JSON Output (`--json`)
+
+```bash
+sniff --json repo package-area-has-source-code-changes
+```
+
+Returns a `{ has_source_code_changes: bool }` object so JSON consumers
+get a stable shape even when the underlying state is "no changes".
+The exit code mirrors the boolean: `0` when `true`, `1` when `false`
+(or when the current directory is outside any package area).
+
+```json
+{ "has_source_code_changes": true }
+```
+
 ## Related Subcommands
 
 | Subcommand | Behavior |

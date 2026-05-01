@@ -48,10 +48,16 @@ sniff repo staged-package-areas !biscuit     # All staged areas except biscuit
 sniff --json repo staged-package-areas
 ```
 
-Returns a JSON array of area name strings:
+Returns a `{ scope, kind, names }` object. `scope` is `"staged"`, `kind`
+is `"package_areas"`, and `names` is an array of area name strings
+(empty when the repo is not a monorepo):
 
 ```json
-["sniff"]
+{
+  "scope": "staged",
+  "kind": "package_areas",
+  "names": ["sniff"]
+}
 ```
 
 ## Related Subcommands

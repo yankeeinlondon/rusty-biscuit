@@ -766,14 +766,7 @@ mod pty {
         // restores the initial selection and submits with exit code 0.
         // Pre-select `beta` so the test can also confirm the restored
         // value reaches stdout.
-        let mut p = spawn_question(&[
-            "choose-one",
-            "--selected",
-            "beta",
-            "alpha",
-            "beta",
-            "gamma",
-        ]);
+        let mut p = spawn_question(&["choose-one", "--selected", "beta", "alpha", "beta", "gamma"]);
         std::thread::sleep(Duration::from_millis(200));
         // Move the hover off the initial selection, then Esc.
         p.write_all(b"\x1b[B").expect("send Down");

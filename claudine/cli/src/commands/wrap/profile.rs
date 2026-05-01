@@ -3216,10 +3216,7 @@ mod tests {
 
     #[test]
     fn opencode_format_equals_json_disables_structured_parsing() {
-        assert!(detect_native_output(
-            Provider::OpenCode,
-            &["--format=json"]
-        ));
+        assert!(detect_native_output(Provider::OpenCode, &["--format=json"]));
     }
 
     #[test]
@@ -3258,10 +3255,7 @@ mod tests {
 
     #[test]
     fn flags_after_double_dash_separator_are_ignored() {
-        assert!(!detect_native_output(
-            Provider::Codex,
-            &["--", "--json"]
-        ));
+        assert!(!detect_native_output(Provider::Codex, &["--", "--json"]));
         assert!(!detect_native_output(
             Provider::Claude,
             &["--", "--output-format", "json"]
@@ -3287,14 +3281,11 @@ mod tests {
                         let separated: Vec<String> =
                             vec![flag.to_string(), support.native_name.to_string()];
                         assert!(
-                            super::super::has_explicit_native_output_request(
-                                provider, &separated
-                            ),
+                            super::super::has_explicit_native_output_request(provider, &separated),
                             "{provider:?}: catalog FlagValue {flag} {} must be detected as native output",
                             support.native_name
                         );
-                        let inline: Vec<String> =
-                            vec![format!("{flag}={}", support.native_name)];
+                        let inline: Vec<String> = vec![format!("{flag}={}", support.native_name)];
                         assert!(
                             super::super::has_explicit_native_output_request(provider, &inline),
                             "{provider:?}: catalog FlagValue {flag}={} (inline) must be detected as native output",

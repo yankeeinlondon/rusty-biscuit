@@ -125,7 +125,6 @@ pub use enums::{
     AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
     OsPackageManager, TerminalApp, TtsClient, Utility,
 };
-pub use notification_helpers::InstalledNotificationHelpers;
 pub use find_program::{
     ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
     find_programs_with_source_from_index, find_programs_with_source_parallel,
@@ -147,6 +146,7 @@ pub use installer::{
 };
 pub use inventory::Program;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
+pub use notification_helpers::InstalledNotificationHelpers;
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;

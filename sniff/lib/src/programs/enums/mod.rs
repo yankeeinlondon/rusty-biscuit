@@ -64,7 +64,10 @@ mod tests {
 
     #[test]
     fn test_notification_helper_count_matches_info() {
-        assert_eq!(NotificationHelper::COUNT, metadata::NOTIFICATION_HELPER_INFO.len());
+        assert_eq!(
+            NotificationHelper::COUNT,
+            metadata::NOTIFICATION_HELPER_INFO.len()
+        );
     }
 
     #[test]

@@ -343,19 +343,14 @@ mod tests {
 
     #[test]
     fn activation_action_with_key() {
-        let receipt = helper_receipt(&[
-            ("activation_type", "action"),
-            ("activation_key", "approve"),
-        ]);
+        let receipt =
+            helper_receipt(&[("activation_type", "action"), ("activation_key", "approve")]);
         assert_eq!(receipt.activation(), Some(Activation::Action("approve")));
     }
 
     #[test]
     fn activation_reply_with_text() {
-        let receipt = helper_receipt(&[
-            ("activation_type", "reply"),
-            ("reply_text", "ship it"),
-        ]);
+        let receipt = helper_receipt(&[("activation_type", "reply"), ("reply_text", "ship it")]);
         assert_eq!(receipt.activation(), Some(Activation::Reply("ship it")));
         assert_eq!(receipt.reply_text(), Some("ship it"));
     }
@@ -394,10 +389,7 @@ mod tests {
 
     #[test]
     fn reply_text_only_returned_for_reply_activation() {
-        let receipt = helper_receipt(&[
-            ("activation_type", "action"),
-            ("reply_text", "leftover"),
-        ]);
+        let receipt = helper_receipt(&[("activation_type", "action"), ("reply_text", "leftover")]);
         assert_eq!(receipt.reply_text(), None);
     }
 }

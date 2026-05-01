@@ -261,15 +261,13 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
                         if sys.is_session_start() {
                             self.handle_init(sys.into_init(), &raw_kind);
                         } else {
-                            let raw = serde_json::to_value(&sys)
-                                .expect("QwenSystem serializes");
+                            let raw = serde_json::to_value(&sys).expect("QwenSystem serializes");
                             self.emit_provider_extension(&raw_kind, raw);
                         }
                     }
                     QwenEvent::Message(msg) | QwenEvent::AssistantMessage(msg) => {
                         if msg.role.as_deref() != Some("assistant") {
-                            let raw = serde_json::to_value(&msg)
-                                .expect("QwenMessage serializes");
+                            let raw = serde_json::to_value(&msg).expect("QwenMessage serializes");
                             self.emit_provider_extension(&raw_kind, raw);
                         } else {
                             self.handle_message(msg, &raw_kind);
@@ -282,8 +280,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
                         self.handle_error(err, &raw_kind);
                     }
                     QwenEvent::Result(result) | QwenEvent::Summary(result) => {
-                        let raw = serde_json::to_value(&result)
-                            .expect("QwenResult serializes");
+                        let raw = serde_json::to_value(&result).expect("QwenResult serializes");
                         self.handle_result(result, raw, &raw_kind);
                     }
                     QwenEvent::ToolUse(tool) | QwenEvent::ToolCall(tool) => {

@@ -14,6 +14,7 @@ mod os;
 mod programs;
 pub(crate) mod recent_commits;
 mod remote;
+pub(crate) mod repo_json;
 mod services;
 mod topics;
 
@@ -30,7 +31,7 @@ pub struct TextOutput {
 }
 
 pub use filesystem::{
-    PathListFormat, render_docs_output, render_git_file_list, render_git_section,
+    PathListFormat, render_docs_output, render_git_section,
     render_hash_section, render_path_list,
 };
 pub use just::{filter_justfiles_for_json, render_just_text};
@@ -631,15 +632,23 @@ pub fn render_text(
 ///
 /// For subsection filters (--cpu, --gpu, --memory, --storage, --git, --repo, --language),
 /// the output is flattened to the top level without the parent container.
+///
+/// ## Returns
+///
+/// A tuple of `(value, exit_code)`. `exit_code` is `None` for almost every
+/// filter; only the boolean / locator repo-action arms set it (so the caller
+/// can `std::process::exit(code)` after the JSON is flushed).
 fn apply_filter_to_json(
     result: &SniffResult,
     filter: OutputFilter,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
-) -> serde_json::Value {
+    repo_action: Option<&RepoAction>,
+    base_dir: Option<&std::path::Path>,
+) -> (serde_json::Value, Option<i32>) {
     use serde_json::{Value, json};
 
-    match filter {
+    let value = match filter {
         OutputFilter::All => {
             // No filtering - serialize everything
             serde_json::to_value(result).unwrap_or(Value::Null)
@@ -717,12 +726,11 @@ fn apply_filter_to_json(
             }
         }
         OutputFilter::Repo => {
-            // Flatten: return repo data at top level
-            if let Some(ref fs) = result.filesystem {
-                serde_json::to_value(&fs.repo).unwrap_or(Value::Null)
-            } else {
-                json!({})
-            }
+            // Dispatch on RepoAction so each subcommand can return a focused
+            // JSON shape. Locator and boolean families also surface an
+            // explicit exit code; we capture both and return-early below.
+            let outcome = repo_json::build_with_outcome(result, repo_action, base_dir);
+            return (outcome.value, outcome.exit_code);
         }
         OutputFilter::Language => {
             // Flatten: return languages data at top level
@@ -771,7 +779,8 @@ fn apply_filter_to_json(
                 "Programs, Services, Just, and BlastRadius filters should be handled separately"
             )
         }
-    }
+    };
+    (value, None)
 }
 
 fn attach_performance(
@@ -795,18 +804,33 @@ fn attach_performance(
     }
 }
 
+/// Print a filtered JSON view of `result` to stdout.
+///
+/// ## Returns
+///
+/// `Ok(Some(code))` when the underlying repo-action JSON wants the process
+/// to exit with `code` after stdout has been flushed (boolean and locator
+/// families). `Ok(None)` when no special exit code is needed and the caller
+/// can return normally from `main`.
 pub fn print_json(
     result: &SniffResult,
     filter: OutputFilter,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
-) -> serde_json::Result<()> {
-    let filtered_json = attach_performance(
-        apply_filter_to_json(result, filter, docs_filter, files_filter),
+    repo_action: Option<&RepoAction>,
+    base_dir: Option<&std::path::Path>,
+) -> serde_json::Result<Option<i32>> {
+    let (filtered, exit_code) = apply_filter_to_json(
         result,
+        filter,
+        docs_filter,
+        files_filter,
+        repo_action,
+        base_dir,
     );
-    println!("{}", serde_json::to_string_pretty(&filtered_json)?);
-    Ok(())
+    let with_perf = attach_performance(filtered, result);
+    println!("{}", serde_json::to_string_pretty(&with_perf)?);
+    Ok(exit_code)
 }
 
 #[cfg(test)]

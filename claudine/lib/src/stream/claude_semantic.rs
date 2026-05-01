@@ -842,8 +842,8 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
                 match event {
                     ClaudeEvent::Init(init) | ClaudeEvent::System(init) => {
                         let subtype = init.subtype.as_deref();
-                        let is_session_init = raw_kind == "init"
-                            || matches!(subtype, None | Some("init") | Some(""));
+                        let is_session_init =
+                            raw_kind == "init" || matches!(subtype, None | Some("init") | Some(""));
                         if is_session_init {
                             self.handle_session_init(init, &raw_kind);
                         } else {

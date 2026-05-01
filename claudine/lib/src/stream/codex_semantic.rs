@@ -573,11 +573,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
                 let raw: Map<String, Value> = match serde_json::from_str(line) {
                     Ok(v) => v,
                     Err(e) => {
-                        super::trace_malformed_line(
-                            Provider::Codex,
-                            self.line_num,
-                            &e.to_string(),
-                        );
+                        super::trace_malformed_line(Provider::Codex, self.line_num, &e.to_string());
                         self.emit_malformed_warning(&e.to_string());
                         return Ok(());
                     }

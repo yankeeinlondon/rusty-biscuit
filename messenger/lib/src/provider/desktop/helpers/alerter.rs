@@ -154,7 +154,9 @@ impl AlerterHelper {
         }
 
         let activation: AlerterActivation = serde_json::from_str(trimmed).map_err(|error| {
-            HelperError::Parse(format!("alerter JSON unparseable: {error}; raw=`{trimmed}`"))
+            HelperError::Parse(format!(
+                "alerter JSON unparseable: {error}; raw=`{trimmed}`"
+            ))
         })?;
 
         let id = request
@@ -223,7 +225,11 @@ impl HelperBackend for AlerterHelper {
     ) -> Result<DesktopNotificationReceipt, HelperError> {
         let args = self.build_args(request);
         let interactive = !request.actions.is_empty();
-        let timeout_ms = if interactive { None } else { Some(NOTICE_TIMEOUT_MS) };
+        let timeout_ms = if interactive {
+            None
+        } else {
+            Some(NOTICE_TIMEOUT_MS)
+        };
         let output = run_expect_success(&self.path, &args, None, timeout_ms).await?;
         Self::parse_output(request, &output.stdout)
     }
@@ -439,8 +445,7 @@ mod tests {
     #[test]
     fn parse_output_reply_recovers_text() {
         let request = notice_request();
-        let stdout =
-            r#"{"activationType":"replied","activationValue":"hello there"}"#;
+        let stdout = r#"{"activationType":"replied","activationValue":"hello there"}"#;
         let receipt = AlerterHelper::parse_output(&request, stdout).unwrap();
         assert_eq!(
             receipt.metadata.get("activation_type").map(String::as_str),
