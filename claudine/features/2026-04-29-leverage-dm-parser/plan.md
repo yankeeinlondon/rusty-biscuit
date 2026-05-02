@@ -54,6 +54,8 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+packages_during_phase_5:
+  - claudine
 source_files_during_phase_6:
   - claudine/cli/README.md
   - claudine/docs/topics/validations-and-handlers.md
