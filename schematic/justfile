@@ -88,7 +88,7 @@ generate:
     @echo ""
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
         --openapi-out openapi --postman-out postman -v
-    @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema"
+    @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema" "Schematic"
 
 
 # generate a single API client to schematic/schema
