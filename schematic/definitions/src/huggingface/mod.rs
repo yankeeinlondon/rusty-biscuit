@@ -447,7 +447,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                     oauth_scopes: None,
             },
         ],
-        module_path: None,
+        module_path: Some("huggingface".to_string()),
         request_suffix: None,
         version: None,
         env_mapping: Some(EnvMapping {

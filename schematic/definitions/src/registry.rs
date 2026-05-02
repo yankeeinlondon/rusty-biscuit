@@ -101,6 +101,19 @@ impl SchemaRegistry {
         self.types.keys().map(String::as_str)
     }
 
+    /// Merges another registry into this one.
+    ///
+    /// Entries from `other` are inserted into `self.types` using
+    /// `IndexMap::insert`, which overwrites duplicates while preserving
+    /// insertion order. This produces the union of schemas suitable for
+    /// module-grouped OpenAPI export — identical schemas registered under the
+    /// same name collapse to a single entry.
+    pub fn extend(&mut self, other: SchemaRegistry) {
+        for (name, schema) in other.types {
+            self.types.insert(name, schema);
+        }
+    }
+
     /// Converts all registered schemas to OpenAPI 3.0 schema format.
     ///
     /// This method transforms the schemars `Schema` objects into
@@ -243,6 +256,107 @@ pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
         "unfolded-circle-core-rest" => Some(crate::unfolded_circle::core_rest::openapi_registry()),
         _ => None,
     }
+}
+
+/// Returns the canonical registry-lookup key for a given API name.
+///
+/// `RestApi::name` uses the API's struct-style name (e.g. `"OllamaNative"`),
+/// but [`get_registry`] is keyed by kebab-cased identifiers
+/// (e.g. `"ollama-native"`). This function bridges the two so callers do not
+/// need to maintain their own translation table.
+///
+/// ## Returns
+///
+/// The kebab-case key suitable for [`get_registry`] when `api_name` is a
+/// known API; otherwise returns the lowercased input as a best-effort
+/// fallback.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::registry::{get_registry, registry_key_for};
+///
+/// assert_eq!(registry_key_for("OllamaNative"), "ollama-native");
+/// assert_eq!(registry_key_for("HuggingFaceHub"), "huggingface");
+/// assert!(get_registry(&registry_key_for("OpenAI")).is_some());
+/// ```
+#[must_use]
+pub fn registry_key_for(api_name: &str) -> String {
+    match api_name {
+        "Anthropic" => "anthropic".to_string(),
+        "Bitbucket" => "bitbucket".to_string(),
+        "OpenAI" => "openai".to_string(),
+        "ElevenLabs" => "elevenlabs".to_string(),
+        "Gitea" => "gitea".to_string(),
+        "GitHub" => "github".to_string(),
+        "GitLab" => "gitlab".to_string(),
+        "HuggingFaceHub" => "huggingface".to_string(),
+        "LmStudio" => "lmstudio".to_string(),
+        "OllamaNative" => "ollama-native".to_string(),
+        "OllamaOpenAI" => "ollama-openai".to_string(),
+        "EmqxBasic" => "emqx-basic".to_string(),
+        "EmqxBearer" => "emqx-bearer".to_string(),
+        "Eversolo" => "eversolo".to_string(),
+        "SamsungSmartTv" => "samsung-smart-tv".to_string(),
+        "UnfoldedCircleCoreRest" => "unfolded-circle-core-rest".to_string(),
+        other => other.to_lowercase(),
+    }
+}
+
+/// Returns the merged OpenAPI schema registry for every API in a module.
+///
+/// Module-grouped OpenAPI export emits a single document per resolved module
+/// path (e.g. `ollama.json` covers both `OllamaNative` and `OllamaOpenAI`).
+/// This helper looks up each member API's per-API registry and merges them
+/// into one [`SchemaRegistry`] suitable for that grouped export.
+///
+/// The merge uses `IndexMap` insertion semantics: identical schemas
+/// registered under the same name collapse to a single entry, while distinct
+/// schemas are unioned in insertion order.
+///
+/// ## Returns
+///
+/// `Some(SchemaRegistry)` containing the union of every member API's
+/// registry when the module is known **and** at least one member API has a
+/// registered schema registry. `None` is returned only when:
+///
+/// - the module name is unknown to [`crate::apis_by_module`], **or**
+/// - every member API in the module has no registry available via
+///   [`get_registry`].
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_definitions::registry::get_registries_for_module;
+///
+/// let ollama = get_registries_for_module("ollama").expect("ollama module");
+/// assert!(!ollama.is_empty());
+///
+/// assert!(get_registries_for_module("unknown-module").is_none());
+/// ```
+#[must_use]
+pub fn get_registries_for_module(module_name: &str) -> Option<SchemaRegistry> {
+    let normalized = module_name.to_lowercase();
+    let grouped = crate::apis_by_module();
+
+    // Find the matching module bucket case-insensitively.
+    let module_apis = grouped
+        .iter()
+        .find(|(name, _)| name.to_lowercase() == normalized)
+        .map(|(_, apis)| apis)?;
+
+    let mut merged = SchemaRegistry::new();
+    let mut found_any = false;
+
+    for api in module_apis {
+        let key = registry_key_for(&api.name);
+        if let Some(reg) = get_registry(&key) {
+            merged.extend(reg);
+            found_any = true;
+        }
+    }
+
+    if found_any { Some(merged) } else { None }
 }
 
 /// Converts a schemars `Schema` to an `openapiv3::Schema`.
@@ -826,5 +940,179 @@ mod tests {
 
         let result = registry.validate_completeness(&api);
         assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+    }
+
+    // =============================================
+    // SchemaRegistry::extend() tests
+    // =============================================
+
+    #[test]
+    fn extend_unions_disjoint_registries() {
+        let mut a = SchemaRegistry::new().register::<Model>("Model");
+        let b = SchemaRegistry::new().register::<ListModelsResponse>("ListModelsResponse");
+
+        a.extend(b);
+
+        assert_eq!(a.len(), 2);
+        assert!(a.get("Model").is_some());
+        assert!(a.get("ListModelsResponse").is_some());
+    }
+
+    #[test]
+    fn extend_overwrites_duplicate_names() {
+        let mut a = SchemaRegistry::new().register::<Model>("Model");
+        let b = SchemaRegistry::new().register::<Model>("Model");
+
+        a.extend(b);
+
+        // Identical schemas registered under the same name collapse to one.
+        assert_eq!(a.len(), 1);
+    }
+
+    #[test]
+    fn extend_preserves_insertion_order() {
+        let mut a = SchemaRegistry::new()
+            .register::<Model>("Model")
+            .register::<ListModelsResponse>("ListModelsResponse");
+        let b = SchemaRegistry::new().register::<DeleteModelResponse>("DeleteModelResponse");
+
+        a.extend(b);
+
+        let names: Vec<&str> = a.names().collect();
+        assert_eq!(
+            names,
+            vec!["Model", "ListModelsResponse", "DeleteModelResponse"]
+        );
+    }
+
+    // =============================================
+    // registry_key_for() tests
+    // =============================================
+
+    #[test]
+    fn registry_key_for_known_apis_matches_table() {
+        // Mirrors the api_names table previously in schematic-gen/src/main.rs.
+        let table = [
+            ("Anthropic", "anthropic"),
+            ("OpenAI", "openai"),
+            ("ElevenLabs", "elevenlabs"),
+            ("Gitea", "gitea"),
+            ("GitHub", "github"),
+            ("GitLab", "gitlab"),
+            ("HuggingFaceHub", "huggingface"),
+            ("LmStudio", "lmstudio"),
+            ("OllamaNative", "ollama-native"),
+            ("OllamaOpenAI", "ollama-openai"),
+            ("EmqxBasic", "emqx-basic"),
+            ("EmqxBearer", "emqx-bearer"),
+            ("Eversolo", "eversolo"),
+            ("SamsungSmartTv", "samsung-smart-tv"),
+            ("UnfoldedCircleCoreRest", "unfolded-circle-core-rest"),
+            ("Bitbucket", "bitbucket"),
+        ];
+
+        for (api_name, expected_key) in table {
+            assert_eq!(
+                registry_key_for(api_name),
+                expected_key,
+                "registry_key_for({:?}) should yield {:?}",
+                api_name,
+                expected_key,
+            );
+            assert!(
+                get_registry(&registry_key_for(api_name)).is_some(),
+                "get_registry({:?}) should resolve to Some",
+                expected_key,
+            );
+        }
+    }
+
+    #[test]
+    fn registry_key_for_unknown_falls_back_to_lowercase() {
+        assert_eq!(registry_key_for("MysteryApi"), "mysteryapi");
+    }
+
+    // =============================================
+    // get_registries_for_module() tests
+    // =============================================
+
+    #[test]
+    fn get_registries_for_module_returns_union_for_ollama() {
+        use crate::ollama::{define_ollama_native_api, define_ollama_openai_api};
+
+        let registry = get_registries_for_module("ollama").expect("ollama module should resolve");
+        assert!(
+            !registry.is_empty(),
+            "merged ollama registry should be non-empty"
+        );
+
+        // Validates both member APIs against the merged registry.
+        registry
+            .validate_completeness(&define_ollama_native_api())
+            .expect("native ollama API should validate");
+        registry
+            .validate_completeness(&define_ollama_openai_api())
+            .expect("openai-compatible ollama API should validate");
+
+        // The merged registry must be a strict superset of each per-API registry.
+        let native = get_registry("ollama-native").unwrap();
+        let openai = get_registry("ollama-openai").unwrap();
+        for name in native.names() {
+            assert!(
+                registry.get(name).is_some(),
+                "merged registry missing {} from ollama-native",
+                name
+            );
+        }
+        for name in openai.names() {
+            assert!(
+                registry.get(name).is_some(),
+                "merged registry missing {} from ollama-openai",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn get_registries_for_module_returns_union_for_emqx() {
+        use crate::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
+
+        let registry = get_registries_for_module("emqx").expect("emqx module should resolve");
+        assert!(!registry.is_empty());
+
+        registry
+            .validate_completeness(&define_emqx_basic_api())
+            .expect("emqx-basic should validate against merged registry");
+        registry
+            .validate_completeness(&define_emqx_bearer_api())
+            .expect("emqx-bearer should validate against merged registry");
+
+        let basic = get_registry("emqx-basic").unwrap();
+        for name in basic.names() {
+            assert!(registry.get(name).is_some());
+        }
+    }
+
+    #[test]
+    fn get_registries_for_module_returns_single_for_singleton_module() {
+        let merged = get_registries_for_module("openai").expect("openai module should resolve");
+        let direct = get_registry("openai").unwrap();
+
+        // Compare key sets — for a singleton module, the merged registry equals
+        // the per-API registry content-wise.
+        let merged_names: std::collections::BTreeSet<&str> = merged.names().collect();
+        let direct_names: std::collections::BTreeSet<&str> = direct.names().collect();
+        assert_eq!(merged_names, direct_names);
+    }
+
+    #[test]
+    fn get_registries_for_module_unknown_returns_none() {
+        assert!(get_registries_for_module("not-a-real-module").is_none());
+    }
+
+    #[test]
+    fn get_registries_for_module_is_case_insensitive() {
+        assert!(get_registries_for_module("OLLAMA").is_some());
+        assert!(get_registries_for_module("Ollama").is_some());
     }
 }

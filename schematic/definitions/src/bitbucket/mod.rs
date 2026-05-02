@@ -710,20 +710,19 @@ mod tests {
                 .find(|e| e.id == id)
                 .unwrap_or_else(|| panic!("Endpoint {} not found", id));
 
-            match &endpoint.response {
-                ApiResponse::Json(schema) => {
-                    assert!(
-                        !schema.type_name.starts_with("PaginatedResponse<"),
-                        "Endpoint {} should return single item, not PaginatedResponse",
-                        id
-                    );
-                    assert_eq!(
-                        schema.type_name, expected_type,
-                        "Endpoint {} should return {}, got {}",
-                        id, expected_type, schema.type_name
-                    );
-                }
-                _ => {} // GetFileContentRaw returns Text, GetDownload returns Binary
+            // GetFileContentRaw returns Text, GetDownload returns Binary;
+            // only assert single-item shape for JSON responses.
+            if let ApiResponse::Json(schema) = &endpoint.response {
+                assert!(
+                    !schema.type_name.starts_with("PaginatedResponse<"),
+                    "Endpoint {} should return single item, not PaginatedResponse",
+                    id
+                );
+                assert_eq!(
+                    schema.type_name, expected_type,
+                    "Endpoint {} should return {}, got {}",
+                    id, expected_type, schema.type_name
+                );
             }
         }
     }

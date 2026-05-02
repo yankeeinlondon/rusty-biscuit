@@ -823,15 +823,14 @@ mod tests {
 
         for id in single_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
-            match &endpoint.response {
-                ApiResponse::Json(schema) => {
-                    assert!(
-                        !schema.type_name.starts_with("Vec<"),
-                        "Endpoint {} should return single item, not Vec",
-                        id
-                    );
-                }
-                _ => {} // GetRepositoryContentRaw returns Text, which is fine
+            // GetRepositoryContentRaw returns Text, which is fine; only
+            // assert single-item shape for JSON responses.
+            if let ApiResponse::Json(schema) = &endpoint.response {
+                assert!(
+                    !schema.type_name.starts_with("Vec<"),
+                    "Endpoint {} should return single item, not Vec",
+                    id
+                );
             }
         }
     }
