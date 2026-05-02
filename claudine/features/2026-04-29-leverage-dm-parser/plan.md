@@ -39,9 +39,16 @@ source_files_during_phase_4:
   - claudine/lib/src/dispatch/matcher.rs
   - claudine/lib/src/dispatch/loader.rs
   - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/dispatch/runner.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - claudine
+  - claudine-cli
 source_files_during_phase_5:
   - claudine/lib/src/harness/validate.rs
 docs_updated_during_phase_5: []
