@@ -629,7 +629,7 @@ pub enum HookAction {
     ///
     /// ```json
     /// { "type": "speak", "message": "Tool {{tool_name}} completed" }
-    /// { "type": "speak", "message": "{{env.GREETING | \"Hello\"}}, session started" }
+    /// { "type": "speak", "message": "{{env.GREETING || \"Hello\"}}, session started" }
     /// ```
     Speak {
         /// Handlebars template message. See section 3.7 for available variables.
@@ -910,7 +910,7 @@ Template variables available in `Speak` messages, `FireAndForget` args, and `Cal
 | Syntax | Description |
 |---|---|
 | `{{env.VAR_NAME}}` | Value of environment variable `VAR_NAME`. Empty string if unset. |
-| `{{env.VAR_NAME \| "default"}}` | Value of `VAR_NAME` with fallback to `"default"` if unset. |
+| `{{env.VAR_NAME \|\| "default"}}` | Value of `VAR_NAME` with fallback to `"default"` if unset or empty. |
 
 #### OS Context (auto-detected via sniff)
 
@@ -956,8 +956,12 @@ Template variables available in `Speak` messages, `FireAndForget` args, and `Cal
 2. `None` values render as empty strings.
 3. Environment variable lookups use `std::env::var()` at template evaluation time (not cached).
 4. OS/hardware/git/project context fields are snapshotted once at session start via `sniff` and reused for all events in the session.
-5. The `env.VAR | "default"` fallback syntax uses the default only when the variable is not set; an empty-string value is still used as-is.
+5. The `env.VAR || "default"` fallback syntax uses the default when the variable is not set or empty (Darkmatter `||` is short-circuit on falsy/empty values). The legacy single-pipe `|` form is no longer supported -- see the migration note below.
 6. Migration compatibility: legacy single-brace placeholders (`{tool_name}`) are accepted during transition, rewritten to `{{tool_name}}`, and logged with a deprecation warning.
+
+#### Migration: single-pipe fallback removed
+
+Earlier Claudine builds accepted `{{env.VAR | "default"}}` (single pipe) as a fallback. The new template engine uses Darkmatter's expression parser, which only accepts `||`. Any remaining single-pipe templates are preserved verbatim in output (no error, no replacement). Search your config for ` | ` inside `{{...}}` blocks and replace with ` || `.
 
 ### 3.8 Comprehensive Mapping Tables
 
@@ -1445,7 +1449,7 @@ The template system uses `{{variable}}` double-brace Handlebars syntax rather th
 2. **Shell expansion**: Single braces can be interpreted by some shells
 3. **Established convention**: Handlebars is widely understood and the `handlebars-rust` crate provides a proven implementation
 
-Environment variables use the `env.` prefix with optional pipe-delimited defaults: `{{env.MESSAGE | "fallback"}}`.
+Environment variables use the `env.` prefix with optional fallbacks via the Darkmatter `||` operator: `{{env.MESSAGE || "fallback"}}`. The legacy single-pipe `|` form is no longer supported (see the migration note in section 3.7).
 
 Migration behavior: legacy single-brace syntax remains accepted temporarily, is rewritten to Handlebars form at load/render time, and emits deprecation warnings.
 
