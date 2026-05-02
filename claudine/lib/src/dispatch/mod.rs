@@ -1,3 +1,4 @@
+pub mod expression;
 pub mod loader;
 mod matcher;
 pub mod runner;
