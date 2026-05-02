@@ -43,6 +43,14 @@ test *args="":
     @just _test {{LIBRARY}} {{args}}
     @just _test {{CLI}} {{args}}
 
+# Run the env-gated PTY/shell verification suites
+# (keyboard protocol, completions shell, choose-cli PTY).
+# Requires bash + zsh on the host. macOS/Linux only.
+test-pty:
+    @RUN_PTY_TESTS=1 cargo test -p {{CLI}} --test keyboard_protocol -- --nocapture
+    @RUN_SHELL_TESTS=1 cargo test -p {{CLI}} --test completions_shell -- --nocapture
+    @QUESTION_INTERACTIVE_PTY=1 cargo test -p {{CLI}} --test choose_cli pty:: -- --nocapture
+
 # Lint both the library and CLI
 lint:
     @just _lint {{LIBRARY}}
