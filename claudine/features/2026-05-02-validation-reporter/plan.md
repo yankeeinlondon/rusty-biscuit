@@ -2,7 +2,7 @@
 phases: 6
 created: 2026-05-02
 start_phase: 1
-spec: claudine/features/2026-05-02-validation-reporter/spec.md
+spec: claudine/features/_completed/2026-05-02-validation-reporter/spec.md
 owner: claudine
 source_files_during_phase_1:
   - claudine/lib/src/harness/model.rs
@@ -35,6 +35,12 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - claudine/docs/topics/composition.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/claudine/validations-and-handlers.md
 packages:
   - claudine
   - claudine-cli
