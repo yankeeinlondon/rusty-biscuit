@@ -22,7 +22,16 @@ source_files_during_phase_3:
   - claudine/lib/src/actions/hook_action.rs
   - claudine/lib/src/dispatch/runner.rs
   - claudine/lib/src/dispatch/loader.rs
-  - claudine/lib/src/events/config.rs
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/tests/canonical_dispatch.rs
+  - claudine/cli/src/commands/actions.rs
+  - claudine/cli/src/commands/hooks.rs
+  - claudine/cli/src/commands/init_wizard.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init/prompts.rs
+  - claudine/cli/src/commands/config_tui/reducers.rs
+  - claudine/cli/src/commands/config_tui/tabs/actions.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
