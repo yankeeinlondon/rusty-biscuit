@@ -7,8 +7,28 @@ use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
+
+/// Parsing detail level for [`parse_markdown_meta_with_mode`].
+///
+/// Some callers (e.g. blast-radius scans) only need the `blast_radius`
+/// frontmatter key. Selecting [`DocParseMode::BlastRadiusOnly`] lets the
+/// parser stop reading at the closing frontmatter delimiter, skip body
+/// hashing, and skip the title/`last_updated` work that the full parser
+/// performs on every document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocParseMode {
+    /// Read and parse the full document — frontmatter, body, hash, title, mtime.
+    Full,
+    /// Read only the frontmatter and extract `blast_radius` plus its presence flag.
+    ///
+    /// Other [`MarkdownMeta`] fields are filled with cheap defaults so the
+    /// returned value still satisfies the public type's invariants but is
+    /// only suitable for blast-radius matching.
+    BlastRadiusOnly,
+}
 
 /// How the document title was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +161,71 @@ pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
     if docs.is_empty() { None } else { Some(docs) }
 }
 
+/// Detect markdown documents that declare a `blast_radius` frontmatter key.
+///
+/// Streams each markdown file only until the closing frontmatter delimiter
+/// and parses just the `blast_radius` key, skipping content hashing, mtime
+/// resolution, and title extraction. Documents without `blast_radius` are
+/// not returned at all.
+///
+/// Returns `None` when the directory is not inside a git repository.
+#[instrument(skip_all, fields(root = %root.display()))]
+pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
+    let repo = git2::Repository::discover(root).ok()?;
+    let repo_root = repo.workdir()?.to_path_buf();
+    let packages = collect_repo_packages(&repo_root);
+
+    let walker = WalkBuilder::new(&repo_root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .build();
+
+    let mut docs: Vec<MarkdownMeta> = walker
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.file_type().is_some_and(|ft| ft.is_file())
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        })
+        .filter_map(|entry| {
+            parse_markdown_meta_with_mode(
+                entry.path(),
+                &repo_root,
+                &packages,
+                DocParseMode::BlastRadiusOnly,
+            )
+        })
+        .filter(|doc| doc.has_blast_radius)
+        .collect();
+
+    docs.sort_by(|a, b| a.relative.cmp(&b.relative));
+    if docs.is_empty() { None } else { Some(docs) }
+}
+
+fn collect_repo_packages(repo_root: &Path) -> Vec<(String, PathBuf)> {
+    detect_repo(repo_root)
+        .ok()
+        .flatten()
+        .and_then(|info| info.packages)
+        .map(|pkgs| {
+            pkgs.into_iter()
+                .map(|p| {
+                    let rel_path = p
+                        .path
+                        .strip_prefix(repo_root)
+                        .unwrap_or(&p.path)
+                        .to_path_buf();
+                    (p.name, rel_path)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 /// Detect markdown documents using pre-computed package info.
 ///
 /// Avoids the redundant `detect_repo()` call that `detect_docs()` performs
@@ -236,6 +321,43 @@ pub(crate) fn parse_markdown_meta(
     repo_root: &Path,
     packages: &[(String, PathBuf)],
 ) -> Option<MarkdownMeta> {
+    parse_markdown_meta_with_mode(path, repo_root, packages, DocParseMode::Full)
+}
+
+/// Parse a single markdown file with the requested level of detail.
+///
+/// [`DocParseMode::Full`] reproduces the historical behavior of
+/// [`parse_markdown_meta`]. [`DocParseMode::BlastRadiusOnly`] streams only
+/// until the closing frontmatter delimiter and parses just the `blast_radius`
+/// key, skipping hashing, mtime resolution, and full-body title scanning.
+pub(crate) fn parse_markdown_meta_with_mode(
+    path: &Path,
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+    mode: DocParseMode,
+) -> Option<MarkdownMeta> {
+    let relative = path
+        .strip_prefix(repo_root)
+        .ok()?
+        .to_string_lossy()
+        .to_string();
+    let relative_path = Path::new(&relative);
+    let package = determine_package(relative_path, packages);
+
+    match mode {
+        DocParseMode::Full => parse_markdown_meta_full(path, repo_root, package, relative),
+        DocParseMode::BlastRadiusOnly => {
+            parse_markdown_meta_blast_radius_only(path, repo_root, package, relative)
+        }
+    }
+}
+
+fn parse_markdown_meta_full(
+    path: &Path,
+    repo_root: &Path,
+    package: Option<String>,
+    relative: String,
+) -> Option<MarkdownMeta> {
     let content = fs::read_to_string(path)
         .map_err(|e| {
             debug!(path = %path.display(), error = %e, "could not read doc file");
@@ -244,14 +366,6 @@ pub(crate) fn parse_markdown_meta(
         .ok()?;
     let (frontmatter, body) = extract_frontmatter(&content);
 
-    let relative = path
-        .strip_prefix(repo_root)
-        .ok()?
-        .to_string_lossy()
-        .to_string();
-
-    let relative_path = Path::new(&relative);
-    let package = determine_package(relative_path, packages);
     let (title, title_source) = extract_title(&frontmatter, body);
     let model = get_string_field(&frontmatter, "model");
     let prompt = get_string_field(&frontmatter, "prompt");
@@ -279,6 +393,78 @@ pub(crate) fn parse_markdown_meta(
         blast_radius,
         frontmatter_keys,
     })
+}
+
+fn parse_markdown_meta_blast_radius_only(
+    path: &Path,
+    repo_root: &Path,
+    package: Option<String>,
+    relative: String,
+) -> Option<MarkdownMeta> {
+    let frontmatter = read_frontmatter_only(path)?;
+    let has_blast_radius = frontmatter.contains_key("blast_radius");
+    let blast_radius = parse_blast_radius(&frontmatter, repo_root);
+
+    Some(MarkdownMeta {
+        filepath: path.to_path_buf(),
+        relative,
+        package,
+        title: String::new(),
+        title_source: TitleSource::None,
+        model: None,
+        prompt: None,
+        last_updated: DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+        updated_source: UpdatedSource::FileMetadata,
+        content_hash: String::new(),
+        has_blast_radius,
+        blast_radius,
+        frontmatter_keys: Vec::new(),
+    })
+}
+
+/// Stream-read just the YAML frontmatter from `path` and parse it.
+///
+/// Stops reading at the closing `---` delimiter, so large documents are not
+/// loaded into memory when only frontmatter keys are needed. Returns an empty
+/// map when the file has no frontmatter, and `None` when the file cannot be
+/// opened or its frontmatter is malformed.
+fn read_frontmatter_only(path: &Path) -> Option<HashMap<String, serde_yaml_ng::Value>> {
+    let file = fs::File::open(path)
+        .map_err(|e| {
+            debug!(path = %path.display(), error = %e, "could not read doc file");
+            e
+        })
+        .ok()?;
+    let mut reader = BufReader::new(file);
+
+    let mut first_line = String::new();
+    if reader.read_line(&mut first_line).ok()? == 0 {
+        return Some(HashMap::new());
+    }
+    if first_line.trim_end_matches(['\r', '\n']) != "---" {
+        return Some(HashMap::new());
+    }
+
+    let mut yaml = String::new();
+    let mut found_close = false;
+    let mut line = String::new();
+    while reader.read_line(&mut line).ok()? > 0 {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            found_close = true;
+            break;
+        }
+        yaml.push_str(&line);
+        line.clear();
+    }
+
+    if !found_close {
+        return Some(HashMap::new());
+    }
+    if yaml.trim().is_empty() {
+        return Some(HashMap::new());
+    }
+
+    serde_yaml_ng::from_str::<HashMap<String, serde_yaml_ng::Value>>(&yaml).ok()
 }
 
 /// Extract YAML frontmatter from markdown content.
