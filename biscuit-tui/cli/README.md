@@ -352,11 +352,27 @@ binary on `$PATH` plus any required env (`WEZTERM_UNIX_SOCKET`,
 no spurious failures.
 
 ```sh
-# Default — Level 2 runs where the host has the tooling, Level 3 skips
+# All levels at once — Level 2 auto-skips when tooling is missing, Level 3 skips
+# unless RUN_LEVEL3=1 is set
+just test          # or: cargo test -p tui-chrome -p tui-chrome-cli
+
+# Level 1 only — library unit tests (TestBackend, buffer asserts)
+cargo test -p tui-chrome
+
+# Level 1 only — CLI PTY tests (manufactured input bytes via `expectrl`)
+cargo test -p tui-chrome-cli --test keyboard_protocol
+
+# Level 2 (and Level 3 when gated on) — real terminal harness
+# Auto-skips individual tests when tmux / wezterm / kitty / cliclick is missing
 cargo test -p tui-chrome-cli --test real_terminal_render
 
-# Enable Level 3 — focus must stay on the spawned terminal during the test
+# Level 3 — OS-level keyboard injection. Focus must stay on the spawned
+# terminal window during the test (cliclick on macOS, xdotool on Linux).
 RUN_LEVEL3=1 cargo test -p tui-chrome-cli --test real_terminal_render
+
+# Run a single test by name (works at any level)
+cargo test -p tui-chrome-cli --test real_terminal_render \
+    level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr -- --nocapture
 ```
 
 #### Choosing the right level

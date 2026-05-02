@@ -142,6 +142,131 @@ fn level2_tmux_ctrl_space_reveals_badges() {
 }
 
 // ---------------------------------------------------------------------------
+// Level 2 — badge SGR styling (orange BG / black FG / bold for held Ctrl)
+//
+// Forces the Ctrl badge family into the held state via `--hotkey-badges
+// ctrl`, captures the pane WITH escape sequences, and asserts the
+// styling immediately preceding `^R` carries:
+//   * palette-208 background (the held Ctrl orange)
+//   * SGR `30` (black foreground) — the spec mandates black; white-on-
+//     yellow is illegible, and we want a single consistent FG across
+//     both badge families
+//   * SGR `1` (bold) — the held badge's distinguishing attribute
+//
+// This is the strongest end-to-end colour verification we have. The
+// PTY suite captures escapes too, but no other test asserts that the
+// badge family + weight survives ratatui's diff renderer and the
+// terminal's re-emission unchanged.
+// ---------------------------------------------------------------------------
+
+/// Returns true when `param` appears as a complete SGR token inside any
+/// `\x1b[…m` sequence in `haystack`.
+///
+/// SGR parameters are `;`-separated, bounded by `[` (start) and `m`
+/// (terminator). A loose substring match would falsely accept e.g. `1`
+/// inside `38;5;1` (red palette index), so we require token boundaries.
+fn sgr_param_present(haystack: &str, param: &str) -> bool {
+    haystack.contains(&format!("\x1b[{param}m"))
+        || haystack.contains(&format!("\x1b[{param};"))
+        || haystack.contains(&format!(";{param}m"))
+        || haystack.contains(&format!(";{param};"))
+}
+
+#[test]
+fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
+    if !TmuxHarness::available() {
+        eprintln!("skipping: requires tmux on PATH");
+        return;
+    }
+    let bin = question_binary();
+    let mut harness = TmuxHarness::new();
+    harness
+        .spawn(
+            &bin,
+            &[
+                "choose-one",
+                "--hotkey-badges",
+                "ctrl",
+                "[CTRL+r] Red",
+                "[CTRL+g] Green",
+                "[CTRL+b] Blue",
+            ],
+        )
+        .expect("spawn question in tmux");
+    std::thread::sleep(Duration::from_millis(400));
+
+    let frame = harness.capture().expect("capture tmux pane");
+
+    // Guardrail: the badge text must actually be on screen before we
+    // try to inspect its styling. If this fails the rest of the test's
+    // diagnostics would be misleading.
+    let badge_pos = frame.raw.find("^R").unwrap_or_else(|| {
+        panic!(
+            "expected `^R` Ctrl badge in pane after --hotkey-badges ctrl; \
+             plain={:?}\nraw={:?}",
+            frame.plain, frame.raw
+        )
+    });
+
+    // Look at the styling window immediately before the badge text.
+    // 200 bytes is generous: ratatui may emit fg/bg/bold as separate
+    // CSIs, and tmux's capture-pane -e may interleave a charset
+    // designator or two.
+    let window_start = badge_pos.saturating_sub(200);
+    let window = &frame.raw[window_start..badge_pos];
+
+    assert!(
+        window.contains("48;5;208"),
+        "Ctrl-held badge `^R` must use palette-208 (orange) background. \
+         window before badge={:?}; full raw={:?}",
+        window,
+        frame.raw,
+    );
+    assert!(
+        sgr_param_present(window, "30") || window.contains("38;5;0"),
+        "Ctrl-held badge `^R` must use BLACK foreground (SGR 30 or 38;5;0); \
+         spec mandates black on both family colours. window={:?}",
+        window,
+    );
+    assert!(
+        sgr_param_present(window, "1"),
+        "Ctrl-held badge `^R` must use bold (SGR 1). window={:?}",
+        window,
+    );
+}
+
+#[test]
+fn level2_tmux_ctrl_c_exits_130() {
+    if !TmuxHarness::available() {
+        eprintln!("skipping: requires tmux on PATH");
+        return;
+    }
+    let bin = question_binary();
+    let mut harness = TmuxHarness::new();
+    harness
+        .spawn(
+            "sh",
+            &[
+                "-c",
+                r#""$0" choose-one Red Green Blue; code=$?; printf '\nEXIT:%s\n' "$code"; sleep 2"#,
+                &bin,
+            ],
+        )
+        .expect("spawn question in tmux");
+    std::thread::sleep(Duration::from_millis(400));
+
+    harness.send_key("C-c").expect("send Ctrl+C");
+    std::thread::sleep(Duration::from_millis(500));
+
+    let frame = harness.capture().expect("capture tmux pane");
+    assert!(
+        frame.plain.contains("EXIT:130"),
+        "Ctrl+C from tmux MUST make question choose-one exit 130; got: {:?}",
+        frame.plain
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Level 2 — bare Ctrl via raw kitty bytes through `wezterm cli send-text`
 //
 // This is the *most reliable* way to verify that the binary correctly
