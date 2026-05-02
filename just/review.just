@@ -312,6 +312,7 @@ implement-feature-review filter="" review="" spec="" design="" agent="":
         echo -e "  - Specification: $(just _link "${spec_file}")"
         if [[ ! -z "${design_file}" ]]; then
             echo -e "  - Design: $(just _link "${design_file}")"
+        fi
         just review --spec="${spec_file}" --design="${design_file}"
 
     else

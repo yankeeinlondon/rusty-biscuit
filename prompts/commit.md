@@ -1,5 +1,5 @@
 ---
-lessons_learned: "@docs/knowledge/commits.md"
+lessons_learned: "@.claudine/memory/commits.md"
 timeout: 10m
 step_timeout: 7m
 show_system_prompt: false
