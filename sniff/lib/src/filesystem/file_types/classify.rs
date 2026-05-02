@@ -70,6 +70,30 @@ fn scan_inventory_parallel(
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
+    /// Worker-local classification buffer that flushes its contents to the
+    /// shared accumulator when the walker drops the per-thread closure.
+    ///
+    /// This mirrors the pattern in `system_view::WorkerBuffers` and ensures
+    /// that classifications recorded on each walker thread are visible after
+    /// the parallel walk completes, even if a worker panics.
+    struct LocalClassifications {
+        shared: Arc<Mutex<Vec<FileClassification>>>,
+        local: Vec<FileClassification>,
+    }
+
+    impl Drop for LocalClassifications {
+        fn drop(&mut self) {
+            if self.local.is_empty() {
+                return;
+            }
+            let mut shared = self
+                .shared
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            shared.append(&mut self.local);
+        }
+    }
+
     let shared: Arc<Mutex<Vec<FileClassification>>> = Arc::new(Mutex::new(Vec::new()));
     let scanned = Arc::new(AtomicUsize::new(0));
 
@@ -84,10 +108,12 @@ fn scan_inventory_parallel(
         })
         .build_parallel()
         .run(|| {
-            let _shared = Arc::clone(&shared);
             let scanned = Arc::clone(&scanned);
             let scan_root = root.to_path_buf();
-            let mut local = Vec::new();
+            let mut buffer = LocalClassifications {
+                shared: Arc::clone(&shared),
+                local: Vec::new(),
+            };
             Box::new(move |result| {
                 let Ok(entry) = result else {
                     return WalkState::Continue;
@@ -103,7 +129,7 @@ fn scan_inventory_parallel(
                 // to reduce atomic overhead in the hot path.
                 #[cfg(feature = "metrics")]
                 performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
-                local.push(classify_file(&scan_root, entry.path()));
+                buffer.local.push(classify_file(&scan_root, entry.path()));
                 WalkState::Continue
             })
         });

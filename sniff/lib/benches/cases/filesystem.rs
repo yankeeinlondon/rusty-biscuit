@@ -6,6 +6,7 @@
 //! deterministic regardless of host state.
 
 use criterion::{Criterion, black_box};
+use sniff::filesystem::file_types::scan_file_inventory;
 use sniff::filesystem::repo::detect_repo_with_inventory;
 use sniff::filesystem::{
     detect_filesystem_with_request, detect_git_with_request, detect_languages,
@@ -75,6 +76,32 @@ pub fn register(c: &mut Criterion) {
     });
 
     repo_group.finish();
+
+    // ---------- file inventory (parallel walker) ----------
+    let mut inventory_group = util::configure_group(c, "filesystem_inventory");
+
+    inventory_group.bench_function("inventory_scan_small", |b| {
+        b.iter(|| {
+            let inventory = scan_file_inventory(black_box(small.path())).unwrap();
+            black_box(inventory);
+        });
+    });
+
+    inventory_group.bench_function("inventory_scan_monorepo", |b| {
+        b.iter(|| {
+            let inventory = scan_file_inventory(black_box(large.path())).unwrap();
+            black_box(inventory);
+        });
+    });
+
+    inventory_group.bench_function("inventory_scan_language_mix", |b| {
+        b.iter(|| {
+            let inventory = scan_file_inventory(black_box(langs.path())).unwrap();
+            black_box(inventory);
+        });
+    });
+
+    inventory_group.finish();
 
     // ---------- languages ----------
     let mut lang_group = util::configure_group(c, "filesystem_languages");
