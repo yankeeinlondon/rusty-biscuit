@@ -266,6 +266,7 @@ fn build_config(
         logging: true,
         protect: claudine::services::protect::config::ProtectConfig::default(),
         actions,
+        matchers: HashMap::new(),
         preferred_agent,
         canonical_provider: None,
         models: HashMap::new(),
