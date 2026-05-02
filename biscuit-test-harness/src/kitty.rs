@@ -108,8 +108,10 @@ impl KittyHarness {
                         // Kitty exposes columns directly on the window
                         // entry. Older versions used `columns`; current
                         // versions use the same key. Try both.
-                        if let Some(cols) =
-                            win.get("columns").and_then(|v| v.as_u64()).map(|v| v as u32)
+                        if let Some(cols) = win
+                            .get("columns")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32)
                         {
                             return Ok(cols);
                         }
