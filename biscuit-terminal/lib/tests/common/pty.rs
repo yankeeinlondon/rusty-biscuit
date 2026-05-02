@@ -67,6 +67,11 @@ pub fn spawn_with_env(envs: &[(&str, &str)]) -> OsSession {
         "ALACRITTY_SOCKET",
         "ALACRITTY_LOG",
         "WT_SESSION",
+        "CI",
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "TRAVIS",
+        "CIRCLECI",
     ] {
         cmd.env_remove(var);
     }

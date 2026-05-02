@@ -3,6 +3,8 @@
 //! These tests exercise `query_osc_actual` by spawning `discovery_probe`
 //! inside a pseudoterminal, manufacturing the OSC reply bytes, and
 //! asserting on the parsed output.
+//!
+//! Run `cargo build -p biscuit-terminal --example discovery_probe` first.
 
 mod common;
 
@@ -76,5 +78,32 @@ fn cursor_color_query_returns_some_with_manufactured_reply() {
     assert!(
         output.contains("cursor_color=Some("),
         "expected parsed cursor_color in output, got: {output}"
+    );
+}
+
+#[test]
+fn bg_color_with_timeout_returns_some_with_manufactured_reply() {
+    let output = query_with_osc_reply("osc11_timeout", "\x1b]11;rgb:8080/8080/8080\x07");
+    assert!(
+        output.contains("osc11_timeout=Some("),
+        "expected parsed osc11_timeout in output, got: {output}"
+    );
+}
+
+#[test]
+fn text_color_with_timeout_returns_some_with_manufactured_reply() {
+    let output = query_with_osc_reply("osc10_timeout", "\x1b]10;rgb:e5e5/e5e5/e5e5\x07");
+    assert!(
+        output.contains("osc10_timeout=Some("),
+        "expected parsed osc10_timeout in output, got: {output}"
+    );
+}
+
+#[test]
+fn cursor_color_with_timeout_returns_some_with_manufactured_reply() {
+    let output = query_with_osc_reply("osc12_timeout", "\x1b]12;rgb:0000/ff00/0000\x07");
+    assert!(
+        output.contains("osc12_timeout=Some("),
+        "expected parsed osc12_timeout in output, got: {output}"
     );
 }
