@@ -13,7 +13,7 @@ use tracing::debug;
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     ApprovedRuntimeCommand, FailureEvent, HandlerAction, HandlerRule, HandlerTable, HarnessPlan,
-    StructuredShape, ValidationEvent, ValidationKind, ValidationPhase, ValidationRule,
+    RuleSource, StructuredShape, ValidationEvent, ValidationKind, ValidationPhase, ValidationRule,
     ValidationRuleId,
 };
 use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
@@ -421,6 +421,8 @@ fn parse_single_validation(
 
     let (kind, subject_key) = parse_validation_kind(name, value, source_path, ctx)?;
 
+    let source = build_rule_source(source_path, name, value);
+
     Ok(ValidationRule {
         id: alloc_id(),
         event: meta.event,
@@ -428,7 +430,31 @@ fn parse_single_validation(
         kind,
         message_template: msg,
         subject_key,
-        source: None,
+        source,
+    })
+}
+
+/// Build a [`RuleSource`] for an author-declared validation rule.
+///
+/// Re-serializes the single rule as a YAML mapping (`name: value`) so the
+/// snippet matches the YAML form authors actually wrote. `line_range` is
+/// always `None` here; recovery is best-effort and left to a follow-up pass
+/// that re-parses the source frontmatter with a span-preserving YAML parser.
+///
+/// Returns `None` when the value cannot be re-serialized into YAML, leaving
+/// the reporter to fall back to its legacy single-line failure rendering.
+fn build_rule_source(source_path: &Path, rule_name: &str, value: &Value) -> Option<RuleSource> {
+    use biscuit_file::serde_yaml_ng;
+    let mut map = serde_yaml_ng::Mapping::new();
+    map.insert(
+        serde_yaml_ng::Value::String(rule_name.to_string()),
+        serde_yaml_ng::to_value(value).ok()?,
+    );
+    let yaml_snippet = serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(map)).ok()?;
+    Some(RuleSource {
+        file: source_path.to_path_buf(),
+        line_range: None,
+        yaml_snippet,
     })
 }
 
@@ -1585,5 +1611,69 @@ mod tests {
     fn has_harness_properties_detects_step_timeout_warn() {
         let fm = json!({ "step_timeout_warn": "15s" });
         assert!(has_harness_properties(&fm));
+    }
+
+    #[test]
+    fn parse_rules_carry_source_with_yaml_snippet() {
+        let fm = json!({
+            "pre_checks": [
+                { "file_exists": "Cargo.toml" }
+            ]
+        });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(plan.pre_checks.len(), 1);
+        let src = plan.pre_checks[0]
+            .source
+            .as_ref()
+            .expect("rule source should be populated");
+        assert_eq!(src.file, source());
+        assert!(src.line_range.is_none());
+        assert!(
+            src.yaml_snippet.contains("file_exists"),
+            "snippet should contain rule name: {}",
+            src.yaml_snippet,
+        );
+        assert!(
+            src.yaml_snippet.contains("Cargo.toml"),
+            "snippet should contain rule value: {}",
+            src.yaml_snippet,
+        );
+    }
+
+    #[test]
+    fn parse_rules_source_field_uses_source_path() {
+        let fm = json!({
+            "pre_checks": { "file_exists": "@docs/plan.md" }
+        });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        assert_eq!(plan.pre_checks[0].source.as_ref().unwrap().file, source());
+    }
+
+    #[test]
+    fn parse_rules_yaml_snippet_round_trips() {
+        let fm = json!({
+            "pre_checks": [
+                { "dir_exists": "@docs" }
+            ]
+        });
+        let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
+        let snippet = &plan.pre_checks[0].source.as_ref().unwrap().yaml_snippet;
+        let value: biscuit_file::serde_yaml_ng::Value =
+            biscuit_file::serde_yaml_ng::from_str(snippet)
+                .expect("snippet should round-trip through serde_yaml_ng");
+        let map = value.as_mapping().expect("snippet should be a mapping");
+        assert_eq!(map.len(), 1, "snippet should have a single key");
+        let key = map
+            .keys()
+            .next()
+            .and_then(|k| k.as_str())
+            .expect("key should be a string");
+        assert_eq!(key, "dir_exists");
+    }
+
+    #[test]
+    fn inline_writability_rule_has_no_source() {
+        let rule = inline_writability_pre_check(source());
+        assert!(rule.source.is_none());
     }
 }
