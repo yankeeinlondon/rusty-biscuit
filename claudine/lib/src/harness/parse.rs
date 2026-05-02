@@ -242,6 +242,7 @@ pub fn inline_writability_pre_check(source_path: &Path) -> ValidationRule {
         },
         message_template: None,
         subject_key: Some(source_path.display().to_string()),
+        source: None,
     }
 }
 
@@ -427,6 +428,7 @@ fn parse_single_validation(
         kind,
         message_template: msg,
         subject_key,
+        source: None,
     })
 }
 

@@ -178,6 +178,7 @@ fn run_checks(
             passed,
             markup,
             failure_message,
+            source: None,
         });
     }
 
@@ -854,7 +855,9 @@ struct ValidationVarsLookup<'a> {
 
 impl<'a> EvaluationLookup for ValidationVarsLookup<'a> {
     fn get(&self, path: &str) -> Option<Value> {
-        self.vars.get(path).map(|value| Value::String(value.clone()))
+        self.vars
+            .get(path)
+            .map(|value| Value::String(value.clone()))
     }
 }
 
@@ -917,6 +920,7 @@ mod tests {
             kind,
             message_template: None,
             subject_key: None,
+            source: None,
         }
     }
 
@@ -1716,17 +1720,11 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("file", "abc".to_string());
 
-        let result = render_template(
-            "{{length(file) > 5 ? \"long\" : \"short\"}}",
-            &vars,
-        );
+        let result = render_template("{{length(file) > 5 ? \"long\" : \"short\"}}", &vars);
         assert_eq!(result, "short");
 
         vars.insert("file", "abcdefghij".to_string());
-        let result = render_template(
-            "{{length(file) > 5 ? \"long\" : \"short\"}}",
-            &vars,
-        );
+        let result = render_template("{{length(file) > 5 ? \"long\" : \"short\"}}", &vars);
         assert_eq!(result, "long");
     }
 

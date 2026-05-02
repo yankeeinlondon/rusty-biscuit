@@ -288,6 +288,7 @@ mod tests {
                     passed: true,
                     markup: "the file /a exists".to_string(),
                     failure_message: None,
+                    source: None,
                 },
                 ValidationCheckOutcome {
                     rule_id: ValidationRuleId(1),
@@ -296,6 +297,7 @@ mod tests {
                     passed: false,
                     markup: "the directory /b exists".to_string(),
                     failure_message: Some("not found".to_string()),
+                    source: None,
                 },
             ],
         };
@@ -409,6 +411,7 @@ mod tests {
                 passed: true,
                 markup: "file changed".to_string(),
                 failure_message: None,
+                source: None,
             }],
         };
         report_check_outcomes(&report, &term);
