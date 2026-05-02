@@ -23,6 +23,7 @@ pub fn create_default_sound_action(event: &AgenticEvent) -> HookAction {
         effect: recommended_sound(event).to_string(),
         volume: 1.0,
         speed: 1.0,
+        when: None,
     }
 }
 
@@ -116,6 +117,7 @@ mod tests {
                 effect,
                 volume,
                 speed,
+                ..
             } => {
                 assert_eq!(effect, "high-up");
                 assert_eq!(volume, 1.0);

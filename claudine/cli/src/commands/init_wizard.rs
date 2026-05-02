@@ -256,6 +256,7 @@ fn build_config(
             effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
             volume: 1.0,
             speed: 1.0,
+            when: None,
         }],
     );
 

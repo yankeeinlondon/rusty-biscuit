@@ -457,6 +457,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
                     effect: recommended_sound(&event).to_string(),
                     volume: 1.0,
                     speed: 1.0,
+                    when: None,
                 }]
             } else {
                 vec![]
@@ -571,6 +572,7 @@ fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, Eve
                     effect: recommended_sound(&event).to_string(),
                     volume: 1.0,
                     speed: 1.0,
+                    when: None,
                 }]
             } else {
                 vec![]
@@ -663,6 +665,7 @@ mod tests {
                 effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
                 volume: 1.0,
                 speed: 1.0,
+                when: None,
             }],
         };
 
@@ -724,6 +727,7 @@ mod tests {
             effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
             volume: 1.0,
             speed: 1.0,
+            when: None,
         };
         let config = config_with_actions(vec![
             (AgenticEvent::SessionStart, vec![]),
