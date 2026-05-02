@@ -63,6 +63,39 @@ Process an incoming event from a provider hook (hidden from help). Reads JSON pa
 
 Show which actions are configured and for which events across the user and repo configs.
 
+### Dispatch Expressions
+
+Hook action templates, conditional `when` clauses, event binding matchers, and harness validation messages all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
+
+**Template Interpolation.** Speak messages, bash params, report templates, and message bodies pass through `{{...}}` interpolation. In addition to simple variable references, authors can use:
+
+- Fallbacks: `{{env.CI || "local"}}`
+- Ternaries: `{{git.is_dirty ? "dirty" : "clean"}}`
+- Comparisons: `{{hardware.cores > 8 ? "fast" : "slow"}}`
+- Helper functions: `{{length(git.branch) > 30 ? "long-branch" : git.branch}}`
+
+Booleans render as `true`/`false`. Unknown bare-variable references like `{{unknown_field}}` are preserved verbatim so misspellings stay visible. Composite expressions that fail to parse are also preserved unchanged. Legacy single-brace placeholders such as `{tool_name}` are still rewritten to `{{tool_name}}` for one compatibility cycle and emit a deprecation warning.
+
+**Action `when` Clauses.** Every hook action variant accepts an optional `when` boolean expression. When it evaluates to false (or fails to parse), the action is skipped without short-circuiting the rest of the binding. A skipped `Call` action cannot replace a previously selected blocking response.
+
+```json
+{ "type": "speak", "message": "Bash on {{git.branch}}", "when": "tool_name == 'Bash'" }
+{ "type": "bash",  "command": "say done", "when": "git.is_dirty" }
+{ "type": "call",  "command": "/usr/local/bin/check", "when": "provider == 'claude' && tool_name == 'Bash'" }
+{ "type": "message", "message": "build red on {{git.branch}}", "when": "event == 'tool_error'" }
+```
+
+**Matcher Modes.** Event binding matchers accept either a Darkmatter condition or a regex (legacy mode). Matcher strings are first attempted as conditions; bare-variable strings like `Bash|Edit` deliberately fall through to regex compilation so historical configurations keep their original semantics. Examples:
+
+| Matcher | Mode | Behavior |
+|---------|------|----------|
+| `Bash\|Edit` | Regex | Matches `tool_name` for tool events, `notification_type` for notifications |
+| `tool_name == 'Bash' && git.branch == 'main'` | Expression | Evaluated against full `EventMeta` |
+| `provider == 'claude' && !git.is_dirty` | Expression | Multi-field condition |
+| `[invalid(regex` | Neither | Warned and skipped (binding fires unconditionally) |
+
+Expression matchers that fail to evaluate at runtime log a warning and are treated as non-matches.
+
 ### `claudine skills`
 
 List shared skills across providers with their scopes. Displays link/sync state per resource using the four-type linking model (Skill, Command, Agent, Script). Replaces the retired `claudine link skills` subcommand.
