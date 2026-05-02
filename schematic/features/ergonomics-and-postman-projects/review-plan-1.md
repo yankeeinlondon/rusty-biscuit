@@ -1,14 +1,17 @@
 ---
 phases: 5
 start_phase: 5
-source_files_during_phase_5: []
+source_files_during_phase_5:
+  - schematic/gen/tests/terminal_capture.rs
+  - schematic/justfile
 docs_updated_during_phase_5:
   - schematic/gen/README.md
   - schematic/docs/io/export-openapi.md
   - schematic/README.md
   - schematic/features/ergonomics-and-postman-projects/review-plan-1.md
 docs_created_during_phase_5: []
-skills_files_updated_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic/SKILL.md
 packages:
   - schematic-gen
 ---
