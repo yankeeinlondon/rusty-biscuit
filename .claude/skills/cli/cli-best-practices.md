@@ -178,7 +178,7 @@ Verifies that glyphs, widths, SGR styling, scroll/overflow, and cursor positioni
 
 Inject real OS keyboard events into the spawned terminal window — the terminal's input encoder fires, then encodes/forwards bytes to the binary just as if a human had pressed the key:
 
-- macOS: `cliclick` (e.g. `cliclick kd:ctrl t:r ku:ctrl` for a chord; `kd:ctrl,sleep,ku:ctrl` for a hold)
+- macOS: [cliclick](./cliclick.md) (e.g. `cliclick kd:ctrl t:r ku:ctrl` for a chord; `kd:ctrl,sleep,ku:ctrl` for a hold)
 - Linux: `xdotool`
 
 This is the **only** level that can verify "what bytes does the terminal actually emit when key X is pressed?" — required for any spec line of the form "*when the user holds/presses key X, Y happens*."
@@ -188,6 +188,81 @@ This is the **only** level that can verify "what bytes does the terminal actuall
 - Before injection, focus the spawned pane explicitly (`wezterm cli activate-pane --pane-id N`) AND raise the app (`osascript -e 'tell application "WezTerm" to activate'`).
 - Provide a parallel chord-injection test alongside the modifier-hold test — the chord variant proves the cliclick→terminal→binary chain works end-to-end, isolating "did the press arrive" from "did the terminal encode it correctly."
 - **Capture during the hold, not after.** Splitting `kd:` and `ku:` with the capture in between is critical when the binary clears its display state on modifier release. A `hold_modifier(800ms)` helper that internally sequences press → sleep → release leaves nothing observable by the time `capture()` runs.
+- **`--test-threads=1` is mandatory** for a Level-3 suite where each test spawns its own GUI window. Parallel runs guarantee one spawned window steals focus from the other before cliclick finishes injecting.
+- **Add a "plain key" diagnostic test** alongside the modifier ones (e.g., `kp:arrow-down` + assert active marker moved). When a Level-3 test fails, run the diagnostic first — if it passes, the harness is sound and the failure is in chord/modifier-specific paths; if it fails, focus delivery is broken upstream.
+- **Use `cliclick -m verbose`** in test harness wrappers and pipe stdout+stderr to test stderr. Verbose mode prints what cliclick is dispatching and surfaces Accessibility-permission warnings; without it, silent failures look identical to focus failures.
+- **Test setup gotcha — option hotkey assignment.** A spec line like *"Ctrl+R selects the Red option"* requires the test to spawn the binary with explicit hotkey prefixes (`[CTRL+r] Red` not `Red`). If the binary's spec says plain options have no hotkey, sending `Ctrl+R` against `Red` does nothing — the chord arrives but the binary has nothing bound to it. Failures present as "click didn't transfer focus" diagnostics that send you down the wrong rabbit hole.
+
+##### Multi-window WezTerm targeting on macOS
+
+When the developer has many WezTerm windows already open (a common reality, not an edge case), naive activation breaks:
+
+- **`tell application "WezTerm" to activate` is window-ambiguous** when the app already owns multiple windows. macOS resolves "front window of activated app" to whichever NSWindow was most recently `keyWindow`, which is rarely the test's freshly spawned window.
+- **`wezterm cli activate-pane --pane-id N` only handles intra-WezTerm pane focus.** It does not move OS-level keyWindow between sibling WezTerm windows.
+- **`set frontmost of <process> to true` via System Events is unreliable across applications** on modern macOS — modifying another app's frontmost state typically requires Apple Events permission, and even when granted the activation can lose to whichever app the user typed in most recently.
+
+**The reliable pattern is title-stamped AXRaise + click:**
+
+1. Stamp a unique title on the spawned window via `wezterm cli set-tab-title --pane-id N <unique>`. **Use `set-tab-title`, not `set-window-title`** — most users' `wezterm.lua` defines a `format-window-title` event that derives the OS-level NSWindow title from the active tab's title and silently overrides direct `set-window-title` calls.
+2. Resolve the WezTerm process by name pattern (`processes whose name contains "wezterm"` — case-insensitive substring match catches `WezTerm`, `wezterm-gui`, etc.).
+3. AppleScript / System Events: find the window whose title matches the stamp and call `perform action "AXRaise"`. Wrap the whole script in `with timeout of 5 seconds` so a wedged AX query fails fast.
+4. Get window position+size from System Events (`position of targetWin`, `size of targetWin`).
+5. **Click into the window via cliclick (`c:X,Y`).** AXRaise alone often does NOT transfer keyWindow when the test runner lives in a different app — only a real OS click reliably forces keyWindow assignment across applications.
+6. Combine the click with the actual key injection in **one batched cliclick invocation** (`cliclick -w 100 c:X,Y kd:ctrl`). Splitting into separate processes leaves a focus-drift window wide enough on a busy desktop for events to route to the wrong window.
+
+##### Parent-app vs spawned-app
+
+If the cargo test runs in WezTerm and spawns more WezTerm windows, the parent and child windows belong to the same NSApplication and compete for keyWindow. AXRaise + activate is window-ambiguous in that scenario.
+
+**Fix: relaunch the cargo run inside a different terminal application** (iTerm2 if installed, else Terminal.app) via osascript before invoking cargo test. The justfile recipe should detect a WezTerm parent (`$TERM_PROGRAM == "WezTerm"`) and relaunch automatically.
+
+##### Permissions chain on macOS (TCC)
+
+Three distinct permissions are involved; granting one does not grant the others:
+
+| Permission | Granted to | Required for |
+|---|---|---|
+| **Accessibility** | The terminal app hosting cargo test (e.g. iTerm.app) | All cliclick events; System Events AX queries; keyboard injection |
+| **Apple Events / Automation** | Same | `tell application "WezTerm" to activate` and any cross-app `tell` block |
+| **Input Monitoring** | Usually not required for our case | Some lower-level CGEvent taps |
+
+Symptom of missing Accessibility: `cliclick` prints `WARNING: Accessibility privileges not enabled. Many actions may fail.` to stderr (visible only with `-m verbose`).
+
+Symptom of missing Apple Events: `tell application "WezTerm" to activate` silently no-ops; macOS may prompt on first use but if dismissed, subsequent attempts fail without re-prompting until you reset via `tccutil reset AppleEvents`.
+
+##### Diagnostic recipes (paste-friendly)
+
+Keyboard delivery sanity check:
+
+```rust
+// After focus_spawned_pane, send a plain key and verify the binary saw it.
+cliclick("c:X,Y", "kp:arrow-down");
+let frame = harness.capture()?;
+let active_moved = frame.plain.lines().any(|l| l.contains("▶") && l.contains("Green"));
+assert!(active_moved, "plain key delivery broken — focus issue, not chord/modifier issue");
+```
+
+Frontmost app + focused window probe:
+
+```rust
+let probe = std::process::Command::new("osascript")
+    .args(["-e", r#"tell application "System Events"
+        set frontApp to name of first application process whose frontmost is true
+        set focusedTitle to "<no AXFocusedWindow>"
+        try
+            tell first process whose name contains "wezterm"
+                set focusedTitle to title of (value of attribute "AXFocusedWindow")
+            end tell
+        end try
+        return frontApp & " | focused: " & focusedTitle
+    end tell"#])
+    .output()?;
+eprintln!("[probe] {}", String::from_utf8_lossy(&probe.stdout).trim());
+```
+
+**Differentiate `AXFocusedWindow` vs `AXMain`.** AXFocusedWindow is the actual keyWindow (where keyboard events go); AXMain is for app-level menu actions. They can differ. Always probe AXFocusedWindow when debugging key-routing issues.
+
+**Multi-monitor coordinates aren't off-screen by default.** A 2x 5K display setup is 5120 pixels wide; window positions up to ~4500 are valid. Don't assume large x-coordinates are bugs.
 
 ##### Known limitation: cliclick + bare modifier keys on macOS
 
@@ -195,6 +270,8 @@ cliclick uses `CGEventCreateKeyboardEvent`, but macOS routes bare-modifier key s
 
 - **Chord injection works** (`kd:ctrl t:r ku:ctrl`): the modifier flag rides along with the letter `keyDown`, which IS a normal CGEvent that AppKit delivers correctly. A Level-3 chord test like "Ctrl+R submits the option bound to Ctrl+R" passes reliably.
 - **Bare-modifier injection is unreliable**: `kd:ctrl` alone often does not produce a `flagsChanged` event that WezTerm sees. The press is dropped before the terminal's input encoder ever fires. This is true even when the binary's bare-modifier handling is correct.
+- **AppleScript System Events `key down control` shares the limitation.** It uses the same CGEvent dispatch path under the hood — the AppleScript layer is just a thin wrapper. Don't reach for it expecting different behaviour.
+- **The only known fix requires a custom Rust binary** built on the `core_graphics` crate that constructs a CGEvent with `CGEventType::FlagsChanged` and the relevant flag bit set, then posts it via `kCGHIDEventTap`. Until that exists, bare-modifier Level-3 verification on macOS is structurally blocked. Mark such tests `#[ignore]` with a comment block pointing at the canonical Level-2 raw-bytes test.
 
 **Workaround — Level 2 with raw kitty bytes.** When you need to verify "the binary correctly handles bare-modifier kitty bytes inside a real terminal," send the literal escape sequence through the terminal's CLI instead of using OS keyboard injection:
 
