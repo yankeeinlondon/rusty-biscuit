@@ -17,50 +17,72 @@ pub(crate) fn detect_repo_inner(
 }
 
 /// Cache for parsed manifest files to avoid redundant I/O during repo detection.
+///
+/// Each manifest file is read and parsed at most once per `create_package`
+/// invocation. Returned values are owned so multiple downstream helpers can
+/// inspect them without re-reading from disk.
 #[derive(Default)]
-#[allow(dead_code)]
 struct ManifestCache {
-    cargo: HashMap<PathBuf, toml_crate::Value>,
-    npm: HashMap<PathBuf, serde_json::Value>,
-    pyproject: HashMap<PathBuf, toml_crate::Value>,
-    go_mod: HashMap<PathBuf, String>,
+    cargo: HashMap<PathBuf, Option<toml_crate::Value>>,
+    npm: HashMap<PathBuf, Option<serde_json::Value>>,
+    pyproject: HashMap<PathBuf, Option<toml_crate::Value>>,
+    go_mod: HashMap<PathBuf, Option<String>>,
 }
 
-#[allow(dead_code)]
 impl ManifestCache {
-    fn get_cargo(&mut self, path: &Path) -> Option<&toml_crate::Value> {
-        if !self.cargo.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            let parsed = toml_crate::from_str(&content).ok()?;
-            self.cargo.insert(path.to_path_buf(), parsed);
-        }
-        self.cargo.get(path)
+    fn cargo(&mut self, path: &Path) -> Option<&toml_crate::Value> {
+        let entry = self.cargo.entry(path.to_path_buf()).or_insert_with(|| {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| toml_crate::from_str(&content).ok())
+        });
+        entry.as_ref()
     }
 
-    fn get_npm(&mut self, path: &Path) -> Option<&serde_json::Value> {
-        if !self.npm.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            let parsed = serde_json::from_str(&content).ok()?;
-            self.npm.insert(path.to_path_buf(), parsed);
-        }
-        self.npm.get(path)
+    fn npm(&mut self, path: &Path) -> Option<&serde_json::Value> {
+        let entry = self.npm.entry(path.to_path_buf()).or_insert_with(|| {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| serde_json::from_str(&content).ok())
+        });
+        entry.as_ref()
     }
 
-    fn get_pyproject(&mut self, path: &Path) -> Option<&toml_crate::Value> {
-        if !self.pyproject.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            let parsed = toml_crate::from_str(&content).ok()?;
-            self.pyproject.insert(path.to_path_buf(), parsed);
-        }
-        self.pyproject.get(path)
+    fn pyproject(&mut self, path: &Path) -> Option<&toml_crate::Value> {
+        let entry = self.pyproject.entry(path.to_path_buf()).or_insert_with(|| {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| toml_crate::from_str(&content).ok())
+        });
+        entry.as_ref()
     }
 
-    fn get_go_mod(&mut self, path: &Path) -> Option<&str> {
-        if !self.go_mod.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            self.go_mod.insert(path.to_path_buf(), content);
+    fn go_mod(&mut self, path: &Path) -> Option<&str> {
+        let entry = self
+            .go_mod
+            .entry(path.to_path_buf())
+            .or_insert_with(|| std::fs::read_to_string(path).ok());
+        entry.as_deref()
+    }
+}
+
+/// Build context shared while constructing `Package` values.
+///
+/// Bundles a per-call manifest cache with the optional `Cargo.lock` version
+/// resolver so each manifest file is read at most once per `create_package`
+/// invocation. The `ManifestCache` is cleared for each package so cache
+/// growth is bounded by the manifests of a single package.
+struct PackageBuildContext<'a> {
+    manifests: ManifestCache,
+    lock_versions: &'a Option<CargoLockVersions>,
+}
+
+impl<'a> PackageBuildContext<'a> {
+    fn new(lock_versions: &'a Option<CargoLockVersions>) -> Self {
+        Self {
+            manifests: ManifestCache::default(),
+            lock_versions,
         }
-        self.go_mod.get(path).map(|s| s.as_str())
     }
 }
 
@@ -277,43 +299,31 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     }))
 }
 
-/// Parses Cargo.toml dependencies into DependencyEntry structs.
-fn parse_cargo_dependencies(
-    toml_path: &Path,
+/// Parses Cargo.toml dependencies from an already-parsed TOML value.
+fn cargo_dependencies_from_value(
+    parsed: &toml_crate::Value,
     lock_versions: &Option<CargoLockVersions>,
-) -> Option<(
+) -> (
     Vec<DependencyEntry>,
     Vec<DependencyEntry>,
     Vec<DependencyEntry>,
-)> {
-    let content = std::fs::read_to_string(toml_path)
-        .map_err(|e| {
-            debug!(path = %toml_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-
-    let normal_deps = parse_cargo_dep_section(
-        &parsed,
-        "dependencies",
-        DependencyKind::Normal,
-        lock_versions,
-    );
+) {
+    let normal_deps =
+        parse_cargo_dep_section(parsed, "dependencies", DependencyKind::Normal, lock_versions);
     let dev_deps = parse_cargo_dep_section(
-        &parsed,
+        parsed,
         "dev-dependencies",
         DependencyKind::Dev,
         lock_versions,
     );
     let build_deps = parse_cargo_dep_section(
-        &parsed,
+        parsed,
         "build-dependencies",
         DependencyKind::Build,
         lock_versions,
     );
 
-    Some((normal_deps, dev_deps, build_deps))
+    (normal_deps, dev_deps, build_deps)
 }
 
 /// Parses a single dependencies section from Cargo.toml.
@@ -413,55 +423,47 @@ fn parse_package_json_dep_section(
         .collect()
 }
 
-/// Parses package.json dependencies into category-specific vectors.
+/// Parses package.json dependencies from an already-parsed JSON value.
 #[allow(clippy::type_complexity)]
-fn parse_package_json_dependencies(
-    package_json_path: &Path,
+fn package_json_dependencies_from_value(
+    parsed: &serde_json::Value,
     package_manager: &str,
-) -> Option<(
+) -> (
     Vec<DependencyEntry>,
     Vec<DependencyEntry>,
     Vec<DependencyEntry>,
     Vec<DependencyEntry>,
-)> {
-    let content = std::fs::read_to_string(package_json_path)
-        .map_err(|e| {
-            debug!(path = %package_json_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-
+) {
     let deps = parse_package_json_dep_section(
-        &parsed,
+        parsed,
         "dependencies",
         DependencyKind::Normal,
         package_manager,
         false,
     );
     let dev_deps = parse_package_json_dep_section(
-        &parsed,
+        parsed,
         "devDependencies",
         DependencyKind::Dev,
         package_manager,
         false,
     );
     let peer_deps = parse_package_json_dep_section(
-        &parsed,
+        parsed,
         "peerDependencies",
         DependencyKind::Normal,
         package_manager,
         false,
     );
     let optional_deps = parse_package_json_dep_section(
-        &parsed,
+        parsed,
         "optionalDependencies",
         DependencyKind::Optional,
         package_manager,
         true,
     );
 
-    Some((deps, dev_deps, peer_deps, optional_deps))
+    (deps, dev_deps, peer_deps, optional_deps)
 }
 
 /// Extracts package name from a PEP 508 requirement string.
@@ -509,17 +511,10 @@ fn parse_python_requirement_name(requirement: &str) -> Option<String> {
     }
 }
 
-/// Parses pyproject.toml dependencies from PEP 621 `[project]` sections.
-fn parse_pyproject_dependencies(
-    pyproject_path: &Path,
+/// Parses pyproject.toml dependencies from an already-parsed TOML value.
+fn pyproject_dependencies_from_value(
+    parsed: &toml_crate::Value,
 ) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>)> {
-    let content = std::fs::read_to_string(pyproject_path)
-        .map_err(|e| {
-            debug!(path = %pyproject_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
     let project = parsed.get("project")?;
 
     let dependencies = project
@@ -614,14 +609,8 @@ fn parse_requirements_txt_dependencies(requirements_path: &Path) -> Option<Vec<D
     if deps.is_empty() { None } else { Some(deps) }
 }
 
-/// Parses go.mod `require` entries.
-fn parse_go_mod_dependencies(go_mod_path: &Path) -> Option<Vec<DependencyEntry>> {
-    let content = std::fs::read_to_string(go_mod_path)
-        .map_err(|e| {
-            debug!(path = %go_mod_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
+/// Parses go.mod `require` entries from cached file contents.
+fn go_mod_dependencies_from_content(content: &str) -> Option<Vec<DependencyEntry>> {
     let mut deps = Vec::new();
     let mut in_require_block = false;
 
@@ -1065,10 +1054,8 @@ fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
 // Package name reading helpers
 // ============================================================================
 
-/// Reads the package name from a Cargo.toml file.
-fn read_cargo_package_name(cargo_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(cargo_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
+/// Extracts the package name from a parsed Cargo.toml value.
+fn cargo_package_name(parsed: &toml_crate::Value) -> Option<String> {
     parsed
         .get("package")
         .and_then(|p| p.get("name"))
@@ -1076,10 +1063,8 @@ fn read_cargo_package_name(cargo_toml: &Path) -> Option<String> {
         .map(String::from)
 }
 
-/// Reads the package version from a Cargo.toml file.
-fn read_cargo_package_version(cargo_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(cargo_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
+/// Extracts the package version from a parsed Cargo.toml value.
+fn cargo_package_version(parsed: &toml_crate::Value) -> Option<String> {
     parsed
         .get("package")
         .and_then(|p| p.get("version"))
@@ -1087,30 +1072,24 @@ fn read_cargo_package_version(cargo_toml: &Path) -> Option<String> {
         .map(String::from)
 }
 
-/// Reads the package name from a package.json file.
-fn read_npm_package_name(package_json: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(package_json).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+/// Extracts the package name from a parsed package.json value.
+fn npm_package_name(parsed: &serde_json::Value) -> Option<String> {
     parsed
         .get("name")
         .and_then(|n| n.as_str())
         .map(String::from)
 }
 
-/// Reads the package version from a package.json file.
-fn read_npm_package_version(package_json: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(package_json).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+/// Extracts the package version from a parsed package.json value.
+fn npm_package_version(parsed: &serde_json::Value) -> Option<String> {
     parsed
         .get("version")
         .and_then(|v| v.as_str())
         .map(String::from)
 }
 
-/// Reads package name from a pyproject.toml `[project].name`.
-fn read_pyproject_package_name(pyproject_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(pyproject_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
+/// Extracts the package name from a parsed pyproject.toml `[project].name`.
+fn pyproject_package_name(parsed: &toml_crate::Value) -> Option<String> {
     parsed
         .get("project")
         .and_then(|p| p.get("name"))
@@ -1118,10 +1097,8 @@ fn read_pyproject_package_name(pyproject_toml: &Path) -> Option<String> {
         .map(String::from)
 }
 
-/// Reads package version from a pyproject.toml `[project].version`.
-fn read_pyproject_package_version(pyproject_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(pyproject_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
+/// Extracts the package version from a parsed pyproject.toml `[project].version`.
+fn pyproject_package_version(parsed: &toml_crate::Value) -> Option<String> {
     parsed
         .get("project")
         .and_then(|p| p.get("version"))
@@ -1129,9 +1106,8 @@ fn read_pyproject_package_version(pyproject_toml: &Path) -> Option<String> {
         .map(String::from)
 }
 
-/// Reads module name from a go.mod file (module directive).
-fn read_go_module_name(go_mod: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(go_mod).ok()?;
+/// Extracts the module name from go.mod content (`module` directive).
+fn go_module_name_from_content(content: &str) -> Option<String> {
     content.lines().find_map(|line| {
         let trimmed = line.trim();
         trimmed
@@ -1140,16 +1116,8 @@ fn read_go_module_name(go_mod: &Path) -> Option<String> {
     })
 }
 
-/// Reads the feature flag names from a Cargo.toml `[features]` section.
-fn read_cargo_features(cargo_toml: &Path) -> Vec<String> {
-    let content = match std::fs::read_to_string(cargo_toml) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    let parsed: toml_crate::Value = match toml_crate::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
+/// Extracts the feature-flag names from a parsed Cargo.toml `[features]` section.
+fn cargo_features_from_value(parsed: &toml_crate::Value) -> Vec<String> {
     let Some(features) = parsed.get("features").and_then(|f| f.as_table()) else {
         return Vec::new();
     };
@@ -1217,31 +1185,37 @@ fn package_relative_path(package_relative: &str, path: &Path) -> PathBuf {
 // ============================================================================
 
 /// Determines the native package name based on manifests present in the package.
-fn resolve_package_name(path: &Path, root: &Path) -> String {
+fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &Path) -> String {
     let cargo_toml = path.join("Cargo.toml");
     if cargo_toml.exists()
-        && let Some(name) = read_cargo_package_name(&cargo_toml)
+        && let Some(name) = ctx.manifests.cargo(&cargo_toml).and_then(cargo_package_name)
     {
         return name;
     }
 
     let package_json = path.join("package.json");
     if package_json.exists()
-        && let Some(name) = read_npm_package_name(&package_json)
+        && let Some(name) = ctx.manifests.npm(&package_json).and_then(npm_package_name)
     {
         return name;
     }
 
     let pyproject_toml = path.join("pyproject.toml");
     if pyproject_toml.exists()
-        && let Some(name) = read_pyproject_package_name(&pyproject_toml)
+        && let Some(name) = ctx
+            .manifests
+            .pyproject(&pyproject_toml)
+            .and_then(pyproject_package_name)
     {
         return name;
     }
 
     let go_mod = path.join("go.mod");
     if go_mod.exists()
-        && let Some(name) = read_go_module_name(&go_mod)
+        && let Some(name) = ctx
+            .manifests
+            .go_mod(&go_mod)
+            .and_then(go_module_name_from_content)
     {
         return name;
     }
@@ -1251,28 +1225,38 @@ fn resolve_package_name(path: &Path, root: &Path) -> String {
 }
 
 /// Determines the package version based on manifests present in the package.
-fn resolve_package_version(path: &Path, root: &Path) -> Option<String> {
+fn resolve_package_version(
+    ctx: &mut PackageBuildContext<'_>,
+    path: &Path,
+    root: &Path,
+) -> Option<String> {
     let cargo_toml = path.join("Cargo.toml");
     if cargo_toml.exists() {
-        return read_cargo_package_version(&cargo_toml);
+        return ctx.manifests.cargo(&cargo_toml).and_then(cargo_package_version);
     }
 
     let package_json = path.join("package.json");
     if package_json.exists() {
-        if let Some(version) = read_npm_package_version(&package_json) {
+        if let Some(version) = ctx.manifests.npm(&package_json).and_then(npm_package_version) {
             return Some(version);
         }
         if path != root {
             let root_package_json = root.join("package.json");
             if root_package_json.exists() {
-                return read_npm_package_version(&root_package_json);
+                return ctx
+                    .manifests
+                    .npm(&root_package_json)
+                    .and_then(npm_package_version);
             }
         }
     }
 
     let pyproject_toml = path.join("pyproject.toml");
     if pyproject_toml.exists()
-        && let Some(version) = read_pyproject_package_version(&pyproject_toml)
+        && let Some(version) = ctx
+            .manifests
+            .pyproject(&pyproject_toml)
+            .and_then(pyproject_package_version)
     {
         return Some(version);
     }
@@ -1921,17 +1905,20 @@ fn create_package(
     lock_versions: &Option<CargoLockVersions>,
     discovery_source: PackageDiscoverySource,
 ) -> Package {
+    let mut ctx = PackageBuildContext::new(lock_versions);
     let relative = make_relative_path(path, root);
     let package_area = make_package_area(&relative);
-    let name = resolve_package_name(path, root);
     let ecosystem = detect_package_ecosystem(path);
     let package_managers = detect_package_managers(path);
-    let version = resolve_package_version(path, root);
+    let name = resolve_package_name(&mut ctx, path, root);
+    let version = resolve_package_version(&mut ctx, path, root);
 
-    // Read feature flags (Cargo only for now)
     let cargo_toml = path.join("Cargo.toml");
     let features = if cargo_toml.exists() {
-        read_cargo_features(&cargo_toml)
+        ctx.manifests
+            .cargo(&cargo_toml)
+            .map(cargo_features_from_value)
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -1942,8 +1929,9 @@ fn create_package(
     let mut optional_dependencies = Vec::new();
 
     if cargo_toml.exists()
-        && let Some((normal, dev, build)) = parse_cargo_dependencies(&cargo_toml, lock_versions)
+        && let Some(parsed) = ctx.manifests.cargo(&cargo_toml)
     {
+        let (normal, dev, build) = cargo_dependencies_from_value(parsed, ctx.lock_versions);
         let mut all_deps = normal;
         all_deps.extend(build);
 
@@ -1958,9 +1946,9 @@ fn create_package(
     let package_json = path.join("package.json");
     if package_json.exists() {
         let js_package_manager = resolve_js_package_manager(tool, root, &package_managers);
-        if let Some((normal, dev, peer, optional)) =
-            parse_package_json_dependencies(&package_json, js_package_manager)
-        {
+        if let Some(parsed) = ctx.manifests.npm(&package_json) {
+            let (normal, dev, peer, optional) =
+                package_json_dependencies_from_value(parsed, js_package_manager);
             dependencies.extend(normal);
             dev_dependencies.extend(dev);
             peer_dependencies.extend(peer);
@@ -1971,7 +1959,10 @@ fn create_package(
     // Parse Python dependencies from pyproject.toml / requirements.txt.
     let pyproject_toml = path.join("pyproject.toml");
     if pyproject_toml.exists()
-        && let Some((normal, optional)) = parse_pyproject_dependencies(&pyproject_toml)
+        && let Some((normal, optional)) = ctx
+            .manifests
+            .pyproject(&pyproject_toml)
+            .and_then(pyproject_dependencies_from_value)
     {
         dependencies.extend(normal);
         optional_dependencies.extend(optional);
@@ -1986,7 +1977,10 @@ fn create_package(
     // Parse Go module dependencies when available.
     let go_mod = path.join("go.mod");
     if go_mod.exists()
-        && let Some(go_deps) = parse_go_mod_dependencies(&go_mod)
+        && let Some(go_deps) = ctx
+            .manifests
+            .go_mod(&go_mod)
+            .and_then(go_mod_dependencies_from_content)
     {
         dependencies.extend(go_deps);
     };

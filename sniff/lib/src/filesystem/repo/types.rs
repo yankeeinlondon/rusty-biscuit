@@ -374,20 +374,36 @@ enum ManifestKind {
     Go,
 }
 
+/// Manifest entry storing both the original path and its canonicalized form.
+///
+/// Pre-normalizing at index-build time eliminates per-query `canonicalize`
+/// syscalls during `package_dirs_in_tree` lookups.
+#[derive(Debug, Clone)]
+struct ManifestEntry {
+    /// Original parent directory path (as discovered).
+    original: PathBuf,
+    /// Canonicalized parent directory path (resolved at build time).
+    canonical: PathBuf,
+    /// Kinds of manifests detected in this directory.
+    #[allow(dead_code)]
+    kinds: HashSet<ManifestKind>,
+}
+
 /// Index of all manifest files in a directory tree.
 ///
 /// Performs a single directory walk and caches manifest locations,
 /// avoiding redundant filesystem traversals during package discovery.
+/// Each entry is canonicalized once at build time so that downstream
+/// `package_dirs_in_tree` queries do not perform any syscalls.
 #[derive(Debug, Clone)]
 pub(crate) struct ManifestIndex {
-    /// Map from parent directory to set of manifest kinds found there
-    manifests: HashMap<PathBuf, HashSet<ManifestKind>>,
+    entries: Vec<ManifestEntry>,
 }
 
 impl ManifestIndex {
     /// Build manifest index by walking the directory tree once.
     pub(crate) fn build(root: &Path) -> Self {
-        let mut manifests: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
+        let mut grouped: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
 
         let walker = walkdir::WalkDir::new(root)
             .follow_links(false)
@@ -431,17 +447,17 @@ impl ManifestIndex {
                 continue;
             };
 
-            manifests
+            grouped
                 .entry(parent.to_path_buf())
                 .or_default()
                 .insert(kind);
         }
 
-        Self { manifests }
+        Self::from_grouped(grouped)
     }
 
     pub(crate) fn from_manifest_paths(paths: impl IntoIterator<Item = PathBuf>) -> Self {
-        let mut manifests: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
+        let mut grouped: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
 
         for path in paths {
             let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
@@ -460,28 +476,46 @@ impl ManifestIndex {
                 continue;
             };
 
-            manifests
+            grouped
                 .entry(parent.to_path_buf())
                 .or_default()
                 .insert(kind);
         }
 
-        Self { manifests }
+        Self::from_grouped(grouped)
+    }
+
+    fn from_grouped(grouped: HashMap<PathBuf, HashSet<ManifestKind>>) -> Self {
+        let entries = grouped
+            .into_iter()
+            .map(|(original, kinds)| {
+                let canonical = canonicalize_path(&original);
+                ManifestEntry {
+                    original,
+                    canonical,
+                    kinds,
+                }
+            })
+            .collect();
+        Self { entries }
     }
 
     /// Get directories containing manifests within a specific subtree.
+    ///
+    /// Uses the pre-canonicalized entries built at index construction time, so
+    /// no filesystem syscalls occur during the query.
     pub(crate) fn package_dirs_in_tree(&self, search_root: &Path, root: &Path) -> Vec<&Path> {
         let search_root_canonical = canonicalize_path(search_root);
         let root_canonical = canonicalize_path(root);
 
         let mut dirs: Vec<&Path> = self
-            .manifests
-            .keys()
-            .filter_map(|path| {
-                let canonical = canonicalize_path(path);
-                // Must be within search_root but not equal to root
-                if canonical.starts_with(&search_root_canonical) && canonical != root_canonical {
-                    Some(path.as_path())
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                if entry.canonical.starts_with(&search_root_canonical)
+                    && entry.canonical != root_canonical
+                {
+                    Some(entry.original.as_path())
                 } else {
                     None
                 }
