@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use tracing::{debug, instrument};
 use which::which;
@@ -79,6 +79,12 @@ use super::types::ExecutableSource;
 pub struct ExecutableIndex {
     /// Number of PATH directories available (counted from the environment).
     path_dir_count: usize,
+    /// Optional eager PATH index built by [`ExecutableIndex::build_eager_path`].
+    ///
+    /// When present, lookups consult this map before delegating to `which`,
+    /// turning bulk PATH scans (one per program name) into a single up-front
+    /// PATH traversal followed by O(1) HashMap probes.
+    eager_path: Option<HashMap<OsString, PathBuf>>,
     /// Maps binary name to app bundle path (macOS only).
     #[cfg(target_os = "macos")]
     bundle_executables: HashMap<String, PathBuf>,
@@ -103,6 +109,23 @@ impl ExecutableIndex {
         Self::build_with_bundles(false)
     }
 
+    /// Build an index that eagerly scans every directory on `PATH`.
+    ///
+    /// Suitable for bulk detection paths (e.g. `ProgramsInfo::detect`) where
+    /// many program names are looked up at once. PATH is traversed once into a
+    /// `HashMap<OsString, PathBuf>` so subsequent lookups avoid per-name PATH
+    /// scans. Single-shot callers should prefer [`Self::build`] (lazy `which`).
+    #[instrument(skip_all)]
+    pub fn build_eager_path() -> Self {
+        let mut index = Self::build_with_bundles(true);
+        index.eager_path = Some(scan_path_executables());
+        debug!(
+            entries = index.eager_path.as_ref().map(|m| m.len()).unwrap_or(0),
+            "eager PATH index built"
+        );
+        index
+    }
+
     fn build_with_bundles(include_bundles: bool) -> Self {
         #[cfg(not(target_os = "macos"))]
         let _ = include_bundles;
@@ -115,6 +138,7 @@ impl ExecutableIndex {
 
         Self {
             path_dir_count,
+            eager_path: None,
             #[cfg(target_os = "macos")]
             bundle_executables: if include_bundles {
                 build_bundle_index()
@@ -130,6 +154,31 @@ impl ExecutableIndex {
         }
     }
 
+    /// Look up `program` in the eager PATH index when one is present.
+    ///
+    /// Returns `None` if no eager index has been built or the program is not
+    /// present in the cached map.
+    fn eager_lookup(&self, program: &str) -> Option<PathBuf> {
+        let map = self.eager_path.as_ref()?;
+        // Direct match first (Unix executables have no extension).
+        if let Some(path) = map.get(OsStr::new(program)) {
+            return Some(path.clone());
+        }
+        // On Windows, PATHEXT-based filenames (e.g. `git.exe`) are stored;
+        // probe the bare name plus each PATHEXT extension.
+        #[cfg(windows)]
+        {
+            for ext in get_pathext_extensions() {
+                let mut candidate = OsString::from(program);
+                candidate.push(&ext);
+                if let Some(path) = map.get(candidate.as_os_str()) {
+                    return Some(path.clone());
+                }
+            }
+        }
+        None
+    }
+
     /// Look up a program - checks PATH first, then macOS bundles / Windows fallbacks.
     ///
     /// PATH lookups are performed on demand via the `which` crate rather than
@@ -140,7 +189,11 @@ impl ExecutableIndex {
     /// - `Some((PathBuf, ExecutableSource))` - Path and how it was found
     /// - `None` - Program not found anywhere
     pub fn find_with_source(&self, program: &str) -> Option<(PathBuf, ExecutableSource)> {
-        // Layer 1: PATH (authoritative — delegated to `which`).
+        // Layer 1: PATH (authoritative).
+        // Use the eager PATH index when present; fall back to `which`.
+        if let Some(path) = self.eager_lookup(program) {
+            return Some((path, ExecutableSource::Path));
+        }
         if let Ok(path) = which(program) {
             return Some((path, ExecutableSource::Path));
         }
@@ -168,17 +221,58 @@ impl ExecutableIndex {
 
     /// Look up a program by PATH only.
     ///
+    /// Consults the eager PATH index when one was built; otherwise delegates
+    /// to `which` for on-demand PATH lookup.
+    ///
     /// ## Returns
     ///
     /// - `Some(PathBuf)` - Path to the executable if found in PATH
     /// - `None` - Program not found in PATH
     pub fn find(&self, program: &str) -> Option<PathBuf> {
+        if let Some(path) = self.eager_lookup(program) {
+            return Some(path);
+        }
         which(program).ok()
     }
 
     pub fn path_dir_count(&self) -> usize {
         self.path_dir_count
     }
+}
+
+/// Scan every directory on `PATH` once and collect executables by filename.
+///
+/// On Unix, the file's basename is the lookup key. On Windows, the basename
+/// (including the PATHEXT extension) is the key, so callers should probe the
+/// bare program name plus each PATHEXT extension.
+///
+/// Earlier PATH entries take precedence: a name already present in the map is
+/// not overwritten by a later entry, matching `which`'s left-to-right semantics.
+fn scan_path_executables() -> HashMap<OsString, PathBuf> {
+    let mut index: HashMap<OsString, PathBuf> = HashMap::new();
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return index;
+    };
+
+    for dir in std::env::split_paths(&path_var) {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !is_executable(&path) {
+                continue;
+            }
+            let Some(name) = path.file_name() else {
+                continue;
+            };
+            index
+                .entry(name.to_os_string())
+                .or_insert_with(|| path.clone());
+        }
+    }
+
+    index
 }
 
 /// Checks whether a path is an executable file.
