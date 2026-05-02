@@ -5,13 +5,18 @@
 
 #![allow(deprecated)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::WordWrap;
+use darkmatter::markdown::YamlBlock;
 
-use crate::harness::model::{FailurePhase, ShellAuditReport, ValidationPhaseReport};
+use crate::harness::model::{
+    FailurePhase, ShellAuditReport, ValidationCheckOutcome, ValidationPhaseReport,
+};
 
 /// Render a single status line to stderr.
 fn emit_status(markup: &str, state: StatusState, term: &Terminal) {
@@ -97,15 +102,93 @@ pub fn report_phase_discovery(phase: FailurePhase, count: usize, term: &Terminal
 }
 
 /// Emit individual check outcomes from a phase report.
+///
+/// Passing checks render as a single compact `Status` line. Failing checks
+/// with `RuleSource` populated render the four-section failure block
+/// (status header, source location, YAML snippet, reason). Failing checks
+/// without `source` fall back to a legacy single-line failure plus reason.
 pub fn report_check_outcomes(report: &ValidationPhaseReport, term: &Terminal) {
     for outcome in &report.outcomes {
-        let state = if outcome.passed {
-            StatusState::Success
+        if outcome.passed {
+            emit_status(&outcome.markup, StatusState::Success, term);
+        } else if outcome.source.is_some() {
+            render_failure_block(outcome, report.phase, term);
         } else {
-            StatusState::Failure
-        };
-        emit_status(&outcome.markup, state, term);
+            emit_status(&outcome.markup, StatusState::Failure, term);
+            if let Some(reason) = &outcome.failure_message {
+                let escaped = prose_escape(reason);
+                let prose = Prose::new(format!("  Reason: <dim>{escaped}</dim>"));
+                eprintln!("{}", prose.render(term));
+            }
+        }
     }
+}
+
+/// Header label for a failed validation phase.
+fn failure_header_text(phase: FailurePhase) -> &'static str {
+    match phase {
+        FailurePhase::PreCheck => "Pre-validation failed",
+        FailurePhase::PostCheck => "Post-validation failed",
+        FailurePhase::Agent => "Agent execution failed",
+        FailurePhase::ShellAudit => "Shell audit failed",
+    }
+}
+
+/// Render a four-section failure block to stderr for an outcome that has
+/// `RuleSource` metadata.
+fn render_failure_block(outcome: &ValidationCheckOutcome, phase: FailurePhase, term: &Terminal) {
+    // Section 1: status header.
+    emit_status(failure_header_text(phase), StatusState::Failure, term);
+
+    // Sections 2 + 3 require the source metadata; the caller has already
+    // verified `source.is_some()` so the unwrap below is sound.
+    let Some(src) = &outcome.source else {
+        return;
+    };
+
+    // Section 2: source location, OSC8-linked when terminal supports it.
+    let abs = src.file.display().to_string();
+    let display = relative_or_abs(&src.file);
+    let display_escaped = prose_escape(&display);
+    let abs_escaped = prose_escape(&abs);
+    let suffix = match &src.line_range {
+        Some(r) => format!(":{}-{}", r.start(), r.end()),
+        None => String::new(),
+    };
+    let suffix_escaped = prose_escape(&suffix);
+    emit_status(
+        &format!("in <a href=\"{abs_escaped}\">{display_escaped}{suffix_escaped}</a>"),
+        StatusState::Info,
+        term,
+    );
+
+    // Section 3: YAML snippet, syntax-highlighted via darkmatter's YamlBlock.
+    if let Ok(block) = YamlBlock::new(src.yaml_snippet.trim_end()) {
+        let rendered = block.render(term);
+        for line in rendered.lines() {
+            eprintln!("    {line}");
+        }
+    }
+
+    // Section 4: muted reason line. Severity is already conveyed by the
+    // status glyph above so the reason is rendered dim.
+    if let Some(reason) = &outcome.failure_message {
+        let escaped = prose_escape(reason);
+        let prose = Prose::new(format!("  Reason: <dim>{escaped}</dim>"))
+            .with_word_wrap(WordWrap::WrapProse(None, None));
+        eprintln!("{}", prose.render(term));
+    }
+}
+
+/// Produce a `cwd`-relative display string when possible, falling back to
+/// the absolute path.
+fn relative_or_abs(path: &Path) -> String {
+    if let Ok(cwd) = std::env::current_dir()
+        && let Ok(rel) = path.strip_prefix(&cwd)
+    {
+        return PathBuf::from(rel).display().to_string();
+    }
+    path.display().to_string()
 }
 
 /// Emit the shell audit header.
