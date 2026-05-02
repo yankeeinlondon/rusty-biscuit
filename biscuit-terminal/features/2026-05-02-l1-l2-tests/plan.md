@@ -44,6 +44,17 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/biscuit-terminal/SKILL.md
+source_files_during_phase_5:
+  - biscuit-terminal/cli/tests/level2_cursor_and_hygiene.rs
+  - biscuit-terminal/cli/tests/fixtures/unicode_dir/中文文件.txt
+  - biscuit-terminal/cli/tests/fixtures/unicode_dir/emoji_🎉.txt
+  - biscuit-terminal/cli/tests/fixtures/unicode_dir/regular.txt
+  - biscuit-terminal/justfile
+docs_updated_during_phase_5:
+  - biscuit-terminal/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .opencode/skill/biscuit-terminal/SKILL.md
 packages:
   - biscuit-test-harness
   - biscuit-tui
