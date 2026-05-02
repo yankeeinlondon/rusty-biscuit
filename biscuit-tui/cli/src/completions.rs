@@ -1,12 +1,12 @@
-//! Shell-completion generation with hotkey-prefix support.
+//! Shell-completion generation with choice-option hotkey-prefix support.
 //!
 //! The standard `clap_complete` script is emitted first, then shell-
 //! specific post-processing and suffixes add the `[CTRL+`, `[ALT+`,
 //! and `[OPT+` hotkey-prefix candidates for supported shells (`bash`,
 //! `zsh`).
 //!
-//! Shells we don't have special handling for (fish, powershell, elvish)
-//! get the plain `clap_complete` script.
+//! Shells we don't have special hotkey-prefix handling for (fish,
+//! powershell, elvish) get the plain `clap_complete` script.
 //!
 //! Spec reference: `2026-04-28-choose-one-improvements/spec.md` →
 //! "Completions" section.
@@ -31,15 +31,22 @@ pub fn write_completions<C: CommandFactory, W: Write>(
 
     match shell {
         Shell::Zsh => {
+            strip_hidden_legacy_zsh(&mut script);
             zsh_post_process(&mut script);
             writer.write_all(script.as_bytes())?;
             writer.write_all(zsh_positional_completer().as_bytes())?;
         }
         Shell::Bash => {
+            strip_hidden_legacy_bash(&mut script);
             writer.write_all(script.as_bytes())?;
             writer.write_all(bash_wrapper(bin).as_bytes())?;
         }
+        Shell::Fish => {
+            strip_hidden_legacy_fish(&mut script);
+            writer.write_all(script.as_bytes())?;
+        }
         _ => {
+            strip_hidden_legacy_generic(&mut script);
             writer.write_all(script.as_bytes())?;
         }
     }
@@ -69,6 +76,20 @@ fn zsh_post_process(script: &mut String) {
     );
 }
 
+fn strip_hidden_legacy_zsh(script: &mut String) {
+    *script = script
+        .lines()
+        .filter(|line| {
+            !line.contains("--options-from-file") && !line.contains("--options-from-dictionary")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if !script.ends_with('\n') {
+        script.push('\n');
+    }
+}
+
 fn zsh_positional_completer() -> &'static str {
     r#"
 # Positional completer for choose-one/choose-many option arguments.
@@ -79,15 +100,20 @@ _question_choice_positional() {
         local -a option_candidates
         option_candidates=(
             --csv --list --rows --file --md
-            --numeric-hot-keys --no-filter --required
+            --selected --required --min-selections --max-selections
+            --delimiter --sort --no-filter
             --border --border-label --border-style
-            --sort --selected --label --label-position
-            --delimiter --active-color --hotkey-badges
+            --margin --mt --mb --ml --mr
+            --padding --pt --pb --pl --pr
+            --numeric-hot-keys
+            --label --label-position --label-convention --value-convention
+            --active-color --hotkey-badges
+            --output --height --help
         )
         _describe -t option-flags 'option flag' option_candidates
         return
     fi
-    if [[ "$PREFIX" == \[* || -z "$PREFIX" ]]; then
+    if [[ "$PREFIX" == \[* ]]; then
         local -a candidates
         candidates=( '[CTRL+' '[ALT+' '[OPT+' )
         _describe -t hotkey-prefix 'hotkey prefix' candidates
@@ -102,6 +128,20 @@ _question_choice_positional() {
 // bash
 // ---------------------------------------------------------------------------
 
+fn strip_hidden_legacy_bash(script: &mut String) {
+    *script = script
+        .lines()
+        .filter(|line| {
+            !line.contains("--options-from-file") && !line.contains("--options-from-dictionary")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if !script.ends_with('\n') {
+        script.push('\n');
+    }
+}
+
 fn bash_wrapper(bin: &str) -> String {
     format!(
         r#"
@@ -109,25 +149,28 @@ fn bash_wrapper(bin: &str) -> String {
 # When the current word begins with `[`, return the hotkey prefixes
 # directly without running the standard completion (which would add
 # path/command fallback pollution).  Otherwise delegate to `_{bin}`.
+_{bin}_choice_command_seen() {{
+    local i
+    for (( i=1; i<COMP_CWORD; i++ )); do
+        case "${{COMP_WORDS[i]}}" in
+            choose-one|choose-many)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}}
 _{bin}_complete() {{
     local cur="${{COMP_WORDS[COMP_CWORD]}}"
-    local line="${{COMP_LINE:-${{READLINE_LINE:-}}}}"
-    if [[ ( "${{COMP_WORDS[1]}}" == "choose-one" || "${{COMP_WORDS[1]}}" == "choose-many" ) && "${{COMP_CWORD}}" -eq 2 && -z "$cur" ]]; then
-        COMPREPLY=( "[CTRL+" "[ALT+" "[OPT+" )
-        return 0
-    fi
-    if [[ "$line" == *" ["* || "$line" == *" \\["* || "$line" == *" '["* || "$line" == *" \"["* ]]; then
-        COMPREPLY=( "[CTRL+" "[ALT+" "[OPT+" )
-        return 0
-    fi
-    if [[ "$cur" == \\[* ]]; then
-        COMPREPLY=( "\\[CTRL+" "\\[ALT+" "\\[OPT+" )
-        return 0
-    fi
-    local hotkey_cur="$cur"
-    if [[ "$hotkey_cur" == \[* ]]; then
-        COMPREPLY=( $(compgen -W "[CTRL+ [ALT+ [OPT+" -- "$hotkey_cur") )
-        return 0
+    if _{bin}_choice_command_seen; then
+        if [[ "$cur" == \\[* ]]; then
+            COMPREPLY=( "\\[CTRL+" "\\[ALT+" "\\[OPT+" )
+            return 0
+        fi
+        if [[ "$cur" == \[* ]]; then
+            COMPREPLY=( $(compgen -W "[CTRL+ [ALT+ [OPT+" -- "$cur") )
+            return 0
+        fi
     fi
     _{bin} "$@"
 }}
@@ -138,6 +181,24 @@ else
 fi
 "#
     )
+}
+
+fn strip_hidden_legacy_fish(script: &mut String) {
+    strip_hidden_legacy_generic(script);
+}
+
+fn strip_hidden_legacy_generic(script: &mut String) {
+    *script = script
+        .lines()
+        .filter(|line| {
+            !line.contains("options-from-file") && !line.contains("options-from-dictionary")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if !script.ends_with('\n') {
+        script.push('\n');
+    }
 }
 
 #[cfg(test)]
@@ -174,8 +235,8 @@ mod tests {
             "bash wrapper should advertise the hotkey prefixes",
         );
         assert!(
-            text.contains("COMP_LINE"),
-            "bash wrapper should inspect the current command line for hotkey-prefix words",
+            text.contains("_question_choice_command_seen"),
+            "bash wrapper should inspect completion words for the choice subcommands",
         );
         assert!(
             text.contains("complete -F _question_complete"),
@@ -201,9 +262,86 @@ mod tests {
             "zsh positional completer should advertise the hotkey prefixes",
         );
         assert!(
-            text.contains("--numeric-hot-keys --no-filter --required"),
+            text.contains("--numeric-hot-keys")
+                && text.contains("--no-filter")
+                && text.contains("--required"),
             "zsh positional completer should advertise option flags for -- prefixes",
         );
+    }
+
+    #[test]
+    fn zsh_choice_positional_completer_does_not_offer_hotkeys_for_empty_prefix() {
+        let script = zsh_positional_completer();
+        assert!(
+            !script.contains("|| -z \"$PREFIX\""),
+            "empty option positions should not be treated as hotkey-prefix completions",
+        );
+    }
+
+    #[test]
+    fn zsh_post_separator_flag_overlay_lists_full_choose_flag_set() {
+        let script = zsh_positional_completer();
+        for flag in [
+            "--csv",
+            "--list",
+            "--rows",
+            "--file",
+            "--md",
+            "--selected",
+            "--required",
+            "--min-selections",
+            "--max-selections",
+            "--delimiter",
+            "--sort",
+            "--no-filter",
+            "--border",
+            "--border-label",
+            "--border-style",
+            "--margin",
+            "--mt",
+            "--mb",
+            "--ml",
+            "--mr",
+            "--padding",
+            "--pt",
+            "--pb",
+            "--pl",
+            "--pr",
+            "--numeric-hot-keys",
+            "--label",
+            "--label-position",
+            "--label-convention",
+            "--value-convention",
+            "--active-color",
+            "--hotkey-badges",
+            "--output",
+            "--height",
+            "--help",
+        ] {
+            assert!(
+                script.contains(flag),
+                "zsh post-separator overlay should include {flag}",
+            );
+        }
+    }
+
+    #[test]
+    fn generated_scripts_do_not_present_hidden_legacy_flags() {
+        for shell in [
+            Shell::Bash,
+            Shell::Zsh,
+            Shell::Fish,
+            Shell::PowerShell,
+            Shell::Elvish,
+        ] {
+            let mut buf = Vec::new();
+            write_completions::<TestCli, _>(shell, "question", &mut buf).unwrap();
+            let text = String::from_utf8(buf).unwrap();
+            assert!(
+                !text.contains("options-from-file") && !text.contains("options-from-dictionary"),
+                "{shell:?} completions must not present hidden legacy flags: {text}",
+            );
+        }
     }
 
     #[test]

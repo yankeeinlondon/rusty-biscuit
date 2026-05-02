@@ -157,6 +157,23 @@ mod zsh {
     }
 
     #[test]
+    fn empty_option_position_does_not_offer_hotkey_prefixes() {
+        if skip_if_not_enabled() {
+            return;
+        }
+        let mut session = spawn_zsh_with_completions();
+        session
+            .write_all(b"question choose-one \t")
+            .expect("send command+tab");
+        std::thread::sleep(Duration::from_millis(400));
+        let output = read_all_available(&mut session);
+        assert!(
+            !output.contains("[CTRL+") && !output.contains("[ALT+") && !output.contains("[OPT+"),
+            "empty option position must not offer hotkey prefixes, got: {output:?}"
+        );
+    }
+
+    #[test]
     fn post_positional_flag_completion() {
         if skip_if_not_enabled() {
             return;
@@ -321,6 +338,29 @@ mod bash {
         std::thread::sleep(Duration::from_millis(400));
         let output = read_all_available(&mut session);
         assert_candidates_contain_only_hotkey_prefixes(&output);
+    }
+
+    #[test]
+    fn empty_option_position_does_not_offer_hotkey_prefixes() {
+        if skip_if_not_enabled() {
+            return;
+        }
+        let mut session = match spawn_bash_with_completions() {
+            Some(s) => s,
+            None => {
+                eprintln!("skipping: could not spawn bash with completions");
+                return;
+            }
+        };
+        session
+            .write_all(b"question choose-one \t\t")
+            .expect("send command+tab");
+        std::thread::sleep(Duration::from_millis(400));
+        let output = read_all_available(&mut session);
+        assert!(
+            !output.contains("[CTRL+") && !output.contains("[ALT+") && !output.contains("[OPT+"),
+            "empty option position must not offer hotkey prefixes, got: {output:?}"
+        );
     }
 
     #[test]
