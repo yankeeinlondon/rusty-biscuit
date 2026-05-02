@@ -34,8 +34,6 @@
 //! bg_color=None
 //! ```
 
-use std::time::Duration;
-
 fn main() {
     // Apply env overrides so the library sees the terminal we want.
     if let Ok(v) = std::env::var("PROBE_TERM_PROGRAM") {
@@ -88,7 +86,10 @@ fn probe_osc12() {
 fn probe_clipboard() {
     use biscuit_terminal::discovery::clipboard::set_clipboard;
     let result = set_clipboard("hello-pty");
-    println!("clipboard_result={:?}", result.map(|_| "ok").map_err(|e| e.to_string()));
+    println!(
+        "clipboard_result={:?}",
+        result.map(|_| "ok").map_err(|e| e.to_string())
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -96,11 +97,17 @@ fn probe_clipboard() {
 // ---------------------------------------------------------------------------
 
 fn probe_mode_2027() {
-    use biscuit_terminal::discovery::mode_2027::{enable_mode_2027, disable_mode_2027};
+    use biscuit_terminal::discovery::mode_2027::{disable_mode_2027, enable_mode_2027};
     let en = enable_mode_2027();
     let dis = disable_mode_2027();
-    println!("enable_mode_2027={:?}", en.map(|_| "ok").map_err(|e| e.to_string()));
-    println!("disable_mode_2027={:?}", dis.map(|_| "ok").map_err(|e| e.to_string()));
+    println!(
+        "enable_mode_2027={:?}",
+        en.map(|_| "ok").map_err(|e| e.to_string())
+    );
+    println!(
+        "disable_mode_2027={:?}",
+        dis.map(|_| "ok").map_err(|e| e.to_string())
+    );
 }
 
 // ---------------------------------------------------------------------------

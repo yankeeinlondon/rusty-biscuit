@@ -325,6 +325,44 @@ impl Terminal {
         }
     }
 
+    /// Creates a new [`Terminal`] with detection-derived `app`/`os`
+    /// fields but with color, TTY, OSC8 link, and italic capabilities
+    /// forced on regardless of what detection reports.
+    ///
+    /// This is the runtime escape hatch honored by `bt` when
+    /// `FORCE_COLOR=1` or `CLICOLOR_FORCE=1` is set in the environment.
+    /// Detection still happens (so `app`, `os`, image protocol, etc.
+    /// remain accurate), but anything that would otherwise gate styling
+    /// behind a heuristic — `color_depth`, `is_tty`, `osc_link_support`,
+    /// `supports_italic` — is set to its enabled value.
+    ///
+    /// Unlike [`Terminal::new_optimistic`], this does **not** hard-code
+    /// the terminal width, app, or OS. Use this when you want detection
+    /// to drive layout but explicit env vars to drive styling.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::terminal::Terminal;
+    /// use biscuit_terminal::discovery::detection::ColorDepth;
+    ///
+    /// let term = Terminal::new_forced();
+    /// assert_eq!(term.color_depth, ColorDepth::TrueColor);
+    /// assert!(term.is_tty);
+    /// assert!(term.osc_link_support);
+    /// assert!(term.supports_italic);
+    /// ```
+    pub fn new_forced() -> Terminal {
+        let detected = new_terminal();
+        Terminal {
+            color_depth: ColorDepth::TrueColor,
+            is_tty: true,
+            osc_link_support: true,
+            supports_italic: true,
+            ..detected
+        }
+    }
+
     /// Creates an optimistic Terminal with fixed width and full capabilities enabled.
     ///
     /// This constructor creates a Terminal that assumes all modern terminal
@@ -882,6 +920,25 @@ mod tests {
         assert!(!term.in_monorepo);
         assert!(term.repo_root.is_none());
         assert!(term.package_root.is_none());
+    }
+
+    #[test]
+    fn new_forced_returns_truecolor_tty() {
+        let term = Terminal::new_forced();
+        assert_eq!(
+            term.color_depth,
+            ColorDepth::TrueColor,
+            "new_forced must set TrueColor regardless of detection"
+        );
+        assert!(term.is_tty, "new_forced must set is_tty=true");
+        assert!(
+            term.osc_link_support,
+            "new_forced must set osc_link_support=true"
+        );
+        assert!(
+            term.supports_italic,
+            "new_forced must set supports_italic=true"
+        );
     }
 
     #[test]
