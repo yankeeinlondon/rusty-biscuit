@@ -363,8 +363,7 @@ pub fn normalize_options(
 /// Disabled options contribute no effective hotkey and participate in
 /// no collisions.
 fn resolve_hotkey_collisions(parsed: &[ParsedOption]) -> Result<(), NormalizeError> {
-    let mut owners: std::collections::HashMap<HotkeySpec, usize> =
-        std::collections::HashMap::new();
+    let mut owners: std::collections::HashMap<HotkeySpec, usize> = std::collections::HashMap::new();
     for (idx, option) in parsed.iter().enumerate() {
         if option.disabled {
             continue;
@@ -849,12 +848,7 @@ mod tests {
         //   - `foo` has the explicit `Ctrl+F` hotkey
         //   - `bar`, `baz`, `bax` are plain labels with no hotkey
         // The user wrote one hotkey; one hotkey appears.
-        let options = vec![
-            raw("[CTRL+f]foo"),
-            raw("bar"),
-            raw("baz"),
-            raw("bax"),
-        ];
+        let options = vec![raw("[CTRL+f]foo"), raw("bar"), raw("baz"), raw("bax")];
         let result = normalize_options(
             options,
             NamingConvention::None,
