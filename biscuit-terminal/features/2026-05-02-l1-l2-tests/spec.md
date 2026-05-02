@@ -94,6 +94,39 @@ The harness already gives us:
 
 The cliclick module from biscuit-tui can be omitted (biscuit-terminal has no interactive keyboard surface).
 
+#### Background-spawn default (`SpawnVisibility`)
+
+To keep Level-2 tests usable while a developer is actively working on
+the same machine, `WezTermHarness` and `KittyHarness` default to
+**`SpawnVisibility::Background`**. Concretely:
+
+- **Kitty `Background`** passes `--keep-focus` to `kitty @ launch` so
+  the new window is created without stealing focus from whatever the
+  developer is doing.
+- **WezTerm `Background`** passes `--workspace biscuit-bg` to
+  `wezterm cli spawn --new-window`. WezTerm workspaces are independent
+  groupings within a single GUI instance, so the spawned window is
+  created but is **not visible on the developer's active workspace**.
+  The harness still drives it via pane-id (workspace-independent), so
+  `send_text` and `get-text` continue to work.
+
+Tests that need the spawned window in the foreground (e.g. biscuit-tui
+cliclick tests that subsequently call
+`WezTermHarness::focus_spawned_pane`) opt out explicitly:
+
+```rust
+let mut harness = WezTermHarness::new()
+    .with_spawn_visibility(SpawnVisibility::Foreground);
+```
+
+biscuit-terminal Level-2 tests have no OS-level keyboard injection, so
+they always use the default Background visibility.
+
+This default is **part of the harness contract**: every new harness
+implementation (Ghostty, iTerm2, …) must honor `SpawnVisibility` and
+default to `Background`. See `biscuit-test-harness/src/lib.rs` for
+the canonical doc-comment.
+
 ### 5.2 Level-1 (PTY) — capability-detection round-trips
 
 **Effort:** M (2-3 days)
@@ -248,6 +281,7 @@ A reviewer can mark this work complete when:
 5. **Diagram coverage:** At least one Level-2 test per diagram subcommand verifies the rendered output contains image-protocol bytes (or fallback fenced block under tmux).
 6. **Prose styling coverage:** Level-2 tests verify SGR, OSC8, and NO_COLOR through a real terminal — not just NO_COLOR snapshots.
 7. **Discoverability:** `just test-l2` runs only Level-2 tests; the README explains the env vars; the `cli` and `biscuit-terminal` skills cross-reference each other on the testing tier vocabulary.
+8. **Non-disruptive defaults:** Running the Level-2 suite on a machine where the developer is actively working does not pop windows into the foreground or steal keyboard focus. `SpawnVisibility::Background` is the default for both `WezTermHarness` and `KittyHarness`; cliclick-driven biscuit-tui tests explicitly opt in to `Foreground`.
 
 ---
 
@@ -260,6 +294,7 @@ A reviewer can mark this work complete when:
 - **Test runtime.** Level-2 tests spawn external processes; budget ~5-10s per test. With ~25 new Level-2 tests this adds ~3 minutes to a full local test run on a host that has all terminals. Acceptable; document as such.
 - **Test isolation.** Each Level-2 test spawns a fresh shell. This guarantees no state bleed but adds ~1-2s of shell startup overhead per test. If test runtime becomes unacceptable, a future optimization could share shells within a test file with explicit reset logic.
 - **Binary resolution.** Tests depend on `assert_cmd::cargo::cargo_bin!()` locating the compiled binary in the cargo target directory. Cross-compilation scenarios or custom target directories may require setting `CARGO_TARGET_DIR` or adjusting the harness.
+- **Background-spawn caveat.** With `SpawnVisibility::Background`, WezTerm windows live in the `biscuit-bg` workspace; if a developer happens to switch to that workspace mid-test they will see ephemeral panes appear and disappear. This is cosmetic — the harness still owns and tears down each pane via pane-id. If a future test needs to assert on real terminal *focus* state (e.g. cursor blink behavior), it must opt into `Foreground`.
 
 ---
 
