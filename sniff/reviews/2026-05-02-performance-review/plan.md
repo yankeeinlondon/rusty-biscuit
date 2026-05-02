@@ -17,7 +17,9 @@ packages:
   - sniff/lib
 source_files_during_phase_2:
   - sniff/lib/src/filesystem/git/detection.rs
-  - sniff/lib/src/filesystem/git/types.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 source_files_during_phase_3:
   - sniff/lib/src/filesystem/repo/types.rs
   - sniff/lib/src/filesystem/repo/detection.rs
