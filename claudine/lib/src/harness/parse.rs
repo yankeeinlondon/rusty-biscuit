@@ -4,12 +4,14 @@
 //! map form (shorthand), parses handler declarations, and builds a typed
 //! [`HarnessPlan`].
 
+use std::ops::RangeInclusive;
 use std::path::Path;
 
 use indexmap::IndexMap;
 use serde_json::Value;
 use tracing::debug;
 
+use self::span::{SpanIndex, find_rule_spans};
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     ApprovedRuntimeCommand, FailureEvent, HandlerAction, HandlerRule, HandlerTable, HarnessPlan,
@@ -74,16 +76,44 @@ pub fn parse_harness_plan(
         id
     };
 
+    // Best-effort source-span recovery. Read the markdown from disk and
+    // extract the YAML frontmatter slice; on any IO or framing failure
+    // fall back to an empty `SpanIndex` so `line_range` stays `None` and
+    // `yaml_snippet` falls back to reconstructed YAML.
+    let raw_source = std::fs::read_to_string(source_path).ok();
+    let frontmatter_slice: Option<(&str, usize)> = raw_source
+        .as_deref()
+        .and_then(extract_frontmatter_text);
+    let span_index = frontmatter_slice
+        .map(|(text, base_line)| find_rule_spans(text, base_line))
+        .unwrap_or_default();
+
     // Parse pre_checks
     let pre_checks = if let Some(v) = obj.get("pre_checks") {
-        parse_checks(v, true, source_path, ctx, &mut alloc_id)?
+        parse_checks(
+            v,
+            true,
+            source_path,
+            ctx,
+            &span_index,
+            frontmatter_slice,
+            &mut alloc_id,
+        )?
     } else {
         Vec::new()
     };
 
     // Parse post_checks
     let post_checks = if let Some(v) = obj.get("post_checks") {
-        parse_checks(v, false, source_path, ctx, &mut alloc_id)?
+        parse_checks(
+            v,
+            false,
+            source_path,
+            ctx,
+            &span_index,
+            frontmatter_slice,
+            &mut alloc_id,
+        )?
     } else {
         Vec::new()
     };
@@ -252,6 +282,8 @@ fn parse_checks(
     is_pre: bool,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
+    spans: &SpanIndex,
+    frontmatter_slice: Option<(&str, usize)>,
     alloc_id: &mut impl FnMut() -> ValidationRuleId,
 ) -> Result<Vec<ValidationRule>, HarnessError> {
     let property = if is_pre { "pre_checks" } else { "post_checks" };
@@ -260,6 +292,7 @@ fn parse_checks(
         Value::Array(arr) => {
             // List form: each element is a single-key object
             let mut rules = Vec::with_capacity(arr.len());
+            let mut decl_index: usize = 0;
             for item in arr {
                 let obj = item
                     .as_object()
@@ -269,9 +302,23 @@ fn parse_checks(
                         detail: "each item in the list must be an object".to_string(),
                     })?;
                 for (name, val) in obj {
-                    let rule =
-                        parse_single_validation(name, val, is_pre, source_path, ctx, alloc_id)?;
+                    let line_range = if is_pre {
+                        spans.pre_check(decl_index)
+                    } else {
+                        spans.post_check(decl_index)
+                    };
+                    let rule = parse_single_validation(
+                        name,
+                        val,
+                        is_pre,
+                        source_path,
+                        ctx,
+                        line_range,
+                        frontmatter_slice,
+                        alloc_id,
+                    )?;
                     rules.push(rule);
+                    decl_index += 1;
                 }
             }
             Ok(rules)
@@ -279,8 +326,22 @@ fn parse_checks(
         Value::Object(obj) => {
             // Map form: shorthand
             let mut rules = Vec::with_capacity(obj.len());
-            for (name, val) in obj {
-                let rule = parse_single_validation(name, val, is_pre, source_path, ctx, alloc_id)?;
+            for (decl_index, (name, val)) in obj.iter().enumerate() {
+                let line_range = if is_pre {
+                    spans.pre_check(decl_index)
+                } else {
+                    spans.post_check(decl_index)
+                };
+                let rule = parse_single_validation(
+                    name,
+                    val,
+                    is_pre,
+                    source_path,
+                    ctx,
+                    line_range,
+                    frontmatter_slice,
+                    alloc_id,
+                )?;
                 rules.push(rule);
             }
             Ok(rules)
@@ -391,12 +452,15 @@ fn validation_meta(name: &str) -> Option<ValidationMeta> {
 }
 
 /// Parse a single validation from its name and YAML value.
+#[allow(clippy::too_many_arguments)]
 fn parse_single_validation(
     name: &str,
     value: &Value,
     is_pre: bool,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
+    line_range: Option<RangeInclusive<usize>>,
+    frontmatter_slice: Option<(&str, usize)>,
     alloc_id: &mut impl FnMut() -> ValidationRuleId,
 ) -> Result<ValidationRule, HarnessError> {
     let meta = validation_meta(name).ok_or_else(|| HarnessError::UnknownValidation {
@@ -421,7 +485,7 @@ fn parse_single_validation(
 
     let (kind, subject_key) = parse_validation_kind(name, value, source_path, ctx)?;
 
-    let source = build_rule_source(source_path, name, value);
+    let source = build_rule_source(source_path, name, value, line_range, frontmatter_slice);
 
     Ok(ValidationRule {
         id: alloc_id(),
@@ -436,26 +500,85 @@ fn parse_single_validation(
 
 /// Build a [`RuleSource`] for an author-declared validation rule.
 ///
-/// Re-serializes the single rule as a YAML mapping (`name: value`) so the
-/// snippet matches the YAML form authors actually wrote. `line_range` is
-/// always `None` here; recovery is best-effort and left to a follow-up pass
-/// that re-parses the source frontmatter with a span-preserving YAML parser.
+/// Prefers the original source slice authored by the user when a
+/// [`SpanIndex`] line range and the raw frontmatter text are both
+/// available, preserving comments, quoting, anchors, and indentation
+/// exactly as written. Falls back to a `serde_yaml_ng`-reconstructed
+/// single-key mapping when span recovery is unavailable.
 ///
-/// Returns `None` when the value cannot be re-serialized into YAML, leaving
-/// the reporter to fall back to its legacy single-line failure rendering.
-fn build_rule_source(source_path: &Path, rule_name: &str, value: &Value) -> Option<RuleSource> {
+/// ## Returns
+///
+/// `None` only when the reconstruction fallback also fails to produce
+/// a YAML snippet (e.g. the JSON value is not representable as YAML),
+/// leaving the reporter to fall back to its legacy single-line failure
+/// rendering.
+fn build_rule_source(
+    source_path: &Path,
+    rule_name: &str,
+    value: &Value,
+    line_range: Option<RangeInclusive<usize>>,
+    frontmatter_slice: Option<(&str, usize)>,
+) -> Option<RuleSource> {
+    let yaml_snippet = original_yaml_slice(line_range.as_ref(), frontmatter_slice)
+        .or_else(|| reconstruct_yaml_snippet(rule_name, value))?;
+    Some(RuleSource {
+        file: source_path.to_path_buf(),
+        line_range,
+        yaml_snippet,
+    })
+}
+
+/// Slice the original YAML lines for a rule out of the raw frontmatter text.
+///
+/// `line_range` is the 1-indexed inclusive line range of the rule **within
+/// the source file**, as recovered by the conservative span finder.
+/// `frontmatter_slice` carries the frontmatter text and the 1-indexed line
+/// number of its first body line (i.e. the line immediately after the
+/// opening `---` fence). When either is absent, or the requested range
+/// falls outside the available frontmatter body, returns `None` so the
+/// caller can fall back to YAML reconstruction.
+///
+/// The returned slice preserves all interior whitespace, comments,
+/// quoting, and indentation exactly as authored, with at most a single
+/// trailing newline trimmed.
+fn original_yaml_slice(
+    line_range: Option<&RangeInclusive<usize>>,
+    frontmatter_slice: Option<(&str, usize)>,
+) -> Option<String> {
+    let range = line_range?;
+    let (text, base_line) = frontmatter_slice?;
+    let start = *range.start();
+    let end = *range.end();
+    if start < base_line || end < start {
+        return None;
+    }
+    // Translate 1-indexed source-file line numbers into 0-indexed offsets
+    // within `text` (whose first line corresponds to `base_line`).
+    let start_idx = start - base_line;
+    let end_idx = end - base_line;
+    let lines: Vec<&str> = text.split('\n').collect();
+    if end_idx >= lines.len() {
+        return None;
+    }
+    let mut snippet = lines[start_idx..=end_idx].join("\n");
+    // Trim a single trailing newline only; preserve all other whitespace.
+    if snippet.ends_with('\n') {
+        snippet.pop();
+    }
+    Some(snippet)
+}
+
+/// Reconstruct a YAML mapping (`name: value`) for the rule via
+/// `serde_yaml_ng`. Used as the fallback when the original source slice
+/// is unavailable.
+fn reconstruct_yaml_snippet(rule_name: &str, value: &Value) -> Option<String> {
     use biscuit_file::serde_yaml_ng;
     let mut map = serde_yaml_ng::Mapping::new();
     map.insert(
         serde_yaml_ng::Value::String(rule_name.to_string()),
         serde_yaml_ng::to_value(value).ok()?,
     );
-    let yaml_snippet = serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(map)).ok()?;
-    Some(RuleSource {
-        file: source_path.to_path_buf(),
-        line_range: None,
-        yaml_snippet,
-    })
+    serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(map)).ok()
 }
 
 /// Parse a validation's kind-specific parameters from its value.
@@ -1114,6 +1237,284 @@ fn extract_usize(value: &Value, name: &str, source_path: &Path) -> Result<usize,
     }
 }
 
+/// Extract the YAML frontmatter slice from a markdown source, returning the
+/// text between the opening and closing `---` fences and the 1-indexed line
+/// number of the first frontmatter content line.
+///
+/// ## Returns
+///
+/// `Some((yaml_text, base_line))` where `base_line` is the 1-indexed line
+/// number of the first body line of the frontmatter (the line immediately
+/// after the opening `---`). `None` if the file does not start with a `---`
+/// fence on its first line, or if no closing fence is found.
+fn extract_frontmatter_text(source: &str) -> Option<(&str, usize)> {
+    // Frontmatter must start at the very first byte of the file with `---`
+    // followed by a newline. Anything else (BOMs, leading whitespace, CRLF
+    // before the first delimiter) falls through to the `None` fallback.
+    let rest = source.strip_prefix("---\n")?;
+    // Find the closing `---` line. Accept either `---\n` or a trailing
+    // `---` at end of string. Look for it as a line by itself.
+    let mut byte_offset = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let trimmed = line.strip_suffix('\n').unwrap_or(line);
+        if trimmed == "---" {
+            // Slice inside the fences.
+            let yaml = &rest[..byte_offset];
+            return Some((yaml, 2));
+        }
+        byte_offset += line.len();
+    }
+    None
+}
+
+mod span {
+    //! Conservative line-range recovery for `pre_checks` / `post_checks`
+    //! frontmatter blocks.
+    //!
+    //! Given the raw YAML frontmatter text and the 1-indexed line number of
+    //! its first line, produce per-rule line ranges keyed by declaration
+    //! order. The finder is intentionally conservative: when it cannot
+    //! unambiguously match a rule's span, it omits the range rather than
+    //! guessing.
+
+    use std::ops::RangeInclusive;
+
+    /// Per-rule line ranges keyed by declaration order.
+    #[derive(Debug, Default, Clone)]
+    pub(crate) struct SpanIndex {
+        pre: Vec<Option<RangeInclusive<usize>>>,
+        post: Vec<Option<RangeInclusive<usize>>>,
+    }
+
+    impl SpanIndex {
+        /// Look up the line range of the *i*-th `pre_checks` rule in
+        /// declaration order. Returns `None` if no unambiguous span was
+        /// recovered or the index is out of bounds.
+        pub(crate) fn pre_check(&self, i: usize) -> Option<RangeInclusive<usize>> {
+            self.pre.get(i).cloned().flatten()
+        }
+
+        /// Look up the line range of the *i*-th `post_checks` rule in
+        /// declaration order. Returns `None` if no unambiguous span was
+        /// recovered or the index is out of bounds.
+        pub(crate) fn post_check(&self, i: usize) -> Option<RangeInclusive<usize>> {
+            self.post.get(i).cloned().flatten()
+        }
+    }
+
+    /// Build a [`SpanIndex`] for the given frontmatter text.
+    ///
+    /// `base_line` is the 1-indexed line number of the first line of
+    /// `frontmatter_text`. The frontmatter slice does NOT include the
+    /// opening `---` fence; the caller is expected to have stripped it.
+    ///
+    /// ## Returns
+    ///
+    /// A `SpanIndex` with one slot per rule in declaration order. Slots are
+    /// `Some(range)` when the finder is confident; `None` otherwise.
+    pub(crate) fn find_rule_spans(frontmatter_text: &str, base_line: usize) -> SpanIndex {
+        let mut index = SpanIndex::default();
+
+        let lines: Vec<&str> = frontmatter_text.split('\n').collect();
+        // Locate the `pre_checks:` / `post_checks:` parent lines. These must
+        // appear at indent 0 (top-level frontmatter keys) with no prefix
+        // whitespace; anything more nested is rejected as ambiguous.
+        for (parent_key, slot) in [
+            ("pre_checks", &mut index.pre),
+            ("post_checks", &mut index.post),
+        ] {
+            let Some(parent_idx) = find_top_level_key(&lines, parent_key) else {
+                continue;
+            };
+            *slot = collect_rule_spans(&lines, parent_idx, base_line);
+        }
+
+        index
+    }
+
+    /// Find the index in `lines` of a top-level frontmatter key matching
+    /// `key`. Top-level means zero leading whitespace and `key:` immediately
+    /// at column 0. Returns the *first* match. If the key appears more than
+    /// once at the top level, returns `None` (ambiguous).
+    fn find_top_level_key(lines: &[&str], key: &str) -> Option<usize> {
+        let mut found: Option<usize> = None;
+        let needle_eq = format!("{key}:");
+        let needle_prefix = format!("{key}: ");
+        for (i, line) in lines.iter().enumerate() {
+            if *line == needle_eq || line.starts_with(&needle_prefix) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(i);
+            }
+        }
+        found
+    }
+
+    /// Walk lines after `parent_idx` and produce per-rule line ranges in
+    /// declaration order. Handles list form (entries beginning with `-`) and
+    /// map form (indented `name:` keys).
+    fn collect_rule_spans(
+        lines: &[&str],
+        parent_idx: usize,
+        base_line: usize,
+    ) -> Vec<Option<RangeInclusive<usize>>> {
+        // Determine the body indent by looking at the first non-blank,
+        // non-comment line after the parent. If none exists, no rules.
+        let mut body_indent: Option<usize> = None;
+        for line in lines.iter().skip(parent_idx + 1) {
+            if is_blank_or_comment(line) {
+                continue;
+            }
+            let indent = leading_spaces(line);
+            if indent == 0 {
+                // Sibling top-level key — no body.
+                break;
+            }
+            body_indent = Some(indent);
+            break;
+        }
+        let Some(body_indent) = body_indent else {
+            return Vec::new();
+        };
+
+        // Detect form: list form starts each entry with `- `; map form does not.
+        let mut entries: Vec<RangeInclusive<usize>> = Vec::new();
+        let mut current_start: Option<usize> = None;
+        let mut current_end: usize = 0;
+        let mut is_list_form: Option<bool> = None;
+
+        let body_iter = lines.iter().enumerate().skip(parent_idx + 1);
+        for (i, line) in body_iter {
+            if is_blank_or_comment(line) {
+                continue;
+            }
+            let indent = leading_spaces(line);
+            if indent < body_indent {
+                // Either back to top level or to a shallower scope; rules end.
+                break;
+            }
+            if indent == body_indent {
+                // Possible new rule entry.
+                let trimmed = &line[indent..];
+                let starts_with_dash = trimmed.starts_with("- ") || trimmed == "-";
+                match is_list_form {
+                    None => {
+                        is_list_form = Some(starts_with_dash);
+                    }
+                    Some(true) => {
+                        if !starts_with_dash {
+                            // Inconsistent with list form; abort.
+                            return mark_all_ambiguous(entries.len() + 1);
+                        }
+                    }
+                    Some(false) => {
+                        if starts_with_dash {
+                            // Inconsistent with map form; abort.
+                            return mark_all_ambiguous(entries.len() + 1);
+                        }
+                    }
+                }
+                // Close out the previous entry.
+                if let Some(start) = current_start.take() {
+                    entries.push(start..=current_end);
+                }
+                current_start = Some(i);
+                current_end = i;
+            } else if indent > body_indent {
+                // Continuation of the current rule (multi-line value).
+                if current_start.is_some() {
+                    current_end = i;
+                }
+            }
+        }
+        if let Some(start) = current_start.take() {
+            entries.push(start..=current_end);
+        }
+
+        // Detect ambiguity: duplicate top-level rule names within this block.
+        // Map form: the key on the entry's start line (after indent, before `:`).
+        // List form: the first inline key after `- ` on the entry's start line.
+        let mut seen: Vec<&str> = Vec::with_capacity(entries.len());
+        let mut ambiguous = false;
+        let names: Vec<Option<&str>> = entries
+            .iter()
+            .map(|r| extract_rule_name(lines[*r.start()], body_indent, is_list_form))
+            .collect();
+        for name in names.iter().flatten() {
+            if seen.contains(name) {
+                ambiguous = true;
+                break;
+            }
+            seen.push(name);
+        }
+
+        if ambiguous {
+            return entries.iter().map(|_| None).collect();
+        }
+
+        entries
+            .into_iter()
+            .map(|r| Some((r.start() + base_line)..=(r.end() + base_line)))
+            .collect()
+    }
+
+    /// Build an all-`None` vector of length `n` to signal ambiguity.
+    fn mark_all_ambiguous(n: usize) -> Vec<Option<RangeInclusive<usize>>> {
+        vec![None; n]
+    }
+
+    /// Return the count of leading space characters in `line`.
+    fn leading_spaces(line: &str) -> usize {
+        line.bytes().take_while(|b| *b == b' ').count()
+    }
+
+    /// Return `true` for blank lines and comment-only lines (lines whose
+    /// first non-space character is `#`).
+    fn is_blank_or_comment(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        trimmed.is_empty() || trimmed.starts_with('#')
+    }
+
+    /// Extract the rule name from the first line of a rule entry.
+    ///
+    /// For map form, the line looks like `  rule_name:` or `  rule_name: value`.
+    /// For list form, the line looks like `  - rule_name: value` or
+    /// `  - rule_name:`.
+    fn extract_rule_name(
+        line: &str,
+        body_indent: usize,
+        is_list_form: Option<bool>,
+    ) -> Option<&str> {
+        if line.len() < body_indent {
+            return None;
+        }
+        let after_indent = &line[body_indent..];
+        let key_part = if is_list_form == Some(true) {
+            // strip `- ` or `-` prefix
+            after_indent
+                .strip_prefix("- ")
+                .or_else(|| after_indent.strip_prefix('-'))?
+        } else {
+            after_indent
+        };
+        let colon = key_part.find(':')?;
+        let raw_name = key_part[..colon].trim();
+        if raw_name.is_empty() {
+            return None;
+        }
+        // Comments between `- ` and the key are unusual but possible; bail
+        // out by rejecting any name containing whitespace or `#`.
+        if raw_name
+            .bytes()
+            .any(|b| b == b' ' || b == b'#' || b == b'\t')
+        {
+            return None;
+        }
+        Some(raw_name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1675,5 +2076,242 @@ mod tests {
     fn inline_writability_rule_has_no_source() {
         let rule = inline_writability_pre_check(source());
         assert!(rule.source.is_none());
+    }
+
+    // ---- Phase 2: span-finder tests -------------------------------------
+
+    /// List form with three rules — each on its own line. Lines are
+    /// 1-indexed against the full source file, where the opening `---`
+    /// fence is line 1.
+    #[test]
+    fn find_rule_spans_list_form_returns_per_rule_ranges() {
+        let frontmatter = "pre_checks:\n  - file_exists: a\n  - dir_exists: b\n  - shell_command: \"ls\"\n";
+        let spans = span::find_rule_spans(frontmatter, 2);
+        assert_eq!(spans.pre_check(0), Some(3..=3));
+        assert_eq!(spans.pre_check(1), Some(4..=4));
+        assert_eq!(spans.pre_check(2), Some(5..=5));
+        assert!(spans.pre_check(3).is_none());
+        // Ranges are non-overlapping.
+        assert!(spans.pre_check(0).unwrap().end() < spans.pre_check(1).unwrap().start());
+        assert!(spans.pre_check(1).unwrap().end() < spans.pre_check(2).unwrap().start());
+    }
+
+    /// Map form with three rules.
+    #[test]
+    fn find_rule_spans_map_form_returns_per_rule_ranges() {
+        let frontmatter =
+            "pre_checks:\n  file_exists: a\n  dir_exists: b\n  shell_command: \"ls\"\n";
+        let spans = span::find_rule_spans(frontmatter, 2);
+        assert_eq!(spans.pre_check(0), Some(3..=3));
+        assert_eq!(spans.pre_check(1), Some(4..=4));
+        assert_eq!(spans.pre_check(2), Some(5..=5));
+    }
+
+    /// Multi-line map values (e.g. `file_exists:` followed by an indented
+    /// `message:` key) extend the rule's range to cover the continuation
+    /// lines.
+    #[test]
+    fn find_rule_spans_multiline_map_value_extends_range() {
+        let frontmatter = "pre_checks:\n  - file_exists: a\n    message: \"first\"\n  - dir_exists: b\n";
+        let spans = span::find_rule_spans(frontmatter, 2);
+        // Rule 0 spans both `- file_exists` (line 3) and `  message:` (line 4).
+        assert_eq!(spans.pre_check(0), Some(3..=4));
+        assert_eq!(spans.pre_check(1), Some(5..=5));
+    }
+
+    /// Duplicate top-level rule names within the same block produce
+    /// `None` for every rule in declaration order — the conservative
+    /// fallback.
+    #[test]
+    fn find_rule_spans_returns_none_when_ambiguous() {
+        let frontmatter = "pre_checks:\n  - file_exists: a\n  - file_exists: b\n";
+        let spans = span::find_rule_spans(frontmatter, 2);
+        assert!(spans.pre_check(0).is_none());
+        assert!(spans.pre_check(1).is_none());
+    }
+
+    /// `parse_harness_plan` populates `line_range` when the source file is
+    /// readable on disk.
+    #[test]
+    fn parse_rules_carry_line_range_when_recoverable() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        writeln!(
+            tmp,
+            "---\npre_checks:\n  - file_exists: \"Cargo.toml\"\n  - dir_exists: \"docs\"\n---\nbody"
+        )
+        .expect("write tempfile");
+        tmp.flush().expect("flush tempfile");
+
+        // A resolution context whose repo_root matches the tempfile's
+        // parent so `@`-prefixed paths resolve cleanly. The validation
+        // values above use bare paths so this is irrelevant for parsing,
+        // but we still need a context.
+        let ctx = HarnessResolutionContext {
+            source_path: tmp.path(),
+            repo_root: None,
+        };
+        let frontmatter = json!({
+            "pre_checks": [
+                { "file_exists": "Cargo.toml" },
+                { "dir_exists": "docs" }
+            ]
+        });
+        let plan = parse_harness_plan(&frontmatter, tmp.path(), &ctx).unwrap();
+        let lr_a = plan.pre_checks[0]
+            .source
+            .as_ref()
+            .and_then(|s| s.line_range.clone())
+            .expect("first rule should have a recovered line range");
+        let lr_b = plan.pre_checks[1]
+            .source
+            .as_ref()
+            .and_then(|s| s.line_range.clone())
+            .expect("second rule should have a recovered line range");
+        assert_eq!(lr_a, 3..=3);
+        assert_eq!(lr_b, 4..=4);
+    }
+
+    /// When the source file cannot be read, parsing still succeeds and
+    /// `line_range` is `None`.
+    #[test]
+    fn parse_rules_no_line_range_when_source_file_unreadable() {
+        let bogus =
+            Path::new("/this/path/does/not/exist/__claudine_phase2_missing__/run.md");
+        let ctx = HarnessResolutionContext {
+            source_path: bogus,
+            repo_root: None,
+        };
+        let frontmatter = json!({
+            "pre_checks": [
+                { "file_exists": "Cargo.toml" }
+            ]
+        });
+        let plan = parse_harness_plan(&frontmatter, bogus, &ctx).unwrap();
+        let src = plan.pre_checks[0]
+            .source
+            .as_ref()
+            .expect("source should still be populated via reconstruction");
+        assert!(src.line_range.is_none());
+    }
+
+    // ---- Phase 3: original YAML slice tests -----------------------------
+
+    /// Single-quoted scalar values are preserved verbatim from the source
+    /// frontmatter rather than being re-emitted in serde_yaml_ng's default
+    /// (unquoted) form.
+    #[test]
+    fn parse_rules_yaml_snippet_preserves_authored_quoting() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        writeln!(
+            tmp,
+            "---\npre_checks:\n  - file_exists: 'Cargo.toml'\n---\nbody"
+        )
+        .expect("write tempfile");
+        tmp.flush().expect("flush tempfile");
+
+        let ctx = HarnessResolutionContext {
+            source_path: tmp.path(),
+            repo_root: None,
+        };
+        let frontmatter = json!({
+            "pre_checks": [
+                { "file_exists": "Cargo.toml" }
+            ]
+        });
+        let plan = parse_harness_plan(&frontmatter, tmp.path(), &ctx).unwrap();
+        let snippet = &plan.pre_checks[0]
+            .source
+            .as_ref()
+            .expect("rule source should be populated")
+            .yaml_snippet;
+        assert!(
+            snippet.contains("'Cargo.toml'"),
+            "snippet should preserve single quotes: {snippet}",
+        );
+    }
+
+    /// Inline trailing comments authored on the rule line are preserved in
+    /// the snippet.
+    #[test]
+    fn parse_rules_yaml_snippet_preserves_inline_comments() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        writeln!(
+            tmp,
+            "---\npre_checks:\n  - file_exists: \"Cargo.toml\" # author comment\n---\nbody"
+        )
+        .expect("write tempfile");
+        tmp.flush().expect("flush tempfile");
+
+        let ctx = HarnessResolutionContext {
+            source_path: tmp.path(),
+            repo_root: None,
+        };
+        let frontmatter = json!({
+            "pre_checks": [
+                { "file_exists": "Cargo.toml" }
+            ]
+        });
+        let plan = parse_harness_plan(&frontmatter, tmp.path(), &ctx).unwrap();
+        let snippet = &plan.pre_checks[0]
+            .source
+            .as_ref()
+            .expect("rule source should be populated")
+            .yaml_snippet;
+        assert!(
+            snippet.contains("# author comment"),
+            "snippet should retain inline comment: {snippet}",
+        );
+    }
+
+    /// When the span finder cannot recover an unambiguous range (e.g.
+    /// duplicate top-level rule names), the snippet falls back to the
+    /// reconstructed YAML, which must still parse back through
+    /// `serde_yaml_ng::from_str`.
+    #[test]
+    fn parse_rules_yaml_snippet_falls_back_when_span_unrecoverable() {
+        use std::io::Write;
+        let mut tmp = tempfile::NamedTempFile::new().expect("create tempfile");
+        writeln!(
+            tmp,
+            "---\npre_checks:\n  - file_exists: \"a\"\n  - file_exists: \"b\"\n---\nbody"
+        )
+        .expect("write tempfile");
+        tmp.flush().expect("flush tempfile");
+
+        let ctx = HarnessResolutionContext {
+            source_path: tmp.path(),
+            repo_root: None,
+        };
+        let frontmatter = json!({
+            "pre_checks": [
+                { "file_exists": "a" },
+                { "file_exists": "b" }
+            ]
+        });
+        let plan = parse_harness_plan(&frontmatter, tmp.path(), &ctx).unwrap();
+        let src = plan.pre_checks[0]
+            .source
+            .as_ref()
+            .expect("rule source should be populated");
+        // Span recovery declined to commit a range, so the slice path is
+        // unavailable and we must have used reconstruction.
+        assert!(
+            src.line_range.is_none(),
+            "ambiguous span should yield no line range",
+        );
+        let value: biscuit_file::serde_yaml_ng::Value =
+            biscuit_file::serde_yaml_ng::from_str(&src.yaml_snippet)
+                .expect("reconstructed snippet should parse as YAML");
+        let map = value.as_mapping().expect("snippet should be a mapping");
+        assert_eq!(map.len(), 1, "reconstructed snippet should be single-key");
+        let key = map
+            .keys()
+            .next()
+            .and_then(|k| k.as_str())
+            .expect("key should be a string");
+        assert_eq!(key, "file_exists");
     }
 }
