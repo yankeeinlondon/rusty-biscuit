@@ -203,6 +203,7 @@ where
 
         match read_event()? {
             Event::Key(key) => {
+                log_key_event_if_enabled(&key);
                 if !should_dispatch_key_event(&key) {
                     continue;
                 }
@@ -283,6 +284,7 @@ where
 
         match read_event()? {
             Event::Key(key) => {
+                log_key_event_if_enabled(&key);
                 if !should_dispatch_key_event(&key) {
                     continue;
                 }
@@ -430,11 +432,22 @@ fn prepare_terminal(fullscreen: bool) -> io::Result<bool> {
     if fullscreen {
         execute!(out, EnterAlternateScreen)?;
     }
+    // REPORT_ALL_KEYS_AS_ESCAPE_CODES is the kitty-protocol flag that
+    // makes terminals emit press/release events for *bare* modifier
+    // keys (Ctrl, Alt, Shift, Super) when no other key is involved.
+    // Without it, most kitty-aware terminals (WezTerm in particular)
+    // only emit modifier events as part of a chord — which means
+    // holding bare Ctrl never produces a key event and the
+    // hotkey-badge UX silently does nothing. REPORT_EVENT_TYPES is
+    // still required so press/release are distinguishable;
+    // DISAMBIGUATE_ESCAPE_CODES keeps Esc from looking like a CSI
+    // prefix.
     let kbd_pushed = execute!(
         out,
         PushKeyboardEnhancementFlags(
             KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                | KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+                | KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
         )
     )
     .is_ok();
@@ -497,6 +510,51 @@ fn should_dispatch_key_event(key: &KeyEvent) -> bool {
     match key.kind {
         KeyEventKind::Press | KeyEventKind::Repeat => true,
         KeyEventKind::Release => matches!(key.code, KeyCode::Modifier(_)),
+    }
+}
+
+/// Optional diagnostic: when `BISCUIT_TUI_TRACE_KEYS=1` is set in the
+/// environment, dump every key event the runner observes to a log
+/// file in the system temp dir (`$TMPDIR/biscuit-tui-keys.log`).
+///
+/// Useful for diagnosing "press X but nothing happens" complaints —
+/// distinguishes the case where the binary never receives an event
+/// (terminal config / encoder issue) from the case where it does
+/// receive one but doesn't act on it (binary handler bug).
+///
+/// Logging goes to a file rather than stderr because in TUI mode
+/// stderr is wired into the alternate-screen buffer and would
+/// scramble the prompt. Tail the log with `tail -f
+/// /tmp/biscuit-tui-keys.log` while exercising the binary.
+///
+/// Cost when disabled: a single env-var lookup per key event.
+fn log_key_event_if_enabled(key: &KeyEvent) {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    let enabled =
+        *ENABLED.get_or_init(|| std::env::var("BISCUIT_TUI_TRACE_KEYS").as_deref() == Ok("1"));
+    if !enabled {
+        return;
+    }
+    let path = std::env::temp_dir().join("biscuit-tui-keys.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write as _;
+        let _ = writeln!(
+            f,
+            "{:?}  code={:?}  modifiers={:?}  kind={:?}  state={:?}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0),
+            key.code,
+            key.modifiers,
+            key.kind,
+            key.state,
+        );
     }
 }
 
