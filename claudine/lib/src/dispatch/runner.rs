@@ -1106,6 +1106,22 @@ mod tests {
     }
 
     #[test]
+    fn report_template_resolves_darkmatter_expressions() {
+        // Verifies the runner-level template path uses the shared expression
+        // engine (Darkmatter) end-to-end: a fallback expression and a simple
+        // variable both resolve correctly via format_report.
+        let output = format_report(
+            &ReportHandler {
+                format: ReportFormat::Text,
+                template: Some("{{provider}} ran {{tool_name || \"unknown-tool\"}}".to_string()),
+                include_metadata: false,
+            },
+            &meta(),
+        );
+        assert_eq!(output, "claude ran Bash");
+    }
+
+    #[test]
     fn tts_config_applies_provider_voice_and_rate() {
         let settings = TtsSettings {
             provider: Some("say".to_string()),
