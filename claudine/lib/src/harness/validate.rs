@@ -178,7 +178,7 @@ fn run_checks(
             passed,
             markup,
             failure_message,
-            source: None,
+            source: rule.source.clone(),
         });
     }
 
