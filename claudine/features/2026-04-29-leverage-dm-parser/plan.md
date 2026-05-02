@@ -7,9 +7,8 @@ packages:
   - claudine-cli
   - darkmatter
 source_files_during_phase_1:
-  - claudine/lib/src/events/event_meta.rs
-  - claudine/lib/src/dispatch/template.rs
-  - claudine/lib/src/dispatch/matcher.rs
+  - claudine/lib/src/dispatch/expression.rs
+  - claudine/lib/src/dispatch/mod.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
