@@ -25,8 +25,12 @@ source_files_during_phase_3:
   - sniff/lib/src/filesystem/repo/detection.rs
   - sniff/lib/src/programs/find_program.rs
   - sniff/lib/src/programs/types.rs
+  - sniff/lib/src/programs/mod.rs
   - sniff/lib/src/filesystem/blast_radius.rs
   - sniff/lib/src/filesystem/docs.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
   - sniff/lib/benches/cases/filesystem.rs
   - sniff/lib/benches/cases/git.rs
