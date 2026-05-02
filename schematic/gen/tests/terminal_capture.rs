@@ -108,8 +108,9 @@ fn run_in_tmux(session_prefix: &str, cmd: &str) -> Result<String, String> {
     // Compose the command to send. The shell expands `$READY_VAR` so
     // the marker that lands in the pane buffer differs from the bytes
     // that tmux echoes back when the user "types" the command.
-    let full_cmd =
-        format!("READY_VAR={marker_value}; {cmd}; printf '{marker_token}_%s\\n' \"$READY_VAR\"");
+    let full_cmd = format!(
+        "READY_VAR={marker_value}; env -u NO_COLOR CLICOLOR_FORCE=1 TERM=xterm-256color {cmd}; printf '{marker_token}_%s\\n' \"$READY_VAR\""
+    );
 
     let send_status = Command::new("tmux")
         .args(["send-keys", "-t", &session, &full_cmd, "Enter"])
@@ -174,6 +175,15 @@ fn assert_contains(haystack: &str, needle: &str, label: &str) {
     }
 }
 
+fn assert_contains_any(haystack: &str, needles: &[&str], label: &str) {
+    if needles.iter().any(|needle| haystack.contains(needle)) {
+        return;
+    }
+
+    let preview: String = haystack.chars().take(2_000).collect();
+    panic!("{label}: expected output to contain one of {needles:?}\n--- buffer preview ---\n{preview}");
+}
+
 fn assert_not_contains(haystack: &str, needle: &str, label: &str) {
     if haystack.contains(needle) {
         let preview: String = haystack.chars().take(2_000).collect();
@@ -202,15 +212,22 @@ fn validate_emits_ansi_styled_ok_on_success() {
     let buffer = run_in_tmux("schematic_gen_validate", &cmd)
         .expect("running schematic-gen validate inside tmux");
 
-    // The `colored` crate emits SGR codes as separate sequences for
-    // each modifier - bold (`\x1b[1m`) followed by green (`\x1b[32m`)
-    // and reset (`\x1b[0m`). Verify both PASS and OK use this style.
-    assert_contains(
+    // The `colored` crate may emit bold+color either as separate SGR
+    // sequences or as one combined sequence depending on platform/version.
+    // Verify both PASS and OK carry equivalent bold-green styling.
+    assert_contains_any(
         &buffer,
-        "\x1b[1m\x1b[32m  [PASS]\x1b[0m",
+        &[
+            "\x1b[1m\x1b[32m  [PASS]\x1b[0m",
+            "\x1b[1;32m  [PASS]\x1b[0m",
+        ],
         "validate PASS marker",
     );
-    assert_contains(&buffer, "\x1b[1m\x1b[32m[OK]\x1b[0m", "validate OK marker");
+    assert_contains_any(
+        &buffer,
+        &["\x1b[1m\x1b[32m[OK]\x1b[0m", "\x1b[1;32m[OK]\x1b[0m"],
+        "validate OK marker",
+    );
     // The summary line should mention the API being validated.
     assert_contains(&buffer, "OpenAI", "validate summary mentions API name");
     assert_contains(
@@ -274,9 +291,9 @@ fn generate_dry_run_emits_module_grouped_filenames() {
 
     // The `[OK]` markers next to "Would export OpenAPI spec" lines
     // must carry the bold-green SGR styling end-to-end through tmux.
-    assert_contains(
+    assert_contains_any(
         &buffer,
-        "\x1b[1m\x1b[32m[OK]\x1b[0m",
+        &["\x1b[1m\x1b[32m[OK]\x1b[0m", "\x1b[1;32m[OK]\x1b[0m"],
         "OK marker keeps bold-green styling",
     );
 }
@@ -302,9 +319,12 @@ fn validate_unknown_api_emits_red_error() {
         .expect("running schematic-gen validate (error path) inside tmux");
 
     // Bold-red `[ERROR]` marker.
-    assert_contains(
+    assert_contains_any(
         &buffer,
-        "\x1b[1m\x1b[31m[ERROR]\x1b[0m",
+        &[
+            "\x1b[1m\x1b[31m[ERROR]\x1b[0m",
+            "\x1b[1;31m[ERROR]\x1b[0m",
+        ],
         "ERROR marker uses bold-red styling",
     );
     assert_contains(&buffer, "Unknown API", "error message mentions Unknown API");
