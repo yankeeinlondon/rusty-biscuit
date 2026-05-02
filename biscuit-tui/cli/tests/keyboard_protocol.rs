@@ -16,7 +16,10 @@ use std::env;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+#[path = "common/mod.rs"]
+mod common;
 
 fn pty_tests_enabled() -> bool {
     env::var("RUN_PTY_TESTS").as_deref() == Ok("1")
@@ -52,35 +55,6 @@ fn read_all_available(session: &mut expectrl::session::OsSession) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-fn answer_cursor_position_request(session: &mut expectrl::session::OsSession) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-
-    while Instant::now() < deadline {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => {
-                output.push_str(&String::from_utf8_lossy(&scratch[..n]));
-                if output.contains("\x1b[6n") {
-                    session
-                        .write_all(b"\x1b[1;1R")
-                        .expect("send cursor position response");
-                    break;
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => break,
-        }
-    }
-
-    session.set_expect_timeout(Some(Duration::from_secs(10)));
-    std::thread::sleep(Duration::from_millis(300));
-}
-
 // ---------------------------------------------------------------------------
 // 3.4 — Bare modifier press shows hotkey badges
 // ---------------------------------------------------------------------------
@@ -104,7 +78,7 @@ mod keyboard_protocol {
         command.args(["choose-one", "--height", "5", "Red", "Green", "Blue"]);
         let mut session = Session::spawn(command).expect("spawn question choose-one");
         session.set_expect_timeout(Some(Duration::from_secs(10)));
-        answer_cursor_position_request(&mut session);
+        crate::common::pty::answer_cursor_position_request(&mut session);
         session
     }
 
@@ -128,11 +102,16 @@ mod keyboard_protocol {
         let output = read_all_available(&mut session);
 
         // Plain positional options receive default Ctrl hotkeys, so a bare Ctrl
-        // press should reveal their compact ^R/^G/^B badges.
+        // press MUST reveal their compact ^R/^G/^B badges. The original
+        // assertion also accepted any "Ctrl"/"CTRL" substring as a pass,
+        // which let unrelated hint text mask a missing badge — that loose
+        // fallback is exactly the kind of thing a reviewer rubber-stamped
+        // across 10 rounds. The strict assertion below verifies the actual
+        // feature instead of any incidental occurrence of the word "Ctrl".
         let has_badge = output.contains("^R") || output.contains("^G") || output.contains("^B");
         assert!(
-            has_badge || output.contains("Ctrl") || output.contains("CTRL"),
-            "bare Ctrl press should reveal hotkey badges; output was: {output:?}"
+            has_badge,
+            "bare Ctrl press MUST render at least one ^R/^G/^B badge; output was: {output:?}"
         );
 
         // Send release so the prompt doesn't stay stuck
@@ -189,7 +168,7 @@ mod degraded_terminal {
         let mut session =
             Session::spawn(command).expect("spawn question choose-one with TERM=dumb");
         session.set_expect_timeout(Some(Duration::from_secs(10)));
-        answer_cursor_position_request(&mut session);
+        crate::common::pty::answer_cursor_position_request(&mut session);
         session
     }
 

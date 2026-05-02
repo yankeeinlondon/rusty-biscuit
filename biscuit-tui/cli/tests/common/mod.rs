@@ -1,6 +1,21 @@
+// Each integration test in `cli/tests/` is compiled as its own crate
+// and only consumes a subset of these shared helpers. That is the
+// canonical Rust integration-test layout, but the dead-code lint does
+// not understand it: from any single test crate's perspective, the
+// helpers it does not call appear unused. Suppress the lint here so
+// the shared module compiles cleanly under `-D warnings` regardless
+// of which subset of helpers the consuming test reaches for.
+#![allow(dead_code)]
+
 use std::process::Output;
 
 use assert_cmd::Command;
+
+#[cfg(unix)]
+pub mod pty;
+
+#[cfg(unix)]
+pub mod real_terminal;
 
 pub fn run_question_in_pty(args: &[&str], send_sequence: &str, expected_code: i32) -> Output {
     let binary = assert_cmd::cargo::cargo_bin!("question");
