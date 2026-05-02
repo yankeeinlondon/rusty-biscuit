@@ -105,9 +105,13 @@ test-level-3:
 
         if [[ "$host" == iTerm ]]; then
             osascript \
-                -e 'tell application "iTerm" to activate' \
-                -e 'tell application "iTerm" to create window with default profile' \
-                -e "tell current session of current window of application \"iTerm\" to write text \"bash '$script'\""
+                -e 'tell application "iTerm"' \
+                -e '  activate' \
+                -e '  create window with default profile' \
+                -e '  tell current session of current window' \
+                -e "    write text \"bash '$script'\"" \
+                -e '  end tell' \
+                -e 'end tell'
         else
             osascript \
                 -e "tell application \"Terminal\" to do script \"bash '$script'\"" \

@@ -59,17 +59,60 @@ impl WezTermHarness {
         }
     }
 
-    /// Brings the spawned pane to the foreground inside WezTerm
-    /// (`wezterm cli activate-pane --pane-id N`) AND raises the
-    /// WezTerm app to the front of the macOS window stack via
-    /// `osascript`.
+    /// Returns a unique window title we stamp on the spawned WezTerm
+    /// window so System Events can target it precisely. Includes the
+    /// pane id (already unique within a WezTerm instance) so concurrent
+    /// runs of the same harness don't collide.
+    fn unique_window_title(&self) -> String {
+        format!("biscuit-tui-test-pane-{}", self.pane_id())
+    }
+
+    /// Brings the spawned pane to the foreground inside WezTerm AND
+    /// raises **its specific window** to the macOS front. Required
+    /// before any OS-level keyboard injection (e.g. `cliclick`).
     ///
-    /// Required before any OS-level keyboard injection (e.g.
-    /// `cliclick`) — without this, key events land in whatever
-    /// window the user happened to have focused, which is almost
-    /// never the spawned pane in a `cargo test` run.
-    pub fn focus_spawned_pane(&self) -> io::Result<()> {
+    /// The naive approach — `tell application "WezTerm" to activate` —
+    /// fails when the developer has many WezTerm windows already open:
+    /// macOS resolves the activation against whichever WezTerm window
+    /// was most recently `keyWindow`, which is rarely the brand-new
+    /// pane we just spawned. We instead:
+    ///
+    /// 1. Stamp the new window with a unique title via
+    ///    `wezterm cli set-window-title --pane-id N <unique>`.
+    /// 2. Activate the pane internally (`wezterm cli activate-pane`).
+    /// 3. Use `osascript` + System Events to `AXRaise` the window
+    ///    whose title matches the unique stamp — leaving every other
+    ///    WezTerm window the developer had open exactly where it was.
+    ///
+    /// Step 3 requires Accessibility permission for whatever app is
+    /// running the test (Terminal.app, iTerm2, WezTerm itself, etc.).
+    /// Without it, `AXRaise` silently fails and the event injection
+    /// falls back to whatever window currently owns key focus — i.e.
+    /// the same broken behaviour as before. We surface this as an
+    /// `io::Error` so the failure mode is explicit.
+    pub fn focus_spawned_pane(&self) -> io::Result<Option<(i32, i32)>> {
         let id = self.pane_id();
+        let title = self.unique_window_title();
+
+        // 1. Stamp a unique title we can target precisely.
+        //
+        // We use `set-tab-title`, not `set-window-title`. Most users'
+        // `wezterm.lua` defines a `format-window-title` event that
+        // ignores `set-window-title` and instead derives the OS-level
+        // NSWindow title from the active *tab*'s title. So setting the
+        // tab title actually propagates to what System Events sees.
+        // (See real-terminal screenshots in the feature folder.)
+        let out = Command::new("wezterm")
+            .args(["cli", "set-tab-title", "--pane-id", id, &title])
+            .output()?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli set-tab-title failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+
+        // 2. Activate intra-WezTerm pane focus (unchanged).
         let out = Command::new("wezterm")
             .args(["cli", "activate-pane", "--pane-id", id])
             .output()?;
@@ -79,21 +122,162 @@ impl WezTermHarness {
                 String::from_utf8_lossy(&out.stderr)
             )));
         }
-        // Activating the pane handles intra-WezTerm focus; raise the
-        // app itself so cliclick events route to WezTerm rather than
-        // whatever app currently owns key focus.
-        let activate = Command::new("osascript")
-            .args(["-e", "tell application \"WezTerm\" to activate"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?;
-        if !activate.success() {
-            return Err(io::Error::other("osascript activate WezTerm failed"));
+
+        // 3. Raise *our* window via System Events (macOS only).
+        // On other platforms there's nothing useful to do here — the
+        // PTY-based bytes injection used by Level 1/2 doesn't depend
+        // on key focus, and Level 3 cliclick is macOS-only by design.
+        #[cfg(target_os = "macos")]
+        {
+            // We don't hardcode the exact WezTerm process name —
+            // different builds register as "WezTerm", "wezterm-gui",
+            // or "wezterm" depending on how the bundle was built.
+            // AppleScript's `contains` is case-insensitive by
+            // default, so the substring `"wezterm"` matches all
+            // common variants in one filter.
+            //
+            // Walking every process on the system was prohibitively
+            // slow on heavily-loaded macs (each `windows of p` is a
+            // synchronous AX query that some apps service slowly).
+            // The narrowed filter is two orders of magnitude faster.
+            //
+            // `with timeout of 5 seconds` guards against AX queries
+            // hanging — if WezTerm itself is wedged we'd rather fail
+            // the test fast with a clear error than block the whole
+            // suite waiting for cliclick injection that will never
+            // land.
+            // Title-matching strategy:
+            //
+            //   1. Prefer our unique stamp (`biscuit-tui-test-pane-N`)
+            //      set via `wezterm cli set-window-title`. Honored
+            //      when the user's `wezterm.lua` does not override
+            //      window titling via a `format-window-title` event.
+            //
+            //   2. Fall back to the binary basename (`question`),
+            //      which is what WezTerm auto-titles a window with by
+            //      default — most `format-window-title` configs derive
+            //      the title from the active pane's foreground command.
+            //
+            // The fallback is unambiguous in this harness because
+            // `--test-threads=1` guarantees only one spawned `question`
+            // window exists at a time, AND `WezTermHarness::Drop`
+            // tears its pane down before the next test starts.
+            //
+            // Caveat: if you happen to have another WezTerm window
+            // running `question` for unrelated reasons during a Level-3
+            // run, the harness may raise that one instead. Don't.
+            // The script raises the matching window AND echoes its
+            // screen position+size so the caller can synthesise a
+            // real OS click into it. AXRaise alone doesn't transfer
+            // macOS keyWindow when the test runner lives in a
+            // different app (e.g. iTerm2 hosts cargo, WezTerm hosts
+            // the spawned pane); a real click does.
+            //
+            // Output format on success: "x y w h\n" (integers in
+            // global screen coords).
+            // First activate WezTerm via Apple Events. System Events
+            // `set frontmost to true` is unreliable when the calling
+            // app (iTerm2 hosting cargo) is currently active —
+            // modern macOS sometimes ignores the activation request
+            // unless the app explicitly issues an Apple Event. The
+            // first time this fires from a new parent, macOS may
+            // prompt to grant Automation permission (System Settings
+            // → Privacy & Security → Automation → <parent app>);
+            // grant it once and the prompts stop.
+            let _ = Command::new("osascript")
+                .args(["-e", "tell application \"WezTerm\" to activate"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            std::thread::sleep(Duration::from_millis(150));
+
+            let script = format!(
+                r#"with timeout of 5 seconds
+                       tell application "System Events"
+                           set wtProcs to (every process whose name contains "wezterm")
+                           if (count of wtProcs) is 0 then
+                               error "no wezterm-like process found in System Events"
+                           end if
+                           set seenTitles to ""
+                           repeat with p in wtProcs
+                               try
+                                   set hits to windows of p whose title contains "{title}"
+                                   if (count of hits) is 0 then
+                                       set hits to windows of p whose title is "question"
+                                   end if
+                                   if (count of hits) > 0 then
+                                       set targetWin to item 1 of hits
+                                       perform action "AXRaise" of targetWin
+                                       set frontmost of p to true
+                                       set winPos to position of targetWin
+                                       set winSize to size of targetWin
+                                       return ((item 1 of winPos) as text) & " " & ¬
+                                              ((item 2 of winPos) as text) & " " & ¬
+                                              ((item 1 of winSize) as text) & " " & ¬
+                                              ((item 2 of winSize) as text)
+                                   end if
+                                   repeat with w in (windows of p)
+                                       try
+                                           set seenTitles to seenTitles & "  - " & (title of w) & linefeed
+                                       end try
+                                   end repeat
+                               end try
+                           end repeat
+                           error "no wezterm window matched {title} or \"question\"; visible titles:" & linefeed & seenTitles
+                       end tell
+                   end timeout"#,
+            );
+            let activate = Command::new("osascript")
+                .args(["-e", &script])
+                .stderr(Stdio::piped())
+                .output()?;
+            if !activate.status.success() {
+                return Err(io::Error::other(format!(
+                    "System Events AXRaise of WezTerm window {title:?} failed (is \
+                     Accessibility permission granted to the parent terminal app?): \
+                     {}",
+                    String::from_utf8_lossy(&activate.stderr).trim()
+                )));
+            }
+
+            // Parse "x y w h" and return the click anchor. We use
+            // (x+50, y+5) — squarely in the title bar on most macOS
+            // setups, or just inside the top edge if title bars are
+            // disabled. The caller is responsible for synthesising
+            // the click as part of a single batched cliclick
+            // invocation alongside the actual key injection — see
+            // `cli/tests/common/real_terminal/cliclick.rs::click_then_*`.
+            // Splitting the click and the keys across separate
+            // cliclick processes is exactly what the cliclick docs
+            // warn against; one process per key sequence is the only
+            // way to keep focus transfer atomic with the press.
+            let stdout = String::from_utf8_lossy(&activate.stdout);
+            let parts: Vec<i32> = stdout
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            if parts.len() == 4 {
+                let (x, y, w, h) = (parts[0], parts[1], parts[2], parts[3]);
+                // Diagnostic so failures are debuggable. Click the
+                // dead center of the window — clicking the title bar
+                // (y+5) was risky because some WezTerm configs hide
+                // title bars and y+5 might land in the macOS menu bar
+                // for top-edge windows.
+                let click_x = x + w / 2;
+                let click_y = y + h / 2;
+                eprintln!(
+                    "[focus_spawned_pane] WezTerm window pos=({x},{y}) size=({w},{h}) → click target ({click_x},{click_y})"
+                );
+                std::thread::sleep(Duration::from_millis(200));
+                return Ok(Some((click_x, click_y)));
+            }
         }
-        // Allow the WindowServer to settle focus before the caller
-        // injects keys.
+
+        // Non-macOS (or AppleScript output unparseable) — caller
+        // gets no coords and falls back to whatever focus the
+        // platform managed to establish.
         std::thread::sleep(Duration::from_millis(400));
-        Ok(())
+        Ok(None)
     }
 }
 
