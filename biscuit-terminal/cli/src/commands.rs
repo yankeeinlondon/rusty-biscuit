@@ -1730,6 +1730,13 @@ pub fn render_prose(
     let term = Terminal::new();
     let output = prose.render(&term);
 
+    // Respect NO_COLOR by stripping SGR sequences.
+    let output = if std::env::var("NO_COLOR").is_ok() {
+        strip_sgr_sequences(&output)
+    } else {
+        output
+    };
+
     emit_vertical_margins(layout, || {
         println!("{}", output);
         Ok(())
@@ -2082,5 +2089,59 @@ mod tests {
         let entry = parse_single_pie_entry("\"Some Label\" : 10.5").unwrap();
         assert_eq!(entry.line, "\"Some Label\" : 10.5");
         assert_eq!(entry.color, None);
+    }
+}
+
+/// Strips SGR (Select Graphic Rendition) CSI sequences from `s`.
+///
+/// This preserves non-color ANSI sequences such as OSC8 hyperlinks
+/// and cursor positioning, removing only `ESC [ … m` style codes.
+fn strip_sgr_sequences(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            let start = i;
+            i += 2;
+            while i < bytes.len() {
+                let b = bytes[i];
+                i += 1;
+                if b == b'm' {
+                    // SGR sequence — discard everything from start to here.
+                    break;
+                }
+                if !(b.is_ascii_digit() || b == b';' || b == b':') {
+                    // Not an SGR sequence — keep the bytes we skipped.
+                    out.extend_from_slice(&bytes[start..i]);
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod strip_tests {
+    use super::strip_sgr_sequences;
+
+    #[test]
+    fn strips_sgr_red() {
+        assert_eq!(strip_sgr_sequences("\x1b[31mRed\x1b[0m"), "Red");
+    }
+
+    #[test]
+    fn preserves_osc8() {
+        let input = "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\";
+        assert_eq!(strip_sgr_sequences(input), input);
+    }
+
+    #[test]
+    fn preserves_plain_text() {
+        assert_eq!(strip_sgr_sequences("hello world"), "hello world");
     }
 }
