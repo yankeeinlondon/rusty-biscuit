@@ -74,8 +74,6 @@ review feat="" agent="" spec="" design="":
                 [[ "${spec_file}" == "NONE" ]] && spec_file=""
             fi
         fi
-        spec_file="${spec}"
-        design_file="${design}"
     else
         # Interactive feature chooser path
         doc="$(just _choose_feature "{{feat}}")"
