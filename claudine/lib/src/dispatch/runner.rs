@@ -1309,6 +1309,7 @@ mod tests {
             logging: true,
             protect: Default::default(),
             actions: HashMap::new(),
+            matchers: HashMap::new(),
             preferred_agent: Some(Provider::Claude),
             canonical_provider: None,
             models: HashMap::new(),

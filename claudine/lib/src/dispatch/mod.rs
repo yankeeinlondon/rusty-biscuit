@@ -1,6 +1,6 @@
 pub mod expression;
 pub mod loader;
-mod matcher;
+pub mod matcher;
 pub mod runner;
 pub mod template;
 
@@ -291,7 +291,7 @@ pub async fn dispatch_canonical_with_runtime(
         if !binding.enabled() {
             debug!(%event, "Canonical binding disabled, skipping actions");
             None
-        } else if !matcher::matches_with_regex(binding.matcher(), &meta) {
+        } else if !matcher::matches(binding.matcher(), &meta) {
             debug!(%event, "Matcher did not match in canonical binding, skipping actions");
             None
         } else {
