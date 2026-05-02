@@ -6,6 +6,15 @@ created: 2026-05-02
 phases: 7
 start_phase: 3
 status: ready
+source_files_during_phase_3:
+  - biscuit-terminal/lib/src/components/mermaid.rs
+  - biscuit-terminal/cli/src/commands.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+  - biscuit-terminal
+  - biscuit-terminal-cli
 ---
 
 # Review-Driven Implementation Plan: L1/L2 Test Hardening (Pass 2)
