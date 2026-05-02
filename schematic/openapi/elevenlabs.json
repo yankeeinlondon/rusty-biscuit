@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "ElevenLabs",
+    "title": "elevenlabs",
     "description": "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation",
     "version": "0.1.0"
   },
@@ -2482,5 +2482,8 @@
       "basic_user": null,
       "bearer_token": null
     }
-  }
+  },
+  "x-schematic-grouped-from": [
+    "ElevenLabs"
+  ]
 }

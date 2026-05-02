@@ -1,0 +1,1699 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "huggingface",
+    "description": "Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://huggingface.co/api",
+      "description": "HuggingFaceHub API Server"
+    }
+  ],
+  "paths": {
+    "/models": {
+      "get": {
+        "summary": "Lists models with optional filtering. Query params: search, author, filter, sort, direction, limit, full, config",
+        "description": "Lists models with optional filtering. Query params: search, author, filter, sort, direction, limit, full, config",
+        "operationId": "ListModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<ModelInfo>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<ModelInfo>"
+            }
+          }
+        }
+      }
+    },
+    "/models/{repo_id}": {
+      "get": {
+        "summary": "Gets detailed information about a specific model",
+        "description": "Gets detailed information about a specific model",
+        "operationId": "GetModel",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ModelInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/models/{repo_id}/tree/{revision}": {
+      "get": {
+        "summary": "Lists files in a model repository at a specific revision",
+        "description": "Lists files in a model repository at a specific revision",
+        "operationId": "ListModelFiles",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<RepoFile>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/models/{repo_id}/blob/{revision}/{path}": {
+      "get": {
+        "summary": "Gets file metadata for a specific file in a model repository",
+        "description": "Gets file metadata for a specific file in a model repository",
+        "operationId": "GetModelFile",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMetadata"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "FileMetadata"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/models/{repo_id}/commits/{revision}": {
+      "get": {
+        "summary": "Lists commits for a model repository",
+        "description": "Lists commits for a model repository",
+        "operationId": "ListModelCommits",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Commit>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Commit>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/models/{repo_id}/resolve/{revision}/README.md": {
+      "get": {
+        "summary": "Gets the README file content for a model",
+        "description": "Gets the README file content for a model",
+        "operationId": "GetModelReadme",
+        "responses": {
+          "200": {
+            "description": "Successful text response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Text"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/models/{repo_id}/discussions": {
+      "get": {
+        "summary": "Lists discussions for a model repository",
+        "description": "Lists discussions for a model repository",
+        "operationId": "ListModelDiscussions",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscussionList"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DiscussionList"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/models/{repo_id}/resolve/{revision}/model_card.md": {
+      "get": {
+        "summary": "Gets the model card file content",
+        "description": "Gets the model card file content",
+        "operationId": "GetModelCard",
+        "responses": {
+          "200": {
+            "description": "Successful text response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Text"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/datasets": {
+      "get": {
+        "summary": "Lists datasets with optional filtering. Query params: search, author, filter, sort, direction, limit, full",
+        "description": "Lists datasets with optional filtering. Query params: search, author, filter, sort, direction, limit, full",
+        "operationId": "ListDatasets",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<DatasetInfo>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<DatasetInfo>"
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{repo_id}": {
+      "get": {
+        "summary": "Gets detailed information about a specific dataset",
+        "description": "Gets detailed information about a specific dataset",
+        "operationId": "GetDataset",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DatasetInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/datasets/{repo_id}/tree/{revision}": {
+      "get": {
+        "summary": "Lists files in a dataset repository at a specific revision",
+        "description": "Lists files in a dataset repository at a specific revision",
+        "operationId": "ListDatasetFiles",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<RepoFile>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/datasets/{repo_id}/blob/{revision}/{path}": {
+      "get": {
+        "summary": "Gets file metadata for a specific file in a dataset repository",
+        "description": "Gets file metadata for a specific file in a dataset repository",
+        "operationId": "GetDatasetFile",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMetadata"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "FileMetadata"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/datasets/{repo_id}/commits/{revision}": {
+      "get": {
+        "summary": "Lists commits for a dataset repository",
+        "description": "Lists commits for a dataset repository",
+        "operationId": "ListDatasetCommits",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Commit>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Commit>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/datasets/{repo_id}/resolve/{revision}/README.md": {
+      "get": {
+        "summary": "Gets the README file content for a dataset",
+        "description": "Gets the README file content for a dataset",
+        "operationId": "GetDatasetReadme",
+        "responses": {
+          "200": {
+            "description": "Successful text response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Text"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/spaces": {
+      "get": {
+        "summary": "Lists spaces with optional filtering. Query params: search, author, filter, sort, direction, limit",
+        "description": "Lists spaces with optional filtering. Query params: search, author, filter, sort, direction, limit",
+        "operationId": "ListSpaces",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<SpaceInfo>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<SpaceInfo>"
+            }
+          }
+        }
+      }
+    },
+    "/spaces/{repo_id}": {
+      "get": {
+        "summary": "Gets detailed information about a specific space",
+        "description": "Gets detailed information about a specific space",
+        "operationId": "GetSpace",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpaceInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SpaceInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/spaces/{repo_id}/tree/{revision}": {
+      "get": {
+        "summary": "Lists files in a space repository at a specific revision",
+        "description": "Lists files in a space repository at a specific revision",
+        "operationId": "ListSpaceFiles",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<RepoFile>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/spaces/{repo_id}/blob/{revision}/{path}": {
+      "get": {
+        "summary": "Gets file metadata for a specific file in a space repository",
+        "description": "Gets file metadata for a specific file in a space repository",
+        "operationId": "GetSpaceFile",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileMetadata"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "FileMetadata"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "revision",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/create": {
+      "post": {
+        "summary": "Creates a new repository (model, dataset, or space)",
+        "description": "Creates a new repository (model, dataset, or space)",
+        "operationId": "CreateRepo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRepoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoUrl"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateRepoBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "RepoUrl"
+            }
+          }
+        }
+      }
+    },
+    "/repos/delete": {
+      "delete": {
+        "summary": "Deletes a repository",
+        "description": "Deletes a repository",
+        "operationId": "DeleteRepo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteRepoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "DeleteRepoBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_type}/{repo_id}/settings": {
+      "put": {
+        "summary": "Updates repository settings (visibility, gated access, etc.)",
+        "description": "Updates repository settings (visibility, gated access, etc.)",
+        "operationId": "UpdateRepoSettings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRepoSettingsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UpdateRepoSettingsBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "repo_type",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/repos/move": {
+      "post": {
+        "summary": "Moves/renames a repository",
+        "description": "Moves/renames a repository",
+        "operationId": "MoveRepo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRepoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MoveRepoBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "StatusResponse"
+            }
+          }
+        }
+      }
+    },
+    "/whoami-v2": {
+      "get": {
+        "summary": "Gets information about the authenticated user",
+        "description": "Gets information about the authenticated user",
+        "operationId": "WhoAmI",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UserInfo"
+            }
+          }
+        }
+      }
+    },
+    "/users/{username}": {
+      "get": {
+        "summary": "Gets public information about a user",
+        "description": "Gets public information about a user",
+        "operationId": "GetUser",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "UserInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "username",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/users/{username}/repos": {
+      "get": {
+        "summary": "Lists repositories owned by a user",
+        "description": "Lists repositories owned by a user",
+        "operationId": "ListUserRepos",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<RepoInfo>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<RepoInfo>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "username",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/users/{username}/collections": {
+      "get": {
+        "summary": "Gets collections created by a user",
+        "description": "Gets collections created by a user",
+        "operationId": "GetUserCollections",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<Collection>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<Collection>"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "username",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    }
+  },
+  "components": {
+    "schemas": {
+      "Vec<ModelInfo>": {
+        "title": "Array_of_ModelInfo",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/ModelInfo"
+            }
+          ]
+        }
+      },
+      "ModelInfo": {
+        "title": "ModelInfo",
+        "description": "Complete model information from the Hub API.",
+        "type": "object",
+        "properties": {
+          "author": {
+            "description": "Author/organization name.",
+            "type": "string"
+          },
+          "cardData": {
+            "description": "Model card data (parsed YAML frontmatter)."
+          },
+          "config": {
+            "description": "config.json contents.",
+            "type": "object"
+          },
+          "createdAt": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "disabled": {
+            "description": "Whether the repository is disabled.",
+            "type": "boolean"
+          },
+          "downloads": {
+            "description": "Total download count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "downloadsAllTime": {
+            "description": "Downloads in the last month.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "gated": {
+            "description": "Gated access status."
+          },
+          "inference": {
+            "description": "Inference API status."
+          },
+          "lastModified": {
+            "description": "Last modified timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "library_name": {
+            "description": "Library/framework name.",
+            "type": "string"
+          },
+          "likes": {
+            "description": "Number of likes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "mask_token": {
+            "description": "Mask token for masked LM models.",
+            "type": "string"
+          },
+          "model-index": {
+            "description": "Model index with evaluation results.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ModelIndexEntry"
+                }
+              ]
+            }
+          },
+          "modelId": {
+            "description": "Model identifier (e.g., \"bert-base-uncased\" or \"org/model\").",
+            "type": "string"
+          },
+          "pipeline_tag": {
+            "description": "Pipeline task tag.",
+            "type": "string"
+          },
+          "private": {
+            "description": "Whether the repository is private.",
+            "type": "boolean"
+          },
+          "safetensors": {
+            "description": "Safetensors metadata."
+          },
+          "sha": {
+            "description": "SHA of the current commit.",
+            "type": "string"
+          },
+          "siblings": {
+            "description": "Files in the repository.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RepoFile"
+                }
+              ]
+            }
+          },
+          "spaces": {
+            "description": "Spaces using this model.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "description": "All tags attached to the model.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "transformersInfo": {
+            "description": "Transformers configuration."
+          },
+          "trendingScore": {
+            "description": "Trending score.",
+            "type": "number",
+            "format": "double"
+          },
+          "widgetData": {
+            "description": "Widget data for the model.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/WidgetConfig"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "modelId"
+        ]
+      },
+      "Vec<RepoFile>": {
+        "title": "Array_of_RepoFile",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/RepoFile"
+            }
+          ]
+        }
+      },
+      "FileMetadata": {
+        "title": "FileMetadata",
+        "description": "File metadata in a repository.\n\nTODO: Define proper fields based on HuggingFace API docs.",
+        "type": "object",
+        "properties": {
+          "oid": {
+            "description": "File blob ID (git SHA).",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path.",
+            "type": "string"
+          },
+          "size": {
+            "description": "File size in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "type": {
+            "description": "MIME type.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "Vec<Commit>": {
+        "title": "Array_of_CommitInfo",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/CommitInfo"
+            }
+          ]
+        }
+      },
+      "DiscussionList": {
+        "title": "DiscussionList",
+        "description": "List of discussions response.",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "Total count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "discussions": {
+            "description": "List of discussions.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Discussion"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "discussions"
+        ]
+      },
+      "Vec<DatasetInfo>": {
+        "title": "Array_of_DatasetInfo",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/DatasetInfo"
+            }
+          ]
+        }
+      },
+      "DatasetInfo": {
+        "title": "DatasetInfo",
+        "description": "Complete dataset information from the Hub API.",
+        "type": "object",
+        "properties": {
+          "author": {
+            "description": "Author/organization name.",
+            "type": "string"
+          },
+          "cardData": {
+            "description": "Card data (parsed frontmatter)."
+          },
+          "citation": {
+            "description": "Citation text.",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Creation timestamp.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Description text.",
+            "type": "string"
+          },
+          "disabled": {
+            "description": "Whether disabled.",
+            "type": "boolean"
+          },
+          "downloads": {
+            "description": "Download count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "gated": {
+            "description": "Gated access status."
+          },
+          "id": {
+            "description": "Dataset identifier (e.g., \"squad\" or \"org/dataset\").",
+            "type": "string"
+          },
+          "lastModified": {
+            "description": "Last modified timestamp.",
+            "type": "string"
+          },
+          "likes": {
+            "description": "Like count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "private": {
+            "description": "Whether private.",
+            "type": "boolean"
+          },
+          "sha": {
+            "description": "SHA of the current commit.",
+            "type": "string"
+          },
+          "siblings": {
+            "description": "Files in the repository.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RepoFile"
+                }
+              ]
+            }
+          },
+          "tags": {
+            "description": "All tags.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trendingScore": {
+            "description": "Trending score.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "Vec<SpaceInfo>": {
+        "title": "Array_of_SpaceInfo",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/SpaceInfo"
+            }
+          ]
+        }
+      },
+      "SpaceInfo": {
+        "title": "SpaceInfo",
+        "description": "Complete Space information from the Hub API.",
+        "type": "object",
+        "properties": {
+          "author": {
+            "description": "Author/organization.",
+            "type": "string"
+          },
+          "cardData": {
+            "description": "Card data (parsed frontmatter)."
+          },
+          "colorFrom": {
+            "description": "Color theme.",
+            "type": "string"
+          },
+          "colorTo": {
+            "description": "Color theme (end).",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Creation timestamp.",
+            "type": "string"
+          },
+          "datasets": {
+            "description": "Datasets used by this space.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabled": {
+            "description": "Whether disabled.",
+            "type": "boolean"
+          },
+          "emoji": {
+            "description": "Emoji icon.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Space identifier (e.g., \"org/space-name\").",
+            "type": "string"
+          },
+          "lastModified": {
+            "description": "Last modified timestamp.",
+            "type": "string"
+          },
+          "likes": {
+            "description": "Like count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "models": {
+            "description": "Models used by this space.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinned": {
+            "description": "Pinned status.",
+            "type": "boolean"
+          },
+          "private": {
+            "description": "Whether private.",
+            "type": "boolean"
+          },
+          "runtime": {
+            "description": "Runtime information."
+          },
+          "sdk": {
+            "description": "SDK type (gradio, streamlit, etc.)."
+          },
+          "sdk_version": {
+            "description": "SDK version.",
+            "type": "string"
+          },
+          "sha": {
+            "description": "SHA of the current commit.",
+            "type": "string"
+          },
+          "siblings": {
+            "description": "Files in the repository.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RepoFile"
+                }
+              ]
+            }
+          },
+          "tags": {
+            "description": "All tags.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trendingScore": {
+            "description": "Trending score.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "RepoUrl": {
+        "title": "RepoUrl",
+        "description": "Repository URL after creation/modification.\n\nTODO: Define proper fields based on HuggingFace API docs.",
+        "type": "object",
+        "properties": {
+          "url": {
+            "description": "Full URL to the repository.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "StatusResponse": {
+        "title": "StatusResponse",
+        "description": "Status response for mutation operations.\n\nTODO: Define proper fields based on HuggingFace API docs.",
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "Optional message.",
+            "type": "string"
+          },
+          "ok": {
+            "description": "Operation success status.",
+            "type": "boolean"
+          }
+        }
+      },
+      "UserInfo": {
+        "title": "UserInfo",
+        "description": "User information.",
+        "type": "object",
+        "properties": {
+          "avatarUrl": {
+            "description": "Avatar URL.",
+            "type": "string"
+          },
+          "fullname": {
+            "description": "Full display name.",
+            "type": "string"
+          },
+          "isPro": {
+            "description": "Whether this is a pro user.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Username.",
+            "type": "string"
+          },
+          "numDatasets": {
+            "description": "Number of datasets.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "numFollowers": {
+            "description": "Number of followers.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "numFollowing": {
+            "description": "Number following.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "numLikes": {
+            "description": "Number of likes given.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "numModels": {
+            "description": "Number of models.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "numSpaces": {
+            "description": "Number of spaces.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "type": {
+            "description": "User type (user or org).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Vec<RepoInfo>": {
+        "title": "Array_of_RepoInfo",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/RepoInfo"
+            }
+          ]
+        }
+      },
+      "Vec<Collection>": {
+        "title": "Array_of_Collection",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/Collection"
+            }
+          ]
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Bearer token authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://huggingface.co/docs/hub/api"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": {
+        "names": [
+          "HF_TOKEN",
+          "HUGGING_FACE_API_KEY",
+          "HF_API_KEY"
+        ]
+      }
+    },
+    "module_path": "huggingface"
+  },
+  "x-schematic-grouped-from": [
+    "HuggingFaceHub"
+  ]
+}

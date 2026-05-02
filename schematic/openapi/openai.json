@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "OpenAI",
+    "title": "openai",
     "description": "OpenAI REST API for model management",
     "version": "0.1.0"
   },
@@ -224,5 +224,8 @@
         ]
       }
     }
-  }
+  },
+  "x-schematic-grouped-from": [
+    "OpenAI"
+  ]
 }

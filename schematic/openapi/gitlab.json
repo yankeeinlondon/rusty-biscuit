@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "GitLab",
+    "title": "gitlab",
     "description": "GitLab REST API v4 for repository, MR, issue, and release workflows",
     "version": "0.1.0"
   },
@@ -1906,5 +1906,8 @@
       ]
     ],
     "module_path": "gitlab"
-  }
+  },
+  "x-schematic-grouped-from": [
+    "GitLab"
+  ]
 }

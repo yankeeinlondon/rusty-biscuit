@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "LmStudio",
+    "title": "lmstudio",
     "description": "LM Studio v1 native REST API for local LLM inference and model management",
     "version": "0.1.0"
   },
@@ -500,5 +500,8 @@
       "basic_user": null,
       "bearer_token": null
     }
-  }
+  },
+  "x-schematic-grouped-from": [
+    "LmStudio"
+  ]
 }

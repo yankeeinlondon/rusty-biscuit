@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Gitea",
+    "title": "gitea",
     "description": "Gitea REST API v1.25+ for repository, PR, issue, and release workflows",
     "version": "0.1.0"
   },
@@ -1417,5 +1417,8 @@
       ]
     ],
     "module_path": "gitea"
-  }
+  },
+  "x-schematic-grouped-from": [
+    "Gitea"
+  ]
 }

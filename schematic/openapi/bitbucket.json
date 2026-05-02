@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Bitbucket",
+    "title": "bitbucket",
     "description": "Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows",
     "version": "0.1.0"
   },
@@ -1478,5 +1478,8 @@
       "bearer_token": null
     },
     "module_path": "bitbucket"
-  }
+  },
+  "x-schematic-grouped-from": [
+    "Bitbucket"
+  ]
 }

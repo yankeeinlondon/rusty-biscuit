@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Eversolo",
+    "title": "eversolo",
     "description": "Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)",
     "version": "0.1.0"
   },
@@ -899,5 +899,8 @@
       "bearer_token": null
     },
     "module_path": "eversolo"
-  }
+  },
+  "x-schematic-grouped-from": [
+    "Eversolo"
+  ]
 }
