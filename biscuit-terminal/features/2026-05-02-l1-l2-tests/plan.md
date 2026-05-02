@@ -37,6 +37,13 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-terminal/cli/tests/level2_image.rs
+  - biscuit-terminal/cli/tests/level2_diagrams.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/biscuit-terminal/SKILL.md
 packages:
   - biscuit-test-harness
   - biscuit-tui
