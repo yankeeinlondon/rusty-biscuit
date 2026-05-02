@@ -16,6 +16,18 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - biscuit-terminal/lib/tests/common/mod.rs
+  - biscuit-terminal/lib/tests/common/pty.rs
+  - biscuit-terminal/lib/examples/discovery_probe.rs
+  - biscuit-terminal/lib/tests/level1_osc_queries.rs
+  - biscuit-terminal/lib/tests/level1_clipboard.rs
+  - biscuit-terminal/lib/tests/level1_mode_2027.rs
+  - biscuit-terminal/lib/tests/level1_cursor.rs
+  - biscuit-terminal/lib/tests/level1_terminal_init.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
   - biscuit-test-harness
   - biscuit-tui
