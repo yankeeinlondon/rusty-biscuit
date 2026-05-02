@@ -18,9 +18,18 @@
 //! * `osc10` — Query foreground colour (OSC 10).
 //! * `osc11` — Query background colour (OSC 11).
 //! * `osc12` — Query cursor colour (OSC 12).
+//! * `osc10_timeout` — Query foreground colour with custom timeout.
+//! * `osc11_timeout` — Query background colour with custom timeout.
+//! * `osc12_timeout` — Query cursor colour with custom timeout.
 //! * `clipboard` — Attempt OSC52 clipboard write.
+//! * `clipboard_support` — Check OSC52 support.
+//! * `clipboard_target` — Attempt OSC52 clipboard write with target.
+//! * `clipboard_clear` — Attempt OSC52 clipboard clear.
+//! * `clipboard_get` — Attempt OSC52 clipboard read.
 //! * `mode2027` — Enable/disable Mode 2027.
+//! * `mode_2027_support` — Check Mode 2027 support.
 //! * `cursor` — Query cursor position (DSR).
+//! * `cursor_timeout` — Query cursor position with custom timeout.
 //! * `terminal` — Build a `Terminal` instance and print its fields.
 //!
 //! ## Output format
@@ -52,9 +61,18 @@ fn main() {
         "osc10" => probe_osc10(),
         "osc11" => probe_osc11(),
         "osc12" => probe_osc12(),
+        "osc10_timeout" => probe_osc10_timeout(),
+        "osc11_timeout" => probe_osc11_timeout(),
+        "osc12_timeout" => probe_osc12_timeout(),
         "clipboard" => probe_clipboard(),
+        "clipboard_support" => probe_clipboard_support(),
+        "clipboard_target" => probe_clipboard_target(),
+        "clipboard_clear" => probe_clipboard_clear(),
+        "clipboard_get" => probe_clipboard_get(),
         "mode2027" => probe_mode_2027(),
+        "mode_2027_support" => probe_mode_2027_support(),
         "cursor" => probe_cursor(),
+        "cursor_timeout" => probe_cursor_timeout(),
         "terminal" => probe_terminal(),
         _ => probe_all(),
     }
@@ -79,6 +97,33 @@ fn probe_osc12() {
     println!("cursor_color={:?}", cursor_color());
 }
 
+fn probe_osc10_timeout() {
+    use biscuit_terminal::discovery::osc_queries::text_color_with_timeout;
+    use std::time::Duration;
+    println!(
+        "osc10_timeout={:?}",
+        text_color_with_timeout(Duration::from_millis(250))
+    );
+}
+
+fn probe_osc11_timeout() {
+    use biscuit_terminal::discovery::osc_queries::bg_color_with_timeout;
+    use std::time::Duration;
+    println!(
+        "osc11_timeout={:?}",
+        bg_color_with_timeout(Duration::from_millis(250))
+    );
+}
+
+fn probe_osc12_timeout() {
+    use biscuit_terminal::discovery::osc_queries::cursor_color_with_timeout;
+    use std::time::Duration;
+    println!(
+        "osc12_timeout={:?}",
+        cursor_color_with_timeout(Duration::from_millis(250))
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Clipboard
 // ---------------------------------------------------------------------------
@@ -90,6 +135,34 @@ fn probe_clipboard() {
         "clipboard_result={:?}",
         result.map(|_| "ok").map_err(|e| e.to_string())
     );
+}
+
+fn probe_clipboard_support() {
+    use biscuit_terminal::discovery::clipboard::osc52_support;
+    println!("osc52_support={}", osc52_support());
+}
+
+fn probe_clipboard_target() {
+    use biscuit_terminal::discovery::clipboard::{ClipboardTarget, set_clipboard_with_target};
+    let result = set_clipboard_with_target("primary-pty", ClipboardTarget::Primary);
+    println!(
+        "clipboard_target_result={:?}",
+        result.map(|_| "ok").map_err(|e| e.to_string())
+    );
+}
+
+fn probe_clipboard_clear() {
+    use biscuit_terminal::discovery::clipboard::clear_clipboard;
+    let result = clear_clipboard();
+    println!(
+        "clipboard_clear_result={:?}",
+        result.map(|_| "ok").map_err(|e| e.to_string())
+    );
+}
+
+fn probe_clipboard_get() {
+    use biscuit_terminal::discovery::clipboard::get_clipboard;
+    println!("clipboard_get={:?}", get_clipboard());
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +183,11 @@ fn probe_mode_2027() {
     );
 }
 
+fn probe_mode_2027_support() {
+    use biscuit_terminal::discovery::mode_2027::supports_mode_2027;
+    println!("supports_mode_2027={}", supports_mode_2027());
+}
+
 // ---------------------------------------------------------------------------
 // Cursor position
 // ---------------------------------------------------------------------------
@@ -117,6 +195,15 @@ fn probe_mode_2027() {
 fn probe_cursor() {
     use biscuit_terminal::discovery::cursor_position::cursor_position;
     println!("cursor_position={:?}", cursor_position());
+}
+
+fn probe_cursor_timeout() {
+    use biscuit_terminal::discovery::cursor_position::cursor_position_with_timeout;
+    use std::time::Duration;
+    println!(
+        "cursor_timeout={:?}",
+        cursor_position_with_timeout(Duration::from_millis(250))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +232,16 @@ fn probe_all() {
     probe_osc10();
     probe_osc11();
     probe_osc12();
+    probe_osc10_timeout();
+    probe_osc11_timeout();
+    probe_osc12_timeout();
     probe_cursor();
+    probe_cursor_timeout();
     probe_clipboard();
+    probe_clipboard_support();
+    probe_clipboard_target();
+    probe_clipboard_clear();
+    probe_clipboard_get();
     probe_mode_2027();
+    probe_mode_2027_support();
 }
