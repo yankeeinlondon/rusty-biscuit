@@ -203,6 +203,7 @@ where
 
         match read_event()? {
             Event::Key(key) => {
+                log_key_event_if_enabled(&key);
                 if !should_dispatch_key_event(&key) {
                     continue;
                 }
@@ -283,6 +284,7 @@ where
 
         match read_event()? {
             Event::Key(key) => {
+                log_key_event_if_enabled(&key);
                 if !should_dispatch_key_event(&key) {
                     continue;
                 }
@@ -430,11 +432,22 @@ fn prepare_terminal(fullscreen: bool) -> io::Result<bool> {
     if fullscreen {
         execute!(out, EnterAlternateScreen)?;
     }
+    // REPORT_ALL_KEYS_AS_ESCAPE_CODES is the kitty-protocol flag that
+    // makes terminals emit press/release events for *bare* modifier
+    // keys (Ctrl, Alt, Shift, Super) when no other key is involved.
+    // Without it, most kitty-aware terminals (WezTerm in particular)
+    // only emit modifier events as part of a chord — which means
+    // holding bare Ctrl never produces a key event and the
+    // hotkey-badge UX silently does nothing. REPORT_EVENT_TYPES is
+    // still required so press/release are distinguishable;
+    // DISAMBIGUATE_ESCAPE_CODES keeps Esc from looking like a CSI
+    // prefix.
     let kbd_pushed = execute!(
         out,
         PushKeyboardEnhancementFlags(
             KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                | KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES,
+                | KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
         )
     )
     .is_ok();
@@ -496,7 +509,73 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
 fn should_dispatch_key_event(key: &KeyEvent) -> bool {
     match key.kind {
         KeyEventKind::Press | KeyEventKind::Repeat => true,
-        KeyEventKind::Release => matches!(key.code, KeyCode::Modifier(_)),
+        KeyEventKind::Release => {
+            // Bare-modifier releases drive bare-Ctrl/Alt badge clearing.
+            if matches!(key.code, KeyCode::Modifier(_)) {
+                return true;
+            }
+            // `Ctrl+Space` and `Alt+Space` release events drive the
+            // press-and-hold sticky-toggle UX in the choose
+            // components. We deliberately ONLY pass through these
+            // specific chord shapes — otherwise releases of arbitrary
+            // chords (e.g. Esc, Enter) would reach component handlers
+            // that don't expect them and could mis-fire bindings.
+            //
+            // Both space encodings are accepted: standard
+            // `Char(' ') + CONTROL/ALT` (kitty protocol) and legacy
+            // `Char('\0') + CONTROL` (Ctrl subtracts 0x40 from
+            // Space's 0x20 → NUL).
+            let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            let has_alt = key.modifiers.contains(KeyModifiers::ALT);
+            let is_space = matches!(key.code, KeyCode::Char(' '))
+                || (matches!(key.code, KeyCode::Char('\0')) && has_ctrl);
+            is_space && (has_ctrl ^ has_alt)
+        }
+    }
+}
+
+/// Optional diagnostic: when `BISCUIT_TUI_TRACE_KEYS=1` is set in the
+/// environment, dump every key event the runner observes to a log
+/// file in the system temp dir (`$TMPDIR/biscuit-tui-keys.log`).
+///
+/// Useful for diagnosing "press X but nothing happens" complaints —
+/// distinguishes the case where the binary never receives an event
+/// (terminal config / encoder issue) from the case where it does
+/// receive one but doesn't act on it (binary handler bug).
+///
+/// Logging goes to a file rather than stderr because in TUI mode
+/// stderr is wired into the alternate-screen buffer and would
+/// scramble the prompt. Tail the log with `tail -f
+/// /tmp/biscuit-tui-keys.log` while exercising the binary.
+///
+/// Cost when disabled: a single env-var lookup per key event.
+fn log_key_event_if_enabled(key: &KeyEvent) {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    let enabled =
+        *ENABLED.get_or_init(|| std::env::var("BISCUIT_TUI_TRACE_KEYS").as_deref() == Ok("1"));
+    if !enabled {
+        return;
+    }
+    let path = std::env::temp_dir().join("biscuit-tui-keys.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write as _;
+        let _ = writeln!(
+            f,
+            "{:?}  code={:?}  modifiers={:?}  kind={:?}  state={:?}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0),
+            key.code,
+            key.modifiers,
+            key.kind,
+            key.state,
+        );
     }
 }
 
@@ -898,6 +977,69 @@ mod tests {
     fn loop_exit_to_result_forwards_submitted_value() {
         let ok = loop_exit_to_result(LoopExit::Submitted("payload".to_string())).unwrap();
         assert_eq!(ok, "payload");
+    }
+
+    #[test]
+    fn dispatcher_passes_ctrl_space_release_through() {
+        // Required so the press-and-hold sticky-toggle UX in the
+        // choose components can clear the sticky mode on chord
+        // release. The previous filter blocked all `Char` releases
+        // and the chord clear never fired.
+        let release = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_passes_legacy_nul_ctrl_space_release_through() {
+        // The non-kitty Ctrl+Space encoding (NUL byte) on release.
+        let release = KeyEvent {
+            code: KeyCode::Char('\0'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_passes_alt_space_release_through() {
+        let release = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::ALT,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_filters_unrelated_char_releases() {
+        // Releases of arbitrary characters MUST still be filtered —
+        // letting them through could fire bindings (Esc, Enter, etc.)
+        // on key release, which components don't expect.
+        let release = KeyEvent {
+            code: KeyCode::Char('a'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(!should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_filters_esc_release() {
+        let release = KeyEvent {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(!should_dispatch_key_event(&release));
     }
 
     #[test]

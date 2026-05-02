@@ -166,6 +166,22 @@ Two-tier validation model:
 1. **Keystroke-time rejection** — hard limits (`max_length`, `max_selections`) silently block input that would exceed the cap.
 2. **Submit-time validation** — `required` and `min_selections` are checked on submit. If violated, `handle_event` returns `Consumed` and the component renders an inline error message. The error text is accessible via `state.validation_error()`.
 
+## Testing
+
+Library unit tests cover state transitions, layout math, fuzzy filter
+behaviour, and rendering of choice badges / hotkey display modes. Run
+them with `cargo test -p tui-chrome --lib`.
+
+For end-to-end and real-terminal verification (Level 1 / Level 2 /
+Level 3 testing rigor — including the `wezterm cli` / `kitty @` / `tmux`
+harnesses and `cliclick` keyboard injection on macOS), see the
+[`tui-chrome-cli` README's "Test Rigor" section](../cli/README.md#test-rigor--level-1--level-2--level-3).
+
+The lib's render correctness for hotkey badges is verified at Level 2 by
+piping kitty keyboard-protocol bytes into a real WezTerm pane via
+`wezterm cli send-text` and capturing the rendered output — see
+`cli/tests/real_terminal_render.rs::level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges`.
+
 ## Documentation
 
 For complete design rationale and implementation details, see:

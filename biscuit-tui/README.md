@@ -161,6 +161,27 @@ just cli <args> # run CLI in development mode
 just docs       # build and open library docs
 ```
 
+### Testing Strategy
+
+Verification spans three rigor levels — see
+[`cli/README.md` "Test Rigor"](cli/README.md#test-rigor--level-1--level-2--level-3)
+for full details:
+
+- **Level 1** (always-on) — unit tests + PTY tests with manufactured input bytes.
+  Runs in default `cargo test`.
+- **Level 2** (host-gated) — spawn the binary inside a real terminal
+  (`wezterm cli`, `kitty @`, or `tmux`) and capture rendered pane text. Skips
+  cleanly when the host lacks the required tooling.
+- **Level 3** (`RUN_LEVEL3=1`) — OS-level keyboard injection via `cliclick`
+  (macOS) or `xdotool` (Linux). Gated because focus stability is platform-
+  specific and would otherwise produce flaky failures during a normal
+  developer workflow.
+
+The harness implementations live in `cli/tests/common/real_terminal/`. A
+modifier-press requirement covered only by Level-1 tests is **not** "production
+ready" — Level 2 with kitty bytes through `wezterm cli send-text` is the
+minimum for end-to-end terminal rendering verification.
+
 ## License
 
 AGPL-3.0-only

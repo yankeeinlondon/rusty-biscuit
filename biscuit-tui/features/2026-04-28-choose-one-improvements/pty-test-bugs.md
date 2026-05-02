@@ -1,9 +1,10 @@
 ---
 ready: false
-status: open
+status: resolved
 scope: cli/tests/choose_cli.rs::pty (and equivalent harnesses)
 related:
   - biscuit-tui/cli/tests/choose_cli.rs
+  - biscuit-tui/cli/tests/common/pty.rs
   - biscuit-tui/cli/tests/keyboard_protocol.rs
   - biscuit-tui/lib/src/core/standalone.rs
 ---
@@ -177,11 +178,21 @@ exited: Ok(Exited(Pid(N), 0))   ✅
 
 A DSR responder is mandatory for any Inline-viewport test.
 
-### Fix not yet applied
+### Fix applied (review-plan-10 Phase 1)
+
+Resolved by extracting `answer_cursor_position_request` into a shared
+helper at `cli/tests/common/pty.rs`. Both `cli/tests/keyboard_protocol.rs`
+and `cli/tests/choose_cli.rs::pty::spawn_question` now call into the
+shared helper. `spawn_question` invokes the responder when
+`args_use_inline_viewport(args)` returns true (i.e. when `--height`
+or bare `-h` is on the command line). `pty::choose_one_height_100_percent_runs_end_to_end`
+now passes under `QUESTION_INTERACTIVE_PTY=1`.
+
+### Original options considered
 
 The keyboard-protocol tests (`cli/tests/keyboard_protocol.rs:55-82`) already
-contain an `answer_cursor_position_request` helper that does this correctly.
-The choose-cli PTY harness does not. Two paths forward:
+contained an `answer_cursor_position_request` helper that does this correctly.
+The choose-cli PTY harness did not. Two paths were considered:
 
 **Option A — Add a DSR responder to the choose-cli harness.** Promote
 `answer_cursor_position_request` to a shared helper (e.g. in a new
@@ -238,7 +249,10 @@ Adopt Option A. Concretely:
 - [x] Bug 1 fix-applied in `cli/tests/choose_cli.rs::pty::wait_exit_code_within`
       (drain-while-poll + deadline-bounded status check)
 - [x] Bug 1 verified: 3 of 4 PTY tests pass after fix
-- [ ] Bug 2 fix pending: choose `Option A` (shared DSR responder helper)
-      or `Option B` (drop the inline-viewport PTY test)
+- [x] Bug 2 fix-applied (Option A): shared DSR responder helper at
+      `cli/tests/common/pty.rs::answer_cursor_position_request`,
+      consumed by both `keyboard_protocol.rs` and
+      `choose_cli.rs::pty::spawn_question`. All 4 `choose_cli::pty`
+      tests pass under `QUESTION_INTERACTIVE_PTY=1`.
 - [ ] Backport drain-while-poll pattern into `keyboard_protocol.rs` and
       `completions_shell.rs` (the harness shape there has the same risk)

@@ -17,13 +17,30 @@ use crate::core::{
     ComponentTheme, FuzzyFilter, NerdFontStatus, TerminalStyle, resolve_active_style,
 };
 
-/// 256-color palette index for the Ctrl badge background (orange tone
-/// that reads on both dark and light terminals).
+/// 256-color palette index for the held Ctrl badge background
+/// (bright orange; reads on both dark and light terminals).
 const CTRL_BADGE_BG: Color = Color::Indexed(208);
-/// 256-color palette index for the Alt badge background (yellow tone).
+/// 256-color palette index for the held Alt badge background (bright
+/// yellow; reads on both dark and light terminals).
 const ALT_BADGE_BG: Color = Color::Indexed(220);
-/// Foreground colour for hotkey badge text.
-const BADGE_FG: Color = Color::White;
+/// Darker shade of the Ctrl orange used when this badge is *not* the
+/// currently-emphasised modifier. The spec asks for badges to stay
+/// visible across both states; using a darker shade keeps the family
+/// colour identifiable while making the held state visually dominant
+/// without relying on the unreliable `Modifier::DIM` SGR.
+const CTRL_BADGE_BG_DIM: Color = Color::Indexed(166);
+/// Darker shade of the Alt yellow for the not-held state. See
+/// [`CTRL_BADGE_BG_DIM`] for rationale.
+const ALT_BADGE_BG_DIM: Color = Color::Indexed(178);
+/// Foreground colour for hotkey badge text on the **orange** Ctrl
+/// background. Black reads cleanly on the bright orange across both
+/// held and dim shades — white-on-orange has marginal contrast on
+/// many terminal palettes.
+const BADGE_FG_ON_ORANGE: Color = Color::Black;
+/// Foreground colour for hotkey badge text on the **yellow** Alt
+/// background. Black reads cleanly on yellow; white-on-yellow renders
+/// as a near-illegible blur on most terminals.
+const BADGE_FG_ON_YELLOW: Color = Color::Black;
 
 /// Builds a renderable string for a hotkey badge.
 ///
@@ -51,25 +68,94 @@ fn badge_width(hotkey: Option<HotkeySpec>, display: HotkeyDisplayMode) -> u16 {
 
 /// Builds a styled span for a hotkey badge.
 ///
-/// `display` selects which modifier is currently "held": Ctrl badges
-/// are rendered bold + bright when `display == CtrlHeld` and dim
-/// otherwise; the inverse applies for Alt badges. When `display` is
-/// `Hidden` no badge is produced.
+/// Per spec:
+/// > those attached to CTRL will have an orange background the hotkey will
+/// > be bold faced; those attached to ALT will have a yellow background
+/// > and the hotkey will be dim/light font
+///
+/// The background colour (orange for Ctrl, yellow for Alt) stays in
+/// **both** states — it's how the user reads the family of a hotkey
+/// at a glance. The difference between held and not-held is the font
+/// weight:
+///
+/// - **Held** (this badge's modifier is what the user is emphasising):
+///   bright family BG + bold white FG.
+/// - **Not held**: a *darker* shade of the same family colour for the
+///   BG, with regular (non-bold) white FG. The darker BG plus removal
+///   of bold is the visual cue that this isn't the active modifier.
+///   We deliberately do NOT use `Modifier::DIM`: it renders
+///   inconsistently across terminals (often invisible in WezTerm's
+///   default theme), which made the original DIM-on-bright treatment
+///   look identical to the held state.
+///
+/// `display == Hidden` → no badge is produced.
 fn badge_span(hotkey: HotkeySpec, display: HotkeyDisplayMode) -> Option<Span<'static>> {
     if display == HotkeyDisplayMode::Hidden {
         return None;
     }
-    let (bg, this_held) = match hotkey {
-        HotkeySpec::Ctrl(_) => (CTRL_BADGE_BG, display == HotkeyDisplayMode::CtrlHeld),
-        HotkeySpec::Alt(_) => (ALT_BADGE_BG, display == HotkeyDisplayMode::AltHeld),
+    let (held_bg, dim_bg, fg, this_held) = match hotkey {
+        HotkeySpec::Ctrl(_) => (
+            CTRL_BADGE_BG,
+            CTRL_BADGE_BG_DIM,
+            BADGE_FG_ON_ORANGE,
+            display == HotkeyDisplayMode::CtrlHeld,
+        ),
+        HotkeySpec::Alt(_) => (
+            ALT_BADGE_BG,
+            ALT_BADGE_BG_DIM,
+            BADGE_FG_ON_YELLOW,
+            display == HotkeyDisplayMode::AltHeld,
+        ),
     };
-    let modifier = if this_held {
-        Modifier::BOLD
+    let style = if this_held {
+        Style::default()
+            .fg(fg)
+            .bg(held_bg)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Modifier::DIM
+        // Spec says "dim/light font" for the non-held family. We
+        // express that as a darker BG + non-bold FG so the badge stays
+        // legibly framed but visually subordinate to the held one,
+        // without relying on the `Modifier::DIM` SGR.
+        Style::default().fg(fg).bg(dim_bg)
     };
-    let style = Style::default().fg(BADGE_FG).bg(bg).add_modifier(modifier);
     Some(Span::styled(badge_text(hotkey), style))
+}
+
+/// Builds the one-line "key" / legend that explains what the orange
+/// and yellow badge colours mean.
+///
+/// The modifier name is rendered **inside** the coloured swatch so
+/// the swatch itself demonstrates the same fill + bold-black-text
+/// styling that real hotkey badges use, while also identifying which
+/// modifier family the colour represents:
+///
+/// ```text
+///  Ctrl    Alt
+/// └────┘  └───┘
+///  orange  yellow swatch
+/// ```
+///
+/// No surrounding label is needed — the swatch IS the label. The
+/// previous `^X` / `⌥X` placeholders read as if `Ctrl+X` and `Alt+X`
+/// were real hotkeys (they are not), and replacing them with empty
+/// blocks lost all visual information about what badges look like.
+/// Putting the name inside the swatch resolves both.
+pub fn hotkey_legend_line() -> Line<'static> {
+    let ctrl_swatch = Style::default()
+        .fg(BADGE_FG_ON_ORANGE)
+        .bg(CTRL_BADGE_BG)
+        .add_modifier(Modifier::BOLD);
+    let alt_swatch = Style::default()
+        .fg(BADGE_FG_ON_YELLOW)
+        .bg(ALT_BADGE_BG)
+        .add_modifier(Modifier::BOLD);
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(" Ctrl ", ctrl_swatch),
+        Span::raw("    "),
+        Span::styled(" Alt ", alt_swatch),
+    ])
 }
 
 /// Minimum label width (in cells) at which the fuzzy filter renders
@@ -1203,6 +1289,49 @@ mod tests {
         (0..buf.area.width).find(|&x| buf[(x, y)].style().bg == Some(expected_bg))
     }
 
+    #[test]
+    fn hotkey_legend_line_renders_modifier_name_inside_each_swatch() {
+        // The Ctrl swatch must contain the literal text "Ctrl"
+        // styled with the orange BG and black FG; same for Alt with
+        // yellow BG. Placing the name inside the swatch means the
+        // legend visually demonstrates the badge styling and
+        // identifies the modifier family in a single element.
+        let line = hotkey_legend_line();
+
+        let ctrl_swatch = line
+            .spans
+            .iter()
+            .find(|s| s.style.bg == Some(CTRL_BADGE_BG))
+            .expect("legend must paint a Ctrl-coloured swatch");
+        assert!(
+            ctrl_swatch.content.contains("Ctrl"),
+            "Ctrl swatch must contain the literal text 'Ctrl'; got {:?}",
+            ctrl_swatch.content
+        );
+        assert_eq!(
+            ctrl_swatch.style.fg,
+            Some(BADGE_FG_ON_ORANGE),
+            "Ctrl swatch FG must be the orange-family foreground"
+        );
+
+        let alt_swatch = line
+            .spans
+            .iter()
+            .find(|s| s.style.bg == Some(ALT_BADGE_BG))
+            .expect("legend must paint an Alt-coloured swatch");
+        assert!(
+            alt_swatch.content.contains("Alt"),
+            "Alt swatch must contain the literal text 'Alt'; got {:?}",
+            alt_swatch.content
+        );
+        assert_eq!(
+            alt_swatch.style.fg,
+            Some(BADGE_FG_ON_YELLOW),
+            "Alt swatch FG must be the yellow-family foreground (black, not white)"
+        );
+    }
+
+
     fn fixture_with_hotkeys() -> Vec<ChoiceOption<String>> {
         vec![
             ChoiceOption::<String>::new("r", "Red", "red")
@@ -1237,11 +1366,13 @@ mod tests {
             None,
         );
 
-        // Row 0 (Red) carries a Ctrl badge in orange (208).
+        // Row 0 (Red) carries a Ctrl badge in orange (208) with
+        // BLACK foreground — high-contrast on bright orange (white
+        // on orange has marginal contrast on many terminal palettes).
         let badge_x =
             find_badge_x(&buf, 0, CTRL_BADGE_BG).expect("expected Ctrl badge background on row 0");
         let style = buf[(badge_x, 0)].style();
-        assert_eq!(style.fg, Some(BADGE_FG));
+        assert_eq!(style.fg, Some(BADGE_FG_ON_ORANGE));
         assert_eq!(style.bg, Some(CTRL_BADGE_BG));
         assert!(style.add_modifier.contains(Modifier::BOLD));
     }
@@ -1270,17 +1401,26 @@ mod tests {
             None,
         );
 
-        // Row 1 (Green) carries an Alt badge in yellow (220).
+        // Row 1 (Green) carries an Alt badge in yellow (220) with
+        // BLACK foreground — white-on-yellow has poor contrast and
+        // reads as a yellow blur on most terminal themes.
         let badge_x =
             find_badge_x(&buf, 1, ALT_BADGE_BG).expect("expected Alt badge background on row 1");
         let style = buf[(badge_x, 1)].style();
-        assert_eq!(style.fg, Some(BADGE_FG));
+        assert_eq!(style.fg, Some(BADGE_FG_ON_YELLOW));
         assert_eq!(style.bg, Some(ALT_BADGE_BG));
         assert!(style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
-    fn vertical_render_when_ctrl_held_renders_alt_badges_dim() {
+    fn vertical_render_when_ctrl_held_renders_alt_badges_with_dim_bg() {
+        // Under `CtrlHeld`, Alt badges still appear so the user can
+        // see all bound hotkeys at a glance — **including a coloured
+        // background fill** (per spec). The visual differentiator
+        // between held and not-held is the darker BG shade plus the
+        // absence of BOLD, NOT removal of the BG. We deliberately do
+        // not use `Modifier::DIM` because it renders inconsistently
+        // across terminals.
         let theme = default_theme();
         let ctx = ChoiceRenderContext::for_single(
             &theme,
@@ -1303,11 +1443,13 @@ mod tests {
             None,
         );
 
-        // Row 1 (Green) still shows its Alt badge — but dim, not bold.
-        let badge_x = find_badge_x(&buf, 1, ALT_BADGE_BG)
-            .expect("expected Alt badge to still render under CtrlHeld");
+        // Row 1 (Green) has an Alt hotkey. Under CtrlHeld it renders
+        // with the *dim* Alt BG, BLACK FG (yellow-family), and no BOLD.
+        let badge_x = find_badge_x(&buf, 1, ALT_BADGE_BG_DIM)
+            .expect("expected Alt badge in dim-BG treatment under CtrlHeld");
         let style = buf[(badge_x, 1)].style();
-        assert!(style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(style.fg, Some(BADGE_FG_ON_YELLOW));
+        assert_eq!(style.bg, Some(ALT_BADGE_BG_DIM));
         assert!(!style.add_modifier.contains(Modifier::BOLD));
     }
 
@@ -1340,7 +1482,10 @@ mod tests {
     }
 
     #[test]
-    fn badge_appears_for_options_with_default_hotkey() {
+    fn no_badge_for_options_without_explicit_hotkey() {
+        // Auto-derivation is gone — an option without an explicit
+        // `with_hotkey()` call renders no badge, even when the user
+        // is holding Ctrl.
         let theme = default_theme();
         let ctx = ChoiceRenderContext::for_single(
             &theme,
@@ -1348,14 +1493,14 @@ mod tests {
             Orientation::Vertical,
         )
         .with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
-        let options = fixture_with_hotkeys();
-        let area = Rect::new(0, 0, 30, 3);
+        let options = vec![ChoiceOption::<String>::new("b", "Blue", "blue")];
+        let area = Rect::new(0, 0, 30, 1);
         let mut buf = Buffer::empty(area);
         ctx.render(
             area,
             &mut buf,
             &options,
-            &[0, 1, 2],
+            &[0],
             0,
             0,
             |_idx| false,
@@ -1363,9 +1508,8 @@ mod tests {
             None,
         );
 
-        // Row 2 (Blue) has no explicit hotkey, but receives default Ctrl+B.
-        assert!(find_badge_x(&buf, 2, CTRL_BADGE_BG).is_some());
-        assert!(find_badge_x(&buf, 2, ALT_BADGE_BG).is_none());
+        assert!(find_badge_x(&buf, 0, CTRL_BADGE_BG).is_none());
+        assert!(find_badge_x(&buf, 0, ALT_BADGE_BG).is_none());
     }
 
     #[test]
@@ -1396,7 +1540,7 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_layout_measures_default_badges() {
+    fn horizontal_layout_measures_explicit_badges() {
         let theme = default_theme();
         let ctx = ChoiceRenderContext::for_single(
             &theme,
@@ -1405,8 +1549,10 @@ mod tests {
         )
         .with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
         let options = vec![
-            ChoiceOption::<String>::new("a", "Alpha", "alpha"),
-            ChoiceOption::<String>::new("b", "Bravo", "bravo"),
+            ChoiceOption::<String>::new("a", "Alpha", "alpha")
+                .with_hotkey(HotkeySpec::Ctrl('a')),
+            ChoiceOption::<String>::new("b", "Bravo", "bravo")
+                .with_hotkey(HotkeySpec::Ctrl('b')),
         ];
         let area = Rect::new(0, 0, 12, 4);
         let layout = ctx.compute_layout(area, &options, &[0, 1], |_idx| false);

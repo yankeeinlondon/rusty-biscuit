@@ -111,7 +111,7 @@ The ChooseMany component has similar changes to ChooseOne:
 
 - we currently support _having_ hot keys but the user has no way of know what they are
 - in the feature we will:
-    - when the user presses the CTRL or ALT/OPTION key the hot keys will show the hotkey's associated to various choices with an orange (CTRL) and yellow (ALT) backgrounds and white text to the right of the choice
+    - when the user presses the CTRL or ALT/OPTION key the hot keys will show the hotkey's associated to various choices with an orange (CTRL) and yellow (ALT) backgrounds and **black** text to the right of the choice (white-on-yellow is illegible on most terminal palettes; black gives consistent contrast on both family colours — see "Badge Rendering — Visual Treatments" below for held vs. not-held shading and bold weighting)
         - in vertical mode this text will be positioned directly to the right of the line's text
         - in horizontal mode this text will be placed below 
     - all hotkeys will be associated to either CTRL+key or ALT+key
@@ -251,14 +251,56 @@ Shell completions are an important way of making the CLI easy to use:
 
 Bare `Ctrl` / `Alt` press MUST surface hotkey badges on terminals that support the kitty keyboard protocol. On terminals that do not support the protocol, the chord-fallback path covers chord presses (e.g., `Ctrl+f`); bare modifiers may legitimately do nothing on those terminals. The runner MUST attempt to enable the protocol and silently fall back if rejected.
 
+### Portable Badge Toggle
+
+`Ctrl+Space` and `Alt+Space` chords are accepted as a fallback for terminals that emit no bare-modifier press/release events:
+
+- `Ctrl+Space` → pin the display to `CtrlHeld`.
+- `Alt+Space` → pin the display to `AltHeld`.
+
+Note that **macOS by default binds `Ctrl+Space` to "Select previous input source"** at the OS level, so on macOS users may need to disable that shortcut in System Settings → Keyboard → Keyboard Shortcuts → Input Sources for the chord to reach the terminal.
+
+Toggle semantics:
+
+- Pressing the same chord again clears the pin and restores dynamic visibility.
+- Pressing the *other* chord switches emphasis directly.
+- **Bare-modifier release clears the sticky toggle.** When `Ctrl` is released after `Ctrl+Space`, the badges hide — the user does not have to press the toggle a second time to dismiss. This applies equally to `Alt`. (On terminals without bare-modifier release events, the toggle persists until pressed again — the only available signal.)
+- `--hotkey-badges always` / `never` / `ctrl` / `alt` (the lifetime override) suppresses the toggle: when the override is active the public CLI flag is the single source of truth.
+- `Plain Space` (no modifier) is unaffected — it continues to behave as the component's existing toggle binding (e.g. row selection in `ChooseMany`).
+
+> **Acceptance**: on a terminal where bare-modifier press events never arrive, pressing `Ctrl+Space` MUST render the same `^x` / `⌥x` badges that holding `Ctrl` would render in a kitty-protocol terminal.
+
+### Hotkey Assignment Semantics
+
+Hotkeys are assigned **only** in the following ways:
+
+- **Explicit prefix** in CLI string options: `[CTRL+x]`, `[ALT+x]`, `[OPT+x]`.
+- **Object-source `hotkey` field** in JSON / YAML / TOML / markdown frontmatter.
+- **`--numeric-hot-keys`** CLI flag: assigns `Ctrl+1..0` then `Alt+1..0` to the first 20 hotkey-less options.
+- **Library-level** `ChoiceOption::with_hotkey()` calls.
+
+A plain CLI option `bar` (with no bracketed prefix) has no hotkey, no badge, and pressing `Ctrl+B` does nothing. Three plain options (`bar baz bax`) is normal input and produces no collision because none of them carries a hotkey.
+
+### Badge Rendering — Visual Treatments
+
+Two visually distinct treatments per state, chosen so a user can tell at a glance which modifier is active. The background colour is always present (orange for Ctrl, yellow for Alt); only the shade and font weight differ:
+
+- **Held**: bright family BG (orange or yellow) + bold black foreground. High contrast, draws the eye.
+- **Not held** (the *other* modifier is active): a darker shade of the same family colour for the BG, with non-bold black foreground. The shade-darker BG plus removal of bold is the visual cue. We deliberately do NOT use `Modifier::DIM` because it renders inconsistently across terminals (often invisible in WezTerm's default theme).
+
+Black is the badge foreground for both Ctrl (orange) and Alt (yellow) backgrounds because white-on-yellow is illegible on most terminal palettes and the consistency reads cleanly.
+
+The result: held badges are filled colour blocks, not-held badges are coloured text. They remain readable in both states across all common terminal themes.
+
 ### Required Keyboard Protocol Flags
 
 The runner MUST push the following keyboard enhancement flags when preparing the terminal:
 
-- `REPORT_EVENT_TYPES` — required for modifier-only press/release events.
+- `REPORT_EVENT_TYPES` — required for press/release distinction on every reported key event.
 - `DISAMBIGUATE_ESCAPE_CODES` — desirable so that `Esc` can be distinguished from CSI sequence prefixes.
+- `REPORT_ALL_KEYS_AS_ESCAPE_CODES` — required for *bare* modifier press/release. Without this flag most kitty-aware terminals (notably WezTerm) only report modifier events as part of a chord, so holding bare `Ctrl` produces no event and the modifier-held UX silently does nothing. `REPORT_EVENT_TYPES` alone is insufficient.
 
-Both flags MUST be popped on terminal restore. The push/pop pair MUST be symmetric: if the push succeeds, the pop is executed; if the push fails, no pop is attempted.
+All flags MUST be popped on terminal restore. The push/pop pair MUST be symmetric: if the push succeeds, the pop is executed; if the push fails, no pop is attempted.
 
 ## Completion Contract
 

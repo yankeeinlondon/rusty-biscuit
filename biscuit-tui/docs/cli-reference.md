@@ -59,3 +59,48 @@ fi
 | `choose-many` | [`ChooseMany`](components/choose_many.md) | Multi-selection list. |
 | `input-table` | [`InputTable`](components/input_table.md) | Grid of heterogeneous editable cells. |
 | `completions` | — | Generate shell completion scripts (bash, zsh, fish, etc.). |
+
+## Option Source Files (`--file`)
+
+`choose-one` and `choose-many` can load their option list from a file via
+`--file <PATH>`. The file extension picks the parser:
+
+| Extension(s) | Format |
+| :--- | :--- |
+| `.json` | JSON array (top-level `[...]`) of strings or objects. |
+| `.jsonl`, `.ndjson` | One JSON value per line; each line is one option. |
+| `.yaml`, `.yml` | YAML sequence (top-level `- ...`) of strings or maps. |
+| `.toml` | TOML table with an `options = [...]` key (see below). |
+| `.csv` | First column is the option label/value (one row per option). |
+
+For Markdown frontmatter sources, use `--md <PATH> <PROP>` instead — the
+`--file` flag does not parse Markdown.
+
+### TOML convention
+
+Standard TOML cannot represent a top-level bare array (the spec requires
+the document root to be a table), so a TOML options file **must** use the
+`options = [...]` table form. Files structured with any other top-level
+key (for example `colors = [...]`) will fail with
+`option file must contain an array`.
+
+Minimal TOML example:
+
+```toml
+options = ["Red", "Green", "Blue"]
+```
+
+With explicit labels and values:
+
+```toml
+[[options]]
+label = "Red Delicious"
+value = "apple"
+
+[[options]]
+label = "Cavendish"
+value = "banana"
+```
+
+Per-option records may also carry `hotkey` and `disabled` fields, matching
+the JSON/YAML object shape.

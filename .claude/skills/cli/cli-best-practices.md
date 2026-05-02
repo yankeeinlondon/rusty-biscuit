@@ -124,13 +124,15 @@ The CLI crate (`./cli`) is a frontend for the library crate (`./lib`).
 
 ### Testing Tech Stack
 
-| Crate | Purpose |
+| Crate / Tool | Purpose |
 |-------|---------|
 | `assert_cmd` | Integration testing — spawn the binary, pass args, assert on stdout/stderr/exit codes |
 | `insta` | Snapshot testing — capture complex visual output, track regressions with `cargo insta review` |
 | `expectrl` | PTY testing — spawn a pseudo-terminal to test TTY-dependent behavior (colors, interactive prompts, terminal dimensions) |
 | `proptest` | Property-based testing — fuzz custom parsers for adversarial edge cases |
 | `cargo-nextest` | Fast test runner with retries for flaky tests, useful for TTY/timeout issues in CI |
+| `wezterm cli`, `kitty @`, `tmux` | Real-terminal IPC for Level 2 tests — spawn the binary inside an actual terminal/multiplexer and capture rendered pane text |
+| `cliclick` (macOS), `xdotool` (Linux) | OS-level keyboard injection for Level 3 tests — emit real `CGEventCreateKeyboardEvent` / X11 events so the terminal's input encoder fires |
 
 ### Testing Types
 
@@ -149,6 +151,83 @@ Pipe CLI output to `insta::assert_snapshot!` for visual outputs, tables, and ANS
 #### PTY Tests
 
 Use `expectrl` to spawn the binary in a pseudo-terminal for testing TTY-dependent code paths (terminal width queries, interactive prompts, `is_terminal()` conditionals) that are skipped in standard integration tests.
+
+### Test Rigor: Level 1 / Level 2 / Level 3
+
+**Test count is not test rigor.** A feature may have hundreds of unit and integration tests and still ship with a glaring user-visible bug if none of those tests exercise the right layer. Classify every user-observable requirement against these three levels:
+
+#### Level 1 — In-Process / PTY
+
+Unit tests, plus tests that spawn the binary in a pseudo-TTY (`expectrl`) and feed manufactured input bytes. Verifies internal state transitions, byte-level parsing, and rendering logic.
+
+**What it cannot catch:** anything that depends on the real terminal's input encoder. Example: "WezTerm did not emit bare-modifier press events because we forgot to push `REPORT_ALL_KEYS_AS_ESCAPE_CODES`" — Level 1 cannot see this because *the test* generates the bytes the binary parses; the terminal is never involved.
+
+#### Level 2 — Run-In-Real-Terminal with IPC
+
+Spawn the binary inside an actual terminal emulator (WezTerm / Kitty) or multiplexer (tmux) and capture the rendered pane text via the terminal's CLI:
+
+- WezTerm: `wezterm cli spawn --new-window`, `wezterm cli send-text`, `wezterm cli get-text --escapes`
+- Kitty: `kitty @ launch`, `kitty @ send-text`, `kitty @ get-text --ansi`
+- tmux: `tmux new-session -d`, `tmux send-keys`, `tmux capture-pane -p -e`
+
+Verifies that glyphs, widths, SGR styling, scroll/overflow, and cursor positioning render correctly through a real terminal — none of which a PTY test can prove. Input is still injected as bytes via the terminal's CLI, so the *input encoder* is not exercised.
+
+**Skip semantics:** the harness's `available()` probe should test for the binary on `$PATH` plus any required env (`WEZTERM_UNIX_SOCKET`, `KITTY_LISTEN_ON`). If the host lacks the tooling, print `skipping: requires <X>` to stderr and return. No `#[ignore]` markers.
+
+#### Level 3 — OS Keyboard Injection
+
+Inject real OS keyboard events into the spawned terminal window — the terminal's input encoder fires, then encodes/forwards bytes to the binary just as if a human had pressed the key:
+
+- macOS: `cliclick` (e.g. `cliclick kd:ctrl t:r ku:ctrl` for a chord; `kd:ctrl,sleep,ku:ctrl` for a hold)
+- Linux: `xdotool`
+
+This is the **only** level that can verify "what bytes does the terminal actually emit when key X is pressed?" — required for any spec line of the form "*when the user holds/presses key X, Y happens*."
+
+**Caveats:**
+- macOS focus is a shared global resource; gate Level 3 behind `RUN_LEVEL3=1` so non-deterministic focus thrash doesn't break `cargo test`.
+- Before injection, focus the spawned pane explicitly (`wezterm cli activate-pane --pane-id N`) AND raise the app (`osascript -e 'tell application "WezTerm" to activate'`).
+- Provide a parallel chord-injection test alongside the modifier-hold test — the chord variant proves the cliclick→terminal→binary chain works end-to-end, isolating "did the press arrive" from "did the terminal encode it correctly."
+- **Capture during the hold, not after.** Splitting `kd:` and `ku:` with the capture in between is critical when the binary clears its display state on modifier release. A `hold_modifier(800ms)` helper that internally sequences press → sleep → release leaves nothing observable by the time `capture()` runs.
+
+##### Known limitation: cliclick + bare modifier keys on macOS
+
+cliclick uses `CGEventCreateKeyboardEvent`, but macOS routes bare-modifier key state through `flagsChanged` events at the AppKit layer. cliclick's synthetic modifier events do not always reach apps via that path:
+
+- **Chord injection works** (`kd:ctrl t:r ku:ctrl`): the modifier flag rides along with the letter `keyDown`, which IS a normal CGEvent that AppKit delivers correctly. A Level-3 chord test like "Ctrl+R submits the option bound to Ctrl+R" passes reliably.
+- **Bare-modifier injection is unreliable**: `kd:ctrl` alone often does not produce a `flagsChanged` event that WezTerm sees. The press is dropped before the terminal's input encoder ever fires. This is true even when the binary's bare-modifier handling is correct.
+
+**Workaround — Level 2 with raw kitty bytes.** When you need to verify "the binary correctly handles bare-modifier kitty bytes inside a real terminal," send the literal escape sequence through the terminal's CLI instead of using OS keyboard injection:
+
+```rust
+// Pipe `\e[57442;1u` (kitty: bare LeftControl press) into a real
+// WezTerm pane and assert badges render.
+harness.send_text(b"\x1b[57442;1u")?;
+std::thread::sleep(Duration::from_millis(200));
+let frame = harness.capture()?;
+let _ = harness.send_text(b"\x1b[57442;1:3u"); // release
+assert!(frame.plain.contains("^R"));
+```
+
+This does NOT prove the terminal's emitter works (a real keyboard would still be needed for that), but it does verify the *binary's* handling end-to-end through real terminal rendering. Combined with Level-3 chord tests, it covers the cliclick gap.
+
+#### Choosing the Right Level
+
+For each user-observable requirement, ask: *what is the lowest-fidelity test that could lie about this?*
+
+| Requirement shape | Minimum level |
+|---|---|
+| Internal state transition | Level 1 |
+| Argument parsing / output formatting | Level 1 |
+| Terminal-rendered glyph / width / colour | Level 2 |
+| `--json` output is valid JSON | Level 1 |
+| "When user presses X, the badge appears" | Level 2 (kitty bytes via `wezterm cli send-text`) **or** Level 3 |
+| "When user holds modifier, behaviour Y" | Level 2 with kitty bytes — Level 3 cliclick has known macOS limitations for bare-modifier events |
+| Hotkey chord triggers binding | Level 1 manufactured bytes + Level 3 chord injection (cliclick chords work reliably) |
+| Scrolling / overflow indicators visible | Level 2 |
+
+A feature MAY be marked production-ready only when each user-observable requirement has at minimum the level appropriate for it. A reviewer who finds e.g. "spec requires modifier-press to surface badges, only Level 1 tests exist" must flag it as a high-severity gap, not a minor follow-up.
+
+> **Why this matters in practice.** A real-world incident in this repo: 11 reviews of a feature called the test coverage "substantial" while a modifier-press requirement had only Level-1 PTY tests using manufactured kitty bytes. The bug — `REPORT_ALL_KEYS_AS_ESCAPE_CODES` was never pushed, so WezTerm emitted no bare-modifier events — was structurally invisible to every existing test. A Level-2 test piping the kitty press bytes through `wezterm cli send-text` (or a Level-3 cliclick chord test) would have caught it on first run.
 
 ### Error Output
 

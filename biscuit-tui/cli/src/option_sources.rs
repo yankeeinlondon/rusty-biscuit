@@ -31,6 +31,10 @@ pub enum SourceError {
     NotAnArray,
     #[error("markdown frontmatter property '{prop}' not found or not an array")]
     MdPropNotArray { prop: String },
+    #[error(
+        "unsupported file format '{ext}': supported extensions are json, jsonl, ndjson, yaml, yml, toml, csv"
+    )]
+    UnsupportedFormat { ext: String },
 }
 
 /// Typed raw option record produced by source resolution.
@@ -212,16 +216,13 @@ fn parse_file(path: &Path) -> Result<Vec<RawOption>, SourceError> {
         "yaml" | "yml" => parse_yaml(&body),
         "toml" => parse_toml(&body),
         "csv" => parse_csv_file(&body),
-        _ => {
-            let trimmed = body.trim_start();
-            if trimmed.starts_with('[') || trimmed.starts_with('{') {
-                parse_json(&body)
-            } else if trimmed.starts_with("---") || trimmed.starts_with('-') {
-                parse_yaml(&body)
+        other => Err(SourceError::UnsupportedFormat {
+            ext: if other.is_empty() {
+                "(none)".to_string()
             } else {
-                Ok(parse_list(&body))
-            }
-        }
+                other.to_string()
+            },
+        }),
     }
 }
 
@@ -552,6 +553,11 @@ fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {
 
 fn parse_md(path: &Path, prop: &str) -> Result<Vec<RawOption>, SourceError> {
     let body = fs::read_to_string(path)?;
+    // Strip an optional UTF-8 BOM, then normalize CRLF to LF so the
+    // literal `\n---` close-fence search is robust against editors
+    // that emit Windows line endings or a leading byte-order mark.
+    let body = body.strip_prefix('\u{feff}').unwrap_or(&body);
+    let body = body.replace("\r\n", "\n");
     // Extract frontmatter between --- delimiters
     let trimmed = body.trim_start();
     let after_first = trimmed.strip_prefix("---").ok_or_else(|| {
@@ -738,6 +744,95 @@ mod tests {
     }
 
     #[test]
+    fn parse_file_rejects_txt_plain_list() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("parse_file_rejects_options.txt");
+        std::fs::write(&path, "Red\nGreen\nBlue\n").unwrap();
+        let result = parse_file(&path);
+        match result {
+            Err(SourceError::UnsupportedFormat { ext }) => assert_eq!(ext, "txt"),
+            other => panic!("expected UnsupportedFormat with ext=txt, got {other:?}"),
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_rejects_unknown_extension() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("parse_file_rejects_options.dat");
+        // Body is valid JSON, but the extension is authoritative.
+        std::fs::write(&path, r#"["Red","Green"]"#).unwrap();
+        let result = parse_file(&path);
+        match result {
+            Err(SourceError::UnsupportedFormat { ext }) => assert_eq!(ext, "dat"),
+            other => panic!("expected UnsupportedFormat with ext=dat, got {other:?}"),
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_rejects_no_extension() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("parse_file_rejects_options_no_ext");
+        std::fs::write(&path, "anything\n").unwrap();
+        let result = parse_file(&path);
+        match result {
+            Err(SourceError::UnsupportedFormat { ext }) => assert_eq!(ext, "(none)"),
+            other => panic!("expected UnsupportedFormat with ext=(none), got {other:?}"),
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_rejects_md_extension() {
+        // `.md` is intentionally routed through `--md <file> <prop>`,
+        // not `--file`. `--file foo.md` must error.
+        let dir = std::env::temp_dir();
+        let path = dir.join("parse_file_rejects_options.md");
+        std::fs::write(&path, "- Red\n- Green\n").unwrap();
+        let result = parse_file(&path);
+        match result {
+            Err(SourceError::UnsupportedFormat { ext }) => assert_eq!(ext, "md"),
+            other => panic!("expected UnsupportedFormat with ext=md, got {other:?}"),
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_csv_extension_still_works() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("parse_file_supported_options.csv");
+        std::fs::write(&path, "Red,apple\nBlue,sky\n").unwrap();
+        let result = parse_file(&path).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].value.as_deref(), Some("apple"));
+        assert_eq!(result[1].label, "Blue");
+        assert_eq!(result[1].value.as_deref(), Some("sky"));
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_jsonl_extension_still_works() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("parse_file_supported_options.jsonl");
+        std::fs::write(&path, "\"Red\"\n\"Blue\"\n").unwrap();
+        let result = parse_file(&path).unwrap();
+        assert_eq!(labels(&result), vec!["Red", "Blue"]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_file_ndjson_extension_still_works() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("parse_file_supported_options.ndjson");
+        std::fs::write(&path, "\"Red\"\n\"Blue\"\n").unwrap();
+        let result = parse_file(&path).unwrap();
+        assert_eq!(labels(&result), vec!["Red", "Blue"]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
     fn resolve_raw_options_csv_source() {
         let result =
             resolve_raw_options(Some("a,b,c"), None, None, None, None, None, None, vec![]).unwrap();
@@ -766,6 +861,52 @@ mod tests {
         std::fs::write(&path, "---\nitems:\n  - Red\n  - Green\n---\n# Hello\n").unwrap();
         let result = parse_md(&path, "items").unwrap();
         assert_eq!(labels(&result), vec!["Red", "Green"]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_md_tolerates_bom_and_crlf_line_endings() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join("question_review10_md_bom_crlf.md");
+        // Build a frontmatter document with:
+        //   * UTF-8 BOM at the very start
+        //   * CRLF line endings throughout
+        //   * Frontmatter property `colors` as a YAML array
+        //   * A leading blank line before the opening `---`
+        let body = b"\xef\xbb\xbf\r\n---\r\ncolors:\r\n  - Red\r\n  - Green\r\n  - Blue\r\n---\r\n# Body content\r\n";
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(body)
+            .unwrap();
+
+        let result = parse_md(&path, "colors").expect("parse_md should tolerate BOM + CRLF");
+        assert_eq!(labels(&result), vec!["Red", "Green", "Blue"]);
+
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_md_tolerates_utf8_bom_with_lf_line_endings() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join("question_review10_md_bom_only.md");
+        let body = b"\xef\xbb\xbf---\nopts:\n  - a\n  - b\n---\n";
+        std::fs::File::create(&path).unwrap().write_all(body).unwrap();
+        let result = parse_md(&path, "opts").expect("parse_md should tolerate BOM");
+        assert_eq!(labels(&result), vec!["a", "b"]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn parse_md_tolerates_crlf_line_endings_without_bom() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join("question_review10_md_crlf_only.md");
+        let body = b"---\r\nopts:\r\n  - a\r\n  - b\r\n---\r\n";
+        std::fs::File::create(&path).unwrap().write_all(body).unwrap();
+        let result = parse_md(&path, "opts").expect("parse_md should tolerate CRLF");
+        assert_eq!(labels(&result), vec!["a", "b"]);
         std::fs::remove_file(&path).unwrap();
     }
 

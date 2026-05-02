@@ -27,6 +27,9 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[test]
 fn choose_one_reads_from_stdin() {
     cargo_bin_cmd!("question")
@@ -711,6 +714,94 @@ fn choose_one_md_frontmatter_object_array_reaches_event_loop() {
     let _ = std::fs::remove_file(&path);
 }
 
+#[test]
+fn choose_one_file_txt_extension_errors() {
+    let path = write_fixture(
+        "choose_cli_unsupported_one.txt",
+        "Red\nGreen\nBlue\n",
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unsupported file format 'txt'"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn choose_one_file_unknown_extension_errors() {
+    // Body is valid JSON, but the extension is authoritative — `.dat`
+    // is not on the spec list and must be rejected before any sniffing.
+    let path = write_fixture(
+        "choose_cli_unsupported_one.dat",
+        r#"["Red","Green","Blue"]"#,
+    );
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unsupported file format 'dat'"));
+    let _ = std::fs::remove_file(&path);
+}
+
+// --- Hotkey collision semantics --------------------------------------------
+//
+// Only USER-SUPPLIED (explicit) hotkey collisions are fatal — the user
+// asked for an impossible binding and we say so. Plain options without
+// a `[CTRL+x]` / `[ALT+x]` prefix have no hotkey at all, so plain
+// invocations like `question choose-one foo bar baz` never produce a
+// collision regardless of label content.
+
+#[test]
+fn explicit_explicit_hotkey_collision_errors() {
+    // Two user-supplied [CTRL+R] bindings on the same chord — the
+    // user explicitly asked for an impossible state; this is the
+    // only collision shape the CLI rejects.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "[CTRL+R] Red", "[CTRL+R] Rose"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate hotkey 'Ctrl+r'"));
+}
+
+#[test]
+fn plain_label_with_explicit_hotkey_companion_passes() {
+    // The user only supplied [CTRL+R] on Rose; plain `Red` has no
+    // hotkey at all. No collision possible.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "Red", "[CTRL+R] Rose"])
+        .assert()
+        .stderr(predicate::str::contains("duplicate hotkey").not());
+}
+
+#[test]
+fn three_plain_labels_pass_normalization() {
+    // Plain labels never produce hotkeys. Three labels in any
+    // shape never collide.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "bar", "baz", "bax"])
+        .assert()
+        .stderr(predicate::str::contains("duplicate hotkey").not());
+}
+
+#[test]
+fn one_explicit_plus_three_plain_passes() {
+    // The user-reported case: `question choose-one "[CTRL+f]foo"
+    // bar baz bax`. `foo` gets `Ctrl+F`; the rest have no hotkey.
+    cargo_bin_cmd!("question")
+        .args(["choose-one", "[CTRL+f]foo", "bar", "baz", "bax"])
+        .assert()
+        .stderr(predicate::str::contains("duplicate hotkey").not());
+}
+
+#[test]
+fn choose_many_one_explicit_plus_three_plain_passes() {
+    cargo_bin_cmd!("question")
+        .args(["choose-many", "[CTRL+f]foo", "bar", "baz", "bax"])
+        .assert()
+        .stderr(predicate::str::contains("duplicate hotkey").not());
+}
+
 // --- PTY-backed keystroke flows --------------------------------------------
 //
 // These tests spawn `question` under a real PTY so that crossterm can
@@ -740,12 +831,35 @@ mod pty {
         std::env::var_os("QUESTION_INTERACTIVE_PTY").is_some()
     }
 
+    /// Returns true if `args` requests Inline-viewport mode via either
+    /// the long `--height` flag (with or without `=`) or the short `-h`
+    /// flag.
+    ///
+    /// Inline-viewport mode triggers a synchronous DSR cursor-position
+    /// query at startup; the PTY harness MUST respond to it (see
+    /// `common::pty::answer_cursor_position_request`) or the binary
+    /// blocks during initialisation.
+    fn args_use_inline_viewport(args: &[&str]) -> bool {
+        for arg in args {
+            if *arg == "--height" || arg.starts_with("--height=") {
+                return true;
+            }
+            if *arg == "-h" {
+                return true;
+            }
+        }
+        false
+    }
+
     fn spawn_question(args: &[&str]) -> OsSession {
         let binary = assert_cmd::cargo::cargo_bin("question");
         let mut command = Command::new(binary);
         command.args(args);
         let mut p = Session::spawn(command).expect("spawn question under PTY");
         p.set_expect_timeout(Some(Duration::from_secs(5)));
+        if args_use_inline_viewport(args) {
+            crate::common::pty::answer_cursor_position_request(&mut p);
+        }
         p
     }
 
