@@ -706,6 +706,7 @@ mod tests {
                 message: "tool starting".to_string(),
                 voice: None,
                 gender: None,
+                when: None,
             }],
         );
         let config = ClaudineConfig {
@@ -1383,6 +1384,7 @@ mod tests {
                     effect,
                     volume: 1.0,
                     speed: 1.0,
+                    when: None,
                 }],
             );
             let config = ClaudineConfig {
@@ -1636,6 +1638,7 @@ mod tests {
                 effect: "doorbell".to_string(),
                 volume: 0.8,
                 speed: 1.0,
+                when: None,
             }],
         );
         actions.insert(
@@ -1645,8 +1648,12 @@ mod tests {
                     message: "Done!".to_string(),
                     voice: Some("Samantha".to_string()),
                     gender: Some(Gender::Female),
+                    when: None,
                 },
-                HookAction::Report { handler: None },
+                HookAction::Report {
+                    handler: None,
+                    when: None,
+                },
             ],
         );
 

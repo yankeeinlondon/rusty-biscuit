@@ -621,11 +621,15 @@ mod tests {
                 effect: "user-sound".to_string(),
                 volume: 1.0,
                 speed: 1.0,
+                when: None,
             }],
         );
         user.actions.insert(
             AgenticEvent::TurnComplete,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
 
         let repo = RepoOverrideConfig {
@@ -635,6 +639,7 @@ mod tests {
                     effect: "repo-sound".to_string(),
                     volume: 0.5,
                     speed: 1.0,
+                    when: None,
                 }],
             )]),
             ..RepoOverrideConfig::default()
@@ -743,6 +748,7 @@ mod tests {
                 effect: "doorbell".to_string(),
                 volume: 1.0,
                 speed: 1.0,
+                when: None,
             }],
         );
         config.default_sounds = DefaultSounds::default();
@@ -786,6 +792,7 @@ mod tests {
                     pattern: r"(?P<decision>allow|deny)\s+because\s+(?P<reason>.*)".to_string(),
                 }),
                 timeout_ms: None,
+                when: None,
             }],
         );
 
@@ -812,6 +819,7 @@ mod tests {
                     pattern: "[invalid(".to_string(),
                 }),
                 timeout_ms: None,
+                when: None,
             }],
         );
 

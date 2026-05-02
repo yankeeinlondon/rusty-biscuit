@@ -1,9 +1,11 @@
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 #[cfg(test)]
 use biscuit_speaks::SpeedLevel;
 use biscuit_speaks::{TtsConfig, TtsFailoverStrategy};
+use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use regex::Regex;
 use serde_json::{Map, Value};
 use tokio::process::Command;
@@ -66,6 +68,63 @@ impl DispatchConfig<'_> {
     }
 }
 
+/// Outcome of evaluating a hook action's optional `when` condition.
+enum WhenOutcome {
+    /// No `when` was provided, or evaluation produced a truthy result.
+    Run,
+    /// Evaluation produced a falsy result; the action should be skipped.
+    SkipFalse,
+    /// The expression failed to parse or evaluate; the action is skipped
+    /// non-fatally and a warning has already been emitted.
+    SkipInvalid,
+}
+
+/// Evaluate an action's `when` expression against the live [`EventMeta`].
+///
+/// `when` is optional: when absent, the action always runs. When present,
+/// the expression is parsed and evaluated through Darkmatter's
+/// [`evaluate_condition_against`] shortcut against the event meta
+/// serialized as JSON. Falsy results yield [`WhenOutcome::SkipFalse`];
+/// parse or evaluation errors yield [`WhenOutcome::SkipInvalid`] with a
+/// `tracing::warn!` so operators can spot a broken condition without
+/// breaking the rest of the binding.
+fn evaluate_when(when: Option<&str>, meta: &EventMeta, meta_json: &Value) -> WhenOutcome {
+    let Some(expr) = when else {
+        return WhenOutcome::Run;
+    };
+
+    let work_dir: PathBuf = meta
+        .cwd
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    match evaluate_condition_against(expr, meta_json, work_dir.as_path()) {
+        Ok(true) => WhenOutcome::Run,
+        Ok(false) => WhenOutcome::SkipFalse,
+        Err(error) => {
+            warn!(
+                expression = expr,
+                %error,
+                "Hook action `when` expression failed to parse or evaluate; skipping action",
+            );
+            WhenOutcome::SkipInvalid
+        }
+    }
+}
+
+/// Serialize an [`EventMeta`] to a JSON value for `when` evaluation.
+///
+/// Falls back to [`Value::Null`] on the (effectively unreachable)
+/// serialization failure so a transient encoding issue cannot abort the
+/// dispatch loop.
+fn event_meta_to_json(meta: &EventMeta) -> Value {
+    serde_json::to_value(meta).unwrap_or_else(|err| {
+        warn!(%err, "serializing EventMeta for `when` evaluation failed; using null payload");
+        Value::Null
+    })
+}
+
 /// Execute hook actions in declaration order.
 ///
 /// Returns the selected blocking response from `call` actions when applicable.
@@ -79,13 +138,33 @@ pub(crate) async fn execute_actions(
     protect_decision: Option<&ProtectDecision>,
 ) -> Result<Option<HookResponse>> {
     let mut selected_response: Option<HookResponse> = None;
+    let meta_json = event_meta_to_json(meta);
 
     for (index, action) in actions.iter().enumerate() {
+        // Pre-execution `when` gate. Falsy or invalid conditions skip the
+        // action without affecting `selected_response`, which guarantees
+        // a skipped `Call` cannot replace a previously selected blocking
+        // response.
+        match evaluate_when(action.when(), meta, &meta_json) {
+            WhenOutcome::Run => {}
+            WhenOutcome::SkipFalse => {
+                debug!(
+                    action_index = index,
+                    action_kind = action.type_slug(),
+                    expression = action.when().unwrap_or_default(),
+                    "Hook action skipped by falsy `when` condition",
+                );
+                continue;
+            }
+            WhenOutcome::SkipInvalid => continue,
+        }
+
         match action {
             HookAction::Speak {
                 message,
                 voice,
                 gender,
+                when: _,
             } => {
                 let _action_span = info_span!(
                     "hook_action",
@@ -99,7 +178,7 @@ pub(crate) async fn execute_actions(
                 .entered();
                 config.execute_speak(message, voice.as_deref(), *gender, meta);
             }
-            HookAction::Report { handler } => {
+            HookAction::Report { handler, when: _ } => {
                 let _action_span = info_span!(
                     "hook_action",
                     action_index = index,
@@ -112,7 +191,11 @@ pub(crate) async fn execute_actions(
                 .entered();
                 execute_report(handler.as_ref(), meta, can_block);
             }
-            HookAction::Bash { command, params } => {
+            HookAction::Bash {
+                command,
+                params,
+                when: _,
+            } => {
                 let _action_span = info_span!(
                     "hook_action",
                     action_index = index,
@@ -130,6 +213,7 @@ pub(crate) async fn execute_actions(
                 args,
                 timeout_ms,
                 mapper,
+                when: _,
             } => {
                 let timeout = timeout_ms
                     .map(Duration::from_millis)
@@ -246,6 +330,7 @@ pub(crate) async fn execute_actions(
                 effect,
                 volume,
                 speed,
+                when: _,
             } => {
                 let _action_span = info_span!(
                     "hook_action",
@@ -259,7 +344,11 @@ pub(crate) async fn execute_actions(
                 .entered();
                 execute_sound_effect(effect, *volume, *speed);
             }
-            HookAction::Message { message, image } => {
+            HookAction::Message {
+                message,
+                image,
+                when: _,
+            } => {
                 let _action_span = info_span!(
                     "hook_action",
                     action_index = index,
@@ -1159,6 +1248,7 @@ mod tests {
         let actions = vec![HookAction::Message {
             message: "test notification".to_string(),
             image: None,
+            when: None,
         }];
 
         let messaging = crate::messaging::RuntimeMessagingSettings::default();
@@ -1184,8 +1274,12 @@ mod tests {
             HookAction::Message {
                 message: "notify".to_string(),
                 image: None,
+                when: None,
             },
-            HookAction::Report { handler: None },
+            HookAction::Report {
+                handler: None,
+                when: None,
+            },
         ];
 
         let messaging = crate::messaging::RuntimeMessagingSettings::default();
@@ -1332,8 +1426,12 @@ mod tests {
             HookAction::Bash {
                 command: "echo".to_string(),
                 params: "hello".to_string(),
+                when: None,
             },
-            HookAction::Report { handler: None },
+            HookAction::Report {
+                handler: None,
+                when: None,
+            },
         ];
 
         let result = execute_actions(
@@ -1358,6 +1456,7 @@ mod tests {
         let actions = vec![HookAction::Message {
             message: "test".to_string(),
             image: None,
+            when: None,
         }];
 
         let result = execute_actions(
@@ -1384,6 +1483,7 @@ mod tests {
             args: None,
             timeout_ms: Some(25),
             mapper: None,
+            when: None,
         }];
 
         let result = execute_actions(
@@ -1415,6 +1515,7 @@ mod tests {
             args: Some(vec!["-c".to_string(), "exit 1".to_string()]),
             timeout_ms: Some(250),
             mapper: None,
+            when: None,
         }];
 
         let result = execute_actions(
@@ -1432,6 +1533,248 @@ mod tests {
         assert!(
             result.is_none(),
             "exit-code mapper status 1 should fall through instead of producing an implicit allow"
+        );
+    }
+
+    // =========================================================================
+    // `when` condition tests (Phase 3 of leverage-dm-parser)
+    // =========================================================================
+
+    fn make_meta_for_when_tests() -> EventMeta {
+        let mut m = meta();
+        m.tool_name = Some("Bash".to_string());
+        m
+    }
+
+    #[tokio::test]
+    async fn when_condition_true_executes_action_and_can_block() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_true__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("tool_name == 'Bash'".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("call action with truthy when should still run and synthesize a deny");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_condition_false_skips_call_action_and_no_blocking_response() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_false__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("tool_name == 'Read'".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.is_none(),
+            "skipped Call action must not produce a blocking response",
+        );
+    }
+
+    #[tokio::test]
+    async fn when_invalid_expression_skips_action_non_fatally() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_invalid__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("&& this is not a valid condition".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await;
+
+        let outcome = result.expect("invalid `when` expression must not error the runner");
+        assert!(
+            outcome.is_none(),
+            "invalid `when` should skip the action without producing a blocking response",
+        );
+    }
+
+    #[tokio::test]
+    async fn when_skipped_call_does_not_replace_prior_selected_response() {
+        // First action is a failing Call producing a deny; second action
+        // is a Call that would normally produce Continue but is skipped
+        // by a falsy `when` and therefore must not overwrite the deny.
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![
+            HookAction::Call {
+                command: "__claudine_when_first__".to_string(),
+                args: None,
+                timeout_ms: Some(50),
+                mapper: None,
+                when: None,
+            },
+            HookAction::Call {
+                command: "echo".to_string(),
+                args: Some(vec!["allow".to_string()]),
+                timeout_ms: Some(500),
+                mapper: None,
+                when: Some("tool_name == 'Read'".to_string()),
+            },
+        ];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("first call should produce a blocking deny");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_env_var_resolves_via_env_namespace() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        let key = "CLAUDINE_DISPATCH_WHEN_ENV_VAR_PRESENT";
+        // SAFETY: tests that touch process env should run serially within a
+        // module; the var is unique per test scope and removed below.
+        unsafe {
+            std::env::set_var(key, "yes");
+        }
+
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_env__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some(format!("env.{key} == 'yes'")),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+        unsafe {
+            std::env::remove_var(key);
+        }
+
+        let response = result.expect("env-backed condition should be truthy and let the call run");
+        assert_eq!(response.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_missing_env_var_is_falsy_and_skips_action() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        unsafe {
+            std::env::remove_var("CLAUDINE_DISPATCH_WHEN_ENV_VAR_ABSENT");
+        }
+
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_env_absent__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("env.CLAUDINE_DISPATCH_WHEN_ENV_VAR_ABSENT".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            result.is_none(),
+            "missing env var should evaluate falsy and skip the call action",
+        );
+    }
+
+    #[tokio::test]
+    async fn when_ctx_fields_do_not_require_precomputed_event_metadata() {
+        // `ctx.*` paths are resolved lazily by Darkmatter's shortcut
+        // lookup. The condition should evaluate without panicking even
+        // though Claudine's EventMeta does not precompute these fields.
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Report {
+            handler: None,
+            when: Some("ctx.today != ''".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            false,
+            None,
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "ctx.* condition should evaluate without erroring the runner",
         );
     }
 

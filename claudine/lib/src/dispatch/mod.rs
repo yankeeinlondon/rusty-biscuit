@@ -833,7 +833,10 @@ mod tests {
         let mut config = ClaudineConfig::default();
         config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
 
         let config_path = repo.path().join(".claudine/config.json");
@@ -908,7 +911,10 @@ mod tests {
         let mut config = ClaudineConfig::default();
         config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
 
         let config_path = repo.path().join(".claudine/config.json");
@@ -1254,7 +1260,10 @@ mod tests {
         config.default_sounds = DefaultSounds::default();
         config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
 
         let runtime = loader::compile_canonical_runtime(config, None).unwrap();
