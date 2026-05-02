@@ -20,18 +20,72 @@ use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{wait_for_prompt, CapturedFrame, TerminalHarness};
+use super::{CapturedFrame, SpawnVisibility, TerminalHarness, wait_for_prompt};
+
+/// Workspace name used when [`SpawnVisibility::Background`] is in
+/// effect. Picked to be distinct from any name a developer is likely
+/// to use interactively so the window is created out-of-sight.
+const BACKGROUND_WORKSPACE: &str = "biscuit-bg";
+
+/// Geometry returned by [`WezTermHarness::pane_size`].
+///
+/// Mirrors the `size` object from `wezterm cli list --format json`.
+#[derive(Debug, Clone, Copy)]
+pub struct PaneSize {
+    /// Number of text rows in the pane.
+    pub rows: u32,
+    /// Number of text columns in the pane.
+    pub cols: u32,
+    /// Pane width in pixels (cols × cell_width_px).
+    pub pixel_width: u32,
+    /// Pane height in pixels (rows × cell_height_px).
+    pub pixel_height: u32,
+}
+
+impl PaneSize {
+    /// Returns the cell width in pixels, derived from `pixel_width / cols`.
+    ///
+    /// Returns `0` when `cols` is zero (defensive — shouldn't happen in
+    /// practice).
+    pub fn cell_width_px(&self) -> u32 {
+        self.pixel_width.checked_div(self.cols).unwrap_or(0)
+    }
+
+    /// Returns the cell height in pixels, derived from
+    /// `pixel_height / rows`.
+    ///
+    /// Returns `0` when `rows` is zero.
+    pub fn cell_height_px(&self) -> u32 {
+        self.pixel_height.checked_div(self.rows).unwrap_or(0)
+    }
+}
 
 /// Harness that talks to a running WezTerm GUI via `wezterm cli`.
 pub struct WezTermHarness {
     pane_id: Option<String>,
+    spawn_visibility: SpawnVisibility,
 }
 
 impl WezTermHarness {
-    /// Returns a fresh harness. Call [`spawn`](TerminalHarness::spawn)
-    /// to actually create a pane.
+    /// Returns a fresh harness with [`SpawnVisibility::Background`].
+    /// Call [`spawn_shell`](TerminalHarness::spawn_shell) to actually
+    /// create a pane.
     pub fn new() -> Self {
-        Self { pane_id: None }
+        Self {
+            pane_id: None,
+            spawn_visibility: SpawnVisibility::default(),
+        }
+    }
+
+    /// Builder-style override of the default
+    /// [`SpawnVisibility::Background`]. Use
+    /// [`SpawnVisibility::Foreground`] for tests that intend to call
+    /// [`focus_spawned_pane`](Self::focus_spawned_pane) — those need
+    /// the window to be on the active workspace before AXRaise can
+    /// reach it.
+    pub fn with_spawn_visibility(mut self, visibility: SpawnVisibility) -> Self {
+        self.spawn_visibility = visibility;
+        self
     }
 
     /// Returns `true` when both the `wezterm` binary and a reachable
@@ -45,7 +99,7 @@ impl WezTermHarness {
     fn pane_id(&self) -> &str {
         self.pane_id
             .as_deref()
-            .expect("WezTermHarness::spawn must be called before send_text/capture")
+            .expect("WezTermHarness::spawn_shell must be called before send_text/capture")
     }
 
     /// Kills the current pane via `wezterm cli kill-pane`, ignoring
@@ -60,52 +114,73 @@ impl WezTermHarness {
         }
     }
 
-    /// Spawns a login shell (`$SHELL`, `bash`, or `sh`) in a fresh
-    /// WezTerm pane and waits for the shell prompt to appear.
-    ///
-    /// The cargo target directory containing `bt` and `question` is
-    /// prepended to `PATH` so CLI binaries resolve without an absolute
-    /// path.
-    pub fn spawn_shell(&mut self) -> io::Result<()> {
-        if !Self::available() {
-            return Err(io::Error::other("WezTerm not available"));
-        }
-        let shell = super::detect_shell();
-        let mut cmd = Command::new("wezterm");
-        cmd.args(["cli", "spawn", "--new-window", "--"]);
-        cmd.arg(&shell);
-        cmd.arg("-l");
-
-        if let Some(bin_dir) = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question")) {
-            let current_path = env::var_os("PATH").unwrap_or_default();
-            let mut new_path = OsString::from(bin_dir);
-            new_path.push(":");
-            new_path.push(current_path);
-            cmd.env("PATH", new_path);
-        }
-
-        let out = cmd.output()?;
-        if !out.status.success() {
-            return Err(io::Error::other(format!(
-                "wezterm cli spawn failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            )));
-        }
-        let pane_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if pane_id.is_empty() {
-            return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
-        }
-        self.pane_id = Some(pane_id);
-        wait_for_prompt(self)?;
-        Ok(())
-    }
-
     /// Returns a unique window title we stamp on the spawned WezTerm
     /// window so System Events can target it precisely. Includes the
     /// pane id (already unique within a WezTerm instance) so concurrent
     /// runs of the same harness don't collide.
     fn unique_window_title(&self) -> String {
         format!("biscuit-test-pane-{}", self.pane_id())
+    }
+
+    /// Returns the spawned pane's geometry as `(rows, cols, pixel_width,
+    /// pixel_height)`.
+    ///
+    /// Wraps `wezterm cli list --format json` and filters for the active
+    /// pane id. Used by Level-2 image and layout tests to compute
+    /// expected row/column counts from real terminal geometry instead
+    /// of hardcoding.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the `wezterm cli list` command fails or
+    /// when the active pane id is not present in its output.
+    pub fn pane_size(&self) -> io::Result<PaneSize> {
+        let id = self.pane_id();
+        let out = Command::new("wezterm")
+            .args(["cli", "list", "--format", "json"])
+            .output()?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli list failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let entries: serde_json::Value = serde_json::from_str(&stdout)
+            .map_err(|e| io::Error::other(format!("wezterm cli list: invalid json: {e}")))?;
+        let arr = entries
+            .as_array()
+            .ok_or_else(|| io::Error::other("wezterm cli list: top level not an array"))?;
+        let want: u64 = id
+            .parse()
+            .map_err(|e| io::Error::other(format!("pane id {id:?} not a u64: {e}")))?;
+        for entry in arr {
+            let pid = entry.get("pane_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            if pid == want {
+                let size = entry
+                    .get("size")
+                    .ok_or_else(|| io::Error::other("pane entry missing size"))?;
+                let rows = size.get("rows").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let cols = size.get("cols").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let pw = size
+                    .get("pixel_width")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let ph = size
+                    .get("pixel_height")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                return Ok(PaneSize {
+                    rows,
+                    cols,
+                    pixel_width: pw,
+                    pixel_height: ph,
+                });
+            }
+        }
+        Err(io::Error::other(format!(
+            "pane id {id} not found in wezterm cli list"
+        )))
     }
 
     /// Brings the spawned pane to the foreground inside WezTerm AND
@@ -251,12 +326,73 @@ impl Drop for WezTermHarness {
 }
 
 impl TerminalHarness for WezTermHarness {
-    fn spawn(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
+    /// Spawns a login shell (`$SHELL`, `bash`, or `sh`) in a fresh
+    /// WezTerm pane and waits for the shell prompt to appear.
+    ///
+    /// The cargo target directory containing `bt` and `question` is
+    /// prepended to `PATH` so CLI binaries resolve without an absolute
+    /// path. Color-forcing env vars are applied so SGR output in
+    /// captures is deterministic.
+    fn spawn_shell(&mut self) -> io::Result<()> {
+        if !Self::available() {
+            return Err(io::Error::other("WezTerm not available"));
+        }
+        let shell = super::detect_shell();
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "spawn", "--new-window"]);
+        if self.spawn_visibility == SpawnVisibility::Background {
+            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
+        }
+        cmd.arg("--");
+        cmd.arg(&shell);
+        cmd.arg("-l");
+
+        if let Some(bin_dir) =
+            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
+        {
+            let current_path = env::var_os("PATH").unwrap_or_default();
+            let mut new_path = OsString::from(bin_dir);
+            new_path.push(":");
+            new_path.push(current_path);
+            cmd.env("PATH", new_path);
+        }
+
+        // Force color on the spawned shell so `bt`'s color detection is
+        // deterministic regardless of how the test runner inherits TTY
+        // state. `wezterm cli get-text --escapes` re-emits SGR from cell
+        // attributes only if SGR was actually rendered into cells.
+        super::apply_color_forcing_env(&mut cmd);
+
+        let out = cmd.output()?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli spawn failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let pane_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if pane_id.is_empty() {
+            return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
+        }
+        self.pane_id = Some(pane_id);
+        wait_for_prompt(self)?;
+        Ok(())
+    }
+
+    /// Direct-spawn escape hatch: launches `program` with `args`
+    /// inside a fresh WezTerm pane via `wezterm cli spawn -- …`. No
+    /// shell, no `PATH` augmentation, no prompt-readiness wait — the
+    /// caller is responsible for any settling.
+    fn spawn_program(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));
         }
         let mut cmd = Command::new("wezterm");
-        cmd.args(["cli", "spawn", "--new-window", "--"]);
+        cmd.args(["cli", "spawn", "--new-window"]);
+        if self.spawn_visibility == SpawnVisibility::Background {
+            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
+        }
+        cmd.arg("--");
         cmd.arg(program);
         for a in args {
             cmd.arg(a);

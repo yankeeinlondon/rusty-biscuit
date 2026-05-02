@@ -30,6 +30,39 @@ pub mod kitty;
 pub mod tmux;
 pub mod wezterm;
 
+/// Controls whether a freshly spawned harness window is allowed to
+/// take keyboard focus / be visible on the active desktop.
+///
+/// The default is [`SpawnVisibility::Background`] so that running
+/// real-terminal tests does not interrupt a developer working on the
+/// same machine. Tests that need OS-level keyboard injection
+/// (`cliclick`, etc.) must opt in with [`SpawnVisibility::Foreground`]
+/// before calling
+/// [`WezTermHarness::focus_spawned_pane`](wezterm::WezTermHarness::focus_spawned_pane).
+///
+/// ## How each backend honors this
+///
+/// - **WezTerm `Background`** — spawns into a dedicated workspace
+///   (`biscuit-bg`) other than the user's active workspace. The window
+///   is created but not visible until the user switches workspaces.
+/// - **WezTerm `Foreground`** — no workspace override; the window
+///   appears on the active desktop and may briefly take focus.
+/// - **Kitty `Background`** — passes `--keep-focus` to
+///   `kitty @ launch` so the new window is created without stealing
+///   the active window's focus.
+/// - **Kitty `Foreground`** — no `--keep-focus`; standard launch.
+/// - **tmux** — N/A (tmux runs detached; visibility is irrelevant).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SpawnVisibility {
+    /// Spawn the window without grabbing focus or appearing on the
+    /// active desktop. Default for both harnesses.
+    #[default]
+    Background,
+    /// Spawn the window in the active workspace / with focus. Required
+    /// before any OS-level keyboard injection can target it.
+    Foreground,
+}
+
 /// Result returned by any [`TerminalHarness`] when it captures the
 /// rendered pane text plus useful metadata.
 #[derive(Debug, Clone)]
@@ -50,16 +83,49 @@ impl CapturedFrame {
 
 /// Common contract every real-terminal harness implements.
 ///
-/// Implementors are responsible for spawning the binary, sending
-/// synthetic input as raw bytes, capturing the rendered pane text,
-/// and tearing the session down on drop.
+/// The contract is **shell-model first**: callers spawn a fresh login
+/// shell with [`spawn_shell`](Self::spawn_shell), then drive the binary
+/// under test through [`send_text`](Self::send_text) — typically by
+/// writing `bt some-command\n` (or `question some-command\n`) into the
+/// shell's stdin. The cargo target directory is prepended to `PATH`
+/// inside the shell, so CLI binaries resolve without an absolute path.
+///
+/// [`spawn_program`](Self::spawn_program) is a lower-level escape hatch
+/// for tests that must launch a binary directly (no enclosing shell,
+/// no prompt-readiness, no PATH augmentation). It defaults to
+/// returning [`io::ErrorKind::Unsupported`]; implementors override it
+/// when direct-spawn is meaningful for that backend.
+///
+/// Implementors are responsible for sending synthetic input as raw
+/// bytes, capturing the rendered pane text, and tearing the session
+/// down on drop.
+///
+/// ## Shell portability
+///
+/// The harness selects a POSIX shell (`bash`/`sh`) by default — see
+/// [`detect_shell`] — so POSIX commands sent via [`send_text`] always
+/// parse, regardless of the developer's login shell. However,
+/// `send_text` itself remains a raw byte channel; tests that need to
+/// scope environment variables to a single command should prefer
+/// [`send_command_with_env`](Self::send_command_with_env), which uses
+/// the portable `KEY=value command` inline-assignment syntax and
+/// shell-escapes values safely.
 pub trait TerminalHarness {
-    /// Spawns `program` with `args` inside a fresh pane / window.
+    /// Spawns a fresh login shell inside a new pane / window and waits
+    /// for the shell prompt to appear.
     ///
-    /// Returns `Ok(())` when the spawn succeeded. Implementors should
-    /// arrange that subsequent calls to [`send_text`](Self::send_text)
-    /// and [`capture`](Self::capture) target the new pane.
-    fn spawn(&mut self, program: &str, args: &[&str]) -> io::Result<()>;
+    /// The cargo target directory containing the workspace's CLI
+    /// binaries (`bt`, `question`, …) is prepended to `PATH` so tests
+    /// can invoke `send_text(b"bt …\n")` without an absolute path.
+    /// Color-forcing env vars ([`apply_color_forcing_env`]) are applied
+    /// so SGR output is deterministic regardless of the test runner's
+    /// TTY state.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the underlying terminal CLI rejects the
+    /// spawn request (missing tooling, no reachable GUI socket, etc.).
+    fn spawn_shell(&mut self) -> io::Result<()>;
 
     /// Sends raw bytes to the spawned pane's stdin.
     ///
@@ -67,7 +133,60 @@ pub trait TerminalHarness {
     /// keyboard-protocol bytes, etc.). Note: the terminal's *input
     /// encoder* is bypassed — you are writing what would normally
     /// appear on the pane's stdin.
+    ///
+    /// ## Notes
+    ///
+    /// `send_text` is a raw byte channel. The bytes are interpreted by
+    /// whichever shell the harness spawned (see [`detect_shell`]).
+    /// The harness defaults to bash/sh, but if a future override
+    /// selects a non-POSIX shell, POSIX-isms like `export VAR=val` or
+    /// inline `KEY=val cmd` will not parse correctly. Tests that need
+    /// to scope env vars to a single command should prefer
+    /// [`send_command_with_env`](Self::send_command_with_env).
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()>;
+
+    /// Sends a single shell command preceded by inline environment
+    /// variable assignments using the POSIX `KEY=value command` syntax.
+    ///
+    /// Because the harness defaults to bash/sh (see [`detect_shell`]),
+    /// inline assignment is portable. Values are shell-escaped using
+    /// single quotes; embedded single quotes are escaped with the
+    /// `'\''` POSIX trick.
+    ///
+    /// `cmd` is the full command line (e.g. `"bt prose \"...\""`),
+    /// without a trailing newline. `env` is a slice of `(name, value)`
+    /// pairs.
+    ///
+    /// Equivalent to typing `KEY1='v1' KEY2='v2' cmd\n` into the shell
+    /// and waiting for the harness to settle.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// harness.send_command_with_env(
+    ///     "bt prose \"<red>x</red>\"",
+    ///     &[("NO_COLOR", "1")],
+    /// )?;
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Propagates whatever error [`send_text`](Self::send_text) returns.
+    fn send_command_with_env(&mut self, cmd: &str, env: &[(&str, &str)]) -> io::Result<()> {
+        use std::fmt::Write as _;
+        let mut line = String::new();
+        for (k, v) in env {
+            // POSIX single-quote escape: replace each `'` with `'\''`.
+            let escaped = v.replace('\'', "'\\''");
+            // Writing into a String never fails; ignore the Result.
+            let _ = write!(line, "{k}='{escaped}' ");
+        }
+        line.push_str(cmd);
+        line.push('\n');
+        self.send_text(line.as_bytes())?;
+        self.settle();
+        Ok(())
+    }
 
     /// Captures the current rendered text of the spawned pane.
     fn capture(&mut self) -> io::Result<CapturedFrame>;
@@ -77,6 +196,33 @@ pub trait TerminalHarness {
     /// their tooling needs more (or less) settling time.
     fn settle(&self) {
         std::thread::sleep(Duration::from_millis(200));
+    }
+
+    /// Lower-level escape hatch: spawn a specific program directly in
+    /// a fresh pane / window, bypassing the shell model.
+    ///
+    /// Default implementation returns [`io::ErrorKind::Unsupported`].
+    /// Backends that can usefully launch a program directly (WezTerm,
+    /// Kitty, tmux) override this with the equivalent of
+    /// `wezterm cli spawn -- <program> <args>` /
+    /// `kitty @ launch -- <program> <args>` /
+    /// `tmux new-session -d <program> <args>`. There is no prompt-
+    /// readiness wait, no `PATH` augmentation, and no color-forcing —
+    /// callers are expected to supply absolute paths and handle their
+    /// own settling.
+    ///
+    /// Most tests should prefer [`spawn_shell`](Self::spawn_shell) and
+    /// drive the binary via `send_text`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`io::ErrorKind::Unsupported`] by default. Overrides
+    /// return whatever error the underlying terminal CLI yields.
+    fn spawn_program(&mut self, _program: &str, _args: &[&str]) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "spawn_program not implemented for this harness; use spawn_shell",
+        ))
     }
 }
 
@@ -158,23 +304,33 @@ pub fn skip_with_reason(what: &str) -> bool {
     true
 }
 
-/// Detects a suitable shell using the fallback chain:
-/// `$SHELL` → `bash` → `sh`.
+/// Detects a suitable shell for use as a generic command interpreter
+/// in real-terminal tests.
+///
+/// Prefers POSIX shells (`bash` → `sh`) over the developer's `$SHELL`
+/// so that POSIX commands sent via [`TerminalHarness::send_text`] always
+/// parse, regardless of whether the user's login shell is fish, zsh,
+/// xonsh, etc. Tests that need a non-POSIX shell's behavior must
+/// override the harness directly.
+///
+/// ## Notes
+///
+/// The harness only uses the shell as a generic command interpreter.
+/// Rcfile differences (`.bashrc` vs `.zshrc`) are irrelevant to the
+/// portable subset of POSIX commands the test suite issues. The
+/// preference order is: `bash` → `sh` → `$SHELL` → literal `"sh"`.
 pub fn detect_shell() -> String {
+    if which("bash") {
+        return "bash".to_string();
+    }
+    if which("sh") {
+        return "sh".to_string();
+    }
     std::env::var("SHELL")
         .ok()
         .and_then(|s| {
             let path = std::path::Path::new(&s);
-            path.file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-        })
-        .filter(|name| which(name))
-        .or_else(|| {
-            if which("bash") {
-                Some("bash".to_string())
-            } else {
-                None
-            }
+            path.file_name().map(|n| n.to_string_lossy().into_owned())
         })
         .unwrap_or_else(|| "sh".to_string())
 }
@@ -211,6 +367,37 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
         return Some(dir);
     }
     None
+}
+
+/// Sets the conventional color-forcing env vars on `cmd` so the
+/// spawned shell (and any process it execs, including `bt`) emits SGR
+/// regardless of whether stdout is a TTY.
+///
+/// Sets:
+///
+/// - `FORCE_COLOR=1` — honored by `bt` and most ecosystem crates.
+/// - `CLICOLOR_FORCE=1` — alternative convention (`clicolors`,
+///   `colored`).
+/// - `TERM=xterm-256color` — only when `TERM` is not already set in
+///   the parent env, so callers can override.
+/// - `COLORTERM=truecolor` — only when `COLORTERM` is not already set
+///   in the parent env.
+///
+/// ## Notes
+///
+/// Real-terminal harnesses spawn the shell via the host terminal's
+/// `cli spawn`-style command. Env vars set on the *outer* `Command`
+/// propagate to the spawned shell process, which exports them for
+/// child processes (e.g. `bt`).
+pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
+    cmd.env("FORCE_COLOR", "1");
+    cmd.env("CLICOLOR_FORCE", "1");
+    if std::env::var_os("TERM").is_none() {
+        cmd.env("TERM", "xterm-256color");
+    }
+    if std::env::var_os("COLORTERM").is_none() {
+        cmd.env("COLORTERM", "truecolor");
+    }
 }
 
 /// Waits for a shell prompt to appear in the harness output.
@@ -270,5 +457,110 @@ mod tests {
     fn strip_ansi_removes_charset_designation() {
         assert_eq!(strip_ansi("\x1b(BHello"), "Hello");
         assert_eq!(strip_ansi("a\x1b(Bb\x1b(0c"), "abc");
+    }
+
+    /// Locks in the shell-model trait contract: a harness that only
+    /// implements the required methods inherits an
+    /// `Unsupported`-returning [`TerminalHarness::spawn_program`].
+    /// Tests that need direct-spawn must explicitly override it.
+    #[test]
+    fn trait_default_spawn_program_is_unsupported() {
+        struct Stub;
+        impl TerminalHarness for Stub {
+            fn spawn_shell(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+            fn send_text(&mut self, _: &[u8]) -> io::Result<()> {
+                Ok(())
+            }
+            fn capture(&mut self) -> io::Result<CapturedFrame> {
+                Ok(CapturedFrame::from_raw(String::new()))
+            }
+        }
+        let mut s = Stub;
+        let err = s.spawn_program("x", &[]).expect_err("default must error");
+        assert_eq!(err.kind(), io::ErrorKind::Unsupported);
+    }
+
+    /// Captures bytes sent through [`TerminalHarness::send_text`] so we
+    /// can assert on the exact line constructed by
+    /// [`TerminalHarness::send_command_with_env`].
+    struct CapturingHarness {
+        sent: Vec<u8>,
+    }
+
+    impl CapturingHarness {
+        fn new() -> Self {
+            Self { sent: Vec::new() }
+        }
+
+        fn sent_string(&self) -> String {
+            String::from_utf8(self.sent.clone()).expect("sent bytes are utf-8")
+        }
+    }
+
+    impl TerminalHarness for CapturingHarness {
+        fn spawn_shell(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
+            self.sent.extend_from_slice(bytes);
+            Ok(())
+        }
+        fn capture(&mut self) -> io::Result<CapturedFrame> {
+            Ok(CapturedFrame::from_raw(String::new()))
+        }
+        // Override so unit tests do not actually sleep.
+        fn settle(&self) {}
+    }
+
+    #[test]
+    fn send_command_with_env_formats_inline_env() {
+        let mut h = CapturingHarness::new();
+        h.send_command_with_env(
+            "bt prose \"<red>x</red>\"",
+            &[("NO_COLOR", "1"), ("FORCE_COLOR", "0")],
+        )
+        .expect("send_command_with_env failed");
+        assert_eq!(
+            h.sent_string(),
+            "NO_COLOR='1' FORCE_COLOR='0' bt prose \"<red>x</red>\"\n",
+        );
+    }
+
+    #[test]
+    fn send_command_with_env_handles_empty_env() {
+        let mut h = CapturingHarness::new();
+        h.send_command_with_env("bt image --debug 13x13.png", &[])
+            .expect("send_command_with_env failed");
+        assert_eq!(h.sent_string(), "bt image --debug 13x13.png\n");
+    }
+
+    #[test]
+    fn send_command_with_env_escapes_single_quotes() {
+        let mut h = CapturingHarness::new();
+        h.send_command_with_env("echo hi", &[("MSG", "it's fine")])
+            .expect("send_command_with_env failed");
+        // POSIX trick: a single quote inside single-quoted string is
+        // closed, escaped, and reopened: `'\''`.
+        assert_eq!(h.sent_string(), "MSG='it'\\''s fine' echo hi\n");
+    }
+
+    /// Confirms the `bash`/`sh` preference: on any developer host where
+    /// either binary is on PATH (the common case), `detect_shell()`
+    /// must NOT return the user's `$SHELL` (e.g. fish, zsh).
+    #[test]
+    fn detect_shell_prefers_posix_over_user_shell() {
+        let shell = detect_shell();
+        if which("bash") {
+            assert_eq!(shell, "bash", "expected bash preference; got {shell}");
+        } else if which("sh") {
+            assert_eq!(shell, "sh", "expected sh fallback; got {shell}");
+        } else {
+            // No POSIX shell at all on PATH — extremely unusual on a
+            // developer host. Just confirm we returned *something* and
+            // skip the strict assertion.
+            assert!(!shell.is_empty());
+        }
     }
 }

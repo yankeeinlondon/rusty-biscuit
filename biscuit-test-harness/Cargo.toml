@@ -6,3 +6,4 @@ publish = false
 license = "AGPL-3.0-only"
 
 [dependencies]
+serde_json = "1.0"

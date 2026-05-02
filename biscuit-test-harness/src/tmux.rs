@@ -18,7 +18,7 @@ use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{wait_for_prompt, CapturedFrame, TerminalHarness};
+use super::{CapturedFrame, TerminalHarness, wait_for_prompt};
 
 /// Harness that runs each spawned binary inside a fresh detached tmux
 /// session.
@@ -40,7 +40,7 @@ impl TmuxHarness {
     fn session(&self) -> &str {
         self.session
             .as_deref()
-            .expect("TmuxHarness::spawn must be called before send_text/capture")
+            .expect("TmuxHarness::spawn_shell must be called before send_text/capture")
     }
 
     fn kill_session(&mut self) {
@@ -51,50 +51,6 @@ impl TmuxHarness {
                 .stderr(Stdio::null())
                 .status();
         }
-    }
-
-    /// Spawns a login shell (`$SHELL`, `bash`, or `sh`) in a fresh
-    /// detached tmux session and waits for the shell prompt to appear.
-    ///
-    /// The cargo target directory containing `bt` and `question` is
-    /// prepended to `PATH` so CLI binaries resolve without an absolute
-    /// path.
-    pub fn spawn_shell(&mut self) -> io::Result<()> {
-        if !Self::available() {
-            return Err(io::Error::other("tmux not available"));
-        }
-        let session = unique_session_name();
-        let shell = super::detect_shell();
-        let shell_cmd = format!("{} -l", shell);
-
-        let mut cmd = Command::new("tmux");
-        cmd.args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "120",
-            "-y",
-            "40",
-            &shell_cmd,
-        ]);
-
-        if let Some(bin_dir) = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question")) {
-            let current_path = std::env::var_os("PATH").unwrap_or_default();
-            let mut new_path = OsString::from(bin_dir);
-            new_path.push(":");
-            new_path.push(current_path);
-            cmd.env("PATH", new_path);
-        }
-
-        let status = cmd.status()?;
-        if !status.success() {
-            return Err(io::Error::other("tmux new-session failed"));
-        }
-        self.session = Some(session);
-        wait_for_prompt(self)?;
-        Ok(())
     }
 
     /// Sends a tmux key-name (e.g. `"C-space"`, `"M-Tab"`, `"Enter"`).
@@ -130,7 +86,62 @@ impl Drop for TmuxHarness {
 }
 
 impl TerminalHarness for TmuxHarness {
-    fn spawn(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
+    /// Spawns a login shell (`$SHELL`, `bash`, or `sh`) in a fresh
+    /// detached tmux session and waits for the shell prompt to appear.
+    ///
+    /// The cargo target directory containing `bt` and `question` is
+    /// prepended to `PATH` so CLI binaries resolve without an absolute
+    /// path. Color-forcing env vars are applied so SGR output is
+    /// deterministic.
+    fn spawn_shell(&mut self) -> io::Result<()> {
+        if !Self::available() {
+            return Err(io::Error::other("tmux not available"));
+        }
+        let session = unique_session_name();
+        let shell = super::detect_shell();
+        let shell_cmd = format!("{} -l", shell);
+
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "120",
+            "-y",
+            "40",
+            &shell_cmd,
+        ]);
+
+        if let Some(bin_dir) =
+            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
+        {
+            let current_path = std::env::var_os("PATH").unwrap_or_default();
+            let mut new_path = OsString::from(bin_dir);
+            new_path.push(":");
+            new_path.push(current_path);
+            cmd.env("PATH", new_path);
+        }
+
+        // Force color on the spawned shell so `bt`'s color detection is
+        // deterministic regardless of how the test runner inherits TTY
+        // state.
+        super::apply_color_forcing_env(&mut cmd);
+
+        let status = cmd.status()?;
+        if !status.success() {
+            return Err(io::Error::other("tmux new-session failed"));
+        }
+        self.session = Some(session);
+        wait_for_prompt(self)?;
+        Ok(())
+    }
+
+    /// Direct-spawn escape hatch: launches `program` with `args` as the
+    /// initial command of a fresh detached tmux session. No login
+    /// shell, no `PATH` augmentation, no prompt-readiness wait.
+    fn spawn_program(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("tmux not available"));
         }
