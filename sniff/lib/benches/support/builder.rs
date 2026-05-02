@@ -199,6 +199,99 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
     repo
 }
 
+/// Build a git repo with a configurable number of dirty (modified) files.
+///
+/// The repo contains `dirty_count` tracked source files, each committed once
+/// and then rewritten in the working tree so `git status` produces exactly
+/// `dirty_count` modified entries. This isolates the per-file diff cost from
+/// noise like renames, deletions, and untracked files so the resulting
+/// benchmarks scale cleanly with dirty-file count.
+///
+/// Returns the opened `Repository` handle.
+pub fn build_git_repo_with_dirty_files(root: &Path, dirty_count: usize) -> Repository {
+    let repo = Repository::init(root).expect("init dirty-files repo");
+
+    write_file(&root.join(".gitignore"), "target/\n");
+    write_file(
+        &root.join("Cargo.toml"),
+        "[package]\nname = \"dirty\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+
+    for i in 0..dirty_count {
+        write_file(
+            &root.join(format!("src/m{i:04}.rs")),
+            &format!("pub fn m{i:04}() -> u32 {{ {i} }}\n"),
+        );
+    }
+
+    commit_all(&repo, "c1: initial dirty-files layout");
+
+    // Rewrite every file so each tracked source path is modified.
+    for i in 0..dirty_count {
+        write_file(
+            &root.join(format!("src/m{i:04}.rs")),
+            &format!("pub fn m{i:04}() -> u32 {{ {} }}\n", i + 1),
+        );
+    }
+
+    repo
+}
+
+/// Build a directory tree of markdown documents for docs-parser benchmarks.
+///
+/// Creates `total_docs` markdown files. The first `with_blast_radius` files
+/// declare a non-trivial `blast_radius` frontmatter list pointing at synthetic
+/// source paths; the rest carry typical frontmatter (title, prompt) but no
+/// `blast_radius`. The root is also initialized as a git repo so
+/// `detect_blast_radius_docs`/`detect_docs` accept it.
+///
+/// Document bodies are intentionally small and uniform so the parsed-vs-only
+/// difference comes from frontmatter handling rather than content size.
+pub fn build_docs_repo(root: &Path, total_docs: usize, with_blast_radius: usize) {
+    let with_br = with_blast_radius.min(total_docs);
+    let repo = Repository::init(root).expect("init docs repo");
+
+    write_file(&root.join("README.md"), "# docs fixture\n");
+    write_file(&root.join(".gitignore"), "target/\n");
+
+    for i in 0..total_docs {
+        let body = format!(
+            "# Doc {i:04}\n\n\
+             Section one.\n\n\
+             ```rust\nfn noop() {{}}\n```\n\n\
+             Section two with a [link](https://example.test/{i}).\n"
+        );
+        let frontmatter = if i < with_br {
+            format!(
+                "---\n\
+                 title: Doc {i:04}\n\
+                 prompt: example\n\
+                 blast_radius:\n  - src/m{i:04}.rs\n  - src/shared.rs\n\
+                 ---\n"
+            )
+        } else {
+            format!(
+                "---\n\
+                 title: Doc {i:04}\n\
+                 prompt: example\n\
+                 ---\n"
+            )
+        };
+        let dir = i / 50;
+        write_file(
+            &root.join(format!("docs/d{dir:03}/doc_{i:04}.md")),
+            &format!("{frontmatter}\n{body}"),
+        );
+    }
+
+    write_file(
+        &root.join("src/shared.rs"),
+        "pub fn shared() -> &'static str { \"shared\" }\n",
+    );
+
+    commit_all(&repo, "c1: initial docs fixture");
+}
+
 /// Build a non-git directory containing a shallow-wide language mix
 /// plus one deeply nested path. Useful for language/file-type scanning
 /// benchmarks that should not pay git discovery costs.

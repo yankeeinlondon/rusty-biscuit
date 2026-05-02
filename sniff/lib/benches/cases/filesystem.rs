@@ -6,20 +6,33 @@
 //! deterministic regardless of host state.
 
 use criterion::{Criterion, black_box};
+use sniff::filesystem::docs::{detect_blast_radius_docs, detect_docs};
 use sniff::filesystem::file_types::scan_file_inventory;
 use sniff::filesystem::repo::detect_repo_with_inventory;
 use sniff::filesystem::{
-    detect_filesystem_with_request, detect_git_with_request, detect_languages,
+    detect_filesystem_with_request, detect_git_with_request, detect_languages, detect_repo,
     detect_repo_structure,
 };
 use sniff::request::{FilesystemRequest, GitRequest, RepoRequest};
 
 use crate::support::{fixtures, util};
 
+/// Total markdown documents in the docs-parser fixture used by the
+/// `filesystem_docs` group. Sized to surface frontmatter-parse cost
+/// without dominating wall-clock time.
+const DOCS_FIXTURE_TOTAL: usize = 200;
+
+/// Fraction of the docs fixture that declares a `blast_radius` frontmatter
+/// list. The remainder carries typical metadata but no `blast_radius`,
+/// so the blast-radius-only parser short-circuits on most files while the
+/// full parser still hashes and resolves them.
+const DOCS_FIXTURE_WITH_BR: usize = 40;
+
 pub fn register(c: &mut Criterion) {
     let small = fixtures::small_git_repo();
     let large = fixtures::large_monorepo();
     let langs = fixtures::language_mix_tree();
+    let docs = fixtures::docs_repo(DOCS_FIXTURE_TOTAL, DOCS_FIXTURE_WITH_BR);
 
     // ---------- git ----------
     let mut git_group = util::configure_group(c, "filesystem_git");
@@ -75,6 +88,17 @@ pub fn register(c: &mut Criterion) {
         });
     });
 
+    // Full per-package detection (language scan, framework heuristics,
+    // dependency parsing). This is the hot path that
+    // `refresh_package_boundaries` feeds into and the dominant cost of
+    // `RepoRequest::full()` on large monorepos.
+    repo_group.bench_function("repo_full_monorepo", |b| {
+        b.iter(|| {
+            let info = detect_repo(black_box(large.path())).unwrap();
+            black_box(info);
+        });
+    });
+
     repo_group.finish();
 
     // ---------- file inventory (parallel walker) ----------
@@ -121,6 +145,25 @@ pub fn register(c: &mut Criterion) {
     });
 
     lang_group.finish();
+
+    // ---------- docs parsing modes ----------
+    let mut docs_group = util::configure_group(c, "filesystem_docs");
+
+    docs_group.bench_function("detect_docs_full", |b| {
+        b.iter(|| {
+            let parsed = detect_docs(black_box(docs.path()));
+            black_box(parsed);
+        });
+    });
+
+    docs_group.bench_function("detect_blast_radius_only", |b| {
+        b.iter(|| {
+            let parsed = detect_blast_radius_docs(black_box(docs.path()));
+            black_box(parsed);
+        });
+    });
+
+    docs_group.finish();
 
     // ---------- staged filesystem request ----------
     let mut stage_group = util::configure_slow_group(c, "filesystem_staged");
