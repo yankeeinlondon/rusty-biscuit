@@ -509,7 +509,28 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
 fn should_dispatch_key_event(key: &KeyEvent) -> bool {
     match key.kind {
         KeyEventKind::Press | KeyEventKind::Repeat => true,
-        KeyEventKind::Release => matches!(key.code, KeyCode::Modifier(_)),
+        KeyEventKind::Release => {
+            // Bare-modifier releases drive bare-Ctrl/Alt badge clearing.
+            if matches!(key.code, KeyCode::Modifier(_)) {
+                return true;
+            }
+            // `Ctrl+Space` and `Alt+Space` release events drive the
+            // press-and-hold sticky-toggle UX in the choose
+            // components. We deliberately ONLY pass through these
+            // specific chord shapes — otherwise releases of arbitrary
+            // chords (e.g. Esc, Enter) would reach component handlers
+            // that don't expect them and could mis-fire bindings.
+            //
+            // Both space encodings are accepted: standard
+            // `Char(' ') + CONTROL/ALT` (kitty protocol) and legacy
+            // `Char('\0') + CONTROL` (Ctrl subtracts 0x40 from
+            // Space's 0x20 → NUL).
+            let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            let has_alt = key.modifiers.contains(KeyModifiers::ALT);
+            let is_space = matches!(key.code, KeyCode::Char(' '))
+                || (matches!(key.code, KeyCode::Char('\0')) && has_ctrl);
+            is_space && (has_ctrl ^ has_alt)
+        }
     }
 }
 
@@ -956,6 +977,69 @@ mod tests {
     fn loop_exit_to_result_forwards_submitted_value() {
         let ok = loop_exit_to_result(LoopExit::Submitted("payload".to_string())).unwrap();
         assert_eq!(ok, "payload");
+    }
+
+    #[test]
+    fn dispatcher_passes_ctrl_space_release_through() {
+        // Required so the press-and-hold sticky-toggle UX in the
+        // choose components can clear the sticky mode on chord
+        // release. The previous filter blocked all `Char` releases
+        // and the chord clear never fired.
+        let release = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_passes_legacy_nul_ctrl_space_release_through() {
+        // The non-kitty Ctrl+Space encoding (NUL byte) on release.
+        let release = KeyEvent {
+            code: KeyCode::Char('\0'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_passes_alt_space_release_through() {
+        let release = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::ALT,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_filters_unrelated_char_releases() {
+        // Releases of arbitrary characters MUST still be filtered —
+        // letting them through could fire bindings (Esc, Enter, etc.)
+        // on key release, which components don't expect.
+        let release = KeyEvent {
+            code: KeyCode::Char('a'),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(!should_dispatch_key_event(&release));
+    }
+
+    #[test]
+    fn dispatcher_filters_esc_release() {
+        let release = KeyEvent {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        assert!(!should_dispatch_key_event(&release));
     }
 
     #[test]

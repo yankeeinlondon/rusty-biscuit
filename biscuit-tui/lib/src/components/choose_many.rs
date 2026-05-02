@@ -575,16 +575,21 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
             }
         }
 
-        // Portable badge-visibility toggle: `Ctrl+Space` / `Alt+Space`.
-        // See `ChooseOne::handle_event` for the full rationale — the
+        // Portable badge-visibility chord: `Ctrl+Space` / `Alt+Space`.
+        // Press sets the sticky display, Release clears it. See
+        // `ChooseOne::handle_event` for the full rationale — the
         // semantics here are identical.
         if let Some(toggled) = sticky_toggle_mode(&event)
             && state.hotkey_display_override.is_none()
         {
-            state.hotkey_display_sticky = match state.hotkey_display_sticky {
-                Some(current) if current == toggled => None,
-                _ => Some(toggled),
-            };
+            match event.kind {
+                KeyEventKind::Press | KeyEventKind::Repeat => {
+                    state.hotkey_display_sticky = Some(toggled);
+                }
+                KeyEventKind::Release => {
+                    state.hotkey_display_sticky = None;
+                }
+            }
             return EventOutcome::Consumed;
         }
 
@@ -2121,12 +2126,19 @@ mod tests {
     }
 
     #[test]
-    fn many_sticky_toggle_same_chord_clears() {
+    fn many_sticky_release_clears() {
+        // Press sets the sticky mode, Release clears it.
         let mut state = ChooseManyState::new(fixture_input());
         ChooseMany::new()
             .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
-        ChooseMany::new()
-            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        let release = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        ChooseMany::new().handle_event(&mut state, release);
         assert_eq!(state.hotkey_display_sticky(), None);
     }
 

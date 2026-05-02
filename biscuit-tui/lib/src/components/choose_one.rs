@@ -578,21 +578,30 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
             }
         }
 
-        // Portable badge-visibility toggle: `Ctrl+Space` and
-        // `Alt+Space` set / clear the sticky display mode regardless
-        // of whether the terminal emits bare modifier press/release
-        // events. Pressing the same chord again clears the sticky
-        // mode; pressing the other chord switches between Ctrl and
-        // Alt emphasis. The CLI lifetime override (`--hotkey-badges
-        // always` / `never` / etc.) suppresses this behaviour so the
-        // public flag remains the source of truth when set.
+        // Portable badge-visibility chord: `Ctrl+Space` and
+        // `Alt+Space` mirror "hold to show" UX without depending on
+        // the terminal's bare-modifier reporting. Press sets the
+        // sticky display mode; Release clears it. The CLI lifetime
+        // override (`--hotkey-badges always` / `never` / etc.)
+        // suppresses this behaviour so the public flag remains the
+        // source of truth when set.
+        //
+        // Release events for these chords arrive only on terminals
+        // that emit kitty-protocol release events; on legacy paths
+        // the badges remain visible after Press until another event
+        // (e.g. another modifier or chord) supersedes the sticky
+        // display.
         if let Some(toggled) = sticky_toggle_mode(&event)
             && state.hotkey_display_override.is_none()
         {
-            state.hotkey_display_sticky = match state.hotkey_display_sticky {
-                Some(current) if current == toggled => None,
-                _ => Some(toggled),
-            };
+            match event.kind {
+                KeyEventKind::Press | KeyEventKind::Repeat => {
+                    state.hotkey_display_sticky = Some(toggled);
+                }
+                KeyEventKind::Release => {
+                    state.hotkey_display_sticky = None;
+                }
+            }
             return EventOutcome::Consumed;
         }
 
@@ -886,10 +895,16 @@ pub(super) fn modifier_only_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> 
     }
 }
 
-/// Detects the portable badge-visibility toggle chord.
+/// Detects the portable badge-visibility chord (Ctrl+Space or
+/// Alt+Space) regardless of press/release direction.
 ///
 /// - `Ctrl+Space` → `Some(CtrlHeld)`
 /// - `Alt+Space`  → `Some(AltHeld)`
+///
+/// The caller inspects `event.kind` to decide what to do — Press sets
+/// the sticky display, Release clears it (mirroring "hold to show"
+/// UX). Returning the same mode for both directions keeps the
+/// matcher logic in one place.
 ///
 /// ## Encoding caveat (the part you must not get wrong)
 ///
@@ -907,9 +922,6 @@ pub(super) fn modifier_only_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> 
 /// `Alt+Space` does not have this NUL quirk — Alt sets the modifier
 /// flag and the key code stays `Char(' ')`.
 ///
-/// Repeat and release events are ignored so the toggle fires exactly
-/// once per physical press.
-///
 /// ## macOS note
 ///
 /// By default macOS binds `Ctrl+Space` to "Select previous input
@@ -917,9 +929,6 @@ pub(super) fn modifier_only_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> 
 /// the terminal. Users may need to disable that shortcut in System
 /// Settings → Keyboard → Keyboard Shortcuts → Input Sources.
 pub(super) fn sticky_toggle_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> {
-    if event.kind != KeyEventKind::Press {
-        return None;
-    }
     let has_ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
     let has_alt = event.modifiers.contains(KeyModifiers::ALT);
     let is_space_chord = match event.code {
@@ -2422,17 +2431,45 @@ mod tests {
     }
 
     #[test]
-    fn sticky_toggle_same_chord_clears() {
-        // Pressing `Ctrl+Space` twice toggles the sticky mode off — the
-        // user goes back to the dynamic / hidden state.
+    fn sticky_toggle_release_clears() {
+        // Press of Ctrl+Space sets the sticky display; the matching
+        // Release event clears it. This mirrors the "hold modifier
+        // to show badges" UX — a tap of Ctrl+Space briefly shows
+        // the Ctrl-emphasis state.
         let mut state = ChooseOneState::new(fixture_input());
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
-        ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
+        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        let release = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        ChooseOne::new().handle_event(&mut state, release);
         assert_eq!(state.hotkey_display_sticky(), None);
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
             HotkeyDisplayMode::Hidden
         );
+    }
+
+    #[test]
+    fn sticky_toggle_legacy_nul_release_clears() {
+        // Same as the previous test but with the legacy NUL encoding
+        // for Ctrl+Space release (the form a non-kitty terminal would
+        // emit if it emitted release events at all).
+        let mut state = ChooseOneState::new(fixture_input());
+        ChooseOne::new()
+            .handle_event(&mut state, KeyEvent::new(KeyCode::Char('\0'), KeyModifiers::CONTROL));
+        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        let release = KeyEvent {
+            code: KeyCode::Char('\0'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        ChooseOne::new().handle_event(&mut state, release);
+        assert_eq!(state.hotkey_display_sticky(), None);
     }
 
     #[test]
@@ -2482,10 +2519,11 @@ mod tests {
     }
 
     #[test]
-    fn sticky_toggle_release_does_not_fire() {
-        // Only the press of `Ctrl+Space` / `Alt+Space` toggles. Repeat
-        // and release events are ignored so kitty-protocol's separate
-        // press/release stream cannot double-toggle.
+    fn lone_release_without_prior_press_is_a_safe_clear() {
+        // Receiving an unmatched Release of `Ctrl+Space` (e.g. when
+        // the prompt opens just as the user is releasing a chord they
+        // pressed earlier) clears the sticky mode. Since None → None
+        // is a no-op, this is benign.
         let mut state = ChooseOneState::new(fixture_input());
         let release = KeyEvent {
             code: KeyCode::Char(' '),
