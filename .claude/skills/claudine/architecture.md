@@ -306,7 +306,7 @@ Atomic file writes (`config::atomic`) prevent corruption during concurrent acces
 | `git.*` | `{{git.branch}}`, `{{git.is_dirty}}`, `{{git.head_sha}}`, `{{git.head_message}}`, `{{git.remote}}`, `{{git.hosting}}`, `{{git.repo_name}}`, `{{git.repo_org}}` |
 | `project.*` | `{{project.language}}`, `{{project.is_monorepo}}`, `{{project.monorepo_tool}}` |
 
-Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR | "fallback"}}`.
+Shell environment variables are also supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
 Unknown placeholders are left as-is. `None` values render as empty strings.
 
