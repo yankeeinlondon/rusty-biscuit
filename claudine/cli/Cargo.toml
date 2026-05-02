@@ -9,6 +9,13 @@ description = "cross-agent abstraction and meta-agent harness"
 name = "claudine"
 path = "src/main.rs"
 
+# Test-only PTY harness used by `tests/validation_reporter_pty.rs` to observe
+# the exact ANSI/OSC-8 output of the harness validation failure reporter
+# under a real PTY. Not intended for end-user invocation.
+[[bin]]
+name = "validation_reporter_pty_harness"
+path = "src/bin/validation_reporter_pty_harness.rs"
+
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
 biscuit-speaks = { path = "../../biscuit-speaks/lib" }
