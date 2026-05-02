@@ -268,12 +268,13 @@ fn level2_warp_uses_floor_rounding() {
     // var to a single command via send_command_with_env avoids POSIX
     // `export` syntax leaking into the test (portable across shells).
     //
-    // 13×13 px: with cell heights ~16-30 px on common fonts this gives
-    // a non-integer raw row count and ceil != floor.
+    // We force an odd character width (41) so that the raw height in
+    // cells is almost always non-integer, ensuring ceil != floor and
+    // the test actually distinguishes the rounding branches.
     let path = fixture_path("13x13.png");
     harness
         .send_command_with_env(
-            &format!("bt image --debug {path}"),
+            &format!("bt image --debug --width 41 {path}"),
             &[("TERM_PROGRAM", "WarpTerminal")],
         )
         .expect("send_command_with_env failed");
@@ -296,20 +297,20 @@ fn level2_warp_uses_floor_rounding() {
     assert_eq!(
         cursor_rows,
         floor.max(1),
-        "Warp branch must round 13px image height ({} ceil / {} floor) using floor()\n\
+        "Warp branch must round 13px@41ch image height ({} ceil / {} floor) using floor()\n\
          plain:\n{}",
         ceil,
         floor,
         frame.plain,
     );
-    // Sanity: ensure the fixture actually exercises a non-integer row
+    // Sanity: ensure the chosen width actually exercises a non-integer row
     // count on this host. If ceil == floor, the test would not actually
     // be distinguishing the two branches.
     assert!(
         ceil != floor || floor == 1,
-        "13x13 fixture produced ceil ({ceil}) == floor ({floor}); \
+        "13x13@41ch fixture produced ceil ({ceil}) == floor ({floor}); \
          test loses distinguishing power on this host's font metrics. \
-         Adjust fixture size."
+         Adjust width or fixture size."
     );
 }
 

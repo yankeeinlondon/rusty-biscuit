@@ -11,8 +11,10 @@ use std::io::Write;
 use std::time::Duration;
 
 use common::pty::spawn_with_env;
+use serial_test::serial;
 
 #[test]
+#[serial]
 fn cursor_position_query_emits_csi_6n() {
     let mut session = spawn_with_env(&[("PROBE", "cursor"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
@@ -48,6 +50,7 @@ fn cursor_position_query_emits_csi_6n() {
 }
 
 #[test]
+#[serial]
 fn cursor_position_parses_csi_r_reply() {
     let mut session = spawn_with_env(&[("PROBE", "cursor"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
@@ -81,6 +84,7 @@ fn cursor_position_parses_csi_r_reply() {
 }
 
 #[test]
+#[serial]
 fn cursor_position_with_timeout_parses_cpr_reply() {
     let mut session = spawn_with_env(&[
         ("PROBE", "cursor_timeout"),
