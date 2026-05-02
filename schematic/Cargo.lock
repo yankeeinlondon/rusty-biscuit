@@ -2139,6 +2139,8 @@ dependencies = [
  "biscuit-file",
  "clap",
  "colored",
+ "indexmap",
+ "openapiv3",
  "prettyplease",
  "proc-macro2",
  "quote",
