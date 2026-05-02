@@ -17,6 +17,13 @@
 //! - Credential environment variables: `ELEVEN_LABS_API_KEY`, `ELEVENLABS_API_KEY`.
 //!
 //! API documentation: <https://elevenlabs.io/docs/api-reference/websockets>
+#![allow(
+    clippy::clone_on_copy,
+    clippy::collapsible_if,
+    clippy::possible_missing_else,
+    clippy::result_large_err,
+    clippy::single_match,
+)]
 pub use schematic_definitions::elevenlabs::*;
 /// Builds the ElevenLabs Text-to-Speech WebSocket API definition.
 #[must_use]
