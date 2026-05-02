@@ -23,6 +23,11 @@ pub fn generate_ws_shared_module() -> TokenStream {
         //! This module provides the core runtime infrastructure used by all
         //! generated WebSocket client and host modules.
 
+        // The `WsError::Transport` variant wraps `tokio_tungstenite::tungstenite::Error`,
+        // which is intentionally large. Boxing it would change the public
+        // signature of every generated codec trait, so we suppress the lint here.
+        #![allow(clippy::result_large_err)]
+
         use std::collections::HashMap;
         use std::sync::Arc;
         use std::sync::atomic::AtomicU64;
