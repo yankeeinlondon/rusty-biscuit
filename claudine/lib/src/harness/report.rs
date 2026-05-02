@@ -268,8 +268,8 @@ pub fn report_unhandled_failure(message: &str, term: &Terminal) {
 mod tests {
     use super::*;
     use crate::harness::model::{
-        AuditedCommand, AuditedCommandSource, ShellAuditOutcome, ValidationCheckOutcome,
-        ValidationEvent, ValidationRuleId,
+        AuditedCommand, AuditedCommandSource, RuleSource, ShellAuditOutcome,
+        ValidationCheckOutcome, ValidationEvent, ValidationRuleId,
     };
 
     /// Create a Terminal without real terminal probing (avoids TTY hangs in tests).
@@ -386,6 +386,122 @@ mod tests {
         };
         // Should render both without panicking
         report_check_outcomes(&report, &term);
+    }
+
+    #[test]
+    fn report_check_outcomes_failure_with_source_emits_block() {
+        // Failing outcome with `source: Some(...)` should drive the
+        // four-section failure block path. We can't easily capture stderr
+        // in unit tests, so this is primarily a smoke test that ensures
+        // the renderer does not panic and exercises the
+        // `render_failure_block` branch.
+        let term = test_terminal();
+        let report = ValidationPhaseReport {
+            phase: FailurePhase::PreCheck,
+            outcomes: vec![ValidationCheckOutcome {
+                rule_id: ValidationRuleId(0),
+                event: ValidationEvent::FileExists,
+                subject_key: Some("Cargo.toml".to_string()),
+                passed: false,
+                markup: "the file Cargo.toml exists".to_string(),
+                failure_message: Some("file does not exist: Cargo.toml".to_string()),
+                source: Some(RuleSource {
+                    file: std::path::PathBuf::from("/repo/prompts/run.md"),
+                    line_range: None,
+                    yaml_snippet: "file_exists: \"Cargo.toml\"\n".to_string(),
+                }),
+            }],
+        };
+        report_check_outcomes(&report, &term);
+    }
+
+    #[test]
+    fn report_check_outcomes_failure_without_source_uses_legacy_path() {
+        // Failing outcome with `source: None` should fall back to the
+        // legacy single-line + reason rendering. Verifies the dispatch
+        // logic without requiring stderr capture.
+        let term = test_terminal();
+        let report = ValidationPhaseReport {
+            phase: FailurePhase::PreCheck,
+            outcomes: vec![ValidationCheckOutcome {
+                rule_id: ValidationRuleId(0),
+                event: ValidationEvent::DirExists,
+                subject_key: None,
+                passed: false,
+                markup: "the directory /b exists".to_string(),
+                failure_message: Some("not found".to_string()),
+                source: None,
+            }],
+        };
+        report_check_outcomes(&report, &term);
+    }
+
+    #[test]
+    fn report_check_outcomes_pass_path_unchanged() {
+        // Regression guard: passing outcomes should never enter the
+        // failure-block branch regardless of whether `source` is set.
+        // The renderer should produce a single compact `Status` line.
+        let term = test_terminal();
+        let report = ValidationPhaseReport {
+            phase: FailurePhase::PreCheck,
+            outcomes: vec![
+                ValidationCheckOutcome {
+                    rule_id: ValidationRuleId(0),
+                    event: ValidationEvent::FileExists,
+                    subject_key: None,
+                    passed: true,
+                    markup: "the file /a exists".to_string(),
+                    failure_message: None,
+                    source: None,
+                },
+                ValidationCheckOutcome {
+                    rule_id: ValidationRuleId(1),
+                    event: ValidationEvent::FileExists,
+                    subject_key: None,
+                    passed: true,
+                    markup: "the file /b exists".to_string(),
+                    failure_message: None,
+                    source: Some(RuleSource {
+                        file: std::path::PathBuf::from("/repo/prompts/run.md"),
+                        line_range: None,
+                        yaml_snippet: "file_exists: \"/b\"\n".to_string(),
+                    }),
+                },
+            ],
+        };
+        report_check_outcomes(&report, &term);
+    }
+
+    #[test]
+    fn render_failure_block_handles_all_phases() {
+        // Cover each `FailurePhase` arm of `failure_header_text` via the
+        // failure-block path so that future header changes are exercised.
+        let term = test_terminal();
+        let phases = [
+            FailurePhase::PreCheck,
+            FailurePhase::PostCheck,
+            FailurePhase::Agent,
+            FailurePhase::ShellAudit,
+        ];
+        for phase in phases {
+            let report = ValidationPhaseReport {
+                phase,
+                outcomes: vec![ValidationCheckOutcome {
+                    rule_id: ValidationRuleId(0),
+                    event: ValidationEvent::FileExists,
+                    subject_key: None,
+                    passed: false,
+                    markup: "the file x exists".to_string(),
+                    failure_message: Some("missing".to_string()),
+                    source: Some(RuleSource {
+                        file: std::path::PathBuf::from("/repo/prompts/run.md"),
+                        line_range: Some(7..=9),
+                        yaml_snippet: "file_exists: \"x\"\n".to_string(),
+                    }),
+                }],
+            };
+            report_check_outcomes(&report, &term);
+        }
     }
 
     // -- report_shell_audit_header --

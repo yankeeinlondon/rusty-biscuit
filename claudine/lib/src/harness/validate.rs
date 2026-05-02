@@ -896,7 +896,7 @@ fn render_validation_expression(
 mod tests {
     use super::*;
     use crate::harness::model::{
-        PermissionAssessment, ProcessTermination, ValidationEvent, ValidationPhase,
+        PermissionAssessment, ProcessTermination, RuleSource, ValidationEvent, ValidationPhase,
         ValidationRuleId,
     };
     use std::process::Command;
@@ -1504,6 +1504,65 @@ mod tests {
             None,
         );
         assert!(result.is_err());
+    }
+
+    // --- Source propagation onto outcomes ---
+
+    #[test]
+    fn outcome_carries_rule_source_clone() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let source = RuleSource {
+            file: std::path::PathBuf::from("/repo/prompts/run.md"),
+            line_range: Some(10..=12),
+            yaml_snippet: "file_exists: \"test.txt\"\n".to_string(),
+        };
+        let mut rule = make_rule(
+            0,
+            ValidationEvent::FileExists,
+            ValidationKind::FileExists { file: file.clone() },
+        );
+        rule.source = Some(source.clone());
+
+        let report = run_checks(
+            std::slice::from_ref(&rule),
+            None,
+            None,
+            std::path::Path::new("/tmp/source.md"),
+            None,
+            FailurePhase::PreCheck,
+        );
+
+        assert_eq!(report.outcomes.len(), 1);
+        let outcome_source = report.outcomes[0]
+            .source
+            .as_ref()
+            .expect("outcome should carry rule source");
+        assert_eq!(outcome_source.file, source.file);
+        assert_eq!(outcome_source.line_range, source.line_range);
+        assert_eq!(outcome_source.yaml_snippet, source.yaml_snippet);
+    }
+
+    #[test]
+    fn outcome_source_is_none_when_rule_has_none() {
+        let rule = make_rule(
+            0,
+            ValidationEvent::FileExists,
+            ValidationKind::FileExists {
+                file: std::path::PathBuf::from("/nonexistent/x.txt"),
+            },
+        );
+        let report = run_checks(
+            std::slice::from_ref(&rule),
+            None,
+            None,
+            std::path::Path::new("/tmp/source.md"),
+            None,
+            FailurePhase::PreCheck,
+        );
+        assert!(report.outcomes[0].source.is_none());
     }
 
     // --- Multiple failures collected ---
