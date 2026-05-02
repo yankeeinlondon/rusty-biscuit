@@ -22,6 +22,12 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - biscuit-terminal/lib/tests/level1_cursor.rs
+  - biscuit-terminal/cli/tests/level2_image.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
   - biscuit-terminal
   - biscuit-terminal-cli
