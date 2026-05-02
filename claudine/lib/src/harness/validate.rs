@@ -8,6 +8,10 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use darkmatter::markdown::compose::expression::{
+    EvaluationLookup, Expr, ExpressionFinder, ParseMode, Parser, evaluate, scalar_string,
+};
+use serde_json::Value;
 use tracing::{debug, info_span};
 
 use crate::harness::error::HarnessError;
@@ -810,13 +814,79 @@ pub(crate) fn build_check_markup(rule: &ValidationRule) -> String {
     }
 }
 
-/// Simple Handlebars-style template renderer: replaces `{{key}}` with values.
+/// Render `{{...}}` placeholders in a validation message template.
+///
+/// Each `{{...}}` token is parsed as a Darkmatter interpolation expression
+/// against the validation variable map, so simple `{{key}}` lookups still
+/// work while richer authors can reach for fallbacks (`{{file || "n/a"}}`),
+/// ternaries, comparisons, and helper functions like `length(...)`.
+///
+/// Bare-variable references that are not in `vars` and tokens that fail
+/// to parse are preserved unchanged so validation messages remain
+/// best-effort and cannot mask the underlying validation result.
 fn render_template(template: &str, vars: &HashMap<&str, String>) -> String {
-    let mut result = template.to_string();
-    for (key, value) in vars {
-        result = result.replace(&format!("{{{{{key}}}}}"), value);
+    let locations = ExpressionFinder::find_all_plain(template);
+    if locations.is_empty() {
+        return template.to_string();
     }
-    result
+
+    let lookup = ValidationVarsLookup { vars };
+    let mut output = String::with_capacity(template.len());
+    let mut cursor = 0;
+    for location in &locations {
+        output.push_str(&template[cursor..location.start]);
+        let original = &template[location.start..location.end];
+        match render_validation_expression(&location.expression, &lookup, vars) {
+            Some(rendered) => output.push_str(&rendered),
+            None => output.push_str(original),
+        }
+        cursor = location.end;
+    }
+    output.push_str(&template[cursor..]);
+    output
+}
+
+/// Lookup adapter exposing the validation variable map to Darkmatter's
+/// expression evaluator.
+struct ValidationVarsLookup<'a> {
+    vars: &'a HashMap<&'a str, String>,
+}
+
+impl<'a> EvaluationLookup for ValidationVarsLookup<'a> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.vars.get(path).map(|value| Value::String(value.clone()))
+    }
+}
+
+/// Evaluate a single `{{...}}` body, or return `None` to preserve the
+/// original token.
+fn render_validation_expression(
+    expression: &str,
+    lookup: &ValidationVarsLookup<'_>,
+    vars: &HashMap<&str, String>,
+) -> Option<String> {
+    let trimmed = expression.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let parsed = Parser::with_mode(trimmed, ParseMode::Interpolation)
+        .ok()?
+        .parse()
+        .ok()?;
+
+    // Preserve bare-variable references not present in the validation map
+    // (for example `{{response_length}}`, which is intentionally omitted
+    // because it depends on outcome not available at template build time).
+    if let Expr::Variable(path) = &parsed
+        && !vars.contains_key(path.as_str())
+    {
+        return None;
+    }
+
+    evaluate(&parsed, lookup)
+        .ok()
+        .map(|value| scalar_string(&value))
 }
 
 #[cfg(test)]
@@ -1585,6 +1655,95 @@ mod tests {
         let markup = build_check_markup(&rule);
         assert!(!markup.contains("<evil>"));
         assert!(markup.contains("\\<evil\\>"));
+    }
+
+    #[test]
+    fn render_template_no_placeholders_returns_unchanged() {
+        let vars = HashMap::new();
+        let result = render_template("plain message text", &vars);
+        assert_eq!(result, "plain message text");
+    }
+
+    #[test]
+    fn render_template_unknown_bare_variable_is_preserved() {
+        // {{response_length}} is intentionally not in build_vars because
+        // it depends on outcome data; preserving the token avoids
+        // rendering an empty string in default messages.
+        let mut vars = HashMap::new();
+        vars.insert("length", "10".to_string());
+
+        let result = render_template(
+            "response is at least {{length}} characters (actual: {{response_length}})",
+            &vars,
+        );
+        assert_eq!(
+            result,
+            "response is at least 10 characters (actual: {{response_length}})"
+        );
+    }
+
+    #[test]
+    fn render_template_fallback_uses_default_when_missing() {
+        let vars = HashMap::new();
+        let result = render_template("path: {{file || \"n/a\"}}", &vars);
+        assert_eq!(result, "path: n/a");
+    }
+
+    #[test]
+    fn render_template_fallback_keeps_value_when_present() {
+        let mut vars = HashMap::new();
+        vars.insert("file", "/tmp/source.md".to_string());
+
+        let result = render_template("path: {{file || \"n/a\"}}", &vars);
+        assert_eq!(result, "path: /tmp/source.md");
+    }
+
+    #[test]
+    fn render_template_ternary_evaluates_branches() {
+        let mut vars = HashMap::new();
+        vars.insert("file", "/tmp/source.md".to_string());
+
+        let result = render_template("{{file ? \"present\" : \"missing\"}}", &vars);
+        assert_eq!(result, "present");
+
+        let empty = HashMap::new();
+        let result = render_template("{{file ? \"present\" : \"missing\"}}", &empty);
+        assert_eq!(result, "missing");
+    }
+
+    #[test]
+    fn render_template_length_helper_works() {
+        let mut vars = HashMap::new();
+        vars.insert("file", "abc".to_string());
+
+        let result = render_template(
+            "{{length(file) > 5 ? \"long\" : \"short\"}}",
+            &vars,
+        );
+        assert_eq!(result, "short");
+
+        vars.insert("file", "abcdefghij".to_string());
+        let result = render_template(
+            "{{length(file) > 5 ? \"long\" : \"short\"}}",
+            &vars,
+        );
+        assert_eq!(result, "long");
+    }
+
+    #[test]
+    fn render_template_malformed_token_is_preserved() {
+        let vars = HashMap::new();
+        // `+` is not a supported operator in interpolation mode, so the
+        // expression fails to parse and the original token survives.
+        let result = render_template("{{a + b}}", &vars);
+        assert_eq!(result, "{{a + b}}");
+    }
+
+    #[test]
+    fn render_template_empty_braces_are_preserved() {
+        let vars = HashMap::new();
+        let result = render_template("before {{}} after", &vars);
+        assert_eq!(result, "before {{}} after");
     }
 
     // -- Public check_write_permission tests (non-harness inline path) ----
