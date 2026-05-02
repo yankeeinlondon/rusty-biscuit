@@ -93,7 +93,11 @@ pub struct ChoiceOption<V = String> {
     /// When `true`, the option is rendered dimmed and cannot be
     /// selected.
     pub disabled: bool,
-    /// Optional keyboard shortcut that selects this option.
+    /// Optional keyboard shortcut that selects this option. `None`
+    /// means the option has no hotkey at all — no badge, no keypress
+    /// binding. Hotkeys are only created by explicit assignment
+    /// (`with_hotkey()`, `[CTRL+x]` in CLI options, object-source
+    /// `hotkey` field, or `--numeric-hot-keys`).
     pub hotkey: Option<HotkeySpec>,
 }
 
@@ -130,22 +134,16 @@ impl<V> ChoiceOption<V> {
         self
     }
 
-    /// Returns the keyboard shortcut that should behave as this
-    /// option's hotkey.
+    /// Returns the keyboard shortcut bound to this option, if any.
     ///
-    /// Disabled options never have a hotkey. Explicit hotkeys take
-    /// priority. Otherwise, the first ASCII alphanumeric label
-    /// character becomes a default Ctrl hotkey.
+    /// Returns the explicit `hotkey` set via [`with_hotkey`](Self::with_hotkey),
+    /// or `None` when no hotkey was assigned. Disabled options never
+    /// have a hotkey.
     pub fn effective_hotkey(&self) -> Option<HotkeySpec> {
         if self.disabled {
             return None;
         }
-        self.hotkey.or_else(|| {
-            self.label
-                .chars()
-                .find(|c| c.is_ascii_alphanumeric())
-                .map(|c| HotkeySpec::Ctrl(c.to_ascii_lowercase()))
-        })
+        self.hotkey
     }
 
     /// Projects the option's value into a new type `U`.
@@ -360,13 +358,14 @@ mod tests {
     }
 
     #[test]
-    fn effective_hotkey_defaults_to_first_usable_label_char() {
-        let option: ChoiceOption = ChoiceOption::new("r", "  Red", "red");
-        assert_eq!(option.effective_hotkey(), Some(HotkeySpec::Ctrl('r')));
+    fn effective_hotkey_returns_none_when_unassigned() {
+        // An option with no explicit hotkey has no badge / no binding.
+        let option: ChoiceOption = ChoiceOption::new("r", "Red", "red");
+        assert_eq!(option.effective_hotkey(), None);
     }
 
     #[test]
-    fn effective_hotkey_uses_explicit_hotkey_first() {
+    fn effective_hotkey_returns_explicit_assignment() {
         let option: ChoiceOption =
             ChoiceOption::new("r", "Red", "red").with_hotkey(HotkeySpec::Alt('x'));
         assert_eq!(option.effective_hotkey(), Some(HotkeySpec::Alt('x')));
@@ -377,12 +376,6 @@ mod tests {
         let option: ChoiceOption = ChoiceOption::new("r", "Red", "red")
             .with_hotkey(HotkeySpec::Ctrl('r'))
             .disabled();
-        assert_eq!(option.effective_hotkey(), None);
-    }
-
-    #[test]
-    fn effective_hotkey_ignores_labels_without_usable_chars() {
-        let option: ChoiceOption = ChoiceOption::new("dash", " -- ", "dash");
         assert_eq!(option.effective_hotkey(), None);
     }
 

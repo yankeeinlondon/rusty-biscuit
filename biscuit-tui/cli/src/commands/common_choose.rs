@@ -51,8 +51,9 @@ pub struct ChooseChromeArgs {
     /// Disable inline fuzzy filtering.
     ///
     /// Filtering is enabled by default for CLI choose prompts so
-    /// typing alphanumeric characters opens the search prompt instead
-    /// of using the legacy first-letter shortcut behaviour.
+    /// typing alphanumeric characters opens the search prompt. With
+    /// `--no-filter` set, those keystrokes are ignored — navigation
+    /// is keyboard-arrow / explicit `[CTRL+x]` hotkey only.
     #[arg(long)]
     pub no_filter: bool,
 
@@ -160,10 +161,17 @@ pub struct ChooseChromeArgs {
     /// explicit `Ctrl+X` / `Alt+X` shortcut.
     ///
     /// `auto` (the default) shows badges while the matching modifier
-    /// is held — using a brief deadline-based fallback on terminals
-    /// that do not emit modifier-only key events. `always` keeps
-    /// badges visible for the lifetime of the prompt; `never` hides
-    /// them entirely.
+    /// is held; `always` keeps them visible for the lifetime of the
+    /// prompt; `never` hides them entirely.
+    ///
+    /// Holding a bare modifier requires a terminal that emits
+    /// kitty-protocol bare-modifier events (e.g. WezTerm with
+    /// `enable_kitty_keyboard = true` and a recent build, or kitty.app).
+    /// As a portable fallback, `Ctrl+Space` and `Alt+Space` toggle
+    /// the corresponding emphasis. NOTE: macOS by default binds
+    /// `Ctrl+Space` to "Select previous input source" — the chord
+    /// will be eaten by the OS unless you uncheck that shortcut in
+    /// System Settings → Keyboard → Keyboard Shortcuts → Input Sources.
     #[arg(long, value_enum, value_name = "MODE", default_value_t = HotkeyBadgesArg::Auto)]
     pub hotkey_badges: HotkeyBadgesArg,
 }

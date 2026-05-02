@@ -107,25 +107,65 @@ fn extract_hotkey(s: &str) -> (Option<HotkeySpec>, &str) {
 /// `"OPT+B"` (case-insensitive) into a [`HotkeySpec`].
 ///
 /// Returns `None` when the input does not match a supported modifier
-/// prefix. Object sources that supply a `hotkey` field route through
-/// this same parser so the wire format matches the bracketed prefix
-/// form (`[CTRL+R]`).
+/// prefix, when the suffix after the modifier is empty, or when the
+/// suffix contains more than a single character. Object sources that
+/// supply a `hotkey` field route through this same parser so the wire
+/// format matches the bracketed prefix form (`[CTRL+R]`).
 pub fn parse_hotkey_spec(spec: &str) -> Option<HotkeySpec> {
     let spec = spec.trim();
     let upper = spec.to_uppercase();
     if let Some(rest) = upper.strip_prefix("CTRL+") {
-        let ch = rest.chars().next()?;
+        let ch = single_char(rest)?;
         return Some(HotkeySpec::Ctrl(ch.to_ascii_lowercase()));
     }
     if let Some(rest) = upper.strip_prefix("ALT+") {
-        let ch = rest.chars().next()?;
+        let ch = single_char(rest)?;
         return Some(HotkeySpec::Alt(ch.to_ascii_lowercase()));
     }
     if let Some(rest) = upper.strip_prefix("OPT+") {
-        let ch = rest.chars().next()?;
+        let ch = single_char(rest)?;
         return Some(HotkeySpec::Alt(ch.to_ascii_lowercase()));
     }
     None
+}
+
+/// Returns `Some(ch)` when `rest` contains exactly one Unicode scalar
+/// value, otherwise returns `None`.
+///
+/// Used by [`parse_hotkey_spec`] to enforce the single-character contract
+/// for hotkey suffixes after `CTRL+`, `ALT+`, or `OPT+` prefixes.
+fn single_char(rest: &str) -> Option<char> {
+    let mut iter = rest.chars();
+    let ch = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
+    Some(ch)
+}
+
+/// Returns `true` when `bracket_contents` (case-insensitively) starts
+/// with one of the recognized modifier prefixes (`CTRL+`, `ALT+`, or
+/// `OPT+`).
+///
+/// Used to distinguish "no recognized hotkey prefix at all" from "a
+/// recognized modifier prefix with an invalid suffix" in bracketed CLI
+/// labels such as `[CTRL+RED] Red`.
+fn has_modifier_prefix(bracket_contents: &str) -> bool {
+    let upper = bracket_contents.trim().to_uppercase();
+    upper.starts_with("CTRL+") || upper.starts_with("ALT+") || upper.starts_with("OPT+")
+}
+
+/// Extracts the contents of a leading `[...]` bracket from `s` if
+/// present, returning `Some((bracket_contents, after))` where `after`
+/// is the substring following the closing `]`.
+///
+/// Returns `None` when `s` does not begin (after leading whitespace)
+/// with a `[` followed by a `]`.
+fn split_bracket_prefix(s: &str) -> Option<(&str, &str)> {
+    let trimmed = s.trim_start();
+    let rest = trimmed.strip_prefix('[')?;
+    let end_idx = rest.find(']')?;
+    Some((&rest[..end_idx], &rest[end_idx + 1..]))
 }
 
 /// Applies a naming convention to a string.
@@ -233,6 +273,15 @@ pub fn assign_numeric_hotkeys(options: &mut [ParsedOption]) {
     }
 }
 
+/// Renders a [`HotkeySpec`] in the user-facing chord form (`Ctrl+r`,
+/// `Alt+b`) used in [`NormalizeError::DuplicateHotkey`] messages.
+fn format_hotkey_spec(hotkey: HotkeySpec) -> String {
+    match hotkey {
+        HotkeySpec::Ctrl(c) => format!("Ctrl+{}", c),
+        HotkeySpec::Alt(c) => format!("Alt+{}", c),
+    }
+}
+
 /// Normalizes a list of typed [`RawOption`] records into
 /// [`ChoiceOption`] values.
 ///
@@ -276,21 +325,7 @@ pub fn normalize_options(
         assign_numeric_hotkeys(&mut parsed);
     }
 
-    // Check for duplicate hotkeys.
-    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for option in &parsed {
-        if let Some(hotkey) = option.hotkey {
-            let key = format!("{:?}", hotkey);
-            if let Some(first) = seen.get(&key) {
-                return Err(NormalizeError::DuplicateHotkey {
-                    hotkey: key,
-                    first: first.clone(),
-                    second: option.raw.clone(),
-                });
-            }
-            seen.insert(key, option.raw.clone());
-        }
-    }
+    resolve_hotkey_collisions(&parsed)?;
 
     Ok(parsed
         .into_iter()
@@ -318,6 +353,36 @@ pub fn normalize_options(
         .collect())
 }
 
+/// Validates hotkey collisions across `parsed`.
+///
+/// The only collision shape that errors is **explicit-vs-explicit**:
+/// two options that each carry a user-supplied (or numeric-assigned)
+/// hotkey on the same chord. Options without an explicit hotkey
+/// contribute no badge and no keypress binding.
+///
+/// Disabled options contribute no effective hotkey and participate in
+/// no collisions.
+fn resolve_hotkey_collisions(parsed: &[ParsedOption]) -> Result<(), NormalizeError> {
+    let mut owners: std::collections::HashMap<HotkeySpec, usize> =
+        std::collections::HashMap::new();
+    for (idx, option) in parsed.iter().enumerate() {
+        if option.disabled {
+            continue;
+        }
+        if let Some(hotkey) = option.hotkey {
+            if let Some(&first_idx) = owners.get(&hotkey) {
+                return Err(NormalizeError::DuplicateHotkey {
+                    hotkey: format_hotkey_spec(hotkey),
+                    first: parsed[first_idx].raw.clone(),
+                    second: option.raw.clone(),
+                });
+            }
+            owners.insert(hotkey, idx);
+        }
+    }
+    Ok(())
+}
+
 /// Lowers a [`RawOption`] into a [`ParsedOption`] applying the prefix
 /// and delimiter rules with object-supplied fields taking precedence.
 fn raw_option_to_parsed(
@@ -338,9 +403,23 @@ fn raw_option_to_parsed(
                 });
             }
         }
+    } else if let Some((bracket_contents, after)) = split_bracket_prefix(&raw.label) {
+        match parse_hotkey_spec(bracket_contents) {
+            Some(h) => (Some(h), after.trim().to_string()),
+            None if has_modifier_prefix(bracket_contents) => {
+                // A recognized modifier prefix with an invalid suffix
+                // (empty, multi-character, or otherwise unparseable)
+                // must surface as an error rather than silently leaving
+                // the bracket text in the label.
+                return Err(NormalizeError::InvalidHotkey {
+                    spec: bracket_contents.to_string(),
+                    option: raw.label.clone(),
+                });
+            }
+            None => (None, raw.label.trim().to_string()),
+        }
     } else {
-        let (hotkey, rest) = extract_hotkey(&raw.label);
-        (hotkey, rest.trim().to_string())
+        (None, raw.label.trim().to_string())
     };
 
     // Value: object-supplied wins outright; otherwise honour `::`,
@@ -451,6 +530,26 @@ mod tests {
         assert_eq!(parse_hotkey_spec("OPT+B"), Some(HotkeySpec::Alt('b')));
         assert_eq!(parse_hotkey_spec("ctrl+x"), Some(HotkeySpec::Ctrl('x')));
         assert_eq!(parse_hotkey_spec("nope"), None);
+    }
+
+    #[test]
+    fn parse_hotkey_spec_rejects_empty_suffix() {
+        assert_eq!(parse_hotkey_spec("CTRL+"), None);
+        assert_eq!(parse_hotkey_spec("ALT+"), None);
+        assert_eq!(parse_hotkey_spec("OPT+"), None);
+        assert_eq!(parse_hotkey_spec("ctrl+"), None);
+        assert_eq!(parse_hotkey_spec("alt+"), None);
+    }
+
+    #[test]
+    fn parse_hotkey_spec_rejects_multi_character_suffix() {
+        assert_eq!(parse_hotkey_spec("CTRL+RED"), None);
+        assert_eq!(parse_hotkey_spec("CTRL+AB"), None);
+        assert_eq!(parse_hotkey_spec("ALT+AB"), None);
+        assert_eq!(parse_hotkey_spec("OPT+AB"), None);
+        // Mixed-case multi-character suffix.
+        assert_eq!(parse_hotkey_spec("ctrl+Red"), None);
+        assert_eq!(parse_hotkey_spec("Opt+ab"), None);
     }
 
     #[test]
@@ -689,7 +788,144 @@ mod tests {
             false,
             None,
         );
-        assert!(result.is_err());
+        match result {
+            Err(NormalizeError::DuplicateHotkey {
+                hotkey,
+                first,
+                second,
+            }) => {
+                assert_eq!(hotkey, "Ctrl+x");
+                assert_eq!(first, "[CTRL+x] A");
+                assert_eq!(second, "[CTRL+x] B");
+            }
+            other => panic!("expected DuplicateHotkey, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unassigned_options_have_no_hotkey() {
+        // Auto-derivation from the first label character is gone.
+        // An option without an explicit `[CTRL+x]` prefix gets no
+        // hotkey at all — no badge, no keypress binding. The user
+        // who did not opt in to a hotkey will not see one.
+        let options = vec![raw("Red"), raw("[CTRL+R] Rose")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .expect("plain options without explicit hotkeys never collide");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].effective_hotkey(), None);
+        assert_eq!(result[1].label, "Rose");
+        assert_eq!(result[1].effective_hotkey(), Some(HotkeySpec::Ctrl('r')));
+    }
+
+    #[test]
+    fn three_plain_labels_run_with_no_badges() {
+        // `bar`, `baz`, `bax` are plain labels with no explicit
+        // hotkeys — none of them gets a badge. The CLI runs cleanly
+        // and no "duplicate hotkey" error fires.
+        let options = vec![raw("bar"), raw("baz"), raw("bax")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .expect("plain labels never produce collisions");
+        assert_eq!(result[0].effective_hotkey(), None);
+        assert_eq!(result[1].effective_hotkey(), None);
+        assert_eq!(result[2].effective_hotkey(), None);
+    }
+
+    #[test]
+    fn user_reported_scenario_one_explicit_three_plain() {
+        // `question choose-one "[CTRL+f]foo" bar baz bax`:
+        //   - `foo` has the explicit `Ctrl+F` hotkey
+        //   - `bar`, `baz`, `bax` are plain labels with no hotkey
+        // The user wrote one hotkey; one hotkey appears.
+        let options = vec![
+            raw("[CTRL+f]foo"),
+            raw("bar"),
+            raw("baz"),
+            raw("bax"),
+        ];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .expect("only user-set explicit hotkeys can produce errors");
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].effective_hotkey(), Some(HotkeySpec::Ctrl('f')));
+        assert_eq!(result[1].effective_hotkey(), None);
+        assert_eq!(result[2].effective_hotkey(), None);
+        assert_eq!(result[3].effective_hotkey(), None);
+    }
+
+    #[test]
+    fn normalize_disabled_implicit_does_not_collide() {
+        // The first option is disabled, so it contributes no effective
+        // hotkey. The second option's implicit `Ctrl+r` therefore has
+        // no collision and the normalization should succeed.
+        let options = vec![
+            RawOption {
+                label: "Red".into(),
+                value: None,
+                hotkey: None,
+                disabled: Some(true),
+            },
+            RawOption::from_label("Rose"),
+        ];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .expect("disabled options should not contribute an effective hotkey");
+        assert_eq!(result.len(), 2);
+        assert!(result[0].disabled);
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[1].label, "Rose");
+    }
+
+    #[test]
+    fn normalize_numeric_hotkey_collision_with_explicit_ctrl_one_is_rejected() {
+        // The first option carries an explicit `[CTRL+1]`, and
+        // `assign_numeric_hotkeys` would also assign `Ctrl+1` to the
+        // first hotkey-less option (here the second). Numeric hotkeys
+        // run before the duplicate check, so the second option ends up
+        // with an effective `Ctrl+1` colliding with the first option's
+        // explicit binding.
+        //
+        // Note: `assign_numeric_hotkeys` walks by index, so when
+        // index 0 already has an explicit hotkey, index 1 receives
+        // `Ctrl+2`. To reliably trigger the collision we put the
+        // explicit `[CTRL+1]` on a later option so an earlier slot
+        // claims `Ctrl+1` first via the numeric pass.
+        let options = vec![raw("Apple"), raw("[CTRL+1] Banana")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            true,
+            None,
+        );
+        match result {
+            Err(NormalizeError::DuplicateHotkey { hotkey, .. }) => {
+                assert_eq!(hotkey, "Ctrl+1");
+            }
+            other => panic!("expected DuplicateHotkey on Ctrl+1, got {other:?}"),
+        }
     }
 
     #[test]
@@ -876,5 +1112,142 @@ mod tests {
             None,
         );
         assert!(matches!(result, Err(NormalizeError::InvalidHotkey { .. })));
+    }
+
+    #[test]
+    fn invalid_object_hotkey_multi_char_ctrl_returns_error() {
+        let options = vec![RawOption {
+            label: "Red".into(),
+            value: None,
+            hotkey: Some("CTRL+AB".into()),
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        );
+        match result {
+            Err(NormalizeError::InvalidHotkey { spec, option }) => {
+                assert_eq!(spec, "CTRL+AB");
+                assert_eq!(option, "Red");
+            }
+            other => panic!("expected InvalidHotkey, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_object_hotkey_empty_alt_returns_error() {
+        let options = vec![RawOption {
+            label: "Red".into(),
+            value: None,
+            hotkey: Some("ALT+".into()),
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        );
+        assert!(matches!(result, Err(NormalizeError::InvalidHotkey { .. })));
+    }
+
+    #[test]
+    fn invalid_object_hotkey_multi_char_opt_returns_error() {
+        let options = vec![RawOption {
+            label: "Red".into(),
+            value: None,
+            hotkey: Some("OPT+AB".into()),
+            disabled: None,
+        }];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        );
+        assert!(matches!(result, Err(NormalizeError::InvalidHotkey { .. })));
+    }
+
+    #[test]
+    fn invalid_bracketed_multi_char_ctrl_returns_error() {
+        let options = vec![raw("[CTRL+AB] Red")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        );
+        match result {
+            Err(NormalizeError::InvalidHotkey { spec, option }) => {
+                assert_eq!(spec, "CTRL+AB");
+                assert_eq!(option, "[CTRL+AB] Red");
+            }
+            other => panic!("expected InvalidHotkey, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_bracketed_empty_alt_returns_error() {
+        let options = vec![raw("[ALT+] Red")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        );
+        assert!(matches!(result, Err(NormalizeError::InvalidHotkey { .. })));
+    }
+
+    #[test]
+    fn invalid_bracketed_multi_char_opt_returns_error() {
+        let options = vec![raw("[OPT+AB] Red")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        );
+        assert!(matches!(result, Err(NormalizeError::InvalidHotkey { .. })));
+    }
+
+    #[test]
+    fn valid_bracketed_ctrl_still_normalizes() {
+        let options = vec![raw("[CTRL+R] Red")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result[0].label, "Red");
+        assert_eq!(result[0].hotkey, Some(HotkeySpec::Ctrl('r')));
+    }
+
+    #[test]
+    fn non_modifier_bracket_prefix_is_treated_as_label_text() {
+        // `[note]` is not a recognized modifier prefix, so it must be
+        // treated as ordinary label content rather than an error.
+        let options = vec![raw("[note] Red")];
+        let result = normalize_options(
+            options,
+            NamingConvention::None,
+            NamingConvention::None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert!(result[0].hotkey.is_none());
+        assert_eq!(result[0].label, "[note] Red");
     }
 }

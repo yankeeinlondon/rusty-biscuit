@@ -55,14 +55,13 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 - **`End` / `G`**: Jumps to the last enabled option.
 - **`Ctrl+A`**: Selects all enabled options.
 - **`Ctrl+D`**: Clears all selections.
-- **`Alphanumeric`**: If `filter_enabled` is true, starts a fuzzy search. Otherwise, jumps to and toggles the option with the matching first-letter hotkey.
+- **`Alphanumeric`**: If `filter_enabled` is true, starts a fuzzy search. Otherwise, the keystroke is ignored.
 
 ## Behavioral Notes
 
 - **Enter Behavior**: `Enter` submits the current selection exactly as-is — it does **not** auto-select the hovered item. If nothing is selected and `required` is set, submit-time validation fails.
 - **Selection Enforcement**: `max_selections` is enforced at the moment of toggling (further selections are silently blocked). `min_selections` and `required` are validated at submission time, displaying an error message if unsatisfied.
 - **Fuzzy Filtering**: When active, only options matching the pattern are displayed. The hover cursor is snapped to the first visible result.
-- **First-Letter Hotkeys**: When filtering is inactive, pressing the first character of a label (case-insensitive) jumps focus to that option and toggles it.
 - **Disabled Options**: Options can be marked as `disabled`. They are rendered dimmed, cannot be hovered or toggled, and are skipped by `Ctrl+A`.
 
 ## Keyboard Protocol & Hotkey Badges
@@ -158,10 +157,13 @@ The `choose_many` component is exposed via the `question choose-many` command. B
 - `--options <TEXT>` — hidden alias for `--csv` (backward compatibility)
 - Piped stdin (automatic when stdin is not a TTY)
 
-TOML files must use a top-level `options` array. Entries may be strings,
+**TOML note.** Standard TOML cannot represent a top-level bare array (the
+document root must be a table), so a TOML options file **must** use the
+`options = [...]` table form. Entries may be strings,
 inline tables (`options = [{ label = "Red", value = "apple" }]`), or
 array-of-tables records (`[[options]]`) with `label`, `value`, `hotkey`, and
-`disabled` fields.
+`disabled` fields. Files with any other top-level key (e.g. `colors = [...]`)
+fail with `option file must contain an array`.
 
 **Selection & filtering:**
 - `--selected <VALUE>`: Pre-select a value (repeatable for multiple values).

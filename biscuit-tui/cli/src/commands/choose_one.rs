@@ -39,7 +39,17 @@ pub struct ChooseOneArgs {
     #[arg(long, value_name = "TEXT")]
     pub rows: Option<String>,
 
-    /// Path to a file containing options (JSON, JSONL, YAML, TOML, or CSV).
+    /// Path to a file containing options (JSON, JSONL, NDJSON, YAML, TOML, or CSV).
+    ///
+    /// The file's top level must be an array of strings or an array of
+    /// objects with `label` / `value` / `hotkey` / `disabled` keys.
+    ///
+    /// **TOML note:** standard TOML cannot represent a top-level bare
+    /// array (the document root must be a table), so a TOML options file
+    /// must use the `options = [...]` table form (e.g.
+    /// `options = ["Red", "Green"]`). Other top-level keys (e.g.
+    /// `colors = [...]`) are rejected with
+    /// `option file must contain an array`.
     #[arg(long, value_name = "PATH")]
     pub file: Option<PathBuf>,
 

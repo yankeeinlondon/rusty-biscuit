@@ -4,7 +4,7 @@ The `choose_one` component is a TUI widget that provides a single-selection list
 
 ## Description
 
-The `choose_one` component is designed for scenarios where a user must make a single choice from a predefined list. It renders each option with a selection indicator (Nerd Font `󰐱`/`󰄱` when detected, otherwise `●`/`○`) and a focus marker (`▶`) on the currently hovered row in vertical mode. In horizontal mode the active option is highlighted with a background colour instead. It supports advanced features like fuzzy filtering (search-on-type), explicit Ctrl/Alt hotkeys, first-letter shortcuts, and automatic scrolling.
+The `choose_one` component is designed for scenarios where a user must make a single choice from a predefined list. It renders each option with a selection indicator (Nerd Font `󰐱`/`󰄱` when detected, otherwise `●`/`○`) and a focus marker (`▶`) on the currently hovered row in vertical mode. In horizontal mode the active option is highlighted with a background colour instead. It supports advanced features like fuzzy filtering (search-on-type), explicit Ctrl/Alt hotkeys, and automatic scrolling.
 
 The component is split into two parts:
 - **`ChooseOne`**: A zero-sized `StatefulWidget` responsible for rendering.
@@ -53,14 +53,13 @@ The component is primarily configured through a `ChoiceInput<V>` struct, which i
 - **`End` / `G`**: Jumps to the last enabled option.
 - **`Ctrl+<char>`**: Selects the option with the matching explicit `Ctrl` hotkey and submits.
 - **`Alt+<char>`**: Selects the option with the matching explicit `Alt` hotkey and submits.
-- **`Alphanumeric`**: If `filter_enabled` is true, starts a fuzzy search. Otherwise, jumps to and selects the option with the matching first-letter hotkey.
+- **`Alphanumeric`**: If `filter_enabled` is true, starts a fuzzy search. Otherwise, the keystroke is ignored.
 
 ## Behavioral Notes
 
 - **Enter Behavior**: `Enter` always selects the currently hovered enabled item and submits. There is no automatic selection of the hovered item on submit; the user must explicitly select with `Space` or `Enter`.
 - **Esc Behavior**: `Esc` restores the selection to whatever it was when the component started (the `initial_selected` value) and then submits with exit code `0`. If the user navigated or changed the selection with `Space`, those changes are discarded. This makes `Esc` a "reset and submit" action, not a cancel.
 - **Fuzzy Filtering**: When active, only options matching the pattern are displayed. The hover cursor is snapped to the first visible result, and matching characters are highlighted in the labels.
-- **First-Letter Hotkeys**: When filtering is inactive, pressing the first character of a label (case-insensitive) jumps focus to that option and selects it immediately.
 - **Explicit Hotkeys**: Options can carry explicit `Ctrl` or `Alt` hotkeys (e.g., `[CTRL+R]`). These are parsed from option text and select + submit when pressed.
 - **Disabled Options**: Options can be marked as `disabled`. They are rendered dimmed, cannot be hovered or selected, and are skipped by navigation.
 
@@ -157,10 +156,13 @@ The `choose_one` component is exposed via the `question choose-one` command. It 
 - `--options <TEXT>` — hidden alias for `--csv` (backward compatibility)
 - Piped stdin (automatic when stdin is not a TTY)
 
-TOML files must use a top-level `options` array. Entries may be strings,
+**TOML note.** Standard TOML cannot represent a top-level bare array (the
+document root must be a table), so a TOML options file **must** use the
+`options = [...]` table form. Entries may be strings,
 inline tables (`options = [{ label = "Red", value = "apple" }]`), or
 array-of-tables records (`[[options]]`) with `label`, `value`, `hotkey`, and
-`disabled` fields.
+`disabled` fields. Files with any other top-level key (e.g. `colors = [...]`)
+fail with `option file must contain an array`.
 
 **Selection & filtering:**
 - `--selected <VALUE>`: Pre-select a specific value.

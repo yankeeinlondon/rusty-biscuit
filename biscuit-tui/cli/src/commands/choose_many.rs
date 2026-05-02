@@ -39,7 +39,17 @@ pub struct ChooseManyArgs {
     #[arg(long, value_name = "TEXT")]
     pub rows: Option<String>,
 
-    /// Path to a file containing options (JSON, JSONL, YAML, TOML, or CSV).
+    /// Path to a file containing options (JSON, JSONL, NDJSON, YAML, TOML, or CSV).
+    ///
+    /// The file's top level must be an array of strings or an array of
+    /// objects with `label` / `value` / `hotkey` / `disabled` keys.
+    ///
+    /// **TOML note:** standard TOML cannot represent a top-level bare
+    /// array (the document root must be a table), so a TOML options file
+    /// must use the `options = [...]` table form (e.g.
+    /// `options = ["Red", "Green"]`). Other top-level keys (e.g.
+    /// `colors = [...]`) are rejected with
+    /// `option file must contain an array`.
     #[arg(long, value_name = "PATH")]
     pub file: Option<PathBuf>,
 
@@ -408,9 +418,12 @@ mod tests {
 
     #[test]
     fn selected_repeated_flag_collects_all_values() {
+        // Labels are chosen to have distinct first alphanumeric chars
+        // so the CLI's effective-hotkey duplicate check (`Ctrl+<first
+        // alphanumeric>`) does not reject them.
         let args = ChooseManyArgs {
-            positional: vec!["one".into(), "two".into(), "three".into()],
-            selected: vec!["one".into(), "two".into(), "three".into()],
+            positional: vec!["one".into(), "two".into(), "four".into()],
+            selected: vec!["one".into(), "two".into(), "four".into()],
             ..default_args()
         };
         let mut output = Vec::new();
@@ -421,14 +434,14 @@ mod tests {
             None,
             &mut output,
             |state, _height| {
-                assert_eq!(state.selected_ids(), vec!["one", "two", "three"]);
+                assert_eq!(state.selected_ids(), vec!["one", "two", "four"]);
                 Ok(state.selected_values().into_iter().cloned().collect())
             },
         )
         .unwrap();
 
         assert_eq!(status, 0);
-        assert_eq!(output, b"one\ntwo\nthree\n");
+        assert_eq!(output, b"one\ntwo\nfour\n");
     }
 
     #[test]

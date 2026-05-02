@@ -43,8 +43,8 @@ use super::choice_layout::{ChoiceLayout, navigate_row};
 use super::choice_render::ChoiceRenderContext;
 use super::choose::{ChoiceInput, ChoiceOption, HotkeyDisplayMode, Orientation, SelectionMode};
 use super::choose_one::{
-    HOTKEY_DISPLAY_FALLBACK, build_effective_hotkeys, build_hotkeys, first_enabled_index,
-    last_enabled_index, modifier_only_mode,
+    HOTKEY_DISPLAY_FALLBACK, build_effective_hotkeys, first_enabled_index,
+    last_enabled_index, modifier_only_mode, sticky_toggle_mode,
 };
 
 /// Mutable state for a [`ChooseMany`] widget.
@@ -62,7 +62,6 @@ pub struct ChooseManyState<V = String> {
     selected: Vec<bool>,
     hover: usize,
     scroll_offset: usize,
-    hotkeys: HashMap<char, usize>,
     ctrl_hotkeys: HashMap<char, usize>,
     alt_hotkeys: HashMap<char, usize>,
     label: Option<Label>,
@@ -75,6 +74,11 @@ pub struct ChooseManyState<V = String> {
     layout_cache: ChoiceLayout,
     hotkey_display: HotkeyDisplayMode,
     hotkey_display_deadline: Option<Instant>,
+    hotkey_display_override: Option<HotkeyDisplayMode>,
+    /// Sticky badge-visibility mode toggled by `Ctrl+Space` / `Alt+Space`.
+    /// See [`ChooseOneState::hotkey_display_sticky`] for details — the
+    /// semantics are identical here.
+    hotkey_display_sticky: Option<HotkeyDisplayMode>,
     terminal_style: TerminalStyle,
 }
 
@@ -93,7 +97,6 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             input.options.shuffle(&mut rand::rng());
         }
         let selected = vec![false; input.options.len()];
-        let hotkeys = build_hotkeys(&input.options);
         let (ctrl_hotkeys, alt_hotkeys) = build_effective_hotkeys(&input.options);
         let hover = first_enabled_index(&input.options).unwrap_or(0);
         let cached_labels: Vec<String> = input.options.iter().map(|o| o.label.clone()).collect();
@@ -104,7 +107,6 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             selected,
             hover,
             scroll_offset: 0,
-            hotkeys,
             ctrl_hotkeys,
             alt_hotkeys,
             label: None,
@@ -117,6 +119,8 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
             layout_cache: ChoiceLayout::default(),
             hotkey_display: HotkeyDisplayMode::Hidden,
             hotkey_display_deadline: None,
+            hotkey_display_override: None,
+            hotkey_display_sticky: None,
             terminal_style: TerminalStyle::from_env(),
         }
     }
@@ -153,7 +157,12 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
 
     /// Forces the hotkey badge display mode for the lifetime of this
     /// state. See [`ChooseOneState::with_hotkey_display`] for details.
+    ///
+    /// The override persists for the lifetime of the state: subsequent
+    /// modifier-only press/release events and Ctrl/Alt chord-fallback
+    /// events are silently ignored for badge-display purposes.
     pub fn with_hotkey_display(mut self, mode: HotkeyDisplayMode) -> Self {
+        self.hotkey_display_override = Some(mode);
         self.hotkey_display = mode;
         self.hotkey_display_deadline = None;
         self
@@ -181,11 +190,23 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
     /// the fallback deadline. See
     /// [`ChooseOneState::current_hotkey_display`] for details.
     pub fn current_hotkey_display(&self, now: Instant) -> HotkeyDisplayMode {
+        if let Some(forced) = self.hotkey_display_override {
+            return forced;
+        }
+        if let Some(sticky) = self.hotkey_display_sticky {
+            return sticky;
+        }
         match self.hotkey_display_deadline {
             Some(deadline) if now < deadline => self.hotkey_display,
             Some(_) => HotkeyDisplayMode::Hidden,
             None => self.hotkey_display,
         }
+    }
+
+    /// Returns the current `Ctrl+Space` / `Alt+Space` toggle state.
+    /// See [`ChooseOneState::hotkey_display_sticky`] for details.
+    pub fn hotkey_display_sticky(&self) -> Option<HotkeyDisplayMode> {
+        self.hotkey_display_sticky
     }
 
     /// Pre-selects options by their stable identifiers.
@@ -307,11 +328,6 @@ impl<V: Clone + PartialEq> ChooseManyState<V> {
         &self.theme
     }
 
-    /// Returns the precomputed hotkey map keyed by lowercase char.
-    pub fn hotkeys(&self) -> &HashMap<char, usize> {
-        &self.hotkeys
-    }
-
     /// Returns a reference to the key bindings.
     pub fn key_bindings(&self) -> &KeyBindings {
         &self.bindings
@@ -426,11 +442,28 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
         let label_style = state.theme.label_style;
 
         let inner_area = render_with_label(area, buf, label.as_ref(), label_style, |rect, b| {
-            let list_area = if state.filter_visible && rect.height > 0 {
+            let mut list_area = if state.filter_visible && rect.height > 0 {
                 draw_search_prompt(Rect::new(rect.x, rect.y, rect.width, 1), b, state);
                 Rect::new(rect.x, rect.y + 1, rect.width, rect.height - 1)
             } else {
                 rect
+            };
+
+            // Reserve the bottom row of the list area for the
+            // hotkey legend when at least one option carries an
+            // explicit hotkey. See `ChooseOne::render` for the
+            // full rationale.
+            let legend_visible = state
+                .input
+                .options
+                .iter()
+                .any(|o| o.hotkey.is_some() && !o.disabled);
+            let legend_y = if legend_visible && list_area.height >= 2 {
+                let y = list_area.bottom().saturating_sub(1);
+                list_area = Rect::new(list_area.x, list_area.y, list_area.width, list_area.height - 1);
+                Some(y)
+            } else {
+                None
             };
 
             let visible_indices: Vec<usize> = state.filter.visible().to_vec();
@@ -485,6 +518,11 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
                 Some(&mut state.filter),
                 state.validation_error.as_deref(),
             );
+
+            if let Some(y) = legend_y {
+                let legend = super::choice_render::hotkey_legend_line();
+                b.set_line(rect.x, y, &legend, rect.width);
+            }
         });
 
         if let Some(message) = state.validation_error.as_deref()
@@ -512,8 +550,13 @@ fn draw_search_prompt<V: Clone + PartialEq>(
 impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
         // Modifier-only key events drive hotkey badge display
-        // directly. See `ChooseOne::handle_event` for details.
+        // directly. See `ChooseOne::handle_event` for details. When a
+        // lifetime-long override is in effect, modifier-only events
+        // are still consumed but never mutate badge state.
         if let Some(mode) = modifier_only_mode(&event) {
+            if state.hotkey_display_override.is_some() {
+                return EventOutcome::Consumed;
+            }
             match event.kind {
                 KeyEventKind::Press | KeyEventKind::Repeat => {
                     state.hotkey_display = mode;
@@ -521,21 +564,48 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
                     return EventOutcome::Consumed;
                 }
                 KeyEventKind::Release => {
+                    // See `ChooseOne::handle_event` — release clears
+                    // dynamic, deadline, AND sticky display state so
+                    // the badges don't outlive the modifier hold.
                     state.hotkey_display = HotkeyDisplayMode::Hidden;
                     state.hotkey_display_deadline = None;
+                    state.hotkey_display_sticky = None;
                     return EventOutcome::Consumed;
                 }
             }
         }
 
+        // Portable badge-visibility chord: `Ctrl+Space` / `Alt+Space`.
+        // Press sets the sticky display, Release clears it. See
+        // `ChooseOne::handle_event` for the full rationale — the
+        // semantics here are identical.
+        if let Some(toggled) = sticky_toggle_mode(&event)
+            && state.hotkey_display_override.is_none()
+        {
+            match event.kind {
+                KeyEventKind::Press | KeyEventKind::Repeat => {
+                    state.hotkey_display_sticky = Some(toggled);
+                }
+                KeyEventKind::Release => {
+                    state.hotkey_display_sticky = None;
+                }
+            }
+            return EventOutcome::Consumed;
+        }
+
         // Chord fallback for terminals that never emit modifier-only
-        // events.
-        if event.modifiers.contains(KeyModifiers::CONTROL) {
-            state.hotkey_display = HotkeyDisplayMode::CtrlHeld;
-            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
-        } else if event.modifiers.contains(KeyModifiers::ALT) {
-            state.hotkey_display = HotkeyDisplayMode::AltHeld;
-            state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+        // events. A forced override mode (set via
+        // `with_hotkey_display`) suppresses these writes so the
+        // override cannot be flipped to the other modifier or armed
+        // with a transient deadline.
+        if state.hotkey_display_override.is_none() {
+            if event.modifiers.contains(KeyModifiers::CONTROL) {
+                state.hotkey_display = HotkeyDisplayMode::CtrlHeld;
+                state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+            } else if event.modifiers.contains(KeyModifiers::ALT) {
+                state.hotkey_display = HotkeyDisplayMode::AltHeld;
+                state.hotkey_display_deadline = Some(Instant::now() + HOTKEY_DISPLAY_FALLBACK);
+            }
         }
 
         // Cancel binding: when the fuzzy filter is visible, the first
@@ -654,20 +724,13 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseMany<V> {
                     );
                     return EventOutcome::Consumed;
                 }
-                KeyCode::Char(c) => {
-                    if state.input.filter_enabled && c.is_alphanumeric() {
-                        state.filter.clear(&state.cached_labels);
-                        state.filter.push_char(c, &state.cached_labels);
-                        state.filter_visible = true;
-                        snap_hover_to_visible(state);
-                        state.validation_error = None;
-                        return EventOutcome::Consumed;
-                    }
-                    if let Some(&idx) = state.hotkeys.get(&c.to_ascii_lowercase()) {
-                        jump_to(state, idx);
-                        toggle_at(state, idx);
-                        return EventOutcome::Consumed;
-                    }
+                KeyCode::Char(c) if state.input.filter_enabled && c.is_alphanumeric() => {
+                    state.filter.clear(&state.cached_labels);
+                    state.filter.push_char(c, &state.cached_labels);
+                    state.filter_visible = true;
+                    snap_hover_to_visible(state);
+                    state.validation_error = None;
+                    return EventOutcome::Consumed;
                 }
                 _ => {}
             }
@@ -890,17 +953,22 @@ mod tests {
     }
 
     #[test]
-    fn hotkey_toggles_matching_option() {
+    fn typing_letter_without_filter_does_not_jump_or_toggle() {
+        // First-letter quick-jump was removed — pressing a literal
+        // letter is now Ignored regardless of filter state.
         let mut state = ChooseManyState::new(fixture_input());
         let outcome = ChooseMany::new().handle_event(&mut state, press(KeyCode::Char('m')));
-        assert_eq!(outcome, EventOutcome::Consumed);
-        assert!(state.is_selected(1));
-        assert_eq!(state.hover(), Some(1));
+        assert_eq!(outcome, EventOutcome::Ignored);
+        assert!(!state.is_selected(1));
     }
 
     #[test]
-    fn default_ctrl_hotkey_toggles_matching_option() {
-        let mut state = ChooseManyState::new(fixture_input());
+    fn explicit_ctrl_hotkey_toggles_matching_option() {
+        let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+            ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+            ChoiceOption::new("m", "Mushrooms", "mushrooms").with_hotkey(HotkeySpec::Ctrl('m')),
+        ]);
+        let mut state = ChooseManyState::new(input);
         let event = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL);
         let outcome = ChooseMany::new().handle_event(&mut state, event);
         assert_eq!(outcome, EventOutcome::Consumed);
@@ -1900,5 +1968,213 @@ mod tests {
             .with_shuffle_options(true);
         let state = ChooseManyState::new(input);
         assert_eq!(state.options().len(), 3);
+    }
+
+    // --- Forced hotkey-display override survives transient events ---
+
+    fn ctrl_press_many(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn alt_press_many(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+    }
+
+    fn modifier_press_many(mod_key: crossterm::event::ModifierKeyCode) -> KeyEvent {
+        KeyEvent::new(KeyCode::Modifier(mod_key), KeyModifiers::NONE)
+    }
+
+    fn modifier_release_many(mod_key: crossterm::event::ModifierKeyCode) -> KeyEvent {
+        let mut event = KeyEvent::new(KeyCode::Modifier(mod_key), KeyModifiers::NONE);
+        event.kind = KeyEventKind::Release;
+        event
+    }
+
+    #[test]
+    fn many_with_hotkey_display_hidden_survives_ctrl_modifier_press() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::Hidden);
+        ChooseMany::new()
+            .handle_event(&mut state, modifier_press_many(ModifierKeyCode::LeftControl));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+        assert!(state.hotkey_display_deadline.is_none());
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::Hidden
+        );
+    }
+
+    #[test]
+    fn many_with_hotkey_display_hidden_survives_alt_modifier_press() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::Hidden);
+        ChooseMany::new().handle_event(&mut state, modifier_press_many(ModifierKeyCode::LeftAlt));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+        assert!(state.hotkey_display_deadline.is_none());
+    }
+
+    #[test]
+    fn many_with_hotkey_display_hidden_survives_chord_fallback() {
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::Hidden);
+        ChooseMany::new().handle_event(&mut state, ctrl_press_many('z'));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
+        assert!(state.hotkey_display_deadline.is_none());
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::Hidden
+        );
+    }
+
+    #[test]
+    fn many_with_hotkey_display_ctrl_held_survives_modifier_release() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        ChooseMany::new().handle_event(
+            &mut state,
+            modifier_release_many(ModifierKeyCode::LeftControl),
+        );
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        assert!(state.hotkey_display_deadline.is_none());
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::CtrlHeld
+        );
+    }
+
+    #[test]
+    fn many_with_hotkey_display_alt_held_survives_modifier_release() {
+        use crossterm::event::ModifierKeyCode;
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::AltHeld);
+        ChooseMany::new()
+            .handle_event(&mut state, modifier_release_many(ModifierKeyCode::LeftAlt));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::AltHeld);
+        assert!(state.hotkey_display_deadline.is_none());
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::AltHeld
+        );
+    }
+
+    #[test]
+    fn many_with_hotkey_display_ctrl_held_not_overwritten_by_alt_event() {
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        ChooseMany::new().handle_event(&mut state, alt_press_many('q'));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        assert!(state.hotkey_display_deadline.is_none());
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::CtrlHeld
+        );
+    }
+
+    #[test]
+    fn many_with_hotkey_display_alt_held_not_overwritten_by_ctrl_event() {
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::AltHeld);
+        ChooseMany::new().handle_event(&mut state, ctrl_press_many('q'));
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::AltHeld);
+        assert!(state.hotkey_display_deadline.is_none());
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::AltHeld
+        );
+    }
+
+    #[test]
+    fn many_with_hotkey_display_forces_mode_and_clears_deadline() {
+        let state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        assert_eq!(state.hotkey_display(), HotkeyDisplayMode::CtrlHeld);
+        assert_eq!(
+            state.current_hotkey_display(Instant::now() + std::time::Duration::from_secs(60)),
+            HotkeyDisplayMode::CtrlHeld
+        );
+    }
+
+    // --- Sticky `Ctrl+Space` / `Alt+Space` toggle ----------------------------
+
+    fn many_space_with_modifier(modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(' '), modifiers)
+    }
+
+    #[test]
+    fn many_ctrl_space_toggles_sticky_ctrl_held() {
+        let mut state = ChooseManyState::new(fixture_input());
+        assert_eq!(state.hotkey_display_sticky(), None);
+        let outcome = ChooseMany::new()
+            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        assert_eq!(outcome, EventOutcome::Consumed);
+        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::CtrlHeld
+        );
+    }
+
+    #[test]
+    fn many_alt_space_toggles_sticky_alt_held() {
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new()
+            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::ALT));
+        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+    }
+
+    #[test]
+    fn many_sticky_release_clears() {
+        // Press sets the sticky mode, Release clears it.
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new()
+            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        let release = KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        };
+        ChooseMany::new().handle_event(&mut state, release);
+        assert_eq!(state.hotkey_display_sticky(), None);
+    }
+
+    #[test]
+    fn many_sticky_toggle_other_chord_switches_mode() {
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new()
+            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        ChooseMany::new()
+            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::ALT));
+        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+    }
+
+    #[test]
+    fn many_sticky_toggle_suppressed_when_override_active() {
+        let mut state =
+            ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::Hidden);
+        ChooseMany::new()
+            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        assert_eq!(state.hotkey_display_sticky(), None);
+        assert_eq!(
+            state.current_hotkey_display(Instant::now()),
+            HotkeyDisplayMode::Hidden
+        );
+    }
+
+    #[test]
+    fn many_plain_space_still_toggles_selection_not_badge_visibility() {
+        // Plain Space (no modifier) MUST continue to toggle the active
+        // row's selection. The sticky-toggle handler is only triggered
+        // by `Ctrl+Space` / `Alt+Space`.
+        let mut state = ChooseManyState::new(fixture_input());
+        ChooseMany::new()
+            .handle_event(&mut state, KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(state.hotkey_display_sticky(), None);
+        // The active option is now selected.
+        assert!(state.is_selected(0));
     }
 }

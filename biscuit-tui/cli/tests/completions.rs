@@ -163,6 +163,40 @@ fn completions_script_mentions_convention_flags() {
     }
 }
 
+#[test]
+fn completions_do_not_present_hidden_legacy_flags() {
+    let shells = ["bash", "zsh", "fish", "powershell", "elvish"];
+    for shell in shells {
+        cargo_bin_cmd!("question")
+            .args(["completions", shell])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("options-from-file").not())
+            .stdout(predicate::str::contains("options-from-dictionary").not());
+    }
+}
+
+#[test]
+fn completions_only_offer_hotkey_prefixes_after_bracket_prefix() {
+    cargo_bin_cmd!("question")
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("|| -z \"$PREFIX\"").not())
+        .stdout(predicate::str::contains("[CTRL+"))
+        .stdout(predicate::str::contains("[ALT+"))
+        .stdout(predicate::str::contains("[OPT+"));
+
+    cargo_bin_cmd!("question")
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("COMP_CWORD}\" -eq 2 && -z \"$cur\"").not())
+        .stdout(predicate::str::contains("[CTRL+"))
+        .stdout(predicate::str::contains("[ALT+"))
+        .stdout(predicate::str::contains("[OPT+"));
+}
+
 // Phase 5: completions must include the `--active-color` flag and its
 // four palette values across all supported shells.
 
