@@ -816,6 +816,21 @@ mod tests {
     }
 
     #[test]
+    fn legacy_single_pipe_fallback_is_preserved_verbatim() {
+        // Single-pipe `|` is no longer recognised as a fallback operator;
+        // Darkmatter's interpolation lexer only accepts `||`. The token
+        // must therefore round-trip unchanged so operators can spot stale
+        // configs in their output.
+        let meta = sample_meta();
+        let raw = "{{env.CLAUDINE_TEMPLATE_TEST_LEGACY_PIPE | \"fallback\"}}";
+        // SAFETY: tests run sequentially in this module.
+        unsafe {
+            std::env::remove_var("CLAUDINE_TEMPLATE_TEST_LEGACY_PIPE");
+        }
+        assert_eq!(interpolate(raw, &meta), raw);
+    }
+
+    #[test]
     fn legacy_single_brace_template_is_rewritten() {
         let meta = sample_meta();
         assert_eq!(interpolate("Tool {tool_name}", &meta), "Tool Bash");

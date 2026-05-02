@@ -919,14 +919,76 @@ mod tests {
     }
 
     #[test]
+    fn invalid_matcher_in_config_compiles_to_unconditional_binding() {
+        // End-to-end pin for the production semantics described in
+        // [`crate::dispatch::matcher::RuntimeMatcher::compile`]: a matcher
+        // string that is neither a valid Darkmatter condition nor a valid
+        // regex must drop to `matcher() == None`, and `matcher::matches`
+        // must then return `true`, so the binding fires unconditionally
+        // rather than silently disappearing.
+        //
+        // The test-only helper [`matches_with_pattern`] returns `false`
+        // for the same input, which is the *opposite* of production
+        // behaviour. This test exists so a future contributor reading
+        // that helper does not "fix" it in the wrong direction.
+        let invalid_matcher = "[invalid(regex";
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
+        );
+        config
+            .matchers
+            .insert(AgenticEvent::BeforeTool, invalid_matcher.to_string());
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("missing binding");
+
+        assert!(
+            binding.matcher().is_none(),
+            "invalid matcher string must compile to None",
+        );
+
+        let meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: Some("Bash".to_string()),
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        assert!(
+            crate::dispatch::matcher::matches(binding.matcher(), &meta),
+            "binding with no matcher must fire unconditionally",
+        );
+    }
+
+    #[test]
     fn compile_canonical_runtime_creates_binding_for_matcher_only_event() {
         let mut config = ClaudineConfig::default();
         config.protect.enabled = false;
         config.default_sounds = DefaultSounds::default();
-        config.matchers.insert(
-            AgenticEvent::BeforeTool,
-            "tool_name == 'Bash'".to_string(),
-        );
+        config
+            .matchers
+            .insert(AgenticEvent::BeforeTool, "tool_name == 'Bash'".to_string());
 
         let runtime = compile_canonical_runtime(config, None).unwrap();
         let binding = runtime

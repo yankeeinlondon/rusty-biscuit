@@ -31,6 +31,11 @@
 //!    `session_id`, `cwd`, `tool_name`, `tool_input`, `tool_response`,
 //!    `error`, `prompt`, `agent_type`, `notification_type`,
 //!    `notification_message`, `extra`) resolve directly off `EventMeta`.
+//!
+//! Hook action `when` evaluation in
+//! [`dispatch::runner`](crate::dispatch::runner) mirrors these paths via
+//! JSON flattening; keep the two layers in sync if you add or rename
+//! event metadata fields.
 
 use std::collections::HashMap;
 

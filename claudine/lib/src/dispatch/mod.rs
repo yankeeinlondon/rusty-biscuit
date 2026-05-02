@@ -1317,6 +1317,90 @@ mod tests {
             "should produce provider-native deny response"
         );
     }
+
+    /// Integration smoke test for the full
+    /// loader → matcher → dispatch → runner pipeline with a `when`-gated
+    /// action.
+    ///
+    /// The runner-level tests in `dispatch::runner::tests::when*` exercise
+    /// `evaluate_when` semantics directly. The loader tests in
+    /// `dispatch::loader::tests` cover compilation. This test guards the
+    /// handoff between those layers: a `ClaudineConfig` whose only action
+    /// is a `Call` with `when: "tool_name == 'Bash'"` must execute and
+    /// synthesize a blocking deny when `tool_name` matches, and must skip
+    /// the action (no blocking response) when it does not. Both assertions
+    /// run against the same compiled `CanonicalRuntimeConfig`, which also
+    /// proves the runtime is reusable across dispatches.
+    #[tokio::test]
+    async fn canonical_dispatch_when_gated_action_executes_or_skips_via_runtime_binding() {
+        use crate::config::claudine_config::{ClaudineConfig, DefaultSounds};
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.logging = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Call {
+                command: "__claudine_pipeline_when_gated_missing__".to_string(),
+                args: None,
+                timeout_ms: Some(50),
+                mapper: None,
+                when: Some("tool_name == 'Bash'".to_string()),
+            }],
+        );
+
+        let runtime = loader::compile_canonical_runtime(config, None)
+            .expect("runtime should compile from a `when`-gated config");
+
+        // Branch 1: `when` evaluates true → Call runs, fails to launch the
+        // missing command, and the runner synthesizes a blocking deny.
+        let mut meta_bash = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta_bash.tool_name = Some("Bash".to_string());
+        meta_bash.tool_input = Some(json!({"command": "echo hi"}));
+        meta_bash.env = EnvironmentContext::default();
+
+        let outcome_bash = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::BeforeTool,
+            meta_bash,
+            &runtime,
+        )
+        .await
+        .expect("dispatch must not error on a truthy `when`");
+
+        assert!(
+            outcome_bash.response.is_some(),
+            "truthy `when` must let the Call action run end-to-end through the configured runtime binding and produce a blocking deny response",
+        );
+        assert!(
+            outcome_bash.protect_pre.is_none() && outcome_bash.protect_post.is_none(),
+            "no protect rules are active in this config; the response must come from the action path, not protect",
+        );
+
+        // Branch 2: `when` evaluates false → Call is skipped, no blocking
+        // response is produced, and dispatch returns the empty
+        // BeforeTool ack.
+        let mut meta_read = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta_read.tool_name = Some("Read".to_string());
+        meta_read.tool_input = Some(json!({"path": "Cargo.toml"}));
+        meta_read.env = EnvironmentContext::default();
+
+        let outcome_read = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::BeforeTool,
+            meta_read,
+            &runtime,
+        )
+        .await
+        .expect("dispatch must not error on a falsy `when`");
+
+        assert!(
+            outcome_read.response.is_none(),
+            "falsy `when` must skip the Call action through the configured runtime binding so no blocking response is produced (got {:?})",
+            outcome_read.response,
+        );
+    }
 }
 
 #[cfg(test)]

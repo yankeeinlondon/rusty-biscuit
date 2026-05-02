@@ -19,9 +19,7 @@
 //! regex; if both fail it is dropped with a warning so the binding fires
 //! unconditionally rather than silently disappearing.
 
-use darkmatter::markdown::compose::expression::{
-    Expr, ParseMode, Parser, evaluate, is_truthy,
-};
+use darkmatter::markdown::compose::expression::{Expr, ParseMode, Parser, evaluate, is_truthy};
 use regex::Regex;
 use tracing::warn;
 
@@ -49,6 +47,16 @@ impl RuntimeMatcher {
     /// failure it is compiled as a regex. If neither succeeds, returns
     /// `None` and emits a warning so the binding falls back to
     /// unconditional matching rather than being silently dropped.
+    ///
+    /// ## Notes
+    ///
+    /// The end-to-end production behaviour for invalid input is pinned by
+    /// `dispatch::loader::tests::invalid_matcher_in_config_compiles_to_unconditional_binding`.
+    /// Note that the test-only helper `matches_with_pattern` returns
+    /// `false` for inputs that compile to `None`, which is the *opposite*
+    /// of how [`matches()`] treats `None` matchers at runtime. Do not
+    /// "align" the helper with the runtime function without first
+    /// updating the dispatch sites that depend on the current contract.
     pub fn compile(source: &str) -> Option<Self> {
         let trimmed = source.trim();
         if trimmed.is_empty() {
@@ -317,12 +325,8 @@ mod tests {
 
     #[test]
     fn expression_matches_tool_and_branch() {
-        let meta = tool_meta_with_branch(
-            AgenticEvent::BeforeTool,
-            Some("Bash"),
-            Some("main"),
-            false,
-        );
+        let meta =
+            tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
 
         assert!(matches_with_pattern(
             Some("tool_name == 'Bash' && git.branch == 'main'"),
@@ -332,12 +336,8 @@ mod tests {
 
     #[test]
     fn expression_provider_and_not_dirty() {
-        let meta = tool_meta_with_branch(
-            AgenticEvent::BeforeTool,
-            Some("Bash"),
-            Some("main"),
-            false,
-        );
+        let meta =
+            tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
 
         assert!(matches_with_pattern(
             Some("provider == 'claude' && !git.is_dirty"),
@@ -365,10 +365,7 @@ mod tests {
         // tool_name is missing but the expression references it.
         let meta = tool_meta(AgenticEvent::SessionStart, None);
 
-        assert!(!matches_with_pattern(
-            Some("tool_name == 'Bash'"),
-            &meta,
-        ));
+        assert!(!matches_with_pattern(Some("tool_name == 'Bash'"), &meta,));
     }
 
     #[test]
@@ -376,8 +373,9 @@ mod tests {
         let mut meta = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
         meta.tool_input = Some(serde_json::json!({"command": "echo hi"}));
 
-        let matcher = RuntimeMatcher::compile("tool_name == 'Bash' && length(tool_input.command) > 0")
-            .expect("compile should succeed");
+        let matcher =
+            RuntimeMatcher::compile("tool_name == 'Bash' && length(tool_input.command) > 0")
+                .expect("compile should succeed");
         assert!(matches!(matcher, RuntimeMatcher::Expression { .. }));
         assert!(matches(Some(&matcher), &meta));
     }
