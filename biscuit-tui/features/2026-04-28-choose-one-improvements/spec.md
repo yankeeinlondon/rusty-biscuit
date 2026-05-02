@@ -111,7 +111,7 @@ The ChooseMany component has similar changes to ChooseOne:
 
 - we currently support _having_ hot keys but the user has no way of know what they are
 - in the feature we will:
-    - when the user presses the CTRL or ALT/OPTION key the hot keys will show the hotkey's associated to various choices with an orange (CTRL) and yellow (ALT) backgrounds and white text to the right of the choice
+    - when the user presses the CTRL or ALT/OPTION key the hot keys will show the hotkey's associated to various choices with an orange (CTRL) and yellow (ALT) backgrounds and **black** text to the right of the choice (white-on-yellow is illegible on most terminal palettes; black gives consistent contrast on both family colours — see "Badge Rendering — Visual Treatments" below for held vs. not-held shading and bold weighting)
         - in vertical mode this text will be positioned directly to the right of the line's text
         - in horizontal mode this text will be placed below 
     - all hotkeys will be associated to either CTRL+key or ALT+key
