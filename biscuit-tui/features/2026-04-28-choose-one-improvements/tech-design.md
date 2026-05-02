@@ -337,9 +337,21 @@ type HotkeyMap = HashMap<HotkeySpec, usize>;
 ```
 
 Normalize alpha characters with `to_ascii_lowercase()` during construction.
-Reject duplicate hotkeys at CLI parsing time with a clear config error. Library
-construction should use first-wins semantics to avoid panicking in embedded
-apps.
+
+**Duplicate hotkey rule.** The only collision shape that errors is
+**explicit-vs-explicit**: two options each carrying a user-supplied or
+numeric-assigned hotkey on the same chord. Plain options (no `[CTRL+x]`
+prefix, no object-source `hotkey` field, no numeric assignment) have no
+hotkey at all and participate in no collisions. Disabled options
+contribute no effective hotkey.
+
+Library construction should use first-wins semantics to avoid panicking in
+embedded apps.
+
+> **Acceptance test (must pass before sign-off):**
+> `question choose-one "[CTRL+f]foo" bar baz bax` runs cleanly. The user
+> explicitly set only `Ctrl+f`; the plain options `bar`, `baz`, `bax`
+> simply have no hotkey.
 
 Pure modifier key press/release visibility is terminal-dependent. The runner MUST
 attempt to enable the kitty keyboard protocol by pushing
