@@ -28,6 +28,15 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - biscuit-terminal/cli/tests/common/mod.rs
+  - biscuit-terminal/cli/tests/level2_prose_styling.rs
+  - biscuit-terminal/cli/src/commands.rs
+  - biscuit-terminal/cli/tests/snapshots/integration_test__prose_snapshot.snap
+  - biscuit-terminal/cli/tests/snapshots/integration_test__prose_styled_snapshot.snap
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - biscuit-test-harness
   - biscuit-tui
