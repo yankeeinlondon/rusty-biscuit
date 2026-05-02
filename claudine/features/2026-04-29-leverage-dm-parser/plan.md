@@ -56,17 +56,16 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 packages_during_phase_5:
   - claudine
-source_files_during_phase_6:
-  - claudine/cli/README.md
-  - claudine/docs/topics/validations-and-handlers.md
-  - claudine/.claude/skills/claudine/SKILL.md
-  - claudine/features/2026-04-29-leverage-dm-parser/plan.md
+source_files_during_phase_6: []
 docs_updated_during_phase_6:
   - claudine/cli/README.md
   - claudine/docs/topics/validations-and-handlers.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
-  - claudine/.claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/SKILL.md
+packages_during_phase_6:
+  - claudine
+  - claudine-cli
 ---
 
 # Leverage Darkmatter Parser in Claudine - Execution Plan
