@@ -542,6 +542,10 @@ fn draw_search_prompt<V: Clone + PartialEq>(
 
 impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
     fn handle_event(&self, state: &mut Self::State, event: KeyEvent) -> EventOutcome {
+        if is_ctrl_c(&event) {
+            return EventOutcome::Cancelled;
+        }
+
         // Modifier-only key events: terminals that emit explicit
         // KeyCode::Modifier press/release events drive
         // `hotkey_display` directly, bypassing the chord-fallback
@@ -951,6 +955,11 @@ pub(super) fn sticky_toggle_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> 
     }
 }
 
+fn is_ctrl_c(event: &KeyEvent) -> bool {
+    event.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(event.code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&'c'))
+}
+
 /// Builds separate maps for effective Ctrl and Alt hotkeys.
 pub(super) fn build_effective_hotkeys<V>(
     options: &[ChoiceOption<V>],
@@ -1323,6 +1332,20 @@ mod tests {
         let outcome = ChooseOne::new().handle_event(&mut state, event);
         assert_eq!(outcome, EventOutcome::Submitted);
         assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn ctrl_c_cancels_before_hotkey_dispatch() {
+        let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+            ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+            ChoiceOption::new("c", "Cherry", "cherry").with_hotkey(HotkeySpec::Ctrl('c')),
+        ]);
+        let mut state = ChooseOneState::new(input);
+        let event = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let outcome = ChooseOne::new().handle_event(&mut state, event);
+
+        assert_eq!(outcome, EventOutcome::Cancelled);
+        assert_eq!(state.selected_index(), None);
     }
 
     #[test]
