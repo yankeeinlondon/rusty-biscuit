@@ -18,6 +18,8 @@
 #[allow(unused_imports)]
 pub use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
 
+pub mod pane_geometry;
+
 /// Sends a `bt` command to the harness and waits for the terminal to
 /// settle.
 ///
