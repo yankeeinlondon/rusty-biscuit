@@ -32,9 +32,16 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
+  - sniff/lib/benches/perf.rs
   - sniff/lib/benches/cases/filesystem.rs
   - sniff/lib/benches/cases/git.rs
   - sniff/lib/benches/cases/programs.rs
+  - sniff/lib/benches/support/builder.rs
+  - sniff/lib/benches/support/fixtures.rs
+docs_updated_during_phase_4:
+  - sniff/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 source_files_during_phase_5:
   - sniff/cli/src/commands.rs
   - sniff/cli/src/main.rs
