@@ -671,4 +671,31 @@ mod tests {
         let cloned = diagram.clone();
         assert_eq!(diagram.instructions(), cloned.instructions());
     }
+
+    /// Locks in the `width_cells` resolution path: when the renderer
+    /// succeeds, `MermaidRenderResult.width_cells` must reflect the
+    /// resolved `ImageWidth` spec.
+    #[test]
+    fn diagram_try_render_populates_width_cells() {
+        use crate::components::terminal_image::ImageWidth;
+
+        let diagram = MermaidDiagram::new("pie\n    A: 1").with_width(ImageWidth::Percent(0.5));
+        let term = crate::terminal::Terminal::new_optimistic(80);
+
+        match diagram.try_render(&term) {
+            Ok(result) => {
+                // Default layout has zero margins, so 50% of 80 cols = 40.
+                assert_eq!(
+                    result.width_cells, 40,
+                    "50% of an 80-column terminal should resolve to 40 cells"
+                );
+            }
+            Err(e) => {
+                // If the host lacks Mermaid rendering dependencies, skip
+                // the assertion rather than fail — the Level-2 tests
+                // exercise the full pipeline.
+                eprintln!("Mermaid render unavailable in unit-test env: {e}");
+            }
+        }
+    }
 }

@@ -647,7 +647,14 @@ pub fn render_quadrant(
 
     // Build and display the diagram with config
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?.with_config(config);
-    display_mermaid(&diagram, &instructions, "quadrant chart", layout, meta, false)?;
+    display_mermaid(
+        &diagram,
+        &instructions,
+        "quadrant chart",
+        layout,
+        meta,
+        false,
+    )?;
 
     // Print command used if example mode
     if example {
@@ -1439,7 +1446,14 @@ pub fn render_state_diagram(
 
     // Build and display the diagram
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
-    display_mermaid(&diagram, &instructions, "state diagram", layout, meta, false)?;
+    display_mermaid(
+        &diagram,
+        &instructions,
+        "state diagram",
+        layout,
+        meta,
+        false,
+    )?;
 
     if example {
         print_example_command(STATE_DIAGRAM_EXAMPLE_CMD);
