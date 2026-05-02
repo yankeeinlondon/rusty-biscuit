@@ -18,16 +18,15 @@ use common::pty::spawn_with_env;
 /// Send a manufactured OSC colour reply into the PTY and collect the
 /// probe's stdout.
 fn query_with_osc_reply(probe_mode: &str, reply: &str) -> String {
-    let mut session = spawn_with_env(&[
-        ("PROBE", probe_mode),
-        ("PROBE_TERM_PROGRAM", "WezTerm"),
-    ]);
+    let mut session = spawn_with_env(&[("PROBE", probe_mode), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
     // Wait for the probe to enter raw mode and emit the query.
     std::thread::sleep(Duration::from_millis(80));
 
     // Manufacture the terminal response.
-    session.write_all(reply.as_bytes()).expect("failed to send OSC reply");
+    session
+        .write_all(reply.as_bytes())
+        .expect("failed to send OSC reply");
     session.flush().unwrap();
 
     // Give the probe time to parse and print.

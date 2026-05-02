@@ -11,10 +11,7 @@ use common::pty::spawn_with_env;
 
 #[test]
 fn terminal_new_cascade_produces_consistent_fields_in_pty() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "terminal"),
-        ("PROBE_TERM_PROGRAM", "ghostty"),
-    ]);
+    let mut session = spawn_with_env(&[("PROBE", "terminal"), ("PROBE_TERM_PROGRAM", "ghostty")]);
 
     std::thread::sleep(Duration::from_millis(150));
 

@@ -11,10 +11,7 @@ use common::pty::spawn_with_env;
 
 #[test]
 fn osc52_sequence_emitted_to_tty() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "clipboard"),
-        ("PROBE_TERM_PROGRAM", "WezTerm"),
-    ]);
+    let mut session = spawn_with_env(&[("PROBE", "clipboard"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
     // Give the probe time to run and emit the sequence.
     std::thread::sleep(Duration::from_millis(150));

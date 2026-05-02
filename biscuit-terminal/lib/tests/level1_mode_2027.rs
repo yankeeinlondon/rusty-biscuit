@@ -11,10 +11,7 @@ use common::pty::spawn_with_env;
 
 #[test]
 fn enable_mode_2027_emits_escape_sequence() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "mode2027"),
-        ("PROBE_TERM_PROGRAM", "WezTerm"),
-    ]);
+    let mut session = spawn_with_env(&[("PROBE", "mode2027"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
     std::thread::sleep(Duration::from_millis(150));
 
@@ -39,10 +36,7 @@ fn enable_mode_2027_emits_escape_sequence() {
 
 #[test]
 fn disable_mode_2027_emits_escape_sequence() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "mode2027"),
-        ("PROBE_TERM_PROGRAM", "WezTerm"),
-    ]);
+    let mut session = spawn_with_env(&[("PROBE", "mode2027"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
     std::thread::sleep(Duration::from_millis(150));
 

@@ -12,15 +12,14 @@ use common::pty::spawn_with_env;
 
 #[test]
 fn cursor_position_query_emits_csi_6n() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "cursor"),
-        ("PROBE_TERM_PROGRAM", "WezTerm"),
-    ]);
+    let mut session = spawn_with_env(&[("PROBE", "cursor"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
     std::thread::sleep(Duration::from_millis(80));
 
     // Manufacture a CPR response.
-    session.write_all(b"\x1b[12;34R").expect("failed to send CPR reply");
+    session
+        .write_all(b"\x1b[12;34R")
+        .expect("failed to send CPR reply");
     session.flush().unwrap();
 
     std::thread::sleep(Duration::from_millis(80));
@@ -48,15 +47,14 @@ fn cursor_position_query_emits_csi_6n() {
 
 #[test]
 fn cursor_position_parses_csi_r_reply() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "cursor"),
-        ("PROBE_TERM_PROGRAM", "WezTerm"),
-    ]);
+    let mut session = spawn_with_env(&[("PROBE", "cursor"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
 
     std::thread::sleep(Duration::from_millis(80));
 
     // Manufacture a CPR response: row 12, col 34.
-    session.write_all(b"\x1b[12;34R").expect("failed to send CPR reply");
+    session
+        .write_all(b"\x1b[12;34R")
+        .expect("failed to send CPR reply");
     session.flush().unwrap();
 
     std::thread::sleep(Duration::from_millis(80));
