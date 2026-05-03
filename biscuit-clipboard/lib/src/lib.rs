@@ -13,6 +13,8 @@
 //! - [`error`] — Error types
 
 pub mod backend;
+pub mod client;
+pub mod config;
 pub mod content;
 pub mod entry;
 pub mod error;
@@ -21,6 +23,7 @@ pub mod storage;
 pub mod watcher;
 
 pub use backend::ClipboardBackend;
+pub use client::{ClipperClient, EntrySummary, ServiceStatus};
 pub use content::{ClipboardFormat, ContentType, ImageSnapshot};
 pub use entry::{ClipboardEntry, EntryId};
 pub use error::ClipboardError;
