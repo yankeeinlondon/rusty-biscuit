@@ -293,6 +293,17 @@ The harness recognizes four categories of failure:
 | `shell_audit_denied` | Shell command denied by approval policy |
 | `<validation_event>` | Any validation check failure (e.g. `file_exists`, `response_includes`) |
 
+## Failure Reporting
+
+Passing checks render as a single compact `Status` line. A failing check renders a four-section block on stderr:
+
+1. **Status header** — red glyph plus a phase label (`Pre-validation failed`, `Post-validation failed`, `Agent execution failed`, or `Shell audit failed`).
+2. **Source line** — `in <path>` pointing at the markdown file that declared the rule, OSC8-linked when the terminal supports hyperlinks.
+3. **YAML snippet** — the rule's frontmatter entry, syntax-highlighted via the same path that renders fenced ` ```yaml ` blocks in markdown.
+4. **Reason line** — the underlying diagnostic (e.g. `file does not exist: /path/to/missing.toml`), rendered in muted styling because the glyph already carries severity.
+
+Each `ValidationRule` carries an optional `RuleSource { file, line_range, yaml_snippet }` populated by `parse_harness_plan` and cloned forward onto every `ValidationCheckOutcome`. Programmatically constructed rules without a markdown origin (such as the system-owned inline-compose writability pre-check) fall back to the legacy single-line failure rendering.
+
 ## Handlers
 
 Four declarative recovery actions plus a programmatic fallback. All declarative actions support these common fields:

@@ -193,6 +193,7 @@ fn main() -> color_eyre::Result<()> {
             show_data,
             example,
             meta,
+            debug,
             ref data,
         }) => {
             tracing::debug!(
@@ -210,6 +211,7 @@ fn main() -> color_eyre::Result<()> {
                 show_data,
                 example,
                 meta,
+                debug,
                 data,
                 args.json,
             );
@@ -462,10 +464,18 @@ fn main() -> color_eyre::Result<()> {
         Some(Command::Prose {
             ref content,
             no_wrap,
+            force_color,
+            print_bytes,
             ref layout,
         }) => {
-            tracing::debug!(command = "prose", no_wrap, "Dispatching subcommand");
-            return render_prose(content, no_wrap, layout);
+            tracing::debug!(
+                command = "prose",
+                no_wrap,
+                force_color,
+                print_bytes,
+                "Dispatching subcommand"
+            );
+            return render_prose(content, no_wrap, force_color, print_bytes, layout);
         }
         Some(Command::Quote {
             ref content,

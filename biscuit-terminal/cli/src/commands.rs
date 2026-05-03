@@ -9,6 +9,24 @@ fn is_dark_mode() -> bool {
     matches!(Terminal::color_mode(), ColorMode::Dark | ColorMode::Unknown)
 }
 
+/// Constructs a [`Terminal`] honoring the conventional color-forcing
+/// env vars (`FORCE_COLOR=1`, `CLICOLOR_FORCE=1`).
+///
+/// When either is set in the environment, this returns
+/// [`Terminal::new_forced`] which sets `color_depth = TrueColor`,
+/// `is_tty = true`, `osc_link_support = true`, and `supports_italic
+/// = true` while leaving detection-driven fields (`app`, `os`,
+/// `image_support`, etc.) intact.
+///
+/// Otherwise, defers to [`Terminal::new`].
+fn detect_terminal_honoring_force_color() -> Terminal {
+    if std::env::var_os("FORCE_COLOR").is_some() || std::env::var_os("CLICOLOR_FORCE").is_some() {
+        Terminal::new_forced()
+    } else {
+        Terminal::new()
+    }
+}
+
 /// Creates a path completer that filters for image files.
 ///
 /// Formats an axis label for Mermaid quadrant charts.
@@ -298,12 +316,17 @@ fn with_mermaid_frontmatter_title(body: &str, title: Option<&str>) -> String {
 /// Display a [`MermaidDiagram`] and optionally output metadata.
 ///
 /// Uses [`MermaidDiagram::try_render()`] for proper error reporting.
+///
+/// When `debug` is true, emits a `--- mermaid debug ---` block to
+/// stderr containing the resolved `image width: <N> cells` line.
+/// Level-2 tests parse this to verify pane-column geometry.
 pub fn display_mermaid(
     diagram: &biscuit_terminal::components::mermaid::MermaidDiagram,
     instructions: &str,
     diagram_type: &str,
     layout: &LayoutArgs,
     meta: bool,
+    debug: bool,
 ) -> color_eyre::Result<()> {
     use std::time::Instant;
 
@@ -335,6 +358,13 @@ pub fn display_mermaid(
         };
 
         output_render_meta(&render_meta)?;
+    }
+
+    if debug {
+        eprintln!("--- mermaid debug ---");
+        eprintln!("image width: {} cells", result.width_cells);
+        eprintln!("term width: {} cells", terminal.width());
+        eprintln!("render time: {render_time_ms} ms");
     }
 
     // Let terminal settle after image rendering
@@ -452,7 +482,7 @@ pub fn render_flowchart(
 
     // Build and display the diagram
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
-    display_mermaid(&diagram, &instructions, "flowchart", layout, meta)?;
+    display_mermaid(&diagram, &instructions, "flowchart", layout, meta, false)?;
 
     // Print command used if example mode
     if example {
@@ -617,7 +647,14 @@ pub fn render_quadrant(
 
     // Build and display the diagram with config
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?.with_config(config);
-    display_mermaid(&diagram, &instructions, "quadrant chart", layout, meta)?;
+    display_mermaid(
+        &diagram,
+        &instructions,
+        "quadrant chart",
+        layout,
+        meta,
+        false,
+    )?;
 
     // Print command used if example mode
     if example {
@@ -829,6 +866,7 @@ pub fn render_pie_chart(
     show_data: bool,
     example: bool,
     meta: bool,
+    debug: bool,
     data: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -900,7 +938,7 @@ pub fn render_pie_chart(
 
     // Build and display the diagram
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
-    display_mermaid(&diagram, &instructions, "pie chart", layout, meta)?;
+    display_mermaid(&diagram, &instructions, "pie chart", layout, meta, debug)?;
 
     // Print command used if example mode
     if example {
@@ -978,7 +1016,7 @@ pub fn render_git_graph(
 
     // Build and display the diagram
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
-    display_mermaid(&diagram, &instructions, "git-graph", layout, meta)?;
+    display_mermaid(&diagram, &instructions, "git-graph", layout, meta, false)?;
 
     // Print command used if example mode
     if example {
@@ -1171,7 +1209,7 @@ pub fn render_xy_chart(
         XyChartType::Bar => "bar chart",
         XyChartType::Line => "line chart",
     };
-    display_mermaid(&diagram, &instructions, chart_name, layout, meta)?;
+    display_mermaid(&diagram, &instructions, chart_name, layout, meta, false)?;
 
     // Print command used if example mode
     if example {
@@ -1330,7 +1368,7 @@ pub fn render_timeline(
 
     // Build and display the diagram
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
-    display_mermaid(&diagram, &instructions, "timeline", layout, meta)?;
+    display_mermaid(&diagram, &instructions, "timeline", layout, meta, false)?;
 
     if example {
         print_example_command(TIMELINE_EXAMPLE_CMD);
@@ -1408,7 +1446,14 @@ pub fn render_state_diagram(
 
     // Build and display the diagram
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
-    display_mermaid(&diagram, &instructions, "state diagram", layout, meta)?;
+    display_mermaid(
+        &diagram,
+        &instructions,
+        "state diagram",
+        layout,
+        meta,
+        false,
+    )?;
 
     if example {
         print_example_command(STATE_DIAGRAM_EXAMPLE_CMD);
@@ -1601,7 +1646,7 @@ pub fn render_erd(
 
     // Build and display the diagram
     let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
-    display_mermaid(&diagram, &instructions, "ERD", layout, meta)?;
+    display_mermaid(&diagram, &instructions, "ERD", layout, meta, false)?;
 
     if example {
         print_example_command(ERD_EXAMPLE_CMD);
@@ -1682,9 +1727,22 @@ pub fn handle_graph_error(
 }
 
 /// Render prose content with styling tokens to the terminal.
+///
+/// When `force_color` is `true`, this constructs a forced-color
+/// [`Terminal`] regardless of TTY detection or the
+/// `FORCE_COLOR`/`CLICOLOR_FORCE` env vars. This decouples the
+/// styling decision from the spawned-shell environment so real-
+/// terminal Level-2 tests can assert SGR emission deterministically.
+///
+/// When `print_bytes` is `true`, the rendered byte stream is dumped
+/// to stderr as a single line of lowercase hex digits prefixed by
+/// `--- prose debug ---`. Used by Level-2 tests to verify SGR
+/// emission independent of the terminal capture path.
 pub fn render_prose(
     content: &[String],
     no_wrap: bool,
+    force_color: bool,
+    print_bytes: bool,
     layout: &LayoutArgs,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::prose::Prose;
@@ -1726,9 +1784,37 @@ pub fn render_prose(
         prose = prose.alignment(align);
     }
 
-    // Render using fallback_render for terminal-aware output
-    let term = Terminal::new();
+    // Render using fallback_render for terminal-aware output. Honor
+    // FORCE_COLOR/CLICOLOR_FORCE so styling is deterministic in real-
+    // terminal harnesses where stdout is captured. The explicit
+    // `--force-color` flag overrides detection entirely.
+    let term = if force_color {
+        Terminal::new_forced()
+    } else {
+        detect_terminal_honoring_force_color()
+    };
     let output = prose.render(&term);
+
+    // Respect NO_COLOR by stripping SGR sequences.
+    let output = if std::env::var("NO_COLOR").is_ok() {
+        strip_sgr_sequences(&output)
+    } else {
+        output
+    };
+
+    // When --print-bytes is set, emit the rendered byte stream to
+    // stderr as a hex dump so Level-2 tests can scrape `1b5b33316d`
+    // (`\x1b[31m`) or `1b5b39316d` (`\x1b[91m`) to confirm SGR
+    // emission independent of the terminal capture path.
+    if print_bytes {
+        eprintln!("--- prose debug ---");
+        let mut hex = String::with_capacity(output.len() * 2);
+        for byte in output.as_bytes() {
+            use std::fmt::Write as _;
+            let _ = write!(hex, "{byte:02x}");
+        }
+        eprintln!("{hex}");
+    }
 
     emit_vertical_margins(layout, || {
         println!("{}", output);
@@ -1755,7 +1841,7 @@ pub fn render_pad_left(text: &[String], width: u32, truncate: bool) -> color_eyr
         pad = pad.truncate();
     }
 
-    let term = Terminal::new();
+    let term = detect_terminal_honoring_force_color();
     println!("{}", pad.render(&term));
     Ok(())
 }
@@ -1779,7 +1865,7 @@ pub fn render_pad_right(text: &[String], width: u32, truncate: bool) -> color_ey
         pad = pad.truncate();
     }
 
-    let term = Terminal::new();
+    let term = detect_terminal_honoring_force_color();
     println!("{}", pad.render(&term));
     Ok(())
 }
@@ -1828,7 +1914,7 @@ pub fn render_quote(
     }
 
     // Render using fallback_render for terminal-aware output
-    let term = Terminal::new();
+    let term = detect_terminal_honoring_force_color();
     let output = quote.render(&term);
 
     emit_vertical_margins(layout, || {
@@ -1890,7 +1976,7 @@ pub fn render_list(
     }
 
     // Render using fallback_render for terminal-aware output
-    let term = Terminal::new();
+    let term = detect_terminal_honoring_force_color();
     let output = list.render(&term);
 
     emit_vertical_margins(layout, || {
@@ -1929,7 +2015,7 @@ pub fn render_columns(
         columns = columns.alignment(align);
     }
 
-    let term = Terminal::new();
+    let term = detect_terminal_honoring_force_color();
     let output = columns.render(&term);
 
     emit_vertical_margins(layout, || {
@@ -2082,5 +2168,59 @@ mod tests {
         let entry = parse_single_pie_entry("\"Some Label\" : 10.5").unwrap();
         assert_eq!(entry.line, "\"Some Label\" : 10.5");
         assert_eq!(entry.color, None);
+    }
+}
+
+/// Strips SGR (Select Graphic Rendition) CSI sequences from `s`.
+///
+/// This preserves non-color ANSI sequences such as OSC8 hyperlinks
+/// and cursor positioning, removing only `ESC [ … m` style codes.
+fn strip_sgr_sequences(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            let start = i;
+            i += 2;
+            while i < bytes.len() {
+                let b = bytes[i];
+                i += 1;
+                if b == b'm' {
+                    // SGR sequence — discard everything from start to here.
+                    break;
+                }
+                if !(b.is_ascii_digit() || b == b';' || b == b':') {
+                    // Not an SGR sequence — keep the bytes we skipped.
+                    out.extend_from_slice(&bytes[start..i]);
+                    break;
+                }
+            }
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod strip_tests {
+    use super::strip_sgr_sequences;
+
+    #[test]
+    fn strips_sgr_red() {
+        assert_eq!(strip_sgr_sequences("\x1b[31mRed\x1b[0m"), "Red");
+    }
+
+    #[test]
+    fn preserves_osc8() {
+        let input = "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\";
+        assert_eq!(strip_sgr_sequences(input), input);
+    }
+
+    #[test]
+    fn preserves_plain_text() {
+        assert_eq!(strip_sgr_sequences("hello world"), "hello world");
     }
 }

@@ -93,6 +93,7 @@ fn action_with_params(action: &HookAction) -> String {
             effect,
             volume,
             speed,
+            ..
         } => {
             let mut s = format!("{}({effect}", action.type_pascal_case());
             if *volume != 1.0 {
@@ -112,7 +113,9 @@ fn action_with_params(action: &HookAction) -> String {
             };
             format!("{}({truncated})", action.type_pascal_case())
         }
-        HookAction::Bash { command, params } => {
+        HookAction::Bash {
+            command, params, ..
+        } => {
             if params.is_empty() {
                 format!("{}({})", action.type_pascal_case(), command)
             } else {
@@ -135,7 +138,7 @@ fn action_with_params(action: &HookAction) -> String {
             s.push(')');
             s
         }
-        HookAction::Report { handler } => {
+        HookAction::Report { handler, .. } => {
             if let Some(h) = handler {
                 let mut params = format!("format: {:?}", h.format);
                 if h.include_metadata {

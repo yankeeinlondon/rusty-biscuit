@@ -216,6 +216,19 @@ The important implementation detail is that Claudine evaluates these against the
 
 This matters most on legacy non-structured runs, where Claudine now captures the real final response text before applying response validations.
 
+## Validation Message Templates
+
+Validation messages support the same `{{...}}` expression syntax used by dispatch templates. The variable map is intentionally narrow — it contains only the fields populated by `build_vars` for the current rule (`file`, `dir`, `command`, `prop`, `length`, `expected`, etc.). Within that map, authors can reach for the same Darkmatter features available elsewhere:
+
+- simple lookups: `{{file}}`, `{{prop}}`
+- fallbacks: `{{file || "n/a"}}`
+- ternaries: `{{file ? "present" : "missing"}}`
+- helper functions: `{{length(file) > 5 ? "long" : "short"}}`
+
+Bare-variable references that are not present in the validation variable map are preserved unchanged rather than rendered as the empty string. This is intentional: validation output must remain best-effort and cannot mask the underlying pass/fail result. Tokens that fail to parse (for example `{{a + b}}`, since `+` is not a supported operator) are likewise preserved.
+
+The pre-check and post-check status indicators continue to come from `StatusState`; message templates are not expected to embed pass/fail glyphs themselves.
+
 ## Path Resolution Is Document-Centric
 
 One subtle but important design choice is how paths inside validations are resolved.

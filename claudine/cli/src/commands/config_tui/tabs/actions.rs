@@ -817,7 +817,10 @@ pub fn handle_action_type_chooser_modal(app: &mut App, key: KeyEvent) {
                 }
                 4 => {
                     // Report
-                    let action = HookAction::Report { handler: None };
+                    let action = HookAction::Report {
+                        handler: None,
+                        when: None,
+                    };
                     if let Some(actions) = current_actions_map_mut(app) {
                         actions.entry(event).or_default().push(action);
                         mark_current_actions_dirty(app);
@@ -923,20 +926,24 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
                         message: text,
                         voice: None,
                         gender: None,
+                        when: None,
                     },
                     2 => HookAction::Message {
                         message: text,
                         image: None,
+                        when: None,
                     },
                     3 => HookAction::Bash {
                         command: text,
                         params: String::new(),
+                        when: None,
                     },
                     5 => HookAction::Call {
                         command: text,
                         args: None,
                         timeout_ms: None,
                         mapper: None,
+                        when: None,
                     },
                     _ => {
                         app.pop_modal();
@@ -965,6 +972,7 @@ fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, St
             effect,
             volume,
             speed,
+            ..
         } => vec![
             ("effect", "Effect", effect.clone()),
             ("volume", "Volume", format!("{volume}")),
@@ -974,6 +982,7 @@ fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, St
             message,
             voice,
             gender,
+            ..
         } => vec![
             ("message", "Message", message.clone()),
             ("voice", "Voice", voice.clone().unwrap_or_default()),
@@ -989,15 +998,17 @@ fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, St
                     .to_string(),
             ),
         ],
-        HookAction::Message { message, image } => vec![
+        HookAction::Message { message, image, .. } => vec![
             ("message", "Message", message.clone()),
             ("image", "Image Path", image.clone().unwrap_or_default()),
         ],
-        HookAction::Bash { command, params } => vec![
+        HookAction::Bash {
+            command, params, ..
+        } => vec![
             ("command", "Command", command.clone()),
             ("params", "Parameters", params.clone()),
         ],
-        HookAction::Report { handler } => {
+        HookAction::Report { handler, .. } => {
             let (fmt, template, metadata) = match handler {
                 Some(h) => (
                     match h.format {
@@ -1031,6 +1042,7 @@ fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, St
             args,
             timeout_ms,
             mapper,
+            ..
         } => vec![
             ("command", "Command", command.clone()),
             (
@@ -1073,6 +1085,7 @@ fn apply_action_field(action: &mut HookAction, field_name: &str, value: String) 
             effect,
             volume,
             speed,
+            ..
         } => match field_name {
             "effect" => *effect = value,
             "volume" => {
@@ -1091,6 +1104,7 @@ fn apply_action_field(action: &mut HookAction, field_name: &str, value: String) 
             message,
             voice,
             gender,
+            ..
         } => match field_name {
             "message" => *message = value,
             "voice" => {
@@ -1105,19 +1119,21 @@ fn apply_action_field(action: &mut HookAction, field_name: &str, value: String) 
             }
             _ => {}
         },
-        HookAction::Message { message, image } => match field_name {
+        HookAction::Message { message, image, .. } => match field_name {
             "message" => *message = value,
             "image" => {
                 *image = if value.is_empty() { None } else { Some(value) };
             }
             _ => {}
         },
-        HookAction::Bash { command, params } => match field_name {
+        HookAction::Bash {
+            command, params, ..
+        } => match field_name {
             "command" => *command = value,
             "params" => *params = value,
             _ => {}
         },
-        HookAction::Report { handler } => {
+        HookAction::Report { handler, .. } => {
             // Lazily initialize handler if needed.
             let h = handler.get_or_insert_with(|| claudine::actions::ReportHandler {
                 format: claudine::actions::ReportFormat::Text,
@@ -1146,6 +1162,7 @@ fn apply_action_field(action: &mut HookAction, field_name: &str, value: String) 
             args,
             timeout_ms,
             mapper,
+            ..
         } => match field_name {
             "command" => *command = value,
             "args" => {
@@ -1341,6 +1358,7 @@ pub fn handle_action_sound_selector_modal(app: &mut App, key: KeyEvent) {
                         effect: effect_name.to_string(),
                         volume: 1.0,
                         speed: 1.0,
+                        when: None,
                     };
                     if let Some(actions) = current_actions_map_mut(app) {
                         actions.entry(event).or_default().push(action);
@@ -1388,13 +1406,17 @@ mod tests {
         let mut app = test_app(true);
         app.config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
         app.config.actions.insert(
             AgenticEvent::BeforeTool,
             vec![HookAction::Bash {
                 command: "user".to_string(),
                 params: String::new(),
+                when: None,
             }],
         );
         app.repo_config.as_mut().unwrap().actions.insert(
@@ -1403,6 +1425,7 @@ mod tests {
                 message: "repo".to_string(),
                 voice: None,
                 gender: None,
+                when: None,
             }],
         );
 
@@ -1422,7 +1445,10 @@ mod tests {
         let mut app = test_app(true);
         app.config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
         app.repo_config.as_mut().unwrap().actions.insert(
             AgenticEvent::SessionStart,
@@ -1430,6 +1456,7 @@ mod tests {
                 message: "repo".to_string(),
                 voice: None,
                 gender: None,
+                when: None,
             }],
         );
 

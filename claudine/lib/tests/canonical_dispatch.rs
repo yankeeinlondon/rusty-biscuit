@@ -62,6 +62,7 @@ async fn dispatch_sound_effect_action() {
             effect: "confirmation".to_string(),
             volume: 0.0,
             speed: 1.0,
+            when: None,
         },
     );
 
@@ -95,6 +96,7 @@ async fn dispatch_no_binding_returns_default() {
             effect: "confirmation".to_string(),
             volume: 1.0,
             speed: 1.0,
+            when: None,
         }],
     );
 

@@ -205,6 +205,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         };
         (rule, phase_checks == "pre")
     }
@@ -455,6 +456,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         });
         plan
     }
