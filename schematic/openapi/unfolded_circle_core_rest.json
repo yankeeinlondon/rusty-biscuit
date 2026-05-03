@@ -531,6 +531,25 @@
   },
   "components": {
     "schemas": {
+      "LoginRequest": {
+        "title": "LoginRequest",
+        "description": "Login request payload for `/pub/login`.",
+        "type": "object",
+        "properties": {
+          "password": {
+            "description": "User password.",
+            "type": "string"
+          },
+          "username": {
+            "description": "User account name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
       "ApiResponseMessage": {
         "title": "ApiResponseMessage",
         "description": "Generic API response envelope used by many endpoints.",
@@ -586,6 +605,38 @@
           ]
         }
       },
+      "BackupRestoreItem": {
+        "description": "Backup restore report item type."
+      },
+      "BackupRestoreReportItem": {
+        "description": "One backup-restore report row.",
+        "type": "object",
+        "properties": {
+          "available": {
+            "description": "Total available items in the backup.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "item": {
+            "description": "Restored object category.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BackupRestoreItem"
+              }
+            ]
+          },
+          "ok": {
+            "description": "Successfully restored items.",
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "item",
+          "available",
+          "ok"
+        ]
+      },
       "ResourceItems": {
         "title": "Array_of_ResourceItem",
         "type": "array",
@@ -596,6 +647,27 @@
             }
           ]
         }
+      },
+      "ResourceItem": {
+        "description": "Single uploaded/listed resource item.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Resource identifier.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Size in bytes."
+          },
+          "type": {
+            "description": "Resource type.\n\nSerialized as `type` in API payloads.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ]
       },
       "IntegrationDriverInfo": {
         "title": "IntegrationDriverInfo",
@@ -644,6 +716,12 @@
           "version",
           "enabled"
         ]
+      },
+      "DriverState": {
+        "description": "Integration driver runtime state."
+      },
+      "IntegrationDriverType": {
+        "description": "Integration driver type."
       },
       "CodeSetUploadResult": {
         "title": "CodeSetUploadResult",
@@ -698,6 +776,9 @@
           "installed",
           "active"
         ]
+      },
+      "CustomComponent": {
+        "description": "Type of custom component installation."
       }
     },
     "securitySchemes": {

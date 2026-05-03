@@ -560,6 +560,328 @@
   },
   "components": {
     "schemas": {
+      "GenerateBody": {
+        "title": "GenerateBody",
+        "description": "Request body for the `/api/generate` endpoint.",
+        "type": "object",
+        "properties": {
+          "context": {
+            "description": "Context from a previous response to continue generation.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "images": {
+            "description": "Images for multimodal models (base64 encoded).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keep_alive": {
+            "description": "How long to keep the model loaded (e.g., \"5m\", \"-1\" for forever).",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model name to use.",
+            "type": "string"
+          },
+          "options": {
+            "description": "Model options."
+          },
+          "prompt": {
+            "description": "The prompt to generate a response for.",
+            "type": "string"
+          },
+          "raw": {
+            "description": "Raw mode bypasses templating.",
+            "type": "boolean"
+          },
+          "stream": {
+            "description": "Enable streaming (default: true).",
+            "type": "boolean"
+          },
+          "system": {
+            "description": "Optional system prompt to override the model's default.",
+            "type": "string"
+          },
+          "template": {
+            "description": "Optional template to use for generation.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ]
+      },
+      "ModelOptions": {
+        "description": "Model generation options for native Ollama API.\n\nControls model behavior including sampling parameters, context window,\nand hardware utilization.",
+        "type": "object",
+        "properties": {
+          "mirostat": {
+            "description": "Enable Mirostat sampling (0, 1, or 2)."
+          },
+          "mirostat_eta": {
+            "description": "Mirostat learning rate."
+          },
+          "mirostat_tau": {
+            "description": "Mirostat target perplexity."
+          },
+          "num_ctx": {
+            "description": "Context window size (default: 2048)."
+          },
+          "num_gpu": {
+            "description": "Number of GPU layers to offload (-1 for all)."
+          },
+          "num_predict": {
+            "description": "Maximum tokens to generate."
+          },
+          "num_thread": {
+            "description": "Number of CPU threads to use."
+          },
+          "penalize_newline": {
+            "description": "Penalize newline tokens."
+          },
+          "repeat_penalty": {
+            "description": "Repetition penalty (1.0 = no penalty)."
+          },
+          "seed": {
+            "description": "Random seed for reproducibility."
+          },
+          "stop": {
+            "description": "Stop sequences."
+          },
+          "temperature": {
+            "description": "Sampling temperature (0.0-2.0)."
+          },
+          "tfs_z": {
+            "description": "Tail-free sampling parameter."
+          },
+          "top_k": {
+            "description": "Top-K sampling parameter."
+          },
+          "top_p": {
+            "description": "Top-P (nucleus) sampling parameter."
+          }
+        }
+      },
+      "ChatBody": {
+        "title": "ChatBody",
+        "description": "Request body for the `/api/chat` endpoint.",
+        "type": "object",
+        "properties": {
+          "format": {
+            "description": "Format of the response (e.g., \"json\").",
+            "type": "string"
+          },
+          "keep_alive": {
+            "description": "How long to keep the model loaded.",
+            "type": "string"
+          },
+          "messages": {
+            "description": "Chat messages.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Message"
+                }
+              ]
+            }
+          },
+          "model": {
+            "description": "Model name to use.",
+            "type": "string"
+          },
+          "options": {
+            "description": "Model options."
+          },
+          "stream": {
+            "description": "Enable streaming (default: true).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ]
+      },
+      "Message": {
+        "title": "Message",
+        "description": "A chat message in the native Ollama format.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "The content of the message.",
+            "type": "string"
+          },
+          "images": {
+            "description": "Optional images for multimodal models (base64 encoded).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "role": {
+            "description": "The role of the message author (system, user, assistant).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "EmbeddingsBody": {
+        "title": "EmbeddingsBody",
+        "description": "Request body for the `/api/embeddings` endpoint.",
+        "type": "object",
+        "properties": {
+          "keep_alive": {
+            "description": "How long to keep the model loaded.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model name to use.",
+            "type": "string"
+          },
+          "options": {
+            "description": "Model options."
+          },
+          "prompt": {
+            "description": "Text to generate embeddings for.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ]
+      },
+      "ShowModelBody": {
+        "title": "ShowModelBody",
+        "description": "Request body for the `/api/show` endpoint.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Model name to show.",
+            "type": "string"
+          },
+          "verbose": {
+            "description": "Include verbose details.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "PullModelBody": {
+        "title": "PullModelBody",
+        "description": "Request body for the `/api/pull` endpoint.",
+        "type": "object",
+        "properties": {
+          "insecure": {
+            "description": "Allow insecure connections.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Model name to pull.",
+            "type": "string"
+          },
+          "stream": {
+            "description": "Enable streaming progress updates (default: true).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "PushModelBody": {
+        "title": "PushModelBody",
+        "description": "Request body for the `/api/push` endpoint.",
+        "type": "object",
+        "properties": {
+          "insecure": {
+            "description": "Allow insecure connections.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Model name to push.",
+            "type": "string"
+          },
+          "stream": {
+            "description": "Enable streaming progress updates (default: true).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CopyModelBody": {
+        "title": "CopyModelBody",
+        "description": "Request body for the `/api/copy` endpoint.",
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "Destination model name.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Source model name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "destination"
+        ]
+      },
+      "DeleteModelBody": {
+        "title": "DeleteModelBody",
+        "description": "Request body for the `/api/delete` endpoint.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Model name to delete.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CreateModelBody": {
+        "title": "CreateModelBody",
+        "description": "Request body for the `/api/create` endpoint.",
+        "type": "object",
+        "properties": {
+          "modelfile": {
+            "description": "Modelfile content.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name for the new model.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path to a Modelfile.",
+            "type": "string"
+          },
+          "stream": {
+            "description": "Enable streaming progress updates (default: true).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
       "EmbeddingsResponse": {
         "title": "EmbeddingsResponse",
         "description": "Response from the `/api/embeddings` endpoint.",
@@ -599,36 +921,6 @@
           "models"
         ]
       },
-      "ModelInfo": {
-        "title": "ModelInfo",
-        "description": "A model in the list response.",
-        "type": "object",
-        "properties": {
-          "details": {
-            "description": "Detailed model information."
-          },
-          "digest": {
-            "description": "Model digest (truncated SHA256).",
-            "type": "string"
-          },
-          "modified_at": {
-            "description": "Model modification time.",
-            "type": "string"
-          },
-          "name": {
-            "description": "Model name with tag (e.g., \"llama3:latest\").",
-            "type": "string"
-          },
-          "size": {
-            "description": "Model size in bytes.",
-            "type": "integer",
-            "format": "uint64"
-          }
-        },
-        "required": [
-          "name"
-        ]
-      },
       "ModelDetails": {
         "title": "ModelDetails",
         "description": "Model details in list response.",
@@ -662,6 +954,36 @@
             "type": "string"
           }
         }
+      },
+      "ModelInfo": {
+        "title": "ModelInfo",
+        "description": "A model in the list response.",
+        "type": "object",
+        "properties": {
+          "details": {
+            "description": "Detailed model information."
+          },
+          "digest": {
+            "description": "Model digest (truncated SHA256).",
+            "type": "string"
+          },
+          "modified_at": {
+            "description": "Model modification time.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Model name with tag (e.g., \"llama3:latest\").",
+            "type": "string"
+          },
+          "size": {
+            "description": "Model size in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        },
+        "required": [
+          "name"
+        ]
       },
       "ShowModelResponse": {
         "title": "ShowModelResponse",
@@ -761,6 +1083,155 @@
         },
         "required": [
           "name"
+        ]
+      },
+      "OpenAIChatCompletionRequest": {
+        "title": "OpenAIChatCompletionRequest",
+        "description": "Request body for the `/v1/chat/completions` endpoint.",
+        "type": "object",
+        "properties": {
+          "frequency_penalty": {
+            "description": "Frequency penalty.",
+            "type": "number",
+            "format": "double"
+          },
+          "max_tokens": {
+            "description": "Maximum tokens to generate.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "messages": {
+            "description": "Chat messages.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/OpenAIMessage"
+                }
+              ]
+            }
+          },
+          "model": {
+            "description": "Model name to use.",
+            "type": "string"
+          },
+          "presence_penalty": {
+            "description": "Presence penalty.",
+            "type": "number",
+            "format": "double"
+          },
+          "stop": {
+            "description": "Stop sequences.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stream": {
+            "description": "Enable streaming.",
+            "type": "boolean"
+          },
+          "temperature": {
+            "description": "Sampling temperature (0.0-2.0).",
+            "type": "number",
+            "format": "double"
+          },
+          "top_p": {
+            "description": "Top-P (nucleus) sampling parameter.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ]
+      },
+      "OpenAIMessage": {
+        "title": "OpenAIMessage",
+        "description": "A chat message in the OpenAI format.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "The content of the message.",
+            "type": "string"
+          },
+          "role": {
+            "description": "The role of the message author.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "OpenAICompletionRequest": {
+        "title": "OpenAICompletionRequest",
+        "description": "Request body for the `/v1/completions` endpoint.",
+        "type": "object",
+        "properties": {
+          "echo": {
+            "description": "Echo back the prompt.",
+            "type": "boolean"
+          },
+          "max_tokens": {
+            "description": "Maximum tokens to generate.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "model": {
+            "description": "Model name to use.",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The prompt to complete.",
+            "type": "string"
+          },
+          "stop": {
+            "description": "Stop sequences.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stream": {
+            "description": "Enable streaming.",
+            "type": "boolean"
+          },
+          "temperature": {
+            "description": "Sampling temperature (0.0-2.0).",
+            "type": "number",
+            "format": "double"
+          },
+          "top_p": {
+            "description": "Top-P (nucleus) sampling parameter.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ]
+      },
+      "OpenAIEmbeddingRequest": {
+        "title": "OpenAIEmbeddingRequest",
+        "description": "Request body for the `/v1/embeddings` endpoint.",
+        "type": "object",
+        "properties": {
+          "input": {
+            "description": "Text to embed.",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model name to use.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "input"
         ]
       },
       "OpenAIEmbeddingResponse": {

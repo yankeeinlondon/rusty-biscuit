@@ -1076,6 +1076,141 @@
           "author"
         ]
       },
+      "Milestone": {
+        "description": "A project milestone.",
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601)."
+          },
+          "description": {
+            "description": "Milestone description."
+          },
+          "due_date": {
+            "description": "Due date (YYYY-MM-DD)."
+          },
+          "expired": {
+            "description": "Whether the milestone is expired."
+          },
+          "id": {
+            "description": "Milestone ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "iid": {
+            "description": "Project-scoped internal ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "project_id": {
+            "description": "Project ID."
+          },
+          "start_date": {
+            "description": "Start date (YYYY-MM-DD)."
+          },
+          "state": {
+            "description": "Milestone state: \"active\", \"closed\".",
+            "type": "string"
+          },
+          "title": {
+            "description": "Milestone title.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "Last update timestamp (ISO 8601)."
+          },
+          "web_url": {
+            "description": "HTML URL to the milestone."
+          }
+        },
+        "required": [
+          "id",
+          "iid",
+          "title",
+          "state"
+        ]
+      },
+      "References": {
+        "description": "Reference information (short, relative, full).",
+        "type": "object",
+        "properties": {
+          "full": {
+            "description": "Full reference (e.g., \"https://gitlab.com/group/project/-/issues/1\").",
+            "type": "string"
+          },
+          "relative": {
+            "description": "Relative reference (e.g., \"group/project#1\").",
+            "type": "string"
+          },
+          "short": {
+            "description": "Short reference (e.g., \"#1\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "short",
+          "relative",
+          "full"
+        ]
+      },
+      "TimeStats": {
+        "description": "Time tracking statistics.",
+        "type": "object",
+        "properties": {
+          "human_time_estimate": {
+            "description": "Human-readable time estimate."
+          },
+          "human_total_time_spent": {
+            "description": "Human-readable total time spent."
+          },
+          "time_estimate": {
+            "description": "Estimated time in seconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total_time_spent": {
+            "description": "Total time spent in seconds.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "User": {
+        "title": "User",
+        "description": "A GitLab user summary (common across many responses).",
+        "type": "object",
+        "properties": {
+          "avatar_url": {
+            "description": "URL to the user's avatar image.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The user's unique ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "name": {
+            "description": "The user's display name.",
+            "type": "string"
+          },
+          "state": {
+            "description": "User state (e.g., \"active\", \"blocked\").",
+            "type": "string"
+          },
+          "username": {
+            "description": "The user's username handle.",
+            "type": "string"
+          },
+          "web_url": {
+            "description": "HTML URL to the user's profile.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username"
+        ]
+      },
       "Vec<MergeRequest>": {
         "title": "Array_of_MergeRequest",
         "type": "array",
@@ -1238,6 +1373,45 @@
           "source_branch"
         ]
       },
+      "Diff": {
+        "description": "A file diff in a merge request.",
+        "type": "object",
+        "properties": {
+          "a_mode": {
+            "description": "Old file mode."
+          },
+          "b_mode": {
+            "description": "New file mode."
+          },
+          "deleted_file": {
+            "description": "Whether this file was deleted.",
+            "type": "boolean"
+          },
+          "diff": {
+            "description": "Diff content (unified diff format)."
+          },
+          "new_file": {
+            "description": "Whether this is a new file.",
+            "type": "boolean"
+          },
+          "new_path": {
+            "description": "New file path (after rename).",
+            "type": "string"
+          },
+          "old_path": {
+            "description": "Old file path (before rename).",
+            "type": "string"
+          },
+          "renamed_file": {
+            "description": "Whether this file was renamed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "old_path",
+          "new_path"
+        ]
+      },
       "Issue": {
         "title": "Issue",
         "description": "Issue summary from list/get endpoints.",
@@ -1390,6 +1564,22 @@
           "author"
         ]
       },
+      "TaskCompletionStatus": {
+        "description": "Task completion status for issues.",
+        "type": "object",
+        "properties": {
+          "completed_count": {
+            "description": "Number of completed tasks.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "count": {
+            "description": "Total number of tasks.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "Vec<Issue>": {
         "title": "Array_of_Issue",
         "type": "array",
@@ -1486,42 +1676,6 @@
           ]
         }
       },
-      "User": {
-        "title": "User",
-        "description": "A GitLab user summary (common across many responses).",
-        "type": "object",
-        "properties": {
-          "avatar_url": {
-            "description": "URL to the user's avatar image.",
-            "type": "string"
-          },
-          "id": {
-            "description": "The user's unique ID.",
-            "type": "integer",
-            "format": "uint64"
-          },
-          "name": {
-            "description": "The user's display name.",
-            "type": "string"
-          },
-          "state": {
-            "description": "User state (e.g., \"active\", \"blocked\").",
-            "type": "string"
-          },
-          "username": {
-            "description": "The user's username handle.",
-            "type": "string"
-          },
-          "web_url": {
-            "description": "HTML URL to the user's profile.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "username"
-        ]
-      },
       "Vec<User>": {
         "title": "Array_of_User",
         "type": "array",
@@ -1569,6 +1723,76 @@
           "name",
           "target",
           "commit"
+        ]
+      },
+      "TagCommit": {
+        "description": "Commit info embedded in a tag.",
+        "type": "object",
+        "properties": {
+          "author_email": {
+            "description": "Author email."
+          },
+          "author_name": {
+            "description": "Author name."
+          },
+          "authored_date": {
+            "description": "Authored timestamp (ISO 8601)."
+          },
+          "committed_date": {
+            "description": "Committed timestamp (ISO 8601)."
+          },
+          "committer_email": {
+            "description": "Committer email."
+          },
+          "committer_name": {
+            "description": "Committer name."
+          },
+          "created_at": {
+            "description": "Creation timestamp."
+          },
+          "id": {
+            "description": "Commit SHA.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Full commit message."
+          },
+          "parent_ids": {
+            "description": "Parent commit SHAs.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "short_id": {
+            "description": "Short commit SHA.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Commit title.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "short_id",
+          "title"
+        ]
+      },
+      "TagRelease": {
+        "description": "Brief release info embedded in a tag.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Release description/notes."
+          },
+          "tag_name": {
+            "description": "Tag name associated with the release.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag_name"
         ]
       },
       "Vec<Tag>": {
@@ -1666,6 +1890,198 @@
           "author",
           "commit",
           "assets"
+        ]
+      },
+      "ReleaseAssets": {
+        "description": "Release assets (sources and links).",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "Number of assets.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "links": {
+            "description": "Custom asset links.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ReleaseLink"
+                }
+              ]
+            }
+          },
+          "sources": {
+            "description": "Source archive downloads.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ReleaseSource"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "ReleaseCommit": {
+        "description": "Commit info embedded in a release.",
+        "type": "object",
+        "properties": {
+          "author_email": {
+            "description": "Author email."
+          },
+          "author_name": {
+            "description": "Author name."
+          },
+          "authored_date": {
+            "description": "Authored timestamp (ISO 8601)."
+          },
+          "committed_date": {
+            "description": "Committed timestamp (ISO 8601)."
+          },
+          "committer_email": {
+            "description": "Committer email."
+          },
+          "committer_name": {
+            "description": "Committer name."
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "id": {
+            "description": "Commit SHA.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Full commit message."
+          },
+          "parent_ids": {
+            "description": "Parent commit SHAs.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "short_id": {
+            "description": "Short commit SHA.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Commit title.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "short_id",
+          "title",
+          "created_at"
+        ]
+      },
+      "ReleaseEvidence": {
+        "description": "Release evidence for compliance.",
+        "type": "object",
+        "properties": {
+          "collected_at": {
+            "description": "Collection timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "filepath": {
+            "description": "Evidence file path.",
+            "type": "string"
+          },
+          "sha": {
+            "description": "Evidence SHA.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "filepath",
+          "collected_at"
+        ]
+      },
+      "ReleaseLink": {
+        "description": "A custom asset link in a release.",
+        "type": "object",
+        "properties": {
+          "external": {
+            "description": "Whether this is an external link.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Link ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "link_type": {
+            "description": "Link type: \"other\", \"runbook\", \"image\", \"package\"."
+          },
+          "name": {
+            "description": "Link name.",
+            "type": "string"
+          },
+          "url": {
+            "description": "Link URL.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url"
+        ]
+      },
+      "ReleaseLinks": {
+        "description": "Related links in a release.",
+        "type": "object",
+        "properties": {
+          "closed_issues_url": {
+            "description": "URL to closed issues."
+          },
+          "closed_merge_requests_url": {
+            "description": "URL to closed merge requests."
+          },
+          "edit_url": {
+            "description": "Edit URL."
+          },
+          "merged_merge_requests_url": {
+            "description": "URL to merged merge requests."
+          },
+          "opened_issues_url": {
+            "description": "URL to opened issues."
+          },
+          "opened_merge_requests_url": {
+            "description": "URL to opened merge requests."
+          },
+          "self": {
+            "description": "Self URL.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "self"
+        ]
+      },
+      "ReleaseSource": {
+        "description": "A source archive for a release.",
+        "type": "object",
+        "properties": {
+          "format": {
+            "description": "Archive format (e.g., \"zip\", \"tar.gz\").",
+            "type": "string"
+          },
+          "url": {
+            "description": "Download URL.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "url"
         ]
       },
       "Vec<Release>": {
@@ -1789,6 +2205,41 @@
         "required": [
           "id",
           "name"
+        ]
+      },
+      "Namespace": {
+        "description": "A GitLab namespace (group or user).",
+        "type": "object",
+        "properties": {
+          "avatar_url": {
+            "description": "URL to the namespace's avatar image."
+          },
+          "full_path": {
+            "description": "Full path (including parent groups)."
+          },
+          "id": {
+            "description": "Namespace ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "kind": {
+            "description": "Namespace kind: \"user\" or \"group\"."
+          },
+          "name": {
+            "description": "Namespace name."
+          },
+          "parent_id": {
+            "description": "Parent namespace ID."
+          },
+          "path": {
+            "description": "URL-safe path."
+          },
+          "web_url": {
+            "description": "HTML URL to the namespace."
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "Vec<Project>": {

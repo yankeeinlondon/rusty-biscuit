@@ -1428,6 +1428,25 @@
   },
   "components": {
     "schemas": {
+      "LoginBody": {
+        "title": "LoginBody",
+        "description": "Request body for the `/login` endpoint.\n\n## Example\n\n```json\n{\n  \"username\": \"admin\",\n  \"password\": \"public\"\n}\n```",
+        "type": "object",
+        "properties": {
+          "password": {
+            "description": "Dashboard password.",
+            "type": "string"
+          },
+          "username": {
+            "description": "Dashboard username.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
       "LoginResponse": {
         "title": "LoginResponse",
         "description": "Response from the `/login` endpoint.\n\n## Example\n\n```json\n{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"license\": {\"edition\": \"enterprise\", ...}\n}\n```",
@@ -1443,6 +1462,230 @@
         },
         "required": [
           "token"
+        ]
+      },
+      "SubscribeBody": {
+        "title": "SubscribeBody",
+        "description": "Request body for creating a subscription for a client.\n\n## Example\n\n```json\n{\n  \"topic\": \"sensors/#\",\n  \"qos\": 1\n}\n```",
+        "type": "object",
+        "properties": {
+          "nl": {
+            "description": "No local flag (MQTT 5.0).",
+            "type": "boolean"
+          },
+          "qos": {
+            "description": "QoS level (0, 1, or 2).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "rap": {
+            "description": "Retain as published flag (MQTT 5.0).",
+            "type": "boolean"
+          },
+          "rh": {
+            "description": "Retain handling (MQTT 5.0).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "topic": {
+            "description": "Topic filter to subscribe to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "PublishBody": {
+        "title": "PublishBody",
+        "description": "Request body for publishing a message.\n\n## Example\n\n```json\n{\n  \"topic\": \"sensors/temp\",\n  \"payload\": \"{\\\"temperature\\\": 25.5}\",\n  \"qos\": 1,\n  \"retain\": false\n}\n```",
+        "type": "object",
+        "properties": {
+          "encoding": {
+            "description": "Message encoding (plain, base64).",
+            "type": "string"
+          },
+          "message_expiry_interval": {
+            "description": "Message expiry interval in seconds (MQTT 5.0).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "payload": {
+            "description": "Message payload.",
+            "type": "string"
+          },
+          "payload_format_indicator": {
+            "description": "Payload format indicator (MQTT 5.0).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "qos": {
+            "description": "QoS level (0, 1, or 2).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "retain": {
+            "description": "Retain flag.",
+            "type": "boolean"
+          },
+          "topic": {
+            "description": "Topic to publish to.",
+            "type": "string"
+          },
+          "user_properties": {
+            "description": "User properties (MQTT 5.0)."
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ]
+      },
+      "PublishBatchBody": {
+        "title": "PublishBatchBody",
+        "description": "Request body for batch publishing.",
+        "type": "object",
+        "properties": {
+          "messages": {
+            "description": "List of messages to publish.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PublishBody"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      },
+      "CreateRuleBody": {
+        "title": "CreateRuleBody",
+        "description": "Request body for creating or updating a rule.",
+        "type": "object",
+        "properties": {
+          "actions": {
+            "description": "List of actions to execute.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RuleAction"
+                }
+              ]
+            }
+          },
+          "description": {
+            "description": "Rule description.",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether the rule is enabled.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Rule identifier.",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Rule metadata."
+          },
+          "sql": {
+            "description": "SQL query for the rule.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sql"
+        ]
+      },
+      "RuleAction": {
+        "title": "RuleAction",
+        "description": "Rule action configuration.\n\n## Example\n\n```json\n{\n  \"function\": \"republish\",\n  \"args\": {\"topic\": \"alerts/temp\"}\n}\n```",
+        "type": "object",
+        "properties": {
+          "args": {
+            "description": "Action arguments."
+          },
+          "function": {
+            "description": "Action function name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "function"
+        ]
+      },
+      "TestRuleBody": {
+        "title": "TestRuleBody",
+        "description": "Rule test request body.",
+        "type": "object",
+        "properties": {
+          "context": {
+            "description": "Context for testing (topic, payload, etc.)."
+          },
+          "sql": {
+            "description": "SQL query to test.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql"
+        ]
+      },
+      "CreateAuthUserBody": {
+        "title": "CreateAuthUserBody",
+        "description": "Request body for creating an auth user.",
+        "type": "object",
+        "properties": {
+          "is_superuser": {
+            "description": "Whether the user is a superuser.",
+            "type": "boolean"
+          },
+          "password": {
+            "description": "Password.",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "User ID (username).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "password"
+        ]
+      },
+      "CreateBanBody": {
+        "title": "CreateBanBody",
+        "description": "Request body for creating a ban.",
+        "type": "object",
+        "properties": {
+          "as": {
+            "description": "Ban type (clientid, username, peerhost).",
+            "type": "string"
+          },
+          "duration": {
+            "description": "Ban duration in seconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "reason": {
+            "description": "Reason for ban.",
+            "type": "string"
+          },
+          "who": {
+            "description": "Value to ban.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "as",
+          "who"
         ]
       },
       "NodeInfo": {
@@ -1647,6 +1890,32 @@
           "data"
         ]
       },
+      "PaginationMeta": {
+        "title": "PaginationMeta",
+        "description": "Pagination metadata in EMQX list responses.\n\n## Example\n\n```json\n{\n  \"count\": 100,\n  \"limit\": 100,\n  \"page\": 1,\n  \"hasnext\": true\n}\n```",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "Total count of items.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "hasnext": {
+            "description": "Whether more pages exist.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum items per page.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "page": {
+            "description": "Current page number.",
+            "type": "integer",
+            "format": "uint32"
+          }
+        }
+      },
       "SubscriptionInfo": {
         "title": "SubscriptionInfo",
         "description": "Subscription information.\n\n## Example\n\n```json\n{\n  \"node\": \"emqx@127.0.0.1\",\n  \"topic\": \"sensors/temperature\",\n  \"clientid\": \"client123\",\n  \"qos\": 1\n}\n```",
@@ -1755,23 +2024,6 @@
         "required": [
           "id",
           "sql"
-        ]
-      },
-      "RuleAction": {
-        "title": "RuleAction",
-        "description": "Rule action configuration.\n\n## Example\n\n```json\n{\n  \"function\": \"republish\",\n  \"args\": {\"topic\": \"alerts/temp\"}\n}\n```",
-        "type": "object",
-        "properties": {
-          "args": {
-            "description": "Action arguments."
-          },
-          "function": {
-            "description": "Action function name.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "function"
         ]
       },
       "ListRulesResponse": {
@@ -2324,32 +2576,6 @@
         "required": [
           "data"
         ]
-      },
-      "PaginationMeta": {
-        "title": "PaginationMeta",
-        "description": "Pagination metadata in EMQX list responses.\n\n## Example\n\n```json\n{\n  \"count\": 100,\n  \"limit\": 100,\n  \"page\": 1,\n  \"hasnext\": true\n}\n```",
-        "type": "object",
-        "properties": {
-          "count": {
-            "description": "Total count of items.",
-            "type": "integer",
-            "format": "uint64"
-          },
-          "hasnext": {
-            "description": "Whether more pages exist.",
-            "type": "boolean"
-          },
-          "limit": {
-            "description": "Maximum items per page.",
-            "type": "integer",
-            "format": "uint32"
-          },
-          "page": {
-            "description": "Current page number.",
-            "type": "integer",
-            "format": "uint32"
-          }
-        }
       }
     },
     "securitySchemes": {

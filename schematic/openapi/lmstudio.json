@@ -249,6 +249,171 @@
   },
   "components": {
     "schemas": {
+      "ChatBody": {
+        "title": "ChatBody",
+        "description": "Request body for the `/api/v1/chat` endpoint.\n\nThe chat endpoint supports SSE streaming by default.",
+        "type": "object",
+        "properties": {
+          "context_length": {
+            "description": "Context length override (optional).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "max_tokens": {
+            "description": "Maximum tokens to generate.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "messages": {
+            "description": "Chat messages.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Message"
+                }
+              ]
+            }
+          },
+          "model": {
+            "description": "Model identifier to use for generation.",
+            "type": "string"
+          },
+          "stop": {
+            "description": "Stop sequences.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stream": {
+            "description": "Whether to stream the response (default: true).",
+            "type": "boolean"
+          },
+          "temperature": {
+            "description": "Sampling temperature (0.0-2.0).",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ]
+      },
+      "Message": {
+        "description": "A chat message in the LM Studio format.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "The content of the message.",
+            "type": "string"
+          },
+          "role": {
+            "description": "The role of the message author (system, user, assistant).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "LoadModelBody": {
+        "title": "LoadModelBody",
+        "description": "Request body for the `/api/v1/models/load` endpoint.",
+        "type": "object",
+        "properties": {
+          "config": {
+            "description": "Optional load configuration."
+          },
+          "integrations": {
+            "description": "Optional MCP integrations.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Integration"
+                }
+              ]
+            }
+          },
+          "model": {
+            "description": "Model identifier to load.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ]
+      },
+      "Integration": {
+        "description": "Configuration for an MCP integration.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The MCP server name or identifier.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "LoadConfig": {
+        "description": "Load configuration options.",
+        "type": "object",
+        "properties": {
+          "context_length": {
+            "description": "Context length to use."
+          },
+          "gpu_offload": {
+            "description": "GPU offload layers (-1 for all)."
+          }
+        }
+      },
+      "UnloadModelBody": {
+        "title": "UnloadModelBody",
+        "description": "Request body for the `/api/v1/models/unload` endpoint.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "description": "Model identifier to unload.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ]
+      },
+      "DownloadModelBody": {
+        "title": "DownloadModelBody",
+        "description": "Request body for the `/api/v1/models/download` endpoint.\n\nThe download endpoint supports SSE streaming for progress updates.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "description": "Model identifier to download (e.g., \"lmstudio-community/gemma-2-2b-it-GGUF\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ]
+      },
+      "DownloadStatusBody": {
+        "title": "DownloadStatusBody",
+        "description": "Request body for the `/api/v1/models/download/status` endpoint.",
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "description": "The job ID to check status for.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      },
       "ListModelsResponse": {
         "title": "ListModelsResponse",
         "description": "Response from the `/api/v1/models` endpoint.",
@@ -274,6 +439,37 @@
           "object",
           "data"
         ]
+      },
+      "Capabilities": {
+        "title": "Capabilities",
+        "description": "Model capabilities.",
+        "type": "object",
+        "properties": {
+          "function_calling": {
+            "description": "Whether the model supports function calling.",
+            "type": "boolean"
+          },
+          "vision": {
+            "description": "Whether the model supports vision/multimodal input.",
+            "type": "boolean"
+          }
+        }
+      },
+      "LoadedInstance": {
+        "title": "LoadedInstance",
+        "description": "A loaded model instance.",
+        "type": "object",
+        "properties": {
+          "context_length": {
+            "description": "Current context length.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "id": {
+            "description": "The instance identifier.",
+            "type": "string"
+          }
+        }
       },
       "ModelInfo": {
         "title": "ModelInfo",
@@ -337,37 +533,6 @@
         "properties": {
           "format": {
             "description": "The quantization format (e.g., \"Q4_0\", \"Q8_0\").",
-            "type": "string"
-          }
-        }
-      },
-      "Capabilities": {
-        "title": "Capabilities",
-        "description": "Model capabilities.",
-        "type": "object",
-        "properties": {
-          "function_calling": {
-            "description": "Whether the model supports function calling.",
-            "type": "boolean"
-          },
-          "vision": {
-            "description": "Whether the model supports vision/multimodal input.",
-            "type": "boolean"
-          }
-        }
-      },
-      "LoadedInstance": {
-        "title": "LoadedInstance",
-        "description": "A loaded model instance.",
-        "type": "object",
-        "properties": {
-          "context_length": {
-            "description": "Current context length.",
-            "type": "integer",
-            "format": "uint32"
-          },
-          "id": {
-            "description": "The instance identifier.",
             "type": "string"
           }
         }

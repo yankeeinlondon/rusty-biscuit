@@ -166,6 +166,263 @@
   },
   "components": {
     "schemas": {
+      "CreateMessageBody": {
+        "title": "CreateMessageBody",
+        "description": "Request body for the Create Message endpoint (POST /v1/messages).",
+        "type": "object",
+        "properties": {
+          "max_tokens": {
+            "description": "Maximum tokens to generate.\n\nMust be less than the model's maximum output limit.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "messages": {
+            "description": "Conversation messages.\n\nMessages alternate between user and assistant roles.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Message"
+                }
+              ]
+            }
+          },
+          "metadata": {
+            "description": "Request metadata for tracking."
+          },
+          "model": {
+            "description": "Model identifier (e.g., \"claude-sonnet-4-5-20250514\").",
+            "type": "string"
+          },
+          "service_tier": {
+            "description": "Service tier selection."
+          },
+          "stop_sequences": {
+            "description": "Custom stop sequences.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stream": {
+            "description": "Whether to stream the response.",
+            "type": "boolean"
+          },
+          "system": {
+            "description": "System prompt providing context and instructions."
+          },
+          "temperature": {
+            "description": "Sampling temperature (0.0-1.0).\n\nLower values are more deterministic.",
+            "type": "number",
+            "format": "double"
+          },
+          "thinking": {
+            "description": "Extended thinking configuration."
+          },
+          "tool_choice": {
+            "description": "How to select tools for use."
+          },
+          "tools": {
+            "description": "Tools available for the model to use.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Tool"
+                }
+              ]
+            }
+          },
+          "top_k": {
+            "description": "Top-K sampling parameter.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "top_p": {
+            "description": "Top-P (nucleus) sampling parameter.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "model",
+          "messages",
+          "max_tokens"
+        ]
+      },
+      "CacheControl": {
+        "description": "Cache control settings for prompt caching.\n\nPrompt caching reduces costs by up to 90% for repeated context.",
+        "type": "object",
+        "properties": {
+          "ttl": {
+            "description": "Time-to-live for the cache entry.\n\nValid values: \"5m\" (default), \"1h\""
+          },
+          "type": {
+            "description": "Cache type (currently only \"ephemeral\" is supported).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "ContentBlock": {
+        "title": "ContentBlock",
+        "description": "Content block for messages.\n\nMessages contain an array of content blocks that can include text,\nimages, documents, tool use requests, and tool results."
+      },
+      "DocumentSource": {
+        "description": "Source for document content."
+      },
+      "ImageSource": {
+        "description": "Source for image content."
+      },
+      "Message": {
+        "title": "Message",
+        "description": "A message in the conversation.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "Content blocks making up the message.\n\nFor simple text messages, use a single TextBlock.\nFor multimodal or tool interactions, use multiple blocks.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ContentBlock"
+                }
+              ]
+            }
+          },
+          "role": {
+            "description": "The role of the message author."
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "MessageRole": {
+        "description": "The role of a message in the conversation."
+      },
+      "Metadata": {
+        "description": "Request metadata for tracking purposes.",
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "description": "External user identifier for abuse detection.\n\nShould be a UUID or hash, not raw identifiable information."
+          }
+        }
+      },
+      "ServiceTier": {
+        "description": "Service tier selection for the request."
+      },
+      "SystemContent": {
+        "description": "System prompt content block."
+      },
+      "SystemPrompt": {
+        "description": "System prompt for the conversation.\n\nCan be a simple string or an array of content blocks."
+      },
+      "ThinkingConfig": {
+        "description": "Configuration for extended thinking.\n\nExtended thinking allows the model to reason internally before responding,\nimproving accuracy on complex tasks.",
+        "type": "object",
+        "properties": {
+          "budget_tokens": {
+            "description": "Token budget for thinking (minimum 1024).\n\nOnly used when type is \"enabled\"."
+          },
+          "type": {
+            "description": "Whether extended thinking is enabled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ThinkingType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "ThinkingType": {
+        "description": "Extended thinking enablement state."
+      },
+      "Tool": {
+        "title": "Tool",
+        "description": "A tool definition for the model to use.\n\nTools are defined using JSON Schema for the input parameters.",
+        "type": "object",
+        "properties": {
+          "cache_control": {
+            "description": "Optional cache control for the tool definition."
+          },
+          "description": {
+            "description": "Human-readable description of what the tool does.\n\nInclude when and how to use the tool. Be specific about trigger conditions.",
+            "type": "string"
+          },
+          "input_schema": {
+            "description": "JSON Schema defining the input parameters."
+          },
+          "name": {
+            "description": "Unique name for the tool.\n\nMust match the pattern `^[a-zA-Z0-9_-]{1,64}$`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "input_schema"
+        ]
+      },
+      "ToolChoice": {
+        "description": "How the model should choose which tools to use."
+      },
+      "ToolResultContent": {
+        "description": "Content for a tool result.\n\nCan be a simple string or an array of content blocks for rich results."
+      },
+      "CountTokensBody": {
+        "title": "CountTokensBody",
+        "description": "Request body for the Count Tokens endpoint (POST /v1/messages/count_tokens).",
+        "type": "object",
+        "properties": {
+          "messages": {
+            "description": "Conversation messages.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Message"
+                }
+              ]
+            }
+          },
+          "model": {
+            "description": "Model identifier.",
+            "type": "string"
+          },
+          "system": {
+            "description": "System prompt."
+          },
+          "thinking": {
+            "description": "Extended thinking configuration."
+          },
+          "tool_choice": {
+            "description": "Tool choice strategy."
+          },
+          "tools": {
+            "description": "Tools to include in token count.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Tool"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ]
+      },
       "MessageResponse": {
         "title": "MessageResponse",
         "description": "Response from the Create Message endpoint.",
@@ -216,6 +473,38 @@
           "content",
           "stop_reason",
           "usage"
+        ]
+      },
+      "StopReason": {
+        "description": "Why the model stopped generating."
+      },
+      "Usage": {
+        "description": "Token usage statistics.",
+        "type": "object",
+        "properties": {
+          "cache_creation_input_tokens": {
+            "description": "Tokens written to cache."
+          },
+          "cache_read_input_tokens": {
+            "description": "Tokens read from cache."
+          },
+          "input_tokens": {
+            "description": "Number of input tokens.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "output_tokens": {
+            "description": "Number of output tokens.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "service_tier": {
+            "description": "Service tier used for this request."
+          }
+        },
+        "required": [
+          "input_tokens",
+          "output_tokens"
         ]
       },
       "CountTokensResponse": {

@@ -858,6 +858,97 @@
           }
         }
       },
+      "BranchInfo": {
+        "description": "Simple branch information (for mainbranch).",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Branch name."
+          },
+          "type": {
+            "description": "Object type (e.g., \"branch\")."
+          }
+        }
+      },
+      "Link": {
+        "description": "A HATEOAS link with href field.",
+        "type": "object",
+        "properties": {
+          "href": {
+            "description": "The URL this link points to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "href"
+        ]
+      },
+      "Project": {
+        "description": "Project information.",
+        "type": "object",
+        "properties": {
+          "key": {
+            "description": "The project key."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "name": {
+            "description": "The project name."
+          },
+          "type": {
+            "description": "Object type (e.g., \"project\")."
+          },
+          "uuid": {
+            "description": "The project UUID."
+          }
+        }
+      },
+      "User": {
+        "description": "A Bitbucket user summary (common across many responses).",
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "description": "The user's account ID."
+          },
+          "display_name": {
+            "description": "The user's display name."
+          },
+          "links": {
+            "description": "HATEOAS links for this user."
+          },
+          "nickname": {
+            "description": "The user's nickname/username."
+          },
+          "type": {
+            "description": "Object type (e.g., \"user\")."
+          },
+          "uuid": {
+            "description": "The user's UUID (e.g., \"{abc-123}\")."
+          }
+        }
+      },
+      "Workspace": {
+        "description": "Workspace information.",
+        "type": "object",
+        "properties": {
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "name": {
+            "description": "The workspace name."
+          },
+          "slug": {
+            "description": "The workspace slug."
+          },
+          "type": {
+            "description": "Object type (e.g., \"workspace\")."
+          },
+          "uuid": {
+            "description": "The workspace UUID."
+          }
+        }
+      },
       "PaginatedResponse<SourceEntry>": {
         "title": "PaginatedResponse",
         "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
@@ -899,6 +990,48 @@
           }
         }
       },
+      "CommitInfo": {
+        "description": "Simple commit info embedded in other types.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "Commit hash."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "type": {
+            "description": "Object type (e.g., \"commit\")."
+          }
+        }
+      },
+      "SourceEntry": {
+        "description": "A source entry from directory listing.\n\nReturned by `GET /repositories/{workspace}/{repo_slug}/src/{commit}/{path}`.",
+        "type": "object",
+        "properties": {
+          "attributes": {
+            "description": "File attributes."
+          },
+          "commit": {
+            "description": "Commit hash (for files)."
+          },
+          "links": {
+            "description": "HATEOAS links including \"self\" for raw content."
+          },
+          "mimetype": {
+            "description": "MIME type for files."
+          },
+          "path": {
+            "description": "Full path from repository root."
+          },
+          "size": {
+            "description": "Size in bytes (only for files)."
+          },
+          "type": {
+            "description": "Entry type: \"commit_directory\" or \"commit_file\"."
+          }
+        }
+      },
       "PaginatedResponse<PullRequest>": {
         "title": "PaginatedResponse",
         "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
@@ -937,6 +1070,65 @@
                 }
               ]
             }
+          }
+        }
+      },
+      "BranchRef": {
+        "description": "Branch reference for PR source/destination.",
+        "type": "object",
+        "properties": {
+          "branch": {
+            "description": "Branch information."
+          },
+          "commit": {
+            "description": "Commit information."
+          },
+          "repository": {
+            "description": "Repository information."
+          }
+        }
+      },
+      "Content": {
+        "description": "Content with raw, markup, and HTML forms.",
+        "type": "object",
+        "properties": {
+          "html": {
+            "description": "Rendered HTML."
+          },
+          "markup": {
+            "description": "Markup type: \"markdown\", \"creole\", \"plaintext\"."
+          },
+          "raw": {
+            "description": "Raw content (markdown or plain text)."
+          }
+        }
+      },
+      "Participant": {
+        "description": "A participant in a pull request.",
+        "type": "object",
+        "properties": {
+          "approved": {
+            "description": "Whether the participant has approved the PR.",
+            "type": "boolean"
+          },
+          "changes_requested": {
+            "description": "Whether the participant has requested changes.",
+            "type": "boolean"
+          },
+          "participated_on": {
+            "description": "Timestamp of participation."
+          },
+          "role": {
+            "description": "Participant role: \"REVIEWER\" or \"PARTICIPANT\"."
+          },
+          "state": {
+            "description": "State of participation: \"approved\", \"changes_requested\", null."
+          },
+          "type": {
+            "description": "Object type."
+          },
+          "user": {
+            "description": "The participating user."
           }
         }
       },
@@ -1038,6 +1230,27 @@
           }
         }
       },
+      "RepositoryRef": {
+        "description": "Minimal repository reference (for PRs).",
+        "type": "object",
+        "properties": {
+          "full_name": {
+            "description": "Full name in \"workspace/repo_slug\" format."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "name": {
+            "description": "Repository name."
+          },
+          "type": {
+            "description": "Object type."
+          },
+          "uuid": {
+            "description": "Repository UUID."
+          }
+        }
+      },
       "PaginatedResponse<PullRequestComment>": {
         "title": "PaginatedResponse",
         "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
@@ -1076,6 +1289,67 @@
                 }
               ]
             }
+          }
+        }
+      },
+      "CommentParent": {
+        "description": "Parent comment reference.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Parent comment ID."
+          }
+        }
+      },
+      "InlineContext": {
+        "description": "Inline context for code comments.",
+        "type": "object",
+        "properties": {
+          "from": {
+            "description": "Line number (old version)."
+          },
+          "path": {
+            "description": "File path."
+          },
+          "to": {
+            "description": "Line number (new version)."
+          }
+        }
+      },
+      "PullRequestComment": {
+        "description": "A comment on a pull request.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "Comment content."
+          },
+          "created_on": {
+            "description": "Creation timestamp (ISO 8601)."
+          },
+          "deleted": {
+            "description": "Whether this is a deleted comment.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Comment ID."
+          },
+          "inline": {
+            "description": "Inline context (for code comments)."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "parent": {
+            "description": "Parent comment ID (for threaded comments)."
+          },
+          "type": {
+            "description": "Object type."
+          },
+          "updated_on": {
+            "description": "Last update timestamp (ISO 8601)."
+          },
+          "user": {
+            "description": "Comment author."
           }
         }
       },
@@ -1206,6 +1480,21 @@
           }
         }
       },
+      "Milestone": {
+        "description": "Milestone reference.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Milestone ID."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "name": {
+            "description": "Milestone name."
+          }
+        }
+      },
       "PaginatedResponse<IssueComment>": {
         "title": "PaginatedResponse",
         "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
@@ -1244,6 +1533,33 @@
                 }
               ]
             }
+          }
+        }
+      },
+      "IssueComment": {
+        "description": "A comment on an issue.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "Comment content."
+          },
+          "created_on": {
+            "description": "Creation timestamp (ISO 8601)."
+          },
+          "id": {
+            "description": "Comment ID."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "type": {
+            "description": "Object type."
+          },
+          "updated_on": {
+            "description": "Last update timestamp (ISO 8601)."
+          },
+          "user": {
+            "description": "Comment author."
           }
         }
       },
@@ -1288,6 +1604,42 @@
           }
         }
       },
+      "ChangeDetail": {
+        "description": "Detail of a field change.",
+        "type": "object",
+        "properties": {
+          "new": {
+            "description": "New value."
+          },
+          "old": {
+            "description": "Old value."
+          }
+        }
+      },
+      "IssueChange": {
+        "description": "An issue change record from the change history.",
+        "type": "object",
+        "properties": {
+          "changes": {
+            "description": "The changes made (field name -> change detail)."
+          },
+          "created_on": {
+            "description": "Change timestamp (ISO 8601)."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "message": {
+            "description": "Message associated with the change (if any)."
+          },
+          "type": {
+            "description": "Object type."
+          },
+          "user": {
+            "description": "User who made the change."
+          }
+        }
+      },
       "PaginatedResponse<Tag>": {
         "title": "PaginatedResponse",
         "description": "A paginated response wrapper.\n\nBitbucket uses cursor-based pagination. Follow the `next` URL to get more results.",
@@ -1329,6 +1681,18 @@
           }
         }
       },
+      "CommitAuthor": {
+        "description": "Commit author information.",
+        "type": "object",
+        "properties": {
+          "raw": {
+            "description": "Raw author string (e.g., \"Name <email>\")."
+          },
+          "user": {
+            "description": "Linked user account (if any)."
+          }
+        }
+      },
       "Tag": {
         "title": "Tag",
         "description": "A repository tag from `GET /repositories/{workspace}/{repo_slug}/refs/tags`.",
@@ -1359,6 +1723,42 @@
           "type": {
             "description": "Object type (e.g., \"tag\").",
             "type": "string"
+          }
+        }
+      },
+      "TagTarget": {
+        "description": "Target commit for a tag.",
+        "type": "object",
+        "properties": {
+          "author": {
+            "description": "Commit author."
+          },
+          "date": {
+            "description": "Commit date (ISO 8601)."
+          },
+          "hash": {
+            "description": "Commit hash."
+          },
+          "links": {
+            "description": "HATEOAS links."
+          },
+          "message": {
+            "description": "Commit message."
+          },
+          "type": {
+            "description": "Object type (e.g., \"commit\")."
+          }
+        }
+      },
+      "Tagger": {
+        "description": "Tagger information for annotated tags.",
+        "type": "object",
+        "properties": {
+          "raw": {
+            "description": "Raw tagger string (e.g., \"Name <email>\")."
+          },
+          "user": {
+            "description": "Linked user account (if any)."
           }
         }
       },
@@ -1400,6 +1800,33 @@
                 }
               ]
             }
+          }
+        }
+      },
+      "Download": {
+        "description": "A download artifact from `GET /repositories/{workspace}/{repo_slug}/downloads`.\n\nDownloads serve as release artifacts in Bitbucket (there's no first-class release concept).",
+        "type": "object",
+        "properties": {
+          "created_on": {
+            "description": "Creation timestamp (ISO 8601)."
+          },
+          "downloads": {
+            "description": "Number of times this file has been downloaded."
+          },
+          "links": {
+            "description": "HATEOAS links (includes \"self\" for download URL)."
+          },
+          "name": {
+            "description": "Filename."
+          },
+          "size": {
+            "description": "File size in bytes."
+          },
+          "type": {
+            "description": "Object type."
+          },
+          "user": {
+            "description": "User who uploaded this download."
           }
         }
       },
