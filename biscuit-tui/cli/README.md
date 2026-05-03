@@ -16,7 +16,8 @@ The binary is named `question`.
   - `raw`: plain text, one value per line (default for scalars and multi-selects)
   - `json`: JSON encoding (strings are quoted, arrays for multi-value outputs)
   - `null`: NUL-byte separated (useful when values may contain newlines; pairs with `xargs -0`)
-- `--height <N|PCT%>` — render inline in the given number of rows below the cursor instead of fullscreen. Accepts either an absolute cell count (e.g. `12`) or a percentage (e.g. `50%`); percentages are resolved against the current terminal rows at render time and clamped to a floor of 3 rows.
+- `--height <N|PCT%>` — render inline in up to the given number of rows below the cursor instead of fullscreen. Accepts either an absolute cell count (e.g. `12`) or a percentage (e.g. `50%`). Both forms are treated as a maximum: when the live terminal is smaller, the prompt clamps to the rows actually available. Percentages are resolved against the current terminal rows (floor of 3) and **re-resolved on every terminal resize** so the inline viewport tracks the requested fraction mid-prompt.
+- `--show-input-on-exit` — preserve the rendered prompt on exit instead of clearing it. Default behaviour is fzf-style: the inline viewport is wiped on submit/Esc/Ctrl-C so the terminal reclaims the space. With this flag set the final frame stays on screen and the cursor moves to the row just below the chrome, so subsequent shell output follows the rendered border without overlapping it. No effect on fullscreen prompts.
 
 ## Subcommands
 

@@ -117,7 +117,8 @@ let result = run_standalone(TextInput::new(), state, None);
 ```
 
 - `None` as the height runs fullscreen (alternate screen).
-- `Some(HeightSpec::Cells(10))` runs inline for 10 rows.
+- `Some(HeightSpec::Cells(10))` runs inline for up to 10 rows; ratatui's `autoresize` clamps the viewport to the live terminal height when smaller.
+- `Some(HeightSpec::Percent(50))` runs inline for 50% of the terminal height (floor of 3 rows). The percentage is re-resolved on every terminal resize, so the inline viewport tracks the requested fraction as the terminal grows or shrinks mid-prompt.
 - The runner handles raw mode, terminal restoration, and exit-code mapping.
 
 ### Embedded
