@@ -1,5 +1,6 @@
 {
     "cSpell.words": [
+        "apikey",
         "backpressure",
         "codegen",
         "docstrings",
@@ -10,6 +11,7 @@
         "Nagle",
         "osascript",
         "rustls",
+        "schemars",
         "SSDP",
         "Tizen",
         "tungstenite",
