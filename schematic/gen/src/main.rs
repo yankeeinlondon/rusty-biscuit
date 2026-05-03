@@ -400,6 +400,33 @@ fn resolve_export_defaults(
     }
 }
 
+/// Builds a `GeneratorError::ConfigError` describing missing JSON response
+/// schemas for an API in a grouped OpenAPI export.
+///
+/// The message is intentionally verbose: it names the module, the API, and
+/// every missing type so authors can fix the registry without re-running the
+/// generator with extra flags.
+fn missing_schemas_error(
+    module_name: &str,
+    api_name: &str,
+    missing: &[String],
+) -> GeneratorError {
+    let first_missing = missing
+        .first()
+        .map(String::as_str)
+        .unwrap_or("MissingType");
+    GeneratorError::ConfigError(format!(
+        "OpenAPI registry incomplete for module \"{module}\" (API \"{api}\"): \
+         missing schema(s) {missing:?}. \
+         Add JsonSchema derive + register::<T>(\"{first}\") entries in \
+         schematic-definitions, or skip with --no-openapi.",
+        module = module_name,
+        api = api_name,
+        missing = missing,
+        first = first_missing,
+    ))
+}
+
 /// Runs the generate command.
 fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
     if api_name == "all" {
@@ -483,6 +510,13 @@ fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Generator
                  Add openapi_registry() to schematic-definitions or skip with --no-openapi."
             ))
         })?;
+
+        // Strict completeness check: every JSON response schema referenced by
+        // this API must be registered. Catches dangling `$ref`s before they
+        // can be emitted into the OpenAPI document.
+        registry
+            .validate_completeness(&api)
+            .map_err(|missing| missing_schemas_error(&module_name, &api.name, &missing))?;
 
         run_openapi_export_grouped(
             &module_name,
@@ -719,6 +753,17 @@ fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
                      Add openapi_registry() to schematic-definitions or skip with --no-openapi."
                 ))
             })?;
+
+            // Strict completeness check: every member API's JSON response
+            // schemas must be present in the merged registry. This guards the
+            // grouped export path against dangling `$ref`s.
+            for member in module_apis.iter() {
+                registry
+                    .validate_completeness(member)
+                    .map_err(|missing| {
+                        missing_schemas_error(module_name, &member.name, &missing)
+                    })?;
+            }
 
             let api_refs: Vec<&schematic_define::RestApi> = module_apis.iter().collect();
 
