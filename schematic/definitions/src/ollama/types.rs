@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Controls model behavior including sampling parameters, context window,
 /// and hardware utilization.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModelOptions {
     /// Context window size (default: 2048).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,7 +78,7 @@ pub struct ModelOptions {
 }
 
 /// A chat message in the native Ollama format.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Message {
     /// The role of the message author (system, user, assistant).
     pub role: String,
@@ -92,7 +92,7 @@ pub struct Message {
 }
 
 /// Request body for the `/api/generate` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GenerateBody {
     /// Model name to use.
     pub model: String,
@@ -178,7 +178,7 @@ pub struct GenerateResponse {
 }
 
 /// Request body for the `/api/chat` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatBody {
     /// Model name to use.
     pub model: String,
@@ -244,7 +244,7 @@ pub struct ChatResponse {
 }
 
 /// Request body for the `/api/embeddings` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EmbeddingsBody {
     /// Model name to use.
     pub model: String,
@@ -331,7 +331,7 @@ pub struct ListModelsResponse {
 }
 
 /// Request body for the `/api/show` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ShowModelBody {
     /// Model name to show.
     pub name: String,
@@ -378,7 +378,7 @@ pub struct ShowModelResponse {
 }
 
 /// Request body for the `/api/pull` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PullModelBody {
     /// Model name to pull.
     pub name: String,
@@ -412,7 +412,7 @@ pub struct PullModelProgress {
 }
 
 /// Request body for the `/api/push` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PushModelBody {
     /// Model name to push.
     pub name: String,
@@ -430,7 +430,7 @@ pub struct PushModelBody {
 pub type PushModelProgress = PullModelProgress;
 
 /// Request body for the `/api/copy` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CopyModelBody {
     /// Source model name.
     pub source: String,
@@ -440,14 +440,14 @@ pub struct CopyModelBody {
 }
 
 /// Request body for the `/api/delete` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteModelBody {
     /// Model name to delete.
     pub name: String,
 }
 
 /// Request body for the `/api/create` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateModelBody {
     /// Name for the new model.
     pub name: String,
@@ -515,7 +515,7 @@ pub struct ListRunningModelsResponse {
 // =============================================================================
 
 /// A chat message in the OpenAI format.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIMessage {
     /// The role of the message author.
     pub role: String,
@@ -525,7 +525,7 @@ pub struct OpenAIMessage {
 }
 
 /// Request body for the `/v1/chat/completions` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIChatCompletionRequest {
     /// Model name to use.
     pub model: String,
@@ -613,7 +613,7 @@ pub struct OpenAIChatCompletionResponse {
 }
 
 /// Request body for the `/v1/completions` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAICompletionRequest {
     /// Model name to use.
     pub model: String,
@@ -684,7 +684,7 @@ pub struct OpenAICompletionResponse {
 }
 
 /// Request body for the `/v1/embeddings` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAIEmbeddingRequest {
     /// Model name to use.
     pub model: String,

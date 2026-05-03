@@ -90,7 +90,19 @@ use schematic_define::{
 pub fn openapi_registry() -> SchemaRegistry {
     SchemaRegistry::new()
         // Authentication types (Bearer API only)
+        .register::<LoginBody>("LoginBody")
         .register::<LoginResponse>("LoginResponse")
+        // Publishing types
+        .register::<SubscribeBody>("SubscribeBody")
+        .register::<PublishBody>("PublishBody")
+        .register::<PublishBatchBody>("PublishBatchBody")
+        // Rules Engine types
+        .register::<CreateRuleBody>("CreateRuleBody")
+        .register::<TestRuleBody>("TestRuleBody")
+        // Authentication types
+        .register::<CreateAuthUserBody>("CreateAuthUserBody")
+        // Banned types
+        .register::<CreateBanBody>("CreateBanBody")
         // Node & Cluster types
         .register::<NodeInfo>("NodeInfo")
         .register::<ListNodesResponse>("ListNodesResponse")

@@ -133,13 +133,27 @@ impl SchemaRegistry {
     /// ```
     #[must_use]
     pub fn to_openapi_schemas(&self) -> IndexMap<String, openapiv3::Schema> {
-        self.types
-            .iter()
-            .map(|(name, schema)| {
-                let openapi_schema = convert_schema_to_openapi(schema);
-                (name.clone(), openapi_schema)
-            })
-            .collect()
+        let mut result = IndexMap::new();
+
+        for (name, schema) in &self.types {
+            let openapi_schema = convert_schema_to_openapi(schema);
+            result.insert(name.clone(), openapi_schema);
+
+            // Extract nested $defs from the schemars JSON and include them too.
+            let json_value = schema.as_value();
+            if let Some(defs) = json_value.get("$defs").and_then(|v| v.as_object()) {
+                for (def_name, def_schema) in defs {
+                    if !result.contains_key(def_name) {
+                        result.insert(
+                            def_name.clone(),
+                            convert_json_schema_to_openapi(def_schema),
+                        );
+                    }
+                }
+            }
+        }
+
+        result
     }
 
     /// Validates that all schema names referenced by an API are registered.
@@ -185,6 +199,12 @@ impl SchemaRegistry {
 
         for endpoint in &api.endpoints {
             if let schematic_define::ApiResponse::Json(schema) = &endpoint.response {
+                let type_name = &schema.type_name;
+                if !self.types.contains_key(type_name) {
+                    missing.push(type_name.clone());
+                }
+            }
+            if let Some(schematic_define::ApiRequest::Json(schema)) = &endpoint.request {
                 let type_name = &schema.type_name;
                 if !self.types.contains_key(type_name) {
                     missing.push(type_name.clone());
@@ -769,6 +789,45 @@ mod tests {
         // Should be deduplicated
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0], "MissingType");
+    }
+
+    #[test]
+    fn validate_completeness_fails_for_missing_request_types() {
+        use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestApi, RestMethod};
+
+        let api = RestApi {
+            name: "Test".to_string(),
+            description: "Test".to_string(),
+            base_url: "https://test.com".to_string(),
+            docs_url: None,
+            auth: schematic_define::AuthStrategy::None,
+            auth_policy: None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "Create".to_string(),
+                method: RestMethod::Post,
+                path: "/create".to_string(),
+                description: String::new(),
+                request: Some(ApiRequest::json_type("SomeBody")),
+                response: ApiResponse::Empty,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            }],
+            module_path: None,
+            request_suffix: None,
+            version: None,
+            env_mapping: None,
+        };
+
+        let registry = SchemaRegistry::new();
+        let result = registry.validate_completeness(&api);
+        assert!(result.is_err());
+
+        let missing = result.unwrap_err();
+        assert!(missing.contains(&"SomeBody".to_string()));
     }
 
     #[test]
