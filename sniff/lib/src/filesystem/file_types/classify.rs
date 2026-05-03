@@ -40,13 +40,10 @@ pub fn scan_file_inventory_with_exclusions(
             .collect(),
     };
 
-    // Use parallel walker for production, sequential for tests to avoid ordering issues
-    #[cfg(not(test))]
+    // Use parallel walker with Drop-based flush (same pattern as system_view.rs).
+    // The parallel path sorts output so results are deterministic.
     let (classifications, total_files_scanned) =
         scan_inventory_parallel(root, &scope.exclude_roots);
-    #[cfg(test)]
-    let (classifications, total_files_scanned) =
-        scan_inventory_sequential(root, &scope.exclude_roots);
 
     performance::record_logged_stage(
         "filesystem.file_inventory.scan",
@@ -61,7 +58,6 @@ pub fn scan_file_inventory_with_exclusions(
     })
 }
 
-#[cfg(not(test))]
 fn scan_inventory_parallel(
     root: &Path,
     exclude_roots: &[PathBuf],
@@ -143,7 +139,7 @@ fn scan_inventory_parallel(
     (classifications, total)
 }
 
-#[cfg(test)]
+#[allow(dead_code)]
 fn scan_inventory_sequential(
     root: &Path,
     exclude_roots: &[PathBuf],
@@ -788,5 +784,49 @@ mod tests {
             pkg_inventory.classifications[0].language,
             Some(ProgrammingLanguage::Rust)
         );
+    }
+
+    /// Regression test for the parallel inventory scanner.
+    ///
+    /// Before the worker-local flush fix, `scan_inventory_parallel` would
+    /// walk and classify files but drop the per-thread results, returning
+    /// an empty vector. This test exercises the parallel path directly
+    /// and asserts that classifications are preserved.
+    #[test]
+    fn parallel_inventory_returns_populated_classifications() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a small fixture tree with varied file types
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::create_dir_all(dir.path().join("tests")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "pub fn lib() {}").unwrap();
+        fs::write(dir.path().join("tests/test.rs"), "#[test] fn t() {}").unwrap();
+        fs::write(dir.path().join("README.md"), "# Project").unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = 'x'\n").unwrap();
+
+        // Call the parallel path directly
+        let (classifications, total) = scan_inventory_parallel(dir.path(), &[]);
+
+        assert!(
+            !classifications.is_empty(),
+            "parallel inventory must return non-empty classifications; got {} files scanned, {} classifications",
+            total,
+            classifications.len()
+        );
+        assert_eq!(classifications.len(), total);
+
+        // Verify expected file types are present
+        let rust_count = classifications
+            .iter()
+            .filter(|c| c.language == Some(ProgrammingLanguage::Rust))
+            .count();
+        assert_eq!(rust_count, 3, "expected 3 Rust files");
+
+        let md_count = classifications
+            .iter()
+            .filter(|c| c.association == FileAssociation::Documentation)
+            .count();
+        assert_eq!(md_count, 1, "expected 1 markdown file");
     }
 }
