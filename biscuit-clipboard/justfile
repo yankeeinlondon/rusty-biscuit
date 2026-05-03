@@ -1,0 +1,71 @@
+set dotenv-load
+set positional-arguments
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+    echo "Biscuit Clipboard Library, Service & CLI"
+    echo "========================================="
+    echo
+    just --list | grep -v 'default'
+
+# build library, service, and CLI
+build *args="":
+    @just _build biscuit-clipboard "Biscuit Clipboard Library" {{args}}
+    @just _build biscuit-clipboard-service "Biscuit Clipboard Service" {{args}}
+    @just _build biscuit-clipboard-cli "Biscuit Clipboard CLI" {{args}}
+
+# test library, service, and CLI
+test *args="":
+    @just _test biscuit-clipboard {{args}}
+    @just _test biscuit-clipboard-service {{args}}
+    @just _test biscuit-clipboard-cli {{args}}
+
+# Lint library, service, and CLI
+lint:
+    @just _lint biscuit-clipboard
+    @just _lint biscuit-clipboard-service
+    @just _lint biscuit-clipboard-cli
+
+# Lint (and fix) library, service, and CLI
+lint-fix:
+    @just _lint biscuit-clipboard || just _fix_lint biscuit-clipboard
+    @just _lint biscuit-clipboard-service || just _fix_lint biscuit-clipboard-service
+    @just _lint biscuit-clipboard-cli || just _fix_lint biscuit-clipboard-cli
+
+# install CLI binary
+install *args="":
+    @just build --release
+    @just _install "./cli" "Biscuit Clipboard CLI" "clip" {{args}}
+
+# build and show the docs for the library code
+docs:
+    @echo "Build and then show latest docs for the biscuit-clipboard library code"
+    @echo ""
+    @cargo doc -p biscuit-clipboard --open
+
+# run CLI in development mode
+cli *args="":
+    @cargo run -p biscuit-clipboard-cli -- {{args}}
+
+# run service in development mode
+service *args="":
+    @cargo run -p biscuit-clipboard-service -- {{args}}

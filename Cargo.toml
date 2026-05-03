@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "biscuit-test-harness",
+    "biscuit-clipboard/cli",
+    "biscuit-clipboard/lib",
+    "biscuit-clipboard/service",
     "biscuit-file/cli",
     "biscuit-file/lib",
     "biscuit-hash/cli",
