@@ -6,17 +6,11 @@ We allow the output of shell commands to be injected into a Markdown page using 
 ::shell <command> <params>
 ```
 
-This is a powerful feature but if left unguarded it could be a very damaging one too. To prevent malicious or accidentally harmful commands from being run we have a two stage security design:
+## Pre-Flight Approval
 
-1. there are a set of [Blacklisted Commands and Syntax](#blacklisted-commands-and-syntax) which will NEVER be allowed to be run
-2. we maintain a list of approved commands in a namespaced "whitelist" file:
-     - located in `[repo root]/.darkmatter-shell-whitelist` if CWD is a git repo
-     - otherwise located in `${HOME}/.darkmatter-shell-whitelist`
+All shell commands must pass through Darkmatter's pre-flight security check before execution. This covers blacklist validation, whitelist lookup, and interactive approval. See [Pre-Flight Shell Approval](../topics/pre-flight-checks.md) for the full policy, blacklisted commands list, whitelist/blacklist file locations, and interactive approval options.
 
-We also maintain a companion namespaced blacklist file for user-denied commands:
-
-- located in `[repo root]/.darkmatter-shell-blacklist` if CWD is a git repo
-- otherwise located in `${HOME}/.darkmatter-shell-blacklist`
+## Execution Behavior
 
 When the Darkmatter compose pipeline reaches the Shell Expansion stage, it will iterate over all `::shell` lines and:
 
@@ -24,7 +18,7 @@ When the Darkmatter compose pipeline reaches the Shell Expansion stage, it will 
     - `<red><b>ERROR:</b></red> the shell command '{command}' does not exist on this host but was referenced in a shell expansion operation during the <b>compose</b> pipeline in <blue>{file}</blue>!`
 - if the command matches the blacklisted commands and syntax we exit in error
     - `<red><b>ERROR:</b></red> the shell command '{command}' is not allowed as a shell expansion command in Darkmatter's compose pipeline! This command is considered a globally blacklisted command.`
-- if the command does not exist in the repo's (or user's) whitelist file the the user will be asked to approve this command. For more details see [Approvals and the Whitelist](#approvals-and-the-whitelist).
+- if the command does not exist in the repo's (or user's) whitelist file the user will be asked to approve this command (see [Pre-Flight Shell Approval](../topics/pre-flight-checks.md))
 - if the command _does_ exist in the whitelist then we execute the command and both STDOUT and STDERR are captured and added to the Markdown document in place of the `::shell` instruction.
 
     - If a command does not complete in 10 seconds (by default) then we will exit with an error
@@ -43,74 +37,6 @@ Darkmatter also supports shell expansion in top-level frontmatter string values 
 - Frontmatter shell expansion stores trimmed `stdout` only
 - Body `::shell` expansion stores combined `stdout` + `stderr`
 - Both variants share the same policy, whitelist/blacklist, approval, and timeout infrastructure
-
-## Blacklisted Commands and Syntax
-
-The following commands will never be allowed as they are part of the global blacklist:
-
-- `rm`
-- `rimraf`
-- `find*-delete`
-- `unlink`
-- `shred`
-- `wipe`
-- `echo* >>*`, `echo* >*`
-- `* >*`
-- `install`
-- `brew`, `apt`, `nala`, `pacman`, `dnf`, `yum`
-- `npm uninstall`, `pnpm uninstall`, `bun uninstall`, `yarn uninstall`
-- `npm install`, `pnpm install`, `bun install`, `yarn install`
-- `npm add`, `pnpm add`, `bun add`, `yarn add`
-- `mv`
-- `dd`
-- `zfs`, `zpool`
-- `wipefs`
-- `mkfs*`
-- `parted`
-- `mparted`
-- `sgdisk`
-- `pvcreate`
-- `lvremove`
-- `vgremove`
-- `mdadm`
-- `cryptsetup`
-- `chmod`, `chgrp`, `chown`, `setfacl`
-- `tar`, `unzip`, `rsync`, `cp`,
-- `kill`, `pkill`, `killall`, 
-- `systemctl`
-- `shutdown`, `reboot`, `poweroff`, `halt`
-- `init`
-- `git reset`, `git clean`, `git checkout`, `git restore`, `git rebase`, `git branch`, `git push`, `git reflog`, `git gc`, `git reset`
-- `psql -c`
-- `mysql -e`
-- `redis-cli FLUSH*`
-- `mongosh --eval`
-- `ssh`
-- `scp`
-- `rsync`
-- `ansible`
-- `curl`
-- `wget`
-- `http`
-- `source`
-- `eval`
-- `sudo`
-- `doas`
-- `su`
-- `docker rm*`, `docker system prune*`, `docker volume rm*`, `docker volume prune*`
-- `kubectl delete*`
-- `helm uninstall*`
-- `terraform destroy*`
-
-## Approvals and the Whitelist
-
-When a command that does NOT match the Blacklist and is not registered in the Whitelist either then we must ask the user if they want to:
-
-- allow exact command (add command with all params to `.darkmatter-shell-whitelist`)
-- allow command with any parameters (add command with wildcard signature for params to `.darkmatter-shell-whitelist`)
-- allow once (all the current execution but do not add to `.darkmatter-shell-whitelist`)
-- deny (exit the pipeline process with an error but don't add to `.darkmatter-shell-blacklist`)
-- blacklist (exits the pipeline with an error and adds this command to `.darkmatter-shell-blacklist`)
 
 
 ## Handling Error Exit Codes

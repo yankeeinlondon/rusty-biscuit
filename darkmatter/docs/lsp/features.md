@@ -1,34 +1,20 @@
 ---
-prompt: |-
-    We are starting the planning process creating a Language Server (LSP) for Darkmatter. Your task is to evaluate the Darkmatter DSL features (interpolation, shell expansion, interpolation, etc.) and translate that into requirements for an LSP. Take your time and be as complete as possible.
 last_updated: 2026-05-02
 ---
-I'll draft the comprehensive feature roundup mapping every Darkmatter DSL feature to LSP requirements.
+# Darkmatter LSP Proposed Features
 
-# Darkmatter LSP Feature Roundup
+This document inventories a probable set of feature we will want in the Darkmatter DSL and translates each feature into the concrete Language Server Protocol (LSP) capabilities required to support it inside an editor.
 
-This document inventories every feature of the Darkmatter DSL (a CommonMark/GFM superset implemented by the `darkmatter` crate) and translates each feature into the concrete Language Server Protocol (LSP) capabilities required to support it inside an editor.
-
-The intent is not yet to design the implementation — that is covered by [`lsp-research-for-darkmatter.md`](./lsp-research-for-darkmatter.md). Here we focus on what the DSL *is*, what an author needs from a smart editor while writing it, and which LSP methods/capabilities map to those needs.
 
 ## 1. DSL Surface Area
 
 Darkmatter's compose pipeline runs in three serial phases (`Inline Pre`, `Transclusion`, `Inline Post`). The LSP must understand every textual artefact that authors can write inside the document — both inside the YAML frontmatter and inside the Markdown body.
 
+> **Note:** the _compose_ functionality that Darkmatter's library provides can convert any Markdown document into it's completed form which is always a valid Markdown document
+
 ### 1.1 Frontmatter Surface
 
-The frontmatter is YAML and forms an authoritative configuration layer. Authors interact with these top-level keys:
-
-| Key                       | Purpose                                                                   | Notable behaviour                                                                                                |
-|---------------------------|---------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| `replace`                 | Literal-string replacements applied to the body.                          | Map of scalar → scalar. Longest-key-wins, then lexicographic tie-break. Single-pass.                             |
-| `prologue` / `epilogue`   | Implicit transclusions prepended / appended to the document body.         | Path string; resolved via the same machinery as `::file`.                                                        |
-| `interpolate_code_blocks` | Boolean opt-in to interpolate fenced/indented code blocks.                | Defaults to `false`.                                                                                             |
-| `hr`                      | Horizontal-rule defaults.                                                 | Object with `style`, `alignment`, `weight`, `width`, `color`.                                                    |
-| `$schema`                 | Optional pointer to a JSON Schema describing this document's frontmatter. | LSP enforcement target.                                                                                          |
-| Arbitrary author keys     | Visible to interpolation as `{{ key }}` and nested `{{ a.b.c }}`.         | Schemas (when present) constrain shape.                                                                          |
-| `$(command)` values       | A frontmatter scalar that is a shell substitution literal.                | Top-level only. Trimmed `stdout` is written back over the original literal during *Frontmatter Shell Expansion*. |
-| `{{ expr }}` values       | A frontmatter scalar that is an interpolation literal.                    | Resolved during *Frontmatter Interpolation*, before the effective state is built.                                |
+::file frontmatter.md
 
 ### 1.2 Body Surface
 
