@@ -31,14 +31,13 @@ pub struct TextOutput {
 }
 
 pub use filesystem::{
-    PathListFormat, render_docs_output, render_git_section,
-    render_hash_section, render_path_list,
+    PathListFormat, render_docs_output, render_git_section, render_hash_section, render_path_list,
 };
 pub use just::{filter_justfiles_for_json, render_just_text};
 pub use notification_helpers::{
     print_notification_helpers_json, render_notification_helpers_markdown,
 };
-pub use programs::{print_programs_json, render_programs_markdown};
+pub use programs::{build_programs_json, render_programs_markdown};
 pub use remote::{
     print_remote_json, render_pull_requests_empty, render_pull_requests_table,
     render_pull_requests_verbose, render_remote_text,
@@ -783,14 +782,10 @@ fn apply_filter_to_json(
     (value, None)
 }
 
-fn attach_performance(
+pub fn attach_performance(
     mut filtered_json: serde_json::Value,
-    result: &SniffResult,
+    performance: &PerformanceReport,
 ) -> serde_json::Value {
-    let Some(performance) = result.performance.as_ref() else {
-        return filtered_json;
-    };
-
     let performance_json = serde_json::to_value(performance).unwrap_or(serde_json::Value::Null);
     match &mut filtered_json {
         serde_json::Value::Object(map) => {
@@ -802,6 +797,32 @@ fn attach_performance(
             "performance": performance_json,
         }),
     }
+}
+
+fn attach_performance_from_result(
+    filtered_json: serde_json::Value,
+    result: &SniffResult,
+) -> serde_json::Value {
+    match result.performance.as_ref() {
+        Some(perf) => attach_performance(filtered_json, perf),
+        None => filtered_json,
+    }
+}
+
+/// Print a JSON value to stdout, optionally injecting performance data.
+///
+/// When `performance` is `Some`, the data is injected into the JSON value
+/// (as a sibling field for objects, or wrapped as `{ data, performance }`
+/// for non-objects), matching the behavior of [`attach_performance`].
+pub fn print_json_value(value: serde_json::Value, performance: Option<&PerformanceReport>) {
+    let output = match performance {
+        Some(perf) => attach_performance(value, perf),
+        None => value,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
 }
 
 /// Print a filtered JSON view of `result` to stdout.
@@ -828,7 +849,7 @@ pub fn print_json(
         repo_action,
         base_dir,
     );
-    let with_perf = attach_performance(filtered, result);
+    let with_perf = attach_performance_from_result(filtered, result);
     println!("{}", serde_json::to_string_pretty(&with_perf)?);
     Ok(exit_code)
 }
@@ -1139,7 +1160,8 @@ mod tests {
             }),
         };
 
-        let filtered = attach_performance(serde_json::json!({"name": "sniff"}), &result);
+        let filtered =
+            attach_performance_from_result(serde_json::json!({"name": "sniff"}), &result);
         assert_eq!(filtered["name"], "sniff");
         assert_eq!(filtered["performance"]["total_duration_ms"], 12.5);
     }
@@ -1158,7 +1180,7 @@ mod tests {
             }),
         };
 
-        let filtered = attach_performance(serde_json::json!(["a", "b"]), &result);
+        let filtered = attach_performance_from_result(serde_json::json!(["a", "b"]), &result);
         assert_eq!(filtered["data"], serde_json::json!(["a", "b"]));
         assert_eq!(filtered["performance"]["counters"]["files"], 2);
     }

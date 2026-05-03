@@ -2152,6 +2152,15 @@ fn is_source_code_file(path: &str) -> bool {
 ///
 /// JSON consumers only need the boolean. The text/verbose path uses the count
 /// and area name to print a human-readable summary.
+///
+/// ## Notes
+///
+/// Pulls dirty paths from `git.file_changes` (always populated) plus the
+/// diff-rich `git.status.dirty` / `git.status.untracked` arrays (deep mode
+/// only). Without the `file_changes` source, non-deep callers would always
+/// see a count of `0` because `status.dirty`/`status.untracked` are empty
+/// unless `--refresh-remotes` is set. This mirrors the same chain used by
+/// [`current_package_area_is_dirty`].
 pub(crate) fn package_area_source_code_change_count(
     result: &sniff::SniffResult,
     base_dir: Option<&Path>,
@@ -2174,6 +2183,11 @@ pub(crate) fn package_area_source_code_change_count(
                 .untracked
                 .iter()
                 .map(|u| u.filepath.to_str().unwrap_or("")),
+        )
+        .chain(
+            git.file_changes
+                .iter()
+                .map(|fc| fc.path.to_str().unwrap_or("")),
         )
         .filter(|path| {
             let in_area = if area_prefix.is_empty() {
@@ -4238,6 +4252,80 @@ mod tests {
                 Some(&PathBuf::from("/somewhere-else")),
             );
             assert!(answer.is_none());
+        }
+
+        /// Build a `SniffResult` whose dirty paths arrive solely via
+        /// `git.file_changes` — i.e. the normal (non-deep) CLI path where
+        /// `git.status.dirty` and `git.status.untracked` are empty.
+        fn build_result_with_file_changes(
+            repo: RepoInfo,
+            file_changes: Vec<FileChange>,
+        ) -> SniffResult {
+            let mut git = make_git_info(file_changes);
+            git.repo_root = repo.root.clone();
+            // Force status.dirty / status.untracked empty so the test
+            // exclusively exercises the file_changes branch.
+            git.status.dirty = Vec::new();
+            git.status.untracked = Vec::new();
+            let filesystem = FilesystemInfo {
+                repo: Some(repo),
+                git: Some(git),
+                ..Default::default()
+            };
+            SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(filesystem),
+                performance: None,
+            }
+        }
+
+        #[test]
+        fn package_area_source_code_change_count_counts_file_changes_source_files() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let file_changes = vec![FileChange {
+                path: PathBuf::from("area-a/alpha/src/lib.rs"),
+                status: FileStatus::Modified,
+                action: FileAction::Modified,
+                lines_added: 1,
+                lines_removed: 0,
+            }];
+            let result = build_result_with_file_changes(repo, file_changes);
+
+            let (has, count, area) = package_area_source_code_change_count(
+                &result,
+                Some(&PathBuf::from("/repo/area-a/alpha")),
+            )
+            .expect("area should resolve");
+            assert!(has);
+            assert_eq!(count, 1);
+            assert_eq!(area, "area-a");
+        }
+
+        #[test]
+        fn package_area_source_code_change_count_ignores_file_changes_docs() {
+            let mut packages = vec![make_package("alpha", "area-a", &[])];
+            packages[0].relative = "area-a/alpha".to_string();
+            let repo = make_repo(packages);
+            let file_changes = vec![FileChange {
+                path: PathBuf::from("area-a/alpha/README.md"),
+                status: FileStatus::Modified,
+                action: FileAction::Modified,
+                lines_added: 1,
+                lines_removed: 0,
+            }];
+            let result = build_result_with_file_changes(repo, file_changes);
+
+            let (has, count, _area) = package_area_source_code_change_count(
+                &result,
+                Some(&PathBuf::from("/repo/area-a/alpha")),
+            )
+            .expect("area should resolve");
+            assert!(!has);
+            assert_eq!(count, 0);
         }
     }
 

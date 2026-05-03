@@ -499,8 +499,12 @@ pub fn render_pull_requests_empty(state: sniff::remote::PullRequestState) -> Str
 }
 
 /// Print remote report as JSON.
-pub fn print_remote_json(report: &RemoteReport) -> serde_json::Result<()> {
-    println!("{}", serde_json::to_string_pretty(report)?);
+pub fn print_remote_json(
+    report: &RemoteReport,
+    performance: Option<&sniff::PerformanceReport>,
+) -> serde_json::Result<()> {
+    let value = serde_json::to_value(report)?;
+    crate::output::print_json_value(value, performance);
     Ok(())
 }
 
@@ -599,7 +603,7 @@ mod tests {
     #[test]
     fn test_print_remote_json_succeeds() {
         let report = make_test_report();
-        let result = print_remote_json(&report);
+        let result = print_remote_json(&report, None);
         assert!(result.is_ok());
     }
 
