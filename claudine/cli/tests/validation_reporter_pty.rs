@@ -197,6 +197,39 @@ fn pty_pre_check_failure_emits_osc8_link_and_styled_header() {
          got window: {pre_header:?}"
     );
 
+    // -- YAML region carries SGR styling (positive assertion) ---------
+    //
+    // The renderer falls back to unstyled lines when
+    // `darkmatter::markdown::highlighting::highlight_yaml_lines` returns a
+    // line count that doesn't match the plain count. Without a positive
+    // assertion here, a degraded highlighter (broken theme load, missing
+    // yaml grammar, empty palette) would silently strip styling and the
+    // existing chrome-removal guard would still pass.
+    //
+    // The harness emits `line_range: Some(3..=5)`, so the source line
+    // contains `:3-5` and the reason line contains `Reason:`. The bytes
+    // between those markers are the YAML region (plus one closing OSC-8
+    // sequence and a CSI reset on the source line). `highlight_yaml_lines`
+    // emits truecolor foreground SGR escapes (`\x1b[38;2;R;G;Bm`) for each
+    // highlighted token; asserting on the `\x1b[38;` introducer guarantees
+    // real styling fired in the YAML region rather than just a bare reset.
+    let source_marker = transcript
+        .find(":3-5")
+        .expect("expected source-location ':3-5' marker in transcript");
+    let reason_marker = transcript
+        .find("Reason:")
+        .expect("expected 'Reason:' marker in transcript");
+    assert!(
+        reason_marker > source_marker,
+        "Reason marker must follow source-location marker"
+    );
+    let yaml_region = &transcript[source_marker..reason_marker];
+    assert!(
+        yaml_region.contains("\x1b[38;"),
+        "YAML region between ':3-5' and 'Reason:' must contain at least one \
+         foreground-color SGR ('\\x1b[38;...m'), got region: {yaml_region:?}"
+    );
+
     // -- No `yaml` fence label (chrome-removal regression guard) -------
     //
     // The chrome-free YAML helper introduced in Phase 4 must never emit a

@@ -103,6 +103,12 @@ impl SectionStream {
         Self { inner, state }
     }
 
+    /// Clone the shared tracker so external emitters (e.g. the flush-if-idle
+    /// ticker) can participate in the same section-spacing state machine.
+    pub fn tracker(&self) -> Arc<Mutex<SectionTracker>> {
+        self.state.clone()
+    }
+
     pub fn emit_stderr(&self, section: Section, line: &str) {
         debug_assert!(
             section != Section::FinalStdout,
