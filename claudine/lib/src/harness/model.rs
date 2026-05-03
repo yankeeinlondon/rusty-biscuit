@@ -128,6 +128,26 @@ impl std::fmt::Display for FailurePhase {
     }
 }
 
+/// Origin metadata for a validation rule, used by the failure reporter to
+/// surface the file, line range (best-effort), and YAML snippet that produced
+/// the rule.
+///
+/// `None` indicates a system-owned rule with no markdown origin (e.g. the
+/// inline writability pre-check) or a programmatically constructed rule from
+/// tests.
+#[derive(Debug, Clone)]
+pub struct RuleSource {
+    /// Absolute path to the source markdown file the rule was authored in.
+    pub file: PathBuf,
+    /// Best-effort 1-indexed inclusive line range within the source file's
+    /// frontmatter where the rule appears. `None` when range recovery was
+    /// not attempted or failed.
+    pub line_range: Option<std::ops::RangeInclusive<usize>>,
+    /// YAML snippet representing the single rule, suitable for syntax-
+    /// highlighted display.
+    pub yaml_snippet: String,
+}
+
 /// A single parsed validation rule.
 #[derive(Debug, Clone)]
 pub struct ValidationRule {
@@ -143,6 +163,8 @@ pub struct ValidationRule {
     pub message_template: Option<String>,
     /// Normalized subject key for subject-specific handler matching.
     pub subject_key: Option<String>,
+    /// Origin metadata for failure reporting; `None` for system-owned rules.
+    pub source: Option<RuleSource>,
 }
 
 /// All supported validation operations with their typed parameters.
@@ -450,6 +472,10 @@ pub struct ValidationCheckOutcome {
     pub markup: String,
     /// Human-readable failure reason when `passed` is false.
     pub failure_message: Option<String>,
+    /// Origin metadata cloned from the originating `ValidationRule`; `None`
+    /// for outcomes derived from system-owned or programmatically constructed
+    /// rules.
+    pub source: Option<RuleSource>,
 }
 
 /// All outcomes for one validation phase (pre or post).

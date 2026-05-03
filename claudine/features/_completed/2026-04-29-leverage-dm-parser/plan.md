@@ -7,9 +7,8 @@ packages:
   - claudine-cli
   - darkmatter
 source_files_during_phase_1:
-  - claudine/lib/src/events/event_meta.rs
-  - claudine/lib/src/dispatch/template.rs
-  - claudine/lib/src/dispatch/matcher.rs
+  - claudine/lib/src/dispatch/expression.rs
+  - claudine/lib/src/dispatch/mod.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
@@ -23,7 +22,16 @@ source_files_during_phase_3:
   - claudine/lib/src/actions/hook_action.rs
   - claudine/lib/src/dispatch/runner.rs
   - claudine/lib/src/dispatch/loader.rs
-  - claudine/lib/src/events/config.rs
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/tests/canonical_dispatch.rs
+  - claudine/cli/src/commands/actions.rs
+  - claudine/cli/src/commands/hooks.rs
+  - claudine/cli/src/commands/init_wizard.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init/prompts.rs
+  - claudine/cli/src/commands/config_tui/reducers.rs
+  - claudine/cli/src/commands/config_tui/tabs/actions.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
@@ -31,25 +39,33 @@ source_files_during_phase_4:
   - claudine/lib/src/dispatch/matcher.rs
   - claudine/lib/src/dispatch/loader.rs
   - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/dispatch/runner.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+packages_during_phase_4:
+  - claudine
+  - claudine-cli
 source_files_during_phase_5:
   - claudine/lib/src/harness/validate.rs
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
-source_files_during_phase_6:
-  - claudine/cli/README.md
-  - claudine/docs/topics/validations-and-handlers.md
-  - claudine/.claude/skills/claudine/SKILL.md
-  - claudine/features/2026-04-29-leverage-dm-parser/plan.md
+packages_during_phase_5:
+  - claudine
+source_files_during_phase_6: []
 docs_updated_during_phase_6:
   - claudine/cli/README.md
   - claudine/docs/topics/validations-and-handlers.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
-  - claudine/.claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/SKILL.md
+packages_during_phase_6:
+  - claudine
+  - claudine-cli
 ---
 
 # Leverage Darkmatter Parser in Claudine - Execution Plan

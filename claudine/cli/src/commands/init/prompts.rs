@@ -303,6 +303,7 @@ fn prompt_input_speak_action() -> Result<HookAction> {
         message,
         voice: None,
         gender: None,
+        when: None,
     })
 }
 
@@ -332,6 +333,7 @@ fn prompt_input_sound_effect() -> Result<HookAction> {
         effect: selected.replace(" (recommended)", ""),
         volume: 1.0,
         speed: 1.0,
+        when: None,
     })
 }
 
@@ -357,11 +359,13 @@ fn prompt_input_run_action() -> Result<HookAction> {
             args,
             timeout_ms: None,
             mapper: None,
+            when: None,
         })
     } else {
         Ok(HookAction::Bash {
             command,
             params: params_str,
+            when: None,
         })
     }
 }
@@ -480,15 +484,18 @@ mod tests {
                 message: "hello".to_string(),
                 voice: None,
                 gender: None,
+                when: None,
             },
             HookAction::SoundEffect {
                 effect: "ding".to_string(),
                 volume: 1.0,
                 speed: 1.0,
+                when: None,
             },
             HookAction::Bash {
                 command: "notify-send".to_string(),
                 params: String::new(),
+                when: None,
             },
         ];
 
