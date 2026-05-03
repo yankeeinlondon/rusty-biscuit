@@ -13,11 +13,12 @@
 
 #![allow(dead_code)]
 
+use std::ffi::OsString;
 use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{CapturedFrame, TerminalHarness};
+use super::{CapturedFrame, TerminalHarness, wait_for_prompt};
 
 /// Harness that runs each spawned binary inside a fresh detached tmux
 /// session.
@@ -39,7 +40,7 @@ impl TmuxHarness {
     fn session(&self) -> &str {
         self.session
             .as_deref()
-            .expect("TmuxHarness::spawn must be called before send_text/capture")
+            .expect("TmuxHarness::spawn_shell must be called before send_text/capture")
     }
 
     fn kill_session(&mut self) {
@@ -50,6 +51,25 @@ impl TmuxHarness {
                 .stderr(Stdio::null())
                 .status();
         }
+    }
+
+    /// Sends a tmux key-name (e.g. `"C-space"`, `"M-Tab"`, `"Enter"`).
+    ///
+    /// Unlike [`send_text`](TerminalHarness::send_text) — which uses
+    /// `-l` for literal byte input — this routes through tmux's
+    /// key-translation layer so callers can name chords symbolically.
+    /// Use this for `Ctrl+Space` / `Alt+Space` and similar control
+    /// chords, which contain bytes (NUL) that the underlying
+    /// `Command::arg` API rejects when passed as raw text.
+    pub fn send_key(&mut self, key_name: &str) -> io::Result<()> {
+        let session = self.session().to_string();
+        let status = Command::new("tmux")
+            .args(["send-keys", "-t", &session, key_name])
+            .status()?;
+        if !status.success() {
+            return Err(io::Error::other("tmux send-keys (key-name) failed"));
+        }
+        Ok(())
     }
 }
 
@@ -66,12 +86,66 @@ impl Drop for TmuxHarness {
 }
 
 impl TerminalHarness for TmuxHarness {
-    fn spawn(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
+    /// Spawns a login shell (`$SHELL`, `bash`, or `sh`) in a fresh
+    /// detached tmux session and waits for the shell prompt to appear.
+    ///
+    /// The cargo target directory containing `bt` and `question` is
+    /// prepended to `PATH` so CLI binaries resolve without an absolute
+    /// path. Color-forcing env vars are applied so SGR output is
+    /// deterministic.
+    fn spawn_shell(&mut self) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("tmux not available"));
         }
         let session = unique_session_name();
-        // Build a single shell-quoted command for tmux.
+        let shell = super::detect_shell();
+        let shell_cmd = format!("{} -l", shell);
+
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "120",
+            "-y",
+            "40",
+            &shell_cmd,
+        ]);
+
+        if let Some(bin_dir) =
+            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
+        {
+            let current_path = std::env::var_os("PATH").unwrap_or_default();
+            let mut new_path = OsString::from(bin_dir);
+            new_path.push(":");
+            new_path.push(current_path);
+            cmd.env("PATH", new_path);
+        }
+
+        // Force color on the spawned shell so `bt`'s color detection is
+        // deterministic regardless of how the test runner inherits TTY
+        // state.
+        super::apply_color_forcing_env(&mut cmd);
+
+        let status = cmd.status()?;
+        if !status.success() {
+            return Err(io::Error::other("tmux new-session failed"));
+        }
+        self.session = Some(session);
+        wait_for_prompt(self)?;
+        Ok(())
+    }
+
+    /// Direct-spawn escape hatch: launches `program` with `args` as the
+    /// initial command of a fresh detached tmux session. No login
+    /// shell, no `PATH` augmentation, no prompt-readiness wait.
+    fn spawn_program(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
+        if !Self::available() {
+            return Err(io::Error::other("tmux not available"));
+        }
+        let session = unique_session_name();
         let mut shell_cmd = shell_quote(program);
         for a in args {
             shell_cmd.push(' ');
@@ -100,9 +174,6 @@ impl TerminalHarness for TmuxHarness {
 
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
         let session = self.session().to_string();
-        // `tmux send-keys -l` sends a literal string (no key-name
-        // translation) which is what we want for terminal escape
-        // sequences. Convert the byte slice to a UTF-8 string up front.
         let s = std::str::from_utf8(bytes)
             .map_err(|e| io::Error::other(format!("send_text non-utf8: {e}")))?;
         let status = Command::new("tmux")
@@ -116,7 +187,6 @@ impl TerminalHarness for TmuxHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let session = self.session().to_string();
-        // `-p` writes capture to stdout; `-e` includes escape codes.
         let out = Command::new("tmux")
             .args(["capture-pane", "-t", &session, "-p", "-e"])
             .output()?;
@@ -131,27 +201,6 @@ impl TerminalHarness for TmuxHarness {
     }
 }
 
-impl TmuxHarness {
-    /// Sends a tmux key-name (e.g. `"C-space"`, `"M-Tab"`, `"Enter"`).
-    ///
-    /// Unlike [`send_text`](TerminalHarness::send_text) — which uses
-    /// `-l` for literal byte input — this routes through tmux's
-    /// key-translation layer so callers can name chords symbolically.
-    /// Use this for `Ctrl+Space` / `Alt+Space` and similar control
-    /// chords, which contain bytes (NUL) that the underlying
-    /// `Command::arg` API rejects when passed as raw text.
-    pub fn send_key(&mut self, key_name: &str) -> io::Result<()> {
-        let session = self.session().to_string();
-        let status = Command::new("tmux")
-            .args(["send-keys", "-t", &session, key_name])
-            .status()?;
-        if !status.success() {
-            return Err(io::Error::other("tmux send-keys (key-name) failed"));
-        }
-        Ok(())
-    }
-}
-
 /// Generates a unique tmux session name so concurrent test runs don't
 /// collide. Mixes process id and a monotonic counter to keep cleanup
 /// under control if the harness is dropped without `kill_session`.
@@ -159,7 +208,7 @@ fn unique_session_name() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("biscuit_tui_test_{}_{n}", std::process::id())
+    format!("biscuit_test_{}_{n}", std::process::id())
 }
 
 fn shell_quote(s: &str) -> String {

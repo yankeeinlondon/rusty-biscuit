@@ -19,7 +19,10 @@ mod common;
 
 use std::time::Duration;
 
-use common::real_terminal::{TerminalHarness, cliclick, kitty::KittyHarness, tmux::TmuxHarness, wezterm::WezTermHarness};
+use common::real_terminal::{
+    SpawnVisibility, TerminalHarness, cliclick, kitty::KittyHarness, tmux::TmuxHarness,
+    wezterm::WezTermHarness,
+};
 
 fn question_binary() -> String {
     assert_cmd::cargo::cargo_bin("question")
@@ -46,7 +49,7 @@ fn level2_wezterm_renders_option_labels() {
     let bin = question_binary();
     let mut harness = WezTermHarness::new();
     harness
-        .spawn(&bin, &["choose-one", "Red", "Green", "Blue"])
+        .spawn_program(&bin, &["choose-one", "Red", "Green", "Blue"])
         .expect("spawn question in wezterm");
     std::thread::sleep(Duration::from_millis(400));
     let frame = harness.capture().expect("capture wezterm pane");
@@ -68,7 +71,7 @@ fn level2_kitty_renders_option_labels() {
     let bin = question_binary();
     let mut harness = KittyHarness::new();
     harness
-        .spawn(&bin, &["choose-one", "Red", "Green", "Blue"])
+        .spawn_program(&bin, &["choose-one", "Red", "Green", "Blue"])
         .expect("spawn question in kitty");
     std::thread::sleep(Duration::from_millis(400));
     let frame = harness.capture().expect("capture kitty window");
@@ -90,7 +93,7 @@ fn level2_tmux_renders_option_labels() {
     let bin = question_binary();
     let mut harness = TmuxHarness::new();
     harness
-        .spawn(&bin, &["choose-one", "Red", "Green", "Blue"])
+        .spawn_program(&bin, &["choose-one", "Red", "Green", "Blue"])
         .expect("spawn question in tmux");
     std::thread::sleep(Duration::from_millis(400));
     let frame = harness.capture().expect("capture tmux pane");
@@ -123,7 +126,15 @@ fn level2_tmux_ctrl_space_reveals_badges() {
     // Options with explicit hotkey prefixes — only options that opt
     // in via `[CTRL+x]` get badges.
     harness
-        .spawn(&bin, &["choose-one", "[CTRL+r] Red", "[CTRL+g] Green", "[CTRL+b] Blue"])
+        .spawn_program(
+            &bin,
+            &[
+                "choose-one",
+                "[CTRL+r] Red",
+                "[CTRL+g] Green",
+                "[CTRL+b] Blue",
+            ],
+        )
         .expect("spawn question in tmux");
     std::thread::sleep(Duration::from_millis(400));
     // `tmux send-keys C-space` routes through tmux's key-name
@@ -181,7 +192,7 @@ fn level2_tmux_ctrl_held_badge_uses_orange_bold_black_sgr() {
     let bin = question_binary();
     let mut harness = TmuxHarness::new();
     harness
-        .spawn(
+        .spawn_program(
             &bin,
             &[
                 "choose-one",
@@ -244,7 +255,7 @@ fn level2_tmux_ctrl_c_exits_130() {
     let bin = question_binary();
     let mut harness = TmuxHarness::new();
     harness
-        .spawn(
+        .spawn_program(
             "sh",
             &[
                 "-c",
@@ -298,7 +309,7 @@ fn level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges() {
     let bin = question_binary();
     let mut harness = WezTermHarness::new();
     harness
-        .spawn(
+        .spawn_program(
             &bin,
             &[
                 "choose-one",
@@ -388,9 +399,9 @@ fn level3_wezterm_arrow_down_moves_active_marker() {
         return;
     }
     let bin = question_binary();
-    let mut harness = WezTermHarness::new();
+    let mut harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);
     harness
-        .spawn(&bin, &["choose-one", "Red", "Green", "Blue"])
+        .spawn_program(&bin, &["choose-one", "Red", "Green", "Blue"])
         .expect("spawn question in wezterm");
     std::thread::sleep(Duration::from_millis(400));
 
@@ -425,8 +436,14 @@ fn level3_wezterm_arrow_down_moves_active_marker() {
     eprintln!("{:?}", frame.plain);
 
     // Find which option line carries the active marker `▶`.
-    let active_on_green = frame.plain.lines().any(|l| l.contains("▶") && l.contains("Green"));
-    let active_on_red = frame.plain.lines().any(|l| l.contains("▶") && l.contains("Red"));
+    let active_on_green = frame
+        .plain
+        .lines()
+        .any(|l| l.contains("▶") && l.contains("Green"));
+    let active_on_red = frame
+        .plain
+        .lines()
+        .any(|l| l.contains("▶") && l.contains("Red"));
     if !active_on_green {
         eprintln!(
             "DIAGNOSTIC: arrow-down did NOT reach the binary. \
@@ -516,13 +533,13 @@ fn level3_wezterm_bare_ctrl_reveals_badges() {
         return;
     }
     let bin = question_binary();
-    let mut harness = WezTermHarness::new();
+    let mut harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);
     // Options carry explicit `[CTRL+x]` prefixes — that's the only
     // way to get a hotkey. Plain options have no badge regardless
     // of modifier state, so we need explicit prefixes to assert
     // that holding bare Ctrl surfaces a `^R` badge.
     harness
-        .spawn(
+        .spawn_program(
             &bin,
             &[
                 "choose-one",
@@ -558,8 +575,7 @@ fn level3_wezterm_bare_ctrl_reveals_badges() {
     // AppKit consumer.
     cliclick::click_at(coords.0, coords.1).expect("click to focus pane");
     std::thread::sleep(Duration::from_millis(150));
-    cliclick::system_events_key_down("control")
-        .expect("System Events key down control");
+    cliclick::system_events_key_down("control").expect("System Events key down control");
 
     // Right after click+kd, ask macOS who actually has keyboard
     // focus. This is the definitive diagnostic — if frontmost is
@@ -595,7 +611,9 @@ fn level3_wezterm_bare_ctrl_reveals_badges() {
     // Give WezTerm + the binary time to process the press event and
     // the renderer to draw the badges.
     std::thread::sleep(Duration::from_millis(300));
-    let frame = harness.capture().expect("capture wezterm pane during Ctrl hold");
+    let frame = harness
+        .capture()
+        .expect("capture wezterm pane during Ctrl hold");
     // Always release before any assertion can panic — otherwise a
     // stuck Ctrl modifier would mess with the rest of the test run.
     // Symmetric with the System Events key down: the press path used
@@ -667,7 +685,7 @@ fn level3_wezterm_ctrl_r_chord_selects_red() {
         return;
     }
     let bin = question_binary();
-    let mut harness = WezTermHarness::new();
+    let mut harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreground);
     // Options MUST carry explicit `[CTRL+x]` prefixes — a plain
     // option string ("Red") has no hotkey binding, so pressing
     // Ctrl+R against it does nothing. This was a long-standing bug
@@ -675,7 +693,7 @@ fn level3_wezterm_ctrl_r_chord_selects_red() {
     // reached the binary fine, but the binary had nothing bound to
     // Ctrl+R so the prompt didn't submit.
     harness
-        .spawn(
+        .spawn_program(
             &bin,
             &[
                 "choose-one",
@@ -699,8 +717,7 @@ fn level3_wezterm_ctrl_r_chord_selects_red() {
         .expect("focus spawned wezterm pane")
         .expect("AXRaise yielded no window coords (non-macOS or AX failure)");
 
-    cliclick::click_then_ctrl_chord(coords.0, coords.1, "r")
-        .expect("invoke cliclick click+chord");
+    cliclick::click_then_ctrl_chord(coords.0, coords.1, "r").expect("invoke cliclick click+chord");
 
     if let Ok(out) = std::process::Command::new("osascript")
         .args([

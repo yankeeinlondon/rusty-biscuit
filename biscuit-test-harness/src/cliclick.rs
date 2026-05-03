@@ -185,9 +185,7 @@ pub fn click_then_ctrl_chord(x: i32, y: i32, key: &str) -> io::Result<()> {
 /// Returns `io::Error` when osascript fails (typically: missing
 /// Accessibility permission for the calling app).
 pub fn system_events_key_down(modifier: &str) -> io::Result<()> {
-    let script = format!(
-        r#"tell application "System Events" to key down {modifier}"#
-    );
+    let script = format!(r#"tell application "System Events" to key down {modifier}"#);
     let out = Command::new("osascript").args(["-e", &script]).output()?;
     if !out.status.success() {
         return Err(io::Error::other(format!(
@@ -205,9 +203,7 @@ pub fn system_events_key_down(modifier: &str) -> io::Result<()> {
 ///
 /// Returns `io::Error` when osascript fails.
 pub fn system_events_key_up(modifier: &str) -> io::Result<()> {
-    let script = format!(
-        r#"tell application "System Events" to key up {modifier}"#
-    );
+    let script = format!(r#"tell application "System Events" to key up {modifier}"#);
     let out = Command::new("osascript").args(["-e", &script]).output()?;
     if !out.status.success() {
         return Err(io::Error::other(format!(
@@ -234,7 +230,6 @@ pub fn activate_app(app_name: &str) -> io::Result<()> {
             "osascript activate of {app_name} failed"
         )));
     }
-    // Give the WindowServer time to settle focus before we inject keys.
     std::thread::sleep(Duration::from_millis(300));
     Ok(())
 }

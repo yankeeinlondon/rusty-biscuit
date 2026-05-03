@@ -1505,6 +1505,77 @@ fn test_prose_empty_errors_to_stderr() {
     );
 }
 
+/// Verifies that `bt prose --force-color` emits SGR sequences to a
+/// non-TTY pipe.
+///
+/// Without `--force-color`, `bt` would correctly suppress colors when
+/// stdout is not a TTY. With the flag, the renderer constructs a
+/// forced-color [`Terminal`] regardless of detection, so the output
+/// must contain `\x1b[3` (the SGR foreground prefix). This is the
+/// Level-1 unit-test-shaped proof that the flag works without any
+/// terminal harness.
+#[test]
+fn test_prose_force_color_flag_emits_sgr_to_pipe() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("--force-color")
+        .arg("<red>x</red>")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --force-color should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let has_red = stdout.contains("\x1b[31m") || stdout.contains("\x1b[91m");
+    assert!(
+        has_red,
+        "expected stdout to contain SGR red (\\x1b[31m or \\x1b[91m); got bytes: {:?}",
+        output.stdout
+    );
+}
+
+/// Verifies that `bt prose --print-bytes` emits a hex dump of the
+/// rendered byte stream to stderr.
+///
+/// The dump is delimited by a `--- prose debug ---` header line and
+/// followed by a single line of lowercase hex digits. Combined with
+/// `--force-color` this gives Level-2 tests a deterministic signal
+/// that the renderer produced SGR red regardless of any terminal
+/// capture filtering.
+#[test]
+fn test_prose_print_bytes_flag_dumps_hex_to_stderr() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("--force-color")
+        .arg("--print-bytes")
+        .arg("<red>x</red>")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --print-bytes should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--- prose debug ---"),
+        "expected stderr to contain '--- prose debug ---' header; got: {stderr}"
+    );
+    // \x1b[31m hex == 1b5b33316d ; \x1b[91m hex == 1b5b39316d
+    let has_red_hex = stderr.contains("1b5b33316d") || stderr.contains("1b5b39316d");
+    assert!(
+        has_red_hex,
+        "expected stderr hex dump to contain SGR red bytes (1b5b33316d or 1b5b39316d); \
+         got: {stderr}"
+    );
+}
+
 #[test]
 fn test_quote_empty_errors_to_stderr() {
     let output = cargo_bin_cmd!("bt")

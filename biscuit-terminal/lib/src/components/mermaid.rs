@@ -474,13 +474,14 @@ impl MermaidDiagram {
         &self,
         term: &crate::terminal::Terminal,
     ) -> Result<MermaidRenderResult, MermaidRenderError> {
-        let (output, png_path, cache_hit) = self.render_to_image(term)?;
+        let (output, png_path, cache_hit, width_cells) = self.render_to_image(term)?;
         let output = self.layout.apply_layout(&output, term.width());
 
         Ok(MermaidRenderResult {
             output,
             png_path,
             cache_hit,
+            width_cells,
         })
     }
 
@@ -490,30 +491,35 @@ impl MermaidDiagram {
     /// on failure.
     fn render_raw(&self, term: &crate::terminal::Terminal) -> String {
         match self.render_to_image(term) {
-            Ok((output, _, _)) => output,
+            Ok((output, _, _, _)) => output,
             Err(_) => self.renderer.fallback_code_block(),
         }
     }
 
     /// Core render pipeline: Mermaid → PNG → terminal image string.
     ///
-    /// Returns `(output, png_path, cache_hit)` on success.
+    /// Returns `(output, png_path, cache_hit, width_cells)` on success.
+    /// `width_cells` is the resolved image width in terminal columns,
+    /// after applying margins and the configured [`ImageWidth`] spec.
     fn render_to_image(
         &self,
         term: &crate::terminal::Terminal,
-    ) -> Result<(String, PathBuf, bool), MermaidRenderError> {
+    ) -> Result<(String, PathBuf, bool, u32), MermaidRenderError> {
         let (png_path, cache_hit) = self.renderer.render_to_cached_png()?;
 
         let term_image = super::terminal_image::TerminalImage::new(&png_path)
             .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
             .with_width(self.width.clone());
 
+        let dims = term_image.resolve_dimensions(term.width());
+        let width_cells = dims.image_width;
+
         let output = term_image.render(term);
         if output.is_empty() {
             return Err(MermaidRenderError::NoImageSupport);
         }
 
-        Ok((output, png_path, cache_hit))
+        Ok((output, png_path, cache_hit, width_cells))
     }
 }
 
@@ -526,6 +532,10 @@ pub struct MermaidRenderResult {
     pub png_path: PathBuf,
     /// Whether the PNG was served from cache.
     pub cache_hit: bool,
+    /// Number of pane columns the rendered image occupies, after
+    /// resolving margins and the configured width spec (percent,
+    /// fill, or absolute cells).
+    pub width_cells: u32,
 }
 
 impl super::renderable::Renderable for MermaidDiagram {
@@ -660,5 +670,32 @@ mod tests {
         let diagram = MermaidDiagram::new("flowchart LR\n    A --> B").with_title("Clone Test");
         let cloned = diagram.clone();
         assert_eq!(diagram.instructions(), cloned.instructions());
+    }
+
+    /// Locks in the `width_cells` resolution path: when the renderer
+    /// succeeds, `MermaidRenderResult.width_cells` must reflect the
+    /// resolved `ImageWidth` spec.
+    #[test]
+    fn diagram_try_render_populates_width_cells() {
+        use crate::components::terminal_image::ImageWidth;
+
+        let diagram = MermaidDiagram::new("pie\n    A: 1").with_width(ImageWidth::Percent(0.5));
+        let term = crate::terminal::Terminal::new_optimistic(80);
+
+        match diagram.try_render(&term) {
+            Ok(result) => {
+                // Default layout has zero margins, so 50% of 80 cols = 40.
+                assert_eq!(
+                    result.width_cells, 40,
+                    "50% of an 80-column terminal should resolve to 40 cells"
+                );
+            }
+            Err(e) => {
+                // If the host lacks Mermaid rendering dependencies, skip
+                // the assertion rather than fail — the Level-2 tests
+                // exercise the full pipeline.
+                eprintln!("Mermaid render unavailable in unit-test env: {e}");
+            }
+        }
     }
 }

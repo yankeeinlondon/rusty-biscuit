@@ -15,22 +15,77 @@
 #![allow(dead_code)]
 
 use std::env;
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{CapturedFrame, TerminalHarness};
+use super::{CapturedFrame, SpawnVisibility, TerminalHarness, wait_for_prompt};
+
+/// Workspace name used when [`SpawnVisibility::Background`] is in
+/// effect. Picked to be distinct from any name a developer is likely
+/// to use interactively so the window is created out-of-sight.
+const BACKGROUND_WORKSPACE: &str = "biscuit-bg";
+
+/// Geometry returned by [`WezTermHarness::pane_size`].
+///
+/// Mirrors the `size` object from `wezterm cli list --format json`.
+#[derive(Debug, Clone, Copy)]
+pub struct PaneSize {
+    /// Number of text rows in the pane.
+    pub rows: u32,
+    /// Number of text columns in the pane.
+    pub cols: u32,
+    /// Pane width in pixels (cols × cell_width_px).
+    pub pixel_width: u32,
+    /// Pane height in pixels (rows × cell_height_px).
+    pub pixel_height: u32,
+}
+
+impl PaneSize {
+    /// Returns the cell width in pixels, derived from `pixel_width / cols`.
+    ///
+    /// Returns `0` when `cols` is zero (defensive — shouldn't happen in
+    /// practice).
+    pub fn cell_width_px(&self) -> u32 {
+        self.pixel_width.checked_div(self.cols).unwrap_or(0)
+    }
+
+    /// Returns the cell height in pixels, derived from
+    /// `pixel_height / rows`.
+    ///
+    /// Returns `0` when `rows` is zero.
+    pub fn cell_height_px(&self) -> u32 {
+        self.pixel_height.checked_div(self.rows).unwrap_or(0)
+    }
+}
 
 /// Harness that talks to a running WezTerm GUI via `wezterm cli`.
 pub struct WezTermHarness {
     pane_id: Option<String>,
+    spawn_visibility: SpawnVisibility,
 }
 
 impl WezTermHarness {
-    /// Returns a fresh harness. Call [`spawn`](TerminalHarness::spawn)
-    /// to actually create a pane.
+    /// Returns a fresh harness with [`SpawnVisibility::Background`].
+    /// Call [`spawn_shell`](TerminalHarness::spawn_shell) to actually
+    /// create a pane.
     pub fn new() -> Self {
-        Self { pane_id: None }
+        Self {
+            pane_id: None,
+            spawn_visibility: SpawnVisibility::default(),
+        }
+    }
+
+    /// Builder-style override of the default
+    /// [`SpawnVisibility::Background`]. Use
+    /// [`SpawnVisibility::Foreground`] for tests that intend to call
+    /// [`focus_spawned_pane`](Self::focus_spawned_pane) — those need
+    /// the window to be on the active workspace before AXRaise can
+    /// reach it.
+    pub fn with_spawn_visibility(mut self, visibility: SpawnVisibility) -> Self {
+        self.spawn_visibility = visibility;
+        self
     }
 
     /// Returns `true` when both the `wezterm` binary and a reachable
@@ -44,7 +99,7 @@ impl WezTermHarness {
     fn pane_id(&self) -> &str {
         self.pane_id
             .as_deref()
-            .expect("WezTermHarness::spawn must be called before send_text/capture")
+            .expect("WezTermHarness::spawn_shell must be called before send_text/capture")
     }
 
     /// Kills the current pane via `wezterm cli kill-pane`, ignoring
@@ -64,7 +119,68 @@ impl WezTermHarness {
     /// pane id (already unique within a WezTerm instance) so concurrent
     /// runs of the same harness don't collide.
     fn unique_window_title(&self) -> String {
-        format!("biscuit-tui-test-pane-{}", self.pane_id())
+        format!("biscuit-test-pane-{}", self.pane_id())
+    }
+
+    /// Returns the spawned pane's geometry as `(rows, cols, pixel_width,
+    /// pixel_height)`.
+    ///
+    /// Wraps `wezterm cli list --format json` and filters for the active
+    /// pane id. Used by Level-2 image and layout tests to compute
+    /// expected row/column counts from real terminal geometry instead
+    /// of hardcoding.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the `wezterm cli list` command fails or
+    /// when the active pane id is not present in its output.
+    pub fn pane_size(&self) -> io::Result<PaneSize> {
+        let id = self.pane_id();
+        let out = Command::new("wezterm")
+            .args(["cli", "list", "--format", "json"])
+            .output()?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli list failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let entries: serde_json::Value = serde_json::from_str(&stdout)
+            .map_err(|e| io::Error::other(format!("wezterm cli list: invalid json: {e}")))?;
+        let arr = entries
+            .as_array()
+            .ok_or_else(|| io::Error::other("wezterm cli list: top level not an array"))?;
+        let want: u64 = id
+            .parse()
+            .map_err(|e| io::Error::other(format!("pane id {id:?} not a u64: {e}")))?;
+        for entry in arr {
+            let pid = entry.get("pane_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            if pid == want {
+                let size = entry
+                    .get("size")
+                    .ok_or_else(|| io::Error::other("pane entry missing size"))?;
+                let rows = size.get("rows").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let cols = size.get("cols").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let pw = size
+                    .get("pixel_width")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let ph = size
+                    .get("pixel_height")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                return Ok(PaneSize {
+                    rows,
+                    cols,
+                    pixel_width: pw,
+                    pixel_height: ph,
+                });
+            }
+        }
+        Err(io::Error::other(format!(
+            "pane id {id} not found in wezterm cli list"
+        )))
     }
 
     /// Brings the spawned pane to the foreground inside WezTerm AND
@@ -95,13 +211,6 @@ impl WezTermHarness {
         let title = self.unique_window_title();
 
         // 1. Stamp a unique title we can target precisely.
-        //
-        // We use `set-tab-title`, not `set-window-title`. Most users'
-        // `wezterm.lua` defines a `format-window-title` event that
-        // ignores `set-window-title` and instead derives the OS-level
-        // NSWindow title from the active *tab*'s title. So setting the
-        // tab title actually propagates to what System Events sees.
-        // (See real-terminal screenshots in the feature folder.)
         let out = Command::new("wezterm")
             .args(["cli", "set-tab-title", "--pane-id", id, &title])
             .output()?;
@@ -112,7 +221,7 @@ impl WezTermHarness {
             )));
         }
 
-        // 2. Activate intra-WezTerm pane focus (unchanged).
+        // 2. Activate intra-WezTerm pane focus.
         let out = Command::new("wezterm")
             .args(["cli", "activate-pane", "--pane-id", id])
             .output()?;
@@ -124,66 +233,8 @@ impl WezTermHarness {
         }
 
         // 3. Raise *our* window via System Events (macOS only).
-        // On other platforms there's nothing useful to do here — the
-        // PTY-based bytes injection used by Level 1/2 doesn't depend
-        // on key focus, and Level 3 cliclick is macOS-only by design.
         #[cfg(target_os = "macos")]
         {
-            // We don't hardcode the exact WezTerm process name —
-            // different builds register as "WezTerm", "wezterm-gui",
-            // or "wezterm" depending on how the bundle was built.
-            // AppleScript's `contains` is case-insensitive by
-            // default, so the substring `"wezterm"` matches all
-            // common variants in one filter.
-            //
-            // Walking every process on the system was prohibitively
-            // slow on heavily-loaded macs (each `windows of p` is a
-            // synchronous AX query that some apps service slowly).
-            // The narrowed filter is two orders of magnitude faster.
-            //
-            // `with timeout of 5 seconds` guards against AX queries
-            // hanging — if WezTerm itself is wedged we'd rather fail
-            // the test fast with a clear error than block the whole
-            // suite waiting for cliclick injection that will never
-            // land.
-            // Title-matching strategy:
-            //
-            //   1. Prefer our unique stamp (`biscuit-tui-test-pane-N`)
-            //      set via `wezterm cli set-window-title`. Honored
-            //      when the user's `wezterm.lua` does not override
-            //      window titling via a `format-window-title` event.
-            //
-            //   2. Fall back to the binary basename (`question`),
-            //      which is what WezTerm auto-titles a window with by
-            //      default — most `format-window-title` configs derive
-            //      the title from the active pane's foreground command.
-            //
-            // The fallback is unambiguous in this harness because
-            // `--test-threads=1` guarantees only one spawned `question`
-            // window exists at a time, AND `WezTermHarness::Drop`
-            // tears its pane down before the next test starts.
-            //
-            // Caveat: if you happen to have another WezTerm window
-            // running `question` for unrelated reasons during a Level-3
-            // run, the harness may raise that one instead. Don't.
-            // The script raises the matching window AND echoes its
-            // screen position+size so the caller can synthesise a
-            // real OS click into it. AXRaise alone doesn't transfer
-            // macOS keyWindow when the test runner lives in a
-            // different app (e.g. iTerm2 hosts cargo, WezTerm hosts
-            // the spawned pane); a real click does.
-            //
-            // Output format on success: "x y w h\n" (integers in
-            // global screen coords).
-            // First activate WezTerm via Apple Events. System Events
-            // `set frontmost to true` is unreliable when the calling
-            // app (iTerm2 hosting cargo) is currently active —
-            // modern macOS sometimes ignores the activation request
-            // unless the app explicitly issues an Apple Event. The
-            // first time this fires from a new parent, macOS may
-            // prompt to grant Automation permission (System Settings
-            // → Privacy & Security → Automation → <parent app>);
-            // grant it once and the prompts stop.
             let _ = Command::new("osascript")
                 .args(["-e", "tell application \"WezTerm\" to activate"])
                 .stdout(Stdio::null())
@@ -240,17 +291,6 @@ impl WezTermHarness {
                 )));
             }
 
-            // Parse "x y w h" and return the click anchor. We use
-            // (x+50, y+5) — squarely in the title bar on most macOS
-            // setups, or just inside the top edge if title bars are
-            // disabled. The caller is responsible for synthesising
-            // the click as part of a single batched cliclick
-            // invocation alongside the actual key injection — see
-            // `cli/tests/common/real_terminal/cliclick.rs::click_then_*`.
-            // Splitting the click and the keys across separate
-            // cliclick processes is exactly what the cliclick docs
-            // warn against; one process per key sequence is the only
-            // way to keep focus transfer atomic with the press.
             let stdout = String::from_utf8_lossy(&activate.stdout);
             let parts: Vec<i32> = stdout
                 .split_whitespace()
@@ -258,11 +298,6 @@ impl WezTermHarness {
                 .collect();
             if parts.len() == 4 {
                 let (x, y, w, h) = (parts[0], parts[1], parts[2], parts[3]);
-                // Diagnostic so failures are debuggable. Click the
-                // dead center of the window — clicking the title bar
-                // (y+5) was risky because some WezTerm configs hide
-                // title bars and y+5 might land in the macOS menu bar
-                // for top-edge windows.
                 let click_x = x + w / 2;
                 let click_y = y + h / 2;
                 eprintln!(
@@ -273,9 +308,6 @@ impl WezTermHarness {
             }
         }
 
-        // Non-macOS (or AppleScript output unparseable) — caller
-        // gets no coords and falls back to whatever focus the
-        // platform managed to establish.
         std::thread::sleep(Duration::from_millis(400));
         Ok(None)
     }
@@ -294,12 +326,73 @@ impl Drop for WezTermHarness {
 }
 
 impl TerminalHarness for WezTermHarness {
-    fn spawn(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
+    /// Spawns a login shell (`$SHELL`, `bash`, or `sh`) in a fresh
+    /// WezTerm pane and waits for the shell prompt to appear.
+    ///
+    /// The cargo target directory containing `bt` and `question` is
+    /// prepended to `PATH` so CLI binaries resolve without an absolute
+    /// path. Color-forcing env vars are applied so SGR output in
+    /// captures is deterministic.
+    fn spawn_shell(&mut self) -> io::Result<()> {
+        if !Self::available() {
+            return Err(io::Error::other("WezTerm not available"));
+        }
+        let shell = super::detect_shell();
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "spawn", "--new-window"]);
+        if self.spawn_visibility == SpawnVisibility::Background {
+            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
+        }
+        cmd.arg("--");
+        cmd.arg(&shell);
+        cmd.arg("-l");
+
+        if let Some(bin_dir) =
+            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
+        {
+            let current_path = env::var_os("PATH").unwrap_or_default();
+            let mut new_path = OsString::from(bin_dir);
+            new_path.push(":");
+            new_path.push(current_path);
+            cmd.env("PATH", new_path);
+        }
+
+        // Force color on the spawned shell so `bt`'s color detection is
+        // deterministic regardless of how the test runner inherits TTY
+        // state. `wezterm cli get-text --escapes` re-emits SGR from cell
+        // attributes only if SGR was actually rendered into cells.
+        super::apply_color_forcing_env(&mut cmd);
+
+        let out = cmd.output()?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli spawn failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let pane_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if pane_id.is_empty() {
+            return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
+        }
+        self.pane_id = Some(pane_id);
+        wait_for_prompt(self)?;
+        Ok(())
+    }
+
+    /// Direct-spawn escape hatch: launches `program` with `args`
+    /// inside a fresh WezTerm pane via `wezterm cli spawn -- …`. No
+    /// shell, no `PATH` augmentation, no prompt-readiness wait — the
+    /// caller is responsible for any settling.
+    fn spawn_program(&mut self, program: &str, args: &[&str]) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));
         }
         let mut cmd = Command::new("wezterm");
-        cmd.args(["cli", "spawn", "--new-window", "--"]);
+        cmd.args(["cli", "spawn", "--new-window"]);
+        if self.spawn_visibility == SpawnVisibility::Background {
+            cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
+        }
+        cmd.arg("--");
         cmd.arg(program);
         for a in args {
             cmd.arg(a);
@@ -316,8 +409,6 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("wezterm cli spawn returned empty pane id"));
         }
         self.pane_id = Some(pane_id);
-        // Give the binary a moment to render its first frame before
-        // tests start poking at it.
         std::thread::sleep(Duration::from_millis(400));
         Ok(())
     }
@@ -345,8 +436,6 @@ impl TerminalHarness for WezTermHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let id = self.pane_id().to_string();
-        // `--escapes` returns the pane content with ANSI sequences
-        // intact, which lets us verify SGR styling when needed.
         let out = Command::new("wezterm")
             .args(["cli", "get-text", "--pane-id", &id, "--escapes"])
             .output()?;
