@@ -18,8 +18,6 @@ packages:
   - claudine-cli
 source_files_during_phase_2:
   - claudine/cli/src/commands/wrap/live_semantic_sink.rs
-  - claudine/cli/src/commands/wrap/subagent_watchdog.rs
-  - claudine/cli/src/commands/wrap/mod.rs
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
