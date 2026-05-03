@@ -13,6 +13,17 @@ source_files_during_phase_2: []
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - schematic/definitions/src/registry.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - schematic-gen
   - schematic-define
