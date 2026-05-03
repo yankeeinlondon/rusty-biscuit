@@ -67,6 +67,8 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<CopyModelBody>("CopyModelBody")
         .register::<DeleteModelBody>("DeleteModelBody")
         .register::<CreateModelBody>("CreateModelBody")
+        // Native API nested types
+        .register::<Message>("Message")
         // Native API response types
         .register::<EmbeddingsResponse>("EmbeddingsResponse")
         .register::<ListModelsResponse>("ListModelsResponse")
@@ -79,6 +81,8 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<OpenAIChatCompletionRequest>("OpenAIChatCompletionRequest")
         .register::<OpenAICompletionRequest>("OpenAICompletionRequest")
         .register::<OpenAIEmbeddingRequest>("OpenAIEmbeddingRequest")
+        // OpenAI-compatible API nested types
+        .register::<OpenAIMessage>("OpenAIMessage")
         // OpenAI-compatible API response types
         .register::<OpenAIEmbeddingResponse>("OpenAIEmbeddingResponse")
         .register::<OpenAIEmbeddingData>("OpenAIEmbeddingData")

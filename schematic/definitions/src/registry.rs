@@ -139,21 +139,60 @@ impl SchemaRegistry {
             let openapi_schema = convert_schema_to_openapi(schema);
             result.insert(name.clone(), openapi_schema);
 
-            // Extract nested $defs from the schemars JSON and include them too.
+            // Recursively extract all nested $defs from the schemars JSON.
             let json_value = schema.as_value();
-            if let Some(defs) = json_value.get("$defs").and_then(|v| v.as_object()) {
+            Self::extract_defs_recursive(json_value, &mut result);
+        }
+
+        result
+    }
+
+    /// Recursively extracts all `$defs` from a JSON schema value and converts
+    /// them to OpenAPI schemas, inserting them into `result`.
+    fn extract_defs_recursive(
+        value: &serde_json::Value,
+        result: &mut IndexMap<String, openapiv3::Schema>,
+    ) {
+        if let Some(obj) = value.as_object() {
+            // Extract $defs at this level
+            if let Some(defs) = obj.get("$defs").and_then(|v| v.as_object()) {
                 for (def_name, def_schema) in defs {
                     if !result.contains_key(def_name) {
                         result.insert(
                             def_name.clone(),
                             convert_json_schema_to_openapi(def_schema),
                         );
+                        // Recurse into the def itself
+                        Self::extract_defs_recursive(def_schema, result);
                     }
                 }
             }
-        }
 
-        result
+            // Extract components.schemas (used by schemars OpenAPI 3.0 settings)
+            if let Some(components) = obj.get("components").and_then(|v| v.as_object())
+                && let Some(schemas) = components.get("schemas").and_then(|v| v.as_object())
+            {
+                for (schema_name, schema_value) in schemas {
+                    if !result.contains_key(schema_name) {
+                        result.insert(
+                            schema_name.clone(),
+                            convert_json_schema_to_openapi(schema_value),
+                        );
+                        // Recurse into the schema itself
+                        Self::extract_defs_recursive(schema_value, result);
+                    }
+                }
+            }
+
+            // Recurse into property values, array items, and allOf/anyOf/oneOf
+            for (_key, val) in obj {
+                Self::extract_defs_recursive(val, result);
+            }
+        } else if let Some(arr) = value.as_array() {
+            for val in arr {
+                Self::extract_defs_recursive(val, result);
+            }
+        }
     }
 
     /// Validates that all schema names referenced by an API are registered.

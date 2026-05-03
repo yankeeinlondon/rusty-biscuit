@@ -78,6 +78,10 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<CountTokensResponse>("CountTokensResponse")
         .register::<ListModelsResponse>("ListModelsResponse")
         .register::<ModelInfo>("ModelInfo")
+        // Nested types used by request/response bodies
+        .register::<Message>("Message")
+        .register::<ContentBlock>("ContentBlock")
+        .register::<Tool>("Tool")
 }
 
 /// Creates the Anthropic API definition.
