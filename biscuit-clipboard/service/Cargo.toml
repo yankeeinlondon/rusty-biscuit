@@ -1,0 +1,11 @@
+[package]
+name = "biscuit-clipboard-service"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "clipper"
+path = "src/main.rs"
+
+[dependencies]
+biscuit-clipboard = { path = "../lib" }
