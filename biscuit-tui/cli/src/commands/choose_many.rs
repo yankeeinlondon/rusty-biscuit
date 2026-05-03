@@ -115,10 +115,12 @@ pub fn run(
     args: ChooseManyArgs,
     output: OutputMode,
     height: Option<HeightSpec>,
+    show_on_exit: bool,
 ) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
-    let chrome = build_chrome(&args.chrome);
+    let mut chrome = build_chrome(&args.chrome);
+    chrome.show_on_exit = show_on_exit;
     run_with_writer(args, output, height, &mut lock, |state, height| {
         run_standalone_with_chrome(ChooseMany::new(), state, height, chrome)
     })
@@ -226,7 +228,8 @@ fn build_choice_input(args: &ChooseManyArgs) -> io::Result<ChoiceInput<String>> 
         .with_selection_mode(SelectionMode::Multiple)
         .with_options(options)
         .with_sort(args.chrome.sort.into())
-        .with_active_color(args.chrome.active_color.into());
+        .with_active_color(args.chrome.active_color.into())
+        .with_orientation(args.chrome.orientation.into());
     Ok(input.with_filter_enabled(!args.chrome.no_filter))
 }
 

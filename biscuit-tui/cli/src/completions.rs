@@ -149,6 +149,10 @@ _question_choice_positional() {
             _values 'badge mode' auto always never ctrl alt
             return
             ;;
+        --orientation)
+            _values 'orientation' vertical horizontal
+            return
+            ;;
         --output)
             _values 'output mode' raw json null
             return
@@ -181,7 +185,7 @@ _question_choice_positional() {
             --padding --pt --pb --pl --pr
             --numeric-hot-keys
             --label --label-position --label-convention --value-convention
-            --active-color --hotkey-badges
+            --active-color --hotkey-badges --orientation
             --output --height --help
         )
         _describe -t option-flags 'option flag' option_candidates
@@ -418,6 +422,7 @@ mod tests {
             "--value-convention",
             "--active-color",
             "--hotkey-badges",
+            "--orientation",
             "--output",
             "--height",
             "--help",
@@ -484,6 +489,7 @@ mod tests {
             ("--sort)", "natural inverse asc desc"),
             ("--label-position)", "above below left right"),
             ("--hotkey-badges)", "auto always never ctrl alt"),
+            ("--orientation)", "vertical horizontal"),
             ("--output)", "raw json null"),
             ("--label-convention|--value-convention)", "camel-case"),
             ("--border-style)", "rounded"),
