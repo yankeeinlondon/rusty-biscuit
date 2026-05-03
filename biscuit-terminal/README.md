@@ -187,6 +187,45 @@ See the darkmatter registry in
 [`darkmatter/lib/src/markdown/errors/mod.rs`](../darkmatter/lib/src/markdown/errors/mod.rs)
 for a concrete example.
 
+## Testing
+
+biscuit-terminal follows the **Level 1 / 2 / 3** testing vocabulary:
+
+| Level | Description | Location |
+|-------|-------------|----------|
+| **Level 1** | PTY-based tests using `expectrl` — no real terminal required | `lib/tests/level1_*.rs` |
+| **Level 2** | Real-terminal tests using the shared `biscuit-test-harness` crate | `cli/tests/level2_*.rs` |
+| **Level 3** | OS-level keyboard injection (not applicable — biscuit-terminal has no interactive input) | — |
+
+### Running Level-2 tests locally
+
+Level-2 tests require a running terminal emulator with remote-control enabled:
+
+**WezTerm:**
+```bash
+export WEZTERM_UNIX_SOCKET="/path/to/wezterm.sock"
+just test-l2
+```
+
+**Kitty:**
+```bash
+export KITTY_LISTEN_ON="unix:/path/to/kitty.sock"
+just test-l2
+```
+
+Both environment variables are normally set automatically by the respective terminal emulator for child shells. If you started WezTerm or Kitty from a launcher (e.g., macOS Dock, Spotlight, or Linux .desktop file), the variables may not propagate to your test shell. In that case, locate the socket and export it manually before running tests.
+
+### CI behaviour
+
+Level-2 tests **skip cleanly** when the required terminal is unavailable — no `#[ignore]` markers are used. On GitHub-hosted runners (which lack WezTerm and Kitty), the tests print `skipping: requires <X>` and exit successfully. This keeps CI green while still providing a local regression net on developer machines.
+
+### Running only Level-2 tests
+
+```bash
+just test-l2          # all Level-2 tests
+just test-l2 -- --nocapture   # with output visible
+```
+
 ## More Information
 
 For more information on either the library or CLI refer to more detailed documents on each:

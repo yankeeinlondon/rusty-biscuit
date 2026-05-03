@@ -279,8 +279,10 @@ Shell environment variables are available via `{{env.VAR_NAME}}` with optional d
 
 ```
 {{env.SLACK_WEBHOOK}}
-{{env.MY_VAR | "fallback_value"}}
+{{env.MY_VAR || "fallback_value"}}
 ```
+
+The single-pipe `|` form is no longer supported (see the migration note in unified-events.md §3.7).
 
 ## Messaging Configuration
 

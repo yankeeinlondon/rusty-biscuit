@@ -402,6 +402,18 @@ pub struct ClaudineConfig {
     #[serde(default)]
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
 
+    /// Optional per-event matcher strings.
+    ///
+    /// Each value is compiled at load time into a [`RuntimeMatcher`]. The
+    /// loader tries to parse the string as a Darkmatter condition first
+    /// (`tool_name == 'Bash' && git.branch == 'main'`); on parse failure
+    /// it falls back to compiling a regex (`Bash|Edit`). Strings that are
+    /// neither produce a warning and the binding fires unconditionally.
+    ///
+    /// [`RuntimeMatcher`]: crate::dispatch::matcher::RuntimeMatcher
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub matchers: HashMap<AgenticEvent, String>,
+
     /// Favorite agent provider for lazy composition operations.
     ///
     /// Stored on disk as `preferred_agent` (with `favorite_agent` accepted
@@ -460,6 +472,14 @@ pub struct RepoOverrideConfig {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
 
+    /// Override or extend per-event matchers for this repo.
+    ///
+    /// Per-event replacement: a repo entry fully replaces the user's entry
+    /// for the same event. See [`ClaudineConfig::matchers`] for compilation
+    /// semantics.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub matchers: HashMap<AgenticEvent, String>,
+
     /// Override the active messenger configuration key for this repo.
     ///
     /// - `None` (absent): no override, inherit from user config.
@@ -477,6 +497,7 @@ impl RepoOverrideConfig {
     pub fn is_empty(&self) -> bool {
         self.canonical_provider.is_none()
             && self.actions.is_empty()
+            && self.matchers.is_empty()
             && self.active_messenger.is_none()
     }
 }
@@ -499,6 +520,7 @@ impl Default for ClaudineConfig {
             logging: true,
             protect: ProtectConfig::default(),
             actions: HashMap::new(),
+            matchers: HashMap::new(),
             preferred_agent: None,
             canonical_provider: None,
             models: HashMap::new(),
@@ -706,6 +728,7 @@ mod tests {
                 message: "tool starting".to_string(),
                 voice: None,
                 gender: None,
+                when: None,
             }],
         );
         let config = ClaudineConfig {
@@ -1383,6 +1406,7 @@ mod tests {
                     effect,
                     volume: 1.0,
                     speed: 1.0,
+                    when: None,
                 }],
             );
             let config = ClaudineConfig {
@@ -1636,6 +1660,7 @@ mod tests {
                 effect: "doorbell".to_string(),
                 volume: 0.8,
                 speed: 1.0,
+                when: None,
             }],
         );
         actions.insert(
@@ -1645,8 +1670,12 @@ mod tests {
                     message: "Done!".to_string(),
                     voice: Some("Samantha".to_string()),
                     gender: Some(Gender::Female),
+                    when: None,
                 },
-                HookAction::Report { handler: None },
+                HookAction::Report {
+                    handler: None,
+                    when: None,
+                },
             ],
         );
 
@@ -1685,6 +1714,7 @@ mod tests {
             preferred_agent: Some(Provider::Codex),
             canonical_provider: Some(Provider::Gemini),
             models: HashMap::new(),
+            matchers: HashMap::new(),
             default_sounds: DefaultSounds {
                 success: Some("doorbell".to_string()),
                 attention: Some("bong".to_string()),

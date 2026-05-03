@@ -2,7 +2,7 @@
 //!
 //! Three delivery strategies are wired behind a single backend:
 //!
-//! - **Helpers** (`terminal-notifier`, `alerter`) — opportunistic layer
+//! - **Helpers** (`terminal-notifier`, `alerter`) — primary delivery path
 //!   probed via `sniff` at construction time. Helpers ship interactive
 //!   actions and inline replies that AppleScript cannot, and they remain
 //!   available even when the host has no bundle identity.

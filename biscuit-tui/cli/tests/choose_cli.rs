@@ -716,10 +716,7 @@ fn choose_one_md_frontmatter_object_array_reaches_event_loop() {
 
 #[test]
 fn choose_one_file_txt_extension_errors() {
-    let path = write_fixture(
-        "choose_cli_unsupported_one.txt",
-        "Red\nGreen\nBlue\n",
-    );
+    let path = write_fixture("choose_cli_unsupported_one.txt", "Red\nGreen\nBlue\n");
     cargo_bin_cmd!("question")
         .args(["choose-one", "--file", path.to_string_lossy().as_ref()])
         .assert()
@@ -901,10 +898,8 @@ mod pty {
                         let _ = session.get_process_mut().kill(Signal::SIGKILL);
                         let reap_deadline = Instant::now() + Duration::from_millis(500);
                         while Instant::now() < reap_deadline {
-                            if !matches!(
-                                session.get_process().status(),
-                                Ok(WaitStatus::StillAlive)
-                            ) {
+                            if !matches!(session.get_process().status(), Ok(WaitStatus::StillAlive))
+                            {
                                 break;
                             }
                             std::thread::sleep(Duration::from_millis(10));
@@ -937,10 +932,7 @@ mod pty {
                 Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(_) => break,
             }
-            if !matches!(
-                session.get_process().status(),
-                Ok(WaitStatus::StillAlive)
-            ) {
+            if !matches!(session.get_process().status(), Ok(WaitStatus::StillAlive)) {
                 // Child exited — one final non-blocking drain, then stop.
                 while let Ok(n) = session.try_read(&mut scratch) {
                     if n == 0 {
@@ -968,14 +960,7 @@ mod pty {
         // restores the initial selection and submits with exit code 0.
         // Pre-select `beta` so the test can also confirm the restored
         // value reaches stdout.
-        let mut p = spawn_question(&[
-            "choose-one",
-            "--selected",
-            "beta",
-            "alpha",
-            "beta",
-            "gamma",
-        ]);
+        let mut p = spawn_question(&["choose-one", "--selected", "beta", "alpha", "beta", "gamma"]);
         std::thread::sleep(Duration::from_millis(200));
         // Move the hover off the initial selection, then Esc.
         p.write_all(b"\x1b[B").expect("send Down");
@@ -1005,7 +990,11 @@ mod pty {
         let mut p = spawn_question(&["choose-one", "alpha", "beta", "gamma"]);
         std::thread::sleep(Duration::from_millis(200));
         p.write_all(b"\x03").expect("send Ctrl+C");
-        assert_eq!(wait_exit_code(&mut p), 130, "Ctrl+C must exit with code 130");
+        assert_eq!(
+            wait_exit_code(&mut p),
+            130,
+            "Ctrl+C must exit with code 130"
+        );
     }
 
     #[test]

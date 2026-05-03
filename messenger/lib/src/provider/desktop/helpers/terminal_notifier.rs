@@ -218,13 +218,13 @@ mod tests {
     fn build_args_notice_only_minimal() {
         let helper = helper();
         let args = helper.build_args(&notice_request());
-        let rendered: Vec<String> =
-            args.iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let rendered: Vec<String> = args
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(
             rendered,
-            vec![
-                "-title", "Hello", "-message", "World", "-sound", "default",
-            ]
+            vec!["-title", "Hello", "-message", "World", "-sound", "default",]
         );
     }
 

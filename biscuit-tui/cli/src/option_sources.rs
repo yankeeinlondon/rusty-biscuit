@@ -892,7 +892,10 @@ mod tests {
         let dir = std::env::temp_dir();
         let path = dir.join("question_review10_md_bom_only.md");
         let body = b"\xef\xbb\xbf---\nopts:\n  - a\n  - b\n---\n";
-        std::fs::File::create(&path).unwrap().write_all(body).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(body)
+            .unwrap();
         let result = parse_md(&path, "opts").expect("parse_md should tolerate BOM");
         assert_eq!(labels(&result), vec!["a", "b"]);
         std::fs::remove_file(&path).unwrap();
@@ -904,7 +907,10 @@ mod tests {
         let dir = std::env::temp_dir();
         let path = dir.join("question_review10_md_crlf_only.md");
         let body = b"---\r\nopts:\r\n  - a\r\n  - b\r\n---\r\n";
-        std::fs::File::create(&path).unwrap().write_all(body).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(body)
+            .unwrap();
         let result = parse_md(&path, "opts").expect("parse_md should tolerate CRLF");
         assert_eq!(labels(&result), vec!["a", "b"]);
         std::fs::remove_file(&path).unwrap();

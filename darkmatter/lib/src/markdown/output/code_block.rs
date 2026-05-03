@@ -350,7 +350,8 @@ pub(crate) fn emit_padding_row(bg_color: Color) -> String {
 mod tests {
     use super::*;
     use crate::markdown::output::terminal::{
-        ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions,
+        ColorDepth, DimMode, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode,
+        TerminalOptions,
     };
     use crate::testing::strip_ansi_codes;
 
@@ -364,6 +365,7 @@ mod tests {
             image_mode: TerminalImageMode::Never,
             base_path: None,
             italic_mode: ItalicMode::Always,
+            dim_mode: DimMode::Always,
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,

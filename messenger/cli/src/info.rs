@@ -84,12 +84,8 @@ pub fn build_report(config: &Config, config_helpers: &[String]) -> InfoReport {
 
     let helper_variants: Vec<sniff::programs::NotificationHelper> =
         sniff::programs::NotificationHelper::iter().collect();
-    let helpers: Vec<HelperRecord> = render_helpers_in_parallel(
-        &helper_variants,
-        &helpers_info,
-        os_type,
-        &host,
-    );
+    let helpers: Vec<HelperRecord> =
+        render_helpers_in_parallel(&helper_variants, &helpers_info, os_type, &host);
 
     let election_order = compute_election_order(&helpers_info, os_type, config_helpers);
 
@@ -159,7 +155,10 @@ fn render_helpers_in_parallel(
             let _ = handle.join();
         }
     });
-    records.into_iter().map(|r| r.expect("helper record set")).collect()
+    records
+        .into_iter()
+        .map(|r| r.expect("helper record set"))
+        .collect()
 }
 
 fn helper_record(
@@ -171,7 +170,11 @@ fn helper_record(
     let path_info = info.path_with_source(helper);
     let installed = path_info.is_some();
     let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
-    let version = if installed { info.version(helper).ok() } else { None };
+    let version = if installed {
+        info.version(helper).ok()
+    } else {
+        None
+    };
     let install_hint = best_install_hint(helper, os_type, host);
 
     HelperRecord {
@@ -229,7 +232,10 @@ fn compute_election_order(
             order.push(helper);
         }
     }
-    order.into_iter().map(|h| h.binary_name().to_string()).collect()
+    order
+        .into_iter()
+        .map(|h| h.binary_name().to_string())
+        .collect()
 }
 
 fn helper_matches_os(helper: sniff::programs::NotificationHelper, os_type: OsType) -> bool {
@@ -299,8 +305,7 @@ pub fn render_text(report: &InfoReport) -> String {
     }
     if let Some(bundle_id) = &report.bundle_id {
         out.push_str(
-            &Prose::new(format!("<b>macOS bundle id:</b> <dim>{}</dim>", bundle_id))
-                .render(&term),
+            &Prose::new(format!("<b>macOS bundle id:</b> <dim>{}</dim>", bundle_id)).render(&term),
         );
         out.push('\n');
     }
@@ -325,9 +330,7 @@ pub fn render_text(report: &InfoReport) -> String {
         out.push('\n');
     } else {
         for (i, helper) in report.election_order.iter().enumerate() {
-            out.push_str(
-                &Prose::new(format!("  <dim>{}.</dim> {}", i + 1, helper)).render(&term),
-            );
+            out.push_str(&Prose::new(format!("  <dim>{}.</dim> {}", i + 1, helper)).render(&term));
             out.push('\n');
         }
     }
@@ -342,7 +345,11 @@ pub fn render_text(report: &InfoReport) -> String {
         out.push('\n');
     } else {
         for route in &report.routes {
-            let marker = if route.is_default { " <green>★</green>" } else { "" };
+            let marker = if route.is_default {
+                " <green>★</green>"
+            } else {
+                ""
+            };
             out.push_str(
                 &Prose::new(format!(
                     "  <b>{}</b> <dim>→</dim> {}{marker}",
@@ -632,5 +639,97 @@ mod tests {
             dunstify_pos < notify_pos,
             "expected dunstify before notify-send: {text}",
         );
+    }
+
+    #[test]
+    fn snapshot_text_rendering() {
+        let report = InfoReport {
+            host_os: "Linux".into(),
+            active_daemon: Some(DaemonRecord {
+                name: "dunst".into(),
+                vendor: Some("knopwob".into()),
+                version: Some("1.9.2".into()),
+            }),
+            bundle_id: None,
+            app_id: None,
+            helpers: vec![
+                HelperRecord {
+                    name: "dunstify".into(),
+                    binary_name: "dunstify".into(),
+                    installed: true,
+                    path: Some("/usr/bin/dunstify".into()),
+                    version: Some("1.2.0".into()),
+                    install_hint: None,
+                    website: "https://dunst-project.org".into(),
+                    description: "Customizable notification daemon".into(),
+                },
+                HelperRecord {
+                    name: "notify-send".into(),
+                    binary_name: "notify-send".into(),
+                    installed: false,
+                    path: None,
+                    version: None,
+                    install_hint: Some("sudo apt install libnotify-bin".into()),
+                    website: "https://gitlab.gnome.org/GNOME/libnotify".into(),
+                    description: "Sends desktop notifications".into(),
+                },
+            ],
+            election_order: vec!["dunstify".into(), "notify-send".into()],
+            routes: vec![
+                RouteRecord {
+                    name: "desktop".into(),
+                    provider: "Desktop".into(),
+                    is_default: true,
+                },
+            ],
+        };
+        let text = render_text(&report);
+        insta::assert_snapshot!(text);
+    }
+
+    #[test]
+    fn snapshot_json_rendering() {
+        let report = InfoReport {
+            host_os: "Linux".into(),
+            active_daemon: Some(DaemonRecord {
+                name: "dunst".into(),
+                vendor: Some("knopwob".into()),
+                version: Some("1.9.2".into()),
+            }),
+            bundle_id: None,
+            app_id: None,
+            helpers: vec![
+                HelperRecord {
+                    name: "dunstify".into(),
+                    binary_name: "dunstify".into(),
+                    installed: true,
+                    path: Some("/usr/bin/dunstify".into()),
+                    version: Some("1.2.0".into()),
+                    install_hint: None,
+                    website: "https://dunst-project.org".into(),
+                    description: "Customizable notification daemon".into(),
+                },
+                HelperRecord {
+                    name: "notify-send".into(),
+                    binary_name: "notify-send".into(),
+                    installed: false,
+                    path: None,
+                    version: None,
+                    install_hint: Some("sudo apt install libnotify-bin".into()),
+                    website: "https://gitlab.gnome.org/GNOME/libnotify".into(),
+                    description: "Sends desktop notifications".into(),
+                },
+            ],
+            election_order: vec!["dunstify".into(), "notify-send".into()],
+            routes: vec![
+                RouteRecord {
+                    name: "desktop".into(),
+                    provider: "Desktop".into(),
+                    is_default: true,
+                },
+            ],
+        };
+        let json = render_json(&report).unwrap();
+        insta::assert_snapshot!(json);
     }
 }

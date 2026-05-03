@@ -1,8 +1,9 @@
 # Biscuit Clipboard
 
-A library and CLI which is able to read and write to the host OS's clipboard.
+A library, background service, and CLI for observing and managing the host OS's clipboard.
 
 ## Packages
 
-- [Library](./lib/README.md)
-- [CLI](./cli/README.md)
+- [Library](./lib/README.md) — Core clipboard models, backend abstraction, history, and storage
+- [CLI](./cli/README.md) — `clip` command-line client
+- Service — `clipper` background daemon (coming in Phase 2)

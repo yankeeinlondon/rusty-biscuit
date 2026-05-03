@@ -237,7 +237,7 @@ Use these in speak messages and report templates: `"Tool {{tool_name}} failed: {
 
 ### Environment Variables
 
-Shell environment variables are supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR | "fallback"}}`.
+Shell environment variables are supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
 ### Example
 

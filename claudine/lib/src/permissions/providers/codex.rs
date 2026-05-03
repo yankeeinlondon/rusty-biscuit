@@ -1006,7 +1006,9 @@ fn ensure_toml_table_path<'a>(
 
 async fn repo_config_exists(ctx: &PolicyContext) -> bool {
     match &ctx.repo_root {
-        Some(root) => fs::try_exists(root.join(".codex/config.toml")).await.unwrap_or(false),
+        Some(root) => fs::try_exists(root.join(".codex/config.toml"))
+            .await
+            .unwrap_or(false),
         None => false,
     }
 }
@@ -1306,8 +1308,12 @@ enabled_tools = ["navigate"]
 
         let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
-        tokio::fs::create_dir_all(edit.path.parent().unwrap()).await.unwrap();
-        tokio::fs::write(&edit.path, edit.after_preview.as_bytes()).await.unwrap();
+        tokio::fs::create_dir_all(edit.path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&edit.path, edit.after_preview.as_bytes())
+            .await
+            .unwrap();
 
         let sources = backend.discover_sources(&ctx).await.unwrap();
         let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();

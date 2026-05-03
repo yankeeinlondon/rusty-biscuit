@@ -24,8 +24,9 @@
 
 #![cfg(feature = "desktop")]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::dispatch::{NotificationAction, NotificationUrgency};
 use crate::provider::desktop::helpers::HelperBackend;
@@ -55,6 +56,8 @@ fn stub_bin_dir() -> PathBuf {
     dir
 }
 
+static STUB_PATH_CACHE: Mutex<Option<HashMap<String, PathBuf>>> = Mutex::new(None);
+
 /// Resolve the path to a stub binary, building it on demand if missing.
 ///
 /// `cargo test` does build every `[[bin]]` whose `required-features` match
@@ -62,7 +65,20 @@ fn stub_bin_dir() -> PathBuf {
 /// `--no-fail-fast`) and surgical filters (`--lib`) can skip that step. As
 /// a safety net we shell out to `cargo build --bin <name>` when the file is
 /// missing; the build is a no-op when the bin is already up to date.
+///
+/// Resolved paths are cached in a process-wide [`Mutex`] so that
+/// `cargo-nextest` (which runs each test in a fresh process) pays the
+/// build cost at most once per process, not once per test.
 fn stub_path(name: &str) -> PathBuf {
+    {
+        let guard = STUB_PATH_CACHE.lock().unwrap();
+        if let Some(cache) = guard.as_ref() {
+            if let Some(path) = cache.get(name) {
+                return path.clone();
+            }
+        }
+    }
+
     let mut path = stub_bin_dir();
     path.push(if cfg!(windows) {
         format!("{name}.exe")
@@ -91,6 +107,10 @@ fn stub_path(name: &str) -> PathBuf {
         name,
         path.display()
     );
+
+    let mut guard = STUB_PATH_CACHE.lock().unwrap();
+    let cache = guard.get_or_insert_with(HashMap::new);
+    cache.insert(name.to_string(), path.clone());
     path
 }
 
@@ -391,6 +411,21 @@ mod snoretoast_stub {
 
     #[tokio::test]
     #[serial]
+    async fn notice_only_timeout_maps_to_timeout_error() {
+        // SnoreToast notice-only timeout is 5000ms; sleep for 6000ms to trigger it.
+        let stub = stub_path("stub_snoretoast");
+        let _env = EnvGuard::set(&[("STUB_SNORETOAST_SLEEP_MS", "6000")]);
+        let helper = snoretoast_helper(&stub);
+        let result = helper.send(&notice_request()).await;
+        let error = result.expect_err("expected SnoreToast stub to timeout");
+        assert!(
+            matches!(error, HelperError::Timeout { timeout_ms: 5000 }),
+            "got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn oversized_png_is_dropped_but_send_still_succeeds() {
         // Step 4.1: a 2048×2048 PNG exceeds Windows toast limits. The helper
         // must drop the image from argv, annotate the receipt with
@@ -499,6 +534,40 @@ mod burnttoast_stub {
         let error = result.expect_err("expected pwsh stub to exit nonzero");
         assert!(matches!(error, HelperError::Exited { status: 9, .. }));
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn notice_only_timeout_maps_to_timeout_error() {
+        // BurntToast notice-only timeout is 10000ms; sleep for 11000ms to trigger it.
+        let stub = stub_path("stub_burnttoast");
+        let _env = EnvGuard::set(&[("STUB_BURNTTOAST_SLEEP_MS", "11000")]);
+        let helper = burnttoast_helper(&stub);
+        let result = helper.send(&notice_request()).await;
+        let error = result.expect_err("expected BurntToast stub to timeout");
+        assert!(
+            matches!(error, HelperError::Timeout { timeout_ms: 10000 }),
+            "got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn app_id_registration_succeeds_before_send() {
+        // Do NOT call mark_app_id_registered — let the real registration path run.
+        let stub = stub_path("stub_burnttoast");
+        let _env = EnvGuard::set(&[(
+            "STUB_BURNTTOAST_JSON",
+            r#"{"activationType":"dismissed"}"#,
+        )]);
+        let helper = BurntToastHelper::new(stub.to_path_buf(), "RustyBiscuit.MessengerTests".to_string());
+        assert!(!helper.app_id_registered());
+        let receipt = helper.send(&notice_request()).await.unwrap();
+        assert!(helper.app_id_registered());
+        assert_eq!(
+            receipt.metadata.get("activation_type").map(String::as_str),
+            Some("dismissed"),
+        );
+    }
 }
 
 mod terminal_notifier_stub {
@@ -541,6 +610,21 @@ mod terminal_notifier_stub {
         let result = helper.send(&notice_request()).await;
         let error = result.expect_err("expected terminal-notifier stub to fail");
         assert!(matches!(error, HelperError::Exited { status: 2, .. }));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn notice_only_timeout_maps_to_timeout_error() {
+        // terminal-notifier timeout is 5000ms; sleep for 6000ms to trigger it.
+        let stub = stub_path("stub_terminal_notifier");
+        let _env = EnvGuard::set(&[("STUB_TERMINAL_NOTIFIER_SLEEP_MS", "6000")]);
+        let helper = terminal_notifier_helper(&stub);
+        let result = helper.send(&notice_request()).await;
+        let error = result.expect_err("expected terminal-notifier stub to timeout");
+        assert!(
+            matches!(error, HelperError::Timeout { timeout_ms: 5000 }),
+            "got {error:?}"
+        );
     }
 }
 
@@ -614,6 +698,33 @@ mod alerter_stub {
         let result = helper.send(&notice_request()).await;
         assert!(matches!(result, Err(HelperError::Parse(_))));
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn interactive_request_does_not_timeout() {
+        // Alerter has no timeout for interactive requests. Sleeping for 2s
+        // must not trigger a timeout error.
+        let stub = stub_path("stub_alerter");
+        let _env = EnvGuard::set(&[
+            ("STUB_ALERTER_SLEEP_MS", "2000"),
+            ("STUB_ALERTER_TYPE", "actionClicked"),
+            ("STUB_ALERTER_VALUE", "ok"),
+        ]);
+        let helper = alerter_helper(&stub);
+        let request = interactive_request(vec![NotificationAction {
+            id: "ok".into(),
+            label: "OK".into(),
+        }]);
+        let receipt = helper.send(&request).await.unwrap();
+        assert_eq!(
+            receipt.metadata.get("activation_type").map(String::as_str),
+            Some("action"),
+        );
+        assert_eq!(
+            receipt.metadata.get("activation_key").map(String::as_str),
+            Some("ok"),
+        );
+    }
 }
 
 mod backend_fallback {
@@ -626,9 +737,11 @@ mod backend_fallback {
 
     use super::*;
     use crate::provider::desktop::LinuxDesktopConfig;
+    use crate::provider::desktop::MacOsDesktopConfig;
     use crate::provider::desktop::WindowsDesktopConfig;
     use crate::provider::desktop::backend::DesktopBackend;
     use crate::provider::desktop::linux::LinuxBackend;
+    use crate::provider::desktop::macos::MacOsBackend;
     use crate::provider::desktop::windows::WindowsBackend;
     use serial_test::serial;
 
@@ -738,5 +851,84 @@ mod backend_fallback {
             .map(String::as_str)
             .unwrap_or("");
         assert!(fallbacks.contains("snore_toast"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn linux_backend_dunstify_timeout_falls_through_to_notify_send() {
+        let dunstify_path = stub_path("stub_dunstify");
+        let notify_path = stub_path("stub_notify_send");
+        // Dunstify notice-only timeout is 3000ms; sleep for 4000ms to trigger it.
+        let _env = EnvGuard::set(&[
+            ("STUB_DUNSTIFY_SLEEP_MS", "4000"),
+            ("STUB_NOTIFY_SEND_ID", "ns-timeout"),
+        ]);
+
+        let helpers: Vec<Arc<dyn HelperBackend>> = vec![
+            Arc::new(dunstify_helper(&dunstify_path)),
+            Arc::new(notify_send_helper(&notify_path)),
+        ];
+        let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), helpers);
+
+        let receipt = backend.send(notice_request()).await.unwrap();
+        assert_eq!(receipt.notification_id, "ns-timeout");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("notify_send"),
+        );
+        let fallbacks = receipt
+            .metadata
+            .get("helper_fallbacks")
+            .map(String::as_str)
+            .unwrap_or("");
+        assert!(fallbacks.contains("dunstify"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn macos_backend_routes_through_terminal_notifier_stub() {
+        let tn_path = stub_path("stub_terminal_notifier");
+        let helpers: Vec<Arc<dyn HelperBackend>> =
+            vec![Arc::new(terminal_notifier_helper(&tn_path))];
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), helpers);
+
+        let mut request = notice_request();
+        request.group_id = Some("mac-group".into());
+        let receipt = backend.send(request).await.unwrap();
+        assert_eq!(receipt.notification_id, "mac-group");
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("terminal_notifier"),
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn macos_backend_falls_through_to_alerter_when_terminal_notifier_fails() {
+        let tn_path = stub_path("stub_terminal_notifier");
+        let alerter_path = stub_path("stub_alerter");
+        // Notice-only request so terminal-notifier scores 80 and is elected first.
+        let _env = EnvGuard::set(&[
+            ("STUB_TERMINAL_NOTIFIER_EXIT", "1"),
+            ("STUB_ALERTER_TYPE", "closed"),
+        ]);
+
+        let helpers: Vec<Arc<dyn HelperBackend>> = vec![
+            Arc::new(terminal_notifier_helper(&tn_path)),
+            Arc::new(alerter_helper(&alerter_path)),
+        ];
+        let backend = MacOsBackend::with_helpers(MacOsDesktopConfig::default(), helpers);
+
+        let receipt = backend.send(notice_request()).await.unwrap();
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("alerter"),
+        );
+        let fallbacks = receipt
+            .metadata
+            .get("helper_fallbacks")
+            .map(String::as_str)
+            .unwrap_or("");
+        assert!(fallbacks.contains("terminal_notifier"));
     }
 }

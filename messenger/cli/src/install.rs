@@ -47,10 +47,8 @@ pub fn run(args: InstallArgs) -> Result<()> {
     if candidates.is_empty() {
         println!(
             "{}",
-            Prose::new(
-                "<green>All applicable notification helpers are already installed.</green>"
-            )
-            .render(&term)
+            Prose::new("<green>All applicable notification helpers are already installed.</green>")
+                .render(&term)
         );
         return Ok(());
     }
@@ -77,10 +75,7 @@ pub fn run(args: InstallArgs) -> Result<()> {
     print_plan_table(&plans, &term);
 
     if !args.yes && !args.dry_run && !confirm_proceed()? {
-        println!(
-            "{}",
-            Prose::new("<dim>Aborted.</dim>").render(&term)
-        );
+        println!("{}", Prose::new("<dim>Aborted.</dim>").render(&term));
         return Ok(());
     }
 
@@ -96,10 +91,7 @@ pub fn run(args: InstallArgs) -> Result<()> {
     }
 
     println!();
-    println!(
-        "{}",
-        Prose::new("<b>Updated state</b>").render(&term)
-    );
+    println!("{}", Prose::new("<b>Updated state</b>").render(&term));
     println!();
     let config = Config::load().unwrap_or_default();
     let host_helpers = info::config_helpers_for_host(&config, sniff::os::detect_os_type());
@@ -130,8 +122,8 @@ fn candidate_helpers(
 
     let mut resolved: Vec<NotificationHelper> = Vec::new();
     for raw in requested {
-        let helper = parse_helper_name(raw)
-            .ok_or_else(|| eyre!("unknown notification helper: {raw}"))?;
+        let helper =
+            parse_helper_name(raw).ok_or_else(|| eyre!("unknown notification helper: {raw}"))?;
         if !helper_applies_to_os(helper, os_type) {
             tracing::warn!(
                 helper = %helper.binary_name(),
@@ -167,15 +159,16 @@ fn prompt_selection(candidates: &[NotificationHelper]) -> Result<Vec<Notificatio
         })
         .collect();
 
-    let chosen_labels = match MultiSelect::new("Select notification helpers to install:", labels.clone())
-        .with_help_message("Space to toggle, Enter to confirm, Esc to skip")
-        .prompt()
-    {
-        Ok(values) => values,
-        Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => Vec::new(),
-        Err(error) => return Err(error.into()),
-    };
+    let chosen_labels =
+        match MultiSelect::new("Select notification helpers to install:", labels.clone())
+            .with_help_message("Space to toggle, Enter to confirm, Esc to skip")
+            .prompt()
+        {
+            Ok(values) => values,
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => Vec::new(),
+            Err(error) => return Err(error.into()),
+        };
 
     Ok(chosen_labels
         .into_iter()
@@ -204,7 +197,11 @@ fn print_plan_table(plans: &[(NotificationHelper, InstallPlan)], term: &Terminal
                 println!("{}", Prose::new(summary).render(term));
                 let cmd = sniff::programs::installer::get_install_command(&option.kind)
                     .unwrap_or_else(|_| {
-                        format!("{} {}", option.kind.manager_name(), option.kind.package_name())
+                        format!(
+                            "{} {}",
+                            option.kind.manager_name(),
+                            option.kind.package_name()
+                        )
                     });
                 println!(
                     "{}",
@@ -283,8 +280,11 @@ fn execute_helper_install(
             }
             println!(
                 "{}",
-                Prose::new(format!("  <green>✓ {} installed</green>", helper.display_name()))
-                    .render(term)
+                Prose::new(format!(
+                    "  <green>✓ {} installed</green>",
+                    helper.display_name()
+                ))
+                .render(term)
             );
             Ok(())
         }
@@ -311,8 +311,14 @@ mod tests {
 
     #[test]
     fn helper_applies_to_os_filters_by_availability() {
-        assert!(helper_applies_to_os(NotificationHelper::Dunstify, OsType::Linux));
-        assert!(!helper_applies_to_os(NotificationHelper::Dunstify, OsType::Windows));
+        assert!(helper_applies_to_os(
+            NotificationHelper::Dunstify,
+            OsType::Linux
+        ));
+        assert!(!helper_applies_to_os(
+            NotificationHelper::Dunstify,
+            OsType::Windows
+        ));
         assert!(helper_applies_to_os(
             NotificationHelper::TerminalNotifier,
             OsType::MacOS
@@ -352,7 +358,8 @@ mod tests {
         let detector =
             sniff::programs::notification_helpers::InstalledNotificationHelpers::default();
         // Asking for a Windows helper on a Linux host drops the entry.
-        let candidates = candidate_helpers(&detector, OsType::Linux, &["snore_toast".into()]).unwrap();
+        let candidates =
+            candidate_helpers(&detector, OsType::Linux, &["snore_toast".into()]).unwrap();
         assert!(candidates.is_empty());
     }
 
@@ -360,8 +367,8 @@ mod tests {
     fn candidate_helpers_returns_error_for_unknown_name() {
         let detector =
             sniff::programs::notification_helpers::InstalledNotificationHelpers::default();
-        let err = candidate_helpers(&detector, OsType::Linux, &["definitely-not".into()])
-            .unwrap_err();
+        let err =
+            candidate_helpers(&detector, OsType::Linux, &["definitely-not".into()]).unwrap_err();
         assert!(format!("{err}").contains("unknown"));
     }
 }

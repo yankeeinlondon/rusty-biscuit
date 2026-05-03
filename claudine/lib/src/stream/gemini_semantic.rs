@@ -380,8 +380,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
                     GeminiEvent::Result(result) => {
                         // Reconstruct the raw payload from the typed struct
                         // without a second parse.
-                        let raw = serde_json::to_value(&result)
-                            .expect("GeminiResult serializes");
+                        let raw = serde_json::to_value(&result).expect("GeminiResult serializes");
                         self.handle_result(result, raw, &raw_kind);
                     }
                     GeminiEvent::ToolUse(tu) => {

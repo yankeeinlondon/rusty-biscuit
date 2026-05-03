@@ -1221,7 +1221,10 @@ mod tests {
             !svg.contains("currentColor"),
             "SVG should not use currentColor: {svg}"
         );
-        assert!(svg.contains("white"), "SVG should use a visible default color: {svg}");
+        assert!(
+            svg.contains("white"),
+            "SVG should use a visible default color: {svg}"
+        );
     }
 
     #[test]

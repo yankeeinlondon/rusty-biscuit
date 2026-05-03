@@ -116,10 +116,12 @@ static RESET_AT_RE: LazyLock<Regex> = LazyLock::new(|| {
 static ANSI_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[A-Za-z]").expect("ansi regex must compile"));
 
-static STATUS_CODE_RES: LazyLock<[Regex; 2]> = LazyLock::new(|| [
-    Regex::new(r#""statusCode":(\d{3})"#).expect("status-code regex 1 must compile"),
-    Regex::new(r"statusCode=(\d{3})").expect("status-code regex 2 must compile"),
-]);
+static STATUS_CODE_RES: LazyLock<[Regex; 2]> = LazyLock::new(|| {
+    [
+        Regex::new(r#""statusCode":(\d{3})"#).expect("status-code regex 1 must compile"),
+        Regex::new(r"statusCode=(\d{3})").expect("status-code regex 2 must compile"),
+    ]
+});
 
 /// Parse a single OpenCode stderr line into either a structured record
 /// or a raw passthrough string.
@@ -2006,26 +2008,14 @@ mod tests {
 
     #[test]
     fn extract_status_code_finds_json_variant() {
-        assert_eq!(
-            extract_status_code(r#""statusCode":429"#),
-            Some(429)
-        );
-        assert_eq!(
-            extract_status_code(r#""statusCode":500"#),
-            Some(500)
-        );
+        assert_eq!(extract_status_code(r#""statusCode":429"#), Some(429));
+        assert_eq!(extract_status_code(r#""statusCode":500"#), Some(500));
     }
 
     #[test]
     fn extract_status_code_finds_key_value_variant() {
-        assert_eq!(
-            extract_status_code("statusCode=429"),
-            Some(429)
-        );
-        assert_eq!(
-            extract_status_code("statusCode=503"),
-            Some(503)
-        );
+        assert_eq!(extract_status_code("statusCode=429"), Some(429));
+        assert_eq!(extract_status_code("statusCode=503"), Some(503));
     }
 
     #[test]
@@ -2039,8 +2029,8 @@ mod tests {
     fn extract_status_code_returns_none_for_missing_code() {
         assert_eq!(extract_status_code("no status here"), None);
         assert_eq!(extract_status_code(""), None);
-        assert_eq!(extract_status_code("statusCode=99"), None);   // too short
+        assert_eq!(extract_status_code("statusCode=99"), None); // too short
         assert_eq!(extract_status_code("statusCode=9999"), Some(999)); // matches first 3 digits
-        assert_eq!(extract_status_code("other=500"), None);       // wrong key
+        assert_eq!(extract_status_code("other=500"), None); // wrong key
     }
 }

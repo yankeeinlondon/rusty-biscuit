@@ -342,6 +342,7 @@ fn format_action(action: &HookAction) -> String {
             effect,
             volume,
             speed,
+            ..
         } => {
             let mut params = Vec::new();
             if *volume != 1.0 {
@@ -360,7 +361,7 @@ fn format_action(action: &HookAction) -> String {
                 effect, params_str
             )
         }
-        HookAction::Report { handler } => {
+        HookAction::Report { handler, .. } => {
             let format_str = handler
                 .as_ref()
                 .map(|h| match h.format {
@@ -386,7 +387,9 @@ fn format_action(action: &HookAction) -> String {
                 format!("<yellow>Report</yellow>({DI}format={}{DI_R})", format_str)
             }
         }
-        HookAction::Bash { command, params } => {
+        HookAction::Bash {
+            command, params, ..
+        } => {
             if params.is_empty() {
                 format!("<green>Bash</green>({DI}\"{}\"{DI_R})", command)
             } else {

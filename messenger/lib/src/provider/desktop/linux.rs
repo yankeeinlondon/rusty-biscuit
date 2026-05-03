@@ -2,8 +2,9 @@
 //!
 //! Delivers notifications through the freedesktop.org D-Bus Notifications
 //! interface via the [`notify-rust`](https://docs.rs/notify-rust) crate, with
-//! an opportunistic helper layer (`dunstify`, `notify-send`) that ships
-//! interactive features the native `notify-rust` path does not surface.
+//! a helper layer (`dunstify`, `notify-send`) that serves as the primary
+//! delivery path for interactive features. The native `notify-rust` D-Bus
+//! path remains the fallback when no helper is present.
 //!
 //! ## Notes
 //!
@@ -12,7 +13,7 @@
 //! - Returns the daemon-assigned notification ID (or helper-issued id) as
 //!   the `MessageRef::Desktop` `notification_id`.
 //! - Uses D-Bus hints (`urgency`, `category`, `desktop-entry`, `image-path`,
-//!   `suppress-sound`) for best-effort enrichment.
+//!   `suppress-sound`) for enrichment.
 
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
@@ -679,5 +680,19 @@ mod tests {
             }
             other => panic!("expected MessengerError::Transport, got {other:?}"),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn native_fallback_delivers_when_no_helpers_installed() {
+        // On a real Linux host, the D-Bus native path must succeed when no
+        // helpers are registered. This proves the fallback chain does not
+        // silently drop notifications.
+        let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), Vec::new());
+        let receipt = backend.send(request()).await.unwrap();
+        assert_eq!(
+            receipt.metadata.get("helper_used").map(String::as_str),
+            Some("native"),
+        );
     }
 }

@@ -64,7 +64,20 @@ Both mobile providers support title-only messages (like desktop) and silent deli
 
 ### Desktop Provider
 
-The desktop provider delivers notifications to the host OS notification center (Linux D-Bus, macOS native/AppleScript, Windows WinRT). Beyond basic send, it exposes:
+The desktop provider delivers notifications to the host OS notification center (Linux D-Bus, macOS native/AppleScript, Windows WinRT). It opportunistically uses third-party helper CLIs when available to unlock richer features:
+
+| Helper | Platform | Score | Actions | Reply | Replace | Notes |
+|--------|----------|-------|---------|-------|---------|-------|
+| `dunstify` | Linux | 90/70 | Yes | No | Yes | Preferred when dunst daemon is active |
+| `notify-send` | Linux | 60 | Yes* | No | No | *Actions require libnotify >= 0.7.8 |
+| `terminal-notifier` | macOS | 80 | No | No | Yes | Notice-only; drops actions/reply |
+| `alerter` | macOS | 90/30 | Yes | Yes | No | Preferred for interactive dispatches |
+| `snoretoast` | Windows | 90 | Yes | Yes | Yes | Default choice; requires AppID registration |
+| `burnttoast` | Windows | 40 | Yes | Yes | No | PowerShell-based fallback |
+
+**Helper election** runs at send time: helpers are scored per-dispatch, filtered by `score > 0`, and tried in preference order (env var `MESSENGER_DESKTOP_PREFER_HELPERS` > per-OS config `prefer_helpers` > default OS order). A failed helper falls through to the next candidate; if all helpers fail, the native backend is used.
+
+Beyond basic send, the desktop provider exposes:
 
 - **`DesktopNotificationProvider::replace(receipt, dispatch, message)`** — update an existing notification by its `SendReceipt` (supported on Linux D-Bus and macOS native; returns `UnsupportedFeature` on AppleScript and Windows)
 - **`DesktopNotificationProvider::dismiss(receipt)`** — remove a delivered notification (supported on macOS native; returns `UnsupportedFeature` on other backends)
@@ -82,6 +95,8 @@ CLI commands for desktop notifications:
 
 - `messenger replace <receipt> [message]` — replace an existing desktop notification using a saved receipt
 - `messenger dismiss <receipt>` — dismiss a delivered desktop notification using a saved receipt
+- `messenger info [--json]` — show host OS, detected helpers, election order, and configured routes
+- `messenger install [--yes] [--helper <name>…] [--dry-run]` — install missing notification helpers via the host package manager
 
 Discord ships with two adapters behind a single `discord` feature: `DiscordProvider` (bot token, full capability) and `DiscordWebhookProvider` (webhook URL, notification-only). The webhook adapter rejects `reply_to` at plan time with `MessengerError::UnsupportedFeature { feature: "replies" }` — no network call is made.
 Both Discord adapters render Markdown through the same Discord renderer; the transport and capability differences live in the provider layer, not in a second markup dialect.
@@ -127,7 +142,9 @@ messenger/
       tests/     # Unit + wiremock integration tests
   cli/           # messenger binary (send, setup, completions)
     src/
-      config.rs  # Route config and secret resolution
+      config.rs  # Route config, secret resolution, prefer_helpers parsing
+      info.rs    # Host detection, helper election, route table
+      install.rs # Interactive helper installation via sniff
       setup.rs   # Interactive provider setup
       receipt_store.rs
   docs/research/ # Provider research and API design notes

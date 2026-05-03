@@ -25,6 +25,13 @@ pub enum InlineTag {
     /// Renders as `<mark>` in HTML or with a yellow background in terminal.
     /// This syntax is supported by popular editors like Obsidian and Typora.
     Mark,
+
+    /// Dim/faint text (`⌄text⌄`).
+    ///
+    /// Terminal-first dim syntax that maps to ANSI SGR `2` when supported.
+    /// Falls back to plain text in terminals without dim support.
+    /// HTML output preserves the `⌄` delimiters as literal characters.
+    Dim,
     // Future extensions:
     // Underline,    // __text__ or ++text++
     // Subscript,    // ~text~
@@ -44,8 +51,10 @@ pub struct HorizontalRuleAttrs {
 /// Wrapper for pulldown-cmark events with custom inline extensions.
 ///
 /// This enum wraps standard pulldown-cmark events while adding support
-/// for custom inline tags. It allows the `MarkProcessor` iterator adapter
-/// to emit both standard and custom events in a unified stream.
+/// for custom inline tags. It allows the [`InlineStyleProcessor`] iterator
+/// adapter to emit both standard and custom events in a unified stream.
+///
+/// [`InlineStyleProcessor`]: super::InlineStyleProcessor
 ///
 /// ## Examples
 ///
@@ -204,5 +213,42 @@ mod tests {
 
         let end = InlineEvent::End(InlineTag::Mark);
         assert_eq!(end.inline_tag(), Some(InlineTag::Mark));
+    }
+
+    #[test]
+    fn test_inline_tag_dim_debug() {
+        let tag = InlineTag::Dim;
+        assert_eq!(format!("{:?}", tag), "Dim");
+    }
+
+    #[test]
+    fn test_inline_tag_dim_equality() {
+        assert_eq!(InlineTag::Dim, InlineTag::Dim);
+        assert_ne!(InlineTag::Dim, InlineTag::Mark);
+    }
+
+    #[test]
+    fn test_inline_tag_dim_clone() {
+        let tag = InlineTag::Dim;
+        let cloned = tag;
+        assert_eq!(tag, cloned);
+    }
+
+    #[test]
+    fn test_inline_event_start_dim() {
+        let event = InlineEvent::Start(InlineTag::Dim);
+        assert!(!event.is_standard());
+        assert!(event.is_start());
+        assert!(!event.is_end());
+        assert_eq!(event.inline_tag(), Some(InlineTag::Dim));
+    }
+
+    #[test]
+    fn test_inline_event_end_dim() {
+        let event = InlineEvent::End(InlineTag::Dim);
+        assert!(!event.is_standard());
+        assert!(!event.is_start());
+        assert!(event.is_end());
+        assert_eq!(event.inline_tag(), Some(InlineTag::Dim));
     }
 }

@@ -1057,8 +1057,12 @@ priority = 100
 
         let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         for edit in &plan.persistent_plan.as_ref().unwrap().edits {
-            tokio::fs::create_dir_all(edit.path.parent().unwrap()).await.unwrap();
-            tokio::fs::write(&edit.path, edit.after_preview.as_bytes()).await.unwrap();
+            tokio::fs::create_dir_all(edit.path.parent().unwrap())
+                .await
+                .unwrap();
+            tokio::fs::write(&edit.path, edit.after_preview.as_bytes())
+                .await
+                .unwrap();
         }
 
         let sources = backend.discover_sources(&ctx).await.unwrap();
