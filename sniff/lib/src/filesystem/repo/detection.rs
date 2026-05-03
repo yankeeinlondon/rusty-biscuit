@@ -5,7 +5,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
-use crate::filesystem::file_types::{FileAssociation, FileInventory, is_command_runner_filename};
+use crate::filesystem::file_types::{
+    FileAssociation, FileInventory, FrameworkAccumulator, FrameworkKind, LanguageAccumulator,
+    ProgrammingLanguage, accumulate_language_classification, build_association_breakdown,
+    build_language_summary, is_command_runner_filename,
+};
 
 use super::types::*;
 
@@ -308,8 +312,12 @@ fn cargo_dependencies_from_value(
     Vec<DependencyEntry>,
     Vec<DependencyEntry>,
 ) {
-    let normal_deps =
-        parse_cargo_dep_section(parsed, "dependencies", DependencyKind::Normal, lock_versions);
+    let normal_deps = parse_cargo_dep_section(
+        parsed,
+        "dependencies",
+        DependencyKind::Normal,
+        lock_versions,
+    );
     let dev_deps = parse_cargo_dep_section(
         parsed,
         "dev-dependencies",
@@ -1188,7 +1196,10 @@ fn package_relative_path(package_relative: &str, path: &Path) -> PathBuf {
 fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &Path) -> String {
     let cargo_toml = path.join("Cargo.toml");
     if cargo_toml.exists()
-        && let Some(name) = ctx.manifests.cargo(&cargo_toml).and_then(cargo_package_name)
+        && let Some(name) = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_name)
     {
         return name;
     }
@@ -1232,12 +1243,19 @@ fn resolve_package_version(
 ) -> Option<String> {
     let cargo_toml = path.join("Cargo.toml");
     if cargo_toml.exists() {
-        return ctx.manifests.cargo(&cargo_toml).and_then(cargo_package_version);
+        return ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_version);
     }
 
     let package_json = path.join("package.json");
     if package_json.exists() {
-        if let Some(version) = ctx.manifests.npm(&package_json).and_then(npm_package_version) {
+        if let Some(version) = ctx
+            .manifests
+            .npm(&package_json)
+            .and_then(npm_package_version)
+        {
             return Some(version);
         }
         if path != root {
@@ -1354,7 +1372,7 @@ pub(crate) fn canonicalize_path(path: &Path) -> PathBuf {
 ///
 /// Cleans up `.` and `..` components and resolves relative paths against
 /// the current working directory when needed.
-fn normalize_path(path: &Path) -> PathBuf {
+pub(crate) fn normalize_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
         let mut normalized = PathBuf::new();
         for component in path.components() {
@@ -1641,65 +1659,198 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
     merged
 }
 
-fn refresh_package_boundaries(packages: &mut [Package], repo_inventory: Option<&FileInventory>) {
-    // Build sorted list of (canonical_root, original_path, name, index) for efficient lookup
-    let mut sorted_packages: Vec<(PathBuf, PathBuf, String, usize)> = packages
-        .iter()
-        .enumerate()
-        .map(|(i, pkg)| {
-            (
-                canonicalize_path(&pkg.path),
-                pkg.path.clone(),
-                pkg.name.clone(),
-                i,
-            )
-        })
-        .collect();
-    // Sort by path depth (shorter paths first = ancestors first)
-    sorted_packages.sort_by_key(|a| a.0.components().count());
-
-    // Build a map from original index to its descendants
-    let mut descendants: Vec<Vec<(PathBuf, String)>> = vec![Vec::new(); packages.len()];
-
-    // For each package, only check packages that come AFTER it in the sorted list
-    // (which are guaranteed to be at least as deep)
-    for i in 0..sorted_packages.len() {
-        let (root_i, _, _, idx_i) = &sorted_packages[i];
-        for (root_j, path_j, name_j, idx_j) in sorted_packages.iter().skip(i + 1) {
-            if root_j.starts_with(root_i) && idx_i != idx_j {
-                descendants[*idx_i].push((path_j.clone(), name_j.clone()));
-            }
-        }
+/// Re-compute language/file stats for every package using a shared repo
+/// inventory.
+///
+/// ## Algorithm
+///
+/// 1. Build a HashMap from canonical package path → index.
+/// 2. Derive nested-package relationships by walking parent directories.
+/// 3. When a repo inventory is provided, do a single pass over all
+///    classifications, assign each to the deepest containing package, and
+///    accumulate stats directly into per-package buckets.
+///
+/// This is O(F·depth + P·depth) instead of the previous O(P·F) + O(P²).
+#[doc(hidden)]
+pub fn refresh_package_boundaries(
+    packages: &mut [Package],
+    repo_inventory: Option<&FileInventory>,
+) {
+    if packages.is_empty() {
+        return;
     }
 
-    for (index, package) in packages.iter_mut().enumerate() {
-        let mut nested_roots: Vec<PathBuf> = Vec::new();
-        let mut nested_packages: Vec<String> = Vec::new();
+    // Build a map from canonicalized package path to original index.
+    // This replaces the O(P²) pairwise scan with O(P) HashMap lookups.
+    let package_path_to_index: HashMap<PathBuf, usize> = packages
+        .iter()
+        .enumerate()
+        .map(|(i, pkg)| (canonicalize_path(&pkg.path), i))
+        .collect();
 
-        for (path, name) in &descendants[index] {
-            nested_roots.push(path.clone());
-            nested_packages.push(name.clone());
+    // Build nested package lists by walking up parent directories.
+    // Each package finds its deepest containing ancestor in O(depth) time.
+    let mut nested_packages: Vec<Vec<String>> = vec![Vec::new(); packages.len()];
+    for (child_idx, package) in packages.iter().enumerate() {
+        let mut current = canonicalize_path(&package.path);
+        while let Some(parent) = current.parent() {
+            let parent_normalized = canonicalize_path(parent);
+            if let Some(&parent_idx) = package_path_to_index.get(&parent_normalized)
+                && parent_idx != child_idx
+            {
+                nested_packages[parent_idx].push(package.name.clone());
+                break;
+            }
+            current = parent_normalized;
+        }
+    }
+    for list in &mut nested_packages {
+        list.sort();
+    }
+
+    if let Some(inventory) = repo_inventory {
+        let repo_root = &inventory.scope.root;
+
+        // Per-package accumulators.  One pass over all classifications assigns
+        // each file to the deepest containing package and accumulates stats
+        // directly, avoiding O(P * F) cloned inventories.
+        let mut per_pkg_lang: Vec<HashMap<ProgrammingLanguage, LanguageAccumulator>> =
+            (0..packages.len()).map(|_| HashMap::new()).collect();
+        let mut per_pkg_fw: Vec<HashMap<FrameworkKind, FrameworkAccumulator>> =
+            (0..packages.len()).map(|_| HashMap::new()).collect();
+        let mut per_pkg_assoc: Vec<HashMap<FileAssociation, Vec<PathBuf>>> =
+            (0..packages.len()).map(|_| HashMap::new()).collect();
+        let mut per_pkg_files: Vec<PackageFiles> = (0..packages.len())
+            .map(|_| PackageFiles::default())
+            .collect();
+        let mut per_pkg_total: Vec<usize> = vec![0; packages.len()];
+
+        for classification in inventory.classifications.iter() {
+            let abs_path = repo_root.join(&classification.path);
+            let normalized_abs = canonicalize_path(&abs_path);
+
+            // Find deepest containing package by walking up parent directories.
+            let mut assigned_pkg = None;
+            let mut current = normalized_abs;
+            while let Some(parent) = current.parent() {
+                let parent_normalized = canonicalize_path(parent);
+                if let Some(&pkg_idx) = package_path_to_index.get(&parent_normalized) {
+                    assigned_pkg = Some(pkg_idx);
+                    break;
+                }
+                current = parent_normalized;
+            }
+
+            let Some(pkg_idx) = assigned_pkg else {
+                continue;
+            };
+
+            per_pkg_total[pkg_idx] += 1;
+
+            accumulate_language_classification(
+                classification,
+                &mut per_pkg_lang[pkg_idx],
+                &mut per_pkg_fw[pkg_idx],
+            );
+
+            per_pkg_assoc[pkg_idx]
+                .entry(classification.association)
+                .or_default()
+                .push(classification.path.clone());
+
+            // Package file categorization (mirrors detect_package_files)
+            let package_relative = &packages[pkg_idx].relative;
+            let repo_relative = package_relative_path(package_relative, &classification.path);
+            let file_name = classification
+                .path
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or_default();
+
+            if file_name == ".editorconfig" {
+                per_pkg_files[pkg_idx].editor_config = Some(repo_relative);
+            } else if is_command_runner_filename(file_name) {
+                per_pkg_files[pkg_idx].command_runner.push(repo_relative);
+            } else {
+                match classification.association {
+                    FileAssociation::Configuration => {
+                        per_pkg_files[pkg_idx].configuration.push(repo_relative);
+                    }
+                    FileAssociation::Documentation => {
+                        per_pkg_files[pkg_idx].documentation.push(repo_relative);
+                    }
+                    _ => {}
+                }
+            }
         }
 
-        nested_roots.sort();
-        nested_packages.sort();
+        // Convert accumulators to final package fields
+        for (i, package) in packages.iter_mut().enumerate() {
+            package.nested_packages = nested_packages[i].clone();
 
-        let scan = detect_package_languages(
-            &package.relative,
-            &package.path,
-            &nested_roots,
-            repo_inventory,
-        );
-        package.primary_language = scan.language_breakdown.primary;
-        package.secondary_languages = scan.language_breakdown.secondary;
-        package.languages = scan.language_breakdown.languages;
-        package.frameworks = scan.language_breakdown.frameworks;
-        package.file_associations = scan.file_breakdown.by_association;
-        package.configuration = scan.compatibility.configuration;
-        package.documentation = scan.compatibility.documentation;
-        package.editor_config = scan.compatibility.editor_config;
-        package.command_runner = scan.compatibility.command_runner;
-        package.nested_packages = nested_packages;
+            let lang_summary = build_language_summary(
+                std::mem::take(&mut per_pkg_lang[i]),
+                std::mem::take(&mut per_pkg_fw[i]),
+                per_pkg_total[i],
+            );
+            package.primary_language = lang_summary.primary;
+            package.secondary_languages = lang_summary.secondary;
+            package.languages = lang_summary.languages;
+            package.frameworks = lang_summary.frameworks;
+
+            package.file_associations = build_association_breakdown(
+                std::mem::take(&mut per_pkg_assoc[i]),
+                per_pkg_total[i],
+            );
+
+            per_pkg_files[i].configuration.sort();
+            per_pkg_files[i].configuration.dedup();
+            per_pkg_files[i].documentation.sort();
+            per_pkg_files[i].documentation.dedup();
+            per_pkg_files[i].command_runner.sort();
+            per_pkg_files[i].command_runner.dedup();
+
+            package.configuration = std::mem::take(&mut per_pkg_files[i].configuration);
+            package.documentation = std::mem::take(&mut per_pkg_files[i].documentation);
+            package.editor_config = per_pkg_files[i].editor_config.take();
+            package.command_runner = std::mem::take(&mut per_pkg_files[i].command_runner);
+        }
+    } else {
+        // Fallback: per-package scanning when no shared repo inventory exists.
+        // Pre-build name -> path map so we don't borrow packages mutably and
+        // immutably at the same time inside the loop.
+        let name_to_path: HashMap<&str, PathBuf> = packages
+            .iter()
+            .map(|p| (p.name.as_str(), p.path.clone()))
+            .collect();
+        let mut nested_roots_by_index: Vec<Vec<PathBuf>> = vec![Vec::new(); packages.len()];
+        for (index, names) in nested_packages.iter().enumerate() {
+            for name in names {
+                if let Some(path) = name_to_path.get(name.as_str()) {
+                    nested_roots_by_index[index].push(path.clone());
+                }
+            }
+            nested_roots_by_index[index].sort();
+        }
+
+        for (index, package) in packages.iter_mut().enumerate() {
+            let scan = detect_package_languages(
+                &package.relative,
+                &package.path,
+                &nested_roots_by_index[index],
+                None,
+            );
+            package.primary_language = scan.language_breakdown.primary;
+            package.secondary_languages = scan.language_breakdown.secondary;
+            package.languages = scan.language_breakdown.languages;
+            package.frameworks = scan.language_breakdown.frameworks;
+            package.file_associations = scan.file_breakdown.by_association;
+            package.configuration = scan.compatibility.configuration;
+            package.documentation = scan.compatibility.documentation;
+            package.editor_config = scan.compatibility.editor_config;
+            package.command_runner = scan.compatibility.command_runner;
+            package.nested_packages = nested_packages[index].clone();
+        }
     }
 }
 
@@ -2204,5 +2355,429 @@ mod tests {
         let path = Path::new("/a/b/c/../../d");
         let normalized = normalize_path(path);
         assert_eq!(normalized, PathBuf::from("/a/d"));
+    }
+
+    // ============================================================================
+    // ManifestCache tests (Phase 3)
+    // ============================================================================
+
+    #[test]
+    fn manifest_cache_parses_cargo_toml_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let cargo_toml = dir.path().join("Cargo.toml");
+        let mut file = std::fs::File::create(&cargo_toml).unwrap();
+        file.write_all(
+            b"[package]\nname = \"test-pkg\"\nversion = \"1.2.3\"\nedition = \"2021\"\n\n\
+             [dependencies]\nserde = \"1.0\"\n\n\
+             [features]\ndefault = [\"std\"]\nstd = []\n",
+        )
+        .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        // First access: parse and cache
+        let parsed = cache.cargo(&cargo_toml);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("package")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-pkg")
+        );
+
+        // Second access: should return the same cached value without re-reading
+        let parsed = cache.cargo(&cargo_toml);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("package")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-pkg")
+        );
+    }
+
+    #[test]
+    fn manifest_cache_parses_package_json_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let package_json = dir.path().join("package.json");
+        let mut file = std::fs::File::create(&package_json).unwrap();
+        file.write_all(
+            br#"{"name":"test-app","version":"2.0.0","dependencies":{"lodash":"^4.0.0"}}"#,
+        )
+        .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        let parsed = cache.npm(&package_json);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed.unwrap().get("name").and_then(|n| n.as_str()),
+            Some("test-app")
+        );
+
+        // Second access should be a cache hit
+        let parsed = cache.npm(&package_json);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed.unwrap().get("name").and_then(|n| n.as_str()),
+            Some("test-app")
+        );
+    }
+
+    #[test]
+    fn manifest_cache_parses_pyproject_toml_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let pyproject = dir.path().join("pyproject.toml");
+        let mut file = std::fs::File::create(&pyproject).unwrap();
+        file.write_all(b"[project]\nname = \"test-py\"\nversion = \"3.0.0\"\n")
+            .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        let parsed = cache.pyproject(&pyproject);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("project")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-py")
+        );
+
+        // Second access should be a cache hit
+        let parsed = cache.pyproject(&pyproject);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("project")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-py")
+        );
+    }
+
+    #[test]
+    fn manifest_cache_reads_go_mod_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let go_mod = dir.path().join("go.mod");
+        let mut file = std::fs::File::create(&go_mod).unwrap();
+        file.write_all(b"module example.com/test\n\ngo 1.21\n")
+            .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        let content = cache.go_mod(&go_mod);
+        assert!(content.is_some());
+        assert!(content.unwrap().contains("example.com/test"));
+
+        // Second access should be a cache hit
+        let content = cache.go_mod(&go_mod);
+        assert!(content.is_some());
+        assert!(content.unwrap().contains("example.com/test"));
+    }
+
+    #[test]
+    fn package_build_context_derives_all_fields_from_cached_manifests() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let cargo_toml = dir.path().join("Cargo.toml");
+        let mut file = std::fs::File::create(&cargo_toml).unwrap();
+        file.write_all(
+            b"[package]\nname = \"ctx-pkg\"\nversion = \"0.5.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nserde = \"1.0\"\n\n\
+             [features]\ndefault = [\"std\"]\nstd = []\n",
+        )
+        .unwrap();
+        drop(file);
+
+        let lock_versions: Option<CargoLockVersions> = None;
+        let mut ctx = PackageBuildContext::new(&lock_versions);
+
+        // Resolve name (first parse)
+        let name = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_name);
+        assert_eq!(name, Some("ctx-pkg".to_string()));
+
+        // Resolve version (cache hit)
+        let version = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_version);
+        assert_eq!(version, Some("0.5.0".to_string()));
+
+        // Resolve features (cache hit)
+        let features = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .map(cargo_features_from_value)
+            .unwrap_or_default();
+        assert!(features.contains(&"default".to_string()));
+        assert!(features.contains(&"std".to_string()));
+
+        // Resolve dependencies (cache hit)
+        if let Some(parsed) = ctx.manifests.cargo(&cargo_toml) {
+            let (normal, _dev, _build) = cargo_dependencies_from_value(parsed, ctx.lock_versions);
+            assert_eq!(normal.len(), 1);
+            assert_eq!(normal[0].name, "serde");
+        }
+    }
+
+    // ============================================================================
+    // refresh_package_boundaries tests (Phase 4)
+    // ============================================================================
+
+    #[test]
+    fn refresh_boundaries_assigns_files_to_deepest_package() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create repo structure:
+        // root/
+        //   packages/
+        //     foo/
+        //       src/main.rs
+        //       Cargo.toml
+        //     bar/
+        //       src/lib.rs
+        //       Cargo.toml
+        //   README.md
+        fs::create_dir_all(root.join("packages/foo/src")).unwrap();
+        fs::create_dir_all(root.join("packages/bar/src")).unwrap();
+        fs::write(root.join("packages/foo/src/main.rs"), "fn main() {}").unwrap();
+        fs::write(
+            root.join("packages/foo/Cargo.toml"),
+            "[package]\nname = 'foo'\n",
+        )
+        .unwrap();
+        fs::write(root.join("packages/bar/src/lib.rs"), "pub fn lib() {}").unwrap();
+        fs::write(
+            root.join("packages/bar/Cargo.toml"),
+            "[package]\nname = 'bar'\n",
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "# Repo").unwrap();
+
+        // Build repo inventory
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+        assert_eq!(inventory.total_files_scanned, 5);
+
+        // Create packages
+        let mut packages = vec![
+            Package {
+                name: "foo".to_string(),
+                path: root.join("packages/foo"),
+                relative: "packages/foo".to_string(),
+                package_area: "packages".to_string(),
+                ..Default::default()
+            },
+            Package {
+                name: "bar".to_string(),
+                path: root.join("packages/bar"),
+                relative: "packages/bar".to_string(),
+                package_area: "packages".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        // foo should have 2 files (main.rs + Cargo.toml)
+        assert_eq!(packages[0].languages.len(), 1);
+        assert_eq!(packages[0].languages[0].language, ProgrammingLanguage::Rust);
+        assert_eq!(packages[0].languages[0].direct_file_count, 1);
+
+        // bar should have 2 files (lib.rs + Cargo.toml)
+        assert_eq!(packages[1].languages.len(), 1);
+        assert_eq!(packages[1].languages[0].language, ProgrammingLanguage::Rust);
+        assert_eq!(packages[1].languages[0].direct_file_count, 1);
+    }
+
+    #[test]
+    fn refresh_boundaries_excludes_nested_package_files_from_parent() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Parent package with nested child package:
+        // root/
+        //   apps/
+        //     browser/
+        //       package.json
+        //     browser/embedded/
+        //       Cargo.toml
+        //       src/main.rs
+        fs::create_dir_all(root.join("apps/browser/src")).unwrap();
+        fs::create_dir_all(root.join("apps/browser/embedded/src")).unwrap();
+        fs::write(
+            root.join("apps/browser/package.json"),
+            r#"{"name":"browser"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("apps/browser/embedded/Cargo.toml"),
+            "[package]\nname = 'embedded'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("apps/browser/embedded/src/main.rs"),
+            "fn main() {}",
+        )
+        .unwrap();
+
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+
+        let mut packages = vec![
+            Package {
+                name: "browser".to_string(),
+                path: root.join("apps/browser"),
+                relative: "apps/browser".to_string(),
+                package_area: "apps".to_string(),
+                ..Default::default()
+            },
+            Package {
+                name: "embedded".to_string(),
+                path: root.join("apps/browser/embedded"),
+                relative: "apps/browser/embedded".to_string(),
+                package_area: "apps/browser".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        // Parent should know about nested package
+        assert_eq!(packages[0].nested_packages, vec!["embedded"]);
+
+        // Parent should NOT have Rust files (they belong to nested package)
+        assert!(packages[0].languages.is_empty());
+
+        // Nested package should have Rust files
+        assert_eq!(packages[1].languages.len(), 1);
+        assert_eq!(packages[1].languages[0].language, ProgrammingLanguage::Rust);
+    }
+
+    #[test]
+    fn refresh_boundaries_root_package_does_not_steal_all_files() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Root package plus one sub-package:
+        // root/
+        //   Cargo.toml
+        //   src/main.rs
+        //   sub/
+        //     Cargo.toml
+        //     src/lib.rs
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("sub/src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\nname = 'root'\n").unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("sub/Cargo.toml"), "[package]\nname = 'sub'\n").unwrap();
+        fs::write(root.join("sub/src/lib.rs"), "pub fn lib() {}").unwrap();
+
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+
+        let mut packages = vec![
+            Package {
+                name: "root".to_string(),
+                path: root.to_path_buf(),
+                relative: "".to_string(),
+                package_area: "root".to_string(),
+                ..Default::default()
+            },
+            Package {
+                name: "sub".to_string(),
+                path: root.join("sub"),
+                relative: "sub".to_string(),
+                package_area: "root".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        // Root should only have its own Rust file, not the sub package's
+        assert_eq!(packages[0].languages.len(), 1);
+        assert_eq!(packages[0].languages[0].direct_file_count, 1);
+
+        // Sub package should have its own Rust file
+        assert_eq!(packages[1].languages.len(), 1);
+        assert_eq!(packages[1].languages[0].direct_file_count, 1);
+
+        // Root should know about nested sub package
+        assert_eq!(packages[0].nested_packages, vec!["sub"]);
+    }
+
+    #[test]
+    fn refresh_boundaries_file_associations_and_compatibility() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("pkg/src")).unwrap();
+        fs::write(root.join("pkg/src/main.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("pkg/README.md"), "# pkg").unwrap();
+        fs::write(root.join("pkg/.editorconfig"), "root = true").unwrap();
+        fs::write(root.join("pkg/justfile"), "build:").unwrap();
+
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+
+        let mut packages = vec![Package {
+            name: "pkg".to_string(),
+            path: root.join("pkg"),
+            relative: "pkg".to_string(),
+            package_area: "root".to_string(),
+            ..Default::default()
+        }];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        // Should have documentation, editor config, command runner
+        assert!(!packages[0].documentation.is_empty());
+        assert!(packages[0].editor_config.is_some());
+        assert!(!packages[0].command_runner.is_empty());
+
+        // File associations should include Documentation
+        let doc_assoc = packages[0]
+            .file_associations
+            .iter()
+            .find(|a| a.association == FileAssociation::Documentation);
+        assert!(doc_assoc.is_some());
     }
 }

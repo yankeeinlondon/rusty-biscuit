@@ -10,7 +10,7 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::{
-    canonicalize_path, is_fixture_manifest, is_generated_manifest,
+    canonicalize_path, is_fixture_manifest, is_generated_manifest, normalize_path,
 };
 
 /// Supported monorepo tools and package managers
@@ -167,7 +167,7 @@ pub struct RepoInfo {
 }
 
 /// A package within a monorepo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Package {
     /// Absolute path to the package
     pub path: PathBuf,
@@ -503,17 +503,19 @@ impl ManifestIndex {
     /// Get directories containing manifests within a specific subtree.
     ///
     /// Uses the pre-canonicalized entries built at index construction time, so
-    /// no filesystem syscalls occur during the query.
+    /// no filesystem syscalls occur during the query.  The `search_root` and
+    /// `root` parameters are lexically normalized (not canonicalized) so the
+    /// comparison is syscall-free.
     pub(crate) fn package_dirs_in_tree(&self, search_root: &Path, root: &Path) -> Vec<&Path> {
-        let search_root_canonical = canonicalize_path(search_root);
-        let root_canonical = canonicalize_path(root);
+        let search_root_normalized = normalize_path(search_root);
+        let root_normalized = normalize_path(root);
 
         let mut dirs: Vec<&Path> = self
             .entries
             .iter()
             .filter_map(|entry| {
-                if entry.canonical.starts_with(&search_root_canonical)
-                    && entry.canonical != root_canonical
+                if entry.canonical.starts_with(&search_root_normalized)
+                    && entry.canonical != root_normalized
                 {
                     Some(entry.original.as_path())
                 } else {
@@ -574,4 +576,195 @@ pub fn detect_repo_with_inventory(
     root: &Path,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
     super::detection::detect_repo_inner(root, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================================
+    // ManifestIndex normalization tests (Phase 3)
+    // ============================================================================
+
+    #[test]
+    fn manifest_index_package_dirs_in_tree_uses_normalized_paths() {
+        // Build an index from synthetic paths.  The key property under
+        // test is that `package_dirs_in_tree` works without filesystem
+        // syscalls, so the paths do not need to exist on disk.
+        let index = ManifestIndex::from_manifest_paths(vec![
+            PathBuf::from("/repo/crates/pkg-a/Cargo.toml"),
+            PathBuf::from("/repo/crates/pkg-b/Cargo.toml"),
+            PathBuf::from("/repo/apps/app-a/package.json"),
+            PathBuf::from("/repo/vendor/some-lib/Cargo.toml"),
+        ]);
+
+        // Query with a path containing `.` and `..` — normalize_path
+        // should clean these up without touching the filesystem.
+        let search_root = Path::new("/repo/crates/../crates");
+        let root = Path::new("/repo");
+        let dirs = index.package_dirs_in_tree(search_root, root);
+
+        // Should find pkg-a and pkg-b under crates, but not the root itself.
+        assert_eq!(dirs.len(), 2);
+        assert!(dirs.contains(&Path::new("/repo/crates/pkg-a")));
+        assert!(dirs.contains(&Path::new("/repo/crates/pkg-b")));
+    }
+
+    #[test]
+    fn manifest_index_package_dirs_excludes_root() {
+        let index = ManifestIndex::from_manifest_paths(vec![
+            PathBuf::from("/repo/Cargo.toml"),
+            PathBuf::from("/repo/crates/pkg-a/Cargo.toml"),
+        ]);
+
+        let dirs = index.package_dirs_in_tree(Path::new("/repo"), Path::new("/repo"));
+
+        // The repo root itself should be excluded even though it has a manifest.
+        assert_eq!(dirs.len(), 1);
+        assert!(dirs.contains(&Path::new("/repo/crates/pkg-a")));
+    }
+
+    #[test]
+    fn manifest_index_package_dirs_returns_empty_for_no_match() {
+        let index = ManifestIndex::from_manifest_paths(vec![PathBuf::from(
+            "/repo/crates/pkg-a/Cargo.toml",
+        )]);
+
+        let dirs = index.package_dirs_in_tree(Path::new("/other"), Path::new("/repo"));
+        assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn manifest_index_preserves_original_paths_in_output() {
+        let index = ManifestIndex::from_manifest_paths(vec![PathBuf::from(
+            "/repo/crates/pkg-a/Cargo.toml",
+        )]);
+
+        let dirs = index.package_dirs_in_tree(Path::new("/repo"), Path::new("/repo"));
+        assert_eq!(dirs.len(), 1);
+        // Returns the *original* parent path, not the canonical one.
+        assert_eq!(dirs[0], Path::new("/repo/crates/pkg-a"));
+    }
+
+    #[test]
+    fn manifest_index_build_deduplicates_same_dir_different_manifests() {
+        let index = ManifestIndex::from_manifest_paths(vec![
+            PathBuf::from("/repo/crates/pkg-a/Cargo.toml"),
+            PathBuf::from("/repo/crates/pkg-a/package.json"),
+        ]);
+
+        // Only one entry for the directory, but it should have both kinds.
+        assert_eq!(index.entries.len(), 1);
+        let entry = &index.entries[0];
+        assert_eq!(entry.original, PathBuf::from("/repo/crates/pkg-a"));
+        assert!(entry.kinds.contains(&ManifestKind::Cargo));
+        assert!(entry.kinds.contains(&ManifestKind::Node));
+    }
+
+    // ============================================================================
+    // CargoLockVersions tests
+    // ============================================================================
+
+    #[test]
+    fn cargo_lock_versions_resolve_finds_first_match() {
+        let versions = CargoLockVersions {
+            versions: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "serde".to_string(),
+                    vec!["1.0.0".to_string(), "1.0.1".to_string()],
+                );
+                m
+            },
+        };
+
+        assert_eq!(versions.resolve("serde"), Some("1.0.0".to_string()));
+        assert_eq!(versions.resolve("missing"), None);
+    }
+
+    // ============================================================================
+    // RepoInfo helper tests
+    // ============================================================================
+
+    #[test]
+    fn repo_info_package_for_dir_finds_deepest_match() {
+        let repo = RepoInfo {
+            is_monorepo: true,
+            monorepo_tool: None,
+            workspace_tools: Vec::new(),
+            root: PathBuf::from("/repo"),
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            packages: Some(vec![
+                Package {
+                    path: PathBuf::from("/repo/crates"),
+                    relative: "crates".to_string(),
+                    package_area: "root".to_string(),
+                    name: "crates".to_string(),
+                    ecosystem: PackageEcosystem::Cargo,
+                    discovery_sources: Vec::new(),
+                    nested_packages: Vec::new(),
+                    primary_language: None,
+                    secondary_languages: Vec::new(),
+                    languages: Vec::new(),
+                    frameworks: Vec::new(),
+                    file_associations: Vec::new(),
+                    configuration: Vec::new(),
+                    documentation: Vec::new(),
+                    editor_config: None,
+                    command_runner: Vec::new(),
+                    package_managers: Vec::new(),
+                    version: None,
+                    features: Vec::new(),
+                    depends_on: Vec::new(),
+                    used_by: Vec::new(),
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+                Package {
+                    path: PathBuf::from("/repo/crates/pkg-a"),
+                    relative: "crates/pkg-a".to_string(),
+                    package_area: "crates".to_string(),
+                    name: "pkg-a".to_string(),
+                    ecosystem: PackageEcosystem::Cargo,
+                    discovery_sources: Vec::new(),
+                    nested_packages: Vec::new(),
+                    primary_language: None,
+                    secondary_languages: Vec::new(),
+                    languages: Vec::new(),
+                    frameworks: Vec::new(),
+                    file_associations: Vec::new(),
+                    configuration: Vec::new(),
+                    documentation: Vec::new(),
+                    editor_config: None,
+                    command_runner: Vec::new(),
+                    package_managers: Vec::new(),
+                    version: None,
+                    features: Vec::new(),
+                    depends_on: Vec::new(),
+                    used_by: Vec::new(),
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+            ]),
+        };
+
+        assert_eq!(
+            repo.package_for_dir(Path::new("/repo/crates/pkg-a/src"))
+                .map(|p| p.name.as_str()),
+            Some("pkg-a")
+        );
+    }
 }
