@@ -1970,6 +1970,156 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn compose_resolves_env_agent_in_body_template() {
+    // Regression: `{{env.AGENT}}` in a compose body must resolve to the
+    // chosen provider's slug, since AGENT is now set in the parent
+    // process env *before* templates render.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: agent env test\n---\nrunning on {{env.AGENT}}\n",
+    )
+    .unwrap();
+
+    let stdin_path = workspace.path().join("stdin.txt");
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+/bin/cat > "$CLAUDINE_STDIN_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert!(
+        stdin.contains("running on codex"),
+        "{{{{env.AGENT}}}} should resolve to the chosen provider during \
+         compose body rendering; prompt was: {stdin:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_resolves_env_agent_in_prompt_template() {
+    // `{{env.AGENT}}` in the inline-compose `prompt` frontmatter must
+    // resolve to the chosen provider's slug after eager target resolution.
+    // Uses Goose because its `-t <prompt>` argv delivery is easy to
+    // capture, and its plain-stdout output works without structured streams.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("inline.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: 'pick: {{env.AGENT}}'\nagent: goose\n---\noriginal body\n",
+    )
+    .unwrap();
+
+    let captured_args = workspace.path().join("captured_args.txt");
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
+printf 'updated body content\n'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
+        .args(["inline-compose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(&captured_args).unwrap();
+    assert!(
+        argv.contains("pick: goose"),
+        "{{{{env.AGENT}}}} should resolve during inline-compose prompt \
+         rendering; argv was: {argv:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_resolves_env_agent_in_system_prompt() {
+    // Direct wrappers must set AGENT before the parent renders any
+    // system-prompt.md template. Use the Claude wrapper because its
+    // non-interactive system-prompt delivery writes the composed prompt
+    // to a temp file passed via --append-system-prompt-file, which the
+    // shim can capture verbatim.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let system_prompt = workspace.path().join("system-prompt.md");
+    fs::write(&system_prompt, "you are running on {{env.AGENT}}\n").unwrap();
+
+    let captured_prompt = workspace.path().join("captured_prompt.txt");
+    let captured_args = workspace.path().join("captured_args.txt");
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
+: > "$CLAUDINE_CAPTURED_PROMPT"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --append-system-prompt-file|--system-prompt-file)
+            shift
+            if [ -n "$1" ] && [ -f "$1" ]; then
+                /bin/cat "$1" >> "$CLAUDINE_CAPTURED_PROMPT"
+            else
+                printf 'TMPFILE_MISSING:%s\n' "$1" >> "$CLAUDINE_CAPTURED_PROMPT"
+            fi
+            ;;
+    esac
+    shift
+done
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_CAPTURED_PROMPT", &captured_prompt)
+        .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
+        .current_dir(workspace.path())
+        .args(["claude", "--", "ping"])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(&captured_args).unwrap_or_default();
+    let captured = fs::read_to_string(&captured_prompt).unwrap_or_default();
+    assert!(
+        captured.contains("running on claude"),
+        "system-prompt template should resolve {{{{env.AGENT}}}} to the \
+         wrapper's provider slug; argv: {argv:?}; captured prompt: {captured:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_preflight_error_includes_source_provenance() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
