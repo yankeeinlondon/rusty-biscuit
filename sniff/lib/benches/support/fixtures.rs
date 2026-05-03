@@ -45,6 +45,17 @@ pub fn large_monorepo() -> Fixture {
     Fixture { dir, path: root }
 }
 
+/// Huge synthetic monorepo fixture backed by a `TempDir`.
+///
+/// 200 Rust + 100 JS + 50 Python + 25 Go packages with ~10 files each.
+/// Designed to stress-test manifest caching and package enrichment.
+pub fn huge_monorepo() -> Fixture {
+    let dir = TempDir::new().expect("tempdir for huge_monorepo");
+    let root = dir.path().to_path_buf();
+    builder::build_huge_monorepo(&root);
+    Fixture { dir, path: root }
+}
+
 /// Language-mix directory fixture backed by a `TempDir`.
 pub fn language_mix_tree() -> Fixture {
     let dir = TempDir::new().expect("tempdir for language_mix_tree");
@@ -71,5 +82,16 @@ pub fn docs_repo(total_docs: usize, with_blast_radius: usize) -> Fixture {
     let dir = TempDir::new().expect("tempdir for docs_repo");
     let root = dir.path().to_path_buf();
     builder::build_docs_repo(&root, total_docs, with_blast_radius);
+    Fixture { dir, path: root }
+}
+
+/// Git repo with fake remote-tracking branches for deep-git containment
+/// benchmarks.
+///
+/// See [`builder::build_git_repo_with_fake_remotes`] for the precise layout.
+pub fn git_repo_with_fake_remotes(commit_count: usize, remote_count: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for git_repo_with_fake_remotes");
+    let root = dir.path().to_path_buf();
+    builder::build_git_repo_with_fake_remotes(&root, commit_count, remote_count);
     Fixture { dir, path: root }
 }

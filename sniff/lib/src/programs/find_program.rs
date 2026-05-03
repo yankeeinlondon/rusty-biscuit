@@ -946,4 +946,168 @@ mod tests {
             "Executable file should appear in the index"
         );
     }
+
+    // ============================================================================
+    // Eager PATH index tests (Phase 3)
+    // ============================================================================
+
+    #[test]
+    fn test_eager_path_index_scans_path_directories() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
+        use std::fs;
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+
+        // Create multiple executables in the temp dir
+        for name in ["eager-a", "eager-b", "eager-c"] {
+            let exec = dir.path().join(name);
+            fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
+            #[cfg(unix)]
+            fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
+            #[cfg(windows)]
+            {
+                // On Windows, rename to .exe so it looks executable
+                let _ = std::fs::rename(&exec, dir.path().join(format!("{}.exe", name)));
+            }
+        }
+
+        let mut env = ScopedEnv::new();
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut new_path = std::ffi::OsString::from(dir.path());
+        new_path.push(":");
+        new_path.push(&original_path);
+        env.set_os("PATH", &new_path);
+
+        let index = ExecutableIndex::build_eager_path();
+
+        // All three executables should be found via the eager index
+        #[cfg(unix)]
+        {
+            assert!(
+                index.find("eager-a").is_some(),
+                "eager-a should be in the eager PATH index"
+            );
+            assert!(
+                index.find("eager-b").is_some(),
+                "eager-b should be in the eager PATH index"
+            );
+            assert!(
+                index.find("eager-c").is_some(),
+                "eager-c should be in the eager PATH index"
+            );
+        }
+        #[cfg(windows)]
+        {
+            assert!(
+                index.find("eager-a.exe").is_some(),
+                "eager-a.exe should be in the eager PATH index"
+            );
+        }
+
+        // The eager index should report that PATH directories were scanned
+        assert!(index.path_dir_count() > 0);
+    }
+
+    #[test]
+    fn test_eager_path_index_respects_path_precedence() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
+        use std::fs;
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let dir_first = tempdir().unwrap();
+        let dir_second = tempdir().unwrap();
+
+        // Create the same executable name in both directories
+        let exec_first = dir_first.path().join("precedence-test");
+        let exec_second = dir_second.path().join("precedence-test");
+
+        fs::write(&exec_first, "#!/bin/sh\necho first").unwrap();
+        fs::write(&exec_second, "#!/bin/sh\necho second").unwrap();
+
+        #[cfg(unix)]
+        {
+            fs::set_permissions(&exec_first, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&exec_second, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let mut env = ScopedEnv::new();
+        // dir_first comes before dir_second in PATH
+        let mut new_path = std::ffi::OsString::from(dir_first.path());
+        new_path.push(":");
+        new_path.push(dir_second.path());
+        env.set_os("PATH", &new_path);
+
+        let index = ExecutableIndex::build_eager_path();
+
+        #[cfg(unix)]
+        {
+            let found = index.find("precedence-test");
+            assert!(found.is_some());
+            // Should return the one from dir_first because it comes first in PATH
+            assert_eq!(
+                found.unwrap().parent().unwrap(),
+                dir_first.path(),
+                "PATH precedence should be respected in eager index"
+            );
+        }
+    }
+
+    #[test]
+    fn test_eager_lookup_returns_path_source() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
+        use std::fs;
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let dir = tempdir().unwrap();
+        let exec = dir.path().join("eager-lookup-test");
+        fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut env = ScopedEnv::new();
+        let mut new_path = std::ffi::OsString::from(dir.path());
+        new_path.push(":");
+        new_path.push(std::env::var_os("PATH").unwrap_or_default());
+        env.set_os("PATH", &new_path);
+
+        let index = ExecutableIndex::build_eager_path();
+
+        #[cfg(unix)]
+        {
+            let result = index.find_with_source("eager-lookup-test");
+            assert!(result.is_some());
+            let (path, source) = result.unwrap();
+            assert_eq!(source, ExecutableSource::Path);
+            assert!(path.ends_with("eager-lookup-test"));
+        }
+    }
+
+    #[test]
+    fn test_lazy_index_does_not_scan_path() {
+        // The lazy index (build) should not set eager_path
+        let index = ExecutableIndex::build();
+        assert!(
+            index.eager_path.is_none(),
+            "Lazy index should not have an eager PATH map"
+        );
+    }
+
+    #[test]
+    fn test_eager_index_has_populated_map() {
+        let index = ExecutableIndex::build_eager_path();
+        assert!(
+            index.eager_path.is_some(),
+            "Eager index should have a PATH map"
+        );
+    }
 }

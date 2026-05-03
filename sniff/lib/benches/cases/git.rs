@@ -41,39 +41,50 @@ pub fn register(c: &mut Criterion) {
         let fixture = fixtures::git_repo_with_dirty_files(count);
 
         let full_req = GitRequest::full();
-        group.bench_with_input(
-            BenchmarkId::new("git_full", count),
-            &count,
-            |b, _| {
-                b.iter(|| {
-                    let info = detect_git_with_request(
-                        black_box(fixture.path()),
-                        black_box(&full_req),
-                    )
+        group.bench_with_input(BenchmarkId::new("git_full", count), &count, |b, _| {
+            b.iter(|| {
+                let info = detect_git_with_request(black_box(fixture.path()), black_box(&full_req))
                     .unwrap();
-                    black_box(info);
-                });
-            },
-        );
+                black_box(info);
+            });
+        });
 
         // `deep()` enables full unified diff emission, which is the
         // worst-case path through the batched diff aggregator.
         let deep_req = GitRequest::deep();
-        group.bench_with_input(
-            BenchmarkId::new("git_deep", count),
-            &count,
+        group.bench_with_input(BenchmarkId::new("git_deep", count), &count, |b, _| {
+            b.iter(|| {
+                let info = detect_git_with_request(black_box(fixture.path()), black_box(&deep_req))
+                    .unwrap();
+                black_box(info);
+            });
+        });
+    }
+
+    group.finish();
+
+    // ---------- deep-git remote containment ----------
+    let mut deep_group = util::configure_slow_group(c, "git_deep_remote");
+
+    // Vary the number of fake remote-tracking branches to stress the
+    // ancestry-walk optimization in `populate_recent_commit_remotes`.
+    for &remote_count in &[1, 5, 10, 25] {
+        let fixture = fixtures::git_repo_with_fake_remotes(20, remote_count);
+        let deep_req = GitRequest::deep().commit_count(10);
+
+        deep_group.bench_with_input(
+            BenchmarkId::new("git_deep_remotes", remote_count),
+            &remote_count,
             |b, _| {
                 b.iter(|| {
-                    let info = detect_git_with_request(
-                        black_box(fixture.path()),
-                        black_box(&deep_req),
-                    )
-                    .unwrap();
+                    let info =
+                        detect_git_with_request(black_box(fixture.path()), black_box(&deep_req))
+                            .unwrap();
                     black_box(info);
                 });
             },
         );
     }
 
-    group.finish();
+    deep_group.finish();
 }

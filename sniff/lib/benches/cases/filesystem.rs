@@ -9,6 +9,7 @@ use criterion::{Criterion, black_box};
 use sniff::filesystem::docs::{detect_blast_radius_docs, detect_docs};
 use sniff::filesystem::file_types::scan_file_inventory;
 use sniff::filesystem::repo::detect_repo_with_inventory;
+use sniff::filesystem::repo::detection::refresh_package_boundaries;
 use sniff::filesystem::{
     detect_filesystem_with_request, detect_git_with_request, detect_languages, detect_repo,
     detect_repo_structure,
@@ -31,6 +32,7 @@ const DOCS_FIXTURE_WITH_BR: usize = 40;
 pub fn register(c: &mut Criterion) {
     let small = fixtures::small_git_repo();
     let large = fixtures::large_monorepo();
+    let huge = fixtures::huge_monorepo();
     let langs = fixtures::language_mix_tree();
     let docs = fixtures::docs_repo(DOCS_FIXTURE_TOTAL, DOCS_FIXTURE_WITH_BR);
 
@@ -96,6 +98,34 @@ pub fn register(c: &mut Criterion) {
         b.iter(|| {
             let info = detect_repo(black_box(large.path())).unwrap();
             black_box(info);
+        });
+    });
+
+    // Huge monorepo benchmarks stress manifest caching and index normalization.
+    repo_group.bench_function("repo_structure_huge", |b| {
+        b.iter(|| {
+            let info = detect_repo_structure(black_box(huge.path())).unwrap();
+            black_box(info);
+        });
+    });
+
+    repo_group.bench_function("repo_full_huge", |b| {
+        b.iter(|| {
+            let info = detect_repo(black_box(huge.path())).unwrap();
+            black_box(info);
+        });
+    });
+
+    // Isolated package-enrichment benchmark: structure + inventory are
+    // prepared outside the timed loop so only `refresh_package_boundaries`
+    // is measured.
+    repo_group.bench_function("package_enrichment_huge", |b| {
+        let mut repo_info = detect_repo_structure(huge.path()).unwrap().unwrap();
+        let inventory = scan_file_inventory(huge.path()).unwrap();
+        let mut packages = repo_info.packages.take().unwrap();
+        b.iter(|| {
+            refresh_package_boundaries(black_box(&mut packages), black_box(Some(&inventory)));
+            black_box(&packages);
         });
     });
 
