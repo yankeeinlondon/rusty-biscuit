@@ -505,10 +505,20 @@ impl<'a> ChoiceRenderContext<'a> {
                 spans.push(Span::styled(option_label.to_string(), label_style));
             }
 
+            let has_badge = option
+                .effective_hotkey()
+                .and_then(|spec| badge_span(spec, self.hotkey_display))
+                .is_some();
+
             // Render active background over the visible item width plus
-            // one blank cell.
+            // one blank cell. When the row is not hovered but a badge is
+            // present, emit an unstyled placeholder of the same width so
+            // badges remain horizontally aligned across hovered and
+            // non-hovered rows.
             if is_hovered && !option_disabled {
                 spans.push(Span::styled(" ", hover_style));
+            } else if has_badge {
+                spans.push(Span::raw(" "));
             }
 
             // Inline hotkey badge in vertical mode (Phase 6). Drawn
@@ -1451,6 +1461,52 @@ mod tests {
         assert_eq!(style.fg, Some(BADGE_FG_ON_YELLOW));
         assert_eq!(style.bg, Some(ALT_BADGE_BG_DIM));
         assert!(!style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn vertical_badges_align_horizontally_across_hovered_and_non_hovered_rows() {
+        // Regression: the active (hovered) row used to render an extra
+        // hover-styled trailing blank that pushed its badge one cell
+        // further right than badges on non-hovered rows. All badges
+        // must share the same starting x-column.
+        let theme = default_theme();
+        let ctx = ChoiceRenderContext::for_multiple(
+            &theme,
+            TerminalStyle::default(),
+            Orientation::Vertical,
+        )
+        .with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
+        let options: Vec<ChoiceOption<String>> = vec![
+            ChoiceOption::new("a", "foo", "foo").with_hotkey(HotkeySpec::Ctrl('1')),
+            ChoiceOption::new("b", "bar", "bar").with_hotkey(HotkeySpec::Ctrl('2')),
+            ChoiceOption::new("c", "baz", "baz").with_hotkey(HotkeySpec::Ctrl('3')),
+            ChoiceOption::new("d", "bax", "bax").with_hotkey(HotkeySpec::Ctrl('4')),
+        ];
+        let area = Rect::new(0, 0, 30, 4);
+        let mut buf = Buffer::empty(area);
+        ctx.render(
+            area,
+            &mut buf,
+            &options,
+            &[0, 1, 2, 3],
+            0,
+            0,
+            |_idx| false,
+            None,
+            None,
+        );
+
+        let xs: Vec<u16> = (0..4)
+            .map(|y| {
+                find_badge_x(&buf, y, CTRL_BADGE_BG)
+                    .or_else(|| find_badge_x(&buf, y, CTRL_BADGE_BG_DIM))
+                    .unwrap_or_else(|| panic!("expected a Ctrl badge on row {y}"))
+            })
+            .collect();
+        assert!(
+            xs.windows(2).all(|w| w[0] == w[1]),
+            "badges must share the same x-column across rows; got {xs:?}"
+        );
     }
 
     #[test]
