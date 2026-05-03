@@ -2212,8 +2212,7 @@ fn test_filtered_commit_json_trims_packages() {
             .success();
 
         let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-        let value: Value =
-            serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+        let value: Value = serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
 
         assert_eq!(
             value["filter"], label,
@@ -3069,9 +3068,12 @@ fn test_repo_packages_json_output() {
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
-    let names = json["names"].as_array().expect("names must be array");
+    let names = json.as_array().expect("top-level JSON must be an array");
     assert_eq!(
-        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        names
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect::<Vec<_>>(),
         vec!["pkg-a", "pkg-b"]
     );
 }
@@ -3297,9 +3299,12 @@ fn test_repo_package_areas_json_output() {
         .success();
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
-    let names = json["names"].as_array().expect("names must be array");
+    let names = json.as_array().expect("top-level JSON must be an array");
     assert_eq!(
-        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        names
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect::<Vec<_>>(),
         vec!["pkg-a", "pkg-b"]
     );
 }
@@ -3322,9 +3327,12 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
-    let names = json["names"].as_array().expect("names must be array");
+    let names = json.as_array().expect("top-level JSON must be an array");
     assert_eq!(
-        names.iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+        names
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect::<Vec<_>>(),
         vec!["pkg-a", "pkg-b"]
     );
 
@@ -4257,5 +4265,71 @@ fn test_is_current_package_area_dirty_json_true_branch() {
         value["dirty"],
         Value::Bool(true),
         "dirty area should emit dirty: true, got: {value}"
+    );
+}
+
+/// `package-area-has-source-code-changes --json` from inside a package area
+/// whose source files are dirty must emit
+/// `{ "has_source_code_changes": true }` and exit 0, even in the normal
+/// (non-deep) git request path where `RepoStatus.dirty` is empty.
+///
+/// Regression test for review-4 High finding: the helper used to read only
+/// `git.status.dirty` / `git.status.untracked` and missed dirty files
+/// surfaced via `git.file_changes`.
+#[test]
+fn test_package_area_has_source_code_changes_json_true_branch() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a() {}");
+    std::fs::write(path.join("pkg-a/lib/src/lib.rs"), "pub fn a() { dirty }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.join("pkg-a/lib").to_str().unwrap(),
+            "repo",
+            "package-area-has-source-code-changes",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .code(0);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(
+        value["has_source_code_changes"],
+        Value::Bool(true),
+        "dirty source file in the area should emit has_source_code_changes: true, got: {value}"
+    );
+}
+
+/// `package-area-has-source-code-changes --json` must remain `false` when
+/// only documentation files are dirty in the current package area, even
+/// though those paths are reported via `git.file_changes` in the normal
+/// CLI path.
+#[test]
+fn test_package_area_has_source_code_changes_json_docs_only_is_false() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/README.md", "# pkg-a");
+    std::fs::write(path.join("pkg-a/lib/README.md"), "# pkg-a (dirty)").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.join("pkg-a/lib").to_str().unwrap(),
+            "repo",
+            "package-area-has-source-code-changes",
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(
+        value["has_source_code_changes"],
+        Value::Bool(false),
+        "docs-only dirty file must not flip has_source_code_changes, got: {value}"
     );
 }

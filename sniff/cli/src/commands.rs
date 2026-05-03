@@ -51,13 +51,23 @@ impl CliPerf {
         self.emit(detailed, true)
     }
 
-    fn emit(&self, detailed: Option<&PerformanceReport>, to_stderr: bool) {
-        let Some(start) = self.start else { return };
-        let report = detailed.cloned().unwrap_or_else(|| PerformanceReport {
+    /// Build a [`PerformanceReport`] from the elapsed CLI timing.
+    ///
+    /// Returns `None` when `--perf` was not enabled.
+    pub fn build_report(&self) -> Option<PerformanceReport> {
+        let start = self.start?;
+        Some(PerformanceReport {
             total_duration_ms: start.elapsed().as_secs_f64() * 1000.0,
             stages: Default::default(),
             counters: Default::default(),
-        });
+        })
+    }
+
+    fn emit(&self, detailed: Option<&PerformanceReport>, to_stderr: bool) {
+        let Some(report) = self.build_report() else {
+            return;
+        };
+        let report = detailed.cloned().unwrap_or(report);
         let text = output::render_performance_section(&report);
         if to_stderr {
             output::emit_stderr(&text, self.plain);
@@ -67,6 +77,19 @@ impl CliPerf {
     }
 }
 
+/// Main CLI entrypoint.
+///
+/// ## Async model
+///
+/// The CLI is a single-shot command runner: parse args, run detection, print
+/// output, and exit.  Most code paths are synchronous (git, filesystem,
+/// subprocess).  The `async` signature exists because a minority of paths
+/// (remote provider calls, dependency enrichment) use async HTTP.  There is
+/// no concurrent async work that would justify `spawn_blocking` for the
+/// synchronous parts — adding it would only add scheduling overhead without
+/// improving throughput.  If future modes add progress UI, cancellation, or
+/// true concurrency, `spawn_blocking` should be introduced selectively for
+/// paths that mix blocking local work with async network awaits.
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle dynamic shell completions (invoked by shell completion scripts)
     CompleteEnv::with_factory(Cli::command).complete();
@@ -127,15 +150,18 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         if matches!(cmd, Commands::NotificationHelpers) {
             let programs = sniff::programs::ProgramsInfo::detect();
             if cli.json {
-                output::print_notification_helpers_json(&programs.notification_helpers)?;
+                output::print_notification_helpers_json(
+                    &programs.notification_helpers,
+                    perf.build_report().as_ref(),
+                )?;
             } else {
                 let rendered = output::render_notification_helpers_markdown(
                     &programs.notification_helpers,
                     cli.verbose,
                 );
                 output::emit_text(&rendered, cli.plain);
+                perf.emit_stdout(None);
             }
-            perf.emit_stdout(None);
             return Ok(());
         }
 
@@ -145,7 +171,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if args.program.is_some() {
                     let filter = cmd.to_output_filter();
                     return crate::install_plan_cmd::dispatch(
-                        kind, args, filter, cli.json, cli.plain,
+                        kind,
+                        args,
+                        filter,
+                        cli.json,
+                        cli.plain,
+                        perf.build_report().as_ref(),
                     );
                 }
                 // No name: fall through to interactive (Install) or error (InstallPlan)
@@ -158,13 +189,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             let programs = detect_programs_for_filter(output_filter);
             if cli.json {
-                output::print_programs_json(&programs, output_filter)?;
+                let json = output::build_programs_json(&programs, output_filter)?;
+                output::print_json_value(json, perf.build_report().as_ref());
             } else {
                 let rendered =
                     output::render_programs_markdown(&programs, cli.verbose, output_filter);
                 output::emit_text(&rendered, cli.plain);
+                perf.emit_stdout(None);
             }
-            perf.emit_stdout(None);
             return Ok(());
         }
 
@@ -182,7 +214,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let justfiles = sniff::filesystem::detect_justfiles(&base, filter)?;
             if cli.json {
                 let filtered = output::filter_justfiles_for_json(&justfiles, with.as_deref());
-                println!("{}", serde_json::to_string_pretty(&filtered)?);
+                let json_val = serde_json::to_value(&filtered)?;
+                output::print_json_value(json_val, perf.build_report().as_ref());
             } else {
                 let rendered =
                     output::render_just_text(&justfiles, cli.verbose, with.as_deref(), *grouped);
@@ -213,7 +246,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             if cli.json {
                 let json_val = serde_json::to_value(&filtered).unwrap_or(serde_json::json!([]));
-                println!("{}", serde_json::to_string_pretty(&json_val)?);
+                output::print_json_value(json_val, perf.build_report().as_ref());
             } else {
                 let text_output = output::render_docs_output(&filtered, cli.verbose);
                 output::emit_stderr(&text_output.stderr, cli.plain);
@@ -262,8 +295,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "scope": change_scope,
                     "documents": matched_docs.iter().map(|d| &d.relative).collect::<Vec<_>>(),
                 });
-                println!("{}", serde_json::to_string_pretty(&json_val)?);
-                perf.emit_for_json(None);
+                output::print_json_value(json_val, perf.build_report().as_ref());
             } else {
                 // Extract document paths and render
                 let repo = git2::Repository::discover(&base)
@@ -303,7 +335,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ServiceStateArg::Stopped => ServiceState::Stopped,
             };
             if cli.json {
-                output::print_services_json(&services_info, state_filter)?;
+                output::print_services_json(
+                    &services_info,
+                    state_filter,
+                    perf.build_report().as_ref(),
+                )?;
             } else {
                 output::emit_text(
                     &output::render_services_text(&services_info, cli.verbose, state_filter),
@@ -329,15 +365,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         match action {
             crate::args::RepoAction::Remote { remote } => {
                 if remote.contains("://") || remote.starts_with("git@") {
-                    let result =
-                        handle_remote_url(remote, cli.json, cli.plain, cli.verbose, &perf).await;
-                    perf.emit_for_json(None);
-                    return result;
+                    return handle_remote_url(remote, cli.json, cli.plain, cli.verbose, &perf)
+                        .await;
                 } else if is_owner_repo_shorthand(remote) {
-                    let result =
-                        handle_shorthand(remote, cli.json, cli.plain, cli.verbose, &perf).await;
-                    perf.emit_for_json(None);
-                    return result;
+                    return handle_shorthand(remote, cli.json, cli.plain, cli.verbose, &perf).await;
                 } else {
                     let url =
                         resolve_remote_name(remote, base_dir.as_deref()).ok_or_else(|| {
@@ -346,10 +377,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 remote
                             )
                         })?;
-                    let result =
-                        handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf).await;
-                    perf.emit_for_json(None);
-                    return result;
+                    return handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf).await;
                 }
             }
             crate::args::RepoAction::Pr { status, .. } => {
@@ -383,7 +411,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             "kind": k,
                         })).collect::<Vec<_>>(),
                     });
-                    println!("{}", serde_json::to_string_pretty(&json)?);
+                    output::print_json_value(json, perf.build_report().as_ref());
                 } else {
                     let commit_url = commit_url_from_repo(&repo, &commit.sha);
                     output::emit_text(
@@ -395,8 +423,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         ),
                         cli.plain,
                     );
+                    perf.emit_for_json(None);
                 }
-                perf.emit_for_json(None);
                 return Ok(());
             }
             crate::args::RepoAction::UnstagedFiles { package } => {
@@ -483,8 +511,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => {
                         if cli.json {
                             let json = serde_json::json!({ "root": "" });
-                            println!("{}", serde_json::to_string_pretty(&json)?);
-                            perf.emit_for_json(None);
+                            output::print_json_value(json, perf.build_report().as_ref());
                             std::process::exit(1);
                         }
                         return Err(format!("Not a git repository: {}", e).into());
@@ -493,8 +520,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let Some(workdir) = repo.workdir() else {
                     if cli.json {
                         let json = serde_json::json!({ "root": "" });
-                        println!("{}", serde_json::to_string_pretty(&json)?);
-                        perf.emit_for_json(None);
+                        output::print_json_value(json, perf.build_report().as_ref());
                         std::process::exit(1);
                     }
                     perf.emit_stderr(None);
@@ -504,8 +530,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let json = serde_json::json!({
                         "root": workdir.display().to_string(),
                     });
-                    println!("{}", serde_json::to_string_pretty(&json)?);
-                    perf.emit_for_json(None);
+                    output::print_json_value(json, perf.build_report().as_ref());
                 } else {
                     println!("{}", workdir.display());
                     perf.emit_stderr(None);
@@ -530,8 +555,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if cli.json {
                     let outcome = output::repo_json::has_merge_conflict_outcome(has_conflict);
-                    println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                    perf.emit_for_json(None);
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
                     std::process::exit(outcome.exit_code.unwrap_or(0));
                 }
                 perf.emit_stderr(None);
@@ -820,16 +844,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if plain_name.is_empty() {
                     if cli.json {
                         let outcome = output::repo_json::name_outcome(String::new());
-                        println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                        perf.emit_for_json(result.performance.as_ref());
+                        output::print_json_value(outcome.value, result.performance.as_ref());
                         std::process::exit(if *no_error { 0 } else { 1 });
                     }
                     return handle_no_results(*no_error, on_error, cli.plain, &perf);
                 }
                 if cli.json {
                     let outcome = output::repo_json::name_outcome(plain_name);
-                    println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                    perf.emit_for_json(result.performance.as_ref());
+                    output::print_json_value(outcome.value, result.performance.as_ref());
                     return Ok(());
                 }
                 let rendered = if cli.verbose > 0 {
@@ -846,16 +868,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if rendered.is_empty() {
                     if cli.json {
                         let outcome = output::repo_json::name_outcome(String::new());
-                        println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                        perf.emit_for_json(result.performance.as_ref());
+                        output::print_json_value(outcome.value, result.performance.as_ref());
                         std::process::exit(if *no_error { 0 } else { 1 });
                     }
                     return handle_no_results(*no_error, on_error, cli.plain, &perf);
                 }
                 if cli.json {
                     let outcome = output::repo_json::name_outcome(rendered);
-                    println!("{}", serde_json::to_string_pretty(&outcome.value)?);
-                    perf.emit_for_json(result.performance.as_ref());
+                    output::print_json_value(outcome.value, result.performance.as_ref());
                     return Ok(());
                 }
                 println!("{rendered}");
@@ -991,14 +1011,14 @@ async fn handle_shorthand(
     json: bool,
     plain: bool,
     verbose: u8,
-    _perf: &CliPerf,
+    perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (owner, repo) = shorthand.split_once('/').expect("already validated");
     let remote = GitRemote::from_shorthand(owner, repo).await?;
     let report = remote.fetch_report(owner, repo).await?;
 
     if json {
-        output::print_remote_json(&report)?;
+        output::print_remote_json(&report, perf.build_report().as_ref())?;
     } else {
         let readme = fetch_readme(&report, &remote, owner, repo, verbose).await;
         let rendered = output::render_remote_text(&report, readme.as_deref());
@@ -1016,14 +1036,14 @@ async fn handle_remote_url(
     json: bool,
     plain: bool,
     verbose: u8,
-    _perf: &CliPerf,
+    perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let remote = GitRemote::from_url(url)?;
     let parsed = GitRemote::parse_url(url)?;
     let report = remote.fetch_report(&parsed.owner, &parsed.repo).await?;
 
     if json {
-        output::print_remote_json(&report)?;
+        output::print_remote_json(&report, perf.build_report().as_ref())?;
     } else {
         let readme = fetch_readme(&report, &remote, &parsed.owner, &parsed.repo, verbose).await;
         let rendered = output::render_remote_text(&report, readme.as_deref());
@@ -1124,7 +1144,7 @@ async fn handle_pr_command(
 
     // 5. Output
     if json {
-        println!("{}", serde_json::to_string_pretty(&prs)?);
+        output::print_json_value(serde_json::to_value(&prs)?, perf.build_report().as_ref());
     } else {
         if prs.is_empty() {
             let rendered = output::render_pull_requests_empty(status);
@@ -1136,9 +1156,9 @@ async fn handle_pr_command(
             let rendered = output::render_pull_requests_table(&prs);
             output::emit_text(&rendered, plain);
         }
+        perf.emit_for_json(None);
     }
 
-    perf.emit_for_json(None);
     Ok(())
 }
 
@@ -1427,8 +1447,7 @@ fn handle_repo_packages(
 
     if json {
         let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
-        let json_val = serde_json::json!({ "names": names });
-        println!("{}", serde_json::to_string(&json_val)?);
+        println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());
     }
@@ -1489,8 +1508,7 @@ fn handle_repo_package_areas(
 
     if json {
         let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
-        let json_val = serde_json::json!({ "names": names });
-        println!("{}", serde_json::to_string(&json_val)?);
+        println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());
     }
@@ -1589,8 +1607,7 @@ fn handle_file_list_command(
             "kind": kind,
             "paths": result.paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         });
-        println!("{}", serde_json::to_string_pretty(&json_val)?);
-        perf.emit_for_json(None);
+        output::print_json_value(json_val, perf.build_report().as_ref());
     } else {
         let format = path_list_format(args);
         let rendered =
