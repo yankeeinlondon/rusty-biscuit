@@ -336,10 +336,51 @@ also rejected (the underlying duration parser requires positive values).
 A warn set without its corresponding hard threshold is legal — the
 "without hard threshold" message variant applies.
 
-**Fire-once semantics.** `timeout_warn` fires at most once per prompt
-run. `step_timeout_warn` fires at most once per stall episode; once
-activity resumes it re-arms for the next stall. Neither emission blocks
-the provider or affects hard-timeout behavior.
+### Subagent and Stream-Idle Watchdogs
+
+In addition to the harness timeouts above, the wrapper runs two
+provider-agnostic watchdog rules that protect against silent hangs
+(particularly with OpenCode parallel `task` subagents). These are
+governed by environment variables and operate independently of
+frontmatter `timeout` / `step_timeout`:
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS` | `180` | Per-subagent silence ceiling. If an active subagent produces no events for this long, the child process group is sent SIGTERM. Set to `0` to disable. |
+| `CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS` | `10` | Grace period between SIGTERM and SIGKILL for watchdog-initiated termination. |
+| `CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS` | `5` | Ticker cadence for evaluating subagent-silence rules. |
+| `CLAUDINE_STREAM_IDLE_KILL_SECONDS` | `300` | Stream-level silence ceiling when **no** subagents are outstanding. If the entire structured stream produces no events for this long, the child is killed. Set to `0` to disable. |
+
+**Rule priority.** On each tick the watchdog evaluates subagent silence
+first. If any active subagent has exceeded the idle threshold, the run
+is terminated with exit reason `subagents_unresponsive`. If subagents
+are active but none has breached, stream-idle evaluation is suppressed
+for that tick. Stream-idle (`stream_idle_timeout`) only fires when zero
+subagents are outstanding and at least one semantic event has been
+observed since session start.
+
+**Diagnostics.** When the subagent watchdog is enabled, the existing
+30-second idle-flush ticker also emits at most one diagnostic line per
+active subagent per silence window:
+
+```
+ ⏳ Awaiting subagent: <name-or-id> (<elapsed-since-start>)
+```
+
+These lines route through the same section tracker as tool calls so
+spacing stays consistent with the rest of the live stderr surface.
+Disabling the subagent watchdog (`CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS=0`)
+also disables the diagnostic emission.
+
+**Exit reasons.** Watchdog-initiated termination surfaces in the
+synthesised JSONL summary with distinct `error_kind` values:
+
+- `subagents_unresponsive` — Fix 1 (subagent silence breach)
+- `stream_idle_timeout` — Fix 2 (total stream silence with no outstanding subagents)
+
+Both render as `Agent Error` coloured `BlockQuote`s on stderr and map
+to `ProcessTermination::Completed` (not `TimedOut`) so they are not
+confused with user-configured harness timeouts.
 
 ### Handlers
 
