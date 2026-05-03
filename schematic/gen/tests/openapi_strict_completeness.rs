@@ -16,7 +16,7 @@
 //! `run_generate` / `run_generate_all`; this integration test pins the
 //! registry-level contract so the binary keeps holding it.
 
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 use schematic_definitions::registry::{
     SchemaRegistry, get_registries_for_module, get_registry, registry_key_for,
 };
@@ -208,6 +208,50 @@ fn real_module_registries_still_pass_strict_completeness() {
             });
         }
     }
+}
+
+#[test]
+fn request_body_types_must_be_registered() {
+    // An API with a JSON request body whose type is not in the registry must
+    // fail validation. This is the request-side counterpart to the response
+    // schema checks above.
+    let api = RestApi {
+        name: "RequestBodyTest".to_string(),
+        description: "Test API with missing request body type".to_string(),
+        base_url: "https://example.test".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        auth_policy: None,
+        env_auth: vec![],
+        env_username: None,
+        headers: vec![],
+        endpoints: vec![Endpoint {
+            id: "Create".to_string(),
+            method: RestMethod::Post,
+            path: "/create".to_string(),
+            description: String::new(),
+            request: Some(ApiRequest::json_type("SomeBody")),
+            response: ApiResponse::Empty,
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        }],
+        module_path: None,
+        request_suffix: None,
+        version: None,
+        env_mapping: None,
+    };
+
+    let registry = SchemaRegistry::new();
+    let result = registry.validate_completeness(&api);
+    assert!(result.is_err(), "expected validation to fail for missing request body type");
+
+    let missing = result.unwrap_err();
+    assert!(
+        missing.iter().any(|m| m == "SomeBody"),
+        "missing list should contain SomeBody, got {:?}",
+        missing,
+    );
 }
 
 /// Resolves an API by its `RestApi::name` value. Mirrors the binary's
