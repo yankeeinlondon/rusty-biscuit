@@ -24,9 +24,24 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - schematic/definitions/src/registry.rs
+  - schematic/define/src/openapi/export.rs
+  - schematic/define/src/openapi/error.rs
+  - schematic/gen/tests/openapi_strict_completeness.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - schematic-gen
   - schematic-define
+  - schematic-definitions
 ---
 # Review-3 Implementation Plan: Ergonomics and Postman Collections
 
