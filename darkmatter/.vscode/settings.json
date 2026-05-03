@@ -21,6 +21,7 @@
         "indexmap",
         "insta",
         "killall",
+        "languageservice",
         "lvremove",
         "mongosh",
         "mparted",
