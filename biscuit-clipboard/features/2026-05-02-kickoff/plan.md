@@ -23,6 +23,17 @@
    - biscuit-clipboard
    - biscuit-clipboard-cli
    - biscuit-clipboard-service
+ source_files_during_phase_2:
+   - biscuit-clipboard/lib/src/lib.rs
+   - biscuit-clipboard/lib/src/watcher.rs
+   - biscuit-clipboard/lib/Cargo.toml
+   - biscuit-clipboard/service/Cargo.toml
+   - biscuit-clipboard/service/src/main.rs
+   - biscuit-clipboard/service/src/api.rs
+   - biscuit-clipboard/service/src/daemon.rs
+ docs_updated_during_phase_2: []
+ docs_created_during_phase_2: []
+ skills_files_updated_during_phase_2: []
  ---
 
  # Execution Plan: Biscuit Clipboard Kickoff
