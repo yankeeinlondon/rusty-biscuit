@@ -5,6 +5,7 @@ pub(crate) mod profile;
 pub(crate) mod repo_home;
 pub(crate) mod section;
 pub(crate) mod stream_io;
+pub(crate) mod subagent_watchdog;
 pub(crate) mod system_prompt;
 pub(crate) mod wire_io;
 
@@ -874,6 +875,17 @@ fn run_provider_wrapper_inner(
             provider
         )
     })?;
+
+    // SAFETY: this runs at subcommand entry on the main task before any
+    // child threads, sub-renders, or hooks have been spawned. No concurrent
+    // env reads exist at this point, so mutating the process env upholds
+    // Rust 2024's `std::env::set_var` safety contract. Setting AGENT
+    // here lets `{{env.AGENT}}` resolve in any prompt rendered by the
+    // parent (system prompt, dispatch templates) before the child launch.
+    unsafe {
+        std::env::set_var("AGENT", profile.agent_env());
+    }
+
     let cwd = std::env::current_dir()?;
 
     let term = wrap_terminal();

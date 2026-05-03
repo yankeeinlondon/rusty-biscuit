@@ -177,6 +177,104 @@ fn composition_dispatch_context(
     context
 }
 
+/// Resolve the execution target *before* composition templates are
+/// rendered, so `{{env.AGENT}}` in the body or inline `prompt` resolves
+/// to the chosen provider.
+///
+/// Mirrors the resolution logic in [`execute_composition_request_inner`]
+/// — explicit flag wins, then frontmatter agent hint, then favorite, with
+/// a TTY picker when no signal yields a unique answer. The hints come
+/// from raw frontmatter (no compose), so an `agent: "{{...}}"` template
+/// is treated as absent and falls back to the picker / favorite.
+pub(crate) fn eagerly_resolve_target(
+    hints: &claudine::composition::EffectiveSelectionHints,
+    explicit_provider: Option<Provider>,
+    excluded: &std::collections::BTreeSet<Provider>,
+    cli_model: Option<&str>,
+    source_repo_root: Option<&Path>,
+) -> Result<ResolvedExecutionTarget> {
+    let cwd = std::env::current_dir()?;
+    let clients = InstalledAiClients::new();
+    let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+        .collect();
+    let snapshot = build_installed_snapshot(&installed, excluded);
+
+    let selection_config = load_selection_config(source_repo_root.unwrap_or(&cwd));
+    let catalog = match &selection_config {
+        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+            cfg.model_overrides.clone(),
+        ),
+        None => claudine::model_catalog::ModelCatalogService::new(),
+    };
+    catalog.refresh_blocking();
+    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+
+    let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+    if is_tty {
+        if let Some(provider) = explicit_provider {
+            let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+                provider,
+                hints,
+                cli_model,
+                Some(&catalog),
+            );
+            return Ok(ResolvedExecutionTarget {
+                provider,
+                provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+                model,
+                model_reason,
+            });
+        }
+        let plan = claudine::composition::build_picker_plan_with_hints(hints, &snapshot, favorite)
+            .map_err(|e| eyre!("{e}"))?;
+        let provider = super::selection_ui::prompt_one_shot_provider(plan)
+            .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+            provider,
+            hints,
+            cli_model,
+            Some(&catalog),
+        );
+        Ok(ResolvedExecutionTarget {
+            provider,
+            provider_reason: claudine::composition::ProviderResolutionReason::InteractivePicker,
+            model,
+            model_reason,
+        })
+    } else {
+        claudine::composition::resolve_target_non_tty_with_hints(
+            explicit_provider,
+            hints,
+            &snapshot,
+            favorite,
+            cli_model,
+            Some(&catalog),
+        )
+        .map_err(|e| eyre!("{e}"))
+    }
+}
+
+/// Inject `AGENT` into both the parent process env and the supplied
+/// `env_overrides` map so composition templates and downstream
+/// system-prompt rendering see the chosen provider's slug.
+pub(crate) fn install_agent_env_for_composition(
+    target: &ResolvedExecutionTarget,
+    env_overrides: &mut std::collections::BTreeMap<String, String>,
+) {
+    let slug = target.provider.as_slug().to_string();
+    // SAFETY: composition entry runs on the main task before any worker
+    // threads or hooks have spawned. Setting AGENT here is the only
+    // mutation of the parent process env at this point, satisfying
+    // Rust 2024's `set_var` safety contract.
+    unsafe {
+        std::env::set_var("AGENT", &slug);
+    }
+    env_overrides.insert("AGENT".to_string(), slug);
+}
+
 /// Execute a composition request through the wrapper-grade pipeline.
 ///
 /// Handles provider selection, environment setup, harness detection from
