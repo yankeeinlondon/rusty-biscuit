@@ -18,6 +18,7 @@ pub mod entry;
 pub mod error;
 pub mod history;
 pub mod storage;
+pub mod watcher;
 
 pub use backend::ClipboardBackend;
 pub use content::{ClipboardFormat, ContentType, ImageSnapshot};
@@ -25,3 +26,4 @@ pub use entry::{ClipboardEntry, EntryId};
 pub use error::ClipboardError;
 pub use history::History;
 pub use storage::Storage;
+pub use watcher::{spawn_watcher, Supervisor, SupervisorAction, SupervisorStatus, WatcherEvent};
