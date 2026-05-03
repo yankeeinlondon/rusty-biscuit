@@ -1684,6 +1684,7 @@ fn run_provider_wrapper_inner(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
+        let watchdog_state = Some(sink.watchdog_state());
         // Snapshot the sink's section-stream handle before the sink is
         // moved into the parser closure. Post-stream trailer and
         // Codex-final-stdout emission uses this handle so every section
@@ -1741,6 +1742,7 @@ fn run_provider_wrapper_inner(
                 stream_output,
                 stderr_bridge,
                 None,
+                watchdog_state,
             )?
         };
         let mut summary = stream_result.data;
@@ -2182,6 +2184,7 @@ fn execute_harness_attempt(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
+        let watchdog_state = Some(sink.watchdog_state());
         let section_stream = sink.section_stream();
         let (build_parser, stderr_bridge) =
             build_structured_plumbing(provider, sink, parser_config);
@@ -2235,6 +2238,7 @@ fn execute_harness_attempt(
                 stream_output,
                 stderr_bridge,
                 prompt_timing,
+                watchdog_state,
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;

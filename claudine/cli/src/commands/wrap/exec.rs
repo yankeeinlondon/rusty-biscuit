@@ -23,7 +23,10 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use tracing::{Span, info_span};
 
 use super::stream_io::StreamOutput;
-use super::subagent_watchdog::WatchdogTermination;
+use super::subagent_watchdog::{
+    WatchdogConfig, WatchdogTermination, WatchdogTickResult, evaluate_watchdog_tick,
+    render_watchdog_error_to_stream,
+};
 
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
@@ -1463,6 +1466,61 @@ fn spawn_flush_if_idle_ticker(
     (done, handle)
 }
 
+/// Spawn the subagent watchdog ticker.
+///
+/// Evaluates subagent-silence and stream-idle rules on a short cadence
+/// (default 5 s). When a rule breaches, renders an `AgentNative` error
+/// block to stderr and sends a [`WatchdogTermination`] request to the
+/// exec wait loop so the child process group receives SIGTERM.
+///
+/// The ticker holds only weak conceptual coupling to the live sink: it
+/// reads the same `WatchdogState` the sink updates, and emits through
+/// the same `StreamOutput` coordinator so stderr lines land on fresh
+/// rows even when stdout is mid-line.
+fn spawn_subagent_watchdog_ticker(
+    config: WatchdogConfig,
+    watchdog_state: Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>,
+    watchdog_tx: std::sync::mpsc::Sender<WatchdogTermination>,
+    live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
+) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&done);
+    let fired = Arc::new(AtomicBool::new(false));
+    let cadence = Duration::from_secs(config.subagent_watchdog_interval_seconds);
+
+    let handle = thread::spawn(move || {
+        let mut next_tick = Instant::now() + cadence;
+        while !done_flag.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_tick {
+                match evaluate_watchdog_tick(
+                    &config,
+                    now,
+                    &watchdog_state,
+                    &live_metrics,
+                    &fired,
+                ) {
+                    WatchdogTickResult::Ok => {}
+                    WatchdogTickResult::SubagentBreach(ref term)
+                    | WatchdogTickResult::StreamIdleBreach(ref term) => {
+                        render_watchdog_error_to_stream(term, &stream_output);
+                        let _ = watchdog_tx.send(term.clone());
+                    }
+                }
+                next_tick += cadence;
+                continue;
+            }
+            let sleep_for = next_tick
+                .saturating_duration_since(now)
+                .min(Duration::from_secs(1));
+            thread::sleep(sleep_for);
+        }
+    });
+
+    (done, handle)
+}
+
 /// Spawn the prompt-scoped timing monitor.
 ///
 /// Emits the periodic timing header anchored on the prompt's start time
@@ -1891,6 +1949,7 @@ pub(crate) fn run_child_stream_semantic(
     stream_output: Arc<StreamOutput>,
     stderr_bridge: Option<StderrBridgeHandle>,
     prompt_timing: Option<PromptTimingContext>,
+    watchdog_state: Option<Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -2141,15 +2200,24 @@ pub(crate) fn run_child_stream_semantic(
     let wall_clock_timeout = timeout.map(Duration::from_secs);
     let step_timeout_duration = step_timeout.map(Duration::from_secs);
 
-    // Watchdog channel: created in Phase 3 so the exec wait loop can
-    // receive termination requests from the watchdog ticker (Phase 4).
-    // For now the receiver is `None`; Phase 4 will spawn the ticker
-    // and optionally populate this.
-    let (_watchdog_tx, watchdog_rx): (
+    // Watchdog channel: the ticker sends termination requests; the wait
+    // loop receives them and escalates SIGTERM → SIGKILL.
+    let (watchdog_tx, watchdog_rx): (
         std::sync::mpsc::Sender<WatchdogTermination>,
         std::sync::mpsc::Receiver<WatchdogTermination>,
     ) = std::sync::mpsc::channel();
-    let watchdog_enabled = false; // Phase 4 will drive this from config
+    let watchdog_config = WatchdogConfig::from_env();
+    let watchdog_enabled = watchdog_config.any_watchdog_enabled() && watchdog_state.is_some();
+    let mut watchdog_ticker = None;
+    if watchdog_enabled && let Some(state) = watchdog_state {
+        watchdog_ticker = Some(spawn_subagent_watchdog_ticker(
+            watchdog_config,
+            state,
+            watchdog_tx,
+            live_metrics.clone(),
+            stream_output.clone(),
+        ));
+    }
     let needs_advanced_wait = wall_clock_timeout.is_some()
         || step_timeout_duration.is_some()
         || early_terminate_rx.is_some()
@@ -2198,6 +2266,7 @@ pub(crate) fn run_child_stream_semantic(
     kill_process_group(&mut child);
     stop_timing_ticker(flush_ticker);
     stop_timing_ticker(timing_monitor);
+    stop_timing_ticker(watchdog_ticker);
 
     let thread_join_timeout = Duration::from_secs(5);
     let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(

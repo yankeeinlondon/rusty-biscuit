@@ -1646,6 +1646,7 @@ fn run_structured_composition(
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
+    let watchdog_state = Some(sink.watchdog_state());
     let section_stream = sink.section_stream();
     let (build_parser, stderr_bridge) =
         super::build_structured_plumbing(provider, sink, parser_config);
@@ -1700,6 +1701,7 @@ fn run_structured_composition(
             stream_output,
             stderr_bridge,
             prompt_timing,
+            watchdog_state,
         )?
     };
     let telemetry = stream_result.telemetry;
