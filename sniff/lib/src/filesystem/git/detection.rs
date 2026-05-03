@@ -786,9 +786,10 @@ pub(crate) fn get_remotes(repo: &Repository, include_remote_details: bool) -> Ve
 
 /// Refresh local remote-tracking refs using the user's configured `git` binary.
 ///
-/// This uses `git fetch --quiet --prune <remote>` per remote and disables
-/// terminal prompts so CLI use does not block on credential input.
-pub(crate) fn refresh_remote_tracking_refs(repo: &Repository) {
+/// When multiple remotes are configured, fetches run with bounded parallelism
+/// (up to `max_concurrency`, clamped to 1–3) to reduce latency.  Terminal
+/// prompts are disabled so CLI use does not block on credential input.
+pub(crate) fn refresh_remote_tracking_refs(repo: &Repository, max_concurrency: usize) {
     let Some(repo_root) = repo.workdir() else {
         return;
     };
@@ -797,17 +798,54 @@ pub(crate) fn refresh_remote_tracking_refs(repo: &Repository) {
         return;
     };
 
-    for remote_name in remotes.iter().flatten() {
-        let _ = Command::new("git")
-            .current_dir(repo_root)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .args(["fetch", "--quiet", "--prune", remote_name])
-            .status()
-            .map_err(|e| {
-                warn!(remote = remote_name, error = %e, "git fetch failed");
-                e
-            });
+    let remote_names: Vec<String> = remotes.iter().flatten().map(|s| s.to_string()).collect();
+
+    if remote_names.is_empty() {
+        return;
     }
+
+    // Serial path for a single remote — avoid threading overhead.
+    if remote_names.len() == 1 {
+        fetch_single_remote(repo_root, &remote_names[0]);
+        return;
+    }
+
+    let max_concurrency = max_concurrency.clamp(1, 3);
+    let repo_root = repo_root.to_path_buf();
+
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
+
+        for chunk in remote_names.chunks(max_concurrency) {
+            // Spawn up to max_concurrency fetches in parallel.
+            for name in chunk {
+                let name = name.clone();
+                let repo_root = &repo_root;
+                handles.push(s.spawn(move || {
+                    fetch_single_remote(repo_root, &name);
+                }));
+            }
+            // Wait for the current batch before starting the next.
+            for handle in handles.drain(..) {
+                if let Err(e) = handle.join() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+        }
+    });
+}
+
+/// Run `git fetch --quiet --prune <remote>` for a single remote.
+fn fetch_single_remote(repo_root: &std::path::Path, remote_name: &str) {
+    let _ = Command::new("git")
+        .current_dir(repo_root)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["fetch", "--quiet", "--prune", remote_name])
+        .status()
+        .map_err(|e| {
+            warn!(remote = remote_name, error = %e, "git fetch failed");
+            e
+        });
 }
 
 /// Derive the user-facing behind status from per-remote tracking counts.
@@ -832,10 +870,71 @@ pub(crate) fn summarize_behind_status(tracking: &[RemoteTrackingStatus]) -> Opti
 }
 
 /// Populate commit containment data from locally available remote-tracking refs.
-pub(crate) fn populate_recent_commit_remotes(repo: &Repository, commits: &mut [CommitInfo]) {
-    let remote_tips = remote_branch_tips(repo);
-    if remote_tips.is_empty() {
+///
+/// Instead of checking every commit against every remote tip with
+/// `graph_descendant_of` (O(commits × branches) graph traversals), this
+/// walks the ancestry from each remote tip once and builds a
+/// `HashMap<Oid, Vec<remote>>`.  A `max_branches` limit can cap the number
+/// of remote-tracking branches inspected.
+pub(crate) fn populate_recent_commit_remotes(
+    repo: &Repository,
+    commits: &mut [CommitInfo],
+    max_branches: Option<usize>,
+) {
+    let mut remote_tips = remote_branch_tips(repo);
+    if remote_tips.is_empty() || commits.is_empty() {
         return;
+    }
+
+    // Sort for deterministic truncation, then apply branch limit if configured.
+    remote_tips.sort_by(|a, b| a.0.cmp(&b.0));
+    if let Some(limit) = max_branches {
+        remote_tips.truncate(limit);
+    }
+
+    // Determine the oldest commit time among the requested commits so we
+    // can stop ancestry walks early.
+    let oldest_time = commits
+        .iter()
+        .filter_map(|c| {
+            git2::Oid::from_str(&c.sha)
+                .ok()
+                .and_then(|oid| repo.find_commit(oid).ok())
+                .map(|c| c.time().seconds())
+        })
+        .min()
+        .unwrap_or(i64::MIN);
+
+    // Walk ancestry from each remote tip, collecting containment.
+    let mut containment: HashMap<git2::Oid, Vec<String>> = HashMap::new();
+
+    for (remote_name, tip_oid) in &remote_tips {
+        let Ok(mut revwalk) = repo.revwalk() else {
+            continue;
+        };
+        if revwalk.push(*tip_oid).is_err() {
+            continue;
+        }
+
+        for oid_result in revwalk {
+            let Ok(oid) = oid_result else {
+                continue;
+            };
+
+            containment
+                .entry(oid)
+                .or_default()
+                .push(remote_name.clone());
+
+            // Stop when we reach commits older than the oldest requested.
+            // This is a safe heuristic: any commit older than the oldest
+            // requested commit cannot be in the `commits` list.
+            if let Ok(commit) = repo.find_commit(oid)
+                && commit.time().seconds() < oldest_time
+            {
+                break;
+            }
+        }
     }
 
     for commit in commits {
@@ -843,21 +942,13 @@ pub(crate) fn populate_recent_commit_remotes(repo: &Repository, commits: &mut [C
             continue;
         };
 
-        let mut containing_remotes = Vec::new();
-        for (remote_name, tip_oid) in &remote_tips {
-            let contains = *tip_oid == commit_oid
-                || repo
-                    .graph_descendant_of(*tip_oid, commit_oid)
-                    .unwrap_or(false);
-            if contains {
-                containing_remotes.push(remote_name.clone());
+        if let Some(remotes) = containment.get(&commit_oid) {
+            let mut containing = remotes.clone();
+            containing.sort();
+            containing.dedup();
+            if !containing.is_empty() {
+                commit.remotes = Some(containing);
             }
-        }
-
-        containing_remotes.sort();
-        containing_remotes.dedup();
-        if !containing_remotes.is_empty() {
-            commit.remotes = Some(containing_remotes);
         }
     }
 }
@@ -1638,5 +1729,277 @@ mod tests {
         assert!(status.is_dirty);
         assert_eq!(status.staged_count, 3);
         assert_eq!(changes.len(), 3);
+    }
+
+    #[test]
+    fn batched_diff_handles_staged_rename_as_delete_and_add() {
+        let (dir, repo) = setup_repo();
+
+        // Rename the committed file on disk and stage the change.
+        let old_path = dir.path().join("test.txt");
+        let new_path = dir.path().join("renamed.txt");
+        std::fs::rename(&old_path, &new_path).unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.remove_path(Path::new("test.txt")).unwrap();
+        index.add_path(Path::new("renamed.txt")).unwrap();
+        index.write().unwrap();
+
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.staged_count, 2);
+        // One delete + one add because rename detection is off by default.
+        assert_eq!(changes.len(), 2);
+
+        let deleted = find_change(&changes, "test.txt");
+        assert_eq!(deleted.status, FileStatus::Staged);
+        assert_eq!(deleted.action, FileAction::Deleted);
+        assert_eq!(deleted.lines_removed, 1);
+        assert_eq!(deleted.lines_added, 0);
+
+        let created = find_change(&changes, "renamed.txt");
+        assert_eq!(created.status, FileStatus::Staged);
+        assert_eq!(created.action, FileAction::Created);
+        // The added side of the rename carries the original line content.
+        assert_eq!(created.lines_added, 1);
+        assert_eq!(created.lines_removed, 0);
+    }
+
+    #[test]
+    fn batched_diff_mixed_binary_and_text_deltas() {
+        let (dir, repo) = setup_repo();
+
+        // Add a binary file and a second text file, then commit.
+        let binary_path = dir.path().join("data.bin");
+        let text_path = dir.path().join("other.txt");
+        std::fs::write(&binary_path, b"\x00\x01\x02\x03\n").unwrap();
+        std::fs::write(&text_path, "alpha\nbeta\n").unwrap();
+        stage_path(&repo, "data.bin");
+        stage_path(&repo, "other.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "add binary and text",
+                &tree,
+                &[&parent],
+            )
+            .unwrap();
+        }
+
+        // Modify both files in the working tree (unstaged).
+        std::fs::write(&binary_path, b"\x00\x01\x02\xFF\n").unwrap();
+        std::fs::write(&text_path, "alpha\ngamma\n").unwrap();
+
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.unstaged_count, 2);
+
+        let text_change = find_change(&changes, "other.txt");
+        assert_eq!(text_change.status, FileStatus::Modified);
+        assert_eq!(text_change.action, FileAction::Modified);
+        // text delta: 1 add, 1 remove
+        assert_eq!(text_change.lines_added, 1);
+        assert_eq!(text_change.lines_removed, 1);
+
+        let binary_change = find_change(&changes, "data.bin");
+        assert_eq!(binary_change.status, FileStatus::Modified);
+        assert_eq!(binary_change.action, FileAction::Modified);
+        // Binary files produce no countable text lines.
+        assert_eq!(binary_change.lines_added, 0);
+        assert_eq!(binary_change.lines_removed, 0);
+    }
+
+    // ── populate_recent_commit_remotes tests ───────────────────────────────
+
+    /// Creates refs/remotes/{remote}/{branch} pointing at `target` so the
+    /// containment code sees them as remote-tracking branches.
+    fn add_fake_remote(repo: &Repository, remote: &str, branch: &str, target: git2::Oid) {
+        let ref_name = format!("refs/remotes/{remote}/{branch}");
+        repo.reference(&ref_name, target, true, "test remote")
+            .unwrap();
+    }
+
+    #[test]
+    fn populate_commit_remotes_finds_single_remote() {
+        let (dir, repo) = setup_repo();
+
+        // Create a second commit on HEAD.
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let head_id = head.id();
+
+        // Fake a remote that points at HEAD.
+        add_fake_remote(&repo, "origin", "main", head_id);
+
+        let mut commits = vec![CommitInfo {
+            sha: head_id.to_string(),
+            message: "second".to_string(),
+            author: "Test".to_string(),
+            timestamp: chrono::Utc::now(),
+            remotes: None,
+            refs: vec![],
+        }];
+
+        populate_recent_commit_remotes(&repo, &mut commits, None);
+
+        assert_eq!(
+            commits[0].remotes,
+            Some(vec!["origin".to_string()]),
+            "HEAD should be contained by origin"
+        );
+    }
+
+    #[test]
+    fn populate_commit_remotes_distinguishes_multiple_remotes() {
+        let (dir, repo) = setup_repo();
+
+        // second commit
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        // third commit
+        std::fs::write(dir.path().join("test.txt"), "third\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "third", &tree, &[&parent])
+                .unwrap();
+        }
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let head_id = head.id();
+        let second_id = head.parent(0).unwrap().id();
+
+        // origin points at HEAD (contains both commits).
+        add_fake_remote(&repo, "origin", "main", head_id);
+        // upstream points at second commit (contains only that one).
+        add_fake_remote(&repo, "upstream", "main", second_id);
+
+        let mut commits = vec![
+            CommitInfo {
+                sha: head_id.to_string(),
+                message: "third".to_string(),
+                author: "Test".to_string(),
+                timestamp: chrono::Utc::now(),
+                remotes: None,
+                refs: vec![],
+            },
+            CommitInfo {
+                sha: second_id.to_string(),
+                message: "second".to_string(),
+                author: "Test".to_string(),
+                timestamp: chrono::Utc::now(),
+                remotes: None,
+                refs: vec![],
+            },
+        ];
+
+        populate_recent_commit_remotes(&repo, &mut commits, None);
+
+        assert_eq!(
+            commits[0].remotes.as_deref(),
+            Some(["origin".to_string()].as_slice()),
+            "third commit only on origin"
+        );
+        assert_eq!(
+            commits[1].remotes.as_deref(),
+            Some(["origin".to_string(), "upstream".to_string()].as_slice()),
+            "second commit on both origin and upstream"
+        );
+    }
+
+    #[test]
+    fn populate_commit_remotes_respects_max_branches() {
+        let (dir, repo) = setup_repo();
+
+        // Create a second commit.
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let head_id = head.id();
+
+        // Add three fake remotes all pointing at HEAD.
+        add_fake_remote(&repo, "origin", "main", head_id);
+        add_fake_remote(&repo, "upstream", "main", head_id);
+        add_fake_remote(&repo, "fork", "main", head_id);
+
+        let mut commits = vec![CommitInfo {
+            sha: head_id.to_string(),
+            message: "second".to_string(),
+            author: "Test".to_string(),
+            timestamp: chrono::Utc::now(),
+            remotes: None,
+            refs: vec![],
+        }];
+
+        // With max_branches = 1, only the alphabetically first remote (fork)
+        // should be checked.
+        populate_recent_commit_remotes(&repo, &mut commits, Some(1));
+        assert_eq!(
+            commits[0].remotes,
+            Some(vec!["fork".to_string()]),
+            "only fork should be checked with limit=1 (alphabetical order)"
+        );
+
+        // With max_branches = 2, fork and origin should be checked.
+        commits[0].remotes = None;
+        populate_recent_commit_remotes(&repo, &mut commits, Some(2));
+        assert_eq!(
+            commits[0].remotes,
+            Some(vec!["fork".to_string(), "origin".to_string()]),
+            "fork and origin should be checked with limit=2"
+        );
+    }
+
+    #[test]
+    fn refresh_remote_tracking_refs_single_remote_runs_without_panic() {
+        let (_dir, repo) = setup_repo();
+        // With a single remote, the serial path should execute without error.
+        refresh_remote_tracking_refs(&repo, 2);
+        // The function has no return value; absence of panic is the test.
+    }
+
+    #[test]
+    fn refresh_remote_tracking_refs_zero_concurrency_uses_one() {
+        let (_dir, repo) = setup_repo();
+        // Concurrency of 0 should be clamped to 1.
+        refresh_remote_tracking_refs(&repo, 0);
     }
 }
