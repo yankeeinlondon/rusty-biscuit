@@ -36,8 +36,9 @@ fn drain(session: &mut expectrl::session::OsSession) -> String {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut =>
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
             {
                 if output.contains("---END---") || std::time::Instant::now() > deadline {
                     break;
