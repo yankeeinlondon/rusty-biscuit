@@ -216,6 +216,31 @@ fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::V
     )
 }
 
+/// Parse selection hints (`agent`, `model`) from a raw Markdown frontmatter
+/// without composing the document.
+///
+/// The CLI uses this for *eager* target resolution: it lets the wrapper
+/// know which provider will run before composition templates are rendered,
+/// so `{{env.AGENT}}` and similar references resolve correctly during
+/// body and inline-prompt rendering.
+///
+/// Untemplated, literal `agent`/`model` values are recognized; values that
+/// require composition to materialize (e.g. `agent: "{{env.SOMETHING}}"`)
+/// are not resolved here and fall through to post-compose resolution.
+///
+/// ## Errors
+///
+/// Returns a [`CompositionError`] if either field is present but holds an
+/// unsupported type, or if `agent` references an unknown provider.
+pub fn parse_selection_hints_from_frontmatter(
+    fm: &darkmatter::markdown::Frontmatter,
+) -> Result<EffectiveSelectionHints, CompositionError> {
+    let map = fm.as_map();
+    let agent = map.get("agent").map_or(Ok(None), parse_agent_hint)?;
+    let model = map.get("model").map_or(Ok(None), parse_model_hint)?;
+    Ok(EffectiveSelectionHints { agent, model })
+}
+
 /// Parse the `agent` frontmatter value into a typed `AgentHint`.
 ///
 /// Accepts a single string or an array of strings. Each string is
