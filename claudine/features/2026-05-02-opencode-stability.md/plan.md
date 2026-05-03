@@ -31,10 +31,14 @@ skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
   - claudine/cli/src/commands/wrap/exec.rs
   - claudine/cli/src/commands/wrap/subagent_watchdog.rs
-  - claudine/cli/src/commands/wrap/live_semantic_sink.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/composition.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+packages:
+  - claudine
+  - claudine-cli
 source_files_during_phase_5:
   - claudine/cli/src/commands/wrap/exec.rs
   - claudine/cli/src/commands/wrap/live_semantic_sink.rs
