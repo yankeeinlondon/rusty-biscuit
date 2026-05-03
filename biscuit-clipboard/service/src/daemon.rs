@@ -2,10 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use biscuit_clipboard::ClipboardError;
+use biscuit_clipboard::config;
 use fs4::fs_std::FileExt;
-
-const PID_FILE: &str = "clipper.pid";
-const PORT_FILE: &str = "clipper.port";
 
 #[derive(Clone)]
 pub struct DaemonFiles {
@@ -14,7 +12,7 @@ pub struct DaemonFiles {
 
 impl DaemonFiles {
     pub fn new() -> Result<Self, ClipboardError> {
-        let runtime_dir = Self::default_runtime_dir()?;
+        let runtime_dir = config::runtime_dir()?;
         fs::create_dir_all(&runtime_dir)?;
         Ok(Self { runtime_dir })
     }
@@ -30,11 +28,11 @@ impl DaemonFiles {
     }
 
     pub fn pid_file(&self) -> PathBuf {
-        self.runtime_dir.join(PID_FILE)
+        self.runtime_dir.join(config::PID_FILENAME)
     }
 
     pub fn port_file(&self) -> PathBuf {
-        self.runtime_dir.join(PORT_FILE)
+        self.runtime_dir.join(config::PORT_FILENAME)
     }
 
     pub fn write_pid(&self) -> Result<(), ClipboardError> {
@@ -63,7 +61,7 @@ impl DaemonFiles {
 
     pub fn is_already_running(&self) -> bool {
         if let Some(pid) = self.read_pid() {
-            is_pid_alive(pid)
+            config::is_pid_alive(pid)
         } else {
             false
         }
@@ -87,17 +85,6 @@ impl DaemonFiles {
             lock_path,
         })
     }
-
-    fn default_runtime_dir() -> Result<PathBuf, ClipboardError> {
-        let base = dirs::runtime_dir()
-            .or_else(dirs::cache_dir)
-            .ok_or_else(|| {
-                ClipboardError::Backend(
-                    "Could not determine runtime directory".to_string(),
-                )
-            })?;
-        Ok(base.join("biscuit-clipboard"))
-    }
 }
 
 pub struct LockGuard {
@@ -111,19 +98,6 @@ impl Drop for LockGuard {
             let _ = file.unlock();
         }
         let _ = fs::remove_file(&self.lock_path);
-    }
-}
-
-fn is_pid_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        false
     }
 }
 
@@ -170,11 +144,11 @@ mod tests {
 
     #[test]
     fn test_is_pid_alive_current_process() {
-        assert!(is_pid_alive(std::process::id()));
+        assert!(config::is_pid_alive(std::process::id()));
     }
 
     #[test]
     fn test_is_pid_alive_nonexistent() {
-        assert!(!is_pid_alive(999999999));
+        assert!(!config::is_pid_alive(999999999));
     }
 }
