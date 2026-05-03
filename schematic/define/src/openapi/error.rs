@@ -82,6 +82,17 @@ pub enum OpenApiError {
         message: String,
     },
 
+    /// One or more schema references could not be resolved in `components.schemas`.
+    ///
+    /// This variant is used by the export validator when a `$ref` under
+    /// `paths` or `components` points to a schema name that is missing from
+    /// the generated OpenAPI document.
+    #[error("Unresolved schema references: {refs:?}")]
+    UnresolvedRefs {
+        /// List of missing schema names (e.g., `["User", "CreateUserBody"]`).
+        refs: Vec<String>,
+    },
+
     /// Unsupported OpenAPI feature.
     ///
     /// This variant is used when the specification uses features that this
