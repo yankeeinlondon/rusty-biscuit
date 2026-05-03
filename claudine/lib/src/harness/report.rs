@@ -1218,6 +1218,64 @@ mod tests {
     }
 
     #[test]
+    fn render_failure_block_yaml_region_contains_sgr_styling() {
+        // Positive assertion that the syntax-highlighted YAML path actually
+        // fires for the canonical happy-path snippet. The renderer falls back
+        // to plain unstyled lines when `highlight_yaml_lines` returns a line
+        // count that doesn't match the plain count -- without this assertion
+        // a degraded highlighter (broken theme load, missing yaml grammar,
+        // empty palette) would silently strip styling and every other test
+        // would still pass.
+        let term = test_terminal();
+        let outcome = ValidationCheckOutcome {
+            rule_id: ValidationRuleId(0),
+            event: ValidationEvent::FileExists,
+            subject_key: Some("x".to_string()),
+            passed: false,
+            markup: "the file x exists".to_string(),
+            failure_message: Some("missing".to_string()),
+            source: Some(RuleSource {
+                file: std::path::PathBuf::from("/repo/prompts/run.md"),
+                line_range: Some(1..=2),
+                yaml_snippet: "file_exists: \"x\"\nmessage: \"y\"\n".to_string(),
+            }),
+        };
+
+        let mut sink = StringSink::default();
+        render_failure_block_to(&mut sink, &outcome, FailurePhase::PreCheck, &term);
+        let captured = sink.into_string();
+
+        let lines: Vec<&str> = captured.lines().collect();
+        let in_idx = lines
+            .iter()
+            .position(|l| l.contains("in ") && l.contains(":1-2"))
+            .expect("expected source-location line containing ':1-2'");
+        let reason_idx = lines
+            .iter()
+            .position(|l| l.contains("Reason:"))
+            .expect("expected Reason line after the YAML region");
+        let yaml_region = &lines[(in_idx + 1)..reason_idx];
+        assert!(
+            !yaml_region.is_empty(),
+            "expected at least one YAML region line, got {lines:?}"
+        );
+
+        // `highlight_yaml_lines` emits truecolor foreground SGR escapes
+        // (`\x1b[38;2;R;G;Bm`) for each highlighted token. Asserting on the
+        // `\x1b[38;` introducer guarantees real styling fired -- not just a
+        // bare reset like `\x1b[0m`.
+        let styled_lines = yaml_region
+            .iter()
+            .filter(|l| l.contains("\x1b[38;"))
+            .count();
+        assert!(
+            styled_lines > 0,
+            "YAML region must contain at least one foreground-color SGR \
+             ('\\x1b[38;...m'), got region: {yaml_region:?}"
+        );
+    }
+
+    #[test]
     fn osc8_hyperlink_target_present_in_raw_output() {
         // Capture WITHOUT stripping ANSI: OSC-8 hyperlinks must survive into
         // the raw transcript so terminal emulators that support them can

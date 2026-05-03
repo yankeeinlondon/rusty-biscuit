@@ -7,6 +7,7 @@ use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tempfile::tempdir;
 mod common;
 use common::{augmented_path, init_git_repo, strip_ansi, write, write_executable, write_json};
@@ -1965,6 +1966,156 @@ exit 0
     assert!(
         stderr.contains("AGENT=codex"),
         "compose should inject AGENT env via wrapper pipeline; stderr was: {stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_resolves_env_agent_in_body_template() {
+    // Regression: `{{env.AGENT}}` in a compose body must resolve to the
+    // chosen provider's slug, since AGENT is now set in the parent
+    // process env *before* templates render.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: agent env test\n---\nrunning on {{env.AGENT}}\n",
+    )
+    .unwrap();
+
+    let stdin_path = workspace.path().join("stdin.txt");
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+/bin/cat > "$CLAUDINE_STDIN_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert!(
+        stdin.contains("running on codex"),
+        "{{{{env.AGENT}}}} should resolve to the chosen provider during \
+         compose body rendering; prompt was: {stdin:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_resolves_env_agent_in_prompt_template() {
+    // `{{env.AGENT}}` in the inline-compose `prompt` frontmatter must
+    // resolve to the chosen provider's slug after eager target resolution.
+    // Uses Goose because its `-t <prompt>` argv delivery is easy to
+    // capture, and its plain-stdout output works without structured streams.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("inline.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: 'pick: {{env.AGENT}}'\nagent: goose\n---\noriginal body\n",
+    )
+    .unwrap();
+
+    let captured_args = workspace.path().join("captured_args.txt");
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
+printf 'updated body content\n'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
+        .args(["inline-compose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(&captured_args).unwrap();
+    assert!(
+        argv.contains("pick: goose"),
+        "{{{{env.AGENT}}}} should resolve during inline-compose prompt \
+         rendering; argv was: {argv:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_resolves_env_agent_in_system_prompt() {
+    // Direct wrappers must set AGENT before the parent renders any
+    // system-prompt.md template. Use the Claude wrapper because its
+    // non-interactive system-prompt delivery writes the composed prompt
+    // to a temp file passed via --append-system-prompt-file, which the
+    // shim can capture verbatim.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let system_prompt = workspace.path().join("system-prompt.md");
+    fs::write(&system_prompt, "you are running on {{env.AGENT}}\n").unwrap();
+
+    let captured_prompt = workspace.path().join("captured_prompt.txt");
+    let captured_args = workspace.path().join("captured_args.txt");
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
+: > "$CLAUDINE_CAPTURED_PROMPT"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --append-system-prompt-file|--system-prompt-file)
+            shift
+            if [ -n "$1" ] && [ -f "$1" ]; then
+                /bin/cat "$1" >> "$CLAUDINE_CAPTURED_PROMPT"
+            else
+                printf 'TMPFILE_MISSING:%s\n' "$1" >> "$CLAUDINE_CAPTURED_PROMPT"
+            fi
+            ;;
+    esac
+    shift
+done
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_CAPTURED_PROMPT", &captured_prompt)
+        .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
+        .current_dir(workspace.path())
+        .args(["claude", "--", "ping"])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(&captured_args).unwrap_or_default();
+    let captured = fs::read_to_string(&captured_prompt).unwrap_or_default();
+    assert!(
+        captured.contains("running on claude"),
+        "system-prompt template should resolve {{{{env.AGENT}}}} to the \
+         wrapper's provider slug; argv: {argv:?}; captured prompt: {captured:?}"
     );
 }
 
@@ -4700,5 +4851,130 @@ fn perf_arg_parsing_includes_clap_time() {
     assert!(
         plain.contains("environment setup:"),
         "perf report must include environment setup timing; got: {plain}"
+    );
+}
+
+// ===========================================================================
+// Watchdog fixture tests (Phase 5)
+// ===========================================================================
+
+/// Replay the reference hang shape: 9 task_started, 7 task_completed, then
+/// silence. With a low subagent-idle threshold the watchdog should terminate
+/// the run and name the 2 stuck subagents in stderr.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: watchdog test\n---\nHello\n").unwrap();
+
+    // Build a shell script that emits 9 task_started, 7 task_completed, then blocks.
+    let mut script = String::from(r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
+"#);
+    for i in 1..=9 {
+        script.push_str(&format!(
+            r#"printf '%s\n' '{{"type":"task_started","task_id":"sa{i}","name":"Task {i}"}}'
+"#,
+        ));
+    }
+    for i in 1..=7 {
+        script.push_str(&format!(
+            r#"printf '%s\n' '{{"type":"task_completed","task_id":"sa{i}","name":"Task {i}","status":"success"}}'
+"#,
+        ));
+    }
+    script.push_str("while :; do /bin/sleep 1; done\n");
+
+    write_executable(&path_dir.join("opencode"), &script);
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS", "2")
+        .env("CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS", "1")
+        .env("CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS", "1")
+        .env("CLAUDINE_STREAM_IDLE_KILL_SECONDS", "0")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The Agent Error block from the watchdog should name the stuck subagents.
+    assert!(
+        plain.contains("subagent went silent") || plain.contains("subagents went silent"),
+        "stderr should contain watchdog breach message; got: {plain}"
+    );
+    assert!(
+        plain.contains("sa8") || plain.contains("Task 8"),
+        "stderr should name stuck subagent 8; got: {plain}"
+    );
+    assert!(
+        plain.contains("sa9") || plain.contains("Task 9"),
+        "stderr should name stuck subagent 9; got: {plain}"
+    );
+}
+
+/// Stream-idle watchdog fires when no subagents are outstanding and the
+/// provider stream goes completely silent after a tool call.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_stream_idle_timeout_after_tool_call_hang() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: idle test\n---\nHello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"idle-test","model":"test-model"}'
+printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}'
+while :; do /bin/sleep 1; done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS", "0")
+        .env("CLAUDINE_STREAM_IDLE_KILL_SECONDS", "2")
+        .env("CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS", "1")
+        .env("CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS", "1")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("stream_idle_timeout"),
+        "stderr should contain stream_idle_timeout message; got: {plain}"
     );
 }

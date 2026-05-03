@@ -32,7 +32,7 @@ Recommended fix: split pure formatting into a testable writer or render-to-strin
 The spec requires showing "the offending YAML rule itself" and says the rich block should show the YAML block "the author wrote." The implementation builds `RuleSource` from the already-parsed `serde_json::Value`:
 
 - `claudine/lib/src/harness/parse.rs:424` calls `build_rule_source(source_path, name, value)`.
-- `claudine/lib/src/harness/parse.rs:446-453` reserializes a new one-key mapping with `serde_yaml_ng::to_string`.
+- `claudine/lib/src/harness/parse.rs:446-453` re-serializes a new one-key mapping with `serde_yaml_ng::to_string`.
 
 That drops comments, original quoting, anchors, ordering/formatting nuances, and any exact author syntax. It also means the displayed snippet can differ from the markdown the user needs to edit.
 

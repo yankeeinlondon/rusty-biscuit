@@ -5,6 +5,7 @@ pub(crate) mod profile;
 pub(crate) mod repo_home;
 pub(crate) mod section;
 pub(crate) mod stream_io;
+pub(crate) mod subagent_watchdog;
 pub(crate) mod system_prompt;
 pub(crate) mod wire_io;
 
@@ -874,6 +875,17 @@ fn run_provider_wrapper_inner(
             provider
         )
     })?;
+
+    // SAFETY: this runs at subcommand entry on the main task before any
+    // child threads, sub-renders, or hooks have been spawned. No concurrent
+    // env reads exist at this point, so mutating the process env upholds
+    // Rust 2024's `std::env::set_var` safety contract. Setting AGENT
+    // here lets `{{env.AGENT}}` resolve in any prompt rendered by the
+    // parent (system prompt, dispatch templates) before the child launch.
+    unsafe {
+        std::env::set_var("AGENT", profile.agent_env());
+    }
+
     let cwd = std::env::current_dir()?;
 
     let term = wrap_terminal();
@@ -1672,6 +1684,7 @@ fn run_provider_wrapper_inner(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
+        let watchdog_state = Some(sink.watchdog_state());
         // Snapshot the sink's section-stream handle before the sink is
         // moved into the parser closure. Post-stream trailer and
         // Codex-final-stdout emission uses this handle so every section
@@ -1729,6 +1742,8 @@ fn run_provider_wrapper_inner(
                 stream_output,
                 stderr_bridge,
                 None,
+                watchdog_state,
+                Some(section_stream.tracker()),
             )?
         };
         let mut summary = stream_result.data;
@@ -2170,6 +2185,7 @@ fn execute_harness_attempt(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
+        let watchdog_state = Some(sink.watchdog_state());
         let section_stream = sink.section_stream();
         let (build_parser, stderr_bridge) =
             build_structured_plumbing(provider, sink, parser_config);
@@ -2223,6 +2239,8 @@ fn execute_harness_attempt(
                 stream_output,
                 stderr_bridge,
                 prompt_timing,
+                watchdog_state,
+                Some(section_stream.tracker()),
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;

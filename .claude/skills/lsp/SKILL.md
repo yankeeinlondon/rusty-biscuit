@@ -18,11 +18,15 @@ This skill is primarily a navigation layer over the research documents in this f
 ## Document Map
 
 - [lsp.md](./lsp.md): LSP history, specification versions, architecture, lifecycle, capability negotiation, and protocol gotchas
+- [LSP Features](./features.md): provides a comprehensive set of features which an LSP can provide to an editor
+- [IWES LSP](./iwes.md): details on IWES, a high performance Rust LSP
+- [Tower LSP](./tower-lsp.md): details on the `tower-lsp` crate; one of the more popular LSP choices in Rust ecosystem
 - [markdown-lsps.md](./markdown-lsps.md): Major Markdown LSP implementations, editor ecosystem fit, implementation languages, and comparison matrix
 - [rust-crates.md](./rust-crates.md): Rust crate landscape for LSP servers, decision guide, simple example, and extension strategies
 - [typescript-libraries.md](./typescript-libraries.md): TypeScript/JavaScript LSP library options, simple example, and extension strategies
 - [supporting-vscode.md](./supporting-vscode.md): Common LSP choices for VS Code across Markdown, HTML, CSS, JS, TS, Rust, Go, PHP, Python, and Lua
 - [supporting-neovim.md](./supporting-neovim.md): Common LSP choices for Neovim across Markdown, HTML, CSS, JS, TS, Rust, Go, PHP, Python, and Lua
+
 
 ## Which Document To Read
 
@@ -31,8 +35,8 @@ This skill is primarily a navigation layer over the research documents in this f
 - For Rust implementation work, read [rust-crates.md](./rust-crates.md) and then [lsp.md](./lsp.md) if protocol detail is needed.
 - For TypeScript or JavaScript implementation work, read [typescript-libraries.md](./typescript-libraries.md) and then [lsp.md](./lsp.md) if protocol detail is needed.
 - For editor recommendations, read the editor-specific guide first:
-  - VS Code: [supporting-vscode.md](./supporting-vscode.md)
-  - Neovim: [supporting-neovim.md](./supporting-neovim.md)
+    - VS Code: [supporting-vscode.md](./supporting-vscode.md)
+    - Neovim: [supporting-neovim.md](./supporting-neovim.md)
 - For Markdown inside a specific editor, combine [markdown-lsps.md](./markdown-lsps.md) with the relevant editor guide.
 
 ## Recommended Workflow

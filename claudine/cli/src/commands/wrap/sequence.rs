@@ -113,7 +113,172 @@ pub(crate) fn execute_sequence(
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
-    // ── Phase 1a: build overlays and prepare each step ─────────────────
+    // ── Phase 1a: resolve target for every step (eager, pre-compose) ────
+    // Hints come from raw source frontmatter so {{env.AGENT}} resolves
+    // during per-step composition. User --set overrides on `agent`/`model`
+    // are honored if present at the top level of `--set`.
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let raw_hints = apply_user_set_to_hints(raw_hints, user_set_overrides.as_ref())?;
+
+    let clients = sniff::programs::InstalledAiClients::new();
+    let installed: Vec<claudine::provider::Provider> = claudine::provider::PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+        .collect();
+    let excluded = shared.excluded();
+    let snapshot = claudine::composition::build_installed_snapshot(&installed, &excluded);
+
+    let source_repo_root = source.resolved_path.parent().and_then(|parent| {
+        sniff::filesystem::git::detect_git(parent, false, 1)
+            .ok()
+            .flatten()
+            .map(|info| info.repo_root)
+    });
+    let selection_config_path = source_repo_root.clone().unwrap_or_else(|| {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+    });
+    let selection_config = super::composition::load_selection_config(&selection_config_path);
+    let catalog = match &selection_config {
+        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+            cfg.model_overrides.clone(),
+        ),
+        None => claudine::model_catalog::ModelCatalogService::new(),
+    };
+    catalog.refresh_blocking();
+    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+
+    let explicit_provider = shared.explicit_provider();
+    let cli_model = shared.model.as_deref();
+    let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let provider_locked = explicit_provider.is_some();
+    let model_locked = cli_model.is_some();
+
+    let mut drafts: Vec<SequenceStepDraft> = Vec::with_capacity(total_steps);
+    let mut failures: Vec<claudine::composition::SequenceSelectionFailure> = Vec::new();
+
+    for step_index in 0..total_steps {
+        let step = &plan.steps[step_index];
+
+        // Resolve provider for this step
+        let provider_result = if let Some(provider) = explicit_provider {
+            Ok(provider)
+        } else {
+            let target = claudine::composition::resolve_target_non_tty_with_hints(
+                None,
+                &raw_hints,
+                &snapshot,
+                favorite,
+                cli_model,
+                Some(&catalog),
+            );
+            target.map(|t| t.provider)
+        };
+
+        let provider_plan = match claudine::composition::build_picker_plan_with_hints(
+            &raw_hints,
+            &snapshot,
+            favorite,
+        ) {
+            Ok(plan) => plan,
+            Err(_) => claudine::composition::ProviderPickerPlan {
+                options: Vec::new(),
+                default_index: 0,
+            },
+        };
+
+        let provider_for_model = explicit_provider.or(provider_result.as_ref().ok().copied());
+        let (model, model_reason) = if let Some(provider) = provider_for_model {
+            claudine::composition::resolve_model_with_hints(
+                provider,
+                &raw_hints,
+                cli_model,
+                Some(&catalog),
+            )
+        } else {
+            (
+                None,
+                claudine::composition::ModelResolutionReason::ProviderDefault,
+            )
+        };
+
+        match provider_result {
+            Ok(_provider) => {
+                drafts.push(SequenceStepDraft {
+                    step_index,
+                    step_name: step.name.clone(),
+                    provider_plan,
+                    proposed_model: model.clone(),
+                    model_reason,
+                    provider_locked,
+                    model_locked,
+                    resolved_provider: explicit_provider,
+                });
+            }
+            Err(ref err) => {
+                failures.push(claudine::composition::SequenceSelectionFailure {
+                    step: step_index + 1,
+                    step_name: step.name.clone(),
+                    reason: err.to_string(),
+                    installed: snapshot.all_installed.clone(),
+                });
+            }
+        }
+    }
+
+    // ── Phase 1b: review (TTY) or validate (non-TTY) ───────────────────
+    let resolved_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if !failures
+        .is_empty()
+    {
+        // Non-TTY aggregate failure path
+        return Err(CompositionError::SequenceSelectionFailed {
+            failure_count: failures.len(),
+            failures,
+        }
+        .into());
+    } else if is_tty && explicit_provider.is_none() {
+        // TTY review screen
+        match super::selection_ui::review_sequence(drafts, &catalog) {
+            Ok(targets) => targets,
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("cancelled") {
+                    return Ok(130); // Treat as interrupt
+                }
+                return Err(e.into());
+            }
+        }
+    } else {
+        // Non-TTY success path: convert drafts to resolved targets directly.
+        // When an explicit provider flag was given, every step uses it.
+        drafts
+            .into_iter()
+            .map(|draft| {
+                let provider = explicit_provider
+                    .or_else(|| {
+                        draft
+                            .provider_plan
+                            .options
+                            .get(draft.provider_plan.default_index)
+                            .map(|o| o.provider)
+                    })
+                    .unwrap_or(claudine::provider::Provider::Claude);
+                let provider_reason = if explicit_provider.is_some() {
+                    claudine::composition::ProviderResolutionReason::ExplicitFlag
+                } else {
+                    claudine::composition::ProviderResolutionReason::FrontmatterSingle
+                };
+                claudine::composition::ResolvedExecutionTarget {
+                    provider,
+                    provider_reason,
+                    model: draft.proposed_model,
+                    model_reason: draft.model_reason,
+                }
+            })
+            .collect()
+    };
+
+    // ── Phase 1c: per-step compose with resolved AGENT in env_overrides ─
     let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
         if interrupted.load(Ordering::SeqCst) {
@@ -131,6 +296,21 @@ pub(crate) fn execute_sequence(
 
         let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
         env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
+        // Inject AGENT for this step using the resolved target so
+        // {{env.AGENT}} in the body composes correctly. The mutation of
+        // the parent process env happens once below for step 0, then
+        // gets refreshed each step in case earlier steps changed it.
+        let target = resolved_targets
+            .get(step_index)
+            .ok_or_else(|| eyre!("missing resolved target for step {}", step_index + 1))?;
+        let slug = target.provider.as_slug().to_string();
+        env_overrides.insert("AGENT".to_string(), slug.clone());
+        // SAFETY: sequence orchestrator runs on the main task; per-step
+        // updates of this single env var precede any composition or
+        // child-process spawn for that step.
+        unsafe {
+            std::env::set_var("AGENT", &slug);
+        }
 
         let compose_options = {
             let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
@@ -196,163 +376,6 @@ pub(crate) fn execute_sequence(
         });
     }
 
-    // ── Phase 1b: resolve provider/model for every step ────────────────
-    let clients = sniff::programs::InstalledAiClients::new();
-    let installed: Vec<claudine::provider::Provider> = claudine::provider::PROVIDERS_DISPLAY_ORDER
-        .into_iter()
-        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-        .collect();
-
-    let excluded = shared.excluded();
-    let snapshot = claudine::composition::build_installed_snapshot(&installed, &excluded);
-    let selection_config = super::composition::load_selection_config(
-        step_contexts
-            .first()
-            .and_then(|ctx| ctx.prepared.source_repo_root.as_deref())
-            .unwrap_or(
-                std::env::current_dir()
-                    .ok()
-                    .as_deref()
-                    .unwrap_or(std::path::Path::new(".")),
-            ),
-    );
-    let catalog = match &selection_config {
-        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
-            cfg.model_overrides.clone(),
-        ),
-        None => claudine::model_catalog::ModelCatalogService::new(),
-    };
-    catalog.refresh_blocking();
-    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
-
-    let explicit_provider = shared.explicit_provider();
-    let cli_model = shared.model.as_deref();
-    let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    let provider_locked = explicit_provider.is_some();
-    let model_locked = cli_model.is_some();
-
-    let mut drafts: Vec<SequenceStepDraft> = Vec::with_capacity(total_steps);
-    let mut failures: Vec<claudine::composition::SequenceSelectionFailure> = Vec::new();
-
-    for (step_index, step_ctx) in step_contexts.iter().enumerate() {
-        let step = &plan.steps[step_index];
-        let prepared = &step_ctx.prepared;
-
-        // Resolve provider for this step
-        let provider_result = if let Some(provider) = explicit_provider {
-            Ok(provider)
-        } else {
-            // Non-TTY resolution per step; TTY mode will use the review screen
-            let target = claudine::composition::resolve_target_non_tty_with_catalog(
-                None,
-                prepared,
-                &snapshot,
-                favorite,
-                cli_model,
-                Some(&catalog),
-            );
-            target.map(|t| t.provider)
-        };
-
-        let provider_plan =
-            match claudine::composition::build_picker_plan(prepared, &snapshot, favorite) {
-                Ok(plan) => plan,
-                Err(_) => claudine::composition::ProviderPickerPlan {
-                    options: Vec::new(),
-                    default_index: 0,
-                },
-            };
-
-        let provider_for_model = explicit_provider.or(provider_result.as_ref().ok().copied());
-        let (model, model_reason) = if let Some(provider) = provider_for_model {
-            claudine::composition::resolve_model_with_catalog(
-                provider,
-                prepared,
-                cli_model,
-                Some(&catalog),
-            )
-        } else {
-            (
-                None,
-                claudine::composition::ModelResolutionReason::ProviderDefault,
-            )
-        };
-
-        match provider_result {
-            Ok(_provider) => {
-                drafts.push(SequenceStepDraft {
-                    step_index,
-                    step_name: step.name.clone(),
-                    provider_plan,
-                    proposed_model: model.clone(),
-                    model_reason,
-                    provider_locked,
-                    model_locked,
-                    resolved_provider: explicit_provider,
-                });
-            }
-            Err(ref err) => {
-                failures.push(claudine::composition::SequenceSelectionFailure {
-                    step: step_index + 1,
-                    step_name: step.name.clone(),
-                    reason: err.to_string(),
-                    installed: snapshot.all_installed.clone(),
-                });
-            }
-        }
-    }
-
-    // ── Phase 1c: review (TTY) or validate (non-TTY) ───────────────────
-    let resolved_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if !failures
-        .is_empty()
-    {
-        // Non-TTY aggregate failure path
-        return Err(CompositionError::SequenceSelectionFailed {
-            failure_count: failures.len(),
-            failures,
-        }
-        .into());
-    } else if is_tty && explicit_provider.is_none() {
-        // TTY review screen
-        match super::selection_ui::review_sequence(drafts, &catalog) {
-            Ok(targets) => targets,
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("cancelled") {
-                    return Ok(130); // Treat as interrupt
-                }
-                return Err(e.into());
-            }
-        }
-    } else {
-        // Non-TTY success path: convert drafts to resolved targets directly.
-        // When an explicit provider flag was given, every step uses it.
-        drafts
-            .into_iter()
-            .map(|draft| {
-                let provider = explicit_provider
-                    .or_else(|| {
-                        draft
-                            .provider_plan
-                            .options
-                            .get(draft.provider_plan.default_index)
-                            .map(|o| o.provider)
-                    })
-                    .unwrap_or(claudine::provider::Provider::Claude);
-                let provider_reason = if explicit_provider.is_some() {
-                    claudine::composition::ProviderResolutionReason::ExplicitFlag
-                } else {
-                    claudine::composition::ProviderResolutionReason::FrontmatterSingle
-                };
-                claudine::composition::ResolvedExecutionTarget {
-                    provider,
-                    provider_reason,
-                    model: draft.proposed_model,
-                    model_reason: draft.model_reason,
-                }
-            })
-            .collect()
-    };
-
     if !silent {
         let term = log::terminal();
         let status = Status::from_prose("Starting pre-flight checks".to_string())
@@ -363,7 +386,7 @@ pub(crate) fn execute_sequence(
 
     // ── Phase 1d: shell pre-flight for finalized steps ─────────────────
     let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
-    // (Shell approvals were already collected during Phase 1a)
+    // (Shell approvals were already collected during Phase 1c)
 
     if let Some(ref mut acc) = perf_accumulator {
         acc.mark_env_setup_complete();
@@ -626,4 +649,36 @@ pub(crate) fn execute_sequence(
         return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
     }
     if summary.failed > 0 { Ok(1) } else { Ok(0) }
+}
+
+/// Apply user `--set` overrides to raw selection hints.
+///
+/// Frontmatter `agent`/`model` can be overridden at the top level of
+/// `--set`. The override is interpreted with the same parsing rules
+/// (`agent` may be a string or array of strings; `model` may be a string
+/// or array of strings).
+fn apply_user_set_to_hints(
+    mut hints: claudine::composition::EffectiveSelectionHints,
+    user_set_overrides: Option<&serde_json::Value>,
+) -> Result<claudine::composition::EffectiveSelectionHints> {
+    let Some(serde_json::Value::Object(map)) = user_set_overrides else {
+        return Ok(hints);
+    };
+
+    if let Some(agent_value) = map.get("agent") {
+        let mut fm = darkmatter::markdown::Frontmatter::new();
+        fm.insert("agent", agent_value.clone())
+            .map_err(|e| eyre!("invalid --set agent: {e}"))?;
+        let parsed = composition::parse_selection_hints_from_frontmatter(&fm)?;
+        hints.agent = parsed.agent;
+    }
+    if let Some(model_value) = map.get("model") {
+        let mut fm = darkmatter::markdown::Frontmatter::new();
+        fm.insert("model", model_value.clone())
+            .map_err(|e| eyre!("invalid --set model: {e}"))?;
+        let parsed = composition::parse_selection_hints_from_frontmatter(&fm)?;
+        hints.model = parsed.model;
+    }
+
+    Ok(hints)
 }

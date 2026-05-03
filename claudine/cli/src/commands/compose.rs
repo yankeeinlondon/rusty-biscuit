@@ -294,6 +294,33 @@ fn run_compose_inner(
     )
     .entered();
 
+    // -- Eager target resolution -------------------------------------------
+    // Resolve the execution target *before* composing templates so that
+    // `{{env.AGENT}}` in the body resolves to the chosen provider's slug.
+    // Hints come from the raw frontmatter (no compose).
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let source_repo_root_eager = source.resolved_path.parent().and_then(|parent| {
+        sniff::filesystem::git::detect_git(parent, false, 1)
+            .ok()
+            .flatten()
+            .map(|info| info.repo_root)
+    });
+    let resolved_target = super::wrap::composition::eagerly_resolve_target(
+        &raw_hints,
+        shared.explicit_provider(),
+        &shared.excluded(),
+        shared.model.as_deref(),
+        source_repo_root_eager.as_deref(),
+    )?;
+
+    let mut env_overrides: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    super::wrap::composition::install_agent_env_for_composition(
+        &resolved_target,
+        &mut env_overrides,
+    );
+
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
@@ -325,8 +352,8 @@ fn run_compose_inner(
         composition::PrepareOptions {
             set_overrides,
             pre_approved_commands: Some(preflight.approved_commands),
+            env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
-            ..Default::default()
         },
     )?;
 
@@ -334,7 +361,7 @@ fn run_compose_inner(
         mode: CompositionMode::ChainedDocument,
         file_ref: file,
         prepared,
-        resolved_target: None,
+        resolved_target: Some(resolved_target),
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -354,7 +381,7 @@ fn run_compose_inner(
         session_interactive: shared.interactive,
         quiet: shared.quiet,
         silent: shared.silent,
-        env_overrides: std::collections::BTreeMap::new(),
+        env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };
@@ -427,6 +454,30 @@ fn run_inline_compose_inner(
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
 
+    // -- Eager target resolution ------------------------------------------
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let source_repo_root_eager = source.resolved_path.parent().and_then(|parent| {
+        sniff::filesystem::git::detect_git(parent, false, 1)
+            .ok()
+            .flatten()
+            .map(|info| info.repo_root)
+    });
+    let resolved_target = super::wrap::composition::eagerly_resolve_target(
+        &raw_hints,
+        shared.explicit_provider(),
+        &shared.excluded(),
+        shared.model.as_deref(),
+        source_repo_root_eager.as_deref(),
+    )?;
+
+    let mut env_overrides: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    super::wrap::composition::install_agent_env_for_composition(
+        &resolved_target,
+        &mut env_overrides,
+    );
+
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
@@ -458,8 +509,8 @@ fn run_inline_compose_inner(
         composition::PrepareOptions {
             set_overrides,
             pre_approved_commands: Some(preflight.approved_commands),
+            env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
-            ..Default::default()
         },
     )?;
 
@@ -467,7 +518,7 @@ fn run_inline_compose_inner(
         mode: CompositionMode::InlineFrontmatterPrompt,
         file_ref: file,
         prepared,
-        resolved_target: None,
+        resolved_target: Some(resolved_target),
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -487,7 +538,7 @@ fn run_inline_compose_inner(
         session_interactive: shared.interactive,
         quiet: shared.quiet,
         silent: shared.silent,
-        env_overrides: std::collections::BTreeMap::new(),
+        env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };
