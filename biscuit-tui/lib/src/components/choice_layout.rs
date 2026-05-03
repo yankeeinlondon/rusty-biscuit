@@ -61,6 +61,12 @@ impl ChoiceLayout {
         }
     }
 
+    /// Extra horizontal gap (in cells) inserted between items on the
+    /// same row. Each item's width already includes a trailing blank;
+    /// the gap adds breathing room beyond that so options don't feel
+    /// cramped.
+    const HORIZONTAL_GAP: u16 = 1;
+
     /// Builds a horizontal layout where options are packed left-to-right,
     /// wrapping to new rows when the next item would exceed `area.width`.
     ///
@@ -72,6 +78,9 @@ impl ChoiceLayout {
     /// when hotkey badges are hidden; pass `2` (or more) when badges
     /// occupy a sub-row below each option so that successive option rows
     /// do not collide with the badge row.
+    ///
+    /// [`HORIZONTAL_GAP`] cells of padding are inserted between adjacent
+    /// items on the same row (but not after the last item).
     pub fn horizontal(
         visible_indices: &[usize],
         item_widths: &[u16],
@@ -84,14 +93,22 @@ impl ChoiceLayout {
         let mut item_rects = Vec::with_capacity(visible_indices.len());
         let mut row_ranges = Vec::new();
 
+        let area_right = area.x + area.width;
         let mut x = area.x;
         let mut y = area.y;
         let mut current_row_start = 0;
 
         for (i, (&idx, &width)) in visible_indices.iter().zip(item_widths.iter()).enumerate() {
-            // If this item would overflow the current row, start a new row.
+            // If this item plus the inter-item gap would overflow the
+            // current row, start a new row. The gap is only needed when
+            // there is already an item on this row (x > area.x).
             // The first item in a row always fits even if wider than the row.
-            if x + width > area.x + area.width && x > area.x {
+            let needed = if x > area.x {
+                Self::HORIZONTAL_GAP + width
+            } else {
+                width
+            };
+            if x + needed > area_right && x > area.x {
                 row_ranges.push((current_row_start, i.saturating_sub(1)));
                 current_row_start = i;
                 x = area.x;
@@ -106,7 +123,7 @@ impl ChoiceLayout {
                 option_index: idx,
             });
 
-            x += width;
+            x += width + Self::HORIZONTAL_GAP;
         }
 
         if current_row_start < item_rects.len() {
@@ -279,7 +296,9 @@ mod tests {
     fn horizontal_layout_packs_left_to_right() {
         let area = Rect::new(0, 0, 20, 5);
         let visible = vec![0, 1, 2];
-        // Widths: 6, 8, 7 -> row 0: 0,1 (6+8=14 <= 20), row 1: 2 (14+7=21 > 20)
+        // Widths: 6, 8, 7 + HORIZONTAL_GAP(1) between items:
+        //   row 0: item0(x=0,w=6), item1(x=7,w=8)  (6+1+8=15 ≤ 20)
+        //   row 1: item2 wraps because 15+1+7=23 > 20
         let widths = vec![6, 8, 7];
         let layout = ChoiceLayout::horizontal(&visible, &widths, area, 1);
 
@@ -291,7 +310,7 @@ mod tests {
         assert_eq!(layout.item_rects[0].y, 0);
 
         assert_eq!(layout.item_rects[1].option_index, 1);
-        assert_eq!(layout.item_rects[1].x, 6);
+        assert_eq!(layout.item_rects[1].x, 7); // 6 + HORIZONTAL_GAP(1)
         assert_eq!(layout.item_rects[1].y, 0);
 
         assert_eq!(layout.item_rects[2].option_index, 2);

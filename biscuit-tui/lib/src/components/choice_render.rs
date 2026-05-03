@@ -54,18 +54,6 @@ fn badge_text(hotkey: HotkeySpec) -> String {
     }
 }
 
-/// Returns the rendered width of a hotkey badge in cells, or `0` when
-/// `hotkey` is `None` or the display mode hides the badge.
-fn badge_width(hotkey: Option<HotkeySpec>, display: HotkeyDisplayMode) -> u16 {
-    if display == HotkeyDisplayMode::Hidden {
-        return 0;
-    }
-    match hotkey {
-        Some(spec) => badge_text(spec).width() as u16,
-        None => 0,
-    }
-}
-
 /// Builds a styled span for a hotkey badge.
 ///
 /// Per spec:
@@ -120,42 +108,6 @@ fn badge_span(hotkey: HotkeySpec, display: HotkeyDisplayMode) -> Option<Span<'st
         Style::default().fg(fg).bg(dim_bg)
     };
     Some(Span::styled(badge_text(hotkey), style))
-}
-
-/// Builds the one-line "key" / legend that explains what the orange
-/// and yellow badge colours mean.
-///
-/// The modifier name is rendered **inside** the coloured swatch so
-/// the swatch itself demonstrates the same fill + bold-black-text
-/// styling that real hotkey badges use, while also identifying which
-/// modifier family the colour represents:
-///
-/// ```text
-///  Ctrl    Alt
-/// └────┘  └───┘
-///  orange  yellow swatch
-/// ```
-///
-/// No surrounding label is needed — the swatch IS the label. The
-/// previous `^X` / `⌥X` placeholders read as if `Ctrl+X` and `Alt+X`
-/// were real hotkeys (they are not), and replacing them with empty
-/// blocks lost all visual information about what badges look like.
-/// Putting the name inside the swatch resolves both.
-pub fn hotkey_legend_line() -> Line<'static> {
-    let ctrl_swatch = Style::default()
-        .fg(BADGE_FG_ON_ORANGE)
-        .bg(CTRL_BADGE_BG)
-        .add_modifier(Modifier::BOLD);
-    let alt_swatch = Style::default()
-        .fg(BADGE_FG_ON_YELLOW)
-        .bg(ALT_BADGE_BG)
-        .add_modifier(Modifier::BOLD);
-    Line::from(vec![
-        Span::raw(" "),
-        Span::styled(" Ctrl ", ctrl_swatch),
-        Span::raw("    "),
-        Span::styled(" Alt ", alt_swatch),
-    ])
 }
 
 /// Minimum label width (in cells) at which the fuzzy filter renders
@@ -318,14 +270,15 @@ impl<'a> ChoiceRenderContext<'a> {
                     self.selected_indicator.width(),
                     self.unselected_indicator.width(),
                 );
+                // Badge width is excluded from layout width because badges
+                // render on a sub-row below the option, not inline. Including
+                // badge width would create ghost gaps between items on the
+                // main row.
                 let widths: Vec<u16> = visible_indices
                     .iter()
                     .map(|&idx| {
                         let label_width = options[idx].label.width();
-                        let badge_w =
-                            badge_width(options[idx].effective_hotkey(), self.hotkey_display);
-                        let badge_pad = if badge_w > 0 { 1 } else { 0 };
-                        (indicator_width + 1 + label_width + 1) as u16 + badge_pad + badge_w
+                        (indicator_width + 1 + label_width + 1) as u16
                     })
                     .collect();
                 ChoiceLayout::horizontal(visible_indices, &widths, area, self.row_height())
@@ -588,13 +541,14 @@ impl<'a> ChoiceRenderContext<'a> {
             self.selected_indicator.width(),
             self.unselected_indicator.width(),
         );
+        // Badge width is excluded from layout width because badges render
+        // on a sub-row below the option, not inline. Including badge width
+        // would create ghost gaps between items on the main row.
         let widths: Vec<u16> = visible_indices
             .iter()
             .map(|&idx| {
                 let label_width = options[idx].label.width();
-                let badge_w = badge_width(options[idx].effective_hotkey(), self.hotkey_display);
-                let badge_pad = if badge_w > 0 { 1 } else { 0 };
-                (indicator_width + 1 + label_width + 1) as u16 + badge_pad + badge_w
+                (indicator_width + 1 + label_width + 1) as u16
             })
             .collect();
         let row_height = self.row_height();
@@ -1299,49 +1253,6 @@ mod tests {
         (0..buf.area.width).find(|&x| buf[(x, y)].style().bg == Some(expected_bg))
     }
 
-    #[test]
-    fn hotkey_legend_line_renders_modifier_name_inside_each_swatch() {
-        // The Ctrl swatch must contain the literal text "Ctrl"
-        // styled with the orange BG and black FG; same for Alt with
-        // yellow BG. Placing the name inside the swatch means the
-        // legend visually demonstrates the badge styling and
-        // identifies the modifier family in a single element.
-        let line = hotkey_legend_line();
-
-        let ctrl_swatch = line
-            .spans
-            .iter()
-            .find(|s| s.style.bg == Some(CTRL_BADGE_BG))
-            .expect("legend must paint a Ctrl-coloured swatch");
-        assert!(
-            ctrl_swatch.content.contains("Ctrl"),
-            "Ctrl swatch must contain the literal text 'Ctrl'; got {:?}",
-            ctrl_swatch.content
-        );
-        assert_eq!(
-            ctrl_swatch.style.fg,
-            Some(BADGE_FG_ON_ORANGE),
-            "Ctrl swatch FG must be the orange-family foreground"
-        );
-
-        let alt_swatch = line
-            .spans
-            .iter()
-            .find(|s| s.style.bg == Some(ALT_BADGE_BG))
-            .expect("legend must paint an Alt-coloured swatch");
-        assert!(
-            alt_swatch.content.contains("Alt"),
-            "Alt swatch must contain the literal text 'Alt'; got {:?}",
-            alt_swatch.content
-        );
-        assert_eq!(
-            alt_swatch.style.fg,
-            Some(BADGE_FG_ON_YELLOW),
-            "Alt swatch FG must be the yellow-family foreground (black, not white)"
-        );
-    }
-
-
     fn fixture_with_hotkeys() -> Vec<ChoiceOption<String>> {
         vec![
             ChoiceOption::<String>::new("r", "Red", "red")
@@ -1597,6 +1508,8 @@ mod tests {
 
     #[test]
     fn horizontal_layout_measures_explicit_badges() {
+        // Badge width must NOT inflate the layout width in horizontal mode
+        // because badges render on a sub-row below the option, not inline.
         let theme = default_theme();
         let ctx = ChoiceRenderContext::for_single(
             &theme,
@@ -1613,8 +1526,11 @@ mod tests {
         let area = Rect::new(0, 0, 12, 4);
         let layout = ctx.compute_layout(area, &options, &[0, 1], |_idx| false);
 
+        // Content-only width: indicator(1) + space(1) + "Alpha"(5) + trailing(1) = 8.
+        // Badge width (^A = 2 cells) is excluded from layout.
+        assert_eq!(layout.item_rects[0].width, 8);
+        // 8 + gap(1) + 8 = 17 > 12, so items wrap to two rows.
         assert_eq!(layout.row_count(), 2);
-        assert_eq!(layout.item_rects[0].width, 11);
         assert_eq!(layout.item_rects[1].y, 2);
     }
 
