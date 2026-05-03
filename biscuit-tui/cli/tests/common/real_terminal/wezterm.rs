@@ -21,6 +21,12 @@ use std::time::Duration;
 
 use super::{CapturedFrame, TerminalHarness};
 
+/// Workspace name used for spawned test windows. Picked to be distinct
+/// from any name a developer is likely to use interactively so the
+/// window is created on a separate workspace and does NOT steal focus
+/// from the terminal the developer is typing in.
+const BACKGROUND_WORKSPACE: &str = "biscuit-bg";
+
 /// Harness that talks to a running WezTerm GUI via `wezterm cli`.
 pub struct WezTermHarness {
     pane_id: Option<String>,
@@ -299,7 +305,14 @@ impl TerminalHarness for WezTermHarness {
             return Err(io::Error::other("WezTerm not available"));
         }
         let mut cmd = Command::new("wezterm");
-        cmd.args(["cli", "spawn", "--new-window", "--"]);
+        cmd.args([
+            "cli",
+            "spawn",
+            "--new-window",
+            "--workspace",
+            BACKGROUND_WORKSPACE,
+            "--",
+        ]);
         cmd.arg(program);
         for a in args {
             cmd.arg(a);
