@@ -41,7 +41,10 @@ packages:
   - claudine-cli
 source_files_during_phase_5:
   - claudine/cli/src/commands/wrap/exec.rs
-  - claudine/cli/src/commands/wrap/live_semantic_sink.rs
+  - claudine/cli/src/commands/wrap/subagent_watchdog.rs
+  - claudine/cli/src/commands/wrap/section.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/composition.rs
   - claudine/cli/tests/wrap_commands.rs
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
