@@ -23,6 +23,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use tracing::{Span, info_span};
 
 use super::stream_io::StreamOutput;
+use super::subagent_watchdog::WatchdogTermination;
 
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
@@ -740,6 +741,7 @@ fn wait_with_signal_and_early_termination(
     child: &mut Child,
     child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
     wall_clock_timeout: Option<Duration>,
@@ -858,6 +860,46 @@ fn wait_with_signal_and_early_termination(
             }
         }
 
+        // Watchdog-initiated termination (subagent silence or stream idle).
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(ref wd_rx) = watchdog_rx
+        {
+            match wd_rx.try_recv() {
+                Ok(req) => {
+                    tracing::warn!(
+                        child_pid,
+                        reason = ?req.reason,
+                        "watchdog termination received; sending SIGTERM to child process group",
+                    );
+                    let kill_pid = if child_in_own_pgroup {
+                        -(child_pid as i32)
+                    } else {
+                        child_pid as i32
+                    };
+                    unsafe {
+                        libc::kill(kill_pid, libc::SIGTERM);
+                    }
+                    let early = match req.reason {
+                        super::subagent_watchdog::WatchdogTerminationReason::SubagentsUnresponsive => {
+                            EarlyTermination::SubagentsUnresponsive {
+                                message: req.message,
+                            }
+                        }
+                        super::subagent_watchdog::WatchdogTerminationReason::StreamIdleTimeout => {
+                            EarlyTermination::StreamIdleTimeout {
+                                message: req.message,
+                            }
+                        }
+                    };
+                    early_termination = Some(early);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {}
+            }
+        }
+
         if early_termination.is_none()
             && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
@@ -931,6 +973,7 @@ fn wait_with_signal_and_early_termination(
     child: &mut Child,
     _child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
     wall_clock_timeout: Option<Duration>,
@@ -979,6 +1022,32 @@ fn wait_with_signal_and_early_termination(
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {}
+            }
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
+            if let Some(ref wd_rx) = watchdog_rx {
+                match wd_rx.try_recv() {
+                    Ok(req) => {
+                        let _ = child.kill();
+                        let early = match req.reason {
+                            super::subagent_watchdog::WatchdogTerminationReason::SubagentsUnresponsive => {
+                                EarlyTermination::SubagentsUnresponsive {
+                                    message: req.message,
+                                }
+                            }
+                            super::subagent_watchdog::WatchdogTerminationReason::StreamIdleTimeout => {
+                                EarlyTermination::StreamIdleTimeout {
+                                    message: req.message,
+                                }
+                            }
+                        };
+                        early_termination = Some(early);
+                        grace_deadline = Some(Instant::now() + grace_period);
+                    }
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => {}
+                }
             }
         }
 
@@ -1054,6 +1123,18 @@ fn apply_early_termination_to_summary(
             summary.exit_code = 1;
             summary.is_error = true;
             summary.error_kind = Some("step_timeout".into());
+            summary.error_message = Some(message.clone());
+        }
+        EarlyTermination::SubagentsUnresponsive { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("subagents_unresponsive".into());
+            summary.error_message = Some(message.clone());
+        }
+        EarlyTermination::StreamIdleTimeout { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("stream_idle_timeout".into());
             summary.error_message = Some(message.clone());
         }
     }
@@ -1705,6 +1786,12 @@ fn early_termination_process_outcome(
         Some(EarlyTermination::StepTimeout { .. }) => {
             claudine::harness::ProcessTermination::TimedOut
         }
+        Some(EarlyTermination::SubagentsUnresponsive { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        Some(EarlyTermination::StreamIdleTimeout { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
         Some(EarlyTermination::CompletedButHung { .. }) => {
             claudine::harness::ProcessTermination::Completed
         }
@@ -2053,9 +2140,20 @@ pub(crate) fn run_child_stream_semantic(
     let opencode_stop_threshold = Duration::from_secs(120);
     let wall_clock_timeout = timeout.map(Duration::from_secs);
     let step_timeout_duration = step_timeout.map(Duration::from_secs);
+
+    // Watchdog channel: created in Phase 3 so the exec wait loop can
+    // receive termination requests from the watchdog ticker (Phase 4).
+    // For now the receiver is `None`; Phase 4 will spawn the ticker
+    // and optionally populate this.
+    let (_watchdog_tx, watchdog_rx): (
+        std::sync::mpsc::Sender<WatchdogTermination>,
+        std::sync::mpsc::Receiver<WatchdogTermination>,
+    ) = std::sync::mpsc::channel();
+    let watchdog_enabled = false; // Phase 4 will drive this from config
     let needs_advanced_wait = wall_clock_timeout.is_some()
         || step_timeout_duration.is_some()
-        || early_terminate_rx.is_some();
+        || early_terminate_rx.is_some()
+        || watchdog_enabled;
     let (exit_code, termination, early_termination) = if needs_advanced_wait {
         // Synthesize a disconnected receiver when no stderr bridge is
         // installed so the wait loop can still enforce wall-clock and
@@ -2064,10 +2162,16 @@ pub(crate) fn run_child_stream_semantic(
             let (_tx, rx) = std::sync::mpsc::channel();
             rx
         });
+        let wd_rx = if watchdog_enabled {
+            Some(watchdog_rx)
+        } else {
+            None
+        };
         wait_with_signal_and_early_termination(
             &mut child,
             true,
             rx,
+            wd_rx,
             Some(wait_loop_metrics),
             opencode_stop_threshold,
             wall_clock_timeout,
@@ -2079,7 +2183,10 @@ pub(crate) fn run_child_stream_semantic(
     };
 
     if let Some(
-        EarlyTermination::CompletedButHung { message } | EarlyTermination::StepTimeout { message },
+        EarlyTermination::CompletedButHung { message }
+        | EarlyTermination::StepTimeout { message }
+        | EarlyTermination::SubagentsUnresponsive { message }
+        | EarlyTermination::StreamIdleTimeout { message },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)
@@ -2706,6 +2813,68 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .contains("no stream activity"),
+        );
+    }
+
+    #[test]
+    fn early_termination_process_outcome_maps_subagents_unresponsive_to_completed() {
+        let termination = EarlyTermination::SubagentsUnresponsive {
+            message: "subagents a, b unresponsive for 180s".into(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::Completed);
+    }
+
+    #[test]
+    fn early_termination_process_outcome_maps_stream_idle_to_completed() {
+        let termination = EarlyTermination::StreamIdleTimeout {
+            message: "no stream activity for 300s".into(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::Completed);
+    }
+
+    #[test]
+    fn apply_early_termination_subagents_unresponsive_sets_error_fields() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::SubagentsUnresponsive {
+                message: "subagents a, b unresponsive for 180s".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("subagents_unresponsive"));
+        assert_eq!(
+            summary.error_message.as_deref(),
+            Some("subagents a, b unresponsive for 180s"),
+        );
+    }
+
+    #[test]
+    fn apply_early_termination_stream_idle_timeout_sets_error_fields() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::StreamIdleTimeout {
+                message: "no stream activity for 300s".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("stream_idle_timeout"));
+        assert_eq!(
+            summary.error_message.as_deref(),
+            Some("no stream activity for 300s"),
         );
     }
 

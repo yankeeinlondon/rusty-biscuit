@@ -47,6 +47,28 @@ pub(crate) struct SubagentDiagnosticLine {
     pub(crate) elapsed_since_start: Duration,
 }
 
+/// Reason for a watchdog-initiated termination.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WatchdogTerminationReason {
+    /// One or more subagents have been idle longer than the threshold.
+    SubagentsUnresponsive,
+    /// The provider stream has been completely idle with no outstanding
+    /// subagents for longer than the threshold.
+    StreamIdleTimeout,
+}
+
+/// Request sent by the watchdog ticker to the exec wait loop asking for
+/// child-process termination.
+///
+/// Carries the reason, a human-readable message, and optional snapshots
+/// of stuck subagents so the summary can be enriched with details.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WatchdogTermination {
+    pub(crate) reason: WatchdogTerminationReason,
+    pub(crate) message: String,
+    pub(crate) stuck_subagents: Vec<ActiveSubagentSnapshot>,
+}
+
 /// Shared watchdog state tracking active subagents.
 ///
 /// All mutation methods accept an explicit `now` so tests can drive time
