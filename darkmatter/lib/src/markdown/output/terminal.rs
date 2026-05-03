@@ -1308,13 +1308,21 @@ pub fn write_terminal<W: std::io::Write>(
 
             // List handling
             InlineEvent::Standard(Event::Start(Tag::List(start_num))) => {
-                // When a nested list starts inside an item, add newline to separate from parent text
-                if !list_stack.is_empty()
-                    && !wrapper.output().is_empty()
-                    && !wrapper.output().ends_with('\n')
-                {
-                    wrapper.newline();
+                // Ensure list starts on a new line
+                if !wrapper.output().is_empty() && !wrapper.output().ends_with('\n') {
+                    if blockquote_depth > 0 {
+                        wrapper.emit_newline_with_prefix();
+                    } else {
+                        wrapper.newline();
+                    }
                 }
+                
+                // For top-level lists inside a blockquote, add a blank line before the list
+                // if there is prior content, to match paragraph spacing behavior.
+                if list_stack.is_empty() && blockquote_depth > 0 && blockquote_has_content {
+                    wrapper.emit_newline_with_prefix();
+                }
+
                 list_stack.push(start_num);
             }
             InlineEvent::Standard(Event::End(TagEnd::List(_))) => {
@@ -1334,27 +1342,26 @@ pub fn write_terminal<W: std::io::Write>(
                         Some(num) => {
                             // Ordered list: emit number and increment
                             let style = prose_highlighter.base_style();
-                            wrapper.emit_styled_marker(
-                                &format!("{}{}. ", indent, num),
-                                style,
-                                emit_italic,
-                            );
+                            let marker = format!("{}{}. ", indent, num);
+                            let marker_width = UnicodeWidthStr::width(marker.as_str());
+                            wrapper.emit_styled_marker(&marker, style, emit_italic);
+                            wrapper.push_indent(marker_width);
                             *num += 1;
                         }
                         None => {
                             // Unordered list: emit bullet
                             let style = prose_highlighter.base_style();
-                            wrapper.emit_styled_marker(
-                                &format!("{}- ", indent),
-                                style,
-                                emit_italic,
-                            );
+                            let marker = format!("{}- ", indent);
+                            let marker_width = UnicodeWidthStr::width(marker.as_str());
+                            wrapper.emit_styled_marker(&marker, style, emit_italic);
+                            wrapper.push_indent(marker_width);
                         }
                     }
                 }
             }
             InlineEvent::Standard(Event::End(TagEnd::Item)) => {
                 wrapper.newline();
+                wrapper.pop_indent();
             }
 
             InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
@@ -2148,6 +2155,8 @@ struct LineWrapper {
     blockquote_bg: Option<Color>,
     /// Whether to emit OSC 8 hyperlinks (cached detection result)
     supports_hyperlinks: bool,
+    /// Stack of indentation widths for wrapped continuation lines (e.g. for nested list items)
+    indent_stack: Vec<usize>,
 }
 
 impl LineWrapper {
@@ -2160,7 +2169,23 @@ impl LineWrapper {
             blockquote_depth: 0,
             blockquote_bg: None,
             supports_hyperlinks,
+            indent_stack: Vec::new(),
         }
+    }
+
+    /// Pushes a new indentation width onto the stack.
+    fn push_indent(&mut self, indent: usize) {
+        self.indent_stack.push(indent);
+    }
+
+    /// Pops the last indentation width from the stack.
+    fn pop_indent(&mut self) {
+        self.indent_stack.pop();
+    }
+
+    /// Gets the current total indentation width.
+    fn current_indent(&self) -> usize {
+        *self.indent_stack.last().unwrap_or(&0)
     }
 
     /// Sets blockquote state without emitting the prefix.
@@ -2171,6 +2196,41 @@ impl LineWrapper {
         self.blockquote_bg = Some(bg);
     }
 
+    /// Ensures the blockquote prefix and list indentation are emitted at the start of a line.
+    fn ensure_prefix(&mut self) {
+        if self.current_col == 0 {
+            let mut current_pos = 0;
+
+            if self.blockquote_depth > 0 && let Some(bg) = self.blockquote_bg {
+                let prefix = "▐   ".repeat(self.blockquote_depth);
+                let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+                self.output.push_str(&format!(
+                    "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
+                    bg.r, bg.g, bg.b, prefix
+                ));
+                current_pos += prefix_width;
+            }
+
+            let indent = self.current_indent();
+            if indent > 0 {
+                let spaces = " ".repeat(indent);
+                if self.blockquote_depth > 0 {
+                    if let Some(bg) = self.blockquote_bg {
+                        self.output.push_str(&format!(
+                            "\x1b[48;2;{};{};{}m{}\x1b[0m",
+                            bg.r, bg.g, bg.b, spaces
+                        ));
+                    }
+                } else {
+                    self.output.push_str(&spaces);
+                }
+                current_pos += indent;
+            }
+
+            self.current_col = current_pos;
+        }
+    }
+
     /// Emits a blockquote prefix with styled bar and indentation.
     ///
     /// Uses `▐` character followed by 3 spaces for visual separation.
@@ -2179,19 +2239,8 @@ impl LineWrapper {
         self.blockquote_depth = depth;
         self.blockquote_bg = Some(bg);
 
-        // Build the prefix: "▐   " repeated for each nesting level
-        // The bar character ▐ has width 1, plus 3 spaces = 4 chars per level
-        let prefix = "▐   ".repeat(depth);
-        let prefix_width = UnicodeWidthStr::width(prefix.as_str());
-
-        // Emit with background color (gray for bar, subtle bg for spaces)
-        // Bar: bright gray foreground
-        // Spaces: subtle background extends
-        self.output.push_str(&format!(
-            "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
-            bg.r, bg.g, bg.b, prefix
-        ));
-        self.current_col = prefix_width;
+        // Emit for the current line
+        self.ensure_prefix();
     }
 
     /// Clears the blockquote context (called when exiting all blockquotes).
@@ -2209,6 +2258,7 @@ impl LineWrapper {
     fn pad_to_width(&mut self) {
         if let Some(bg) = self.blockquote_bg
             && self.current_col < self.max_width
+            && self.current_col > 0
         {
             let padding = self.max_width - self.current_col;
             let spaces = " ".repeat(padding);
@@ -2222,24 +2272,8 @@ impl LineWrapper {
 
     /// Emits a newline and the blockquote prefix if we're in a blockquote.
     fn emit_newline_with_prefix(&mut self) {
-        // Pad line to terminal width before newline (for uniform blockquote background)
-        self.pad_to_width();
-        self.output.push('\n');
-        if self.blockquote_depth > 0 {
-            if let Some(bg) = self.blockquote_bg {
-                let prefix = "▐   ".repeat(self.blockquote_depth);
-                let prefix_width = UnicodeWidthStr::width(prefix.as_str());
-                self.output.push_str(&format!(
-                    "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
-                    bg.r, bg.g, bg.b, prefix
-                ));
-                self.current_col = prefix_width;
-            } else {
-                self.current_col = 0;
-            }
-        } else {
-            self.current_col = 0;
-        }
+        self.newline();
+        self.ensure_prefix();
     }
 
     /// Emits styled text with word wrapping.
@@ -2318,6 +2352,9 @@ impl LineWrapper {
                     }
                 }
             } else {
+                if current_word.is_empty() {
+                    self.ensure_prefix();
+                }
                 current_word.push(ch);
             }
         }
@@ -2349,9 +2386,12 @@ impl LineWrapper {
         emit_dim: bool,
     ) {
         let word_width = UnicodeWidthStr::width(word);
+        self.ensure_prefix();
 
         // Check if word fits on current line
-        if self.current_col > 0 && self.current_col + word_width > self.max_width {
+        if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
+            && self.current_col + word_width > self.max_width
+        {
             // Need to wrap - emit newline (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
         }
@@ -2374,6 +2414,7 @@ impl LineWrapper {
     /// Emits a raw string without styling (for markers, bullets, etc.).
     /// Updates column position based on visual width.
     fn emit_raw(&mut self, text: &str) {
+        self.ensure_prefix();
         self.output.push_str(text);
         // Update column for non-newline content
         if let Some(last_line) = text.rsplit('\n').next() {
@@ -2388,7 +2429,7 @@ impl LineWrapper {
     /// Emits styled text for markers/prefixes (bullets, numbers).
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
-        // Note: markers don't use blockquote background (they have their own styling)
+        self.ensure_prefix();
         push_prose_text(
             &mut self.output,
             text,
@@ -2396,7 +2437,7 @@ impl LineWrapper {
             emit_italic,
             false,
             false,
-            None,
+            self.blockquote_bg,
             false,
             true,
         );
@@ -2415,6 +2456,7 @@ impl LineWrapper {
     /// OSC8 Format: `ESC]8;;URL BEL <styled_text> ESC]8;; BEL`
     /// Fallback Format: `<styled_text> [url]`
     fn emit_styled_hyperlink(&mut self, text: &str, url: &str, style: Style, emit_italic: bool) {
+        self.ensure_prefix();
         if self.supports_hyperlinks {
             // OSC8 hyperlink start: ESC ] 8 ; ; <url> BEL
             self.output.push_str("\x1b]8;;");
@@ -2430,7 +2472,7 @@ impl LineWrapper {
                 emit_italic,
                 false,
                 false,
-                None,
+                self.blockquote_bg,
                 false,
                 true,
             );
@@ -2448,7 +2490,7 @@ impl LineWrapper {
                 emit_italic,
                 false,
                 false,
-                None,
+                self.blockquote_bg,
                 false,
                 true,
             );
@@ -2464,9 +2506,12 @@ impl LineWrapper {
     /// Emits inline code with styling.
     fn emit_inline_code(&mut self, code: &str, style: Style) {
         let code_width = UnicodeWidthStr::width(code);
+        self.ensure_prefix();
 
         // Check if code fits on current line
-        if self.current_col > 0 && self.current_col + code_width > self.max_width {
+        if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
+            && self.current_col + code_width > self.max_width
+        {
             // Wrap before inline code (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
         }
@@ -2477,15 +2522,27 @@ impl LineWrapper {
 
     /// Adds a newline and resets column position.
     fn newline(&mut self) {
+        if self.blockquote_depth > 0 && self.current_col == 0 {
+            self.ensure_prefix();
+        }
+        self.pad_to_width();
         self.output.push('\n');
         self.current_col = 0;
     }
 
     /// Adds content that includes newlines (resets column tracking).
     fn push_with_newlines(&mut self, text: &str) {
-        self.output.push_str(text);
-        if text.ends_with('\n') {
-            self.current_col = 0;
+        let mut first = true;
+        for line in text.split('\n') {
+            if !first {
+                self.newline();
+            }
+            if !line.is_empty() {
+                self.ensure_prefix();
+                self.output.push_str(line);
+                self.current_col += UnicodeWidthStr::width(line);
+            }
+            first = false;
         }
     }
 
@@ -2603,7 +2660,7 @@ pub(crate) fn adjust_background(
 /// Uses uniform brightness adjustment for subtle visual separation.
 #[inline]
 fn compute_blockquote_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
-    adjust_background(theme_bg, color_mode, (20, 20, 20), (15, 15, 15))
+    adjust_background(theme_bg, color_mode, (10, 10, 10), (8, 8, 8))
 }
 
 #[cfg(test)]
@@ -8314,5 +8371,88 @@ flowchart LR
         // Should have both bold and dim escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
         assert!(result.contains("\x1b[2m"), "Should have dim");
+    }
+
+    #[test]
+    fn test_blockquote_list_wrapping_and_links() {
+        let content = r#"> Note: interpolation can point to frontmatter properties defined on the page but it also always gets two lookup variables defined for it:
+> - env - the env property is a dictionary of environment variables
+> - ctx - the ctx (short for "context") property is a dictionary of contextual information about the environment the page is being executed in. This is defined in detail in [Context Variables](https://example.com) document.
+"#;
+        let md: Markdown = content.into();
+        let mut options = test_options();
+        options.max_width = Some(60); // Force wrapping
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // 1. Check for blockquote prefix on ALL lines
+        for line in output.lines() {
+            let plain = strip_ansi_codes(line);
+            if !plain.trim().is_empty() {
+                assert!(
+                    line.contains("▐"),
+                    "Line missing blockquote prefix:\n{:?}\nPlain: {:?}",
+                    line, plain
+                );
+            }
+        }
+
+        // 2. Check for hanging indent in wrapped list items
+        // "ctx - the ctx (short for \"context\") property is a dictionary of contextual information..."
+        // The wrapped lines should be indented by 2 spaces (after blockquote prefix)
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Find the line that starts with "- ctx" (ignoring ANSI codes for search)
+        let ctx_line_idx = lines
+            .iter()
+            .position(|l| strip_ansi_codes(l).contains("- ctx"))
+            .expect("Could not find ctx list item");
+
+        // Check next line for indentation
+        // Ensure there IS a next line and it's part of the same list item's wrapped content
+        let next_line = lines[ctx_line_idx + 1];
+        let plain_next = strip_ansi_codes(next_line);
+
+        // Blockquote prefix width is 4. Next 2 should be spaces (total 6 leading spaces in plain text).
+        assert!(
+            plain_next.starts_with("▐     "),
+            "Wrapped line missing hanging indent:\nExpected: \"▐     ...\"\nActual:   {:?}",
+            plain_next
+        );
+
+        // 3. Check for hyperlink background color
+        // Hyperlink should have the same background color as the blockquote
+        assert!(output.contains("Context Variables"));
+
+        // Find the line containing the link
+        let link_line = lines
+            .iter()
+            .find(|l| l.contains("Context Variables"))
+            .unwrap();
+
+        // OneHalf dark bg: (40, 44, 52)
+        // compute_blockquote_bg adds (10, 10, 10) -> (50, 54, 62)
+        assert!(
+            link_line.contains("\x1b[48;2;50;54;62m"),
+            "Link missing blockquote background color (50, 54, 62):\n{}",
+            link_line
+        );
+    }
+
+    #[test]
+    fn test_list_after_paragraph_in_blockquote() {
+        let content = "> Paragraph one\n> - Item 1\n> - Item 2";
+        let md: Markdown = content.into();
+        let options = test_options();
+        let output = for_terminal(&md, options).unwrap();
+        
+        let plain = strip_ansi_codes(&output);
+        assert!(!plain.contains("Paragraph one- Item 1"));
+        
+        // Split into trimmed lines to ignore the padding
+        let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
+        let p_idx = lines.iter().position(|l| l.contains("Paragraph one")).unwrap();
+        assert_eq!(lines[p_idx + 1], "▐");
+        assert_eq!(lines[p_idx + 2], "▐   - Item 1");
     }
 }
