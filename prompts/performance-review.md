@@ -14,7 +14,9 @@ failure:
 
 # Rust Performance Review
 
-You are performing a **senior-level Rust performance review** of this project.
+You are performing a **senior-level Rust performance review** of the {{area}} package area of this monorepo. This package area includes the packages:
+
+::shell sniff repo packages --package-area {{area}}
 
 Your job is to identify concrete opportunities to improve runtime performance, memory efficiency, async/concurrency behavior, I/O efficiency, dependency overhead, compile-time cost, and scalability.
 
@@ -239,103 +241,99 @@ Produce the review using the following structure.
 
 1. `## Executive Summary`
 
-   Summarize the most important performance risks and highest-leverage improvements.
+    Summarize the most important performance risks and highest-leverage improvements.
 
-   Include:
-
-   - number of findings by severity
-   - top 3 recommendations
-   - areas that already appear performance-conscious
-   - areas where more measurement is needed
+    Include:
+    - number of findings by severity
+    - top 3 recommendations
+    - areas that already appear performance-conscious
+    - areas where more measurement is needed
 
 2. `## Findings`
 
     For each finding:
+    - `## Finding Title`
 
-   - `## Finding Title`
+        **Severity:** High | Medium | Low  
+         **Category:** runtime | memory | async/concurrency | I/O | parsing/text | data-structure | API/architecture | compile-time | dependency  
+         **Location:** `path/to/file.rs`, function/module name
 
-      **Severity:** High | Medium | Low  
-      **Category:** runtime | memory | async/concurrency | I/O | parsing/text | data-structure | API/architecture | compile-time | dependency  
-      **Location:** `path/to/file.rs`, function/module name
+        **Problem**
 
-      **Problem**
+        Explain the inefficient behavior.
 
-      Explain the inefficient behavior.
+        **Why it matters**
 
-      **Why it matters**
+        Explain when this cost becomes significant.
 
-      Explain when this cost becomes significant.
+        **Evidence**
 
-      **Evidence**
+        Point to the relevant code pattern, call path, loop behavior, allocation behavior, dependency behavior, or complexity issue.
 
-      Point to the relevant code pattern, call path, loop behavior, allocation behavior, dependency behavior, or complexity issue.
+        **Recommendation**
 
-      **Recommendation**
+        Give a concrete change. Include a short code sketch when useful.
 
-      Give a concrete change. Include a short code sketch when useful.
+        **Expected impact**
 
-      **Expected impact**
+        Explain what gets faster, cheaper, or more scalable.
 
-      Explain what gets faster, cheaper, or more scalable.
+        **Risk/tradeoff**
 
-      **Risk/tradeoff**
+        Explain any downside, migration concern, correctness risk, or maintainability tradeoff.
 
-      Explain any downside, migration concern, correctness risk, or maintainability tradeoff.
-
-   > Note: repeat for each finding.
+    > Note: repeat for each finding.
 
 3. `## Quick Wins`
 
-   List small, low-risk changes that are likely worth doing even before deep benchmarking.
+    List small, low-risk changes that are likely worth doing even before deep benchmarking.
 
-   Use a table:
+    Use a table:
 
-   | Change | Location | Why it is low risk | Expected benefit |
-   |---|---|---|---|
+    | Change | Location | Why it is low risk | Expected benefit |
+    | ------ | -------- | ------------------ | ---------------- |
 
-   ## Benchmarking and Profiling Recommendations
+    ## Benchmarking and Profiling Recommendations
 
-   Suggest targeted benchmarks or profiling steps that would validate the important findings.
+    Suggest targeted benchmarks or profiling steps that would validate the important findings.
 
-   Prefer concrete commands or benchmark targets where possible.
+    Prefer concrete commands or benchmark targets where possible.
 
-   Consider tools such as:
+    Consider tools such as:
+    - `cargo bench`
+    - Criterion
+    - `cargo flamegraph`
+    - `perf`
+    - Instruments on macOS
+    - `heaptrack`
+    - `dhat`
+    - `cargo bloat`
+    - `cargo llvm-lines`
+    - `tokio-console`
+    - `hyperfine`
 
-   - `cargo bench`
-   - Criterion
-   - `cargo flamegraph`
-   - `perf`
-   - Instruments on macOS
-   - `heaptrack`
-   - `dhat`
-   - `cargo bloat`
-   - `cargo llvm-lines`
-   - `tokio-console`
-   - `hyperfine`
-
-   Only recommend tools that fit the project and the findings.
+    Only recommend tools that fit the project and the findings.
 
 4. `## Non-Issues / Things I Would Not Change Yet`
 
-   Call out tempting micro-optimizations that are probably not worth doing.
+    Call out tempting micro-optimizations that are probably not worth doing.
 
-   Also call out code that appears acceptable as-is despite matching common suspicious patterns.
+    Also call out code that appears acceptable as-is despite matching common suspicious patterns.
 
 5. `## Suggested Implementation Order`
 
-   Provide a prioritized sequence for addressing the findings.
+    Provide a prioritized sequence for addressing the findings.
 
-   Use this format:
-
-   1. Highest impact / lowest risk
-   2. High impact but requires design care
-   3. Medium-impact cleanup
-   4. Benchmarking and validation
-   5. Optional compile-time or dependency cleanup
+    Use this format:
+    1. Highest impact / lowest risk
+    2. High impact but requires design care
+    3. Medium-impact cleanup
+    4. Benchmarking and validation
+    5. Optional compile-time or dependency cleanup
 
 ## Review Finalization
 
-To complete this task you must 
+To complete this task you must
 
 - save the specified report format to the file "{{area}}/reviews/{{today}}-performance-review/review.md"
 - set the `agent` Frontmatter property to "{{env.AGENT}}"
@@ -343,5 +341,3 @@ To complete this task you must
 - set the `repo` Frontmatter property to "{{ctx.repo}}"
 - set the `created` Frontmatter property to "{{today}} at {{time}}"
 - ensure all Frontmatter properties have been saved to "{{area}}/reviews/{{today}}-performance-review/review.md" and that the review content is in the body of the document
-
-
