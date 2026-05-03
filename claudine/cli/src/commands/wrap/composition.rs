@@ -1702,6 +1702,7 @@ fn run_structured_composition(
             stderr_bridge,
             prompt_timing,
             watchdog_state,
+            Some(section_stream.tracker()),
         )?
     };
     let telemetry = stream_result.telemetry;

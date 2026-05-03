@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,6 +23,7 @@ use color_eyre::eyre::Result;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use tracing::{Span, info_span};
 
+use super::section::{Section, SectionTracker};
 use super::stream_io::StreamOutput;
 use super::subagent_watchdog::{
     WatchdogConfig, WatchdogTermination, WatchdogTickResult, evaluate_watchdog_tick,
@@ -1435,9 +1437,21 @@ pub(crate) fn run_child_capture(
 /// passthrough) and regardless of whether any periodic header is being
 /// emitted. The 30-second cadence and 30-second silence window are the
 /// tuning preserved from the previous heartbeat thread.
+///
+/// When `watchdog_state` is provided and the subagent watchdog is enabled,
+/// the ticker also emits at most one diagnostic line per active subagent
+/// per silence window:
+///
+///   `⏳ Awaiting subagent: <name-or-id> (<elapsed-since-start>)`
+///
+/// These lines route through the shared [`SectionTracker`] so spacing stays
+/// consistent with the live sink.
 fn spawn_flush_if_idle_ticker(
     stream_output: Arc<StreamOutput>,
     text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>>,
+    watchdog_state: Option<Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>>,
+    section_tracker: Option<Arc<Mutex<SectionTracker>>>,
+    watchdog_config: WatchdogConfig,
 ) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
     const SILENCE_WINDOW: Duration = Duration::from_secs(30);
     const CADENCE: Duration = Duration::from_secs(30);
@@ -1445,6 +1459,9 @@ fn spawn_flush_if_idle_ticker(
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = Arc::clone(&done);
     let handle = thread::spawn(move || {
+        let section_stream = section_tracker.map(|tracker| {
+            super::section::SectionStream::with_tracker(stream_output.clone(), tracker)
+        });
         let mut next_tick = Instant::now() + CADENCE;
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
@@ -1453,6 +1470,29 @@ fn spawn_flush_if_idle_ticker(
                     let mut writer = stream_output.stdout_writer();
                     r.flush_if_idle(&mut writer, SILENCE_WINDOW);
                 }
+
+                // Emit subagent idle diagnostics when the subagent watchdog is enabled.
+                if watchdog_config.subagent_watchdog_enabled()
+                    && let Some(ref state) = watchdog_state
+                    && let Ok(mut guard) = state.lock()
+                {
+                    let lines = guard.diagnostic_lines(now, SILENCE_WINDOW);
+                    drop(guard);
+                    for line in lines {
+                        let elapsed_text =
+                            super::subagent_watchdog::format_duration(line.elapsed_since_start);
+                        let diagnostic = format!(
+                            " ⏳ Awaiting subagent: {} ({})",
+                            line.display_name, elapsed_text
+                        );
+                        if let Some(ref ss) = section_stream {
+                            ss.emit_stderr(Section::ToolUseAndEvents, &diagnostic);
+                        } else {
+                            stream_output.emit_stderr_line(&diagnostic);
+                        }
+                    }
+                }
+
                 next_tick += CADENCE;
                 continue;
             }
@@ -1950,6 +1990,7 @@ pub(crate) fn run_child_stream_semantic(
     stderr_bridge: Option<StderrBridgeHandle>,
     prompt_timing: Option<PromptTimingContext>,
     watchdog_state: Option<Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>>,
+    section_tracker: Option<Arc<Mutex<SectionTracker>>>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -2005,6 +2046,9 @@ pub(crate) fn run_child_stream_semantic(
     let flush_ticker = Some(spawn_flush_if_idle_ticker(
         stream_output.clone(),
         text_renderer.clone(),
+        watchdog_state.clone(),
+        section_tracker.clone(),
+        WatchdogConfig::from_env(),
     ));
 
     // Prompt-scoped periodic header + warnings. Only started when the

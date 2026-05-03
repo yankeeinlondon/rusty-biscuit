@@ -1743,6 +1743,7 @@ fn run_provider_wrapper_inner(
                 stderr_bridge,
                 None,
                 watchdog_state,
+                Some(section_stream.tracker()),
             )?
         };
         let mut summary = stream_result.data;
@@ -2239,6 +2240,7 @@ fn execute_harness_attempt(
                 stderr_bridge,
                 prompt_timing,
                 watchdog_state,
+                Some(section_stream.tracker()),
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;

@@ -414,7 +414,7 @@ fn format_subagent_breach_message(stuck: &[ActiveSubagentSnapshot]) -> String {
 }
 
 /// Format a duration in a human-readable way (e.g. "3m 0s").
-fn format_duration(d: Duration) -> String {
+pub(crate) fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {
         format!("{secs}s")

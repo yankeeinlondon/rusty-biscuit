@@ -7,6 +7,7 @@ use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tempfile::tempdir;
 mod common;
 use common::{augmented_path, init_git_repo, strip_ansi, write, write_executable, write_json};
@@ -4850,5 +4851,130 @@ fn perf_arg_parsing_includes_clap_time() {
     assert!(
         plain.contains("environment setup:"),
         "perf report must include environment setup timing; got: {plain}"
+    );
+}
+
+// ===========================================================================
+// Watchdog fixture tests (Phase 5)
+// ===========================================================================
+
+/// Replay the reference hang shape: 9 task_started, 7 task_completed, then
+/// silence. With a low subagent-idle threshold the watchdog should terminate
+/// the run and name the 2 stuck subagents in stderr.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: watchdog test\n---\nHello\n").unwrap();
+
+    // Build a shell script that emits 9 task_started, 7 task_completed, then blocks.
+    let mut script = String::from(r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
+"#);
+    for i in 1..=9 {
+        script.push_str(&format!(
+            r#"printf '%s\n' '{{"type":"task_started","task_id":"sa{i}","name":"Task {i}"}}'
+"#,
+        ));
+    }
+    for i in 1..=7 {
+        script.push_str(&format!(
+            r#"printf '%s\n' '{{"type":"task_completed","task_id":"sa{i}","name":"Task {i}","status":"success"}}'
+"#,
+        ));
+    }
+    script.push_str("while :; do /bin/sleep 1; done\n");
+
+    write_executable(&path_dir.join("opencode"), &script);
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS", "2")
+        .env("CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS", "1")
+        .env("CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS", "1")
+        .env("CLAUDINE_STREAM_IDLE_KILL_SECONDS", "0")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The Agent Error block from the watchdog should name the stuck subagents.
+    assert!(
+        plain.contains("subagent went silent") || plain.contains("subagents went silent"),
+        "stderr should contain watchdog breach message; got: {plain}"
+    );
+    assert!(
+        plain.contains("sa8") || plain.contains("Task 8"),
+        "stderr should name stuck subagent 8; got: {plain}"
+    );
+    assert!(
+        plain.contains("sa9") || plain.contains("Task 9"),
+        "stderr should name stuck subagent 9; got: {plain}"
+    );
+}
+
+/// Stream-idle watchdog fires when no subagents are outstanding and the
+/// provider stream goes completely silent after a tool call.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_stream_idle_timeout_after_tool_call_hang() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: idle test\n---\nHello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"idle-test","model":"test-model"}'
+printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}'
+while :; do /bin/sleep 1; done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS", "0")
+        .env("CLAUDINE_STREAM_IDLE_KILL_SECONDS", "2")
+        .env("CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS", "1")
+        .env("CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS", "1")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("stream_idle_timeout"),
+        "stderr should contain stream_idle_timeout message; got: {plain}"
     );
 }
