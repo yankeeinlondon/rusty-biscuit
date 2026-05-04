@@ -315,6 +315,11 @@ fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>
 }
 
 /// Convert a block tag to its opening and closing ANSI escape codes.
+///
+/// TODO: `Prose` tag styling and `utils::styling::Style`/`Stylist` should
+/// eventually converge so capability-aware degradation lives in one place
+/// instead of being duplicated between the prose parser and the styling
+/// helpers.
 fn block_tag_to_escape(
     tag_name: &str,
     attrs: &[(String, String)],
@@ -326,7 +331,23 @@ fn block_tag_to_escape(
         "dim" => Some(("\x1b[2m".to_string(), "\x1b[22m".to_string())),
         "italic" | "i" => Some(("\x1b[3m".to_string(), "\x1b[23m".to_string())),
         "underline" | "u" => Some(("\x1b[4m".to_string(), "\x1b[24m".to_string())),
-        "double-underline" | "uu" => Some(("\x1b[4:2m".to_string(), "\x1b[24m".to_string())),
+        "double-underline" | "uu" => {
+            // Capability-aware degradation:
+            //   - No terminal context: optimistic `\x1b[4:2m` (legacy behavior).
+            //   - Double underline supported: `\x1b[4:2m`.
+            //   - Only straight underline supported: degrade to `\x1b[4m`.
+            //   - Neither supported: suppress the underline entirely.
+            match term {
+                None => Some(("\x1b[4:2m".to_string(), "\x1b[24m".to_string())),
+                Some(t) if t.underline_support.double => {
+                    Some(("\x1b[4:2m".to_string(), "\x1b[24m".to_string()))
+                }
+                Some(t) if t.underline_support.straight => {
+                    Some(("\x1b[4m".to_string(), "\x1b[24m".to_string()))
+                }
+                Some(_) => Some((String::new(), String::new())),
+            }
+        }
         "curly-underline" => Some(("\x1b[4:3m".to_string(), "\x1b[24m".to_string())),
         "dotted-underline" => Some(("\x1b[4:4m".to_string(), "\x1b[24m".to_string())),
         "dashed-underline" => Some(("\x1b[4:5m".to_string(), "\x1b[24m".to_string())),
@@ -346,16 +367,21 @@ fn block_tag_to_escape(
             // Resolve the href (handles relative paths)
             let resolved_href = resolve_href(href);
 
-            // Check if terminal supports OSC8
+            // Check if terminal supports OSC8 (default true when no context).
             let supports_osc8 = term.map(|t| t.osc_link_support).unwrap_or(true);
-            if supports_osc8 && !resolved_href.is_empty() {
+            if resolved_href.is_empty() {
+                // No href: just show the content with no link wrapping.
+                Some((String::new(), String::new()))
+            } else if supports_osc8 {
                 Some((
                     format!("\x1b]8;;{}\x1b\\", resolved_href),
                     "\x1b]8;;\x1b\\".to_string(),
                 ))
             } else {
-                // Fallback: just show the content (no link)
-                Some((String::new(), String::new()))
+                // Markdown fallback: `[description](resolved_href)`.
+                // The closing string carries the resolved href since the
+                // structural emit pattern is `open + inner + close`.
+                Some(("[".to_string(), format!("]({})", resolved_href)))
             }
         }
 
@@ -1476,7 +1502,13 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                         let layer = block_tag_layer(&tag_name);
                         state.used_styles = true;
 
-                        if let Some(layer) = layer {
+                        if open.is_empty() && close.is_empty() {
+                            // Suppressed tag (e.g., `<double-underline>` on a
+                            // terminal that supports neither double nor
+                            // straight underlines, or `<a href="">link</a>`):
+                            // emit only the inner content with no escapes.
+                            result.push_str(&parse_tokens_inner(&inner_content, term, state));
+                        } else if let Some(layer) = layer {
                             // Styled tag: layer-aware push/pop
                             let prev = state.set(layer, &open);
                             result.push_str(&open);
@@ -1519,6 +1551,7 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::detection::UnderlineSupport;
 
     #[test]
     fn test_atomic_bold_token() {
@@ -2021,5 +2054,128 @@ mod tests {
         let prose = Prose::new("hello\\nworld");
         let result = prose.render_optimistic(None);
         assert_eq!(result, "hello\\nworld");
+    }
+
+    // ── Capability-aware degradation (Apple Terminal etc.) ───────────
+
+    /// `<a href>` keeps OSC8 output when the terminal supports it.
+    #[test]
+    fn test_osc8_link_supported_emits_osc8() {
+        let term = Terminal::builder().osc_link_support(true).build();
+        let prose = Prose::new("<a href=\"https://example.com\">click here</a>");
+        let result = prose.parse_tokens(Some(&term));
+        assert!(
+            result.contains("\x1b]8;;https://example.com\x1b\\"),
+            "expected OSC8 open sequence, got: {:?}",
+            result
+        );
+        assert!(result.contains("click here"));
+        assert!(result.contains("\x1b]8;;\x1b\\"));
+    }
+
+    /// `<a href>` falls back to markdown when OSC8 is unsupported.
+    #[test]
+    fn test_osc8_link_unsupported_emits_markdown_fallback() {
+        let term = Terminal::builder().osc_link_support(false).build();
+        let prose = Prose::new("<a href=\"https://example.com\">click here</a>");
+        let result = prose.parse_tokens(Some(&term));
+        assert!(
+            result.contains("[click here](https://example.com)"),
+            "expected markdown link, got: {:?}",
+            result
+        );
+        assert!(
+            !result.contains("\x1b]8;;"),
+            "must not emit OSC8 escape, got: {:?}",
+            result
+        );
+    }
+
+    /// `<double-underline>` degrades to a straight underline when only
+    /// the straight variant is supported.
+    #[test]
+    fn test_double_underline_degrades_to_straight_when_only_straight_supported() {
+        let term = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: true,
+                double: false,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+        let prose = Prose::new("<double-underline>important text</double-underline>");
+        let result = prose.parse_tokens(Some(&term));
+        assert!(
+            result.contains("\x1b[4m"),
+            "expected straight underline open, got: {:?}",
+            result
+        );
+        assert!(
+            result.contains("important text"),
+            "missing inner text, got: {:?}",
+            result
+        );
+        assert!(
+            !result.contains("\x1b[4:2m"),
+            "must not emit double underline escape, got: {:?}",
+            result
+        );
+        assert!(
+            result.contains("\x1b[24m"),
+            "expected underline close, got: {:?}",
+            result
+        );
+    }
+
+    /// `<double-underline>` is suppressed entirely when the terminal
+    /// supports neither double nor straight underlines.
+    #[test]
+    fn test_double_underline_suppressed_when_no_underline_support() {
+        let term = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: false,
+                double: false,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+        let prose = Prose::new("<double-underline>important text</double-underline>");
+        let result = prose.parse_tokens(Some(&term));
+        assert!(
+            result.contains("important text"),
+            "missing inner text, got: {:?}",
+            result
+        );
+        assert!(
+            !result.contains("\x1b[4:2m"),
+            "must not emit double underline escape, got: {:?}",
+            result
+        );
+        assert!(
+            !result.contains("\x1b[4m"),
+            "must not emit straight underline escape, got: {:?}",
+            result
+        );
+        assert!(
+            !result.contains("\x1b[24m"),
+            "must not emit underline close, got: {:?}",
+            result
+        );
+    }
+
+    /// `<a href="">link</a>` keeps the existing no-link behavior even
+    /// when the terminal supports OSC8.
+    #[test]
+    fn test_osc8_link_empty_href_renders_inner_only() {
+        let term = Terminal::builder().osc_link_support(true).build();
+        let prose = Prose::new("<a href=\"\">click here</a>");
+        let result = prose.parse_tokens(Some(&term));
+        assert!(result.contains("click here"));
+        assert!(!result.contains("\x1b]8;;"));
+        assert!(!result.contains("[click here]"));
     }
 }

@@ -1,0 +1,67 @@
+{
+  "auth": {
+    "type": "noauth"
+  },
+  "info": {
+    "description": "OllamaNative: OllamaNative test API\nOllamaOpenAI: OllamaOpenAI test API",
+    "name": "Ollama",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "ListLocalModels",
+          "request": {
+            "description": "List locally installed models",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tags"
+              ],
+              "raw": "{{baseUrl}}/api/tags"
+            }
+          }
+        }
+      ],
+      "name": "Api"
+    },
+    {
+      "item": [
+        {
+          "name": "ListModels",
+          "request": {
+            "description": "OpenAI-compatible model listing",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl2}}"
+              ],
+              "path": [
+                "models"
+              ],
+              "raw": "{{baseUrl2}}/models"
+            }
+          }
+        }
+      ],
+      "name": "Models"
+    }
+  ],
+  "variable": [
+    {
+      "description": "Base URL for OllamaNative",
+      "key": "baseUrl",
+      "value": "http://localhost:11434"
+    },
+    {
+      "description": "Base URL for OllamaOpenAI",
+      "key": "baseUrl2",
+      "value": "http://localhost:11434/v1"
+    }
+  ]
+}

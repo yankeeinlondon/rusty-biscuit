@@ -31,6 +31,23 @@
 //! * `cursor` — Query cursor position (DSR).
 //! * `cursor_timeout` — Query cursor position with custom timeout.
 //! * `terminal` — Build a `Terminal` instance and print its fields.
+//! * `prose` — Render a [`Prose`] string against the detected (or
+//!   override-built) terminal and print the raw bytes between
+//!   `---PROSE---` / `---END---` markers.
+//!
+//! ## Prose probe environment variables
+//!
+//! The `prose` mode reads:
+//!
+//! | Variable | Purpose |
+//! |----------|---------|
+//! | `PROBE_PROSE_INPUT` | Source prose text to render. Defaults to empty. |
+//! | `PROBE_FORCE_OSC8` | `1`/`true`/`0`/`false` to override `osc_link_support`. |
+//! | `PROBE_FORCE_UNDERLINE_STRAIGHT` | `1`/`true`/`0`/`false` to override `underline_support.straight`. |
+//! | `PROBE_FORCE_UNDERLINE_DOUBLE` | `1`/`true`/`0`/`false` to override `underline_support.double`. |
+//!
+//! When no override variables are present the probe builds the
+//! [`Terminal`] from the detected environment.
 //!
 //! ## Output format
 //!
@@ -74,6 +91,7 @@ fn main() {
         "cursor" => probe_cursor(),
         "cursor_timeout" => probe_cursor_timeout(),
         "terminal" => probe_terminal(),
+        "prose" => probe_prose(),
         _ => probe_all(),
     }
 }
@@ -221,6 +239,69 @@ fn probe_terminal() {
     println!("underline_support={:?}", term.underline_support);
     println!("osc_link_support={}", term.osc_link_support);
     println!("is_ci={}", term.is_ci);
+}
+
+// ---------------------------------------------------------------------------
+// Prose rendering
+// ---------------------------------------------------------------------------
+
+fn parse_bool_env(name: &str) -> Option<bool> {
+    match std::env::var(name) {
+        Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        },
+        Err(_) => None,
+    }
+}
+
+fn probe_prose() {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::discovery::detection::{
+        TerminalApp, UnderlineSupport, get_terminal_app, underline_support,
+    };
+    use biscuit_terminal::terminal::Terminal;
+
+    let input = std::env::var("PROBE_PROSE_INPUT").unwrap_or_default();
+
+    let force_osc8 = parse_bool_env("PROBE_FORCE_OSC8");
+    let force_straight = parse_bool_env("PROBE_FORCE_UNDERLINE_STRAIGHT");
+    let force_double = parse_bool_env("PROBE_FORCE_UNDERLINE_DOUBLE");
+
+    // Build the Terminal manually so the probe never triggers the
+    // viuer-based image detection cascade — that path sends terminal
+    // queries and blocks indefinitely inside a non-responding test PTY.
+    //
+    // Start from `Terminal::new_optimistic(80)` (no probes; all fields
+    // explicit), then stamp the prose-relevant capabilities from the
+    // environment helpers and explicit overrides.
+    let app = get_terminal_app();
+    let mut us: UnderlineSupport = underline_support();
+    if let Some(v) = force_straight {
+        us.straight = v;
+    }
+    if let Some(v) = force_double {
+        us.double = v;
+    }
+    let osc_link_support = match force_osc8 {
+        Some(v) => v,
+        None => !matches!(app, TerminalApp::AppleTerminal | TerminalApp::Wast),
+    };
+
+    let mut term = Terminal::new_optimistic(80);
+    term.app = app;
+    term.underline_support = us;
+    term.osc_link_support = osc_link_support;
+
+    let prose = Prose::new(input);
+    let rendered = prose.render(&term);
+
+    println!("---PROSE---");
+    print!("{rendered}");
+    println!();
+    println!("---END---");
 }
 
 // ---------------------------------------------------------------------------

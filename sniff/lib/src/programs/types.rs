@@ -6,7 +6,7 @@
 //! - `InstallationMethod`: Enum describing how to install a program
 //! - `CategoryDetector<E>`: Generic detector for any category enum
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
@@ -462,29 +462,40 @@ impl<'de, E: CategoryEnum> serde::de::Visitor<'de> for CategoryDetectorVisitor<E
     }
 }
 
+/// Collect every binary name (primary + alternates) for a category enum,
+/// preserving first-seen order while removing duplicates.
+///
+/// Categories share aliases (e.g. `node`, `npm`), and a duplicate name causes
+/// the underlying `which`/`PATH` lookup to fire twice. Deduplicating up front
+/// keeps bulk detection one-PATH-walk-per-program.
+fn collect_unique_names<E: CategoryEnum>() -> Vec<&'static str> {
+    let mut seen: HashSet<&'static str> = HashSet::new();
+    let mut names: Vec<&'static str> = Vec::new();
+    for variant in E::iter() {
+        let info = variant.info();
+        if seen.insert(info.binary_name) {
+            names.push(info.binary_name);
+        }
+        for alt in info.alternate_binary_names {
+            if seen.insert(*alt) {
+                names.push(*alt);
+            }
+        }
+    }
+    names
+}
+
 impl<E: CategoryEnum> CategoryDetector<E> {
     /// Detect installed programs by scanning PATH.
     pub fn new() -> Self {
-        let mut names_to_search: Vec<&'static str> = Vec::new();
-        for variant in E::iter() {
-            let info = variant.info();
-            names_to_search.push(info.binary_name);
-            names_to_search.extend_from_slice(info.alternate_binary_names);
-        }
-
+        let names_to_search = collect_unique_names::<E>();
         let found = find_programs_with_source_parallel(&names_to_search);
         Self::from_search_results(&found)
     }
 
     /// Detect installed programs using a pre-built executable index.
     pub fn new_with_index(index: &ExecutableIndex) -> Self {
-        let mut names_to_search: Vec<&'static str> = Vec::new();
-        for variant in E::iter() {
-            let info = variant.info();
-            names_to_search.push(info.binary_name);
-            names_to_search.extend_from_slice(info.alternate_binary_names);
-        }
-
+        let names_to_search = collect_unique_names::<E>();
         let found = find_programs_with_source_from_index(index, &names_to_search);
         Self::from_search_results(&found)
     }

@@ -482,7 +482,7 @@ pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
 /// Detects timezone and time-related system information.
 ///
 /// Gathers timezone name, UTC offset, DST status, and NTP synchronization state.
-/// This is equivalent to calling [`detect_timezone_with_options(true)`].
+/// This is equivalent to calling [`detect_timezone_with_options`] with `true`.
 ///
 /// ## Examples
 ///

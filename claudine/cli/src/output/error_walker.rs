@@ -12,6 +12,7 @@
 
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
+use claudine::composition::CompositionError;
 use color_eyre::eyre::Report;
 use darkmatter::markdown::errors::as_block_error;
 use std::error::Error as StdError;
@@ -33,15 +34,27 @@ pub(crate) fn try_render_block_report(report: &Report, term: &Terminal) -> Optio
 fn deepest_block_error<'a>(
     err: &'a (dyn StdError + 'static),
 ) -> Option<&'a (dyn BlockError + 'static)> {
-    let mut deepest = as_block_error(err);
+    let mut deepest = discover_block_error(err);
     let mut current = err.source();
     while let Some(next) = current {
-        if let Some(found) = as_block_error(next) {
+        if let Some(found) = discover_block_error(next) {
             deepest = Some(found);
         }
         current = next.source();
     }
     deepest
+}
+
+fn discover_block_error<'a>(
+    err: &'a (dyn StdError + 'static),
+) -> Option<&'a (dyn BlockError + 'static)> {
+    if let Some(found) = as_block_error(err) {
+        return Some(found);
+    }
+    if let Some(v) = err.downcast_ref::<CompositionError>() {
+        return Some(v);
+    }
+    None
 }
 
 #[cfg(test)]

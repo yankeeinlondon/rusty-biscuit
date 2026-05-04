@@ -114,9 +114,10 @@ pub struct SharedComposeArgs {
     )]
     pub replace_system_prompt: Option<String>,
 
-    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
-    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
-    pub timeout: Option<u64>,
+    /// Wall-clock timeout (e.g. `30s`, `5m`, `2h`). Sends SIGTERM then SIGKILL.
+    /// Only valid in non-interactive mode.
+    #[arg(short = 't', long = "timeout", value_name = "DURATION")]
+    pub timeout: Option<String>,
 
     /// Step-silence timeout (e.g. `30s`, `5m`). Kills the child when no stream
     /// event is observed for this long. Only valid in non-interactive
@@ -275,12 +276,20 @@ fn run_compose_inner(
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    if shared.timeout.is_some() && shared.interactive {
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
     if shared.step_timeout.is_some() && shared.interactive {
         return Err(eyre!(
             "--step-timeout cannot be used with --interactive mode"
         ));
     }
-    let cli_step_timeout_secs = shared.step_timeout_secs()?;
+    // Early validation: both flags share the same duration grammar.
+    if let Some(ref raw) = shared.timeout {
+        claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
+            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+    }
+    shared.step_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
@@ -293,6 +302,33 @@ fn run_compose_inner(
         interactive = shared.interactive,
     )
     .entered();
+
+    // -- Eager target resolution -------------------------------------------
+    // Resolve the execution target *before* composing templates so that
+    // `{{env.AGENT}}` in the body resolves to the chosen provider's slug.
+    // Hints come from the raw frontmatter (no compose).
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let source_repo_root_eager = source.resolved_path.parent().and_then(|parent| {
+        sniff::filesystem::git::detect_git(parent, false, 1)
+            .ok()
+            .flatten()
+            .map(|info| info.repo_root)
+    });
+    let resolved_target = super::wrap::composition::eagerly_resolve_target(
+        &raw_hints,
+        shared.explicit_provider(),
+        &shared.excluded(),
+        shared.model.as_deref(),
+        source_repo_root_eager.as_deref(),
+    )?;
+
+    let mut env_overrides: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    super::wrap::composition::install_agent_env_for_composition(
+        &resolved_target,
+        &mut env_overrides,
+    );
 
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
@@ -325,8 +361,8 @@ fn run_compose_inner(
         composition::PrepareOptions {
             set_overrides,
             pre_approved_commands: Some(preflight.approved_commands),
+            env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
-            ..Default::default()
         },
     )?;
 
@@ -334,7 +370,7 @@ fn run_compose_inner(
         mode: CompositionMode::ChainedDocument,
         file_ref: file,
         prepared,
-        resolved_target: None,
+        resolved_target: Some(resolved_target),
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -342,8 +378,8 @@ fn run_compose_inner(
         model: shared.model,
         output: shared.output,
         system_prompt_args,
-        timeout: shared.timeout,
-        step_timeout: cli_step_timeout_secs,
+        timeout: shared.timeout.clone(),
+        step_timeout: shared.step_timeout.clone(),
         operation: shared.operation,
         sandbox: shared.sandbox,
         repo: shared.repo,
@@ -354,7 +390,7 @@ fn run_compose_inner(
         session_interactive: shared.interactive,
         quiet: shared.quiet,
         silent: shared.silent,
-        env_overrides: std::collections::BTreeMap::new(),
+        env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };
@@ -372,12 +408,20 @@ fn run_inline_compose_inner(
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    if shared.timeout.is_some() && shared.interactive {
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
     if shared.step_timeout.is_some() && shared.interactive {
         return Err(eyre!(
             "--step-timeout cannot be used with --interactive mode"
         ));
     }
-    let cli_step_timeout_secs = shared.step_timeout_secs()?;
+    // Early validation: both flags share the same duration grammar.
+    if let Some(ref raw) = shared.timeout {
+        claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
+            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+    }
+    shared.step_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
     let show_checks = !shared.silent;
@@ -427,6 +471,30 @@ fn run_inline_compose_inner(
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
 
+    // -- Eager target resolution ------------------------------------------
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let source_repo_root_eager = source.resolved_path.parent().and_then(|parent| {
+        sniff::filesystem::git::detect_git(parent, false, 1)
+            .ok()
+            .flatten()
+            .map(|info| info.repo_root)
+    });
+    let resolved_target = super::wrap::composition::eagerly_resolve_target(
+        &raw_hints,
+        shared.explicit_provider(),
+        &shared.excluded(),
+        shared.model.as_deref(),
+        source_repo_root_eager.as_deref(),
+    )?;
+
+    let mut env_overrides: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    super::wrap::composition::install_agent_env_for_composition(
+        &resolved_target,
+        &mut env_overrides,
+    );
+
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
@@ -458,8 +526,8 @@ fn run_inline_compose_inner(
         composition::PrepareOptions {
             set_overrides,
             pre_approved_commands: Some(preflight.approved_commands),
+            env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
-            ..Default::default()
         },
     )?;
 
@@ -467,7 +535,7 @@ fn run_inline_compose_inner(
         mode: CompositionMode::InlineFrontmatterPrompt,
         file_ref: file,
         prepared,
-        resolved_target: None,
+        resolved_target: Some(resolved_target),
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -475,8 +543,8 @@ fn run_inline_compose_inner(
         model: shared.model,
         output: shared.output,
         system_prompt_args,
-        timeout: shared.timeout,
-        step_timeout: cli_step_timeout_secs,
+        timeout: shared.timeout.clone(),
+        step_timeout: shared.step_timeout.clone(),
         operation: shared.operation,
         sandbox: shared.sandbox,
         repo: shared.repo,
@@ -487,7 +555,7 @@ fn run_inline_compose_inner(
         session_interactive: shared.interactive,
         quiet: shared.quiet,
         silent: shared.silent,
-        env_overrides: std::collections::BTreeMap::new(),
+        env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };

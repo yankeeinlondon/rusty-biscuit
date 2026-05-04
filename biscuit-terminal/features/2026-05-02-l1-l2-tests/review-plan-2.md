@@ -4,7 +4,7 @@ source_spec: spec.md
 source_history: review-plan-1.md
 created: 2026-05-02
 phases: 7
-start_phase: 3
+start_phase: 5
 status: completed
 source_files_during_phase_3:
   - biscuit-terminal/lib/src/components/mermaid.rs
@@ -22,14 +22,11 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
-source_files_during_phase_5:
-  - biscuit-terminal/lib/tests/level1_cursor.rs
-  - biscuit-terminal/cli/tests/level2_image.rs
+source_files_during_phase_5: []
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
-source_files_during_phase_6:
-  - biscuit-test-harness/src/kitty.rs
+source_files_during_phase_6: []
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []

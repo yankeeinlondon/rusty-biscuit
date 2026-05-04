@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
 use crate::filesystem::FileAssociation;
-use crate::filesystem::docs::{MarkdownMeta, detect_docs};
+use crate::filesystem::docs::{MarkdownMeta, detect_blast_radius_docs};
 use crate::filesystem::file_types::{lookup_exact_filename, lookup_extension};
 use crate::filesystem::git::get_commit_files;
 use crate::filesystem::repo::detect_repo;
@@ -348,21 +348,19 @@ pub fn find_blast_radius_documents(
         return Ok(Vec::new());
     }
 
-    let docs = match detect_docs(&result.repo_root) {
+    // Use the blast-radius-only parser: documents are streamed until the
+    // closing frontmatter delimiter and only the `blast_radius` key is parsed.
+    // Docs without `blast_radius` are never returned by this scanner.
+    let docs = match detect_blast_radius_docs(&result.repo_root) {
         Some(docs) => docs,
         None => return Ok(Vec::new()),
     };
 
     let mut matched: Vec<MarkdownMeta> = docs
         .into_iter()
-        .filter(|doc| {
-            if !doc.has_blast_radius {
-                return false;
-            }
-            match &doc.blast_radius {
-                Some(paths) => paths.iter().any(|p| changed_set.contains(p)),
-                None => false,
-            }
+        .filter(|doc| match &doc.blast_radius {
+            Some(paths) => paths.iter().any(|p| changed_set.contains(p)),
+            None => false,
         })
         .collect();
 

@@ -274,6 +274,10 @@ pub struct GitRequest {
     pub include_remote_branch_details: bool,
     /// Check which remotes contain recent commits (requires refresh_remote_tracking)
     pub include_commit_remote_containment: bool,
+    /// Maximum number of remote-tracking branches to inspect for commit
+    /// containment. Lower values reduce deep-git latency for repos with many
+    /// remote branches. `None` means no limit.
+    pub max_remote_branches: Option<usize>,
 }
 
 impl GitRequest {
@@ -288,6 +292,7 @@ impl GitRequest {
             refresh_remote_tracking: false,
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
+            max_remote_branches: None,
         }
     }
 
@@ -302,6 +307,7 @@ impl GitRequest {
             refresh_remote_tracking: false,
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
+            max_remote_branches: None,
         }
     }
 
@@ -316,6 +322,7 @@ impl GitRequest {
             refresh_remote_tracking: true,
             include_remote_branch_details: true,
             include_commit_remote_containment: true,
+            max_remote_branches: Some(50),
         }
     }
 
@@ -341,6 +348,11 @@ impl GitRequest {
 
     pub fn refresh_remote_tracking(mut self, include: bool) -> Self {
         self.refresh_remote_tracking = include;
+        self
+    }
+
+    pub fn max_remote_branches(mut self, limit: Option<usize>) -> Self {
+        self.max_remote_branches = limit;
         self
     }
 }

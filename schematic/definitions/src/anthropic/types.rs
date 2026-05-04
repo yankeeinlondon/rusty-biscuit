@@ -481,7 +481,7 @@ pub enum ServiceTier {
 }
 
 /// Request body for the Create Message endpoint (POST /v1/messages).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateMessageBody {
     /// Model identifier (e.g., "claude-sonnet-4-5-20250514").
     pub model: String,
@@ -607,7 +607,7 @@ impl CreateMessageBody {
 }
 
 /// Request body for the Count Tokens endpoint (POST /v1/messages/count_tokens).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CountTokensBody {
     /// Model identifier.
     pub model: String,

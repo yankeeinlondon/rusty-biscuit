@@ -987,6 +987,8 @@ mod tests {
     #[test]
     fn param_style_debug_clone_eq() {
         let style = ParamStyle::Form;
+        // Explicitly exercise the Clone impl on a Copy type.
+        #[allow(clippy::clone_on_copy)]
         let cloned = style.clone();
         assert_eq!(style, cloned);
         assert!(format!("{:?}", style).contains("Form"));
@@ -1012,7 +1014,7 @@ mod tests {
 
     #[test]
     fn param_style_all_variants() {
-        let variants = vec![
+        let variants = [
             ParamStyle::Form,
             ParamStyle::Simple,
             ParamStyle::SpaceDelimited,

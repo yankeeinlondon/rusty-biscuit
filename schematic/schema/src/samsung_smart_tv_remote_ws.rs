@@ -16,6 +16,13 @@
 //! - No automatic handshake authentication is configured.
 //!
 //! API documentation: <https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html>
+#![allow(
+    clippy::clone_on_copy,
+    clippy::collapsible_if,
+    clippy::possible_missing_else,
+    clippy::result_large_err,
+    clippy::single_match,
+)]
 pub use schematic_definitions::samsung_smart_tv::remote_ws::*;
 /// Builds the Samsung Smart TV Remote Control WebSocket API definition.
 #[must_use]

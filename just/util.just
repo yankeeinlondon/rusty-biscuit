@@ -177,7 +177,7 @@ _choose_model:
 _choose_review filter="":
     #!/usr/bin/env bash
     set -euo pipefail
-    mapfile -t files < <(for d in reviews/; do [[ -d "${d}" ]] && fd -g '*review*.md' "${d}"; done {{ if filter == "" { "" } else { "| rg \"" + filter + "\"" } }})
+    mapfile -t files < <(for d in reviews/; do [[ -d "${d}" ]] && fd -g '*review*.md' "${d}" --exclude '_completed'; done {{ if filter == "" { "" } else { "| rg \"" + filter + "\"" } }})
     if [[ ${#files[@]} -eq 1 ]]; then
         echo "${files[0]}"
     elif [[ ${#files[@]} -gt 1 ]]; then

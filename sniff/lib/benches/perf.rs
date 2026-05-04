@@ -17,9 +17,11 @@ mod support {
 
 mod cases {
     pub mod filesystem;
+    pub mod git;
     pub mod hardware;
     pub mod inventory;
     pub mod network;
+    pub mod programs;
     pub mod system;
 }
 
@@ -32,7 +34,9 @@ fn register_all(c: &mut Criterion) {
     cases::system::register(c);
     cases::hardware::register(c);
     cases::filesystem::register(c);
+    cases::git::register(c);
     cases::inventory::register(c);
+    cases::programs::register(c);
     cases::network::register(c);
 }
 

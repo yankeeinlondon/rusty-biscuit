@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Gitea",
+    "title": "gitea",
     "description": "Gitea REST API v1.25+ for repository, PR, issue, and release workflows",
     "version": "0.1.0"
   },
@@ -878,6 +878,27 @@
           }
         }
       },
+      "UserSummary": {
+        "description": "A Gitea user summary (common across many responses).",
+        "type": "object",
+        "properties": {
+          "avatar_url": {
+            "description": "URL to the user's avatar image."
+          },
+          "full_name": {
+            "description": "The user's full name."
+          },
+          "id": {
+            "description": "The user's unique ID."
+          },
+          "login": {
+            "description": "The user's login handle."
+          },
+          "username": {
+            "description": "Alternative field name for login (Gitea sometimes uses `username`)."
+          }
+        }
+      },
       "GitTreeResponse": {
         "title": "GitTreeResponse",
         "description": "Response from `GET /repos/{owner}/{repo}/git/trees/{sha}`.",
@@ -915,6 +936,30 @@
           "url": {
             "description": "API URL for this tree.",
             "type": "string"
+          }
+        }
+      },
+      "GitTreeEntry": {
+        "description": "A single entry in a Git tree.",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "description": "Git file mode (e.g., \"100644\" for regular file)."
+          },
+          "path": {
+            "description": "File or directory path."
+          },
+          "sha": {
+            "description": "SHA of the entry."
+          },
+          "size": {
+            "description": "Size in bytes (only for blobs)."
+          },
+          "type": {
+            "description": "Entry type: \"blob\" (file), \"tree\" (directory), or \"commit\" (submodule)."
+          },
+          "url": {
+            "description": "API URL for the entry."
           }
         }
       },
@@ -996,6 +1041,50 @@
           },
           "user": {
             "description": "PR author."
+          }
+        }
+      },
+      "Label": {
+        "title": "Label",
+        "description": "A label applied to a Gitea issue or pull request.\n\nGitea uses a single `Label` shape for both issues and PRs.",
+        "type": "object",
+        "properties": {
+          "color": {
+            "description": "Label color (hex without `#`, e.g. \"ff0000\").",
+            "type": "string"
+          },
+          "description": {
+            "description": "Optional human-readable description.",
+            "type": "string"
+          },
+          "exclusive": {
+            "description": "Whether the label is exclusive within its scope.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Label ID.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "description": "Label name (e.g. \"bug\", \"enhancement\").",
+            "type": "string"
+          },
+          "url": {
+            "description": "Optional API URL for the label resource.",
+            "type": "string"
+          }
+        }
+      },
+      "PullRef": {
+        "description": "Branch reference for PR head/base.",
+        "type": "object",
+        "properties": {
+          "ref": {
+            "description": "Branch name."
+          },
+          "sha": {
+            "description": "Commit SHA."
           }
         }
       },
@@ -1196,38 +1285,6 @@
           ]
         }
       },
-      "Label": {
-        "title": "Label",
-        "description": "A label applied to a Gitea issue or pull request.\n\nGitea uses a single `Label` shape for both issues and PRs.",
-        "type": "object",
-        "properties": {
-          "color": {
-            "description": "Label color (hex without `#`, e.g. \"ff0000\").",
-            "type": "string"
-          },
-          "description": {
-            "description": "Optional human-readable description.",
-            "type": "string"
-          },
-          "exclusive": {
-            "description": "Whether the label is exclusive within its scope.",
-            "type": "boolean"
-          },
-          "id": {
-            "description": "Label ID.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "name": {
-            "description": "Label name (e.g. \"bug\", \"enhancement\").",
-            "type": "string"
-          },
-          "url": {
-            "description": "Optional API URL for the label resource.",
-            "type": "string"
-          }
-        }
-      },
       "RepoTag": {
         "title": "RepoTag",
         "description": "A repository tag from `GET /repos/{owner}/{repo}/tags`.",
@@ -1255,6 +1312,15 @@
           "zipball_url": {
             "description": "URL to download zipball.",
             "type": "string"
+          }
+        }
+      },
+      "TagCommit": {
+        "description": "Commit info embedded in a tag.",
+        "type": "object",
+        "properties": {
+          "sha": {
+            "description": "Commit SHA."
           }
         }
       },
@@ -1345,6 +1411,21 @@
           }
         }
       },
+      "GitRefObject": {
+        "description": "Object pointed to by a Git reference.",
+        "type": "object",
+        "properties": {
+          "sha": {
+            "description": "Object SHA."
+          },
+          "type": {
+            "description": "Object type: \"commit\" (lightweight tag) or \"tag\" (annotated tag)."
+          },
+          "url": {
+            "description": "API URL for the object."
+          }
+        }
+      },
       "Vec<GitRef>": {
         "title": "Array_of_GitRef",
         "type": "array",
@@ -1417,5 +1498,8 @@
       ]
     ],
     "module_path": "gitea"
-  }
+  },
+  "x-schematic-grouped-from": [
+    "Gitea"
+  ]
 }

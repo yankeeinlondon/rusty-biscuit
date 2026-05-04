@@ -2166,3 +2166,42 @@ fn test_performance_collector_snapshot_is_deterministic() {
         "second snapshot should show the same single call (not double-counted)"
     );
 }
+
+#[test]
+fn parallel_inventory_collects_all_classifications() {
+    // Regression test for the production parallel inventory drop-flush bug.
+    // Integration tests compile the sniff lib without `cfg(test)`, so this
+    // exercises `scan_inventory_parallel` directly. Before the fix, every
+    // worker-local buffer was discarded and the resulting inventory was empty.
+    use sniff::filesystem::file_types::scan_file_inventory;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    let total = 256_usize;
+    for i in 0..total {
+        let kind = i % 4;
+        let (name, body) = match kind {
+            0 => (format!("file_{i}.rs"), "pub fn x() {}\n".to_string()),
+            1 => (format!("file_{i}.ts"), "export const x = 1;\n".to_string()),
+            2 => (format!("file_{i}.py"), "def x():\n    pass\n".to_string()),
+            _ => (format!("file_{i}.md"), "# Title\n".to_string()),
+        };
+        std::fs::write(dir.path().join(name), body).unwrap();
+    }
+
+    let inventory = scan_file_inventory(dir.path()).unwrap();
+
+    assert_eq!(
+        inventory.classifications.len(),
+        total,
+        "parallel scanner must retain every classification produced by worker threads"
+    );
+    assert_eq!(inventory.total_files_scanned, total);
+    assert!(
+        inventory
+            .classifications
+            .windows(2)
+            .all(|pair| pair[0].path <= pair[1].path),
+        "classifications should be sorted by path"
+    );
+}

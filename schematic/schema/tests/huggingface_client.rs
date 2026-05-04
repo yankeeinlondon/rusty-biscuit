@@ -3,6 +3,11 @@
 //! These tests use wiremock to mock HTTP responses and verify
 //! that the generated client makes correct requests.
 
+#![allow(
+    clippy::needless_borrows_for_generic_args,
+    clippy::field_reassign_with_default
+)]
+
 use schematic_schema::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
 use schematic_schema::shared::SchematicError;
 use wiremock::matchers::{header, method, path};

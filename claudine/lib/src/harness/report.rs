@@ -3,8 +3,6 @@
 //! All output uses `Status::from_prose` with `StatusTheme::Circular` and
 //! writes to stderr. Every public function takes `&Terminal` for rendering.
 
-#![allow(deprecated)]
-
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
@@ -87,15 +85,28 @@ fn emit_status(markup: &str, state: StatusState, term: &Terminal) {
 
 /// Escape user-controlled strings for safe Prose interpolation.
 ///
-/// Escapes `<`, `>`, `{`, `}`, `"`, and `\` to prevent unintended markup
-/// or attribute injection (e.g. inside `href="..."`).
+/// Escapes `<`, `>`, `{`, `}`, and `\` to backslash form to prevent
+/// unintended markup, and `"` to the HTML entity `&quot;` because Prose's
+/// attribute parser (e.g. inside `href="..."`) treats a backslashed quote
+/// as a literal quote rather than a string delimiter -- the entity form is
+/// the documented escape for embedding a quote inside an attribute value.
+///
+/// Performs a single linear scan over the input and reserves capacity up
+/// front so the typical input (no special characters) costs one allocation.
 pub fn prose_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('<', "\\<")
-        .replace('>', "\\>")
-        .replace('{', "\\{")
-        .replace('}', "\\}")
-        .replace('"', "&quot;")
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '<' => out.push_str("\\<"),
+            '>' => out.push_str("\\>"),
+            '{' => out.push_str("\\{"),
+            '}' => out.push_str("\\}"),
+            '"' => out.push_str("&quot;"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Emit the source-file existence status.
@@ -113,7 +124,7 @@ pub fn report_source_file(original_ref: &str, resolved_path: &Path, term: &Termi
                 "the file reference <blue-500>{ref_escaped}</blue-500> \
                  found no match on host computer!"
             ),
-            StatusState::Failure,
+            StatusState::Error,
             term,
         );
     }
@@ -200,7 +211,7 @@ fn report_check_outcomes_to(
         } else if outcome.source.is_some() {
             render_failure_block_to(sink, outcome, report.phase, term);
         } else {
-            emit_status_to(sink, &outcome.markup, StatusState::Failure, term);
+            emit_status_to(sink, &outcome.markup, StatusState::Error, term);
             if let Some(reason) = &outcome.failure_message {
                 let escaped = prose_escape(reason);
                 let prose = Prose::new(format!("  Reason: <dim>{escaped}</dim>"));
@@ -229,7 +240,7 @@ fn render_failure_block_to(
     term: &Terminal,
 ) {
     // Section 1: status header.
-    emit_status_to(sink, failure_header_text(phase), StatusState::Failure, term);
+    emit_status_to(sink, failure_header_text(phase), StatusState::Error, term);
 
     // Sections 2 + 3 require the source metadata; the caller has already
     // verified `source.is_some()` so the unwrap below is sound.
@@ -238,44 +249,36 @@ fn render_failure_block_to(
     };
 
     // Section 2: source location, OSC8-linked when terminal supports it.
+    //
+    // The link target carries a clangd-style `:N:1` anchor when a line
+    // range is known so editors that honor jump anchors (iTerm2, VS Code,
+    // Ghostty, Kitty) open the file at the offending rule. The displayed
+    // text continues to use the human-friendly `:N-M` range format.
     let abs = src.file.display().to_string();
     let display = relative_or_abs(&src.file);
     let display_escaped = prose_escape(&display);
-    let abs_escaped = prose_escape(&abs);
-    let suffix = match &src.line_range {
+    let display_suffix = match &src.line_range {
         Some(r) => format!(":{}-{}", r.start(), r.end()),
         None => String::new(),
     };
-    let suffix_escaped = prose_escape(&suffix);
+    let display_suffix_escaped = prose_escape(&display_suffix);
+    let link_target = match &src.line_range {
+        Some(r) => format!("{}:{}:1", abs, r.start()),
+        None => abs.clone(),
+    };
+    let link_target_escaped = prose_escape(&link_target);
     emit_status_to(
         sink,
-        &format!("in <a href=\"{abs_escaped}\">{display_escaped}{suffix_escaped}</a>"),
+        &format!(
+            "in <a href=\"{link_target_escaped}\">{display_escaped}{display_suffix_escaped}</a>"
+        ),
         StatusState::Info,
         term,
     );
 
     // Section 3: chrome-free, syntax-highlighted YAML snippet.
-    //
-    // We deliberately skip darkmatter's `YamlBlock::render` here because it
-    // wraps the body in a `yaml`-labelled code-block frame with full-width
-    // background fill, which is too visually heavy for an inline failure
-    // block. `highlight_yaml_lines` returns one ANSI-styled line per input
-    // line; if the result count does not match the plain-line count we
-    // fall back to unstyled snippet lines so the user is never shown a
-    // missing snippet.
-    let trimmed_snippet = src.yaml_snippet.trim_end();
-    if !trimmed_snippet.is_empty() {
-        let plain_lines: Vec<&str> = trimmed_snippet.lines().collect();
-        let highlighted = highlight_yaml_lines(trimmed_snippet);
-        if highlighted.len() == plain_lines.len() {
-            for line in &highlighted {
-                sink.write_line(&format!("    {line}"));
-            }
-        } else {
-            for line in &plain_lines {
-                sink.write_line(&format!("    {line}"));
-            }
-        }
+    for line in yaml_snippet_lines(&src.yaml_snippet) {
+        sink.write_line(&line);
     }
 
     // Section 4: muted reason line. Severity is already conveyed by the
@@ -285,6 +288,44 @@ fn render_failure_block_to(
         let prose = Prose::new(format!("  Reason: <dim>{escaped}</dim>"))
             .with_word_wrap(WordWrap::WrapProse(None, None));
         sink.write_line(&prose.render(term));
+    }
+}
+
+/// Build the four-space-indented snippet lines for the YAML failure section.
+///
+/// Returns an empty `Vec` when `snippet` is empty after trailing-whitespace
+/// trim, which is the signal for "no Section 3" rather than a fallback.
+///
+/// We deliberately skip darkmatter's `YamlBlock::render` here because it
+/// wraps the body in a `yaml`-labelled code-block frame with full-width
+/// background fill, which is too visually heavy for an inline failure
+/// block. `highlight_yaml_lines` returns one ANSI-styled line per input
+/// line; if the result count does not match the plain-line count we fall
+/// back to unstyled snippet lines so the user is never shown a missing
+/// snippet. The selection logic is split out so each branch is unit
+/// testable in isolation via [`select_yaml_lines`].
+fn yaml_snippet_lines(snippet: &str) -> Vec<String> {
+    let trimmed = snippet.trim_end();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let plain_lines: Vec<&str> = trimmed.lines().collect();
+    let highlighted = highlight_yaml_lines(trimmed);
+    select_yaml_lines(&plain_lines, &highlighted)
+}
+
+/// Choose between the highlighted lines and the plain fallback, then
+/// indent every chosen line by four spaces.
+///
+/// The styled path fires when the highlighter returned exactly one entry
+/// per plain input line (the documented happy-path contract); any other
+/// count drops to the plain-line fallback so the snippet survives a
+/// degraded highlighter.
+fn select_yaml_lines(plain: &[&str], highlighted: &[String]) -> Vec<String> {
+    if highlighted.len() == plain.len() {
+        highlighted.iter().map(|l| format!("    {l}")).collect()
+    } else {
+        plain.iter().map(|l| format!("    {l}")).collect()
     }
 }
 
@@ -322,7 +363,7 @@ pub fn report_shell_audit_outcomes(report: &ShellAuditReport, term: &Terminal) {
         let state = if outcome.passed {
             StatusState::Success
         } else {
-            StatusState::Failure
+            StatusState::Error
         };
         emit_status(&outcome.message, state, term);
     }
@@ -355,13 +396,13 @@ pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Termi
     } else if has_prompt {
         emit_status(
             "the <blue-500>prompt</blue-500> frontmatter property is present but empty",
-            StatusState::Failure,
+            StatusState::Error,
             term,
         );
     } else {
         emit_status(
             "the <blue-500>prompt</blue-500> frontmatter property is missing",
-            StatusState::Failure,
+            StatusState::Error,
             term,
         );
     }
@@ -369,7 +410,7 @@ pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Termi
 
 /// Emit a terminal unhandled failure banner.
 pub fn report_unhandled_failure(message: &str, term: &Terminal) {
-    emit_status(message, StatusState::Failure, term);
+    emit_status(message, StatusState::Error, term);
 }
 
 #[cfg(test)]
@@ -1218,6 +1259,64 @@ mod tests {
     }
 
     #[test]
+    fn render_failure_block_yaml_region_contains_sgr_styling() {
+        // Positive assertion that the syntax-highlighted YAML path actually
+        // fires for the canonical happy-path snippet. The renderer falls back
+        // to plain unstyled lines when `highlight_yaml_lines` returns a line
+        // count that doesn't match the plain count -- without this assertion
+        // a degraded highlighter (broken theme load, missing yaml grammar,
+        // empty palette) would silently strip styling and every other test
+        // would still pass.
+        let term = test_terminal();
+        let outcome = ValidationCheckOutcome {
+            rule_id: ValidationRuleId(0),
+            event: ValidationEvent::FileExists,
+            subject_key: Some("x".to_string()),
+            passed: false,
+            markup: "the file x exists".to_string(),
+            failure_message: Some("missing".to_string()),
+            source: Some(RuleSource {
+                file: std::path::PathBuf::from("/repo/prompts/run.md"),
+                line_range: Some(1..=2),
+                yaml_snippet: "file_exists: \"x\"\nmessage: \"y\"\n".to_string(),
+            }),
+        };
+
+        let mut sink = StringSink::default();
+        render_failure_block_to(&mut sink, &outcome, FailurePhase::PreCheck, &term);
+        let captured = sink.into_string();
+
+        let lines: Vec<&str> = captured.lines().collect();
+        let in_idx = lines
+            .iter()
+            .position(|l| l.contains("in ") && l.contains(":1-2"))
+            .expect("expected source-location line containing ':1-2'");
+        let reason_idx = lines
+            .iter()
+            .position(|l| l.contains("Reason:"))
+            .expect("expected Reason line after the YAML region");
+        let yaml_region = &lines[(in_idx + 1)..reason_idx];
+        assert!(
+            !yaml_region.is_empty(),
+            "expected at least one YAML region line, got {lines:?}"
+        );
+
+        // `highlight_yaml_lines` emits truecolor foreground SGR escapes
+        // (`\x1b[38;2;R;G;Bm`) for each highlighted token. Asserting on the
+        // `\x1b[38;` introducer guarantees real styling fired -- not just a
+        // bare reset like `\x1b[0m`.
+        let styled_lines = yaml_region
+            .iter()
+            .filter(|l| l.contains("\x1b[38;"))
+            .count();
+        assert!(
+            styled_lines > 0,
+            "YAML region must contain at least one foreground-color SGR \
+             ('\\x1b[38;...m'), got region: {yaml_region:?}"
+        );
+    }
+
+    #[test]
     fn osc8_hyperlink_target_present_in_raw_output() {
         // Capture WITHOUT stripping ANSI: OSC-8 hyperlinks must survive into
         // the raw transcript so terminal emulators that support them can
@@ -1256,5 +1355,172 @@ mod tests {
             "OSC-8 link target should contain the absolute path {abs_path:?}, \
              got target: {target:?}"
         );
+    }
+
+    #[test]
+    fn osc8_hyperlink_target_includes_line_anchor_when_range_present() {
+        // Editors that honor jump anchors (iTerm2, VS Code, Ghostty, Kitty)
+        // open `file:///path:N:1` at line N rather than line 1. The display
+        // text keeps the `:N-M` range format; only the link target carries
+        // the clangd-style anchor.
+        let abs_path = "/repo/prompts/run.md";
+        let report = single_failure_report(
+            FailurePhase::PreCheck,
+            Some(RuleSource {
+                file: std::path::PathBuf::from(abs_path),
+                line_range: Some(42..=44),
+                yaml_snippet: "file_exists: \"x\"\n".to_string(),
+            }),
+            Some("missing".to_string()),
+        );
+
+        let term = test_terminal();
+        let raw = report_check_outcomes_to_string(&report, &term);
+
+        let osc8_introducer = "\x1b]8;;";
+        let intro_idx = raw
+            .find(osc8_introducer)
+            .expect("expected OSC-8 introducer in raw output");
+        let after_intro = &raw[intro_idx + osc8_introducer.len()..];
+        let st_idx = after_intro.find("\x1b\\").unwrap_or(after_intro.len());
+        let bel_idx = after_intro.find('\x07').unwrap_or(after_intro.len());
+        let target_end = st_idx.min(bel_idx);
+        let target = &after_intro[..target_end];
+
+        assert!(
+            target.contains(":42:1"),
+            "OSC-8 link target should carry the ':42:1' line anchor when \
+             line_range is Some, got target: {target:?}"
+        );
+        assert!(
+            target.contains(abs_path),
+            "OSC-8 link target should still contain the absolute path \
+             {abs_path:?}, got target: {target:?}"
+        );
+    }
+
+    #[test]
+    fn osc8_hyperlink_target_omits_line_anchor_when_range_none() {
+        let abs_path = "/repo/prompts/run.md";
+        let report = single_failure_report(
+            FailurePhase::PreCheck,
+            Some(RuleSource {
+                file: std::path::PathBuf::from(abs_path),
+                line_range: None,
+                yaml_snippet: "file_exists: \"x\"\n".to_string(),
+            }),
+            Some("missing".to_string()),
+        );
+
+        let term = test_terminal();
+        let raw = report_check_outcomes_to_string(&report, &term);
+
+        let osc8_introducer = "\x1b]8;;";
+        let intro_idx = raw
+            .find(osc8_introducer)
+            .expect("expected OSC-8 introducer in raw output");
+        let after_intro = &raw[intro_idx + osc8_introducer.len()..];
+        let st_idx = after_intro.find("\x1b\\").unwrap_or(after_intro.len());
+        let bel_idx = after_intro.find('\x07').unwrap_or(after_intro.len());
+        let target_end = st_idx.min(bel_idx);
+        let target = &after_intro[..target_end];
+
+        // No line anchor when the range is unknown: the target should be
+        // the bare path with no trailing `:N:1`.
+        let trimmed = target.trim_start_matches("file://");
+        assert_eq!(
+            trimmed, abs_path,
+            "OSC-8 link target should be the bare path with no line anchor \
+             when line_range is None, got target: {target:?}"
+        );
+    }
+
+    // -- yaml_snippet_lines / select_yaml_lines (Phase 6) --
+
+    #[test]
+    fn yaml_snippet_lines_returns_empty_for_empty_input() {
+        assert!(yaml_snippet_lines("").is_empty());
+    }
+
+    #[test]
+    fn yaml_snippet_lines_returns_empty_for_whitespace_only_input() {
+        // After `trim_end`, all-trailing-whitespace input collapses to an
+        // empty string, which is the "no Section 3" signal.
+        assert!(yaml_snippet_lines("\n\n").is_empty());
+        assert!(yaml_snippet_lines("   \n").is_empty());
+    }
+
+    #[test]
+    fn yaml_snippet_lines_styled_path_indents_each_line_by_four_spaces() {
+        let lines = yaml_snippet_lines("file_exists: \"x\"\nmessage: \"y\"\n");
+        assert_eq!(lines.len(), 2, "expected one entry per snippet line");
+        for line in &lines {
+            assert!(
+                line.starts_with("    "),
+                "every snippet line must be indented by four spaces, got {line:?}"
+            );
+            // Indent must be exactly four (not five+).
+            assert!(
+                !line[4..].starts_with(' '),
+                "indent must be exactly four spaces, got {line:?}"
+            );
+            // Styled lines carry the highlighter's truecolor SGR introducer.
+            assert!(
+                line.contains("\x1b[38;"),
+                "styled snippet line must contain a foreground-color SGR \
+                 ('\\x1b[38;...m'), got {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn select_yaml_lines_styled_branch_uses_highlighted_when_counts_match() {
+        let plain: Vec<&str> = vec!["a", "b"];
+        let highlighted: Vec<String> = vec!["A_styled".to_string(), "B_styled".to_string()];
+        let out = select_yaml_lines(&plain, &highlighted);
+        assert_eq!(
+            out,
+            vec!["    A_styled".to_string(), "    B_styled".to_string()],
+            "styled branch should pick the highlighted entries verbatim and \
+             prepend a four-space indent"
+        );
+    }
+
+    #[test]
+    fn select_yaml_lines_fallback_branch_uses_plain_when_counts_differ() {
+        // Mismatch case the live highlighter is unlikely to produce today
+        // (it always returns 1:1), but the renderer must not blow up if it
+        // ever does. Asserting the fallback branch directly keeps regression
+        // coverage even when the upstream contract holds.
+        let plain: Vec<&str> = vec!["plain_a", "plain_b"];
+        let highlighted: Vec<String> = vec!["only_one_styled".to_string()];
+        let out = select_yaml_lines(&plain, &highlighted);
+        assert_eq!(
+            out,
+            vec!["    plain_a".to_string(), "    plain_b".to_string()],
+            "fallback branch should pick the plain entries when the \
+             highlighted count does not match the plain count"
+        );
+    }
+
+    #[test]
+    fn select_yaml_lines_fallback_branch_handles_extra_highlighted_entry() {
+        // Symmetric mismatch: highlighter returned more entries than there
+        // were plain lines (e.g. trailing newline edge case). Same fallback.
+        let plain: Vec<&str> = vec!["plain_a"];
+        let highlighted: Vec<String> = vec![
+            "extra_styled_a".to_string(),
+            "extra_styled_b".to_string(),
+        ];
+        let out = select_yaml_lines(&plain, &highlighted);
+        assert_eq!(out, vec!["    plain_a".to_string()]);
+    }
+
+    #[test]
+    fn select_yaml_lines_styled_branch_handles_empty_inputs() {
+        let plain: Vec<&str> = vec![];
+        let highlighted: Vec<String> = vec![];
+        let out = select_yaml_lines(&plain, &highlighted);
+        assert!(out.is_empty());
     }
 }

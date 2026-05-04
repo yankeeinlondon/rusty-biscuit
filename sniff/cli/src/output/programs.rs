@@ -346,10 +346,11 @@ struct ProgramJsonEntry {
 }
 
 /// Print programs information as JSON.
-pub fn print_programs_json(
+/// Build a JSON value for the given program filter.
+pub fn build_programs_json(
     programs: &ProgramsInfo,
     filter: OutputFilter,
-) -> serde_json::Result<()> {
+) -> serde_json::Result<serde_json::Value> {
     use sniff::programs::ProgramMetadata;
 
     // JSON output always includes rich metadata with version and path info
@@ -399,8 +400,7 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::Editors {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
@@ -430,8 +430,7 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::Utilities {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
@@ -461,8 +460,7 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::LanguagePackageManagers {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
@@ -492,8 +490,7 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::OsPackageManagers {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
@@ -523,8 +520,7 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::TtsClients {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
@@ -554,8 +550,7 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::TerminalApps {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
@@ -585,8 +580,7 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::HeadlessAudio {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
@@ -616,17 +610,12 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::AiClients {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-                return Ok(());
+                return serde_json::to_value(&entries);
             }
         }
         _ => {}
     }
 
-    // For OutputFilter::Programs, print all collected entries
-    if filter == OutputFilter::Programs {
-        println!("{}", serde_json::to_string_pretty(&entries)?);
-    }
-
-    Ok(())
+    // For OutputFilter::Programs, return all collected entries
+    serde_json::to_value(&entries)
 }

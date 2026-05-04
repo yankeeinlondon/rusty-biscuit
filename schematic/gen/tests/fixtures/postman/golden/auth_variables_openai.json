@@ -1,0 +1,51 @@
+{
+  "auth": {
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{bearerToken}}"
+      }
+    ],
+    "type": "bearer"
+  },
+  "info": {
+    "description": "OpenAI test API",
+    "name": "OpenAI",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "ListModels",
+          "request": {
+            "description": "List available models",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "models"
+              ],
+              "raw": "{{baseUrl}}/models"
+            }
+          }
+        }
+      ],
+      "name": "Models"
+    }
+  ],
+  "variable": [
+    {
+      "description": "Base URL for all requests",
+      "key": "baseUrl",
+      "value": "https://api.openai.com/v1"
+    },
+    {
+      "description": "Bearer token for Authorization header",
+      "key": "bearerToken",
+      "value": ""
+    }
+  ]
+}

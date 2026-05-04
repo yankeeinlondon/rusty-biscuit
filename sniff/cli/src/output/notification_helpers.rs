@@ -88,7 +88,9 @@ pub fn render_notification_helpers_markdown(
 /// Print notification helpers information as JSON.
 pub fn print_notification_helpers_json(
     helpers: &InstalledNotificationHelpers,
+    performance: Option<&sniff::PerformanceReport>,
 ) -> serde_json::Result<()> {
-    println!("{}", serde_json::to_string_pretty(helpers)?);
+    let value = serde_json::to_value(helpers)?;
+    crate::output::print_json_value(value, performance);
     Ok(())
 }

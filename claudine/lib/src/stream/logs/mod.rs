@@ -9,7 +9,7 @@
 pub mod codex;
 pub mod opencode;
 
-pub use opencode::{EarlyTermination, StderrIngestOutcome};
+pub use opencode::{EarlyTermination, StderrIngestOutcome, StuckSubagentInfo};
 
 use std::sync::mpsc::Receiver;
 

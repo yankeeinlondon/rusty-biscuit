@@ -6,10 +6,10 @@
 //!
 //! ## Modules
 //!
-//! - [`distro`] - Linux distribution detection and classification
-//! - [`locale`] - Locale detection from environment variables
-//! - [`time`] - Timezone and NTP status detection
-//! - [`package_manager`] - System package manager detection
+//! - `distro` - Linux distribution detection and classification
+//! - `locale` - Locale detection from environment variables
+//! - `time` - Timezone and NTP status detection
+//! - `package_manager` - System package manager detection
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;

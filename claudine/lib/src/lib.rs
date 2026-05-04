@@ -14,6 +14,7 @@ pub mod messaging;
 pub mod model_catalog;
 pub mod permissions;
 pub mod provider;
+pub mod provider_id;
 pub mod reporting;
 pub mod services;
 pub mod stream;

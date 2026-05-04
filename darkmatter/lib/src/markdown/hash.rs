@@ -1,4 +1,5 @@
 use crate::markdown::Markdown;
+use biscuit_file::serde_yaml_ng;
 use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 
 impl Markdown {
@@ -24,7 +25,7 @@ impl Markdown {
             return xx_hash("");
         }
         if strict {
-            let yaml = serde_yaml::to_string(map).unwrap_or_default();
+            let yaml = serde_yaml_ng::to_string(map).unwrap_or_default();
             xx_hash(&yaml)
         } else {
             let mut keys: Vec<&String> = map.keys().collect();
