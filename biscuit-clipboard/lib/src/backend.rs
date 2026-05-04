@@ -1,11 +1,32 @@
+//! Trait abstraction over the host clipboard.
+//!
+//! The [`ClipboardBackend`] trait isolates the rest of the crate from
+//! `clipboard-rs`. The production impl ([`SystemClipboard`]) wraps a
+//! real `ClipboardContext`; the test impl ([`MockClipboard`]) returns
+//! whatever the test set up.
+//!
+//! Only [`SystemClipboard`] holds OS-level state — no other code in
+//! this crate touches `clipboard_rs::ClipboardContext` directly.
+
 use std::path::PathBuf;
 
-use clipboard_rs::common::RustImage;
 use clipboard_rs::Clipboard;
+use clipboard_rs::common::RustImage;
 
 use crate::content::ImageSnapshot;
 use crate::error::ClipboardError;
 
+/// Read/write access to a clipboard.
+///
+/// All methods return `Result<Option<_>, ClipboardError>` for read
+/// operations: `Ok(None)` means "no payload of that format is
+/// currently on the clipboard", `Err(_)` means the read itself
+/// failed.
+///
+/// ## Errors
+///
+/// Implementations should return [`ClipboardError::Backend`] for
+/// platform-level failures, and [`ClipboardError::Io`] for I/O.
 pub trait ClipboardBackend {
     fn get_text(&self) -> Result<Option<String>, ClipboardError>;
     fn get_html(&self) -> Result<Option<String>, ClipboardError>;
@@ -13,14 +34,29 @@ pub trait ClipboardBackend {
     fn get_image(&self) -> Result<Option<ImageSnapshot>, ClipboardError>;
     fn get_files(&self) -> Result<Option<Vec<PathBuf>>, ClipboardError>;
     fn set_text(&self, text: &str) -> Result<(), ClipboardError>;
+    /// Whether the OS marks the current clipboard contents as concealed
+    /// (e.g. a password manager pasteboard with
+    /// `org.nspasteboard.ConcealedType` on macOS).
     fn is_concealed(&self) -> Result<bool, ClipboardError>;
 }
 
+/// Production [`ClipboardBackend`] backed by `clipboard_rs`.
+///
+/// Construct via [`SystemClipboard::new`]. The constructor wraps the
+/// real OS clipboard; subsequent methods are blocking and must not be
+/// called from the Tokio runtime hot path (use
+/// `tokio::task::spawn_blocking`).
 pub struct SystemClipboard {
     ctx: clipboard_rs::ClipboardContext,
 }
 
 impl SystemClipboard {
+    /// Initialize the OS clipboard backend.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`ClipboardError::Backend`] if `clipboard_rs` cannot
+    /// open a context (e.g. no running window server on Linux).
     pub fn new() -> Result<Self, ClipboardError> {
         let ctx = clipboard_rs::ClipboardContext::new()
             .map_err(|e| ClipboardError::Backend(e.to_string()))?;
@@ -119,6 +155,22 @@ impl ClipboardBackend for SystemClipboard {
     }
 }
 
+/// Test-only [`ClipboardBackend`] that returns whatever was set on
+/// the struct fields.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_clipboard::backend::{ClipboardBackend, MockClipboard};
+///
+/// let mock = MockClipboard {
+///     text: Some("hi".into()),
+///     ..Default::default()
+/// };
+/// assert_eq!(mock.get_text().unwrap(), Some("hi".into()));
+/// mock.set_text("changed").unwrap();
+/// assert_eq!(mock.set_text_log(), vec!["changed".to_string()]);
+/// ```
 #[derive(Default)]
 pub struct MockClipboard {
     pub text: Option<String>,
@@ -127,6 +179,16 @@ pub struct MockClipboard {
     pub image: Option<ImageSnapshot>,
     pub files: Option<Vec<PathBuf>>,
     pub concealed: bool,
+    /// Captures every `set_text` call so tests can assert backend
+    /// invocations (e.g. `POST /clear` calls `set_text("")`).
+    pub set_text_calls: std::sync::Mutex<Vec<String>>,
+}
+
+impl MockClipboard {
+    /// Snapshot of every `set_text` argument observed so far.
+    pub fn set_text_log(&self) -> Vec<String> {
+        self.set_text_calls.lock().unwrap().clone()
+    }
 }
 
 impl ClipboardBackend for MockClipboard {
@@ -151,7 +213,7 @@ impl ClipboardBackend for MockClipboard {
     }
 
     fn set_text(&self, text: &str) -> Result<(), ClipboardError> {
-        let _ = text;
+        self.set_text_calls.lock().unwrap().push(text.to_string());
         Ok(())
     }
 
