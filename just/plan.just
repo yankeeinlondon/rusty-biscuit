@@ -412,6 +412,20 @@ plan-review review="":
     echo
     echo -e "🎉 planning is complete!"
 
+    # Offer to implement the newly created plan
+    plan_file="${dir}/plan.md"
+    if [[ -f "${plan_file}" ]]; then
+        echo
+        echo -e "A plan file was created at {{blue}}$(just _link "${plan_file}" "$(sniff repo root)/${plan_file}"){{reset}}"
+        if [[ "$(just _confirm "Do you want to start implementing this plan now?")" == "y" ]]; then
+            echo
+            just implement-plan "${plan_file}"
+        else
+            echo
+            echo -e "Ok. You can implement it later with: {{yellow}}just implement-plan ${plan_file}{{reset}}"
+        fi
+    fi
+    echo
 
 
 
