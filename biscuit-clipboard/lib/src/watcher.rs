@@ -723,6 +723,18 @@ mod tests {
         fn set_text(&self, _: &str) -> Result<(), ClipboardError> {
             Ok(())
         }
+        fn set_html(&self, _: &str) -> Result<(), ClipboardError> {
+            Ok(())
+        }
+        fn set_rtf(&self, _: &str) -> Result<(), ClipboardError> {
+            Ok(())
+        }
+        fn set_image(&self, _: &[u8], _: u32, _: u32) -> Result<(), ClipboardError> {
+            Ok(())
+        }
+        fn set_files(&self, _: &[std::path::PathBuf]) -> Result<(), ClipboardError> {
+            Ok(())
+        }
         fn is_concealed(&self) -> Result<bool, ClipboardError> {
             Ok(false)
         }

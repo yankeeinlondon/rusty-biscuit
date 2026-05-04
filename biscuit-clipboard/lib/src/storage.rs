@@ -25,6 +25,7 @@ const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
 /// let storage = Storage::new().expect("storage init");
 /// // Use the storage to spill or load images...
 /// ```
+#[derive(Clone)]
 pub struct Storage {
     cache_dir: PathBuf,
     spill_threshold: usize,
