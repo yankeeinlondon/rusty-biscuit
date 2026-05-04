@@ -100,7 +100,7 @@ Strict byte-level assertions against a spoofed Apple Terminal environment.
 End-to-end validation through the actual Terminal.app process.
 
 - **Spawn:** `osascript -e 'tell application "Terminal" to do script "..."'` (returns tab ID).
-- **Background:** Minimize window after spawn via `set miniaturized of window N to true` so the user can continue working.
+- **Background:** Spawn the window without grabbing focus by snapshotting the frontmost application before `do script` and re-activating it immediately afterwards. The Terminal.app window remains in normal window-manager z-order but sits behind the developer's foreground app — no Dock minimize animation, no risk of stray keystrokes landing in the test window.
 - **Capture:** `osascript -e 'tell application "Terminal" to get contents of selected tab of window id N'`.
   - Terminal.app returns **plain text only**.
   - For this backend `frame.raw == frame.plain`; escape sequences are not observable.
