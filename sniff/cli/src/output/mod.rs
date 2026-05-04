@@ -93,8 +93,6 @@ pub enum OutputFilter {
     AudioDevices,
     /// Show only repo/monorepo info (filesystem subsection, flattened in JSON)
     Repo,
-    /// Show only language detection (filesystem subsection, flattened in JSON)
-    Language,
     /// Show only broad file associations (filesystem subsection, flattened in JSON)
     Files,
     /// Show only markdown document metadata (filesystem subsection, flattened in JSON)
@@ -548,7 +546,10 @@ pub fn render_text(
                         out.push_str(&render_git_section(git, history_count, verbose, *compact));
                     }
                 }
-                Some(RepoAction::Language) => {
+                Some(RepoAction::Language { breakdown: true }) => {
+                    out.push_str(&render_language_section(result, verbose, base_dir));
+                }
+                Some(RepoAction::Language { breakdown: false }) => {
                     let rendered = render_repo_language(result, base_dir);
                     if rendered.is_empty() {
                         // Mirror locator family: empty == not detected → exit 1, no stdout.
@@ -588,9 +589,6 @@ pub fn render_text(
                     // are handled as early returns in commands.rs
                 }
             }
-        }
-        OutputFilter::Language => {
-            out.push_str(&render_language_section(result, verbose, base_dir));
         }
         OutputFilter::Files => {
             if let Some(ref filesystem) = result.filesystem
@@ -739,14 +737,6 @@ fn apply_filter_to_json(
             // explicit exit code; we capture both and return-early below.
             let outcome = repo_json::build_with_outcome(result, repo_action, base_dir);
             return (outcome.value, outcome.exit_code);
-        }
-        OutputFilter::Language => {
-            // Flatten: return languages data at top level
-            if let Some(ref fs) = result.filesystem {
-                serde_json::to_value(&fs.languages).unwrap_or(Value::Null)
-            } else {
-                json!({})
-            }
         }
         OutputFilter::Files => {
             if let Some(ref fs) = result.filesystem

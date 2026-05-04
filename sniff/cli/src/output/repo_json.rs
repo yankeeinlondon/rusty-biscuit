@@ -178,12 +178,20 @@ pub(crate) fn build_with_outcome(
         // `{ "language": null }` when no primary language can be detected).
         // Exit code mirrors the text path: 0 on success, 1 on null, so scripts
         // can branch on `$?` without parsing the JSON body.
-        Some(RepoAction::Language) => {
+        Some(RepoAction::Language { breakdown: false }) => {
             let name = filesystem::primary_language_name(result);
             let exit_code = if name.is_none() { Some(1) } else { None };
             BuildOutcome {
                 value: json!({ "language": name }),
                 exit_code,
+            }
+        }
+        Some(RepoAction::Language { breakdown: true }) => {
+            // Breakdown mode: emit the full language breakdown like the old `sniff language --json`
+            if let Some(ref fs) = result.filesystem {
+                BuildOutcome::pure(serde_json::to_value(&fs.languages).unwrap_or(Value::Null))
+            } else {
+                BuildOutcome::pure(json!({}))
             }
         }
         // Phase 5: `deps --json` emits a hand-built per-package object so

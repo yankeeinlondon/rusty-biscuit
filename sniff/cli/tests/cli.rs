@@ -734,13 +734,16 @@ fn test_repo_subcommand_json_output() {
 
 #[test]
 fn test_language_subcommand_text_output() {
-    cargo_bin_cmd!("sniff").arg("language").assert().success();
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "language", "--breakdown"])
+        .assert()
+        .success();
 }
 
 #[test]
 fn test_language_subcommand_json_output() {
     let output = cargo_bin_cmd!("sniff")
-        .args(["language", "--json"])
+        .args(["repo", "language", "--breakdown", "--json"])
         .assert()
         .success()
         .get_output()
