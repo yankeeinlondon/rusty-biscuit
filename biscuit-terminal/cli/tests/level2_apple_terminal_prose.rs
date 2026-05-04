@@ -155,33 +155,51 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
     std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
     disable_color_forcing(&mut harness);
 
-    send_bt_command(
-        &mut harness,
-        "prose '<double-underline>important text</double-underline>'",
-    );
+    // Wrap the rendered output between sentinels so the assertion
+    // window excludes shell prompts, command echoes, and other chrome
+    // that varies with the user's login shell. Assumes a POSIX-ish
+    // shell (zsh/bash on macOS) where `printf` and `;` are available.
+    harness
+        .send_text(
+            b"printf '__BT_START__\\n'; bt prose '<double-underline>important text</double-underline>'; printf '\\n__BT_END__\\n'\n",
+        )
+        .expect("send_text failed");
+    harness.settle();
     std::thread::sleep(Duration::from_millis(400));
 
     let frame = harness.capture().expect("capture failed");
 
+    let bounded = frame
+        .plain
+        .split("__BT_START__\n")
+        .nth(1)
+        .and_then(|s| s.split("\n__BT_END__").next())
+        .unwrap_or("");
+
     assert!(
-        frame.plain.contains("important text"),
-        "expected visible inner text `important text`. plain:\n{}",
+        !bounded.is_empty(),
+        "sentinel-bounded output is empty — bt prose likely crashed or emitted nothing.\n\
+         full capture:\n{}",
         frame.plain,
+    );
+    assert!(
+        bounded.contains("important text"),
+        "expected rendered `important text` between sentinels.\nbounded:\n{}",
+        bounded,
     );
     // Terminal.app's capture strips ANSI bytes, so the byte-level
     // assertion ("renderer emitted `\x1b[4m` not `\x1b[4:2m`") is
     // covered by Level-1. What we *can* prove at Level-2 is that no
     // literal escape-fragment garbage is visible on screen.
     assert!(
-        !frame.plain.contains("\x1b[4:2m"),
-        "raw double-underline escape leaked into visible capture. plain:\n{}",
-        frame.plain,
+        !bounded.contains("[4:2m"),
+        "literal `[4:2m` fragment visible in rendered output.\nbounded:\n{}",
+        bounded,
     );
     assert!(
-        !frame.plain.contains("[4:2m"),
-        "literal `[4:2m` fragment visible on screen — renderer did not \
-         degrade `<double-underline>`. plain:\n{}",
-        frame.plain,
+        !bounded.contains("\u{1b}[4:2m"),
+        "raw double-underline SGR visible in rendered output.\nbounded:\n{}",
+        bounded,
     );
 }
 
@@ -254,8 +272,10 @@ fn level2_apple_terminal_harness_lifecycle() {
         );
 
         // Identify the window id the harness created by diffing against
-        // the baseline. The harness miniaturizes its window after
-        // spawn, so `front window` is unreliable.
+        // the baseline. The harness restores focus to the previous
+        // frontmost app after spawn, so `front window` (system focus)
+        // is unreliable; diffing the full window-id set is robust
+        // regardless of focus / z-order.
         let current_ids: std::collections::HashSet<i64> = list_window_ids()
             .expect("list_window_ids failed")
             .into_iter()
