@@ -162,7 +162,7 @@ Shared wrapper flags:
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `-s, --system-prompt <PROMPT\|FILE>` | Set or append a system prompt (string or file path) |
-| `-t, --timeout <SECONDS>` | Timeout in seconds (non-interactive only) |
+| `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |

@@ -118,7 +118,7 @@ pub(crate) fn build_prompt_timing_context(
 /// `built_in` is the final fallback (e.g. `Some(30m)` for `step_timeout`,
 /// `None` for `timeout`).
 pub(crate) struct TimeoutResolutionInput<'a> {
-    pub cli_secs: Option<u64>,
+    pub cli: Option<String>,
     pub frontmatter: Option<std::time::Duration>,
     pub env_var: &'a str,
     pub built_in: Option<std::time::Duration>,
@@ -136,8 +136,14 @@ pub(crate) struct TimeoutResolutionInput<'a> {
 pub(crate) fn resolve_single_timeout(
     input: TimeoutResolutionInput<'_>,
 ) -> Option<std::time::Duration> {
-    if let Some(secs) = input.cli_secs {
-        return Some(std::time::Duration::from_secs(secs));
+    if let Some(raw) = input.cli {
+        match claudine::harness::parse_timeout(&raw, std::path::Path::new("<cli>")) {
+            Ok(d) => return Some(d),
+            Err(_) => {
+                // Invalid CLI value should have been caught earlier, but
+                // fall through rather than panicking.
+            }
+        }
     }
     if let Some(d) = input.frontmatter {
         return Some(d);
@@ -186,19 +192,19 @@ fn is_zero_duration_literal(value: &str) -> bool {
 /// Supporting knobs (`kill_grace`, `interval`) are read from env via
 /// [`super::subagent_watchdog::TimeoutConfig::resolve`].
 pub(crate) fn resolve_timeouts(
-    cli_timeout_secs: Option<u64>,
+    cli_timeout: Option<String>,
     plan_timeout: Option<std::time::Duration>,
-    cli_step_timeout_secs: Option<u64>,
+    cli_step_timeout: Option<String>,
     plan_step_timeout: Option<std::time::Duration>,
 ) -> super::subagent_watchdog::TimeoutConfig {
     let timeout = resolve_single_timeout(TimeoutResolutionInput {
-        cli_secs: cli_timeout_secs,
+        cli: cli_timeout,
         frontmatter: plan_timeout,
         env_var: "CLAUDINE_TIMEOUT",
         built_in: None,
     });
     let step_timeout = resolve_single_timeout(TimeoutResolutionInput {
-        cli_secs: cli_step_timeout_secs,
+        cli: cli_step_timeout,
         frontmatter: plan_step_timeout,
         env_var: "CLAUDINE_STEP_TIMEOUT",
         built_in: Some(std::time::Duration::from_secs(30 * 60)),
@@ -1187,8 +1193,8 @@ pub(crate) fn execute_composition_request_inner(
             binary_path.as_path(),
             child_cwd,
             effective_non_interactive,
-            request.timeout,
-            request.step_timeout,
+            request.timeout.clone(),
+            request.step_timeout.clone(),
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -1259,6 +1265,13 @@ pub(crate) fn execute_composition_request_inner(
             None,
         ));
 
+        let timeout_config = resolve_timeouts(
+            request.timeout.clone(),
+            None,
+            request.step_timeout.clone(),
+            None,
+        );
+
         let mut child_spawned = false;
         let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;
         let exit_result = execute_without_harness(
@@ -1283,6 +1296,7 @@ pub(crate) fn execute_composition_request_inner(
             &mut child_spawned,
             prompt_timing,
             &mut agent_perf,
+            timeout_config,
         );
 
         // Mark launched as soon as spawn succeeded — before propagating
@@ -1360,6 +1374,7 @@ fn execute_without_harness(
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
     agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
+    timeout_config: super::subagent_watchdog::TimeoutConfig,
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
 
@@ -1381,6 +1396,7 @@ fn execute_without_harness(
             dispatch_context,
             child_spawned,
             prompt_timing,
+            timeout_config,
         )?;
         *agent_perf_out = Some(result.telemetry.into_agent_perf(result.summary.duration_ms));
 
@@ -1415,6 +1431,18 @@ fn execute_without_harness(
         // Legacy (non-structured) path. Inline must capture the response so
         // the closure plan can rewrite the target file; direct just runs the
         // child and lets it write to stdout on its own.
+        if timeout_config.any_enabled() {
+            use biscuit_terminal::components::renderable::Renderable;
+            use biscuit_terminal::components::status::{Status, StatusState};
+            let rendered = Status::new(
+                "timeouts are only enforced in structured-stream mode; \
+                 ignoring for this non-structured attempt"
+                    .to_string(),
+            )
+            .state(StatusState::Warning)
+            .render(term);
+            eprintln!("{rendered}");
+        }
         match &mode {
             CompositionExecutionMode::Inline {
                 session_interactive,
@@ -1730,6 +1758,7 @@ fn run_structured_composition(
     dispatch_context: &HashMap<String, serde_json::Value>,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
+    timeout_config: super::subagent_watchdog::TimeoutConfig,
 ) -> Result<CompositionStreamResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
@@ -1766,7 +1795,7 @@ fn run_structured_composition(
                 env: child_env,
                 cwd: child_cwd,
                 prompt: wire_prompt.to_string(),
-                timeout: None,
+                timeout: timeout_config.timeout,
                 client_name: env!("CARGO_PKG_NAME"),
                 client_version: env!("CARGO_PKG_VERSION"),
                 capabilities: super::wire_io::WireClientCapabilities::default_for_claudine(),
@@ -1781,10 +1810,6 @@ fn run_structured_composition(
             child_spawned,
         )?
     } else {
-        // Non-harness composition path: no CLI/frontmatter timeout
-        // values exist here, so the resolver only consults env vars and
-        // the built-in defaults.
-        let timeout_config = resolve_timeouts(None, None, None, None);
         exec::run_child_stream_semantic(
             binary_path,
             child_args,
@@ -2270,9 +2295,9 @@ mod tests {
         let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
 
         let cfg = resolve_timeouts(
-            Some(60),
+            Some("60s".into()),
             Some(std::time::Duration::from_secs(120)),
-            Some(45),
+            Some("45s".into()),
             Some(std::time::Duration::from_secs(90)),
         );
         assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(60)));
@@ -2339,5 +2364,89 @@ mod tests {
         let cfg = resolve_timeouts(None, None, None, None);
         assert_eq!(cfg.timeout, None);
         assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_accepts_duration_strings_cli() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(
+            Some("2h".into()),
+            None,
+            Some("5m".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_cli_zero_rejected() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        // parse_timeout rejects 0s, so CLI layer falls through to next
+        // precedence (which is None here), resulting in built-in defaults.
+        let cfg = resolve_timeouts(
+            Some("0s".into()),
+            None,
+            Some("0s".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_accepts_hour_and_minute_cli() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(
+            Some("2h".into()),
+            None,
+            Some("30m".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(1800)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_cli_duration_string_parsed() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(
+            Some("2h".into()),
+            None,
+            Some("5m".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_rejects_bare_seconds_cli() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+
+        // Bare seconds like "60" are rejected by parse_timeout, so CLI
+        // falls through to env / frontmatter / built-in.
+        let cfg = resolve_timeouts(
+            Some("60".into()),
+            None,
+            Some("45".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(3600)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
     }
 }

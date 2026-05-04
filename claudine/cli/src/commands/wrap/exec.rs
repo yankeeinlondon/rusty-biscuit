@@ -731,12 +731,18 @@ fn wait_with_signal_handling(
 /// to the structured stream executor.
 ///
 /// Behaves like [`wait_with_signal_handling`] while also polling the
-/// stderr-bridge channel. When a signal arrives, the child's process group
-/// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
-/// period. User Ctrl-C still reports `Interrupted`; wrapper-driven early
-/// termination (rate-limit recovery) preserves a
-/// normal `Completed` termination so downstream failure handling can inspect
-/// synthesized summary fields instead of treating the run like a user cancel.
+/// stderr-bridge channel and the watchdog ticker channel. When a signal
+/// arrives, the child's process group is sent `SIGTERM` and escalated to
+/// `SIGKILL` after a grace period. User Ctrl-C still reports `Interrupted`;
+/// wrapper-driven early termination (rate-limit recovery, timeout, or
+/// step_timeout) preserves a normal `Completed` termination so downstream
+/// failure handling can inspect synthesized summary fields instead of
+/// treating the run like a user cancel.
+///
+/// Timeout enforcement is delegated to the watchdog ticker
+/// (`spawn_timeout_watchdog_ticker`), which sends `WatchdogTermination`
+/// requests through the `watchdog_rx` channel. This function only consumes
+/// those signals and escalates them to child-process termination.
 ///
 /// Isolated to the bridge path so non-OpenCode runs keep the existing
 /// `child.wait()`-based helper.
@@ -749,8 +755,6 @@ fn wait_with_signal_and_early_termination(
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
-    wall_clock_timeout: Option<Duration>,
-    step_timeout: Option<Duration>,
     kill_grace: Duration,
 ) -> Result<(
     i32,
@@ -791,11 +795,9 @@ fn wait_with_signal_and_early_termination(
     }?;
 
     let mut early_termination: Option<EarlyTermination> = None;
-    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
     let grace_period = kill_grace;
-    let loop_start = Instant::now();
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -806,8 +808,6 @@ fn wait_with_signal_and_early_termination(
             let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
             let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
-            } else if wall_clock_tripped {
-                claudine::harness::ProcessTermination::TimedOut
             } else if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
@@ -816,32 +816,7 @@ fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
-        // Wall-clock timeout check: short-circuits directly to TimedOut
-        // without routing through the EarlyTermination surface (matches
-        // the legacy wait_with_timeout behavior for the streaming path).
-        if !wall_clock_tripped
-            && early_termination.is_none()
-            && let Some(budget) = wall_clock_timeout
-            && loop_start.elapsed() >= budget
-        {
-            tracing::warn!(
-                child_pid,
-                timeout_secs = budget.as_secs(),
-                "wall-clock timeout exceeded; sending SIGTERM to child process group",
-            );
-            let kill_pid = if child_in_own_pgroup {
-                -(child_pid as i32)
-            } else {
-                child_pid as i32
-            };
-            unsafe {
-                libc::kill(kill_pid, libc::SIGTERM);
-            }
-            wall_clock_tripped = true;
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        if early_termination.is_none() && !wall_clock_tripped {
+        if early_termination.is_none() {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     tracing::info!(
@@ -867,10 +842,7 @@ fn wait_with_signal_and_early_termination(
         }
 
         // Watchdog-initiated termination (unified `timeout` / `step_timeout`).
-        if early_termination.is_none()
-            && !wall_clock_tripped
-            && let Some(ref wd_rx) = watchdog_rx
-        {
+        if early_termination.is_none() && let Some(ref wd_rx) = watchdog_rx {
             match wd_rx.try_recv() {
                 Ok(req) => {
                     tracing::warn!(
@@ -895,38 +867,10 @@ fn wait_with_signal_and_early_termination(
         }
 
         if early_termination.is_none()
-            && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
             && let Some(signal) =
                 detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
         {
-            let kill_pid = if child_in_own_pgroup {
-                -(child_pid as i32)
-            } else {
-                child_pid as i32
-            };
-            unsafe {
-                libc::kill(kill_pid, libc::SIGTERM);
-            }
-            early_termination = Some(signal);
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        // Step-silence timeout check: user-configured hard kill that
-        // maps to ProcessTermination::TimedOut. Fires after every other
-        // early-termination branch so wall-clock and rate-limit recoveries
-        // keep precedence when they happen in the same poll tick.
-        if early_termination.is_none()
-            && !wall_clock_tripped
-            && let Some(silence_budget) = step_timeout
-            && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
-        {
-            tracing::warn!(
-                child_pid,
-                step_timeout_secs = silence_budget.as_secs(),
-                "step_timeout exceeded; sending SIGTERM to child process group",
-            );
             let kill_pid = if child_in_own_pgroup {
                 -(child_pid as i32)
             } else {
@@ -970,8 +914,6 @@ fn wait_with_signal_and_early_termination(
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
-    wall_clock_timeout: Option<Duration>,
-    step_timeout: Option<Duration>,
     kill_grace: Duration,
 ) -> Result<(
     i32,
@@ -979,18 +921,14 @@ fn wait_with_signal_and_early_termination(
     Option<EarlyTermination>,
 )> {
     let mut early_termination: Option<EarlyTermination> = None;
-    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
     let grace_period = kill_grace;
-    let loop_start = Instant::now();
 
     loop {
         if let Some(status) = child.try_wait()? {
             let code = exit_code_from_status(status);
-            let termination = if wall_clock_tripped {
-                claudine::harness::ProcessTermination::TimedOut
-            } else if early_termination.is_some() {
+            let termination = if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
                 claudine::harness::ProcessTermination::Completed
@@ -998,17 +936,7 @@ fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
-        if !wall_clock_tripped
-            && early_termination.is_none()
-            && let Some(budget) = wall_clock_timeout
-            && loop_start.elapsed() >= budget
-        {
-            let _ = child.kill();
-            wall_clock_tripped = true;
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        if early_termination.is_none() && !wall_clock_tripped {
+        if early_termination.is_none() {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     let _ = child.kill();
@@ -1020,10 +948,7 @@ fn wait_with_signal_and_early_termination(
             }
         }
 
-        if early_termination.is_none()
-            && !wall_clock_tripped
-            && let Some(ref wd_rx) = watchdog_rx
-        {
+        if early_termination.is_none() && let Some(ref wd_rx) = watchdog_rx {
             match wd_rx.try_recv() {
                 Ok(req) => {
                     let _ = child.kill();
@@ -1036,21 +961,9 @@ fn wait_with_signal_and_early_termination(
         }
 
         if early_termination.is_none()
-            && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
             && let Some(signal) =
                 detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
-        {
-            let _ = child.kill();
-            early_termination = Some(signal);
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        if early_termination.is_none()
-            && !wall_clock_tripped
-            && let Some(silence_budget) = step_timeout
-            && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
         {
             let _ = child.kill();
             early_termination = Some(signal);
@@ -1831,11 +1744,15 @@ fn format_internal_duration(secs: u64) -> String {
 /// Returns `Some(EarlyTermination::StepTimeout)` when the time since the last
 /// stream event exceeds `step_timeout`. Returns `None` when `last_event_at`
 /// is not yet populated (first-event grace so provider startup does not
-/// trip a kill) or when silence is still under budget.
+/// trip a kill), when silence is still under budget, or when in-flight tools
+/// or subagents are still active.
 ///
-/// Unlike [`detect_opencode_hang_termination`], this helper does not gate on
-/// `in_flight` state or `provider_status`: any silence past the budget is a
-/// hard kill. The caller is responsible for SIGTERM escalation.
+/// Like [`detect_opencode_hang_termination`], this helper gates on `in_flight`
+/// and `in_flight_subagents`: a long-running Task/subagent call produces
+/// parent-stream silence by design while the child works. The wall-clock
+/// `timeout` rule serves as the backstop for truly stuck tool calls. The
+/// caller is responsible for SIGTERM escalation.
+#[allow(dead_code)]
 fn detect_step_timeout(
     metrics: &LiveMetrics,
     now: Instant,
@@ -1843,6 +1760,9 @@ fn detect_step_timeout(
 ) -> Option<EarlyTermination> {
     let state = metrics.lock().ok()?;
     let last_event_at = state.last_event_at?;
+    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
+        return None;
+    }
     let silence = now.saturating_duration_since(last_event_at);
     if silence >= step_timeout {
         let silence_text = format_internal_duration(silence.as_secs());
@@ -2242,8 +2162,6 @@ pub(crate) fn run_child_stream_semantic(
     // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"
     // grace window (120s). It does not drive a user-visible timing line.
     let opencode_stop_threshold = Duration::from_secs(120);
-    let wall_clock_timeout = timeout_config.timeout;
-    let step_timeout_duration = timeout_config.step_timeout;
 
     // Watchdog channel: the ticker sends termination requests; the wait
     // loop receives them and escalates SIGTERM → SIGKILL via the same
@@ -2264,19 +2182,15 @@ pub(crate) fn run_child_stream_semantic(
             stream_output.clone(),
         ));
     }
-    // Promote to the advanced wait path whenever any timeout rule is
-    // enabled (wall-clock, step, watchdog tick, or stderr early-terminate
-    // bridge). This guarantees the `Timeout` / `StepTimeout` early
-    // termination signal can fire even on non-OpenCode providers and
-    // even when the stderr bridge is absent.
-    let needs_advanced_wait = wall_clock_timeout.is_some()
-        || step_timeout_duration.is_some()
-        || early_terminate_rx.is_some()
+    // Promote to the advanced wait path whenever the watchdog ticker or
+    // stderr early-terminate bridge is active. The watchdog is the sole
+    // source of timeout-driven termination; the wait loop only consumes
+    // signals from channels.
+    let needs_advanced_wait = early_terminate_rx.is_some()
         || watchdog_enabled;
     let (exit_code, termination, early_termination) = if needs_advanced_wait {
         // Synthesize a disconnected receiver when no stderr bridge is
-        // installed so the wait loop can still enforce wall-clock and
-        // step timeouts for non-OpenCode providers.
+        // installed so the wait loop can still receive watchdog signals.
         let rx = early_terminate_rx.unwrap_or_else(|| {
             let (_tx, rx) = std::sync::mpsc::channel();
             rx
@@ -2293,8 +2207,6 @@ pub(crate) fn run_child_stream_semantic(
             wd_rx,
             Some(wait_loop_metrics),
             opencode_stop_threshold,
-            wall_clock_timeout,
-            step_timeout_duration,
             timeout_config.kill_grace,
         )?
     } else {
@@ -2900,6 +2812,86 @@ mod tests {
         let detected = detect_step_timeout(&metrics, now, Duration::from_secs(1));
 
         assert!(detected.is_none());
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_in_flight_tool_exists() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight.insert(
+                "task-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(
+            detected.is_none(),
+            "step_timeout must not fire while a tool call is in-flight"
+        );
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_in_flight_subagent_exists() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(
+            detected.is_none(),
+            "step_timeout must not fire while a subagent is in-flight"
+        );
+    }
+
+    #[test]
+    fn detect_step_timeout_fires_when_in_flight_cleared() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        assert!(
+            detect_step_timeout(&metrics, now, Duration::from_secs(5)).is_none(),
+            "must not fire while subagent is active"
+        );
+
+        {
+            let mut state = metrics.lock().unwrap();
+            state.in_flight_subagents.clear();
+        }
+
+        assert!(
+            detect_step_timeout(&metrics, now, Duration::from_secs(5)).is_some(),
+            "must fire once in-flight is cleared and silence exceeds budget"
+        );
     }
 
     #[test]

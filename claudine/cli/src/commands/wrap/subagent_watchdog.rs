@@ -1,7 +1,3 @@
-// Helpers and types will be used in Phase 2-5; silence dead-code lints
-// until then.
-#![allow(dead_code)]
-
 //! Subagent watchdog state model.
 //!
 //! Tracks active subagents across the lifetime of a wrapped provider session.
@@ -368,7 +364,8 @@ pub(crate) enum WatchdogTickResult {
 ///    `now - started_at >= timeout`, fire `Timeout`.
 /// 2. **Stream-silence (`step_timeout`).** If `config.step_timeout` is set
 ///    AND at least one activity event has been observed
-///    (`LiveMetrics.last_event_at.is_some()`) AND
+///    (`LiveMetrics.last_event_at.is_some()`) AND no tools or subagents
+///    are currently in flight AND
 ///    `now - last_event_at >= step_timeout`, fire `StepTimeout` with
 ///    `outstanding = watchdog_state.active_subagents(now)` for diagnostic
 ///    enrichment.
@@ -410,12 +407,23 @@ pub(crate) fn evaluate_timeout_tick(
 
     // Rule 2: stream silence. Requires that at least one activity event
     // has been observed past initial session start, matching the existing
-    // `last_event_at: Option<Instant>` first-event grace semantics.
+    // `last_event_at: Option<Instant>` first-event grace semantics. When
+    // in-flight tools or subagents exist the rule is suppressed: a
+    // long-running Task/subagent call produces parent-stream silence by
+    // design while the child works. The wall-clock `timeout` rule serves as
+    // the backstop for truly stuck tool calls.
     if let Some(budget) = config.step_timeout {
-        let last_event_at = match live_metrics.lock() {
-            Ok(g) => g.last_event_at,
+        let guarded = match live_metrics.lock() {
+            Ok(g) => {
+                let has_in_flight = !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
+                (g.last_event_at, has_in_flight)
+            }
             Err(_) => return WatchdogTickResult::Ok,
         };
+        let (last_event_at, has_in_flight) = guarded;
+        if has_in_flight {
+            return WatchdogTickResult::Ok;
+        }
         if let Some(last) = last_event_at {
             let silence = now.saturating_duration_since(last);
             if silence >= budget {
@@ -874,6 +882,110 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_timeout_tick_silence_suppressed_by_in_flight_tool() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight.insert(
+                "tool-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: t0,
+                },
+            );
+        }
+
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(result, WatchdogTickResult::Ok);
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_suppressed_by_in_flight_subagent() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: t0,
+                },
+            );
+        }
+
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(result, WatchdogTickResult::Ok);
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_fires_after_in_flight_cleared() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight.insert(
+                "tool-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: t0,
+                },
+            );
+        }
+
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(result, WatchdogTickResult::Ok, "must not fire while tool in-flight");
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.in_flight.clear();
+        }
+
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!("expected StepTimeout breach after in-flight cleared, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn format_step_timeout_breach_message_no_outstanding() {
         let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[]);
         assert!(msg.contains("3m 0s"));
@@ -1039,6 +1151,22 @@ mod tests {
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(config.kill_grace, Duration::from_secs(60));
         assert_eq!(config.interval, Duration::from_secs(3600));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn timeout_config_resolve_cli_wins_over_frontmatter_env_and_default() {
+        let _g1 = TestEnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = TestEnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+        let _g3 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
+        let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+
+        // Simulating the composition layer resolving CLI > frontmatter > env
+        let resolved_timeout = Some(Duration::from_secs(7200)); // from CLI
+        let resolved_step_timeout = Some(Duration::from_secs(1800)); // from CLI
+        let config = TimeoutConfig::resolve(resolved_timeout, resolved_step_timeout);
+        assert_eq!(config.timeout, Some(Duration::from_secs(7200)));
+        assert_eq!(config.step_timeout, Some(Duration::from_secs(1800)));
     }
 
     /// RAII wrapper that restores the prior env var value on drop.
