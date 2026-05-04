@@ -79,6 +79,7 @@ use super::{CapturedFrame, TerminalHarness};
 /// keystrokes being typed into the test window.
 pub struct AppleTerminalHarness {
     window_id: Option<i64>,
+    preserve_capabilities: bool,
 }
 
 impl AppleTerminalHarness {
@@ -86,7 +87,34 @@ impl AppleTerminalHarness {
     /// [`spawn_shell`](TerminalHarness::spawn_shell) to actually open a
     /// Terminal.app window.
     pub fn new() -> Self {
-        Self { window_id: None }
+        Self {
+            window_id: None,
+            preserve_capabilities: false,
+        }
+    }
+
+    /// Suppresses the `FORCE_COLOR=1 CLICOLOR_FORCE=1` exports the
+    /// harness otherwise injects into the spawned shell, so capability
+    /// detection runs against Terminal.app's natural profile.
+    ///
+    /// Use this for tests that exercise `Prose` graceful-degradation
+    /// paths — Apple Terminal does not implement OSC8 hyperlinks or
+    /// double underline, and forcing color flips `bt` into the
+    /// `Terminal::new_forced` path which unconditionally enables both,
+    /// defeating the very degradation being tested.
+    ///
+    /// Image / color tests should leave this at the default (`false`).
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// use biscuit_test_harness::apple_terminal::AppleTerminalHarness;
+    ///
+    /// let harness = AppleTerminalHarness::new().preserve_capabilities(true);
+    /// ```
+    pub fn preserve_capabilities(mut self, yes: bool) -> Self {
+        self.preserve_capabilities = yes;
+        self
     }
 
     /// Returns `true` when this harness can be used:
@@ -187,11 +215,19 @@ impl TerminalHarness for AppleTerminalHarness {
     ///
     /// Cargo's target binary directory is prepended to `PATH` so CLI
     /// binaries (`bt`, `question`) resolve without an absolute path.
-    /// Color-forcing env vars (`FORCE_COLOR`, `CLICOLOR_FORCE`,
-    /// optionally `TERM` / `COLORTERM`) are set so SGR output in
-    /// captures is deterministic — Terminal.app's plain-text capture
-    /// strips SGR anyway, but the variables propagate to `bt` and other
-    /// child processes that gate output on TTY heuristics.
+    /// Color-forcing env vars (`FORCE_COLOR`, `CLICOLOR_FORCE`) are set
+    /// by default so SGR output in captures is deterministic —
+    /// Terminal.app's plain-text capture strips SGR anyway, but the
+    /// variables propagate to `bt` and other child processes that gate
+    /// output on TTY heuristics. Tests exercising graceful-degradation
+    /// paths (OSC8 hyperlink fallback, double-underline degradation)
+    /// should opt out via
+    /// [`AppleTerminalHarness::preserve_capabilities`] so `bt` runs its
+    /// natural detection against Terminal.app's actual capability
+    /// profile instead of the unconditionally-capable
+    /// `Terminal::new_forced` path. `TERM` and `COLORTERM` are always
+    /// exported (when not already inherited) — they fix the TERM family
+    /// for deterministic capture rather than forcing the color profile.
     fn spawn_shell(&mut self) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("Terminal.app via osascript not available"));
@@ -206,7 +242,22 @@ impl TerminalHarness for AppleTerminalHarness {
             shell_cmd.push_str(&shell_quote(&bin_dir.to_string_lossy()));
             shell_cmd.push_str(":$PATH ");
         }
-        shell_cmd.push_str("FORCE_COLOR=1 CLICOLOR_FORCE=1 ");
+        if !self.preserve_capabilities {
+            // Force-color env vars are gated because they flip `bt`'s
+            // `detect_terminal_honoring_force_color` into the
+            // `Terminal::new_forced` profile, which unconditionally
+            // enables `osc_link_support` and `supports_italic` — that
+            // collapses the very Prose graceful-degradation paths that
+            // Level-2 capability tests are designed to exercise.
+            shell_cmd.push_str("FORCE_COLOR=1 CLICOLOR_FORCE=1 ");
+        }
+        // TERM / COLORTERM are NOT gated by preserve_capabilities. They
+        // pin the TERM family Apple Terminal already advertises in
+        // normal use (a truecolor `xterm-256color`-class TERM); dropping
+        // them would regress every existing image / color test that
+        // depends on a deterministic TERM value, and they do not by
+        // themselves trigger the forced-capability path that
+        // FORCE_COLOR / CLICOLOR_FORCE do.
         if env::var_os("TERM").is_none() {
             shell_cmd.push_str("TERM=xterm-256color ");
         }
@@ -416,6 +467,18 @@ fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preserve_capabilities_default_is_false() {
+        let h = AppleTerminalHarness::new();
+        assert!(!h.preserve_capabilities);
+    }
+
+    #[test]
+    fn preserve_capabilities_setter_toggles() {
+        let h = AppleTerminalHarness::new().preserve_capabilities(true);
+        assert!(h.preserve_capabilities);
+    }
 
     #[test]
     fn applescript_escape_double_quote() {

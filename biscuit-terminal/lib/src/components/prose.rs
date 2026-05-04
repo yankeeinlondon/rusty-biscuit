@@ -266,6 +266,37 @@ fn atomic_token_to_escape(token: &str) -> Option<&'static str> {
         .map(|(_, escape)| *escape)
 }
 
+// TODO(apple-terminal-followup): generalize to `degraded_underline_open(term, UnderlineKind)` when the curly/dotted/dashed work at the `block_tag_to_escape` TODO (see `prose.rs` ~L375-381) lands.
+/// Resolves the opening SGR escape for a `<double-underline>` request
+/// against the terminal's actual underline-support profile.
+///
+/// ## Returns
+///
+/// - `Some("\x1b[4:2m")` when no terminal context is available (legacy
+///   optimistic behavior) **or** when the terminal advertises
+///   [`UnderlineSupport::double`].
+/// - `Some("\x1b[4m")` when only [`UnderlineSupport::straight`] is
+///   advertised — the canonical Apple Terminal path.
+/// - `None` when neither variant is supported, signalling the caller to
+///   suppress the underline entirely (no SGR at all, including no
+///   `\x1b[0m` reset — `state.used_styles` must remain unchanged).
+///
+/// ## Notes
+///
+/// The closing SGR for any non-`None` return is always `"\x1b[24m"` and
+/// is intentionally not returned by this helper.
+///
+/// [`UnderlineSupport::double`]: crate::discovery::detection::UnderlineSupport::double
+/// [`UnderlineSupport::straight`]: crate::discovery::detection::UnderlineSupport::straight
+fn degraded_double_underline_open(term: Option<&Terminal>) -> Option<&'static str> {
+    match term {
+        None => Some("\x1b[4:2m"),
+        Some(t) if t.underline_support.double => Some("\x1b[4:2m"),
+        Some(t) if t.underline_support.straight => Some("\x1b[4m"),
+        Some(_) => None,
+    }
+}
+
 /// Capability-aware variant of [`atomic_token_to_escape`].
 ///
 /// Returns the same escape as `atomic_token_to_escape` for every token
@@ -285,12 +316,7 @@ fn atomic_token_to_escape_with_term(
     term: Option<&Terminal>,
 ) -> Option<Cow<'static, str>> {
     if token.eq_ignore_ascii_case("double-underline") {
-        return match term {
-            None => Some(Cow::Borrowed("\x1b[4:2m")),
-            Some(t) if t.underline_support.double => Some(Cow::Borrowed("\x1b[4:2m")),
-            Some(t) if t.underline_support.straight => Some(Cow::Borrowed("\x1b[4m")),
-            Some(_) => None,
-        };
+        return degraded_double_underline_open(term).map(Cow::Borrowed);
     }
 
     atomic_token_to_escape(token).map(Cow::Borrowed)
@@ -372,6 +398,13 @@ fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>
 /// eventually converge so capability-aware degradation lives in one place
 /// instead of being duplicated between the prose parser and the styling
 /// helpers.
+// TODO(apple-terminal-followup): make `curly-underline`, `dotted-underline`,
+// and `dashed-underline` capability-aware in the same way `double-underline`
+// is. `UnderlineSupport` already exposes `curly`, `dotted`, and `dashed`
+// booleans; the atomic and block tag handlers should consult them and fall
+// back to single underline (or plain text) when unsupported. Scoped out of
+// the 2026-05-02 Apple Terminal feature — see
+// features/2026-05-02-apple-terminal/spec.md.
 fn block_tag_to_escape(
     tag_name: &str,
     attrs: &[(String, String)],
@@ -397,15 +430,9 @@ fn block_tag_to_escape(
             //   - Double underline supported: `\x1b[4:2m`.
             //   - Only straight underline supported: degrade to `\x1b[4m`.
             //   - Neither supported: suppress the underline entirely.
-            match term {
-                None => Some(wrap_static("\x1b[4:2m", "\x1b[24m")),
-                Some(t) if t.underline_support.double => {
-                    Some(wrap_static("\x1b[4:2m", "\x1b[24m"))
-                }
-                Some(t) if t.underline_support.straight => {
-                    Some(wrap_static("\x1b[4m", "\x1b[24m"))
-                }
-                Some(_) => Some(BlockTagAction::Suppress),
+            match degraded_double_underline_open(term) {
+                Some(open) => Some(wrap_static(open, "\x1b[24m")),
+                None => Some(BlockTagAction::Suppress),
             }
         }
         "curly-underline" => Some(wrap_static("\x1b[4:3m", "\x1b[24m")),
@@ -1593,11 +1620,7 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                                 // straight underlines, `<a href="">link</a>`,
                                 // or `<clipboard>`): emit only the inner
                                 // content with no escapes.
-                                result.push_str(&parse_tokens_inner(
-                                    &inner_content,
-                                    term,
-                                    state,
-                                ));
+                                result.push_str(&parse_tokens_inner(&inner_content, term, state));
                                 continue;
                             }
                             BlockTagAction::Wrap { open, close } => {
@@ -1616,8 +1639,28 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                         } else {
                             // Structural tag (e.g. `<a href>` with OSC8
                             // or markdown fallback): emit open/close as-is.
+                            //
+                            // The `<a>` markdown fallback (`[desc](url)`,
+                            // emitted only when `osc_link_support == false`)
+                            // is recognised by its structural fingerprint
+                            // (`open == "["` plus `close` of the form
+                            // `"](...)"`). For that one path, escape any
+                            // literal `]` in the rendered description so
+                            // downstream CommonMark parsers don't split
+                            // `[array[0]](url)` into `[array[`/`0]](url)`.
+                            // SGR escapes (CSI `\x1b[...m`) never contain
+                            // `]`, so the replace is safe against any
+                            // styling embedded in the description.
+                            let rendered_inner = parse_tokens_inner(&inner_content, term, state);
+                            let is_markdown_link_fallback = open.as_ref() == "["
+                                && close.as_ref().starts_with("](")
+                                && close.as_ref().ends_with(')');
                             result.push_str(open.as_ref());
-                            result.push_str(&parse_tokens_inner(&inner_content, term, state));
+                            if is_markdown_link_fallback {
+                                result.push_str(&rendered_inner.replace(']', "\\]"));
+                            } else {
+                                result.push_str(&rendered_inner);
+                            }
                             result.push_str(close.as_ref());
                         }
                     } else {
@@ -2181,6 +2224,27 @@ mod tests {
         assert!(
             result.contains("[click here](https://example.com)"),
             "expected markdown link, got: {:?}",
+            result
+        );
+        assert!(
+            !result.contains("\x1b]8;;"),
+            "must not emit OSC8 escape, got: {:?}",
+            result
+        );
+    }
+
+    /// When OSC8 is unsupported and the description contains a literal
+    /// `]`, the markdown fallback must escape it so downstream CommonMark
+    /// parsers do not mis-resolve the link (e.g. `[array[0]](url)` would
+    /// otherwise be parsed as `[array[`/`0]](url)`).
+    #[test]
+    fn link_markdown_fallback_escapes_bracket_in_description() {
+        let term = Terminal::builder().osc_link_support(false).build();
+        let prose = Prose::new(r#"<a href="https://example.com">array[0]</a>"#);
+        let result = prose.parse_tokens(Some(&term));
+        assert!(
+            result.contains(r"[array[0\]](https://example.com)"),
+            "expected escaped `\\]` in markdown-fallback description; got: {:?}",
             result
         );
         assert!(

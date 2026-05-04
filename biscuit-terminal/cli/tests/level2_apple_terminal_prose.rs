@@ -35,7 +35,6 @@ mod common;
 
 use biscuit_test_harness::apple_terminal::AppleTerminalHarness;
 use biscuit_test_harness::{TerminalHarness, skip_with_reason};
-use common::send_bt_command;
 use serial_test::serial;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -47,31 +46,6 @@ use std::time::Duration;
 /// custom prompts), so we wait substantially longer than the WezTerm /
 /// Kitty defaults.
 const SHELL_READY_MS: u64 = 2500;
-
-/// Disables `FORCE_COLOR` / `CLICOLOR_FORCE` for the lifetime of the
-/// spawned shell.
-///
-/// `AppleTerminalHarness::spawn_shell` sets both env vars so SGR is
-/// deterministic, but they also flip
-/// [`detect_terminal_honoring_force_color`] (in `bt`) into the
-/// `Terminal::new_forced` path which unconditionally enables
-/// `osc_link_support` and `supports_italic` — collapsing the very
-/// graceful-degradation paths these tests aim to exercise.
-///
-/// We unset both vars after spawn so detection runs naturally and
-/// `bt prose` honors Apple Terminal's actual capability profile.
-fn disable_color_forcing(harness: &mut impl TerminalHarness) {
-    // wait_for_prompt polls the visible capture for `$`/`#`/`%`,
-    // ensuring the shell's prompt has actually been emitted before we
-    // start typing — otherwise the first characters of `unset` get
-    // type-ahead-eaten by the still-initializing shell.
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    harness
-        .send_text(b"unset FORCE_COLOR CLICOLOR_FORCE\n")
-        .expect("send_text failed");
-    harness.settle();
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-}
 
 // ------------------------------------------------------------------
 // AC-1 — OSC8 link fallback is visible in Apple Terminal
@@ -90,44 +64,63 @@ fn level2_apple_terminal_link_fallback_visible() {
         return;
     }
 
-    let mut harness = AppleTerminalHarness::new();
+    let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
     harness.spawn_shell().expect("spawn_shell failed");
     std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-    disable_color_forcing(&mut harness);
 
+    // Wrap the rendered output between sentinels so the assertion
+    // window excludes shell prompts, command echoes, and other chrome
+    // that varies with the user's login shell. Assumes a POSIX-ish
+    // shell (zsh/bash on macOS) where `printf` and `;` are available.
+    //
     // The inner double-quotes in the bt argument are escaped at the
     // shell level: bash sees `bt prose '<a href="https://example.com">click here</a>'`.
-    send_bt_command(
-        &mut harness,
-        "prose '<a href=\"https://example.com\">click here</a>'",
-    );
+    harness
+        .send_text(
+            b"printf '__BT_START__\\n'; bt prose '<a href=\"https://example.com\">click here</a>'; printf '\\n__BT_END__\\n'\n",
+        )
+        .expect("send_text failed");
+    harness.settle();
     std::thread::sleep(Duration::from_millis(400));
 
     let frame = harness.capture().expect("capture failed");
 
+    let bounded = frame
+        .plain
+        .split("__BT_START__\n")
+        .nth(1)
+        .and_then(|s| s.split("\n__BT_END__").next())
+        .unwrap_or("");
+
     assert!(
-        frame.plain.contains("click here"),
-        "expected visible link label `click here` in capture. plain:\n{}",
+        !bounded.is_empty(),
+        "sentinel-bounded output is empty — bt prose likely crashed or emitted nothing.\n\
+         full capture:\n{}",
         frame.plain,
     );
     assert!(
-        frame.plain.contains("(https://example.com)"),
-        "expected markdown-style URL fallback `(https://example.com)`. plain:\n{}",
-        frame.plain,
+        bounded.contains("click here"),
+        "expected visible link label `click here` between sentinels.\nbounded:\n{}",
+        bounded,
+    );
+    assert!(
+        bounded.contains("(https://example.com)"),
+        "expected markdown-style URL fallback `(https://example.com)`.\nbounded:\n{}",
+        bounded,
     );
     // Negative: literal OSC8 escape garbage must not be visible.
     // Terminal.app strips ANSI from its capture, but if the renderer
     // emitted OSC8 *before* deciding to degrade, the on-screen result
     // would contain the leftover `8;;…` text.
     assert!(
-        !frame.plain.contains("\x1b]8;;"),
-        "raw OSC8 prefix `\\x1b]8;;` leaked into visible capture. plain:\n{}",
-        frame.plain,
+        !bounded.contains("\x1b]8;;"),
+        "raw OSC8 prefix `\\x1b]8;;` leaked into visible capture.\nbounded:\n{}",
+        bounded,
     );
     assert!(
-        !frame.plain.contains("8;;https://example.com"),
-        "OSC8 URL fragment leaked into visible capture. plain:\n{}",
-        frame.plain,
+        !bounded.contains("8;;https://example.com"),
+        "OSC8 URL fragment leaked into visible capture.\nbounded:\n{}",
+        bounded,
     );
 }
 
@@ -150,10 +143,9 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
         return;
     }
 
-    let mut harness = AppleTerminalHarness::new();
+    let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
     harness.spawn_shell().expect("spawn_shell failed");
     std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
-    disable_color_forcing(&mut harness);
 
     // Wrap the rendered output between sentinels so the assertion
     // window excludes shell prompts, command echoes, and other chrome
@@ -233,8 +225,10 @@ fn level2_apple_terminal_harness_lifecycle() {
     // Snapshot the set of Terminal.app window ids *before* the harness
     // spawns. After the harness drops we check that no NEW window ids
     // remain — i.e. every window the harness created was cleaned up.
-    let baseline_ids: std::collections::HashSet<i64> =
-        list_window_ids().expect("list_window_ids failed").into_iter().collect();
+    let baseline_ids: std::collections::HashSet<i64> = list_window_ids()
+        .expect("list_window_ids failed")
+        .into_iter()
+        .collect();
 
     // Capture the new harness window's id inside an inner scope so the
     // harness is dropped (and its window closed) before we query
@@ -254,6 +248,8 @@ fn level2_apple_terminal_harness_lifecycle() {
     // the harness-driven shell is intervention by the *shell*, not by
     // the test runner.
     let harness_window_id = {
+        // Lifecycle test does not touch capability-aware paths; default
+        // forced-color env keeps it consistent with the image / color tests.
         let mut harness = AppleTerminalHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
         std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
@@ -350,10 +346,7 @@ fn level2_apple_terminal_harness_lifecycle() {
 /// by diffing against a pre-spawn snapshot.
 fn list_window_ids() -> Option<Vec<i64>> {
     let out = Command::new("osascript")
-        .args([
-            "-e",
-            "tell application \"Terminal\" to id of every window",
-        ])
+        .args(["-e", "tell application \"Terminal\" to id of every window"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()

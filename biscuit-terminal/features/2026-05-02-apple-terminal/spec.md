@@ -79,6 +79,12 @@ All behaviors are implemented via **inline capability checks in `Prose` tag hand
 
 > **Out of scope:** Refactoring `Prose` to use the `Style`/`Stylist` system. Add a TODO comment in `prose.rs` noting that `Prose` and `Style` should eventually converge.
 
+> **Also out of scope:** `<curly-underline>`, `<dotted-underline>`, and
+> `<dashed-underline>` graceful degradation. These tags currently emit
+> their SGR sequences unconditionally. `UnderlineSupport` already tracks
+> the relevant capability bits; making the tags capability-aware is
+> tracked as a follow-up TODO in `prose.rs`.
+
 ## What Is Being Tested
 
 ### Test Strategy — Two Tiers

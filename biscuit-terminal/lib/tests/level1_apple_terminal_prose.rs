@@ -227,10 +227,7 @@ fn atomic_double_underline_no_underline_support_emits_plain_text() {
         ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
         ("PROBE_FORCE_UNDERLINE_STRAIGHT", "false"),
         ("PROBE_FORCE_UNDERLINE_DOUBLE", "false"),
-        (
-            "PROBE_PROSE_INPUT",
-            "{{double-underline}}important text",
-        ),
+        ("PROBE_PROSE_INPUT", "{{double-underline}}important text"),
     ]);
 
     let output = drain(&mut session);
