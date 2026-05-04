@@ -10,6 +10,10 @@ source_files_during_phase_2: [sniff/cli/src/args.rs]
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3: [sniff/cli/src/commands.rs, sniff/cli/src/output/mod.rs, sniff/cli/src/output/filesystem.rs, sniff/cli/src/output/repo_json.rs]
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages: [sniff-cli]
 ---
 

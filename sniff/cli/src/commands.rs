@@ -701,15 +701,27 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_network()
             .without_filesystem()
             .hardware(HardwareRequest::summary().include_audio(true)),
-        OutputFilter::Repo => DetectionPlan::new()
-            .without_os()
-            .without_hardware()
-            .without_network()
-            .filesystem(
-                FilesystemRequest::new()
-                    .git(git_request.clone())
-                    .without_file_inventory(),
-            ),
+        OutputFilter::Repo => match &repo_action {
+            Some(crate::args::RepoAction::Language) => DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(git_request.clone())
+                        .without_docs()
+                        .without_formatting(),
+                ),
+            _ => DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(git_request.clone())
+                        .without_file_inventory(),
+                ),
+        },
         OutputFilter::Language => DetectionPlan::new()
             .without_os()
             .without_hardware()

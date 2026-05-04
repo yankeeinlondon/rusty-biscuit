@@ -174,6 +174,12 @@ pub(crate) fn build_with_outcome(
                 if has { 0 } else { 1 },
             )
         }
+        // `repo language --json` emits `{ "language": "Rust" }` (or
+        // `{ "language": null }` when no primary language can be detected),
+        // mirroring the bare-name text output.
+        Some(RepoAction::Language) => BuildOutcome::pure(json!({
+            "language": filesystem::primary_language_name(result),
+        })),
         // Phase 5: `deps --json` emits a hand-built per-package object so
         // future fields on `Package` don't leak into the public contract.
         // The `ui` flag is text-only and is intentionally ignored in JSON.

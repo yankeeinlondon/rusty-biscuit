@@ -2075,6 +2075,29 @@ pub fn render_repo_root(result: &sniff::SniffResult) -> String {
         .unwrap_or_default()
 }
 
+/// Render the repository's primary programming language as plain text.
+///
+/// Returns the language name (e.g. `"Rust"`) followed by a newline, suitable
+/// for piping. When no primary language can be determined, returns an empty
+/// string so callers can decide how to surface the absence (exit code, etc.).
+pub fn render_repo_language(result: &sniff::SniffResult, _base_dir: Option<&Path>) -> String {
+    primary_language_name(result)
+        .map(|name| format!("{name}\n"))
+        .unwrap_or_default()
+}
+
+/// Return the repository's primary programming language as a string, when known.
+///
+/// Used by both the text renderer and the JSON builder so they stay in sync.
+pub(crate) fn primary_language_name(result: &sniff::SniffResult) -> Option<String> {
+    result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.languages.as_ref())
+        .and_then(|langs| langs.primary)
+        .map(|lang| lang.to_string())
+}
+
 /// Pure helper: returns whether the current package area has uncommitted
 /// changes, or `None` when the area cannot be resolved.
 ///
