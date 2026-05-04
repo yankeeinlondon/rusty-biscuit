@@ -8,22 +8,22 @@ model: ""
 
 ## Findings
 
-### High: The wait loop still enforces `timeout` and `step_timeout` outside the unified watchdog
+### High: The wait loop still has duplicate timeout enforcement that races with the timeout ticker
 
-The spec requires "two timeouts, one termination path" and says watchdog breaches must flow through the same early-termination pathway so the synthesized summary records `error_kind: "timeout"` or `"step_timeout"` and the `step_timeout` message can include outstanding subagent diagnostics.
+The timeouts spec requires exactly two timeout rules (`timeout` and `step_timeout`), both evaluated by a single timeout ticker thread. When a rule breaches, the ticker renders an error block to stderr, then sends a termination request through the same channel the wait loop already monitors. The wait loop sends SIGTERM, waits 10 s, and escalates to SIGKILL. The synthesised `session_end` records `error_kind: "timeout"` or `"step_timeout"`.
 
-The implementation starts the new watchdog ticker, but then also passes the same `wall_clock_timeout` and `step_timeout_duration` into `wait_with_signal_and_early_termination`:
+The implementation starts the new timeout ticker, but then _also_ passes the raw `wall_clock_timeout` and `step_timeout_duration` values into `wait_with_signal_and_early_termination` as separate enforcement parameters:
 
-- `claudine/cli/src/commands/wrap/exec.rs:2255` enables the watchdog ticker.
+- `claudine/cli/src/commands/wrap/exec.rs:2255` enables the timeout ticker.
 - `claudine/cli/src/commands/wrap/exec.rs:2289` calls the advanced wait loop with both raw timeout durations.
 - `claudine/cli/src/commands/wrap/exec.rs:819` still has a direct wall-clock branch that sets `wall_clock_tripped` and never creates `EarlyTermination::Timeout`.
 - `claudine/cli/src/commands/wrap/exec.rs:919` still has a direct `detect_step_timeout` branch that creates `EarlyTermination::StepTimeout` with `outstanding: Vec::new()`.
 
-Those branches poll every 75 ms, while the watchdog ticker defaults to 5 s. In practice the old branches can win the race, kill the child first, and bypass the watchdog-rendered `Agent Error` block and subagent snapshot. For wall-clock timeout, the direct branch also returns `early_termination = None`, so `apply_early_termination_to_summary` never sets `error_kind: "timeout"`.
+Those branches poll every 75 ms, while the ticker defaults to a 5 s cadence. In practice the old branches can win the race, kill the child first, and bypass the ticker-rendered `Agent Error` block and subagent snapshot. For wall-clock timeout, the direct branch also returns `early_termination = None`, so `apply_early_termination_to_summary` never sets `error_kind: "timeout"`.
 
 Verification level present: Level 1/CLI integration tests with fake provider scripts, but they do not make the race deterministic or assert the JSONL/session summary error kind. This is a functional gap, not just a test gap.
 
-Recommended fix: remove `wall_clock_timeout` and `step_timeout` enforcement from the wait loop when the unified watchdog is enabled. The wait loop should only consume `WatchdogTermination` requests, apply the configured kill grace, and carry the converted `EarlyTermination` through summary finalization.
+Recommended fix: remove `wall_clock_timeout` and `step_timeout` enforcement from the wait loop. The wait loop should only consume termination requests from the ticker channel, apply the 10-second grace, and carry the converted `EarlyTermination` through summary finalization.
 
 ### High: `compose --timeout` / `compose --step-timeout` are ignored on the common non-harness path
 
@@ -69,7 +69,7 @@ Recommended fix: make `--timeout` an `Option<String>`, parse it with `claudine::
 
 ## Additional Notes
 
-The core state model is reasonable: `WatchdogState` is explicit-clock testable, `TimeoutConfig::resolve` separates user-facing timeout precedence from supporting env knobs, and the OpenCode fixture tests are a good Level 1 foundation. The largest ergonomics improvement is to remove the older timeout fields from `AttemptLaunch` / wait-loop plumbing once `TimeoutConfig` is the single contract; today both representations coexist and made the race easy to introduce.
+The core state model is reasonable: `WatchdogState` (internal symbol name) is explicit-clock testable, `TimeoutConfig::resolve` separates user-facing timeout precedence from supporting internals, and the OpenCode fixture tests are a good Level 1 foundation. The largest ergonomics improvement is to remove the older timeout fields from `AttemptLaunch` / wait-loop plumbing once `TimeoutConfig` is the single contract; today both representations coexist and made the race easy to introduce.
 
 ## Test Run
 
@@ -78,8 +78,8 @@ I started targeted checks:
 - `cargo test -p claudine-cli watchdog_subagent_hang_terminates_and_names_stuck_ids --test wrap_commands -- --nocapture`
 - `cargo test -p claudine-cli watchdog_wall_clock_timeout_terminates_active_stream --test wrap_commands -- --nocapture`
 
-Both were still compiling dependencies when this review was written. The source-level issues above do not depend on those results.
+The first command was still compiling dependencies after several minutes, and the second was blocked behind Cargo locks, so I stopped both before they reached the test binary. The source-level issues above do not depend on those results.
 
 ## Readiness
 
-Not ready for production. The main watchdog concept is implemented, but CLI timeouts are ignored on a common compose path, the old wait-loop timeout branches can bypass the new diagnostics and summary mapping, and user-visible rendering lacks the Level 2 verification required by the review rubric.
+Not ready for production. The two-rule timeout ticker is implemented, but CLI timeouts are ignored on a common compose path, the old wait-loop timeout branches can bypass the new diagnostics and summary mapping, and user-visible rendering lacks the Level 2 verification required by the review rubric.

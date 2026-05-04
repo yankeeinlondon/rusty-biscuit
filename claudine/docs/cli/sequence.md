@@ -135,7 +135,7 @@ The `FAIL_FAST` environment variable is injected into each step's session, refle
 The `sequence` command inherits all shared composition flags:
 
 - **Provider Selection**: `--claude`, `--gemini`, `--provider <NAME>`, etc.
-- **Session Control**: `--interactive` (`-i`), `--timeout <SECONDS>`, `--yolo` (`-y`).
+- **Session Control**: `--interactive` (`-i`), `--timeout <DURATION>`, `--yolo` (`-y`).
 - **Resource Management**: `--mcp`, `--use <SERVERS>`, `--repo`.
 - **System Prompt**: `--append-system-prompt` (`--asp`), `--replace-system-prompt` (`--rsp`).
 - **Output Control**: `--output <FORMAT>`, `--quiet` (`-q`), `--silent`.

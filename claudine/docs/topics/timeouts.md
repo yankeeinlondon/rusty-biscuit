@@ -8,20 +8,21 @@ Other docs link here rather than duplicating definitions.
 ## Overview
 
 Claudine enforces **exactly two timeouts**, both evaluated by a single
-watchdog ticker in the wrapper process:
+timeout ticker in the wrapper process:
 
 | Name | What it measures | Built-in default |
 |---|---|---|
 | `timeout` | Wall-clock budget from child spawn | none (opt-in) |
 | `step_timeout` | Stream-silence budget since the last parent-stream event | `30m` |
 
-Both rules feed the same termination path: the watchdog asks the wait loop
-to send `SIGTERM` to the child process group, waits a configurable grace
-period, then escalates to `SIGKILL`. The synthesised `session_end` JSONL
-event records the breach as `error_kind: "timeout"` or
-`"step_timeout"`. There is no third "subagent" or "stream-idle" rule; any
-silence kill is a `step_timeout`, and stuck-subagent detail is surfaced in
-the rendered error block, not in a separate exit reason.
+Both rules feed the same termination path: the ticker sends a
+termination request into the wait loop, which sends `SIGTERM` to the child
+process group, waits a 10-second grace period, then escalates to
+`SIGKILL`. The synthesized `session_end` JSONL event records the breach as
+`error_kind: "timeout"` or `"step_timeout"`. There is no third "subagent"
+or "stream-idle" rule; any silence kill is a `step_timeout`, and
+stuck-subagent detail is surfaced in the rendered error block, not in a
+separate exit reason.
 
 The two-rule design replaces the previous matrix of
 `CLAUDINE_SUBAGENT_*` and `CLAUDINE_STREAM_IDLE_*` knobs with one
@@ -33,7 +34,7 @@ and env-var defaults.
 `timeout` is a hard ceiling on how long the wrapped child may run, measured
 from the moment Claudine spawns it.
 
-- **Formula.** The watchdog fires when `now - started_at >= timeout`.
+- **Formula.** The ticker fires when `now - started_at >= timeout`.
 - **Resets.** Nothing resets it. Tool calls, subagent activity, and
   reasoning chunks all leave the wall-clock alone; the ceiling is absolute.
 - **Default.** None. The rule is opt-in: if neither CLI, frontmatter, nor
@@ -46,8 +47,8 @@ from the moment Claudine spawns it.
 12:00:00  child spawned                   started_at = 12:00:00
 12:00:30  --timeout 5m supplied           ceiling    = 12:05:00
 12:04:59  any activity                    ceiling unchanged
-12:05:00  watchdog tick observes breach   SIGTERM sent
-12:05:10  CLAUDINE_KILL_GRACE elapsed     SIGKILL sent
+12:05:00  ticker observes breach          SIGTERM sent
+12:05:10  grace period elapsed            SIGKILL sent
 12:05:10  session_end recorded            error_kind = "timeout"
 ```
 
@@ -55,12 +56,18 @@ from the moment Claudine spawns it.
 
 `step_timeout` is a silence deadline on the parent-stream channel. As long
 as the child keeps emitting structured events at a healthy cadence, the
-silence clock keeps resetting and the watchdog stays asleep.
+silence clock keeps resetting and the ticker stays asleep.
 
-- **Formula.** The watchdog fires when `now - last_event_at >= step_timeout`.
+- **Formula.** The ticker fires when `now - last_event_at >= step_timeout`
+  **and** no tool calls or subagents are currently in-flight.
+- **In-flight gate.** When the structured stream reports in-flight tool
+  calls (`in_flight`) or active subagents (`in_flight_subagents`), the
+  rule is suppressed entirely. A long-running Task/subagent call produces
+  parent-stream silence by design while the child works; the wall-clock
+  `timeout` rule serves as the backstop for truly stuck tool calls.
 - **Resets.** Every parent-stream event resets `last_event_at`: tool
   calls, tool results, reasoning chunks, info/warning lines, assistant
-  text deltas, and recognised subagent progress events.
+  text deltas, and recognized subagent progress events.
 - **Default.** `30m`. The default is intentionally large so that legitimate
   long-running tool calls (deep research, large test suites) finish without
   spurious kills. Overriding with a smaller value is the right choice when
@@ -69,16 +76,17 @@ silence clock keeps resetting and the watchdog stays asleep.
 
 **Worked example.**
 
-```
+```txt
 12:00:00  child spawned                                         last_event_at = 12:00:00
-12:00:01  task_started: id=A                                    last_event_at = 12:00:01
-12:01:30  task_started: id=B                                    last_event_at = 12:01:30
-12:01:31  task_completed: id=A                                  last_event_at = 12:01:31
-12:01:32  ...stream goes silent. B is still active...
-12:31:32  step_timeout (30m) elapsed                            SIGTERM sent
-12:31:42  CLAUDINE_KILL_GRACE elapsed                           SIGKILL sent
-12:31:42  session_end recorded                                  error_kind = "step_timeout"
-                                                                 outstanding subagents = [B]
+12:00:01  tool_use: Task (starts rust-developer subagent)     last_event_at = 12:00:01
+12:00:02  task_started: id=B                                   last_event_at = 12:00:02
+12:00:03  ...stream goes silent while subagent works...
+12:30:03  step_timeout budget met (30m)                        IN-FLIGHT GATE: suppressed
+                                                                     (in_flight_subagents non-empty)
+...subagent continues working...
+13:00:00  task_completed: id=B                                  last_event_at = 13:00:00
+13:00:01  tool_result: Task                                     in_flight cleared
+13:00:01  parent agent continues with subagent output
 ```
 
 ## Configuration sources and precedence
@@ -132,15 +140,12 @@ $ CLAUDINE_STEP_TIMEOUT=0s claudine compose prompt-without-frontmatter.md
 | `CLAUDINE_TIMEOUT` | none | Wall-clock budget when neither CLI nor frontmatter supplies one. Duration string (`30s`, `5m`, `2h`). |
 | `CLAUDINE_STEP_TIMEOUT` | `30m` | Stream-silence budget when neither CLI nor frontmatter supplies one. Duration string. |
 
-### Termination tuning
+Both values use the same `parse_timeout` grammar as frontmatter, so
+`30s`, `5m`, `2h`, and `0s` all parse the same way.
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `CLAUDINE_KILL_GRACE` | `10s` | How long the wrapper waits between SIGTERM and SIGKILL after a watchdog-initiated termination. |
-| `CLAUDINE_WATCHDOG_INTERVAL` | `5s` | Internal cadence at which the watchdog ticker re-evaluates the two rules. |
-
-The grammar for every knob is the same `parse_timeout` grammar used by
-frontmatter, so `30s`, `5m`, `2h`, and `0s` all parse the same way.
+The ticker evaluates both rules at a 5-second cadence. After a breach,
+the wait loop sends SIGTERM and then waits 10 seconds before escalating
+to SIGKILL. These internals are not configurable.
 
 ## Defaults and rationale
 
@@ -152,9 +157,10 @@ frontmatter, so `30s`, `5m`, `2h`, and `0s` all parse the same way.
   long single tool calls (deep research, large file edits, test suites
   that take many minutes). The point of `step_timeout` is to catch *true*
   silence — the provider is no longer producing any stream events at all,
-  not the absence of assistant text in particular. `30m` is large enough
-  to clear normal long tool work yet still terminate a hung session in
-  bounded time.
+  not the absence of assistant text in particular. The in-flight gate
+  ensures that long-running subagents (which produce parent-stream silence
+  by design) are never killed by this rule; the wall-clock `timeout` is
+  the correct tool for bounding total session duration.
 
 ## Frontmatter syntax
 
@@ -201,20 +207,20 @@ section for the exact wording of the warning lines.
 
 ## Termination path
 
-When either rule fires, the watchdog sends a `WatchdogTermination` request
+When either rule fires, the ticker sends a termination request
 into the same channel that the wait loop already monitors for early
 termination signals (rate limits, completed-but-hung detection). The wait
 loop then runs the standard escalation:
 
 1. **SIGTERM** to the child process group.
-2. **Grace period** of `CLAUDINE_KILL_GRACE` (default `10s`).
+2. **Grace period** (10 s).
 3. **SIGKILL** to the child process group if it has not exited.
 
 This reuses the existing `wait_with_signal_and_early_termination` plumbing
 in `claudine/cli/src/commands/wrap/exec.rs`, so user-driven SIGINT
-handling, rate-limit termination, and watchdog termination all share one
-path. User SIGINT (Ctrl+C) continues to surface as the existing
-`exit_code: 130` flow — it is not a watchdog event.
+handling, rate-limit termination, and timeout-initiated termination all
+share one path. User SIGINT (Ctrl+C) continues to surface as the existing
+`exit_code: 130` flow — it is not a timeout event.
 
 After termination, `apply_early_termination_to_summary` rewrites the
 synthesised `session_end` JSONL event with the corresponding
@@ -230,8 +236,8 @@ rules would expire on the same tick.
 
 ## Subagent diagnostics in error reports
 
-When `step_timeout` fires, the watchdog snapshots any active subagents
-from the shared `WatchdogState` (populated by `SubagentStart` /
+When `step_timeout` fires, the ticker snapshots any active subagents
+from shared tracker state (populated by `SubagentStart` /
 `SubagentStop` events on the structured stream) and includes them in the
 rendered error block on stderr. The block is a colored `BlockQuote`
 labelled `Step Timeout` (rendered through `SemanticEvent::Error` with
@@ -301,7 +307,7 @@ With the unified `step_timeout`:
  ⏳ Awaiting subagent: <id-A> (16m)
  ⏳ Awaiting subagent: <id-B> (14m)
 
-# At 12:44:33 (last_event_at + 30m) the watchdog fires:
+# At 12:44:33 (last_event_at + 30m) the ticker fires:
 > Step Timeout
 > No stream activity for 30m. Outstanding subagents:
 >   - <id-A> (<name-A>) — 30m since last progress
@@ -309,11 +315,11 @@ With the unified `step_timeout`:
 
 # Termination path:
 12:44:33  SIGTERM
-12:44:43  SIGKILL (10s CLAUDINE_KILL_GRACE)
+12:44:43  SIGKILL (10s grace period)
 12:44:43  session_end → error_kind: "step_timeout"
 ```
 
-The synthesised summary records the breach so downstream reporting (`claudine
+The synthesized summary records the breach so downstream reporting (`claudine
 logs`) can attribute the hang to a stream-silence kill rather than a
 generic non-zero exit.
 

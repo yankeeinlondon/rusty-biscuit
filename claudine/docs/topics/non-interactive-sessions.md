@@ -415,7 +415,7 @@ strings (`30s`, `5m`, `2h`):
 
 | Property | Frontmatter | CLI flag | Semantics |
 |----------|-------------|----------|-----------|
-| Wall clock | `timeout` | `--timeout <SECONDS>` | Deadline for total runtime. Checked every poll against `Instant::now() - loop_start`. |
+| Wall clock | `timeout` | `--timeout <DURATION>` | Deadline for total runtime like 30s, 5m, 2h. Enforced by the watchdog ticker. |
 | Step silence | `step_timeout` | `--step-timeout <DURATION>` | Deadline for silence between stream events. Resets on every `SemanticEvent`; fires when `last_event_at` is older than the budget. |
 
 At either deadline, Claudine sends SIGTERM to the child; after a 5-second
