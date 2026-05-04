@@ -335,7 +335,15 @@ fn render_format(storage: &Storage, format: &ClipboardFormat, encode_base64: boo
 /// `GET /current` performs a live read against the OS clipboard and
 /// returns an entry-shaped body with `id: "current"`. It does **not**
 /// insert into history.
-async fn get_current(State(state): State<SharedState>) -> Response {
+///
+/// When `?format=` or `?encoding=` query parameters are present, the
+/// handler returns the rendered format directly (mirroring
+/// `/history/:id/content` behaviour) rather than the `EntrySummary`
+/// JSON.
+async fn get_current(
+    State(state): State<SharedState>,
+    Query(params): Query<ContentQuery>,
+) -> Response {
     let backend = state.clipboard.clone();
 
     let formats = match tokio::task::spawn_blocking(move || capture_current(backend.as_ref())).await
@@ -347,6 +355,27 @@ async fn get_current(State(state): State<SharedState>) -> Response {
 
     if formats.is_empty() {
         return empty_response(StatusCode::NO_CONTENT);
+    }
+
+    // If format or encoding is requested, render the specific format
+    // directly rather than returning the entry summary JSON.
+    if params.format.is_some() || params.encoding.is_some() {
+        let entry = ClipboardEntry::new(formats);
+        let format = match select_format(&entry, params.format) {
+            Some(f) => f,
+            None => {
+                return match params.format {
+                    Some(fmt) => format_not_available(fmt),
+                    None => {
+                        // formats is not empty (we checked above), so
+                        // this path is theoretically unreachable.
+                        return internal("no format available for current clipboard");
+                    }
+                };
+            }
+        };
+        let encode = matches!(params.encoding, Some(Encoding::Base64));
+        return render_format(&state.storage, format, encode);
     }
 
     let entry = ClipboardEntry::new(formats);
@@ -394,6 +423,20 @@ async fn set_content(
         Err(BuildFormatError::InvalidBase64(msg)) => return bad_request(msg),
     };
 
+    let backend = state.clipboard.clone();
+    let storage = state.storage.clone();
+    let format_for_write = format.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        write_format_to_backend(&storage, backend.as_ref(), &format_for_write)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return internal(format!("clipboard write failed: {e}")),
+        Err(e) => return internal(format!("clipboard write task panicked: {e}")),
+    }
+
     let mut history = state.history.lock().await;
     let (id, broadcast_payload) = match history.insert(vec![format]) {
         Some(entry) => (entry.id.clone(), Some(EntrySummary::from(entry))),
@@ -408,6 +451,25 @@ async fn set_content(
     }
 
     json_response(StatusCode::OK, SetResponse { id })
+}
+
+fn write_format_to_backend(
+    storage: &Storage,
+    backend: &(dyn ClipboardBackend + Send + Sync),
+    format: &ClipboardFormat,
+) -> Result<(), String> {
+    match format {
+        ClipboardFormat::Text(text) => backend.set_text(text).map_err(|e| e.to_string()),
+        ClipboardFormat::Html(html) => backend.set_html(html).map_err(|e| e.to_string()),
+        ClipboardFormat::Rtf(rtf) => backend.set_rtf(rtf).map_err(|e| e.to_string()),
+        ClipboardFormat::Image(image) => {
+            let bytes = storage.load_spilled(image).map_err(|e| e.to_string())?;
+            backend
+                .set_image(&bytes, image.width(), image.height())
+                .map_err(|e| e.to_string())
+        }
+        ClipboardFormat::Files(files) => backend.set_files(files).map_err(|e| e.to_string()),
+    }
 }
 
 /// `POST /clear` — clears the OS clipboard by writing an empty string
@@ -713,6 +775,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_set_text_invokes_backend_set_text() {
+        let mock = Arc::new(MockClipboard::default());
+        let (app, _dir) = test_app_with_mock_arc(mock.clone());
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"content_type":"text","data":"hello"}"#))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(mock.set_text_log(), vec!["hello".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_set_html_invokes_backend_set_html() {
+        let mock = Arc::new(MockClipboard::default());
+        let (app, _dir) = test_app_with_mock_arc(mock.clone());
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"content_type":"html","data":"<b>hello</b>"}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(mock.set_html_log(), vec!["<b>hello</b>".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_set_image_invokes_backend_set_image() {
+        let mock = Arc::new(MockClipboard::default());
+        let (app, _dir) = test_app_with_mock_arc(mock.clone());
+        let pixel_bytes: Vec<u8> = vec![1, 2, 3, 4];
+        let body = serde_json::json!({
+            "content_type": "image",
+            "data": b64(&pixel_bytes),
+            "width": 2u32,
+            "height": 2u32,
+        });
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(mock.set_image_log(), vec![(pixel_bytes, 2, 2)]);
+    }
+
+    #[tokio::test]
     async fn test_set_image_decodes_base64_and_creates_image_entry() {
         let (app, _dir) = test_app();
 
@@ -886,12 +1017,10 @@ mod tests {
         assert!(env.error.message.contains("nonexistent"));
     }
 
-    /// `/current` becomes a live read; populating history must NOT
-    /// influence what `/current` returns. The mock backend below has
-    /// nothing on the clipboard, so even with a populated history
-    /// `/current` returns 204.
+    /// `/set` writes through the live backend, so a subsequent
+    /// `/current` on the same app state sees the text that was set.
     #[tokio::test]
-    async fn test_current_is_a_live_read_independent_of_history() {
+    async fn test_set_then_current_roundtrip() {
         let (app, _dir) = test_app();
 
         send_request(
@@ -913,8 +1042,10 @@ mod tests {
                 .unwrap(),
         )
         .await;
-        // Mock backend has no live content, so live read returns 204.
-        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert_eq!(resp.status(), StatusCode::OK);
+        let summary: EntrySummary = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(summary.id, "current");
+        assert_eq!(summary.preview, "in history");
     }
 
     #[tokio::test]
@@ -1381,6 +1512,18 @@ mod tests {
             fn set_text(&self, _: &str) -> Result<(), ClipboardError> {
                 Err(ClipboardError::Backend("synthetic set_text failure".into()))
             }
+            fn set_html(&self, _: &str) -> Result<(), ClipboardError> {
+                Ok(())
+            }
+            fn set_rtf(&self, _: &str) -> Result<(), ClipboardError> {
+                Ok(())
+            }
+            fn set_image(&self, _: &[u8], _: u32, _: u32) -> Result<(), ClipboardError> {
+                Ok(())
+            }
+            fn set_files(&self, _: &[PathBuf]) -> Result<(), ClipboardError> {
+                Ok(())
+            }
             fn is_concealed(&self) -> Result<bool, ClipboardError> {
                 Ok(false)
             }
@@ -1415,6 +1558,83 @@ mod tests {
             env.error.message.contains("clear failed"),
             "expected message to contain 'clear failed', got: {}",
             env.error.message,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_backend_failure_returns_500_internal() {
+        use biscuit_clipboard::error::ClipboardError;
+        use std::path::PathBuf;
+
+        struct ErroringBackend;
+        impl ClipboardBackend for ErroringBackend {
+            fn get_text(&self) -> Result<Option<String>, ClipboardError> {
+                Ok(None)
+            }
+            fn get_html(&self) -> Result<Option<String>, ClipboardError> {
+                Ok(None)
+            }
+            fn get_rtf(&self) -> Result<Option<String>, ClipboardError> {
+                Ok(None)
+            }
+            fn get_image(&self) -> Result<Option<ImageSnapshot>, ClipboardError> {
+                Ok(None)
+            }
+            fn get_files(&self) -> Result<Option<Vec<PathBuf>>, ClipboardError> {
+                Ok(None)
+            }
+            fn set_text(&self, _: &str) -> Result<(), ClipboardError> {
+                Err(ClipboardError::Backend("synthetic set_text failure".into()))
+            }
+            fn set_html(&self, _: &str) -> Result<(), ClipboardError> {
+                Ok(())
+            }
+            fn set_rtf(&self, _: &str) -> Result<(), ClipboardError> {
+                Ok(())
+            }
+            fn set_image(&self, _: &[u8], _: u32, _: u32) -> Result<(), ClipboardError> {
+                Ok(())
+            }
+            fn set_files(&self, _: &[PathBuf]) -> Result<(), ClipboardError> {
+                Ok(())
+            }
+            fn is_concealed(&self) -> Result<bool, ClipboardError> {
+                Ok(false)
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new()
+            .unwrap()
+            .with_cache_dir(dir.path().to_path_buf());
+        let state = Arc::new(AppState {
+            history: Mutex::new(History::new()),
+            storage,
+            clipboard: Arc::new(ErroringBackend),
+            watcher_status: Arc::new(RwLock::new(SupervisorStatus::Running)),
+            events_tx: AppState::new_events_channel(),
+        });
+        let app = router(state.clone());
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"content_type":"text","data":"boom"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let env: ErrorResponse = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(env.error.code, ErrorCode::Internal);
+
+        let history = state.history.lock().await;
+        assert_eq!(
+            history.len(),
+            0,
+            "failed backend writes must not enter history"
         );
     }
 
@@ -1678,6 +1898,125 @@ mod tests {
             }
         }
         out
+    }
+
+    // -------------------------------------------------------------------
+    // Phase 2: /current must honour ?format= and ?encoding= query params
+    // -------------------------------------------------------------------
+
+    /// `GET /current?format=text` returns the text body directly.
+    #[tokio::test]
+    async fn test_current_with_format_text() {
+        let mock = MockClipboard {
+            text: Some("plain text".to_string()),
+            html: Some("<b>html</b>".to_string()),
+            ..Default::default()
+        };
+        let (app, _dir) = test_app_with(mock);
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .uri("/current?format=text")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_text(resp).await, "plain text");
+    }
+
+    /// `GET /current?format=html` returns the HTML body directly.
+    #[tokio::test]
+    async fn test_current_with_format_html() {
+        let mock = MockClipboard {
+            text: Some("plain text".to_string()),
+            html: Some("<b>html</b>".to_string()),
+            ..Default::default()
+        };
+        let (app, _dir) = test_app_with(mock);
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .uri("/current?format=html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_text(resp).await, "<b>html</b>");
+    }
+
+    /// Requesting a format that is not on the clipboard returns 406.
+    #[tokio::test]
+    async fn test_current_with_format_missing_returns_406() {
+        let mock = MockClipboard {
+            text: Some("only text".to_string()),
+            ..Default::default()
+        };
+        let (app, _dir) = test_app_with(mock);
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .uri("/current?format=html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_ACCEPTABLE);
+        let env: ErrorResponse = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(env.error.code, ErrorCode::FormatNotAvailable);
+    }
+
+    /// `GET /current?encoding=base64` returns the primary format
+    /// base64-encoded.
+    #[tokio::test]
+    async fn test_current_with_encoding_base64() {
+        let mock = MockClipboard {
+            text: Some("hello base64".to_string()),
+            ..Default::default()
+        };
+        let (app, _dir) = test_app_with(mock);
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .uri("/current?encoding=base64")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let encoded = body_text(resp).await;
+        let decoded = BASE64_STANDARD.decode(encoded.as_bytes()).unwrap();
+        assert_eq!(decoded, b"hello base64");
+    }
+
+    /// Without query params, `/current` preserves the existing
+    /// `EntrySummary` JSON behaviour (regression guard).
+    #[tokio::test]
+    async fn test_current_without_query_params_returns_entry_summary() {
+        let mock = MockClipboard {
+            text: Some("summary text".to_string()),
+            ..Default::default()
+        };
+        let (app, _dir) = test_app_with(mock);
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .uri("/current")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let summary: EntrySummary = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(summary.id, "current");
+        assert_eq!(summary.preview, "summary text");
+        assert_eq!(summary.content_type, "text");
     }
 
     mod integration {
