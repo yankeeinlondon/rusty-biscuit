@@ -67,6 +67,7 @@ Each phase is self-contained, has clear test requirements, and ends with passing
 ## Phase 1: Postman API-Key Auth Key/Value Fix
 
 ### Goal
+
 Swap the reversed `key`/`value` fields in Postman `apikey` auth blocks so that `key` holds the header/parameter name and `value` holds the secret variable reference.
 
 ### Files to Change
@@ -87,11 +88,13 @@ Swap the reversed `key`/`value` fields in Postman `apikey` auth blocks so that `
    - Regenerate via `BLESS_POSTMAN_GOLDEN=1 cargo test -p schematic-gen --test postman_golden` after code fix.
 
 ### Test Verification
+
 - `cargo test -p schematic-gen --test postman_golden` passes (fixture re-blessed)
 - `cargo test -p schematic-gen postman_output::tests::auth_api_key` passes with corrected assertions
 - `cargo clippy -p schematic-gen` clean
 
 ### Estimated Complexity
+
 Small — two field swaps, one test update, one fixture regeneration.
 
 ---
@@ -99,12 +102,14 @@ Small — two field swaps, one test update, one fixture regeneration.
 ## Phase 2: Grouped Postman Base URL Variable Routing
 
 ### Goal
+
 Ensure requests from grouped APIs with distinct base URLs reference the correct `baseUrl` variable (`baseUrl`, `baseUrl2`, etc.) instead of always using `{{baseUrl}}`.
 
 ### Files to Change
 
 1. **`schematic/gen/src/postman_output.rs`**
    - Modify `build_request_item()` signature to accept `base_url_var: &str`:
+
      ```rust
      fn build_request_item(
          endpoint: &Endpoint,
@@ -115,12 +120,15 @@ Ensure requests from grouped APIs with distinct base URLs reference the correct 
          base_url_var: &str,  // NEW
      ) -> PostmanItem
      ```
+
    - Pass `base_url_var` into `build_url()`:
+
      ```rust
      let url = build_url(&api.base_url, &endpoint.path, &path_params, endpoint, base_url_var);
      ```
 
    - Modify `build_url()` signature to accept `base_url_var: &str`:
+
      ```rust
      fn build_url(
          _base_url: &str,
@@ -130,6 +138,7 @@ Ensure requests from grouped APIs with distinct base URLs reference the correct 
          base_url_var: &str,  // NEW
      ) -> PostmanUrl
      ```
+
    - Replace hard-coded `"{{baseUrl}}"` with `format!("{{{{{}}}}}"`, base_url_var)` in `raw` URL and `host`.
 
    - In `build_postman_collection_grouped()` (lines 728-860):
@@ -153,6 +162,7 @@ Ensure requests from grouped APIs with distinct base URLs reference the correct 
 
 4. **`schematic/gen/tests/postman_golden.rs`**
    - Add behavioural assertion to `golden_grouped_module_ollama()`:
+
      ```rust
      // Verify OllamaOpenAI's ListModels uses baseUrl2, not baseUrl
      let list_models_req = find_request_by_name(&value, "ListModels")
@@ -162,11 +172,13 @@ Ensure requests from grouped APIs with distinct base URLs reference the correct 
      ```
 
 ### Test Verification
+
 - `cargo test -p schematic-gen --test postman_golden` passes (fixture re-blessed + new assertion)
 - `cargo test -p schematic-gen postman_output::tests` passes
 - `cargo clippy -p schematic-gen` clean
 
 ### Estimated Complexity
+
 Medium — signature changes propagate through multiple functions, tests, and fixtures. The core logic is straightforward (map base_url → var name, pass it through).
 
 ---
@@ -174,12 +186,14 @@ Medium — signature changes propagate through multiple functions, tests, and fi
 ## Phase 3: API-Key Parameter Auth Location Metadata
 
 ### Goal
+
 Preserve `ApiKeyParam.location` (Query/Cookie) through the export pipeline instead of hard-coding `"header"`.
 
 ### Files to Change
 
 1. **`schematic/gen/src/export/auth.rs`**
    - Extend `ExportAuth::ApiKey` with an `in`/`location` field:
+
      ```rust
      pub enum ExportAuth {
          // ...
@@ -191,6 +205,7 @@ Preserve `ApiKeyParam.location` (Query/Cookie) through the export pipeline inste
          // ...
      }
      ```
+
    - Update `map_auth()`:
      - `AuthStrategy::ApiKey { header }` → `location: ApiKeyLocation::Header`
      - `AuthStrategy::BearerToken { header: Some(h) }` → `location: ApiKeyLocation::Header`
@@ -218,12 +233,14 @@ Preserve `ApiKeyParam.location` (Query/Cookie) through the export pipeline inste
    - Commit the generated fixture to `tests/fixtures/postman/golden/api_key_query_auth.json`.
 
 ### Test Verification
+
 - `cargo test -p schematic-gen --test postman_golden` passes (new fixture + existing)
 - `cargo test -p schematic-gen export::auth::tests` passes
 - `cargo test -p schematic-gen postman_output::tests` passes
 - `cargo clippy -p schematic-gen` clean
 
 ### Estimated Complexity
+
 Small-to-medium — adding a field to an enum variant touches several pattern matches, but the logic is simple.
 
 ---
@@ -231,7 +248,9 @@ Small-to-medium — adding a field to an enum variant touches several pattern ma
 ## Phase 4: OpenAPI $ref Closure Validation
 
 ### Goal
+
 Prevent OpenAPI artifacts from containing dangling `$ref` references by:
+
 1. Adding a validation pass that walks every emitted `$ref` and fails if the target is missing from `components.schemas`.
 2. Extending `validate_completeness()` to also check JSON request body schemas and nested `$defs` from registered response types.
 
@@ -241,6 +260,7 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
 
 1. **`schematic/definitions/src/registry.rs`**
    - In `validate_completeness()` (lines 180-203), add request schema checking:
+
      ```rust
      for endpoint in &api.endpoints {
          // Existing: check response schemas
@@ -256,11 +276,12 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
          }
      }
      ```
+
    - Add test: `validate_completeness_fails_for_missing_request_types()`.
 
 #### 4b. Add `$ref` closure validation to OpenAPI export
 
-2. **`schematic/define/src/openapi/export.rs`**
+1. **`schematic/define/src/openapi/export.rs`**
    - Add a new function `validate_ref_closure(openapi: &OpenAPI) -> Result<(), Vec<String>>` that:
      - Collects all schema names present in `components.schemas`.
      - Recursively walks every `ReferenceOr::Reference { reference }` under `paths` and `components`.
@@ -269,10 +290,10 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
    - Call `validate_ref_closure()` at the end of `export()` before returning `Ok(OpenAPI)`.
    - Update `export()` return type or wrap the error appropriately. Since `export()` already returns `Result<OpenAPI, OpenApiError>`, add a new `OpenApiError::UnresolvedRefs(Vec<String>)` variant (or similar).
 
-3. **`schematic/define/src/openapi/error.rs`** (or wherever `OpenApiError` is defined)
+2. **`schematic/define/src/openapi/error.rs`** (or wherever `OpenApiError` is defined)
    - Add error variant for unresolved refs if not already present.
 
-4. **`schematic/define/src/openapi/export.rs` (tests)**
+3. **`schematic/define/src/openapi/export.rs` (tests)**
    - Add test `export_fails_on_unresolved_request_schema_ref()`:
      - Create an API with `ApiRequest::Json(Schema::new("MissingBody"))`.
      - Use an empty `TestRegistry`.
@@ -285,7 +306,7 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
 
 #### 4c. Nested `$defs` / nested schema inclusion (optional but recommended)
 
-5. **`schematic/definitions/src/registry.rs`**
+1. **`schematic/definitions/src/registry.rs`**
    - The `convert_schema_to_openapi()` function already rewrites `#/$defs/` → `#/components/schemas/`. However, those `$defs` are not extracted and registered separately.
    - **Recommended approach**: In the schemars `Schema` → OpenAPI conversion, when a `$ref` to `#/components/schemas/<Name>` is emitted but `<Name>` is NOT in the top-level registry, we have two options:
      - **Option A**: Include all `$defs` from every registered schema into `components.schemas` during `to_openapi_schemas()`. This requires walking the schemars JSON tree for each registered schema, finding `$defs`, and converting them too.
@@ -303,6 +324,7 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
 
    **Final approach for this plan**:
    - Modify `SchemaRegistry::to_openapi_schemas()` to also extract `$defs` from each registered schemars schema and convert them:
+
      ```rust
      pub fn to_openapi_schemas(&self) -> IndexMap<String, openapiv3::Schema> {
          let mut result = IndexMap::new();
@@ -321,12 +343,13 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
          result
      }
      ```
+
    - Update `validate_completeness()` to also check request body schemas (as in 4a).
    - Per-API registries may need to be updated to register request body types. The plan should include running `cargo test -p schematic-definitions` to identify which APIs now fail `validate_completeness` after adding request-body checks, then updating those registries.
 
 #### 4d. Registry updates for request body schemas
 
-6. **Per-API registry files** (`schematic/definitions/src/*/mod.rs` or wherever `openapi_registry()` is defined)
+1. **Per-API registry files** (`schematic/definitions/src/*/mod.rs` or wherever `openapi_registry()` is defined)
    - Run tests to identify which APIs are missing request body schema registrations.
    - Add `.register::<T>("BodyTypeName")` entries for every `ApiRequest::Json` schema referenced by endpoints.
    - Examples from the review:
@@ -335,7 +358,7 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
 
 #### 4e. Update existing OpenAPI strict completeness tests
 
-7. **`schematic/gen/tests/openapi_strict_completeness.rs`**
+1. **`schematic/gen/tests/openapi_strict_completeness.rs`**
    - The existing tests should continue to pass after registry updates.
    - Add a new test `request_body_types_must_be_registered()`:
      - Create a synthetic API with `ApiRequest::Json(Schema::new("SomeBody"))`.
@@ -343,6 +366,7 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
      - Assert `validate_completeness()` returns `Err` containing `"SomeBody"`.
 
 ### Test Verification
+
 - `cargo test -p schematic-define` passes (new `$ref` closure tests)
 - `cargo test -p schematic-definitions` passes (registry completeness tests + any updated registries)
 - `cargo test -p schematic-gen --test openapi_strict_completeness` passes
@@ -350,7 +374,9 @@ Prevent OpenAPI artifacts from containing dangling `$ref` references by:
 - `cargo clippy -p schematic-define -p schematic-definitions -p schematic-gen` clean
 
 ### Estimated Complexity
+
 Large — this is the most involved fix. It requires:
+
 - Adding a new validation pass to the OpenAPI exporter
 - Extending registry completeness checks
 - Potentially updating many per-API registry definitions
@@ -362,17 +388,21 @@ Large — this is the most involved fix. It requires:
 ## Phase 5: Integration, Regeneration, and Final Verification
 
 ### Goal
+
 Ensure all changes work together, all tests pass, no lint warnings, and committed artifacts are regenerated.
 
 ### Steps
 
 1. **Regenerate committed artifacts**:
+
    ```bash
    just -f schematic/justfile generate
    ```
+
    This will update `schematic/openapi/*.json` and `schematic/postman/*.postman_collection.json`.
 
 2. **Verify OpenAPI $ref closure manually**:
+
    ```bash
    # Quick sanity check: no dangling $refs in committed OpenAPI files
    for f in schematic/openapi/*.json; do
@@ -389,16 +419,19 @@ Ensure all changes work together, all tests pass, no lint warnings, and committe
    ```
 
 3. **Run full test suite**:
+
    ```bash
    cargo test -p schematic-define -p schematic-definitions -p schematic-gen
    ```
 
 4. **Run lint checks**:
+
    ```bash
    cargo clippy -p schematic-gen -p schematic-define -p schematic-definitions -- -D warnings
    ```
 
 5. **Verify Postman golden fixtures**:
+
    ```bash
    cargo test -p schematic-gen --test postman_golden
    cargo test -p schematic-gen --test postman_artifact_validation
@@ -409,6 +442,7 @@ Ensure all changes work together, all tests pass, no lint warnings, and committe
    - Change `ready: false` → `ready: true` after all tests pass.
 
 ### Test Verification
+
 - All unit tests pass
 - All integration tests pass
 - All golden fixtures are regenerated and committed
@@ -416,6 +450,7 @@ Ensure all changes work together, all tests pass, no lint warnings, and committe
 - Manual `$ref` check shows zero dangling references in committed OpenAPI artifacts
 
 ### Estimated Complexity
+
 Medium — mostly verification and regeneration. Could reveal issues from earlier phases that need minor fixes.
 
 ---
