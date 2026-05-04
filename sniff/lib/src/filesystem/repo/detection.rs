@@ -1685,16 +1685,16 @@ pub fn refresh_package_boundaries(
     let package_path_to_index: HashMap<PathBuf, usize> = packages
         .iter()
         .enumerate()
-        .map(|(i, pkg)| (canonicalize_path(&pkg.path), i))
+        .map(|(i, pkg)| (normalize_path(&pkg.path), i))
         .collect();
 
     // Build nested package lists by walking up parent directories.
     // Each package finds its deepest containing ancestor in O(depth) time.
     let mut nested_packages: Vec<Vec<String>> = vec![Vec::new(); packages.len()];
     for (child_idx, package) in packages.iter().enumerate() {
-        let mut current = canonicalize_path(&package.path);
+        let mut current = normalize_path(&package.path);
         while let Some(parent) = current.parent() {
-            let parent_normalized = canonicalize_path(parent);
+            let parent_normalized = normalize_path(parent);
             if let Some(&parent_idx) = package_path_to_index.get(&parent_normalized)
                 && parent_idx != child_idx
             {
@@ -1727,13 +1727,13 @@ pub fn refresh_package_boundaries(
 
         for classification in inventory.classifications.iter() {
             let abs_path = repo_root.join(&classification.path);
-            let normalized_abs = canonicalize_path(&abs_path);
+            let normalized_abs = normalize_path(&abs_path);
 
             // Find deepest containing package by walking up parent directories.
             let mut assigned_pkg = None;
             let mut current = normalized_abs;
             while let Some(parent) = current.parent() {
-                let parent_normalized = canonicalize_path(parent);
+                let parent_normalized = normalize_path(parent);
                 if let Some(&pkg_idx) = package_path_to_index.get(&parent_normalized) {
                     assigned_pkg = Some(pkg_idx);
                     break;

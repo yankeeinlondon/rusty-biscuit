@@ -176,7 +176,7 @@ pub struct Package {
     /// Directory path between repo root and package root (e.g., "sniff" for "sniff/lib",
     /// "apps/browser" for "apps/browser/my_package", "root" for top-level packages)
     pub package_area: String,
-    /// Native package name from manifest (Cargo.toml [package].name or package.json name)
+    /// Native package name from manifest (Cargo.toml `[package]`.name or package.json name)
     pub name: String,
     /// The package ecosystem inferred from its manifests.
     #[serde(default)]
@@ -215,10 +215,10 @@ pub struct Package {
     pub command_runner: Vec<PathBuf>,
     /// Detected package managers (e.g., "cargo", "npm", "pnpm")
     pub package_managers: Vec<String>,
-    /// Package version from manifest (Cargo.toml [package].version or package.json version)
+    /// Package version from manifest (Cargo.toml `[package]`.version or package.json version)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
-    /// Feature flags defined by this package (e.g., Cargo [features])
+    /// Feature flags defined by this package (e.g., Cargo `[features]`)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
     /// Names of workspace-internal packages this package depends on

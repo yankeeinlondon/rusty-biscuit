@@ -11,7 +11,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
-/// Parsing detail level for [`parse_markdown_meta_with_mode`].
+/// Parsing detail level for `parse_markdown_meta_with_mode`.
 ///
 /// Some callers (e.g. blast-radius scans) only need the `blast_radius`
 /// frontmatter key. Selecting [`DocParseMode::BlastRadiusOnly`] lets the
