@@ -2,6 +2,17 @@
 
 use schematic_define::AuthStrategy;
 
+/// Location where an API key is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApiKeyLocation {
+    /// API key sent in an HTTP header.
+    Header,
+    /// API key sent as a query parameter.
+    Query,
+    /// API key sent in a cookie.
+    Cookie,
+}
+
 /// Normalized authentication for export formats.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportAuth {
@@ -10,12 +21,14 @@ pub enum ExportAuth {
         /// Postman variable name (e.g., "bearerToken").
         variable: String,
     },
-    /// API key in a header.
+    /// API key authentication.
     ApiKey {
-        /// Header name (e.g., "X-API-Key").
+        /// Parameter / header name (e.g., "X-API-Key").
         header: String,
         /// Postman variable name (e.g., "apiKey").
         variable: String,
+        /// Where the key is sent (header, query, cookie).
+        location: ApiKeyLocation,
     },
     /// HTTP Basic authentication.
     Basic {
@@ -51,6 +64,7 @@ pub fn map_auth(strategy: &AuthStrategy) -> ExportAuth {
                 ExportAuth::ApiKey {
                     header: header.as_deref().unwrap_or("Authorization").to_string(),
                     variable: "apiKey".to_string(),
+                    location: ApiKeyLocation::Header,
                 }
             } else {
                 ExportAuth::Bearer {
@@ -61,14 +75,20 @@ pub fn map_auth(strategy: &AuthStrategy) -> ExportAuth {
         AuthStrategy::ApiKey { header } => ExportAuth::ApiKey {
             header: header.clone(),
             variable: "apiKey".to_string(),
+            location: ApiKeyLocation::Header,
         },
         AuthStrategy::Basic => ExportAuth::Basic {
             username_var: "username".to_string(),
             password_var: "password".to_string(),
         },
-        AuthStrategy::ApiKeyParam { name, .. } => ExportAuth::ApiKey {
+        AuthStrategy::ApiKeyParam { name, location } => ExportAuth::ApiKey {
             header: name.clone(),
             variable: "apiKey".to_string(),
+            location: match location {
+                schematic_define::auth::ApiKeyLocation::Query => ApiKeyLocation::Query,
+                schematic_define::auth::ApiKeyLocation::Cookie => ApiKeyLocation::Cookie,
+                _ => ApiKeyLocation::Header,
+            },
         },
         AuthStrategy::OAuth2(_) => ExportAuth::Bearer {
             variable: "bearerToken".to_string(),
@@ -106,6 +126,7 @@ mod tests {
             ExportAuth::ApiKey {
                 header: "X-Auth-Token".to_string(),
                 variable: "apiKey".to_string(),
+                location: ApiKeyLocation::Header,
             }
         );
     }
@@ -119,6 +140,37 @@ mod tests {
             ExportAuth::ApiKey {
                 header: "X-API-Key".to_string(),
                 variable: "apiKey".to_string(),
+                location: ApiKeyLocation::Header,
+            }
+        );
+    }
+
+    #[test]
+    fn map_auth_api_key_param_query() {
+        assert_eq!(
+            map_auth(&AuthStrategy::ApiKeyParam {
+                name: "api_key".to_string(),
+                location: schematic_define::auth::ApiKeyLocation::Query,
+            }),
+            ExportAuth::ApiKey {
+                header: "api_key".to_string(),
+                variable: "apiKey".to_string(),
+                location: ApiKeyLocation::Query,
+            }
+        );
+    }
+
+    #[test]
+    fn map_auth_api_key_param_cookie() {
+        assert_eq!(
+            map_auth(&AuthStrategy::ApiKeyParam {
+                name: "api_key".to_string(),
+                location: schematic_define::auth::ApiKeyLocation::Cookie,
+            }),
+            ExportAuth::ApiKey {
+                header: "api_key".to_string(),
+                variable: "apiKey".to_string(),
+                location: ApiKeyLocation::Cookie,
             }
         );
     }

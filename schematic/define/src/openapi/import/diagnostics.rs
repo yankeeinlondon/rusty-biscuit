@@ -156,6 +156,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)] // Explicitly exercising Clone on a Copy type.
     fn severity_clone_eq() {
         let severity = DiagnosticSeverity::Warn;
         let cloned = severity.clone();

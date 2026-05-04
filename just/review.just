@@ -74,8 +74,6 @@ review feat="" agent="" spec="" design="":
                 [[ "${spec_file}" == "NONE" ]] && spec_file=""
             fi
         fi
-        spec_file="${spec}"
-        design_file="${design}"
     else
         # Interactive feature chooser path
         doc="$(just _choose_feature "{{feat}}")"
@@ -203,6 +201,16 @@ implement-review filter="":
 
     echo
     echo -e "Preparing to implement all {{italic}}suggestions{{reset}} found in a Review"
+
+    # Ask user what type of review to implement
+    review_type="$(printf '%s\n' 'Feature or Fix Review (features/ or fixes/)' 'General Review (reviews/)' | fzf --height=10 --border --border-label 'What type of review do you want to implement?')"
+
+    if [[ "${review_type}" == "Feature or Fix Review (features/ or fixes/)" ]]; then
+        just implement-feature-review "{{filter}}"
+        exit 0
+    fi
+
+    # General review path (reviews/ directory)
     review="$(just _choose_review "{{filter}}")"
     agent="$(just _choose_agent)"
     model=""
@@ -255,16 +263,6 @@ implement-feature-review filter="" review="" spec="" design="" agent="":
         exit 1
     fi
 
-    if [[ -z "{{agent}}" ]]; then
-        use_agent="$(just _choose_agent)"
-    else
-        use_agent="{{agent}}"
-    fi
-    model=""
-    if [[ "${use_agent}" == "opencode" ]];then
-        model="--model $(just _choose_model)"
-    fi
-
     echo
     echo -e "About to {{bold}}implement{{reset}} the {{blue}}$(just _link "${review}"){{reset}} review suggestions"
     echo -e "    - Review Iteration:  {{dim}}${iteration}{{reset}}"
@@ -276,6 +274,16 @@ implement-feature-review filter="" review="" spec="" design="" agent="":
     if [[ "${has_design}" == true && -n "${design_file}" ]]; then
         link="$(just _link "${design_file}")"
         echo -e "  - {{bold}}Design file:{{reset}} {{blue}}${link}{{reset}}"
+    fi
+
+    if [[ -z "{{agent}}" ]]; then
+        use_agent="$(just _choose_agent)"
+    else
+        use_agent="{{agent}}"
+    fi
+    model=""
+    if [[ "${use_agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
     fi
 
     echo
@@ -310,10 +318,10 @@ implement-feature-review filter="" review="" spec="" design="" agent="":
         fi
         echo -e "Starting the {{bold}}review{{reset}} recipe with:"
         echo -e "  - Specification: $(just _link "${spec_file}")"
-        if [[ ! -z "${design_file}" ]]; then
-            echo -e "  - Design: $(just _link "${design_file}")"
-        fi
-        just review --spec="${spec_file}" --design="${design_file}"
+    if [[ ! -z "${design_file}" ]]; then
+        echo -e "  - Design: $(just _link "${design_file}")"
+    fi
+    just review --spec="${spec_file}" --design="${design_file}"
 
     else
         echo

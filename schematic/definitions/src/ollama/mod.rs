@@ -57,7 +57,19 @@ use schematic_define::{
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
     SchemaRegistry::new()
-        // Native API types
+        // Native API request body types
+        .register::<GenerateBody>("GenerateBody")
+        .register::<ChatBody>("ChatBody")
+        .register::<EmbeddingsBody>("EmbeddingsBody")
+        .register::<ShowModelBody>("ShowModelBody")
+        .register::<PullModelBody>("PullModelBody")
+        .register::<PushModelBody>("PushModelBody")
+        .register::<CopyModelBody>("CopyModelBody")
+        .register::<DeleteModelBody>("DeleteModelBody")
+        .register::<CreateModelBody>("CreateModelBody")
+        // Native API nested types
+        .register::<Message>("Message")
+        // Native API response types
         .register::<EmbeddingsResponse>("EmbeddingsResponse")
         .register::<ListModelsResponse>("ListModelsResponse")
         .register::<ModelInfo>("ModelInfo")
@@ -65,7 +77,13 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<ShowModelResponse>("ShowModelResponse")
         .register::<ListRunningModelsResponse>("ListRunningModelsResponse")
         .register::<RunningModel>("RunningModel")
-        // OpenAI-compatible API types
+        // OpenAI-compatible API request body types
+        .register::<OpenAIChatCompletionRequest>("OpenAIChatCompletionRequest")
+        .register::<OpenAICompletionRequest>("OpenAICompletionRequest")
+        .register::<OpenAIEmbeddingRequest>("OpenAIEmbeddingRequest")
+        // OpenAI-compatible API nested types
+        .register::<OpenAIMessage>("OpenAIMessage")
+        // OpenAI-compatible API response types
         .register::<OpenAIEmbeddingResponse>("OpenAIEmbeddingResponse")
         .register::<OpenAIEmbeddingData>("OpenAIEmbeddingData")
         .register::<OpenAIUsage>("OpenAIUsage")

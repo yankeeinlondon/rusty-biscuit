@@ -112,9 +112,8 @@ renderer, use a matching CSS treatment for that demoted partial output.
 
 Shell blocks share the same security infrastructure as `::shell` directives:
 
-- [Blacklisted commands](./shell-expansion.md#blacklisted-commands-and-syntax)
-- Whitelist/blacklist files
-- Approval handler flow
+- [Pre-Flight Shell Approval](../topics/pre-flight-checks.md) — blacklist, whitelist, and approval flow
+- [Shell Expansion](./shell-expansion.md) — `::shell` directive details
 
 Commands inside a shell block are discovered during pre-flight and presented for
 approval along with `::shell` directives.

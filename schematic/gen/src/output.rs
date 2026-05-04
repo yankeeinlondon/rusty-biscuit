@@ -190,6 +190,20 @@ fn assemble_ws_definition_module(module: &str) -> Option<TokenStream> {
     Some(quote! {
         #module_docs
 
+        // Generated WebSocket modules intentionally use slightly verbose
+        // patterns (explicit clones, separate `if let` blocks, single-arm
+        // `match`, large `Result::Err` variants from the runtime
+        // transport). These are stable codegen shapes shared by every WS
+        // module; suppressing the corresponding clippy lints here keeps
+        // the templates simple without changing emitted behavior.
+        #![allow(
+            clippy::clone_on_copy,
+            clippy::collapsible_if,
+            clippy::possible_missing_else,
+            clippy::result_large_err,
+            clippy::single_match,
+        )]
+
         #reexport_path
 
         #api_fn

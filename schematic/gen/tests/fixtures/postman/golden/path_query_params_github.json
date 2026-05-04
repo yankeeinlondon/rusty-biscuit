@@ -1,0 +1,70 @@
+{
+  "auth": {
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{bearerToken}}"
+      }
+    ],
+    "type": "bearer"
+  },
+  "info": {
+    "description": "GitHub test API",
+    "name": "GitHub",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "ListRepoIssues",
+          "request": {
+            "description": "List issues for a repository",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "issues"
+              ],
+              "query": [
+                {
+                  "description": "Issue state filter",
+                  "key": "state"
+                }
+              ],
+              "raw": "{{baseUrl}}/repos/:owner/:repo/issues",
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "Repos"
+    }
+  ],
+  "variable": [
+    {
+      "description": "Base URL for all requests",
+      "key": "baseUrl",
+      "value": "https://api.github.com"
+    },
+    {
+      "description": "Bearer token for Authorization header",
+      "key": "bearerToken",
+      "value": ""
+    }
+  ]
+}

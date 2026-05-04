@@ -109,6 +109,109 @@ pub(crate) fn build_prompt_timing_context(
     }
 }
 
+/// Source-precedence input for [`resolve_timeouts`].
+///
+/// `cli` is the value passed via `--timeout` / `--step-timeout`.
+/// `frontmatter` is the value parsed from `HarnessPlan.timeout` /
+/// `HarnessPlan.step_timeout`.
+/// `env_var` is the env-var name to consult as the third-priority source.
+/// `built_in` is the final fallback (e.g. `Some(30m)` for `step_timeout`,
+/// `None` for `timeout`).
+pub(crate) struct TimeoutResolutionInput<'a> {
+    pub cli: Option<String>,
+    pub frontmatter: Option<std::time::Duration>,
+    pub env_var: &'a str,
+    pub built_in: Option<std::time::Duration>,
+}
+
+/// Resolve a single timeout following the documented precedence chain:
+///
+///   CLI flag > frontmatter > env-var default > built-in default.
+///
+/// Env values use the same `parse_timeout` grammar as frontmatter
+/// (`30s`, `5m`, `2h`). An env value of `0s` (or any zero duration via the
+/// grammar) **disables** the rule for this run, returning `None` even if a
+/// non-zero built-in default exists. Invalid env values are silently
+/// ignored and the chain falls through to the next layer.
+pub(crate) fn resolve_single_timeout(
+    input: TimeoutResolutionInput<'_>,
+) -> Option<std::time::Duration> {
+    if let Some(raw) = input.cli {
+        match claudine::harness::parse_timeout(&raw, std::path::Path::new("<cli>")) {
+            Ok(d) => return Some(d),
+            Err(_) => {
+                // Invalid CLI value should have been caught earlier, but
+                // fall through rather than panicking.
+            }
+        }
+    }
+    if let Some(d) = input.frontmatter {
+        return Some(d);
+    }
+    match std::env::var(input.env_var) {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                input.built_in
+            } else if is_zero_duration_literal(trimmed) {
+                // Spec: env value of `0s` disables the rule (parse_timeout
+                // itself rejects zero, so we recognise the literal here).
+                None
+            } else {
+                match claudine::harness::parse_timeout(trimmed, std::path::Path::new("<env>")) {
+                    Ok(d) => Some(d),
+                    Err(_) => input.built_in,
+                }
+            }
+        }
+        Err(_) => input.built_in,
+    }
+}
+
+/// Recognise env-var literals that the user means as "disable this rule".
+///
+/// Accepts plain `0`, `0s`, `0 seconds`, `0m`, `0h`, etc. — anything whose
+/// numeric component is `0` regardless of unit. Case-insensitive on the unit.
+fn is_zero_duration_literal(value: &str) -> bool {
+    let trimmed = value.trim();
+    let digits_end = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(trimmed.len());
+    if digits_end == 0 {
+        return false;
+    }
+    let (digits, _rest) = trimmed.split_at(digits_end);
+    digits.parse::<u64>().is_ok_and(|n| n == 0)
+}
+
+/// Resolve `timeout` and `step_timeout` simultaneously and assemble a
+/// [`TimeoutConfig`] for the watchdog ticker.
+///
+/// CLI > frontmatter > env > built-in. Built-ins are `None` for `timeout`
+/// (no wall-clock kill unless opted in) and `30m` for `step_timeout`.
+/// Supporting knobs (`kill_grace`, `interval`) are read from env via
+/// [`super::subagent_watchdog::TimeoutConfig::resolve`].
+pub(crate) fn resolve_timeouts(
+    cli_timeout: Option<String>,
+    plan_timeout: Option<std::time::Duration>,
+    cli_step_timeout: Option<String>,
+    plan_step_timeout: Option<std::time::Duration>,
+) -> super::subagent_watchdog::TimeoutConfig {
+    let timeout = resolve_single_timeout(TimeoutResolutionInput {
+        cli: cli_timeout,
+        frontmatter: plan_timeout,
+        env_var: "CLAUDINE_TIMEOUT",
+        built_in: None,
+    });
+    let step_timeout = resolve_single_timeout(TimeoutResolutionInput {
+        cli: cli_step_timeout,
+        frontmatter: plan_step_timeout,
+        env_var: "CLAUDINE_STEP_TIMEOUT",
+        built_in: Some(std::time::Duration::from_secs(30 * 60)),
+    });
+    super::subagent_watchdog::TimeoutConfig::resolve(timeout, step_timeout)
+}
+
 fn resolve_prompt_display_path(
     path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
@@ -175,6 +278,104 @@ fn composition_dispatch_context(
         ),
     );
     context
+}
+
+/// Resolve the execution target *before* composition templates are
+/// rendered, so `{{env.AGENT}}` in the body or inline `prompt` resolves
+/// to the chosen provider.
+///
+/// Mirrors the resolution logic in [`execute_composition_request_inner`]
+/// — explicit flag wins, then frontmatter agent hint, then favorite, with
+/// a TTY picker when no signal yields a unique answer. The hints come
+/// from raw frontmatter (no compose), so an `agent: "{{...}}"` template
+/// is treated as absent and falls back to the picker / favorite.
+pub(crate) fn eagerly_resolve_target(
+    hints: &claudine::composition::EffectiveSelectionHints,
+    explicit_provider: Option<Provider>,
+    excluded: &std::collections::BTreeSet<Provider>,
+    cli_model: Option<&str>,
+    source_repo_root: Option<&Path>,
+) -> Result<ResolvedExecutionTarget> {
+    let cwd = std::env::current_dir()?;
+    let clients = InstalledAiClients::new();
+    let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+        .collect();
+    let snapshot = build_installed_snapshot(&installed, excluded);
+
+    let selection_config = load_selection_config(source_repo_root.unwrap_or(&cwd));
+    let catalog = match &selection_config {
+        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+            cfg.model_overrides.clone(),
+        ),
+        None => claudine::model_catalog::ModelCatalogService::new(),
+    };
+    catalog.refresh_blocking();
+    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+
+    let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+    if is_tty {
+        if let Some(provider) = explicit_provider {
+            let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+                provider,
+                hints,
+                cli_model,
+                Some(&catalog),
+            );
+            return Ok(ResolvedExecutionTarget {
+                provider,
+                provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+                model,
+                model_reason,
+            });
+        }
+        let plan = claudine::composition::build_picker_plan_with_hints(hints, &snapshot, favorite)
+            .map_err(|e| eyre!("{e}"))?;
+        let provider = super::selection_ui::prompt_one_shot_provider(plan)
+            .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+        let (model, model_reason) = claudine::composition::resolve_model_with_hints(
+            provider,
+            hints,
+            cli_model,
+            Some(&catalog),
+        );
+        Ok(ResolvedExecutionTarget {
+            provider,
+            provider_reason: claudine::composition::ProviderResolutionReason::InteractivePicker,
+            model,
+            model_reason,
+        })
+    } else {
+        claudine::composition::resolve_target_non_tty_with_hints(
+            explicit_provider,
+            hints,
+            &snapshot,
+            favorite,
+            cli_model,
+            Some(&catalog),
+        )
+        .map_err(|e| eyre!("{e}"))
+    }
+}
+
+/// Inject `AGENT` into both the parent process env and the supplied
+/// `env_overrides` map so composition templates and downstream
+/// system-prompt rendering see the chosen provider's slug.
+pub(crate) fn install_agent_env_for_composition(
+    target: &ResolvedExecutionTarget,
+    env_overrides: &mut std::collections::BTreeMap<String, String>,
+) {
+    let slug = target.provider.as_slug().to_string();
+    // SAFETY: composition entry runs on the main task before any worker
+    // threads or hooks have spawned. Setting AGENT here is the only
+    // mutation of the parent process env at this point, satisfying
+    // Rust 2024's `set_var` safety contract.
+    unsafe {
+        std::env::set_var("AGENT", &slug);
+    }
+    env_overrides.insert("AGENT".to_string(), slug);
 }
 
 /// Execute a composition request through the wrapper-grade pipeline.
@@ -992,8 +1193,8 @@ pub(crate) fn execute_composition_request_inner(
             binary_path.as_path(),
             child_cwd,
             effective_non_interactive,
-            request.timeout,
-            request.step_timeout,
+            request.timeout.clone(),
+            request.step_timeout.clone(),
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -1064,6 +1265,13 @@ pub(crate) fn execute_composition_request_inner(
             None,
         ));
 
+        let timeout_config = resolve_timeouts(
+            request.timeout.clone(),
+            None,
+            request.step_timeout.clone(),
+            None,
+        );
+
         let mut child_spawned = false;
         let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;
         let exit_result = execute_without_harness(
@@ -1088,6 +1296,7 @@ pub(crate) fn execute_composition_request_inner(
             &mut child_spawned,
             prompt_timing,
             &mut agent_perf,
+            timeout_config,
         );
 
         // Mark launched as soon as spawn succeeded — before propagating
@@ -1165,6 +1374,7 @@ fn execute_without_harness(
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
     agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
+    timeout_config: super::subagent_watchdog::TimeoutConfig,
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
 
@@ -1186,6 +1396,7 @@ fn execute_without_harness(
             dispatch_context,
             child_spawned,
             prompt_timing,
+            timeout_config,
         )?;
         *agent_perf_out = Some(result.telemetry.into_agent_perf(result.summary.duration_ms));
 
@@ -1220,6 +1431,18 @@ fn execute_without_harness(
         // Legacy (non-structured) path. Inline must capture the response so
         // the closure plan can rewrite the target file; direct just runs the
         // child and lets it write to stdout on its own.
+        if timeout_config.any_enabled() {
+            use biscuit_terminal::components::renderable::Renderable;
+            use biscuit_terminal::components::status::{Status, StatusState};
+            let rendered = Status::new(
+                "timeouts are only enforced in structured-stream mode; \
+                 ignoring for this non-structured attempt"
+                    .to_string(),
+            )
+            .state(StatusState::Warning)
+            .render(term);
+            eprintln!("{rendered}");
+        }
         match &mode {
             CompositionExecutionMode::Inline {
                 session_interactive,
@@ -1535,6 +1758,7 @@ fn run_structured_composition(
     dispatch_context: &HashMap<String, serde_json::Value>,
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
+    timeout_config: super::subagent_watchdog::TimeoutConfig,
 ) -> Result<CompositionStreamResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
@@ -1548,6 +1772,7 @@ fn run_structured_composition(
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
+    let watchdog_state = Some(sink.watchdog_state());
     let section_stream = sink.section_stream();
     let (build_parser, stderr_bridge) =
         super::build_structured_plumbing(provider, sink, parser_config);
@@ -1570,7 +1795,7 @@ fn run_structured_composition(
                 env: child_env,
                 cwd: child_cwd,
                 prompt: wire_prompt.to_string(),
-                timeout: None,
+                timeout: timeout_config.timeout,
                 client_name: env!("CARGO_PKG_NAME"),
                 client_version: env!("CARGO_PKG_VERSION"),
                 capabilities: super::wire_io::WireClientCapabilities::default_for_claudine(),
@@ -1590,8 +1815,7 @@ fn run_structured_composition(
             child_args,
             child_env,
             child_cwd,
-            None,
-            None,
+            timeout_config,
             stderr_noise,
             profile.suppress_structured_stderr_on_success(),
             stream_verbosity != Verbosity::Silent,
@@ -1602,6 +1826,8 @@ fn run_structured_composition(
             stream_output,
             stderr_bridge,
             prompt_timing,
+            watchdog_state,
+            Some(section_stream.tracker()),
         )?
     };
     let telemetry = stream_result.telemetry;
@@ -2024,5 +2250,203 @@ mod tests {
         assert!(catalog.is_valid(Provider::Codex, "gpt-5"));
         // Non-overridden provider should use static catalog
         assert!(catalog.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
+    }
+
+    /// RAII guard that restores the prior value of an env var on drop. Used
+    /// to keep the resolve_timeouts tests hermetic.
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_cli_wins_over_frontmatter_env_and_default() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+
+        let cfg = resolve_timeouts(
+            Some("60s".into()),
+            Some(std::time::Duration::from_secs(120)),
+            Some("45s".into()),
+            Some(std::time::Duration::from_secs(90)),
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(60)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(45)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_frontmatter_wins_over_env_and_default() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+
+        let cfg = resolve_timeouts(
+            None,
+            Some(std::time::Duration::from_secs(7200)),
+            None,
+            Some(std::time::Duration::from_secs(900)),
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(900)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_env_wins_over_built_in_default() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "10m");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(3600)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(600)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_built_in_default_used_when_nothing_set() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        // No CLI/frontmatter/env: timeout has no built-in default (None);
+        // step_timeout falls back to 30m.
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_zero_env_disables_rule() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "0s");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "0s");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, None);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_invalid_env_falls_back_to_built_in() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "garbage");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "also garbage");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_accepts_duration_strings_cli() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(
+            Some("2h".into()),
+            None,
+            Some("5m".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_cli_zero_rejected() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        // parse_timeout rejects 0s, so CLI layer falls through to next
+        // precedence (which is None here), resulting in built-in defaults.
+        let cfg = resolve_timeouts(
+            Some("0s".into()),
+            None,
+            Some("0s".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_accepts_hour_and_minute_cli() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(
+            Some("2h".into()),
+            None,
+            Some("30m".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(1800)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_cli_duration_string_parsed() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(
+            Some("2h".into()),
+            None,
+            Some("5m".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_rejects_bare_seconds_cli() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+
+        // Bare seconds like "60" are rejected by parse_timeout, so CLI
+        // falls through to env / frontmatter / built-in.
+        let cfg = resolve_timeouts(
+            Some("60".into()),
+            None,
+            Some("45".into()),
+            None,
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(3600)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
     }
 }

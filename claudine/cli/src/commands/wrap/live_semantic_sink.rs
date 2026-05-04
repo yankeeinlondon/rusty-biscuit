@@ -52,6 +52,7 @@ use serde_json::Value;
 use super::StructuredSummaryDetails;
 use super::section::{Section, SectionStream, SectionTracker};
 use super::stream_io::StreamOutput;
+use super::subagent_watchdog::WatchdogState;
 
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
 /// `wrap/mod.rs` so both sinks render against the same capabilities.
@@ -148,6 +149,11 @@ pub(crate) struct LiveSemanticSink {
     /// other bytes, and cleared to `0` whenever the sink emits non-blank
     /// stderr content.
     stdout_trailing_newlines: usize,
+    /// Shared subagent watchdog state. Updated from the semantic event
+    /// stream so the exec-layer ticker can detect stuck subagents and
+    /// request termination. The same `Arc<Mutex<_>>` is shared with
+    /// `exec.rs` via [`Self::watchdog_state`].
+    watchdog_state: Arc<Mutex<WatchdogState>>,
 }
 
 impl LiveSemanticSink {
@@ -183,6 +189,7 @@ impl LiveSemanticSink {
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
+            watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
         }
     }
 
@@ -262,6 +269,7 @@ impl LiveSemanticSink {
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
+            watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
         }
     }
 
@@ -317,6 +325,13 @@ impl LiveSemanticSink {
 
     pub(crate) fn live_metrics(&self) -> LiveMetrics {
         self.live_metrics.clone()
+    }
+
+    /// Return a clone of the shared [`WatchdogState`] handle so the exec
+    /// layer and heartbeat threads can inspect active subagents without
+    /// holding the sink mutex during writes.
+    pub(crate) fn watchdog_state(&self) -> Arc<Mutex<WatchdogState>> {
+        self.watchdog_state.clone()
     }
 
     fn should_render(&self) -> bool {
@@ -991,7 +1006,35 @@ impl SemanticEventSink for LiveSemanticSink {
             details.record_tool_name(n);
         }
 
-        // 4. Forward text/reasoning to their dedicated renderers before the
+        // 4. Update shared watchdog state for subagent tracking.
+        //    Start/stop manage the active set; any event with a recognized
+        //    subagent id resets `last_progress_at` for that id.
+        {
+            let now = std::time::Instant::now();
+            if let Ok(mut state) = self.watchdog_state.lock() {
+                match &event {
+                    SemanticEvent::SubagentStart { id, name, .. } => {
+                        state.subagent_started(
+                            id.clone().unwrap_or_default(),
+                            name.clone(),
+                            now,
+                        );
+                    }
+                    SemanticEvent::SubagentStop { id, .. } => {
+                        if let Some(id) = id {
+                            state.subagent_stopped(id, now);
+                        }
+                    }
+                    _ => {
+                        for subagent_id in extract_subagent_ids_from_event(&event) {
+                            state.observe_subagent_progress(&subagent_id, now);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Forward text/reasoning to their dedicated renderers before the
         //    status-line rendering so stdout writes happen in stream order.
         match &event {
             SemanticEvent::OutputText { text, .. } if self.emit_output_text.is_some() => {
@@ -1042,10 +1085,10 @@ impl SemanticEventSink for LiveSemanticSink {
             _ => {}
         }
 
-        // 5. Render status line to STDERR.
+        // 6. Render status line to STDERR.
         self.render_event(&event);
 
-        // 6. Dispatch to agentic hooks when applicable, and log the
+        // 7. Dispatch to agentic hooks when applicable, and log the
         //    resulting `DispatchEventMeta` to JSONL when a logger is wired.
         //    The logger always sees every event (even Output/Reasoning which
         //    have no agentic mapping); we build a Notification-shaped meta
@@ -1061,6 +1104,45 @@ impl SemanticEventSink for LiveSemanticSink {
             (self.dispatch)(agentic, meta);
         }
     }
+}
+
+/// Extract any recognized subagent identifiers from a semantic event.
+///
+/// Returns all ids found so the caller can update `last_progress_at`
+/// for every matching active entry.  The list is usually empty or a
+/// single element, but OpenCode `task_progress` payloads may carry a
+/// `task_id` alongside the primary event id.
+fn extract_subagent_ids_from_event(event: &SemanticEvent) -> Vec<super::subagent_watchdog::SubagentId> {
+    use super::subagent_watchdog::SubagentId;
+
+    let mut ids = Vec::new();
+
+    match event {
+        SemanticEvent::SubagentStart { id, .. } | SemanticEvent::SubagentStop { id, .. } => {
+            if let Some(id) = id {
+                ids.push(id.clone());
+            }
+        }
+        SemanticEvent::Info { extra, .. } => {
+            // OpenCode task_progress style: extra["task_id"] or extra["id"]
+            if let Some(task_id) = extra.get("task_id").and_then(Value::as_str) {
+                ids.push(SubagentId::from(task_id));
+            } else if let Some(id) = extra.get("id").and_then(Value::as_str) {
+                ids.push(SubagentId::from(id));
+            }
+        }
+        SemanticEvent::ProviderExtension { payload, .. } => {
+            // Some provider extensions carry a task/subagent id in the payload.
+            if let Some(task_id) = payload.get("task_id").and_then(Value::as_str) {
+                ids.push(SubagentId::from(task_id));
+            } else if let Some(id) = payload.get("id").and_then(Value::as_str) {
+                ids.push(SubagentId::from(id));
+            }
+        }
+        _ => {}
+    }
+
+    ids
 }
 
 /// Return `true` when `event` is a Claude `task_progress` Info line —
@@ -4076,5 +4158,112 @@ mod tests {
                 "reasoning text must appear exactly once, found {count} times: {captured:?}"
             );
         }
+    }
+
+    #[test]
+    fn subagent_start_inserts_active_entry_via_on_semantic_event() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::SubagentStart {
+            name: Some("researcher".into()),
+            id: Some("sa1".into()),
+            extra: json!({}),
+        });
+        let state = sink.watchdog_state.lock().unwrap();
+        let active = state.active_subagents(std::time::Instant::now());
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "sa1");
+        assert_eq!(active[0].name.as_deref(), Some("researcher"));
+    }
+
+    #[test]
+    fn subagent_stop_removes_active_entry_via_on_semantic_event() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::SubagentStart {
+            name: Some("researcher".into()),
+            id: Some("sa1".into()),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::SubagentStop {
+            name: Some("researcher".into()),
+            id: Some("sa1".into()),
+            status: Some("success".into()),
+            extra: json!({}),
+        });
+        let state = sink.watchdog_state.lock().unwrap();
+        let active = state.active_subagents(std::time::Instant::now());
+        assert!(active.is_empty());
+    }
+
+    #[test]
+    fn opencode_progress_payload_resets_last_progress_at() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::SubagentStart {
+            name: Some("researcher".into()),
+            id: Some("sa1".into()),
+            extra: json!({}),
+        });
+        // Small delay to ensure progress timestamp moves forward
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        sink.on_semantic_event(SemanticEvent::Info {
+            message: "working".into(),
+            extra: json!({"task_id": "sa1"}),
+        });
+        let state = sink.watchdog_state.lock().unwrap();
+        let active = state.active_subagents(std::time::Instant::now());
+        assert_eq!(active.len(), 1);
+        // elapsed_since_progress should be very small (< 1s) because the
+        // Info event with task_id reset last_progress_at just now.
+        assert!(
+            active[0].elapsed_since_progress < std::time::Duration::from_secs(1),
+            "progress should have been reset by the Info event: {:?}",
+            active[0].elapsed_since_progress
+        );
+    }
+
+    #[test]
+    fn unknown_subagent_id_in_progress_is_silently_ignored() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        // No subagent started yet — progress for unknown id must not panic
+        sink.on_semantic_event(SemanticEvent::Info {
+            message: "working".into(),
+            extra: json!({"task_id": "unknown"}),
+        });
+        let state = sink.watchdog_state.lock().unwrap();
+        let active = state.active_subagents(std::time::Instant::now());
+        assert!(active.is_empty());
+    }
+
+    #[test]
+    fn provider_extension_with_task_id_updates_progress() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::SubagentStart {
+            name: Some("worker".into()),
+            id: Some("ext1".into()),
+            extra: json!({}),
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        sink.on_semantic_event(SemanticEvent::ProviderExtension {
+            provider: Provider::OpenCode,
+            kind: "task_progress".into(),
+            payload: json!({"task_id": "ext1", "percent": 50}),
+        });
+        let state = sink.watchdog_state.lock().unwrap();
+        let active = state.active_subagents(std::time::Instant::now());
+        assert_eq!(active.len(), 1);
+        assert!(
+            active[0].elapsed_since_progress < std::time::Duration::from_secs(1),
+            "progress should have been reset by the ProviderExtension event: {:?}",
+            active[0].elapsed_since_progress
+        );
     }
 }

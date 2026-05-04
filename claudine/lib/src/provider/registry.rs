@@ -6,12 +6,13 @@
 
 use std::sync::OnceLock;
 
+use crate::provider_id::{PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER, Provider};
+
 use super::ProviderInfo;
 use super::claude::CLAUDE_INFO;
 use super::codex::CODEX_INFO;
 use super::gemini::GEMINI_INFO;
 use super::goose::GOOSE_INFO;
-use super::identity::{PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER, Provider};
 use super::kimi::KIMI_INFO;
 use super::opencode::OPENCODE_INFO;
 use super::qwen::QWEN_INFO;

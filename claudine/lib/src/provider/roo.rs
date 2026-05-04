@@ -14,8 +14,9 @@ use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
 use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
+use super::OutputFormatSelector;
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::{ReasoningCustomTag, ReasoningSupport};

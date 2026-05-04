@@ -72,10 +72,16 @@ use schematic_define::{
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
     SchemaRegistry::new()
+        .register::<CreateMessageBody>("CreateMessageBody")
+        .register::<CountTokensBody>("CountTokensBody")
         .register::<MessageResponse>("MessageResponse")
         .register::<CountTokensResponse>("CountTokensResponse")
         .register::<ListModelsResponse>("ListModelsResponse")
         .register::<ModelInfo>("ModelInfo")
+        // Nested types used by request/response bodies
+        .register::<Message>("Message")
+        .register::<ContentBlock>("ContentBlock")
+        .register::<Tool>("Tool")
 }
 
 /// Creates the Anthropic API definition.

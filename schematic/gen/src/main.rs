@@ -23,14 +23,14 @@ use schematic_definitions::huggingface::define_huggingface_hub_api;
 use schematic_definitions::lmstudio::define_lmstudio_api;
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
 use schematic_definitions::openai::define_openai_api;
-use schematic_definitions::registry::get_registry;
+use schematic_definitions::registry::get_registries_for_module;
 use schematic_definitions::samsung_smart_tv::define_samsung_smart_tv_api;
 use schematic_definitions::unfolded_circle::define_unfolded_circle_core_rest_api;
 use schematic_gen::asyncapi_import::{self, AsyncImportOptions, WsRole as AsyncWsRole};
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::import_pipeline::{self, ImportOptions};
-use schematic_gen::openapi_output::write_openapi;
+use schematic_gen::openapi_output::write_openapi_grouped;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::postman_output::{write_postman, write_postman_grouped};
 use schematic_gen::validate_api;
@@ -400,6 +400,33 @@ fn resolve_export_defaults(
     }
 }
 
+/// Builds a `GeneratorError::ConfigError` describing missing JSON response
+/// schemas for an API in a grouped OpenAPI export.
+///
+/// The message is intentionally verbose: it names the module, the API, and
+/// every missing type so authors can fix the registry without re-running the
+/// generator with extra flags.
+fn missing_schemas_error(
+    module_name: &str,
+    api_name: &str,
+    missing: &[String],
+) -> GeneratorError {
+    let first_missing = missing
+        .first()
+        .map(String::as_str)
+        .unwrap_or("MissingType");
+    GeneratorError::ConfigError(format!(
+        "OpenAPI registry incomplete for module \"{module}\" (API \"{api}\"): \
+         missing schema(s) {missing:?}. \
+         Add JsonSchema derive + register::<T>(\"{first}\") entries in \
+         schematic-definitions, or skip with --no-openapi.",
+        module = module_name,
+        api = api_name,
+        missing = missing,
+        first = first_missing,
+    ))
+}
+
 /// Runs the generate command.
 fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
     if api_name == "all" {
@@ -473,9 +500,28 @@ fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Generator
     if !opts.no_openapi
         && let Some(openapi_dir) = openapi_out.as_deref()
     {
-        run_openapi_export(
-            api_name,
-            &api,
+        // Resolve the module name from the API definition; for single-API
+        // generation we still go through the grouped writer with a one-element
+        // slice to keep both code paths identical.
+        let module_name = schematic_gen::export::resolve_module_name(&api);
+        let registry = get_registries_for_module(&module_name).ok_or_else(|| {
+            GeneratorError::ConfigError(format!(
+                "Missing schema registry for module \"{module_name}\". \
+                 Add openapi_registry() to schematic-definitions or skip with --no-openapi."
+            ))
+        })?;
+
+        // Strict completeness check: every JSON response schema referenced by
+        // this API must be registered. Catches dangling `$ref`s before they
+        // can be emitted into the OpenAPI document.
+        registry
+            .validate_completeness(&api)
+            .map_err(|missing| missing_schemas_error(&module_name, &api.name, &missing))?;
+
+        run_openapi_export_grouped(
+            &module_name,
+            &[&api],
+            &registry,
             openapi_dir,
             opts.openapi_format,
             opts.openapi_version,
@@ -516,6 +562,7 @@ fn run_postman_export(
     }
 
     if dry_run {
+        // Filename derived from module name, NOT api.name.
         let module_name = schematic_gen::export::resolve_module_name(api);
         println!(
             "{} Would export Postman collection to {}/{}.postman_collection.json",
@@ -535,30 +582,32 @@ fn run_postman_export(
     Ok(())
 }
 
-/// Exports an API definition to OpenAPI format.
-fn run_openapi_export(
-    api_name: &str,
-    api: &schematic_define::RestApi,
+/// Exports a module-grouped OpenAPI document.
+///
+/// Writes a single OpenAPI 3.0.3 file named `<module_name>.<ext>` containing
+/// the union of every member API's operations and schemas. Single-API modules
+/// are handled identically — callers pass a one-element slice — so there is
+/// only one OpenAPI export code path.
+///
+/// Filename derived from `module_name`, NOT `api.name`.
+#[allow(clippy::too_many_arguments)]
+fn run_openapi_export_grouped(
+    module_name: &str,
+    apis: &[&schematic_define::RestApi],
+    registry: &schematic_definitions::registry::SchemaRegistry,
     openapi_dir: &str,
     format: OpenApiFormat,
     version_override: Option<&str>,
     dry_run: bool,
     verbose: u8,
 ) -> Result<(), GeneratorError> {
-    // Get the schema registry for this API (strict mode: fail if missing)
-    let registry = get_registry(api_name).ok_or_else(|| {
-        GeneratorError::ConfigError(format!(
-            "Missing schema registry for API \"{}\" (module: {})\n  \
-             → Add `openapi_registry()` to schematic-definitions/src/{}/mod.rs\n  \
-             → Or skip with --no-openapi",
-            api.name,
-            api_name,
-            api_name.replace('-', "_")
-        ))
-    })?;
-
     if verbose > 0 {
-        println!("{}", "Exporting OpenAPI specification...".dimmed());
+        println!(
+            "{} Exporting OpenAPI specification for module '{}' ({} APIs)...",
+            "...".dimmed(),
+            module_name,
+            apis.len(),
+        );
     }
 
     let openapi_path = Path::new(openapi_dir);
@@ -571,9 +620,9 @@ fn run_openapi_export(
         })?;
     }
 
-    // Version resolution: CLI override > RestApi.version > fallback "0.1.0"
+    // Version resolution: CLI override > first API's version > fallback "0.1.0"
     let version = version_override
-        .or(api.version.as_deref())
+        .or_else(|| apis.first().and_then(|api| api.version.as_deref()))
         .unwrap_or("0.1.0");
 
     let options = ExportOptions::new()
@@ -581,18 +630,20 @@ fn run_openapi_export(
         .with_format(format.into());
 
     if dry_run {
+        let extension = match format {
+            OpenApiFormat::Json => "json",
+            OpenApiFormat::Yaml => "yaml",
+        };
+        // Filename derived from module name, NOT api.name.
         println!(
             "{} Would export OpenAPI spec to {}/{}.{}",
             "[OK]".green().bold(),
             openapi_dir,
-            api.name.to_lowercase(),
-            match format {
-                OpenApiFormat::Json => "json",
-                OpenApiFormat::Yaml => "yaml",
-            }
+            module_name,
+            extension,
         );
     } else {
-        let path = write_openapi(api, &registry, &options, openapi_path)?;
+        let path = write_openapi_grouped(apis, module_name, registry, &options, openapi_path)?;
         println!(
             "{} Exported OpenAPI spec to {}",
             "[OK]".green().bold(),
@@ -683,43 +734,43 @@ fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
     if !opts.no_openapi
         && let Some(openapi_dir) = openapi_out.as_deref()
     {
-        // Map API structs to names for registry lookup
-        let api_names = [
-            ("Anthropic", "anthropic"),
-            ("OpenAI", "openai"),
-            ("ElevenLabs", "elevenlabs"),
-            ("Gitea", "gitea"),
-            ("GitHub", "github"),
-            ("GitLab", "gitlab"),
-            ("HuggingFaceHub", "huggingface"),
-            ("LmStudio", "lmstudio"),
-            ("OllamaNative", "ollama-native"),
-            ("OllamaOpenAI", "ollama-openai"),
-            ("EmqxBasic", "emqx-basic"),
-            ("EmqxBearer", "emqx-bearer"),
-            ("Eversolo", "eversolo"),
-            ("SamsungSmartTv", "samsung-smart-tv"),
-            ("UnfoldedCircleCoreRest", "unfolded-circle-core-rest"),
-        ];
+        let grouped = apis_by_module();
 
-        for api in &apis {
-            let api_name_lower = api.name.to_lowercase();
-            let api_name = api_names
-                .iter()
-                .find(|(name, _)| *name == api.name)
-                .map(|(_, key)| *key)
-                .unwrap_or(&api_name_lower);
-
-            // Track expected filename
+        for (module_name, module_apis) in grouped.iter() {
+            // Track expected filename — derived from module name, NOT api.name.
             let extension = match opts.openapi_format {
                 OpenApiFormat::Json => "json",
                 OpenApiFormat::Yaml => "yaml",
             };
-            openapi_files.insert(format!("{}.{}", api.name.to_lowercase(), extension));
+            openapi_files.insert(format!("{}.{}", module_name, extension));
 
-            run_openapi_export(
-                api_name,
-                api,
+            // Look up the merged registry for this module (strict mode: fail
+            // if missing). The escape hatch for incomplete coverage is
+            // --no-openapi.
+            let registry = get_registries_for_module(module_name).ok_or_else(|| {
+                GeneratorError::ConfigError(format!(
+                    "Missing schema registry for module \"{module_name}\". \
+                     Add openapi_registry() to schematic-definitions or skip with --no-openapi."
+                ))
+            })?;
+
+            // Strict completeness check: every member API's JSON response
+            // schemas must be present in the merged registry. This guards the
+            // grouped export path against dangling `$ref`s.
+            for member in module_apis.iter() {
+                registry
+                    .validate_completeness(member)
+                    .map_err(|missing| {
+                        missing_schemas_error(module_name, &member.name, &missing)
+                    })?;
+            }
+
+            let api_refs: Vec<&schematic_define::RestApi> = module_apis.iter().collect();
+
+            run_openapi_export_grouped(
+                module_name,
+                &api_refs,
+                &registry,
                 openapi_dir,
                 opts.openapi_format,
                 opts.openapi_version,

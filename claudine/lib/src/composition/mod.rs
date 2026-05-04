@@ -26,12 +26,14 @@ pub use lifecycle::{
     emit_lifecycle_signal, parse_lifecycle_config,
 };
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
-pub use prepare::{PrepareOptions, prepare_direct, prepare_inline};
+pub use prepare::{
+    PrepareOptions, parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
+};
 pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use select::{
-    build_candidate_set, build_installed_snapshot, build_picker_plan, resolve_model,
-    resolve_model_with_catalog, resolve_target_non_tty, resolve_target_non_tty_with_catalog,
-    select_provider,
+    build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
+    resolve_model, resolve_model_with_catalog, resolve_model_with_hints, resolve_target_non_tty,
+    resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints, select_provider,
 };
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{

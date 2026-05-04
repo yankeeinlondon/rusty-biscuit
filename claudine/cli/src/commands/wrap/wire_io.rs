@@ -26,7 +26,7 @@
 //! behind a `Mutex` and flushes after each newline, satisfying the
 //! "one serialized writer path" requirement from the Phase 3 plan.
 
-#![allow(dead_code)]
+
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -578,7 +578,7 @@ pub(crate) struct WireSessionConfig<'a> {
     pub env: &'a HashMap<OsString, OsString>,
     pub cwd: &'a Path,
     pub prompt: String,
-    pub timeout: Option<u64>,
+    pub timeout: Option<Duration>,
     pub client_name: &'a str,
     pub client_version: &'a str,
     pub capabilities: WireClientCapabilities,
@@ -776,7 +776,7 @@ pub(crate) fn run_kimi_wire_session(
 
     let exit_code = match wait_for_child_exit(
         &mut child,
-        config.timeout.map(Duration::from_secs),
+        config.timeout,
         &cancel_requested,
         &prompt_finished,
         &writer,

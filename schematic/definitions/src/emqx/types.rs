@@ -74,7 +74,7 @@ pub struct ErrorResponse {
 ///   "password": "public"
 /// }
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LoginBody {
     /// Dashboard username.
     pub username: String,
@@ -296,7 +296,7 @@ pub struct ListClientsResponse {
 ///   "qos": 1
 /// }
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SubscribeBody {
     /// Topic filter to subscribe to.
     pub topic: String,
@@ -390,7 +390,7 @@ pub struct ListSubscriptionsResponse {
 ///   "retain": false
 /// }
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PublishBody {
     /// Topic to publish to.
     pub topic: String,
@@ -424,7 +424,7 @@ pub struct PublishBody {
 }
 
 /// Request body for batch publishing.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PublishBatchBody {
     /// List of messages to publish.
     pub messages: Vec<PublishBody>,
@@ -496,7 +496,7 @@ pub struct RuleInfo {
 }
 
 /// Request body for creating or updating a rule.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateRuleBody {
     /// Rule identifier.
     pub id: String,
@@ -529,7 +529,7 @@ pub struct ListRulesResponse {
 }
 
 /// Rule test request body.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TestRuleBody {
     /// SQL query to test.
     pub sql: String,
@@ -593,7 +593,7 @@ pub struct AuthUser {
 }
 
 /// Request body for creating an auth user.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateAuthUserBody {
     /// User ID (username).
     pub user_id: String,
@@ -865,7 +865,7 @@ pub struct BanInfo {
 }
 
 /// Request body for creating a ban.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CreateBanBody {
     /// Ban type (clientid, username, peerhost).
     #[serde(rename = "as")]

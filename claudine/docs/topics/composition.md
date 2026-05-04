@@ -224,47 +224,49 @@ post_checks:
 
 Available validations include filesystem checks (`file_exists`, `dir_exists`, `json_file_exists`, `yaml_file_exists`, `toml_file_exists`, `has_write_permission`), git checks (`no_dirty_source_code`, `has_dirty_source_code`), post-only file comparisons (`file_changed`, `file_unchanged`), frontmatter comparisons (`frontmatter_prop_changed`, `frontmatter_prop_unchanged`, `frontmatter_prop_equals`), response checks (`response_length_at_least`, `response_length_at_most`, `response_includes`, `response_missing`), and shell commands (`shell_command`).
 
+#### Failure reporting
+
+Passing checks render as a single compact `Status` line. A failing check renders a four-section block on stderr:
+
+1. **Status header** — red glyph plus a phase label (`Pre-validation failed`, `Post-validation failed`, `Agent execution failed`, or `Shell audit failed`).
+2. **Source line** — `in <path>` pointing at the markdown file that declared the rule, OSC8-linked when the terminal supports hyperlinks.
+3. **YAML snippet** — the rule's frontmatter entry, syntax-highlighted via the same path that renders fenced ` ```yaml ` blocks in markdown.
+4. **Reason line** — the underlying diagnostic (e.g. `file does not exist: /path/to/missing.toml`), rendered in muted styling because the glyph already carries severity.
+
+Programmatically constructed rules without a markdown origin (such as the system-owned inline-compose writability pre-check) fall back to the legacy single-line failure rendering.
+
 ### Timeouts
 
-Claudine supports two independent timeout properties that share the same
-human-readable duration syntax (`s`/`sec`/`seconds`, `m`/`min`/`minutes`,
-`h`/`hr`/`hours`):
+Claudine supports two timeout properties — `timeout` (wall-clock) and
+`step_timeout` (stream-silence) — that share the same human-readable
+duration grammar and the same termination path. Both are settable via
+markdown frontmatter, CLI flags (`--timeout`, `--step-timeout`), and
+env-var defaults (`CLAUDINE_TIMEOUT`, `CLAUDINE_STEP_TIMEOUT`), with
+precedence CLI > frontmatter > env > built-in default.
 
 ```yaml
-timeout: 5m
-step_timeout: 30s
+timeout: 10m          # opt-in hard ceiling on total runtime
+step_timeout: 45s     # kill the child if it goes silent for 45s
 ```
-
-- **`timeout`** is a wall-clock deadline for the entire provider run. When the
-  elapsed time since launch exceeds this budget, Claudine sends SIGTERM (then
-  SIGKILL after a short grace period).
-- **`step_timeout`** is a silence deadline. The timer resets on every
-  `SemanticEvent` observed on the provider's structured stream (tool call,
-  tool result, reasoning chunk, assistant text, info/warning, etc.). If no
-  event is observed for longer than the budget, Claudine kills the child.
 
 Both timeouts surface as the same `FailureEvent::Timeout` variant, so a
 single `handle_timeout` handler matches either one.
-
-**Streaming-only.** `step_timeout` requires structured streaming. If the
-selected provider runs in capture or passthrough mode, Claudine emits a
-warning and ignores the field. The non-streaming Goose wrapper is the
-primary example.
 
 **Relational validation.** When both properties are present,
 `step_timeout` must be less than or equal to `timeout`. Documents that
 violate this invariant fail parse-time validation with
 `HarnessError::InvalidTimeout`.
 
-**Precedence.** The CLI flags `--timeout` and `--step-timeout` override
-frontmatter when provided. Wall-clock enforcement is checked before
-step-silence on each poll, so if both budgets expire in the same tick the
-run is reported as the wall-clock timeout.
+**Streaming-only.** `step_timeout` requires structured streaming. If the
+selected provider runs in capture or passthrough mode (the non-streaming
+Goose wrapper is the primary example), Claudine emits a warning and
+ignores the field.
 
-```yaml
-timeout: 10m          # hard ceiling on total runtime
-step_timeout: 45s     # kill the child if it goes silent for 45s
-```
+See [`topics/timeouts.md`](timeouts.md) for the canonical reference,
+including the full precedence table, defaults rationale, env-var knobs
+(`CLAUDINE_TIMEOUT`, `CLAUDINE_STEP_TIMEOUT`, `CLAUDINE_KILL_GRACE`,
+`CLAUDINE_WATCHDOG_INTERVAL`), termination path, exit reasons, and the
+subagent diagnostics that ride alongside `step_timeout`.
 
 ## Timing Surface
 
@@ -325,10 +327,19 @@ also rejected (the underlying duration parser requires positive values).
 A warn set without its corresponding hard threshold is legal — the
 "without hard threshold" message variant applies.
 
-**Fire-once semantics.** `timeout_warn` fires at most once per prompt
-run. `step_timeout_warn` fires at most once per stall episode; once
-activity resumes it re-arms for the next stall. Neither emission blocks
-the provider or affects hard-timeout behavior.
+### Watchdog and Exit Reasons
+
+The wrapper enforces `timeout` and `step_timeout` via a unified watchdog
+ticker. On breach, the synthesised `session_end` JSONL summary records
+`error_kind: "timeout"` or `"step_timeout"`, and the rendered `Agent
+Error` `BlockQuote` enumerates any outstanding subagents (id, name,
+elapsed since last progress) so the operator knows which workers
+stalled. While `step_timeout` is enabled, the live stderr surface also
+emits at most one ` ⏳ Awaiting subagent: <name-or-id> (<elapsed>)`
+diagnostic line per active subagent per silence window.
+
+See [`topics/timeouts.md`](timeouts.md) for the full env-var table,
+precedence chain, termination path, and worked examples.
 
 ### Handlers
 

@@ -456,6 +456,12 @@ pub enum Command {
         #[arg(long)]
         meta: bool,
 
+        /// Emit a `--- mermaid debug ---` block to stderr containing the
+        /// resolved `image width: <N> cells` line. Used by Level-2 tests
+        /// to verify pane-column geometry.
+        #[arg(long)]
+        debug: bool,
+
         /// Data points as "Label: value" pairs (e.g., "Dogs: 386" "Cats: 85")
         #[arg(value_name = "DATA", required_unless_present = "example")]
         data: Vec<String>,
@@ -1097,6 +1103,24 @@ pub enum Command {
         /// Disable word wrapping
         #[arg(long)]
         no_wrap: bool,
+
+        /// Force ANSI color output regardless of TTY detection
+        ///
+        /// Useful for piped output and real-terminal test harnesses where
+        /// the spawned shell's environment may not propagate
+        /// `FORCE_COLOR`/`CLICOLOR_FORCE`. Equivalent to setting
+        /// `FORCE_COLOR=1` in the environment.
+        #[arg(long)]
+        force_color: bool,
+
+        /// Print the rendered byte stream as a hex dump to stderr
+        ///
+        /// Emits `--- prose debug ---` followed by a single line of
+        /// lowercase hex digits representing the bytes the renderer
+        /// produced. Used by Level-2 tests to assert SGR emission
+        /// independent of the terminal capture path.
+        #[arg(long = "print-bytes")]
+        print_bytes: bool,
 
         #[command(flatten)]
         layout: LayoutArgs,

@@ -4,6 +4,7 @@
 //!
 //! This module provides the core runtime infrastructure used by all
 //! generated WebSocket client and host modules.
+#![allow(clippy::result_large_err)]
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;

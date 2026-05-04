@@ -59,6 +59,8 @@ schematic/
     openai.json
     elevenlabs.json
     huggingface.json
+    ollama.json
+    emqx.json
 ```
 
 ### Justfile Integration
@@ -322,6 +324,24 @@ OpenAPI spec version is resolved with this priority chain:
 1. `--openapi-version <VERSION>` CLI flag (highest priority)
 2. `RestApi.version` field on the API definition
 3. Fallback: `"0.1.0"`
+
+## Shared Modules
+
+OpenAPI artifacts are named from the resolved generated module, not from the
+individual API definition name. APIs that share a module are exported into one
+combined document:
+
+- `OllamaNative` + `OllamaOpenAI` -> `ollama.json`
+- `EmqxBasic` + `EmqxBearer` -> `emqx.json`
+
+The same naming convention applies to single-API modules such as
+`HuggingFaceHub` -> `huggingface.json`, `SamsungSmartTv` ->
+`samsung_smart_tv.json`, and `UnfoldedCircleCoreRest` ->
+`unfolded_circle_core_rest.json`.
+
+Registry coverage is intentionally strict. Missing a schema registry for a
+module fails generation so incomplete OpenAPI artifacts are not written. Use
+`--no-openapi` when generating Rust clients during a registry migration.
 
 ## Grouped Export
 

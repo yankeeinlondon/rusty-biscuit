@@ -1,5 +1,6 @@
 ---
 area: "{{ctx.current_package_area}}"
+root: "{{ctx.repo_root}}"
 dir: "$(dirname {{ "{{spec}}" || "{{design}}" }})"
 spec: ""
 design: ""
@@ -29,7 +30,7 @@ You are a planning agent. Convert the following documents into a high confidence
 
 ## Closure
 
-- Save the plan as "{{ctx.current_package_area}}/{{plan}}" in the same directory as the design document(s).
+- Save the plan as "{{ctx.repo_root}}/{{ctx.current_package_area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
 - Add frontmatter to the plan document and set:
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format

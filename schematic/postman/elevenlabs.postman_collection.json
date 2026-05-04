@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "https://api.elevenlabs.io",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "description": "API key value"
     }
   ],
   "auth": {
@@ -16,11 +21,11 @@
     "apikey": [
       {
         "key": "key",
-        "value": "{{apiKey}}"
+        "value": "xi-api-key"
       },
       {
         "key": "value",
-        "value": "xi-api-key"
+        "value": "{{apiKey}}"
       },
       {
         "key": "in",
@@ -844,9 +849,8 @@
               "formdata": [
                 {
                   "key": "audio",
-                  "value": "",
                   "description": "Audio file (mp3, wav, ogg, m4a)",
-                  "type": "text"
+                  "type": "file"
                 },
                 {
                   "key": "name",

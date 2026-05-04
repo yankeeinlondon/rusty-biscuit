@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 // =============================================================================
 
 /// A chat message in the LM Studio format.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Message {
     /// The role of the message author (system, user, assistant).
     pub role: String,
@@ -24,7 +24,7 @@ pub struct Message {
 /// Request body for the `/api/v1/chat` endpoint.
 ///
 /// The chat endpoint supports SSE streaming by default.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatBody {
     /// Model identifier to use for generation.
     pub model: String,
@@ -158,14 +158,14 @@ pub struct ListModelsResponse {
 // =============================================================================
 
 /// Configuration for an MCP integration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Integration {
     /// The MCP server name or identifier.
     pub name: String,
 }
 
 /// Load configuration options.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadConfig {
     /// Context length to use.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -177,7 +177,7 @@ pub struct LoadConfig {
 }
 
 /// Request body for the `/api/v1/models/load` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LoadModelBody {
     /// Model identifier to load.
     pub model: String,
@@ -207,7 +207,7 @@ pub struct LoadModelResponse {
 // =============================================================================
 
 /// Request body for the `/api/v1/models/unload` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UnloadModelBody {
     /// Model identifier to unload.
     pub model: String,
@@ -227,7 +227,7 @@ pub struct UnloadModelResponse {
 /// Request body for the `/api/v1/models/download` endpoint.
 ///
 /// The download endpoint supports SSE streaming for progress updates.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadModelBody {
     /// Model identifier to download (e.g., "lmstudio-community/gemma-2-2b-it-GGUF").
     pub model: String,
@@ -267,7 +267,7 @@ pub struct OutputItem {
 }
 
 /// Request body for the `/api/v1/models/download/status` endpoint.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DownloadStatusBody {
     /// The job ID to check status for.
     pub job_id: String,

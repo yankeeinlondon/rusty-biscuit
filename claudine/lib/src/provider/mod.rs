@@ -47,12 +47,16 @@ pub use behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderB
 pub use cli_sensitivity::CliSensitiveAxes;
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
-pub use identity::{PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER, Provider};
+pub use identity::PROVIDER_COUNT;
 pub use known_gap::{KnownGap, KnownGapArea};
 pub use model_catalog_source::ModelCatalogSource;
 pub use output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSelector, OutputFormatSupport,
+    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
 };
+// Temporary shim: Provider, OutputFormatSelector and friends now live in
+// `crate::provider_id`.  These re-exports keep existing importers working
+// during the migration.
+pub use crate::provider_id::{OutputFormatSelector, Provider, PROVIDERS_DISPLAY_ORDER};
 pub use path_template::{GlobKind, PathContext, PathSegment, PathTemplate};
 pub use prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 pub use reasoning::{ReasoningCustomTag, ReasoningSupport};
