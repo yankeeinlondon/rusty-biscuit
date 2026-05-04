@@ -4,6 +4,18 @@ model: opus
 phases: 7
 start_phase: 7
 status: ready
+source_files_during_phase_7:
+  - biscuit-clipboard/cli/Cargo.toml
+  - biscuit-clipboard/cli/src/main.rs
+  - biscuit-clipboard/cli/src/autostart.rs
+  - biscuit-clipboard/cli/tests/clip_service_install.rs
+  - biscuit-clipboard/cli/tests/clip_service_uninstall.rs
+docs_updated_during_phase_7:
+  - biscuit-clipboard/cli/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+packages:
+  - biscuit-clipboard-cli
 ---
 
 # Biscuit Clipboard — Review #1 Remediation Plan
@@ -574,7 +586,7 @@ fixes land. This phase audits and fills the remaining gaps.
 
 ## Phase 7: Autostart — install/uninstall shim + docs
 
-**Status:** pending
+**Status:** complete
 
 **Addresses:** Significant #14.
 

@@ -57,6 +57,7 @@ description: A record of novel things learned about how to best perform commits 
 - Literal backticks inside a double-quoted shell command trigger command substitution in `zsh`. If a commit message contains Markdown code spans, escape the backticks or build the message with a single-quoted heredoc first.
 - Function names, identifiers with underscores, or code-like strings in commit messages can be interpreted as commands by zsh if they match shell functions or aliases. Prefer writing commit message bodies in prose that describes the feature rather than naming implementation details, or use single-quoted strings to prevent expansion.
 - In scripts that run `git add .`, use `git add . || exit 0` to prevent CI failure when there is nothing to commit.
+- For complex commit messages with bullet points and special characters (like backticks or underscores), some agents prefer committing with a simple placeholder message first and then using `git commit --amend` (or passing the message via a temporary file) to avoid shell expansion and command-injection false positives in the `-m` argument.
 
 ## Rust Idioms
 
