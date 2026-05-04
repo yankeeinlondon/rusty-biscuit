@@ -2,7 +2,7 @@
 phases: 4
 created: 2026-05-03
 start_phase: 1
-source_files_during_phase_1: [sniff/cli/src/args.rs, sniff/cli/tests/cli.rs]
+source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
