@@ -112,6 +112,7 @@ pub enum RepoAction {
         status: sniff::remote::PullRequestState,
         verbose: bool,
     },
+    Language,
 }
 
 // ---------------------------------------------------------------------------
@@ -839,6 +840,8 @@ pub enum RepoSubcommand {
         #[arg(long, default_value = "open")]
         status: sniff::remote::PullRequestState,
     },
+    /// Output the primary programming language for the repository
+    Language,
 }
 
 impl Commands {
@@ -1285,6 +1288,7 @@ impl Commands {
                     status: *status,
                     verbose: false,
                 },
+                Some(RepoSubcommand::Language) => RepoAction::Language,
             }),
             _ => None,
         }
