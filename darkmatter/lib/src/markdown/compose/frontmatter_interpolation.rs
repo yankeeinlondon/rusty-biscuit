@@ -3,16 +3,18 @@
 //! Resolves `{{ variable }}` expressions inside frontmatter values using
 //! non-templated (seed) frontmatter values, `ctx.*`, and `env.*` as inputs.
 //!
-//! ## Seed-Only Semantics
+//! ## Incremental Seed Semantics
 //!
 //! Top-level frontmatter entries are partitioned into:
 //! - **Seed** values: contain no `{{ }}` expressions
 //! - **Templated** values: contain at least one `{{ }}` expression
 //!
-//! The lookup state is built from seed values only. This means chained
-//! references between templated values are not supported — if `spec`
-//! references `base`, and `plan` references `spec`, then `plan` will
-//! see the raw (unrewritten) value of `spec`, not its resolved form.
+//! Templated keys are resolved in dependency order: a key is only processed
+//! once all other templated keys it references have been resolved. After
+//! each key is resolved its value is added to the seed map so that
+//! subsequent keys can reference it. This allows a frontmatter variable
+//! like `area` to be defined as `{{ctx.current_package_area}}` and then
+//! referenced by `success.stderr` as `{{area}}`.
 
 use super::expression::{EvaluationLookup, ExpressionFinder};
 use super::interpolation::{Evaluator, ScanMode, interpolate_text};
@@ -20,7 +22,7 @@ use super::types::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownError;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Returns `true` if the JSON value tree contains any `{{ }}` interpolation expressions.
 pub(crate) fn contains_interpolation(value: &Value) -> bool {
@@ -161,8 +163,10 @@ pub(crate) struct FrontmatterInterpolationReport {
 /// Interpolates templated frontmatter values using seed (non-templated) values.
 ///
 /// Classifies top-level frontmatter entries into seed values (no `{{ }}`)
-/// and templated values (contain `{{ }}`). Builds a lookup state from the
-/// seed values plus the runtime context, then rewrites the templated values.
+/// and templated values (contain `{{ }}`). Templated keys are resolved in
+/// dependency order: a key is only processed once all other templated keys
+/// it references have been resolved. After each key is resolved its value
+/// is added to the seed map so that later keys can reference it.
 pub(crate) fn interpolate_frontmatter(
     frontmatter: &mut Frontmatter,
     context: &ComposeContext,
@@ -170,14 +174,15 @@ pub(crate) fn interpolate_frontmatter(
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     let fm = frontmatter.as_map();
 
-    // Partition: seed keys have no interpolation, templated keys have at least one.
     let mut seed_map: HashMap<String, Value> = HashMap::new();
-    let mut templated_keys: Vec<String> = Vec::new();
+    let templated_keys: Vec<String> = fm
+        .iter()
+        .filter(|(_, v)| contains_interpolation(v))
+        .map(|(k, _)| k.clone())
+        .collect();
 
     for (key, value) in fm.iter() {
-        if contains_interpolation(value) {
-            templated_keys.push(key.clone());
-        } else {
+        if !contains_interpolation(value) {
             seed_map.insert(key.clone(), value.clone());
         }
     }
@@ -189,34 +194,124 @@ pub(crate) fn interpolate_frontmatter(
         });
     }
 
-    // Build seed state
-    let seed_state = FrontmatterSeedState::new(seed_map, context.clone());
-    let evaluator = Evaluator::new(&seed_state);
+    let original_values: HashMap<String, Value> = templated_keys
+        .iter()
+        .filter_map(|k| fm.get(k).cloned().map(|v| (k.clone(), v)))
+        .collect();
 
+    let templated_set: HashSet<String> = templated_keys.iter().cloned().collect();
+    let mut resolved: HashSet<String> = HashSet::new();
     let mut total_replacements = 0;
     let mut all_warnings = Vec::new();
 
-    // Rewrite each templated key's value tree
-    let fm_mut = frontmatter.as_map_mut();
-    for key in &templated_keys {
-        if let Some(value) = fm_mut.get(key).cloned() {
-            let (new_value, count, mut warnings) = rewrite_value(&value, &evaluator, fail_fast)?;
+    loop {
+        let mut made_progress = false;
 
-            // Add key context to warnings
+        for key in &templated_keys {
+            if resolved.contains(key) {
+                continue;
+            }
+
+            let original = match original_values.get(key) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let refs = extract_simple_key_refs(original);
+            let has_unresolved = refs
+                .iter()
+                .any(|r| templated_set.contains(r) && !resolved.contains(r));
+            if has_unresolved {
+                continue;
+            }
+
+            let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+            let evaluator = Evaluator::new(&seed_state);
+            let (new_value, count, mut warnings) =
+                rewrite_value(original, &evaluator, fail_fast)?;
+
             for w in &mut warnings {
                 w.message = format!("key '{}': {}", key, w.message);
             }
 
-            fm_mut.insert(key.clone(), new_value);
+            frontmatter
+                .as_map_mut()
+                .insert(key.clone(), new_value.clone());
+            seed_map.insert(key.clone(), new_value);
+            resolved.insert(key.clone());
             total_replacements += count;
             all_warnings.extend(warnings);
+            made_progress = true;
         }
+
+        if !made_progress {
+            break;
+        }
+    }
+
+    for key in &templated_keys {
+        if resolved.contains(key) {
+            continue;
+        }
+
+        let original = match original_values.get(key) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+        let evaluator = Evaluator::new(&seed_state);
+        let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
+
+        for w in &mut warnings {
+            w.message = format!("key '{}': {}", key, w.message);
+        }
+
+        frontmatter
+            .as_map_mut()
+            .insert(key.clone(), new_value.clone());
+        seed_map.insert(key.clone(), new_value);
+        total_replacements += count;
+        all_warnings.extend(warnings);
     }
 
     Ok(FrontmatterInterpolationReport {
         replacements: total_replacements,
         warnings: all_warnings,
     })
+}
+
+/// Extracts simple identifier references (bare variable names) from a JSON value tree.
+///
+/// Only collects expressions that are purely alphanumeric identifiers (no dots,
+/// operators, or function calls) so that `ctx.today`, `area || "default"`, and
+/// `length(items)` are excluded.
+fn extract_simple_key_refs(value: &Value) -> Vec<String> {
+    let mut refs = Vec::new();
+    collect_simple_key_refs(value, &mut refs);
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
+fn collect_simple_key_refs(value: &Value, refs: &mut Vec<String>) {
+    match value {
+        Value::String(s) => {
+            for loc in ExpressionFinder::find_all_plain(s) {
+                let expr = loc.expression.trim();
+                if !expr.is_empty() && expr.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    refs.push(expr.to_string());
+                }
+            }
+        }
+        Value::Array(arr) => arr
+            .iter()
+            .for_each(|v| collect_simple_key_refs(v, refs)),
+        Value::Object(obj) => obj
+            .values()
+            .for_each(|v| collect_simple_key_refs(v, refs)),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -430,19 +525,16 @@ mod tests {
         }
 
         #[test]
-        fn chained_reference_not_supported() {
-            // spec is templated, so it's excluded from seed state
-            // plan references spec, which won't resolve
+        fn chained_reference_resolved_incrementally() {
+            // spec is templated but resolved before plan, so plan can reference spec
             let mut fm = fm_from_json(json!({
                 "base": "/root",
                 "spec": "{{base}}/spec.md",
                 "plan": "{{spec}}.plan.md"
             }));
             let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
-            // base resolved in spec and plan, but spec itself is not available as seed
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
-            // plan resolves {{spec}} to empty string since spec is templated
-            assert_eq!(fm.as_map().get("plan"), Some(&json!(".plan.md")));
+            assert_eq!(fm.as_map().get("plan"), Some(&json!("/root/spec.md.plan.md")));
             assert!(report.replacements >= 2);
         }
 

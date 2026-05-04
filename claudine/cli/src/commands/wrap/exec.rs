@@ -26,7 +26,7 @@ use tracing::{Span, info_span};
 use super::section::{Section, SectionTracker};
 use super::stream_io::StreamOutput;
 use super::subagent_watchdog::{
-    WatchdogConfig, WatchdogTermination, WatchdogTickResult, evaluate_watchdog_tick,
+    TimeoutConfig, WatchdogTermination, WatchdogTickResult, evaluate_timeout_tick,
     render_watchdog_error_to_stream,
 };
 
@@ -731,12 +731,18 @@ fn wait_with_signal_handling(
 /// to the structured stream executor.
 ///
 /// Behaves like [`wait_with_signal_handling`] while also polling the
-/// stderr-bridge channel. When a signal arrives, the child's process group
-/// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
-/// period. User Ctrl-C still reports `Interrupted`; wrapper-driven early
-/// termination (rate-limit recovery) preserves a
-/// normal `Completed` termination so downstream failure handling can inspect
-/// synthesized summary fields instead of treating the run like a user cancel.
+/// stderr-bridge channel and the watchdog ticker channel. When a signal
+/// arrives, the child's process group is sent `SIGTERM` and escalated to
+/// `SIGKILL` after a grace period. User Ctrl-C still reports `Interrupted`;
+/// wrapper-driven early termination (rate-limit recovery, timeout, or
+/// step_timeout) preserves a normal `Completed` termination so downstream
+/// failure handling can inspect synthesized summary fields instead of
+/// treating the run like a user cancel.
+///
+/// Timeout enforcement is delegated to the watchdog ticker
+/// (`spawn_timeout_watchdog_ticker`), which sends `WatchdogTermination`
+/// requests through the `watchdog_rx` channel. This function only consumes
+/// those signals and escalates them to child-process termination.
 ///
 /// Isolated to the bridge path so non-OpenCode runs keep the existing
 /// `child.wait()`-based helper.
@@ -749,8 +755,7 @@ fn wait_with_signal_and_early_termination(
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
-    wall_clock_timeout: Option<Duration>,
-    step_timeout: Option<Duration>,
+    kill_grace: Duration,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
@@ -790,23 +795,19 @@ fn wait_with_signal_and_early_termination(
     }?;
 
     let mut early_termination: Option<EarlyTermination> = None;
-    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
-    let grace_period = Duration::from_secs(5);
-    let loop_start = Instant::now();
+    let grace_period = kill_grace;
 
     loop {
         if let Some(status) = child.try_wait()? {
-            // Mark the PID as reaped before the 5-second grace window's
-            // signal guard can drop so we never signal a recycled PID.
+            // Mark the PID as reaped before the grace window's signal guard
+            // can drop so we never signal a recycled PID.
             child_exited.store(true, Ordering::SeqCst);
             let code = exit_code_from_status(status);
             let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
             let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
-            } else if wall_clock_tripped {
-                claudine::harness::ProcessTermination::TimedOut
             } else if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
@@ -815,32 +816,7 @@ fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
-        // Wall-clock timeout check: short-circuits directly to TimedOut
-        // without routing through the EarlyTermination surface (matches
-        // the legacy wait_with_timeout behavior for the streaming path).
-        if !wall_clock_tripped
-            && early_termination.is_none()
-            && let Some(budget) = wall_clock_timeout
-            && loop_start.elapsed() >= budget
-        {
-            tracing::warn!(
-                child_pid,
-                timeout_secs = budget.as_secs(),
-                "wall-clock timeout exceeded; sending SIGTERM to child process group",
-            );
-            let kill_pid = if child_in_own_pgroup {
-                -(child_pid as i32)
-            } else {
-                child_pid as i32
-            };
-            unsafe {
-                libc::kill(kill_pid, libc::SIGTERM);
-            }
-            wall_clock_tripped = true;
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        if early_termination.is_none() && !wall_clock_tripped {
+        if early_termination.is_none() {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     tracing::info!(
@@ -865,11 +841,8 @@ fn wait_with_signal_and_early_termination(
             }
         }
 
-        // Watchdog-initiated termination (subagent silence or stream idle).
-        if early_termination.is_none()
-            && !wall_clock_tripped
-            && let Some(ref wd_rx) = watchdog_rx
-        {
+        // Watchdog-initiated termination (unified `timeout` / `step_timeout`).
+        if early_termination.is_none() && let Some(ref wd_rx) = watchdog_rx {
             match wd_rx.try_recv() {
                 Ok(req) => {
                     tracing::warn!(
@@ -885,19 +858,7 @@ fn wait_with_signal_and_early_termination(
                     unsafe {
                         libc::kill(kill_pid, libc::SIGTERM);
                     }
-                    let early = match req.reason {
-                        super::subagent_watchdog::WatchdogTerminationReason::SubagentsUnresponsive => {
-                            EarlyTermination::SubagentsUnresponsive {
-                                message: req.message,
-                            }
-                        }
-                        super::subagent_watchdog::WatchdogTerminationReason::StreamIdleTimeout => {
-                            EarlyTermination::StreamIdleTimeout {
-                                message: req.message,
-                            }
-                        }
-                    };
-                    early_termination = Some(early);
+                    early_termination = Some(watchdog_request_to_early_termination(req));
                     grace_deadline = Some(Instant::now() + grace_period);
                 }
                 Err(TryRecvError::Empty) => {}
@@ -906,38 +867,10 @@ fn wait_with_signal_and_early_termination(
         }
 
         if early_termination.is_none()
-            && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
             && let Some(signal) =
                 detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
         {
-            let kill_pid = if child_in_own_pgroup {
-                -(child_pid as i32)
-            } else {
-                child_pid as i32
-            };
-            unsafe {
-                libc::kill(kill_pid, libc::SIGTERM);
-            }
-            early_termination = Some(signal);
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        // Step-silence timeout check: user-configured hard kill that
-        // maps to ProcessTermination::TimedOut. Fires after every other
-        // early-termination branch so wall-clock and rate-limit recoveries
-        // keep precedence when they happen in the same poll tick.
-        if early_termination.is_none()
-            && !wall_clock_tripped
-            && let Some(silence_budget) = step_timeout
-            && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
-        {
-            tracing::warn!(
-                child_pid,
-                step_timeout_secs = silence_budget.as_secs(),
-                "step_timeout exceeded; sending SIGTERM to child process group",
-            );
             let kill_pid = if child_in_own_pgroup {
                 -(child_pid as i32)
             } else {
@@ -981,26 +914,21 @@ fn wait_with_signal_and_early_termination(
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
-    wall_clock_timeout: Option<Duration>,
-    step_timeout: Option<Duration>,
+    kill_grace: Duration,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
     let mut early_termination: Option<EarlyTermination> = None;
-    let mut wall_clock_tripped = false;
     let mut grace_deadline: Option<Instant> = None;
     let poll_interval = Duration::from_millis(75);
-    let grace_period = Duration::from_secs(5);
-    let loop_start = Instant::now();
+    let grace_period = kill_grace;
 
     loop {
         if let Some(status) = child.try_wait()? {
             let code = exit_code_from_status(status);
-            let termination = if wall_clock_tripped {
-                claudine::harness::ProcessTermination::TimedOut
-            } else if early_termination.is_some() {
+            let termination = if early_termination.is_some() {
                 early_termination_process_outcome(early_termination.as_ref())
             } else {
                 claudine::harness::ProcessTermination::Completed
@@ -1008,17 +936,7 @@ fn wait_with_signal_and_early_termination(
             return Ok((code, termination, early_termination));
         }
 
-        if !wall_clock_tripped
-            && early_termination.is_none()
-            && let Some(budget) = wall_clock_timeout
-            && loop_start.elapsed() >= budget
-        {
-            let _ = child.kill();
-            wall_clock_tripped = true;
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        if early_termination.is_none() && !wall_clock_tripped {
+        if early_termination.is_none() {
             match early_rx.try_recv() {
                 Ok(signal) => {
                     let _ = child.kill();
@@ -1030,48 +948,22 @@ fn wait_with_signal_and_early_termination(
             }
         }
 
-        if early_termination.is_none() && !wall_clock_tripped {
-            if let Some(ref wd_rx) = watchdog_rx {
-                match wd_rx.try_recv() {
-                    Ok(req) => {
-                        let _ = child.kill();
-                        let early = match req.reason {
-                            super::subagent_watchdog::WatchdogTerminationReason::SubagentsUnresponsive => {
-                                EarlyTermination::SubagentsUnresponsive {
-                                    message: req.message,
-                                }
-                            }
-                            super::subagent_watchdog::WatchdogTerminationReason::StreamIdleTimeout => {
-                                EarlyTermination::StreamIdleTimeout {
-                                    message: req.message,
-                                }
-                            }
-                        };
-                        early_termination = Some(early);
-                        grace_deadline = Some(Instant::now() + grace_period);
-                    }
-                    Err(TryRecvError::Empty) => {}
-                    Err(TryRecvError::Disconnected) => {}
+        if early_termination.is_none() && let Some(ref wd_rx) = watchdog_rx {
+            match wd_rx.try_recv() {
+                Ok(req) => {
+                    let _ = child.kill();
+                    early_termination = Some(watchdog_request_to_early_termination(req));
+                    grace_deadline = Some(Instant::now() + grace_period);
                 }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {}
             }
         }
 
         if early_termination.is_none()
-            && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
             && let Some(signal) =
                 detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
-        {
-            let _ = child.kill();
-            early_termination = Some(signal);
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
-        if early_termination.is_none()
-            && !wall_clock_tripped
-            && let Some(silence_budget) = step_timeout
-            && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = detect_step_timeout(metrics, Instant::now(), silence_budget)
         {
             let _ = child.kill();
             early_termination = Some(signal);
@@ -1124,24 +1016,42 @@ fn apply_early_termination_to_summary(
             summary.error_kind = None;
             summary.error_message = None;
         }
-        EarlyTermination::StepTimeout { message } => {
+        EarlyTermination::Timeout { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("timeout".into());
+            summary.error_message = Some(message.clone());
+        }
+        EarlyTermination::StepTimeout { message, .. } => {
             summary.exit_code = 1;
             summary.is_error = true;
             summary.error_kind = Some("step_timeout".into());
             summary.error_message = Some(message.clone());
         }
-        EarlyTermination::SubagentsUnresponsive { message } => {
-            summary.exit_code = 1;
-            summary.is_error = true;
-            summary.error_kind = Some("subagents_unresponsive".into());
-            summary.error_message = Some(message.clone());
-        }
-        EarlyTermination::StreamIdleTimeout { message } => {
-            summary.exit_code = 1;
-            summary.is_error = true;
-            summary.error_kind = Some("stream_idle_timeout".into());
-            summary.error_message = Some(message.clone());
-        }
+    }
+}
+
+/// Convert a [`WatchdogTermination`] request from the watchdog ticker into
+/// the lib-side [`EarlyTermination`] variant the wait loop carries until
+/// the synthesized summary is built.
+///
+/// `Timeout` and `StepTimeout` are the only two reasons; `StepTimeout`
+/// preserves the stuck-subagent snapshots as `outstanding` so the
+/// rendered error block can name any subagents still in flight.
+fn watchdog_request_to_early_termination(req: WatchdogTermination) -> EarlyTermination {
+    use super::subagent_watchdog::WatchdogTerminationReason;
+    match req.reason {
+        WatchdogTerminationReason::Timeout => EarlyTermination::Timeout {
+            message: req.message,
+        },
+        WatchdogTerminationReason::StepTimeout => EarlyTermination::StepTimeout {
+            message: req.message,
+            outstanding: req
+                .stuck_subagents
+                .iter()
+                .map(|snap| snap.to_stuck_info())
+                .collect(),
+        },
     }
 }
 
@@ -1438,9 +1348,9 @@ pub(crate) fn run_child_capture(
 /// emitted. The 30-second cadence and 30-second silence window are the
 /// tuning preserved from the previous heartbeat thread.
 ///
-/// When `watchdog_state` is provided and the subagent watchdog is enabled,
-/// the ticker also emits at most one diagnostic line per active subagent
-/// per silence window:
+/// When `watchdog_state` is provided and the unified `step_timeout` rule
+/// is enabled, the ticker also emits at most one diagnostic line per
+/// active subagent per silence window:
 ///
 ///   `⏳ Awaiting subagent: <name-or-id> (<elapsed-since-start>)`
 ///
@@ -1451,7 +1361,7 @@ fn spawn_flush_if_idle_ticker(
     text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>>,
     watchdog_state: Option<Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>>,
     section_tracker: Option<Arc<Mutex<SectionTracker>>>,
-    watchdog_config: WatchdogConfig,
+    timeout_config: TimeoutConfig,
 ) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
     const SILENCE_WINDOW: Duration = Duration::from_secs(30);
     const CADENCE: Duration = Duration::from_secs(30);
@@ -1471,8 +1381,10 @@ fn spawn_flush_if_idle_ticker(
                     r.flush_if_idle(&mut writer, SILENCE_WINDOW);
                 }
 
-                // Emit subagent idle diagnostics when the subagent watchdog is enabled.
-                if watchdog_config.subagent_watchdog_enabled()
+                // Emit subagent idle diagnostics only when the unified
+                // step_timeout rule is enabled. If the user disabled the
+                // silence rule, the idle diagnostic is also suppressed.
+                if timeout_config.step_timeout_enabled()
                     && let Some(ref state) = watchdog_state
                     && let Ok(mut guard) = state.lock()
                 {
@@ -1506,19 +1418,24 @@ fn spawn_flush_if_idle_ticker(
     (done, handle)
 }
 
-/// Spawn the subagent watchdog ticker.
+/// Spawn the unified timeout watchdog ticker.
 ///
-/// Evaluates subagent-silence and stream-idle rules on a short cadence
-/// (default 5 s). When a rule breaches, renders an `AgentNative` error
-/// block to stderr and sends a [`WatchdogTermination`] request to the
-/// exec wait loop so the child process group receives SIGTERM.
+/// Evaluates the two timeout rules — wall-clock (`timeout`) and
+/// stream-silence (`step_timeout`) — on the configured cadence
+/// ([`TimeoutConfig::interval`], default 5 s). When a rule breaches,
+/// renders an `AgentNative` error block to stderr and sends a
+/// [`WatchdogTermination`] request to the exec wait loop so the child
+/// process group receives SIGTERM with the configured `kill_grace`.
 ///
 /// The ticker holds only weak conceptual coupling to the live sink: it
-/// reads the same `WatchdogState` the sink updates, and emits through
-/// the same `StreamOutput` coordinator so stderr lines land on fresh
-/// rows even when stdout is mid-line.
-fn spawn_subagent_watchdog_ticker(
-    config: WatchdogConfig,
+/// reads the same `WatchdogState` the sink updates (for diagnostic
+/// enrichment of `step_timeout` breaches) and emits through the same
+/// `StreamOutput` coordinator so stderr lines land on fresh rows even
+/// when stdout is mid-line. A one-shot atomic `fired` guard inside
+/// [`evaluate_timeout_tick`] prevents double-fire across the two rules.
+fn spawn_timeout_watchdog_ticker(
+    config: TimeoutConfig,
+    started_at: Instant,
     watchdog_state: Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>,
     watchdog_tx: std::sync::mpsc::Sender<WatchdogTermination>,
     live_metrics: LiveMetrics,
@@ -1527,23 +1444,23 @@ fn spawn_subagent_watchdog_ticker(
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = Arc::clone(&done);
     let fired = Arc::new(AtomicBool::new(false));
-    let cadence = Duration::from_secs(config.subagent_watchdog_interval_seconds);
+    let cadence = config.interval;
 
     let handle = thread::spawn(move || {
         let mut next_tick = Instant::now() + cadence;
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
             if now >= next_tick {
-                match evaluate_watchdog_tick(
+                match evaluate_timeout_tick(
                     &config,
                     now,
+                    started_at,
                     &watchdog_state,
                     &live_metrics,
                     &fired,
                 ) {
                     WatchdogTickResult::Ok => {}
-                    WatchdogTickResult::SubagentBreach(ref term)
-                    | WatchdogTickResult::StreamIdleBreach(ref term) => {
+                    WatchdogTickResult::Breach(ref term) => {
                         render_watchdog_error_to_stream(term, &stream_output);
                         let _ = watchdog_tx.send(term.clone());
                     }
@@ -1827,11 +1744,15 @@ fn format_internal_duration(secs: u64) -> String {
 /// Returns `Some(EarlyTermination::StepTimeout)` when the time since the last
 /// stream event exceeds `step_timeout`. Returns `None` when `last_event_at`
 /// is not yet populated (first-event grace so provider startup does not
-/// trip a kill) or when silence is still under budget.
+/// trip a kill), when silence is still under budget, or when in-flight tools
+/// or subagents are still active.
 ///
-/// Unlike [`detect_opencode_hang_termination`], this helper does not gate on
-/// `in_flight` state or `provider_status`: any silence past the budget is a
-/// hard kill. The caller is responsible for SIGTERM escalation.
+/// Like [`detect_opencode_hang_termination`], this helper gates on `in_flight`
+/// and `in_flight_subagents`: a long-running Task/subagent call produces
+/// parent-stream silence by design while the child works. The wall-clock
+/// `timeout` rule serves as the backstop for truly stuck tool calls. The
+/// caller is responsible for SIGTERM escalation.
+#[allow(dead_code)]
 fn detect_step_timeout(
     metrics: &LiveMetrics,
     now: Instant,
@@ -1839,6 +1760,9 @@ fn detect_step_timeout(
 ) -> Option<EarlyTermination> {
     let state = metrics.lock().ok()?;
     let last_event_at = state.last_event_at?;
+    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
+        return None;
+    }
     let silence = now.saturating_duration_since(last_event_at);
     if silence >= step_timeout {
         let silence_text = format_internal_duration(silence.as_secs());
@@ -1846,6 +1770,7 @@ fn detect_step_timeout(
             message: format!(
                 "no stream activity for {silence_text}; terminating due to step_timeout"
             ),
+            outstanding: Vec::new(),
         })
     } else {
         None
@@ -1881,14 +1806,11 @@ fn early_termination_process_outcome(
     early_termination: Option<&EarlyTermination>,
 ) -> claudine::harness::ProcessTermination {
     match early_termination {
-        Some(EarlyTermination::StepTimeout { .. }) => {
+        Some(EarlyTermination::Timeout { .. }) => {
             claudine::harness::ProcessTermination::TimedOut
         }
-        Some(EarlyTermination::SubagentsUnresponsive { .. }) => {
-            claudine::harness::ProcessTermination::Completed
-        }
-        Some(EarlyTermination::StreamIdleTimeout { .. }) => {
-            claudine::harness::ProcessTermination::Completed
+        Some(EarlyTermination::StepTimeout { .. }) => {
+            claudine::harness::ProcessTermination::TimedOut
         }
         Some(EarlyTermination::CompletedButHung { .. }) => {
             claudine::harness::ProcessTermination::Completed
@@ -1977,8 +1899,7 @@ pub(crate) fn run_child_stream_semantic(
     args: &[String],
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
-    timeout: Option<u64>,
-    step_timeout: Option<u64>,
+    timeout_config: TimeoutConfig,
     stderr_noise_prefixes: &[&str],
     suppress_stderr_on_success: bool,
     show_timing_output: bool,
@@ -2048,7 +1969,7 @@ pub(crate) fn run_child_stream_semantic(
         text_renderer.clone(),
         watchdog_state.clone(),
         section_tracker.clone(),
-        WatchdogConfig::from_env(),
+        timeout_config,
     ));
 
     // Prompt-scoped periodic header + warnings. Only started when the
@@ -2061,8 +1982,8 @@ pub(crate) fn run_child_stream_semantic(
                 started_at,
                 started_at_wall,
                 ctx,
-                timeout.map(Duration::from_secs),
-                step_timeout.map(Duration::from_secs),
+                timeout_config.timeout,
+                timeout_config.step_timeout,
                 live_metrics.clone(),
                 stream_output.clone(),
             )
@@ -2241,35 +2162,35 @@ pub(crate) fn run_child_stream_semantic(
     // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"
     // grace window (120s). It does not drive a user-visible timing line.
     let opencode_stop_threshold = Duration::from_secs(120);
-    let wall_clock_timeout = timeout.map(Duration::from_secs);
-    let step_timeout_duration = step_timeout.map(Duration::from_secs);
 
     // Watchdog channel: the ticker sends termination requests; the wait
-    // loop receives them and escalates SIGTERM → SIGKILL.
+    // loop receives them and escalates SIGTERM → SIGKILL via the same
+    // pathway used for stderr-bridge early termination.
     let (watchdog_tx, watchdog_rx): (
         std::sync::mpsc::Sender<WatchdogTermination>,
         std::sync::mpsc::Receiver<WatchdogTermination>,
     ) = std::sync::mpsc::channel();
-    let watchdog_config = WatchdogConfig::from_env();
-    let watchdog_enabled = watchdog_config.any_watchdog_enabled() && watchdog_state.is_some();
+    let watchdog_enabled = timeout_config.any_enabled() && watchdog_state.is_some();
     let mut watchdog_ticker = None;
     if watchdog_enabled && let Some(state) = watchdog_state {
-        watchdog_ticker = Some(spawn_subagent_watchdog_ticker(
-            watchdog_config,
+        watchdog_ticker = Some(spawn_timeout_watchdog_ticker(
+            timeout_config,
+            started_at,
             state,
             watchdog_tx,
             live_metrics.clone(),
             stream_output.clone(),
         ));
     }
-    let needs_advanced_wait = wall_clock_timeout.is_some()
-        || step_timeout_duration.is_some()
-        || early_terminate_rx.is_some()
+    // Promote to the advanced wait path whenever the watchdog ticker or
+    // stderr early-terminate bridge is active. The watchdog is the sole
+    // source of timeout-driven termination; the wait loop only consumes
+    // signals from channels.
+    let needs_advanced_wait = early_terminate_rx.is_some()
         || watchdog_enabled;
     let (exit_code, termination, early_termination) = if needs_advanced_wait {
         // Synthesize a disconnected receiver when no stderr bridge is
-        // installed so the wait loop can still enforce wall-clock and
-        // step timeouts for non-OpenCode providers.
+        // installed so the wait loop can still receive watchdog signals.
         let rx = early_terminate_rx.unwrap_or_else(|| {
             let (_tx, rx) = std::sync::mpsc::channel();
             rx
@@ -2286,8 +2207,7 @@ pub(crate) fn run_child_stream_semantic(
             wd_rx,
             Some(wait_loop_metrics),
             opencode_stop_threshold,
-            wall_clock_timeout,
-            step_timeout_duration,
+            timeout_config.kill_grace,
         )?
     } else {
         let (code, term) = wait_with_signal_handling(&mut child, true)?;
@@ -2296,9 +2216,8 @@ pub(crate) fn run_child_stream_semantic(
 
     if let Some(
         EarlyTermination::CompletedButHung { message }
-        | EarlyTermination::StepTimeout { message }
-        | EarlyTermination::SubagentsUnresponsive { message }
-        | EarlyTermination::StreamIdleTimeout { message },
+        | EarlyTermination::Timeout { message }
+        | EarlyTermination::StepTimeout { message, .. },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)
@@ -2865,7 +2784,7 @@ mod tests {
 
         assert!(matches!(
             detected,
-            Some(EarlyTermination::StepTimeout { .. })
+            Some(EarlyTermination::StepTimeout { ref outstanding, .. }) if outstanding.is_empty()
         ));
     }
 
@@ -2896,9 +2815,90 @@ mod tests {
     }
 
     #[test]
+    fn detect_step_timeout_returns_none_when_in_flight_tool_exists() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight.insert(
+                "task-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(
+            detected.is_none(),
+            "step_timeout must not fire while a tool call is in-flight"
+        );
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_in_flight_subagent_exists() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(
+            detected.is_none(),
+            "step_timeout must not fire while a subagent is in-flight"
+        );
+    }
+
+    #[test]
+    fn detect_step_timeout_fires_when_in_flight_cleared() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        assert!(
+            detect_step_timeout(&metrics, now, Duration::from_secs(5)).is_none(),
+            "must not fire while subagent is active"
+        );
+
+        {
+            let mut state = metrics.lock().unwrap();
+            state.in_flight_subagents.clear();
+        }
+
+        assert!(
+            detect_step_timeout(&metrics, now, Duration::from_secs(5)).is_some(),
+            "must fire once in-flight is cleared and silence exceeds budget"
+        );
+    }
+
+    #[test]
     fn early_termination_process_outcome_maps_step_timeout_to_timed_out() {
         let termination = EarlyTermination::StepTimeout {
             message: "no stream activity for 6s; terminating due to step_timeout".into(),
+            outstanding: Vec::new(),
         };
 
         let outcome = early_termination_process_outcome(Some(&termination));
@@ -2914,6 +2914,7 @@ mod tests {
             &mut summary,
             &EarlyTermination::StepTimeout {
                 message: "no stream activity for 6s; terminating due to step_timeout".into(),
+                outstanding: Vec::new(),
             },
         );
 
@@ -2930,65 +2931,85 @@ mod tests {
     }
 
     #[test]
-    fn early_termination_process_outcome_maps_subagents_unresponsive_to_completed() {
-        let termination = EarlyTermination::SubagentsUnresponsive {
-            message: "subagents a, b unresponsive for 180s".into(),
+    fn early_termination_process_outcome_maps_timeout_to_timed_out() {
+        let termination = EarlyTermination::Timeout {
+            message: "wall-clock budget exceeded after 2h".into(),
         };
 
         let outcome = early_termination_process_outcome(Some(&termination));
 
-        assert_eq!(outcome, claudine::harness::ProcessTermination::Completed);
+        assert_eq!(outcome, claudine::harness::ProcessTermination::TimedOut);
     }
 
     #[test]
-    fn early_termination_process_outcome_maps_stream_idle_to_completed() {
-        let termination = EarlyTermination::StreamIdleTimeout {
-            message: "no stream activity for 300s".into(),
-        };
-
-        let outcome = early_termination_process_outcome(Some(&termination));
-
-        assert_eq!(outcome, claudine::harness::ProcessTermination::Completed);
-    }
-
-    #[test]
-    fn apply_early_termination_subagents_unresponsive_sets_error_fields() {
+    fn apply_early_termination_timeout_sets_timeout_error() {
         let mut summary = StreamExecutionSummary::default();
 
         apply_early_termination_to_summary(
             &mut summary,
-            &EarlyTermination::SubagentsUnresponsive {
-                message: "subagents a, b unresponsive for 180s".into(),
+            &EarlyTermination::Timeout {
+                message: "wall-clock budget exceeded after 2h".into(),
             },
         );
 
         assert_eq!(summary.exit_code, 1);
         assert!(summary.is_error);
-        assert_eq!(summary.error_kind.as_deref(), Some("subagents_unresponsive"));
+        assert_eq!(summary.error_kind.as_deref(), Some("timeout"));
         assert_eq!(
             summary.error_message.as_deref(),
-            Some("subagents a, b unresponsive for 180s"),
+            Some("wall-clock budget exceeded after 2h"),
         );
     }
 
     #[test]
-    fn apply_early_termination_stream_idle_timeout_sets_error_fields() {
-        let mut summary = StreamExecutionSummary::default();
+    fn watchdog_request_to_early_termination_maps_timeout_reason() {
+        use crate::commands::wrap::subagent_watchdog::{
+            WatchdogTermination, WatchdogTerminationReason,
+        };
 
-        apply_early_termination_to_summary(
-            &mut summary,
-            &EarlyTermination::StreamIdleTimeout {
-                message: "no stream activity for 300s".into(),
-            },
-        );
+        let req = WatchdogTermination {
+            reason: WatchdogTerminationReason::Timeout,
+            message: "wall-clock budget exceeded".into(),
+            stuck_subagents: Vec::new(),
+        };
 
-        assert_eq!(summary.exit_code, 1);
-        assert!(summary.is_error);
-        assert_eq!(summary.error_kind.as_deref(), Some("stream_idle_timeout"));
-        assert_eq!(
-            summary.error_message.as_deref(),
-            Some("no stream activity for 300s"),
-        );
+        let early = watchdog_request_to_early_termination(req);
+        assert!(matches!(
+            early,
+            EarlyTermination::Timeout { ref message } if message == "wall-clock budget exceeded"
+        ));
+    }
+
+    #[test]
+    fn watchdog_request_to_early_termination_carries_stuck_subagents() {
+        use crate::commands::wrap::subagent_watchdog::{
+            ActiveSubagentSnapshot, WatchdogTermination, WatchdogTerminationReason,
+        };
+
+        let now = Instant::now();
+        let snapshot = ActiveSubagentSnapshot {
+            id: "ses_a".into(),
+            name: Some("Commit feature work".into()),
+            started_at: now,
+            last_progress_at: now,
+            elapsed_since_start: Duration::from_secs(900),
+            elapsed_since_progress: Duration::from_secs(900),
+        };
+        let req = WatchdogTermination {
+            reason: WatchdogTerminationReason::StepTimeout,
+            message: "no stream activity for 30m".into(),
+            stuck_subagents: vec![snapshot],
+        };
+
+        let early = watchdog_request_to_early_termination(req);
+        let outstanding = match early {
+            EarlyTermination::StepTimeout { outstanding, .. } => outstanding,
+            other => panic!("expected StepTimeout, got {other:?}"),
+        };
+        assert_eq!(outstanding.len(), 1);
+        assert_eq!(outstanding[0].id, "ses_a");
+        assert_eq!(outstanding[0].name.as_deref(), Some("Commit feature work"));
+        assert_eq!(outstanding[0].elapsed_since_progress, Duration::from_secs(900));
     }
 
     #[test]

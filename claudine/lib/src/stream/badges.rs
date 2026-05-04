@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::provider::Provider;
+use crate::provider_id::Provider;
 use crate::stream::summary::StreamExecutionSummary;
 
 /// Category describing why a badge was emitted.

@@ -165,10 +165,16 @@ pub(crate) fn get_recent_commits_with_decorations(
 /// Gathers repository status including staged, unstaged, and untracked changes.
 /// Also returns file changes with their status for rich output.
 ///
+/// Builds the staged and unstaged diffs once for the whole repository and
+/// walks each diff a single time to accumulate per-file line stats and (when
+/// `include_diffs` is true) per-file unified patch text. This avoids the
+/// previous O(dirty_files * diff_setup_cost) scaling of issuing one
+/// pathspec-restricted diff per dirty file.
+///
 /// When `include_diffs` is true, `RepoStatus.dirty` and `RepoStatus.untracked` are
-/// populated with full unified diff payloads via [`build_dirty_files`] and
-/// [`build_untracked_files`]. When false, those fields are empty `Vec`s and only
-/// the cheaper per-file stats (paths, status, line counts) are computed.
+/// populated with full unified diff payloads. When false, those fields are
+/// empty `Vec`s and only the cheaper per-file stats (paths, status, line counts)
+/// are computed.
 pub(crate) fn get_repo_status_with_changes(
     repo: &Repository,
     include_diffs: bool,
@@ -182,8 +188,30 @@ pub(crate) fn get_repo_status_with_changes(
 
     let statuses = repo.statuses(Some(&mut opts))?;
 
-    // Resolve HEAD tree once upfront to avoid repeated resolution per dirty file
+    // Resolve HEAD tree once upfront so the staged diff can be built without
+    // repeating tree resolution per file.
     let head_tree = repo.head().and_then(|h| h.peel_to_tree()).ok();
+
+    // Build staged (HEAD -> index) and unstaged (index -> workdir) diffs once
+    // for the whole repository, then walk each diff a single time to fill the
+    // per-path accumulators below.
+    let staged_diff = head_tree
+        .as_ref()
+        .and_then(|tree| repo.diff_tree_to_index(Some(tree), None, None).ok());
+    let unstaged_diff = repo.diff_index_to_workdir(None, None).ok();
+
+    let mut diff_stats: HashMap<PathBuf, LineStats> = HashMap::new();
+    let mut staged_patches: HashMap<PathBuf, String> = HashMap::new();
+    let mut unstaged_patches: HashMap<PathBuf, String> = HashMap::new();
+
+    if let Some(diff) = staged_diff.as_ref() {
+        let patch_sink = include_diffs.then_some(&mut staged_patches);
+        aggregate_diff(diff, &mut diff_stats, patch_sink)?;
+    }
+    if let Some(diff) = unstaged_diff.as_ref() {
+        let patch_sink = include_diffs.then_some(&mut unstaged_patches);
+        aggregate_diff(diff, &mut diff_stats, patch_sink)?;
+    }
 
     let mut staged = 0;
     let mut unstaged = 0;
@@ -246,38 +274,38 @@ pub(crate) fn get_repo_status_with_changes(
         if let Some(ref p) = path
             && !is_untracked
         {
-            if is_staged && is_unstaged {
-                // File is both staged and has additional modifications
-                let (lines_added, lines_removed) = get_file_diff_stats(repo, p, head_tree.as_ref());
-                file_changes.push(FileChange {
-                    path: p.clone(),
-                    status: FileStatus::Both,
-                    action: staged_action.unwrap_or(FileAction::Modified),
-                    lines_added,
-                    lines_removed,
-                });
-                dirty_set.insert(p.clone());
+            let LineStats {
+                added: lines_added,
+                removed: lines_removed,
+            } = diff_stats.get(p).copied().unwrap_or_default();
+
+            let (file_status, action) = if is_staged && is_unstaged {
+                (
+                    FileStatus::Both,
+                    staged_action.unwrap_or(FileAction::Modified),
+                )
             } else if is_staged {
-                let (lines_added, lines_removed) = get_file_diff_stats(repo, p, head_tree.as_ref());
-                file_changes.push(FileChange {
-                    path: p.clone(),
-                    status: FileStatus::Staged,
-                    action: staged_action.unwrap_or(FileAction::Modified),
-                    lines_added,
-                    lines_removed,
-                });
-                dirty_set.insert(p.clone());
+                (
+                    FileStatus::Staged,
+                    staged_action.unwrap_or(FileAction::Modified),
+                )
             } else if is_unstaged {
-                let (lines_added, lines_removed) = get_file_diff_stats(repo, p, head_tree.as_ref());
-                file_changes.push(FileChange {
-                    path: p.clone(),
-                    status: FileStatus::Modified,
-                    action: unstaged_action.unwrap_or(FileAction::Modified),
-                    lines_added,
-                    lines_removed,
-                });
-                dirty_set.insert(p.clone());
-            }
+                (
+                    FileStatus::Modified,
+                    unstaged_action.unwrap_or(FileAction::Modified),
+                )
+            } else {
+                continue;
+            };
+
+            file_changes.push(FileChange {
+                path: p.clone(),
+                status: file_status,
+                action,
+                lines_added,
+                lines_removed,
+            });
+            dirty_set.insert(p.clone());
         }
     }
 
@@ -306,9 +334,18 @@ pub(crate) fn get_repo_status_with_changes(
     // Get repository root for absolute paths
     let repo_root = repo.workdir().map(Path::to_path_buf);
 
-    // Build dirty file details with diffs (only when requested)
+    // Build dirty file details with diffs (only when requested). The patch
+    // strings were captured in the single diff walk above, so this does not
+    // re-run any libgit2 diff machinery.
     let dirty = if include_diffs {
-        build_dirty_files(repo, &dirty_paths, &head_sha, &origin_commit, &repo_root)?
+        build_dirty_files_from_patches(
+            &dirty_paths,
+            &staged_patches,
+            &unstaged_patches,
+            &head_sha,
+            &origin_commit,
+            &repo_root,
+        )
     } else {
         Vec::new()
     };
@@ -336,6 +373,102 @@ pub(crate) fn get_repo_status_with_changes(
     };
 
     Ok((repo_status, file_changes))
+}
+
+/// Per-file line stats accumulated from a single diff walk.
+#[derive(Debug, Clone, Copy, Default)]
+struct LineStats {
+    added: usize,
+    removed: usize,
+}
+
+/// Walk a `git2::Diff` exactly once, accumulating per-path line stats and
+/// optionally per-path unified patch strings.
+///
+/// Lines are attributed to the new file path when present, falling back to
+/// the old file path. This keeps deletes attributed to the deleted path and
+/// renames (when rename detection is off, the default) attributed as
+/// add/delete pairs against their respective paths — matching the prior
+/// behavior of the per-file `pathspec`-restricted diff loop.
+fn aggregate_diff(
+    diff: &git2::Diff,
+    stats: &mut HashMap<PathBuf, LineStats>,
+    mut patches: Option<&mut HashMap<PathBuf, String>>,
+) -> Result<()> {
+    diff.print(git2::DiffFormat::Patch, |delta, _hunk, line| {
+        let Some(path) = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .map(PathBuf::from)
+        else {
+            return true;
+        };
+
+        match line.origin() {
+            '+' => stats.entry(path.clone()).or_default().added += 1,
+            '-' => stats.entry(path.clone()).or_default().removed += 1,
+            _ => {}
+        }
+
+        if let Some(patches) = patches.as_deref_mut() {
+            let entry = patches.entry(path).or_default();
+            // Mirror the legacy diff_to_string format: prefix only content
+            // lines, leave headers untouched.
+            if matches!(line.origin(), '+' | '-' | ' ') {
+                entry.push(line.origin());
+            }
+            if let Ok(content) = std::str::from_utf8(line.content()) {
+                entry.push_str(content);
+            }
+        }
+        true
+    })?;
+    Ok(())
+}
+
+/// Assemble per-file `DirtyFile` entries from the staged and unstaged patch
+/// strings collected by [`aggregate_diff`].
+fn build_dirty_files_from_patches(
+    paths: &[PathBuf],
+    staged_patches: &HashMap<PathBuf, String>,
+    unstaged_patches: &HashMap<PathBuf, String>,
+    head_sha: &str,
+    origin_commit: &Option<String>,
+    repo_root: &Option<PathBuf>,
+) -> Vec<DirtyFile> {
+    paths
+        .iter()
+        .map(|filepath| {
+            let mut diff = String::new();
+            if let Some(staged) = staged_patches.get(filepath)
+                && !staged.is_empty()
+            {
+                diff.push_str(staged);
+            }
+            if let Some(unstaged) = unstaged_patches.get(filepath)
+                && !unstaged.is_empty()
+            {
+                if !diff.is_empty() {
+                    diff.push('\n');
+                }
+                diff.push_str(unstaged);
+            }
+
+            let absolute_filepath = repo_root
+                .as_ref()
+                .map(|root| root.join(filepath))
+                .unwrap_or_else(|| filepath.clone());
+
+            DirtyFile {
+                filepath: filepath.clone(),
+                absolute_filepath,
+                diff,
+                last_local_commit: head_sha.to_string(),
+                origin_commit: origin_commit.clone(),
+            }
+        })
+        .collect()
 }
 
 /// Gets HEAD commit SHA and upstream tracking branch commit SHA.
@@ -407,133 +540,6 @@ fn get_upstream_commit(repo: &Repository) -> Option<String> {
         .ok()?;
 
     Some(upstream_commit.id().to_string())
-}
-
-/// Builds detailed information for dirty files including unified diffs.
-fn build_dirty_files(
-    repo: &Repository,
-    paths: &[PathBuf],
-    head_sha: &str,
-    origin_commit: &Option<String>,
-    repo_root: &Option<PathBuf>,
-) -> Result<Vec<DirtyFile>> {
-    let mut dirty_files = Vec::new();
-
-    for filepath in paths {
-        let diff = get_file_diff(repo, filepath)?;
-        let absolute_filepath = repo_root
-            .as_ref()
-            .map(|root| root.join(filepath))
-            .unwrap_or_else(|| filepath.clone());
-
-        dirty_files.push(DirtyFile {
-            filepath: filepath.clone(),
-            absolute_filepath,
-            diff,
-            last_local_commit: head_sha.to_string(),
-            origin_commit: origin_commit.clone(),
-        });
-    }
-
-    Ok(dirty_files)
-}
-
-/// Gets the unified diff for a single file (combined staged + unstaged changes).
-/// Returns `(lines_added, lines_removed)` for a single file by combining staged and unstaged diffs.
-///
-/// `head_tree` should be pre-resolved from `repo.head().and_then(|h| h.peel_to_tree())`
-/// to avoid repeated tree resolution when this function is called in a loop.
-fn get_file_diff_stats(
-    repo: &Repository,
-    filepath: &Path,
-    head_tree: Option<&git2::Tree>,
-) -> (usize, usize) {
-    let mut added: usize = 0;
-    let mut removed: usize = 0;
-
-    // Staged changes (HEAD to index)
-    if let Some(head_tree) = head_tree {
-        let mut opts = git2::DiffOptions::new();
-        opts.pathspec(filepath);
-        if let Ok(diff) = repo.diff_tree_to_index(Some(head_tree), None, Some(&mut opts))
-            && let Ok(stats) = diff.stats()
-        {
-            added += stats.insertions();
-            removed += stats.deletions();
-        }
-    }
-
-    // Unstaged changes (index to workdir)
-    let mut opts = git2::DiffOptions::new();
-    opts.pathspec(filepath);
-    if let Ok(diff) = repo.diff_index_to_workdir(None, Some(&mut opts))
-        && let Ok(stats) = diff.stats()
-    {
-        added += stats.insertions();
-        removed += stats.deletions();
-    }
-
-    (added, removed)
-}
-
-fn get_file_diff(repo: &Repository, filepath: &Path) -> Result<String> {
-    let mut diff_output = String::new();
-
-    // Get diff for staged changes (HEAD to index)
-    if let Ok(head_tree) = repo.head().and_then(|h| h.peel_to_tree()) {
-        let mut diff_opts = git2::DiffOptions::new();
-        diff_opts.pathspec(filepath);
-
-        if let Ok(staged_diff) =
-            repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut diff_opts))
-        {
-            let staged_output = diff_to_string(&staged_diff)?;
-            if !staged_output.is_empty() {
-                diff_output.push_str(&staged_output);
-            }
-        }
-    }
-
-    // Get diff for unstaged changes (index to workdir)
-    let mut diff_opts = git2::DiffOptions::new();
-    diff_opts.pathspec(filepath);
-
-    if let Ok(unstaged_diff) = repo.diff_index_to_workdir(None, Some(&mut diff_opts)) {
-        let unstaged_output = diff_to_string(&unstaged_diff)?;
-        if !unstaged_output.is_empty() {
-            if !diff_output.is_empty() {
-                diff_output.push('\n');
-            }
-            diff_output.push_str(&unstaged_output);
-        }
-    }
-
-    Ok(diff_output)
-}
-
-/// Converts a git2::Diff to a unified diff string using the callback-based print API.
-fn diff_to_string(diff: &git2::Diff) -> Result<String> {
-    let mut output = String::new();
-
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-        // Add the appropriate prefix based on line origin
-        let prefix = match line.origin() {
-            '+' | '-' | ' ' => line.origin(),
-            _ => ' ',
-        };
-
-        // Only add prefix for content lines, not headers
-        if matches!(line.origin(), '+' | '-' | ' ') {
-            output.push(prefix);
-        }
-
-        if let Ok(content) = std::str::from_utf8(line.content()) {
-            output.push_str(content);
-        }
-        true
-    })?;
-
-    Ok(output)
 }
 
 /// Builds detailed information for untracked files.
@@ -780,9 +786,10 @@ pub(crate) fn get_remotes(repo: &Repository, include_remote_details: bool) -> Ve
 
 /// Refresh local remote-tracking refs using the user's configured `git` binary.
 ///
-/// This uses `git fetch --quiet --prune <remote>` per remote and disables
-/// terminal prompts so CLI use does not block on credential input.
-pub(crate) fn refresh_remote_tracking_refs(repo: &Repository) {
+/// When multiple remotes are configured, fetches run with bounded parallelism
+/// (up to `max_concurrency`, clamped to 1–3) to reduce latency.  Terminal
+/// prompts are disabled so CLI use does not block on credential input.
+pub(crate) fn refresh_remote_tracking_refs(repo: &Repository, max_concurrency: usize) {
     let Some(repo_root) = repo.workdir() else {
         return;
     };
@@ -791,17 +798,54 @@ pub(crate) fn refresh_remote_tracking_refs(repo: &Repository) {
         return;
     };
 
-    for remote_name in remotes.iter().flatten() {
-        let _ = Command::new("git")
-            .current_dir(repo_root)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .args(["fetch", "--quiet", "--prune", remote_name])
-            .status()
-            .map_err(|e| {
-                warn!(remote = remote_name, error = %e, "git fetch failed");
-                e
-            });
+    let remote_names: Vec<String> = remotes.iter().flatten().map(|s| s.to_string()).collect();
+
+    if remote_names.is_empty() {
+        return;
     }
+
+    // Serial path for a single remote — avoid threading overhead.
+    if remote_names.len() == 1 {
+        fetch_single_remote(repo_root, &remote_names[0]);
+        return;
+    }
+
+    let max_concurrency = max_concurrency.clamp(1, 3);
+    let repo_root = repo_root.to_path_buf();
+
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
+
+        for chunk in remote_names.chunks(max_concurrency) {
+            // Spawn up to max_concurrency fetches in parallel.
+            for name in chunk {
+                let name = name.clone();
+                let repo_root = &repo_root;
+                handles.push(s.spawn(move || {
+                    fetch_single_remote(repo_root, &name);
+                }));
+            }
+            // Wait for the current batch before starting the next.
+            for handle in handles.drain(..) {
+                if let Err(e) = handle.join() {
+                    std::panic::resume_unwind(e);
+                }
+            }
+        }
+    });
+}
+
+/// Run `git fetch --quiet --prune <remote>` for a single remote.
+fn fetch_single_remote(repo_root: &std::path::Path, remote_name: &str) {
+    let _ = Command::new("git")
+        .current_dir(repo_root)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["fetch", "--quiet", "--prune", remote_name])
+        .status()
+        .map_err(|e| {
+            warn!(remote = remote_name, error = %e, "git fetch failed");
+            e
+        });
 }
 
 /// Derive the user-facing behind status from per-remote tracking counts.
@@ -826,10 +870,71 @@ pub(crate) fn summarize_behind_status(tracking: &[RemoteTrackingStatus]) -> Opti
 }
 
 /// Populate commit containment data from locally available remote-tracking refs.
-pub(crate) fn populate_recent_commit_remotes(repo: &Repository, commits: &mut [CommitInfo]) {
-    let remote_tips = remote_branch_tips(repo);
-    if remote_tips.is_empty() {
+///
+/// Instead of checking every commit against every remote tip with
+/// `graph_descendant_of` (O(commits × branches) graph traversals), this
+/// walks the ancestry from each remote tip once and builds a
+/// `HashMap<Oid, Vec<remote>>`.  A `max_branches` limit can cap the number
+/// of remote-tracking branches inspected.
+pub(crate) fn populate_recent_commit_remotes(
+    repo: &Repository,
+    commits: &mut [CommitInfo],
+    max_branches: Option<usize>,
+) {
+    let mut remote_tips = remote_branch_tips(repo);
+    if remote_tips.is_empty() || commits.is_empty() {
         return;
+    }
+
+    // Sort for deterministic truncation, then apply branch limit if configured.
+    remote_tips.sort_by(|a, b| a.0.cmp(&b.0));
+    if let Some(limit) = max_branches {
+        remote_tips.truncate(limit);
+    }
+
+    // Determine the oldest commit time among the requested commits so we
+    // can stop ancestry walks early.
+    let oldest_time = commits
+        .iter()
+        .filter_map(|c| {
+            git2::Oid::from_str(&c.sha)
+                .ok()
+                .and_then(|oid| repo.find_commit(oid).ok())
+                .map(|c| c.time().seconds())
+        })
+        .min()
+        .unwrap_or(i64::MIN);
+
+    // Walk ancestry from each remote tip, collecting containment.
+    let mut containment: HashMap<git2::Oid, Vec<String>> = HashMap::new();
+
+    for (remote_name, tip_oid) in &remote_tips {
+        let Ok(mut revwalk) = repo.revwalk() else {
+            continue;
+        };
+        if revwalk.push(*tip_oid).is_err() {
+            continue;
+        }
+
+        for oid_result in revwalk {
+            let Ok(oid) = oid_result else {
+                continue;
+            };
+
+            containment
+                .entry(oid)
+                .or_default()
+                .push(remote_name.clone());
+
+            // Stop when we reach commits older than the oldest requested.
+            // This is a safe heuristic: any commit older than the oldest
+            // requested commit cannot be in the `commits` list.
+            if let Ok(commit) = repo.find_commit(oid)
+                && commit.time().seconds() < oldest_time
+            {
+                break;
+            }
+        }
     }
 
     for commit in commits {
@@ -837,21 +942,13 @@ pub(crate) fn populate_recent_commit_remotes(repo: &Repository, commits: &mut [C
             continue;
         };
 
-        let mut containing_remotes = Vec::new();
-        for (remote_name, tip_oid) in &remote_tips {
-            let contains = *tip_oid == commit_oid
-                || repo
-                    .graph_descendant_of(*tip_oid, commit_oid)
-                    .unwrap_or(false);
-            if contains {
-                containing_remotes.push(remote_name.clone());
+        if let Some(remotes) = containment.get(&commit_oid) {
+            let mut containing = remotes.clone();
+            containing.sort();
+            containing.dedup();
+            if !containing.is_empty() {
+                commit.remotes = Some(containing);
             }
-        }
-
-        containing_remotes.sort();
-        containing_remotes.dedup();
-        if !containing_remotes.is_empty() {
-            commit.remotes = Some(containing_remotes);
         }
     }
 }
@@ -1474,42 +1571,144 @@ mod tests {
         (dir, repo)
     }
 
-    #[test]
-    fn get_file_diff_stats_with_none_head_tree_returns_only_unstaged() {
-        let (dir, repo) = setup_repo();
+    /// Stage a path (`git add <path>`).
+    fn stage_path(repo: &Repository, relative: &str) {
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new(relative)).unwrap();
+        index.write().unwrap();
+    }
 
-        // Modify the file (unstaged change)
-        let file_path = dir.path().join("test.txt");
-        std::fs::write(&file_path, "modified content\n").unwrap();
+    /// Stage a deletion (`git rm <path>` equivalent at the index level).
+    fn stage_delete(repo: &Repository, relative: &str) {
+        let mut index = repo.index().unwrap();
+        index.remove_path(Path::new(relative)).unwrap();
+        index.write().unwrap();
+    }
 
-        let (added, removed) = get_file_diff_stats(&repo, Path::new("test.txt"), None);
-
-        // Without head_tree, only unstaged changes are counted
-        assert_eq!(added, 1);
-        assert_eq!(removed, 1);
+    fn find_change<'a>(changes: &'a [FileChange], path: &str) -> &'a FileChange {
+        changes
+            .iter()
+            .find(|c| c.path == Path::new(path))
+            .unwrap_or_else(|| panic!("expected change for {}", path))
     }
 
     #[test]
-    fn get_file_diff_stats_with_head_tree_counts_staged_and_unstaged() {
+    fn batched_diff_attributes_lines_to_unstaged_only_files() {
         let (dir, repo) = setup_repo();
 
-        // Stage a modification
-        let file_path = dir.path().join("test.txt");
-        std::fs::write(&file_path, "staged content\n").unwrap();
+        // Modify the file (unstaged change only)
+        std::fs::write(dir.path().join("test.txt"), "modified content\n").unwrap();
 
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new("test.txt")).unwrap();
-        index.write().unwrap();
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
 
-        // Also modify unstaged
-        std::fs::write(&file_path, "unstaged content\nmore lines\n").unwrap();
+        assert!(status.is_dirty);
+        assert_eq!(status.unstaged_count, 1);
+        assert_eq!(status.staged_count, 0);
+        let change = find_change(&changes, "test.txt");
+        assert_eq!(change.status, FileStatus::Modified);
+        assert_eq!(change.lines_added, 1);
+        assert_eq!(change.lines_removed, 1);
+    }
 
-        let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
-        let (added, removed) = get_file_diff_stats(&repo, Path::new("test.txt"), Some(&head_tree));
+    #[test]
+    fn batched_diff_sums_staged_and_unstaged_for_combined_changes() {
+        let (dir, repo) = setup_repo();
 
-        // Should count both staged (1 add, 1 remove) and unstaged (2 add, 1 remove)
-        assert_eq!(added, 3);
-        assert_eq!(removed, 2);
+        // Stage one modification, then add additional unstaged edits.
+        std::fs::write(dir.path().join("test.txt"), "staged content\n").unwrap();
+        stage_path(&repo, "test.txt");
+        std::fs::write(
+            dir.path().join("test.txt"),
+            "unstaged content\nmore lines\n",
+        )
+        .unwrap();
+
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.staged_count, 1);
+        assert_eq!(status.unstaged_count, 1);
+
+        let change = find_change(&changes, "test.txt");
+        assert_eq!(change.status, FileStatus::Both);
+        // Staged: 1 add / 1 remove. Unstaged (index→workdir): 2 add / 1 remove.
+        // Combined totals must match the legacy per-file path.
+        assert_eq!(change.lines_added, 3);
+        assert_eq!(change.lines_removed, 2);
+    }
+
+    #[test]
+    fn batched_diff_handles_staged_deletes() {
+        let (dir, repo) = setup_repo();
+
+        // Stage deletion of the committed file.
+        std::fs::remove_file(dir.path().join("test.txt")).unwrap();
+        stage_delete(&repo, "test.txt");
+
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.staged_count, 1);
+        assert_eq!(status.unstaged_count, 0);
+
+        let change = find_change(&changes, "test.txt");
+        assert_eq!(change.status, FileStatus::Staged);
+        assert_eq!(change.action, FileAction::Deleted);
+        // The deleted file had a single line, so the diff records exactly one removal.
+        assert_eq!(change.lines_added, 0);
+        assert_eq!(change.lines_removed, 1);
+    }
+
+    #[test]
+    fn batched_diff_handles_unstaged_deletes_with_concurrent_modify() {
+        let (dir, repo) = setup_repo();
+
+        // Add a second file and commit so we can mix delete + modify cases.
+        std::fs::write(dir.path().join("other.txt"), "alpha\nbeta\n").unwrap();
+        stage_path(&repo, "other.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        // Unstaged delete of `test.txt` and unstaged modify of `other.txt`.
+        std::fs::remove_file(dir.path().join("test.txt")).unwrap();
+        std::fs::write(dir.path().join("other.txt"), "alpha\ngamma\n").unwrap();
+
+        let (status, changes) = get_repo_status_with_changes(&repo, true).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.unstaged_count, 2);
+
+        let deleted = find_change(&changes, "test.txt");
+        assert_eq!(deleted.action, FileAction::Deleted);
+        assert!(deleted.lines_removed >= 1);
+
+        let modified = find_change(&changes, "other.txt");
+        assert_eq!(modified.action, FileAction::Modified);
+        assert_eq!(modified.lines_added, 1);
+        assert_eq!(modified.lines_removed, 1);
+
+        // include_diffs=true must emit per-file unified patches assembled from
+        // the same batched diff walk.
+        let dirty_test = status
+            .dirty
+            .iter()
+            .find(|d| d.filepath == Path::new("test.txt"))
+            .expect("dirty entry for test.txt");
+        assert!(dirty_test.diff.contains("-initial content"));
+
+        let dirty_other = status
+            .dirty
+            .iter()
+            .find(|d| d.filepath == Path::new("other.txt"))
+            .expect("dirty entry for other.txt");
+        assert!(dirty_other.diff.contains("-beta"));
+        assert!(dirty_other.diff.contains("+gamma"));
     }
 
     #[test]
@@ -1521,10 +1720,7 @@ mod tests {
             let name = format!("file{}.txt", i);
             let path = dir.path().join(&name);
             std::fs::write(&path, format!("content {}\n", i)).unwrap();
-
-            let mut index = repo.index().unwrap();
-            index.add_path(Path::new(&name)).unwrap();
-            index.write().unwrap();
+            stage_path(&repo, &name);
         }
 
         // This should work without error and resolve HEAD only once
@@ -1533,5 +1729,277 @@ mod tests {
         assert!(status.is_dirty);
         assert_eq!(status.staged_count, 3);
         assert_eq!(changes.len(), 3);
+    }
+
+    #[test]
+    fn batched_diff_handles_staged_rename_as_delete_and_add() {
+        let (dir, repo) = setup_repo();
+
+        // Rename the committed file on disk and stage the change.
+        let old_path = dir.path().join("test.txt");
+        let new_path = dir.path().join("renamed.txt");
+        std::fs::rename(&old_path, &new_path).unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.remove_path(Path::new("test.txt")).unwrap();
+        index.add_path(Path::new("renamed.txt")).unwrap();
+        index.write().unwrap();
+
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.staged_count, 2);
+        // One delete + one add because rename detection is off by default.
+        assert_eq!(changes.len(), 2);
+
+        let deleted = find_change(&changes, "test.txt");
+        assert_eq!(deleted.status, FileStatus::Staged);
+        assert_eq!(deleted.action, FileAction::Deleted);
+        assert_eq!(deleted.lines_removed, 1);
+        assert_eq!(deleted.lines_added, 0);
+
+        let created = find_change(&changes, "renamed.txt");
+        assert_eq!(created.status, FileStatus::Staged);
+        assert_eq!(created.action, FileAction::Created);
+        // The added side of the rename carries the original line content.
+        assert_eq!(created.lines_added, 1);
+        assert_eq!(created.lines_removed, 0);
+    }
+
+    #[test]
+    fn batched_diff_mixed_binary_and_text_deltas() {
+        let (dir, repo) = setup_repo();
+
+        // Add a binary file and a second text file, then commit.
+        let binary_path = dir.path().join("data.bin");
+        let text_path = dir.path().join("other.txt");
+        std::fs::write(&binary_path, b"\x00\x01\x02\x03\n").unwrap();
+        std::fs::write(&text_path, "alpha\nbeta\n").unwrap();
+        stage_path(&repo, "data.bin");
+        stage_path(&repo, "other.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "add binary and text",
+                &tree,
+                &[&parent],
+            )
+            .unwrap();
+        }
+
+        // Modify both files in the working tree (unstaged).
+        std::fs::write(&binary_path, b"\x00\x01\x02\xFF\n").unwrap();
+        std::fs::write(&text_path, "alpha\ngamma\n").unwrap();
+
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(status.is_dirty);
+        assert_eq!(status.unstaged_count, 2);
+
+        let text_change = find_change(&changes, "other.txt");
+        assert_eq!(text_change.status, FileStatus::Modified);
+        assert_eq!(text_change.action, FileAction::Modified);
+        // text delta: 1 add, 1 remove
+        assert_eq!(text_change.lines_added, 1);
+        assert_eq!(text_change.lines_removed, 1);
+
+        let binary_change = find_change(&changes, "data.bin");
+        assert_eq!(binary_change.status, FileStatus::Modified);
+        assert_eq!(binary_change.action, FileAction::Modified);
+        // Binary files produce no countable text lines.
+        assert_eq!(binary_change.lines_added, 0);
+        assert_eq!(binary_change.lines_removed, 0);
+    }
+
+    // ── populate_recent_commit_remotes tests ───────────────────────────────
+
+    /// Creates refs/remotes/{remote}/{branch} pointing at `target` so the
+    /// containment code sees them as remote-tracking branches.
+    fn add_fake_remote(repo: &Repository, remote: &str, branch: &str, target: git2::Oid) {
+        let ref_name = format!("refs/remotes/{remote}/{branch}");
+        repo.reference(&ref_name, target, true, "test remote")
+            .unwrap();
+    }
+
+    #[test]
+    fn populate_commit_remotes_finds_single_remote() {
+        let (dir, repo) = setup_repo();
+
+        // Create a second commit on HEAD.
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let head_id = head.id();
+
+        // Fake a remote that points at HEAD.
+        add_fake_remote(&repo, "origin", "main", head_id);
+
+        let mut commits = vec![CommitInfo {
+            sha: head_id.to_string(),
+            message: "second".to_string(),
+            author: "Test".to_string(),
+            timestamp: chrono::Utc::now(),
+            remotes: None,
+            refs: vec![],
+        }];
+
+        populate_recent_commit_remotes(&repo, &mut commits, None);
+
+        assert_eq!(
+            commits[0].remotes,
+            Some(vec!["origin".to_string()]),
+            "HEAD should be contained by origin"
+        );
+    }
+
+    #[test]
+    fn populate_commit_remotes_distinguishes_multiple_remotes() {
+        let (dir, repo) = setup_repo();
+
+        // second commit
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        // third commit
+        std::fs::write(dir.path().join("test.txt"), "third\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "third", &tree, &[&parent])
+                .unwrap();
+        }
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let head_id = head.id();
+        let second_id = head.parent(0).unwrap().id();
+
+        // origin points at HEAD (contains both commits).
+        add_fake_remote(&repo, "origin", "main", head_id);
+        // upstream points at second commit (contains only that one).
+        add_fake_remote(&repo, "upstream", "main", second_id);
+
+        let mut commits = vec![
+            CommitInfo {
+                sha: head_id.to_string(),
+                message: "third".to_string(),
+                author: "Test".to_string(),
+                timestamp: chrono::Utc::now(),
+                remotes: None,
+                refs: vec![],
+            },
+            CommitInfo {
+                sha: second_id.to_string(),
+                message: "second".to_string(),
+                author: "Test".to_string(),
+                timestamp: chrono::Utc::now(),
+                remotes: None,
+                refs: vec![],
+            },
+        ];
+
+        populate_recent_commit_remotes(&repo, &mut commits, None);
+
+        assert_eq!(
+            commits[0].remotes.as_deref(),
+            Some(["origin".to_string()].as_slice()),
+            "third commit only on origin"
+        );
+        assert_eq!(
+            commits[1].remotes.as_deref(),
+            Some(["origin".to_string(), "upstream".to_string()].as_slice()),
+            "second commit on both origin and upstream"
+        );
+    }
+
+    #[test]
+    fn populate_commit_remotes_respects_max_branches() {
+        let (dir, repo) = setup_repo();
+
+        // Create a second commit.
+        std::fs::write(dir.path().join("test.txt"), "second\n").unwrap();
+        stage_path(&repo, "test.txt");
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+                .unwrap();
+        }
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let head_id = head.id();
+
+        // Add three fake remotes all pointing at HEAD.
+        add_fake_remote(&repo, "origin", "main", head_id);
+        add_fake_remote(&repo, "upstream", "main", head_id);
+        add_fake_remote(&repo, "fork", "main", head_id);
+
+        let mut commits = vec![CommitInfo {
+            sha: head_id.to_string(),
+            message: "second".to_string(),
+            author: "Test".to_string(),
+            timestamp: chrono::Utc::now(),
+            remotes: None,
+            refs: vec![],
+        }];
+
+        // With max_branches = 1, only the alphabetically first remote (fork)
+        // should be checked.
+        populate_recent_commit_remotes(&repo, &mut commits, Some(1));
+        assert_eq!(
+            commits[0].remotes,
+            Some(vec!["fork".to_string()]),
+            "only fork should be checked with limit=1 (alphabetical order)"
+        );
+
+        // With max_branches = 2, fork and origin should be checked.
+        commits[0].remotes = None;
+        populate_recent_commit_remotes(&repo, &mut commits, Some(2));
+        assert_eq!(
+            commits[0].remotes,
+            Some(vec!["fork".to_string(), "origin".to_string()]),
+            "fork and origin should be checked with limit=2"
+        );
+    }
+
+    #[test]
+    fn refresh_remote_tracking_refs_single_remote_runs_without_panic() {
+        let (_dir, repo) = setup_repo();
+        // With a single remote, the serial path should execute without error.
+        refresh_remote_tracking_refs(&repo, 2);
+        // The function has no return value; absence of panic is the test.
+    }
+
+    #[test]
+    fn refresh_remote_tracking_refs_zero_concurrency_uses_one() {
+        let (_dir, repo) = setup_repo();
+        // Concurrency of 0 should be clamped to 1.
+        refresh_remote_tracking_refs(&repo, 0);
     }
 }

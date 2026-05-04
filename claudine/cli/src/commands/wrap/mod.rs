@@ -137,13 +137,13 @@ pub(crate) struct AttemptLaunch {
     /// instead of stdin / argv. Mutually exclusive with `stdin_seed` for
     /// the same launch.
     pub(crate) wire_prompt: Option<String>,
-    pub(crate) timeout: Option<u64>,
-    /// Silence-detection step timeout in seconds, if configured.
-    ///
-    /// Enforced by the streaming wait loop against `LiveMetrics.last_event_at`.
-    /// Dropped (with a stderr warning) for capture and passthrough paths
-    /// because those modes have no stream events to observe.
-    pub(crate) step_timeout: Option<u64>,
+    /// Unified timeout configuration resolved through the full precedence
+    /// chain (CLI > frontmatter > env > built-in default). Drives the
+    /// timeout watchdog ticker for `timeout` (wall-clock) and
+    /// `step_timeout` (stream silence). Carries the supporting knobs
+    /// `kill_grace` and `interval` from `CLAUDINE_KILL_GRACE` /
+    /// `CLAUDINE_WATCHDOG_INTERVAL`.
+    pub(crate) timeout_config: subagent_watchdog::TimeoutConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -702,9 +702,10 @@ pub struct WrapperArgs {
     )]
     pub replace_system_prompt: Option<String>,
 
-    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
-    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
-    pub timeout: Option<u64>,
+    /// Wall-clock timeout (e.g. `30s`, `5m`, `2h`). Sends SIGTERM then SIGKILL.
+    /// Only valid in non-interactive mode.
+    #[arg(short = 't', long = "timeout", value_name = "DURATION")]
+    pub timeout: Option<String>,
 
     /// Step-silence timeout (e.g. `30s`, `5m`). Kills the child when no stream
     /// event is observed for this long. Only valid in non-interactive
@@ -1014,18 +1015,35 @@ fn run_provider_wrapper_inner(
         ));
     }
 
-    // Parse `--step-timeout DURATION` once via the same parser frontmatter
-    // uses so CLI and frontmatter errors share one grammar. The `Path`
-    // argument is only used to decorate `HarnessError`; the CLI flag has no
-    // source file, so we use a synthetic label.
-    let cli_step_timeout_secs: Option<u64> = match args.step_timeout.as_deref() {
+    // Parse `--timeout DURATION` and `--step-timeout DURATION` once via the
+    // same parser frontmatter uses so CLI and frontmatter errors share one
+    // grammar. The `Path` argument is only used to decorate `HarnessError`;
+    // the CLI flag has no source file, so we use a synthetic label.
+    let cli_timeout_duration: Option<std::time::Duration> = match args.timeout.as_deref() {
         Some(raw) => Some(
-            claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
-                .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?
-                .as_secs(),
+            claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
+                .map_err(|e| eyre!("invalid --timeout value: {e}"))?,
         ),
         None => None,
     };
+    if cli_timeout_duration == Some(std::time::Duration::from_secs(0)) {
+        return Err(eyre!(
+            "--timeout: zero duration is not accepted; omit the flag to disable the wall-clock timeout"
+        ));
+    }
+
+    let cli_step_timeout_duration: Option<std::time::Duration> = match args.step_timeout.as_deref() {
+        Some(raw) => Some(
+            claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
+                .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?,
+        ),
+        None => None,
+    };
+    if cli_step_timeout_duration == Some(std::time::Duration::from_secs(0)) {
+        return Err(eyre!(
+            "--step-timeout: zero duration is not accepted; omit the flag or set the env var to 0s to disable the step timeout"
+        ));
+    }
 
     // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
@@ -1498,7 +1516,7 @@ fn run_provider_wrapper_inner(
     // `step_timeout` is only enforceable in structured-stream mode because
     // it gates on `LiveMetrics::last_event_at`. Warn and drop it otherwise so
     // the downstream exec path never has to re-check.
-    let cli_step_timeout_secs = if !use_structured && cli_step_timeout_secs.is_some() {
+    let cli_step_timeout = if !use_structured && args.step_timeout.is_some() {
         if !silent_requested {
             log::warn(
                 "--step-timeout is only enforced in structured-stream mode; \
@@ -1507,7 +1525,7 @@ fn run_provider_wrapper_inner(
         }
         None
     } else {
-        cli_step_timeout_secs
+        args.step_timeout.clone()
     };
 
     if use_structured {
@@ -1641,8 +1659,8 @@ fn run_provider_wrapper_inner(
             binary_path.as_path(),
             child_cwd,
             effective_non_interactive,
-            args.timeout,
-            cli_step_timeout_secs,
+            args.timeout.clone(),
+            cli_step_timeout.clone(),
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
@@ -1710,7 +1728,9 @@ fn run_provider_wrapper_inner(
                     env: &env_plan.env,
                     cwd: child_cwd,
                     prompt: wire_prompt,
-                    timeout: args.timeout,
+                    timeout: args.timeout.as_ref().and_then(|raw| {
+                        claudine::harness::parse_timeout(raw, std::path::Path::new("<cli>")).ok()
+                    }),
                     client_name: env!("CARGO_PKG_NAME"),
                     client_version: env!("CARGO_PKG_VERSION"),
                     capabilities: wire_io::WireClientCapabilities::default_for_claudine(),
@@ -1725,13 +1745,18 @@ fn run_provider_wrapper_inner(
                 &mut _spawned,
             )?
         } else {
+            let timeout_config = composition::resolve_timeouts(
+                args.timeout.clone(),
+                None,
+                cli_step_timeout.clone(),
+                None,
+            );
             exec::run_child_stream_semantic(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
                 child_cwd,
-                args.timeout,
-                cli_step_timeout_secs,
+                timeout_config,
                 stderr_noise,
                 profile.suppress_structured_stderr_on_success(),
                 stream_verbosity != Verbosity::Silent,
@@ -1795,7 +1820,7 @@ fn run_provider_wrapper_inner(
             &child_args,
             &env_plan.env,
             child_cwd,
-            args.timeout,
+            cli_timeout_duration.map(|d| d.as_secs()),
             exec::ChildIoOptions {
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
@@ -2025,41 +2050,6 @@ fn materialize_harness_prompt(
     })
 }
 
-/// Resolved timeouts for a single harness attempt.
-///
-/// Combines optional CLI overrides with frontmatter-declared values using the
-/// standard "CLI wins" precedence rule. Each field is an `Option<u64>` of
-/// seconds so the wait loop can skip enforcement when neither source supplies
-/// a value.
-#[derive(Debug, Clone, Copy, Default)]
-struct LaunchTimeouts {
-    timeout: Option<u64>,
-    step_timeout: Option<u64>,
-}
-
-impl LaunchTimeouts {
-    fn timeout_secs_for_span(self) -> u64 {
-        self.timeout.unwrap_or(0)
-    }
-
-    fn step_timeout_secs_for_span(self) -> u64 {
-        self.step_timeout.unwrap_or(0)
-    }
-}
-
-fn resolve_launch_timeouts(
-    cli_timeout: Option<u64>,
-    plan_timeout: Option<std::time::Duration>,
-    cli_step_timeout: Option<u64>,
-    plan_step_timeout: Option<std::time::Duration>,
-) -> LaunchTimeouts {
-    LaunchTimeouts {
-        timeout: cli_timeout.or_else(|| plan_timeout.map(|timeout| timeout.as_secs())),
-        step_timeout: cli_step_timeout
-            .or_else(|| plan_step_timeout.map(|timeout| timeout.as_secs())),
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn build_harness_launch(
     provider: Provider,
@@ -2069,9 +2059,9 @@ fn build_harness_launch(
     state: &mut HarnessPromptState,
     materialized: &MaterializedHarnessPrompt,
     effective_non_interactive: bool,
-    cli_timeout: Option<u64>,
+    cli_timeout: Option<String>,
     plan_timeout: Option<std::time::Duration>,
-    cli_step_timeout: Option<u64>,
+    cli_step_timeout: Option<String>,
     plan_step_timeout: Option<std::time::Duration>,
 ) -> Result<AttemptLaunch> {
     let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
@@ -2095,7 +2085,7 @@ fn build_harness_launch(
         env.insert(key.clone().into(), value.clone().into());
     }
 
-    let timeouts = resolve_launch_timeouts(
+    let timeout_config = composition::resolve_timeouts(
         cli_timeout,
         plan_timeout,
         cli_step_timeout,
@@ -2107,8 +2097,7 @@ fn build_harness_launch(
         env,
         stdin_seed,
         wire_prompt,
-        timeout: timeouts.timeout,
-        step_timeout: timeouts.step_timeout,
+        timeout_config,
     })
 }
 
@@ -2152,7 +2141,7 @@ fn execute_harness_attempt(
     // Step-silence enforcement requires live `SemanticEvent` ticks, which only
     // exist in the structured-stream path. Capture and passthrough attempts
     // drop the value with a warning rather than silently ignoring it.
-    let launch = if !use_structured && launch.step_timeout.is_some() {
+    let launch = if !use_structured && launch.timeout_config.step_timeout.is_some() {
         use biscuit_terminal::components::renderable::Renderable;
         use biscuit_terminal::components::status::{Status, StatusState};
         let rendered = Status::new(
@@ -2163,10 +2152,9 @@ fn execute_harness_attempt(
         .state(StatusState::Warning)
         .render(term);
         eprintln!("{rendered}");
-        AttemptLaunch {
-            step_timeout: None,
-            ..launch.clone()
-        }
+        let mut adjusted = launch.clone();
+        adjusted.timeout_config.step_timeout = None;
+        adjusted
     } else {
         launch.clone()
     };
@@ -2207,7 +2195,7 @@ fn execute_harness_attempt(
                     env: &launch.env,
                     cwd: child_cwd,
                     prompt: wire_prompt,
-                    timeout: launch.timeout,
+                    timeout: launch.timeout_config.timeout,
                     client_name: env!("CARGO_PKG_NAME"),
                     client_version: env!("CARGO_PKG_VERSION"),
                     capabilities: wire_io::WireClientCapabilities::default_for_claudine(),
@@ -2227,8 +2215,7 @@ fn execute_harness_attempt(
                 &launch.args,
                 &launch.env,
                 child_cwd,
-                launch.timeout,
-                launch.step_timeout,
+                launch.timeout_config,
                 stderr_noise,
                 suppress_stderr_on_success,
                 stream_verbosity != Verbosity::Silent,
@@ -2292,7 +2279,7 @@ fn execute_harness_attempt(
             &launch.args,
             &launch.env,
             child_cwd,
-            launch.timeout,
+            launch.timeout_config.timeout.map(|d| d.as_secs()),
             exec::ChildIoOptions {
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
@@ -2820,8 +2807,8 @@ pub(crate) fn run_harness_loop(
     binary_path: &Path,
     child_cwd: &Path,
     effective_non_interactive: bool,
-    cli_timeout: Option<u64>,
-    cli_step_timeout: Option<u64>,
+    cli_timeout: Option<String>,
+    cli_step_timeout: Option<String>,
     base_args: &[String],
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
@@ -3114,33 +3101,26 @@ pub(crate) fn run_harness_loop(
         )
         .in_scope(|| claudine::harness::capture_pre_run_snapshot(&plan))
         .map_err(|e| eyre!("harness snapshot: {e}"))?;
-        let resolved_timeouts = resolve_launch_timeouts(
-            cli_timeout,
+        let launch = build_harness_launch(
+            provider,
+            profile,
+            base_args,
+            base_env,
+            prompt_state,
+            &materialized,
+            effective_non_interactive,
+            cli_timeout.clone(),
             plan.timeout,
-            cli_step_timeout,
+            cli_step_timeout.clone(),
             plan.step_timeout,
-        );
-        let launch = info_span!(
+        )?;
+        let _launch_span = info_span!(
             "harness_launch_plan",
             attempt,
-            timeout_secs = resolved_timeouts.timeout_secs_for_span(),
-            step_timeout_secs = resolved_timeouts.step_timeout_secs_for_span(),
+            timeout_secs = launch.timeout_config.timeout.map(|d| d.as_secs()).unwrap_or(0),
+            step_timeout_secs = launch.timeout_config.step_timeout.map(|d| d.as_secs()).unwrap_or(0),
         )
-        .in_scope(|| {
-            build_harness_launch(
-                provider,
-                profile,
-                base_args,
-                base_env,
-                prompt_state,
-                &materialized,
-                effective_non_interactive,
-                cli_timeout,
-                plan.timeout,
-                cli_step_timeout,
-                plan.step_timeout,
-            )
-        })?;
+        .entered();
 
         // Build the prompt-scoped timing context for this attempt. The
         // warn thresholds are re-read from each parsed plan so a
@@ -3765,7 +3745,7 @@ fn print_wrapper_help(provider: Provider) {
          \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
           \x20     --asp <FILE>             Append a system prompt from a file\n\
           \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
-          \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
+           \x20 -t, --timeout <DURATION>  Wall-clock timeout like 30s, 5m, 2h (non-interactive only)\n\
          \x20     --dry-run             Show what would be executed without launching the child\n\
          \x20 -q, --quiet              Suppress env details and info; still show the system prompt when set\n\
          \x20     --silent              Suppress all Claudine preflight output\n\

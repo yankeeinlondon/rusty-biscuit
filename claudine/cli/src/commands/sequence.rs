@@ -62,14 +62,19 @@ fn run_sequence_inner(
         fail_fast,
     } = args;
 
+    if shared.timeout.is_some() && shared.interactive {
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
     if shared.step_timeout.is_some() && shared.interactive {
         return Err(eyre!(
             "--step-timeout cannot be used with --interactive mode"
         ));
     }
-    // Validate `--step-timeout` once at entry; the parsed value is threaded
-    // to each step through [`super::wrap::sequence::execute_sequence`] via
-    // [`SharedComposeArgs::step_timeout_secs`].
+    // Early validation: both flags share the same duration grammar.
+    if let Some(ref raw) = shared.timeout {
+        claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
+            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+    }
     shared.step_timeout_secs()?;
 
     let parsed = super::compose::parse_composition_positionals(&args)?;

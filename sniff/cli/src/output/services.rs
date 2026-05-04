@@ -110,6 +110,7 @@ pub fn render_services_text(
 pub fn print_services_json(
     info: &ServicesInfo,
     state_filter: ServiceState,
+    performance: Option<&sniff::PerformanceReport>,
 ) -> serde_json::Result<()> {
     // Filter services based on state
     let filtered: Vec<&Service> = info
@@ -134,6 +135,6 @@ pub fn print_services_json(
         "services": filtered,
     });
 
-    println!("{}", serde_json::to_string_pretty(&output)?);
+    crate::output::print_json_value(output, performance);
     Ok(())
 }

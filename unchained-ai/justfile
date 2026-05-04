@@ -1,6 +1,8 @@
-set dotenv-load
-set positional-arguments
+set dotenv-load := true
+set positional-arguments := true
+
 # set allow-duplicate-recipes
+
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
@@ -9,6 +11,7 @@ import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
+import "../just/spec.just"
 
 BOLD := '\033[1m'
 ITALIC := '\033[3m'
@@ -41,31 +44,31 @@ default:
 
 # build unchained-ai packages (lib, cli, gen)
 build *args="":
-    @just _build unchained-ai "unchained-ai Library" {{args}}
-    @just _build unchained-ai-cli "unchained-ai Library" {{args}}
-    @just _build unchained-ai-gen "unchained-ai Library" {{args}}
+    @just _build unchained-ai "unchained-ai Library" {{ args }}
+    @just _build unchained-ai-cli "unchained-ai Library" {{ args }}
+    @just _build unchained-ai-gen "unchained-ai Library" {{ args }}
 
 # Test both library and CLI.
 test *args="":
-    @just _test unchained-ai {{args}}
-    @just _test unchained-ai-cli {{args}}
-    @just _test unchained-ai-gen {{args}}
+    @just _test unchained-ai {{ args }}
+    @just _test unchained-ai-cli {{ args }}
+    @just _test unchained-ai-gen {{ args }}
 
 # run clippy on unchained-ai packages
 lint *args="":
-    @just _lint unchained-ai {{args}}
-    @just _lint unchained-ai-cli {{args}}
-    @just _lint unchained-ai-gen {{args}}
+    @just _lint unchained-ai {{ args }}
+    @just _lint unchained-ai-cli {{ args }}
+    @just _lint unchained-ai-gen {{ args }}
 
 # lint and fix with AI if problems found
 lint-fix *args="":
-    @just _lint unchained-ai {{args}} || just _lint_fix unchained-ai
-    @just _lint unchained-ai-cli {{args}} || just _lint_fix unchained-ai-cli
-    @just _lint unchained-ai-gen {{args}} || just _lint_fix unchained-ai-gen
+    @just _lint unchained-ai {{ args }} || just _lint_fix unchained-ai
+    @just _lint unchained-ai-cli {{ args }} || just _lint_fix unchained-ai-cli
+    @just _lint unchained-ai-gen {{ args }} || just _lint_fix unchained-ai-gen
 
 install *args="":
     @just build --release
-    @just _install "./cli" "Unchained AI" {{args}}
+    @just _install "./cli" "Unchained AI" {{ args }}
 
 check:
     @echo ""
@@ -74,20 +77,21 @@ check:
     @cargo check -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen
 
 # Regenerate provider model enums and metadata lookup tables.
+
 # Pass extra args to gen-models, e.g.: just generate-models --providers openai,anthropic
 generate-models *args="":
     @echo ""
-    @echo -e "{{BOLD}}Regenerating unchained-ai provider models & metadata{{RESET}}"
-    @echo -e "{{ITALIC}}Fetching live model lists from provider APIs and metadata from Parsera...{{RESET}}"
+    @echo -e "{{ BOLD }}Regenerating unchained-ai provider models & metadata{{ RESET }}"
+    @echo -e "{{ ITALIC }}Fetching live model lists from provider APIs and metadata from Parsera...{{ RESET }}"
     @echo ""
-    @cargo run -p unchained-ai-gen -- -v {{args}}
+    @cargo run -p unchained-ai-gen -- -v {{ args }}
 
 # Outdated packages
 outdated:
     @cargo outdated --root-deps-only
 
-
 # No-op recipe: reference color vars so linters won't report them as unused.
+
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ YELLOW2 }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} >/dev/null || true
