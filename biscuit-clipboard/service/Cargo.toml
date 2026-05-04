@@ -29,3 +29,4 @@ libc = "0.2"
 axum-test = "16"
 tempfile = "3"
 tower = "0.5"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
