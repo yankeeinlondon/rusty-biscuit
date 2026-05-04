@@ -83,15 +83,19 @@ impl History {
         self
     }
 
-    /// Insert a new entry built from `formats`. Returns the inserted
-    /// entry, or `None` if it duplicates the head (most-recent) entry.
+    /// Insert a new entry built from `formats`. Returns a tuple:
+    ///
+    /// 1. `Some(&ClipboardEntry)` — the inserted entry, or `None` if it
+    ///    duplicates the head (most-recent) entry.
+    /// 2. `Vec<ClipboardEntry>` — every entry removed from history by
+    ///    eviction (TTL expiry or max-capacity truncation).
     ///
     /// ## Notes
     ///
     /// The dedup probe uses [`entry::content_hash_of`] — the same
     /// function that derives the entry id — so a re-insert of the same
     /// content always either deduplicates or matches the existing id.
-    pub fn insert(&mut self, formats: Vec<ClipboardFormat>) -> Option<&ClipboardEntry> {
+    pub fn insert(&mut self, formats: Vec<ClipboardFormat>) -> (Option<&ClipboardEntry>, Vec<ClipboardEntry>) {
         let new_hash = entry::content_hash_of(&formats);
 
         if self
@@ -99,7 +103,7 @@ impl History {
             .front()
             .is_some_and(|e| e.content_hash == new_hash)
         {
-            return None;
+            return (None, Vec::new());
         }
 
         let entry = ClipboardEntry::with_hash(formats, new_hash);
@@ -107,8 +111,8 @@ impl History {
         self.entries.retain(|e| e.id != entry.id);
 
         self.entries.push_front(entry);
-        self.evict();
-        self.entries.front()
+        let evicted = self.evict();
+        (self.entries.front(), evicted)
     }
 
     /// Look up an entry by id.
@@ -147,11 +151,13 @@ impl History {
         self.entries.is_empty()
     }
 
-    pub fn clear(&mut self) {
-        self.entries.clear();
+    /// Remove every entry from the buffer and return them.
+    pub fn clear(&mut self) -> Vec<ClipboardEntry> {
+        std::mem::take(&mut self.entries).into_iter().collect()
     }
 
-    fn evict(&mut self) {
+    fn evict(&mut self) -> Vec<ClipboardEntry> {
+        let mut evicted = Vec::new();
         let now = Utc::now();
         let ttl_delta = TimeDelta::from_std(self.ttl).unwrap_or(TimeDelta::seconds(3600));
         let cutoff = now - ttl_delta;
@@ -163,7 +169,9 @@ impl History {
             let mut i = min_entries;
             while i < self.entries.len() {
                 if self.entries[i].timestamp <= cutoff {
-                    self.entries.remove(i);
+                    if let Some(entry) = self.entries.remove(i) {
+                        evicted.push(entry);
+                    }
                 } else {
                     i += 1;
                 }
@@ -172,8 +180,12 @@ impl History {
 
         // Hard cap: pop from the back (oldest first).
         while self.entries.len() > self.max_entries {
-            self.entries.pop_back();
+            if let Some(entry) = self.entries.pop_back() {
+                evicted.push(entry);
+            }
         }
+
+        evicted
     }
 }
 
@@ -186,7 +198,7 @@ mod tests {
     #[test]
     fn test_insert_and_latest() {
         let mut history = History::new();
-        let entry = history.insert(vec![ClipboardFormat::Text("hello".to_string())]);
+        let (entry, _) = history.insert(vec![ClipboardFormat::Text("hello".to_string())]);
         assert!(entry.is_some());
         assert_eq!(history.latest().unwrap().find_text().unwrap(), "hello");
     }
@@ -195,7 +207,7 @@ mod tests {
     fn test_deduplication() {
         let mut history = History::new();
         history.insert(vec![ClipboardFormat::Text("hello".to_string())]);
-        let second = history.insert(vec![ClipboardFormat::Text("hello".to_string())]);
+        let (second, _) = history.insert(vec![ClipboardFormat::Text("hello".to_string())]);
         assert!(second.is_none());
         assert_eq!(history.len(), 1);
     }
@@ -351,7 +363,7 @@ mod tests {
         assert_eq!(EntryId::from(dedup_hash), id);
 
         // Re-inserting the same spilled image should be deduped.
-        let second = history.insert(formats);
+        let (second, _) = history.insert(formats);
         assert!(second.is_none());
     }
 
@@ -363,5 +375,32 @@ mod tests {
         history.insert(vec![ClipboardFormat::Text("first".to_string())]);
         assert_eq!(history.len(), 2);
         assert_eq!(history.latest().unwrap().find_text().unwrap(), "first");
+    }
+
+    #[test]
+    fn test_insert_returns_evicted_entries() {
+        let mut history = History::new().with_max_entries(2);
+        let (_, evicted1) = history.insert(vec![ClipboardFormat::Text("first".to_string())]);
+        assert!(evicted1.is_empty());
+
+        let (_, evicted2) = history.insert(vec![ClipboardFormat::Text("second".to_string())]);
+        assert!(evicted2.is_empty());
+
+        let (_, evicted3) = history.insert(vec![ClipboardFormat::Text("third".to_string())]);
+        assert_eq!(evicted3.len(), 1);
+        assert_eq!(evicted3[0].find_text().unwrap(), "first");
+        assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn test_clear_returns_all_entries() {
+        let mut history = History::new();
+        history.insert(vec![ClipboardFormat::Text("a".to_string())]);
+        history.insert(vec![ClipboardFormat::Text("b".to_string())]);
+        history.insert(vec![ClipboardFormat::Text("c".to_string())]);
+
+        let removed = history.clear();
+        assert_eq!(removed.len(), 3);
+        assert!(history.is_empty());
     }
 }
