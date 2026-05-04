@@ -25,6 +25,12 @@ docs_updated_during_phase_3:
   - biscuit-clipboard/features/2026-05-02-kickoff/review-plan-2.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-clipboard/service/src/main.rs
+docs_updated_during_phase_4:
+  - biscuit-clipboard/features/2026-05-02-kickoff/review-plan-2.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - biscuit-clipboard
   - biscuit-clipboard-service
