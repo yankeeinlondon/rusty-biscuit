@@ -10,7 +10,11 @@ path = "src/main.rs"
 [dependencies]
 biscuit-clipboard = { path = "../lib" }
 axum = { version = "0.8", features = ["json"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
@@ -23,6 +27,5 @@ libc = "0.2"
 
 [dev-dependencies]
 axum-test = "16"
-base64 = "0.22"
 tempfile = "3"
 tower = "0.5"
