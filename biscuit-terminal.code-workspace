@@ -1,13 +1,10 @@
 {
     "folders": [
         {
-            "name": "Monorepo Prompts",
-            "path": "prompts"
+            "name": "shared",
+            "path": ".ai"
         },
-        {
-            "name": "Agent Skills",
-            "path": ".claude/skills"
-        },
+
         {
             "name": "biscuit-terminal",
             "path": "biscuit-terminal"
