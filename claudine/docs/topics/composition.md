@@ -237,45 +237,36 @@ Programmatically constructed rules without a markdown origin (such as the system
 
 ### Timeouts
 
-Claudine supports two independent timeout properties that share the same
-human-readable duration syntax (`s`/`sec`/`seconds`, `m`/`min`/`minutes`,
-`h`/`hr`/`hours`):
+Claudine supports two timeout properties — `timeout` (wall-clock) and
+`step_timeout` (stream-silence) — that share the same human-readable
+duration grammar and the same termination path. Both are settable via
+markdown frontmatter, CLI flags (`--timeout`, `--step-timeout`), and
+env-var defaults (`CLAUDINE_TIMEOUT`, `CLAUDINE_STEP_TIMEOUT`), with
+precedence CLI > frontmatter > env > built-in default.
 
 ```yaml
-timeout: 5m
-step_timeout: 30s
+timeout: 10m          # opt-in hard ceiling on total runtime
+step_timeout: 45s     # kill the child if it goes silent for 45s
 ```
-
-- **`timeout`** is a wall-clock deadline for the entire provider run. When the
-  elapsed time since launch exceeds this budget, Claudine sends SIGTERM (then
-  SIGKILL after a short grace period).
-- **`step_timeout`** is a silence deadline. The timer resets on every
-  `SemanticEvent` observed on the provider's structured stream (tool call,
-  tool result, reasoning chunk, assistant text, info/warning, etc.). If no
-  event is observed for longer than the budget, Claudine kills the child.
 
 Both timeouts surface as the same `FailureEvent::Timeout` variant, so a
 single `handle_timeout` handler matches either one.
-
-**Streaming-only.** `step_timeout` requires structured streaming. If the
-selected provider runs in capture or passthrough mode, Claudine emits a
-warning and ignores the field. The non-streaming Goose wrapper is the
-primary example.
 
 **Relational validation.** When both properties are present,
 `step_timeout` must be less than or equal to `timeout`. Documents that
 violate this invariant fail parse-time validation with
 `HarnessError::InvalidTimeout`.
 
-**Precedence.** The CLI flags `--timeout` and `--step-timeout` override
-frontmatter when provided. Wall-clock enforcement is checked before
-step-silence on each poll, so if both budgets expire in the same tick the
-run is reported as the wall-clock timeout.
+**Streaming-only.** `step_timeout` requires structured streaming. If the
+selected provider runs in capture or passthrough mode (the non-streaming
+Goose wrapper is the primary example), Claudine emits a warning and
+ignores the field.
 
-```yaml
-timeout: 10m          # hard ceiling on total runtime
-step_timeout: 45s     # kill the child if it goes silent for 45s
-```
+See [`topics/timeouts.md`](timeouts.md) for the canonical reference,
+including the full precedence table, defaults rationale, env-var knobs
+(`CLAUDINE_TIMEOUT`, `CLAUDINE_STEP_TIMEOUT`, `CLAUDINE_KILL_GRACE`,
+`CLAUDINE_WATCHDOG_INTERVAL`), termination path, exit reasons, and the
+subagent diagnostics that ride alongside `step_timeout`.
 
 ## Timing Surface
 
@@ -336,51 +327,19 @@ also rejected (the underlying duration parser requires positive values).
 A warn set without its corresponding hard threshold is legal — the
 "without hard threshold" message variant applies.
 
-### Subagent and Stream-Idle Watchdogs
+### Watchdog and Exit Reasons
 
-In addition to the harness timeouts above, the wrapper runs two
-provider-agnostic watchdog rules that protect against silent hangs
-(particularly with OpenCode parallel `task` subagents). These are
-governed by environment variables and operate independently of
-frontmatter `timeout` / `step_timeout`:
+The wrapper enforces `timeout` and `step_timeout` via a unified watchdog
+ticker. On breach, the synthesised `session_end` JSONL summary records
+`error_kind: "timeout"` or `"step_timeout"`, and the rendered `Agent
+Error` `BlockQuote` enumerates any outstanding subagents (id, name,
+elapsed since last progress) so the operator knows which workers
+stalled. While `step_timeout` is enabled, the live stderr surface also
+emits at most one ` ⏳ Awaiting subagent: <name-or-id> (<elapsed>)`
+diagnostic line per active subagent per silence window.
 
-| Environment Variable | Default | Description |
-|---|---|---|
-| `CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS` | `180` | Per-subagent silence ceiling. If an active subagent produces no events for this long, the child process group is sent SIGTERM. Set to `0` to disable. |
-| `CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS` | `10` | Grace period between SIGTERM and SIGKILL for watchdog-initiated termination. |
-| `CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS` | `5` | Ticker cadence for evaluating subagent-silence rules. |
-| `CLAUDINE_STREAM_IDLE_KILL_SECONDS` | `300` | Stream-level silence ceiling when **no** subagents are outstanding. If the entire structured stream produces no events for this long, the child is killed. Set to `0` to disable. |
-
-**Rule priority.** On each tick the watchdog evaluates subagent silence
-first. If any active subagent has exceeded the idle threshold, the run
-is terminated with exit reason `subagents_unresponsive`. If subagents
-are active but none has breached, stream-idle evaluation is suppressed
-for that tick. Stream-idle (`stream_idle_timeout`) only fires when zero
-subagents are outstanding and at least one semantic event has been
-observed since session start.
-
-**Diagnostics.** When the subagent watchdog is enabled, the existing
-30-second idle-flush ticker also emits at most one diagnostic line per
-active subagent per silence window:
-
-```
- ⏳ Awaiting subagent: <name-or-id> (<elapsed-since-start>)
-```
-
-These lines route through the same section tracker as tool calls so
-spacing stays consistent with the rest of the live stderr surface.
-Disabling the subagent watchdog (`CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS=0`)
-also disables the diagnostic emission.
-
-**Exit reasons.** Watchdog-initiated termination surfaces in the
-synthesised JSONL summary with distinct `error_kind` values:
-
-- `subagents_unresponsive` — Fix 1 (subagent silence breach)
-- `stream_idle_timeout` — Fix 2 (total stream silence with no outstanding subagents)
-
-Both render as `Agent Error` coloured `BlockQuote`s on stderr and map
-to `ProcessTermination::Completed` (not `TimedOut`) so they are not
-confused with user-configured harness timeouts.
+See [`topics/timeouts.md`](timeouts.md) for the full env-var table,
+precedence chain, termination path, and worked examples.
 
 ### Handlers
 
