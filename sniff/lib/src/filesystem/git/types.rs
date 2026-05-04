@@ -624,7 +624,7 @@ impl GitRepo {
     ///
     /// Both `deep=false` and `deep=true` include full unified diff payloads to
     /// preserve backward compatibility. New callers that want file stats without
-    /// diffs should use [`detect_with_request`] with [`GitRequest::full()`] directly.
+    /// diffs should use [`Self::detect_with_request`] with [`GitRequest::full()`] directly.
     pub fn detect_full(&self, deep: bool, commit_count: usize) -> Result<GitInfo> {
         let request = if deep {
             GitRequest::deep().commit_count(commit_count)
@@ -650,7 +650,7 @@ impl GitRepo {
         let current_branch = self.current_branch();
 
         if request.refresh_remote_tracking {
-            super::detection::refresh_remote_tracking_refs(&self.repo);
+            super::detection::refresh_remote_tracking_refs(&self.repo, 2);
         }
 
         let mut recent = if request.commit_count > 0 {
@@ -692,7 +692,11 @@ impl GitRepo {
         if request.refresh_remote_tracking {
             status.is_behind = super::detection::summarize_behind_status(&tracking);
             if request.include_commit_remote_containment {
-                super::detection::populate_recent_commit_remotes(&self.repo, &mut recent);
+                super::detection::populate_recent_commit_remotes(
+                    &self.repo,
+                    &mut recent,
+                    request.max_remote_branches,
+                );
             }
         }
 

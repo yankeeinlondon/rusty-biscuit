@@ -122,7 +122,7 @@ pub enum ResolvedProgram {
 /// Resolve a program name scoped to a specific output filter category.
 ///
 /// For `OutputFilter::Programs`, falls back to the cross-category
-/// [`resolve_program`]. For all other program filters, restricts resolution to
+/// [`resolve_program()`]. For all other program filters, restricts resolution to
 /// the matching category so that error messages name the category correctly
 /// (e.g., "Unknown editor" rather than "Unknown program").
 pub fn resolve_program_in_category(

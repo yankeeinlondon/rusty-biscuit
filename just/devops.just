@@ -8,6 +8,7 @@ red := '\033[31m'
 green := '\033[32m'
 yellow := '\033[33m'
 blue := '\033[34m'
+magenta := '\033[35m'
 underline := '\033[4m'
 
 # dim := '\033[2m'
@@ -143,6 +144,19 @@ status subject="":
             eza fixes -lDga -I '_*' || echo -e "  {{italic}}no fixes found{{reset}}"
         else
             echo -e "  {{italic}}no fixes directory{{reset}}"
+        fi
+        echo
+        echo -e "{{bold}}{{magenta}}{{underline}}Recent Reviews{{reset}}"
+        echo
+        if [[ -d reviews ]]; then
+            mapfile -t recent_reviews < <(find reviews -maxdepth 1 -mindepth 1 -type d -mtime -3 2>/dev/null | sort)
+            if [[ ${#recent_reviews[@]} -gt 0 ]]; then
+                eza "${recent_reviews[@]}" -ldga --hyperlink
+            else
+                echo -e "  {{italic}}no reviews updated in the last 3 days{{reset}}"
+            fi
+        else
+            echo -e "  {{italic}}no reviews directory{{reset}}"
         fi
         exit 0
     fi

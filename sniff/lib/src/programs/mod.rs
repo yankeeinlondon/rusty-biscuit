@@ -209,10 +209,12 @@ impl ProgramsInfo {
     pub fn detect() -> Self {
         use std::sync::Arc;
 
-        // Build the shared executable index once
+        // Build the shared executable index once. Bulk detection benefits from
+        // an eager PATH scan so per-program lookups become O(1) HashMap probes
+        // instead of repeated PATH traversals via `which`.
         let index = {
             let _span = info_span!("build_executable_index").entered();
-            Arc::new(ExecutableIndex::build())
+            Arc::new(ExecutableIndex::build_eager_path())
         };
 
         // Parallelize category detection in pairs using rayon::join
