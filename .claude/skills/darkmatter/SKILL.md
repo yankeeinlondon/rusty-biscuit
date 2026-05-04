@@ -34,7 +34,7 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 
 ## Compose Pipeline
 
-Three-phase pipeline for document preparation:
+Three-phase pipeline for document preparation leveraging the [pulldown-cmark](./pulldown-cmark.md) crate:
 
 **Inline Pre** (serial):
 1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
@@ -196,11 +196,11 @@ Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-le
 
 - **Markdown syntax**: `--- { style: waves, width: "50%" }`
 - **Supported attributes** (all optional):
-  - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
-  - `alignment`: `full` (default), `centered`, `left`, `right`
-  - `weight`: `thin`, `medium` (default), `thick`
-  - `width`: CSS-like string (`"75%"`, `"200px"`)
-  - `color`: CSS color name or `#rrggbb`
+    - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+    - `alignment`: `full` (default), `centered`, `left`, `right`
+    - `weight`: `thin`, `medium` (default), `thick`
+    - `width`: CSS-like string (`"75%"`, `"200px"`)
+    - `color`: CSS color name or `#rrggbb`
 - **Preferred page defaults:** put these fields under frontmatter `hr:`; per-rule attributes override only specified keys.
 - **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
 - **Bare `---`:** produces a configured rule when `hr:` frontmatter is present, otherwise the default dashed rule.
@@ -227,15 +227,17 @@ These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-h
 `YamlBlock` is a typed, validated YAML payload that renders as a syntax-highlighted `yaml` code block in both terminal and browser output.
 
 - **Constructors:**
-  - `YamlBlock::new(yaml)` — from raw YAML string; validates via `serde_yaml_ng`
-  - `YamlBlock::from_yaml_file(path)` — from a YAML file on disk
-  - `YamlBlock::from_markdown_content(md)` — extracts only the frontmatter; yields `{}` if none
-  - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
+    - `YamlBlock::new(yaml)` — from raw YAML string; validates via `serde_yaml_ng`
+    - `YamlBlock::from_yaml_file(path)` — from a YAML file on disk
+    - `YamlBlock::from_markdown_content(md)` — extracts only the frontmatter; yields `{}` if none
+    - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
 - **Validation:** all constructors parse YAML through `serde_yaml_ng::from_str` and fail fast; the parsed `Value` is not retained
 - **Rendering:** implements `Renderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
 - **No tree view or custom YAML renderer** — produces a standard highlighted code block
 
 Located in `darkmatter/lib/src/markdown/yaml_block.rs`.
+
+
 
 ## See Also
 

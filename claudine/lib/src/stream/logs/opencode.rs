@@ -608,6 +608,16 @@ pub enum EarlyTermination {
     /// the outcome to [`crate::harness::ProcessTermination::TimedOut`] so
     /// the standard `handle_timeout` failure handler runs.
     StepTimeout { message: String },
+    /// One or more outstanding subagents have been silent for longer than
+    /// the configured idle threshold. The wrapper terminates the child
+    /// process and maps the outcome to a distinct exit reason so the
+    /// synthesized summary can report which subagents were stuck.
+    SubagentsUnresponsive { message: String },
+    /// The provider stream has been completely idle (no semantic events)
+    /// for longer than the configured stream-idle threshold while no
+    /// subagents are outstanding. The wrapper terminates the child process
+    /// and maps the outcome to a distinct exit reason.
+    StreamIdleTimeout { message: String },
 }
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.

@@ -63,6 +63,39 @@ Process an incoming event from a provider hook (hidden from help). Reads JSON pa
 
 Show which actions are configured and for which events across the user and repo configs.
 
+### Dispatch Expressions
+
+Hook action templates, conditional `when` clauses, event binding matchers, and harness validation messages all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
+
+**Template Interpolation.** Speak messages, bash params, report templates, and message bodies pass through `{{...}}` interpolation. In addition to simple variable references, authors can use:
+
+- Fallbacks: `{{env.CI || "local"}}`
+- Ternaries: `{{git.is_dirty ? "dirty" : "clean"}}`
+- Comparisons: `{{hardware.cores > 8 ? "fast" : "slow"}}`
+- Helper functions: `{{length(git.branch) > 30 ? "long-branch" : git.branch}}`
+
+Booleans render as `true`/`false`. Unknown bare-variable references like `{{unknown_field}}` are preserved verbatim so misspellings stay visible. Composite expressions that fail to parse are also preserved unchanged. Legacy single-brace placeholders such as `{tool_name}` are still rewritten to `{{tool_name}}` for one compatibility cycle and emit a deprecation warning.
+
+**Action `when` Clauses.** Every hook action variant accepts an optional `when` boolean expression. When it evaluates to false (or fails to parse), the action is skipped without short-circuiting the rest of the binding. A skipped `Call` action cannot replace a previously selected blocking response.
+
+```json
+{ "type": "speak", "message": "Bash on {{git.branch}}", "when": "tool_name == 'Bash'" }
+{ "type": "bash",  "command": "say done", "when": "git.is_dirty" }
+{ "type": "call",  "command": "/usr/local/bin/check", "when": "provider == 'claude' && tool_name == 'Bash'" }
+{ "type": "message", "message": "build red on {{git.branch}}", "when": "event == 'tool_error'" }
+```
+
+**Matcher Modes.** Event binding matchers accept either a Darkmatter condition or a regex (legacy mode). Matcher strings are first attempted as conditions; bare-variable strings like `Bash|Edit` deliberately fall through to regex compilation so historical configurations keep their original semantics. Examples:
+
+| Matcher | Mode | Behavior |
+|---------|------|----------|
+| `Bash\|Edit` | Regex | Matches `tool_name` for tool events, `notification_type` for notifications |
+| `tool_name == 'Bash' && git.branch == 'main'` | Expression | Evaluated against full `EventMeta` |
+| `provider == 'claude' && !git.is_dirty` | Expression | Multi-field condition |
+| `[invalid(regex` | Neither | Warned and skipped (binding fires unconditionally) |
+
+Expression matchers that fail to evaluate at runtime log a warning and are treated as non-matches.
+
 ### `claudine skills`
 
 List shared skills across providers with their scopes. Displays link/sync state per resource using the four-type linking model (Skill, Command, Agent, Script). Replaces the retired `claudine link skills` subcommand.
@@ -152,6 +185,7 @@ Wrapper behavior:
 - **Stderr status lines**: `LiveSemanticSink` renders tool/subagent/info/warning/error status lines. Tool calls use a canonical humanized contract — `→ {Name}({summary})` for outgoing and `← {Name}({slot})` for incoming — that reads like a function call. Shell tools (`Bash`, `bash`, `run_command`, Codex `shell`) prepend the canonical shell name to the command (`bash ls -la`) so the user can see how the line would actually execute. `Task` summaries prefer `description → subject → prompt → task` so the agent's task body wins over arbitrary fields like `subagent_type`. Unknown event types fall through to a silent skip so provider format drift never turns into a hard failure. Raw JSON is never dumped to the terminal for known tools.
 - **Typed error blocks**: `SemanticEvent::Error` now carries a `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`) and renders as a colored `BlockQuote` with `▌ ` border instead of a single failure status line. Border colors and labels are: orange `Configuration Error`, red `Agent Error`, red `API Error`, yellow `Interrupted`, red `Error`. Replays of older JSONL streams without a `kind` field default to `Unknown` via `#[serde(default)]`. The kind maps directly onto `AgentErrorCategory` for end-of-run reports via `From<SemanticErrorKind> for AgentErrorCategory`. Dispatch behavior remains keyed off `terminal: bool`; `kind` is classificatory metadata, not a new dispatch switch.
 - **Idle output flush**: `StreamTextRenderer` records when the block buffer last grew. When the heartbeat thread runs, it calls `flush_if_idle(silence_window)` (default **30 s**) before emitting its own status line, so a dangling final paragraph from a slow-to-close provider becomes visible within the silence window even if the provider never closes stdout. Buffered content always appears above the next heartbeat.
+- **Subagent watchdog** (OpenCode stability): when a provider emits `SubagentStart` without a matching `SubagentStop` (observed with OpenCode parallel `task` subagents), a dedicated watchdog ticker terminates the child after a configurable silence threshold. The default is **180 s** (`CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS`), with a **10 s** SIGTERM-to-SIGKILL grace (`CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS`). Set the threshold to `0` to disable. A coarser stream-idle rule (`CLAUDINE_STREAM_IDLE_KILL_SECONDS`, default **300 s**) fires when no subagents are outstanding but the entire stream has gone silent. Both rules render `Agent Error` blocks on stderr and report distinct exit reasons (`subagents_unresponsive`, `stream_idle_timeout`) in the JSONL summary.
 - **Verbosity**: `--quiet` shows only a compact completion line; `--silent` suppresses all Claudine output; `-v` adds detailed human-facing metadata on the second summary line.
 - **Diagnostics**: `--debug <level>` controls Claudine tracing (`trace`, `debug`, `info`, `warn`, `error`). `RUST_LOG` takes precedence and supports per-module targeting such as `RUST_LOG=claudine::dispatch=trace,claudine::stream=debug`.
 - Validates provider binary availability before spawn (with provider docs URL in errors).

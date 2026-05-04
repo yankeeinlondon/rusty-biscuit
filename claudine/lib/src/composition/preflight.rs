@@ -311,6 +311,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -360,6 +361,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -608,6 +610,7 @@ mod tests {
                 },
                 message_template: None,
                 subject_key: None,
+                source: None,
             }],
             post_checks: Vec::new(),
             handlers: HandlerTable::default(),

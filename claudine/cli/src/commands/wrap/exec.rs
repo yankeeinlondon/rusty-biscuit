@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,7 +23,12 @@ use color_eyre::eyre::Result;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use tracing::{Span, info_span};
 
+use super::section::{Section, SectionTracker};
 use super::stream_io::StreamOutput;
+use super::subagent_watchdog::{
+    WatchdogConfig, WatchdogTermination, WatchdogTickResult, evaluate_watchdog_tick,
+    render_watchdog_error_to_stream,
+};
 
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
@@ -740,6 +746,7 @@ fn wait_with_signal_and_early_termination(
     child: &mut Child,
     child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
     wall_clock_timeout: Option<Duration>,
@@ -858,6 +865,46 @@ fn wait_with_signal_and_early_termination(
             }
         }
 
+        // Watchdog-initiated termination (subagent silence or stream idle).
+        if early_termination.is_none()
+            && !wall_clock_tripped
+            && let Some(ref wd_rx) = watchdog_rx
+        {
+            match wd_rx.try_recv() {
+                Ok(req) => {
+                    tracing::warn!(
+                        child_pid,
+                        reason = ?req.reason,
+                        "watchdog termination received; sending SIGTERM to child process group",
+                    );
+                    let kill_pid = if child_in_own_pgroup {
+                        -(child_pid as i32)
+                    } else {
+                        child_pid as i32
+                    };
+                    unsafe {
+                        libc::kill(kill_pid, libc::SIGTERM);
+                    }
+                    let early = match req.reason {
+                        super::subagent_watchdog::WatchdogTerminationReason::SubagentsUnresponsive => {
+                            EarlyTermination::SubagentsUnresponsive {
+                                message: req.message,
+                            }
+                        }
+                        super::subagent_watchdog::WatchdogTerminationReason::StreamIdleTimeout => {
+                            EarlyTermination::StreamIdleTimeout {
+                                message: req.message,
+                            }
+                        }
+                    };
+                    early_termination = Some(early);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {}
+            }
+        }
+
         if early_termination.is_none()
             && !wall_clock_tripped
             && let Some(metrics) = live_metrics.as_ref()
@@ -931,6 +978,7 @@ fn wait_with_signal_and_early_termination(
     child: &mut Child,
     _child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    watchdog_rx: Option<Receiver<WatchdogTermination>>,
     live_metrics: Option<LiveMetrics>,
     stop_threshold: Duration,
     wall_clock_timeout: Option<Duration>,
@@ -979,6 +1027,32 @@ fn wait_with_signal_and_early_termination(
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {}
+            }
+        }
+
+        if early_termination.is_none() && !wall_clock_tripped {
+            if let Some(ref wd_rx) = watchdog_rx {
+                match wd_rx.try_recv() {
+                    Ok(req) => {
+                        let _ = child.kill();
+                        let early = match req.reason {
+                            super::subagent_watchdog::WatchdogTerminationReason::SubagentsUnresponsive => {
+                                EarlyTermination::SubagentsUnresponsive {
+                                    message: req.message,
+                                }
+                            }
+                            super::subagent_watchdog::WatchdogTerminationReason::StreamIdleTimeout => {
+                                EarlyTermination::StreamIdleTimeout {
+                                    message: req.message,
+                                }
+                            }
+                        };
+                        early_termination = Some(early);
+                        grace_deadline = Some(Instant::now() + grace_period);
+                    }
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => {}
+                }
             }
         }
 
@@ -1054,6 +1128,18 @@ fn apply_early_termination_to_summary(
             summary.exit_code = 1;
             summary.is_error = true;
             summary.error_kind = Some("step_timeout".into());
+            summary.error_message = Some(message.clone());
+        }
+        EarlyTermination::SubagentsUnresponsive { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("subagents_unresponsive".into());
+            summary.error_message = Some(message.clone());
+        }
+        EarlyTermination::StreamIdleTimeout { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("stream_idle_timeout".into());
             summary.error_message = Some(message.clone());
         }
     }
@@ -1351,9 +1437,21 @@ pub(crate) fn run_child_capture(
 /// passthrough) and regardless of whether any periodic header is being
 /// emitted. The 30-second cadence and 30-second silence window are the
 /// tuning preserved from the previous heartbeat thread.
+///
+/// When `watchdog_state` is provided and the subagent watchdog is enabled,
+/// the ticker also emits at most one diagnostic line per active subagent
+/// per silence window:
+///
+///   `⏳ Awaiting subagent: <name-or-id> (<elapsed-since-start>)`
+///
+/// These lines route through the shared [`SectionTracker`] so spacing stays
+/// consistent with the live sink.
 fn spawn_flush_if_idle_ticker(
     stream_output: Arc<StreamOutput>,
     text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>>,
+    watchdog_state: Option<Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>>,
+    section_tracker: Option<Arc<Mutex<SectionTracker>>>,
+    watchdog_config: WatchdogConfig,
 ) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
     const SILENCE_WINDOW: Duration = Duration::from_secs(30);
     const CADENCE: Duration = Duration::from_secs(30);
@@ -1361,6 +1459,9 @@ fn spawn_flush_if_idle_ticker(
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = Arc::clone(&done);
     let handle = thread::spawn(move || {
+        let section_stream = section_tracker.map(|tracker| {
+            super::section::SectionStream::with_tracker(stream_output.clone(), tracker)
+        });
         let mut next_tick = Instant::now() + CADENCE;
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
@@ -1369,7 +1470,85 @@ fn spawn_flush_if_idle_ticker(
                     let mut writer = stream_output.stdout_writer();
                     r.flush_if_idle(&mut writer, SILENCE_WINDOW);
                 }
+
+                // Emit subagent idle diagnostics when the subagent watchdog is enabled.
+                if watchdog_config.subagent_watchdog_enabled()
+                    && let Some(ref state) = watchdog_state
+                    && let Ok(mut guard) = state.lock()
+                {
+                    let lines = guard.diagnostic_lines(now, SILENCE_WINDOW);
+                    drop(guard);
+                    for line in lines {
+                        let elapsed_text =
+                            super::subagent_watchdog::format_duration(line.elapsed_since_start);
+                        let diagnostic = format!(
+                            " ⏳ Awaiting subagent: {} ({})",
+                            line.display_name, elapsed_text
+                        );
+                        if let Some(ref ss) = section_stream {
+                            ss.emit_stderr(Section::ToolUseAndEvents, &diagnostic);
+                        } else {
+                            stream_output.emit_stderr_line(&diagnostic);
+                        }
+                    }
+                }
+
                 next_tick += CADENCE;
+                continue;
+            }
+            let sleep_for = next_tick
+                .saturating_duration_since(now)
+                .min(Duration::from_secs(1));
+            thread::sleep(sleep_for);
+        }
+    });
+
+    (done, handle)
+}
+
+/// Spawn the subagent watchdog ticker.
+///
+/// Evaluates subagent-silence and stream-idle rules on a short cadence
+/// (default 5 s). When a rule breaches, renders an `AgentNative` error
+/// block to stderr and sends a [`WatchdogTermination`] request to the
+/// exec wait loop so the child process group receives SIGTERM.
+///
+/// The ticker holds only weak conceptual coupling to the live sink: it
+/// reads the same `WatchdogState` the sink updates, and emits through
+/// the same `StreamOutput` coordinator so stderr lines land on fresh
+/// rows even when stdout is mid-line.
+fn spawn_subagent_watchdog_ticker(
+    config: WatchdogConfig,
+    watchdog_state: Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>,
+    watchdog_tx: std::sync::mpsc::Sender<WatchdogTermination>,
+    live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
+) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&done);
+    let fired = Arc::new(AtomicBool::new(false));
+    let cadence = Duration::from_secs(config.subagent_watchdog_interval_seconds);
+
+    let handle = thread::spawn(move || {
+        let mut next_tick = Instant::now() + cadence;
+        while !done_flag.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_tick {
+                match evaluate_watchdog_tick(
+                    &config,
+                    now,
+                    &watchdog_state,
+                    &live_metrics,
+                    &fired,
+                ) {
+                    WatchdogTickResult::Ok => {}
+                    WatchdogTickResult::SubagentBreach(ref term)
+                    | WatchdogTickResult::StreamIdleBreach(ref term) => {
+                        render_watchdog_error_to_stream(term, &stream_output);
+                        let _ = watchdog_tx.send(term.clone());
+                    }
+                }
+                next_tick += cadence;
                 continue;
             }
             let sleep_for = next_tick
@@ -1705,6 +1884,12 @@ fn early_termination_process_outcome(
         Some(EarlyTermination::StepTimeout { .. }) => {
             claudine::harness::ProcessTermination::TimedOut
         }
+        Some(EarlyTermination::SubagentsUnresponsive { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        Some(EarlyTermination::StreamIdleTimeout { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
         Some(EarlyTermination::CompletedButHung { .. }) => {
             claudine::harness::ProcessTermination::Completed
         }
@@ -1804,6 +1989,8 @@ pub(crate) fn run_child_stream_semantic(
     stream_output: Arc<StreamOutput>,
     stderr_bridge: Option<StderrBridgeHandle>,
     prompt_timing: Option<PromptTimingContext>,
+    watchdog_state: Option<Arc<std::sync::Mutex<super::subagent_watchdog::WatchdogState>>>,
+    section_tracker: Option<Arc<Mutex<SectionTracker>>>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -1859,6 +2046,9 @@ pub(crate) fn run_child_stream_semantic(
     let flush_ticker = Some(spawn_flush_if_idle_ticker(
         stream_output.clone(),
         text_renderer.clone(),
+        watchdog_state.clone(),
+        section_tracker.clone(),
+        WatchdogConfig::from_env(),
     ));
 
     // Prompt-scoped periodic header + warnings. Only started when the
@@ -2053,9 +2243,29 @@ pub(crate) fn run_child_stream_semantic(
     let opencode_stop_threshold = Duration::from_secs(120);
     let wall_clock_timeout = timeout.map(Duration::from_secs);
     let step_timeout_duration = step_timeout.map(Duration::from_secs);
+
+    // Watchdog channel: the ticker sends termination requests; the wait
+    // loop receives them and escalates SIGTERM → SIGKILL.
+    let (watchdog_tx, watchdog_rx): (
+        std::sync::mpsc::Sender<WatchdogTermination>,
+        std::sync::mpsc::Receiver<WatchdogTermination>,
+    ) = std::sync::mpsc::channel();
+    let watchdog_config = WatchdogConfig::from_env();
+    let watchdog_enabled = watchdog_config.any_watchdog_enabled() && watchdog_state.is_some();
+    let mut watchdog_ticker = None;
+    if watchdog_enabled && let Some(state) = watchdog_state {
+        watchdog_ticker = Some(spawn_subagent_watchdog_ticker(
+            watchdog_config,
+            state,
+            watchdog_tx,
+            live_metrics.clone(),
+            stream_output.clone(),
+        ));
+    }
     let needs_advanced_wait = wall_clock_timeout.is_some()
         || step_timeout_duration.is_some()
-        || early_terminate_rx.is_some();
+        || early_terminate_rx.is_some()
+        || watchdog_enabled;
     let (exit_code, termination, early_termination) = if needs_advanced_wait {
         // Synthesize a disconnected receiver when no stderr bridge is
         // installed so the wait loop can still enforce wall-clock and
@@ -2064,10 +2274,16 @@ pub(crate) fn run_child_stream_semantic(
             let (_tx, rx) = std::sync::mpsc::channel();
             rx
         });
+        let wd_rx = if watchdog_enabled {
+            Some(watchdog_rx)
+        } else {
+            None
+        };
         wait_with_signal_and_early_termination(
             &mut child,
             true,
             rx,
+            wd_rx,
             Some(wait_loop_metrics),
             opencode_stop_threshold,
             wall_clock_timeout,
@@ -2079,7 +2295,10 @@ pub(crate) fn run_child_stream_semantic(
     };
 
     if let Some(
-        EarlyTermination::CompletedButHung { message } | EarlyTermination::StepTimeout { message },
+        EarlyTermination::CompletedButHung { message }
+        | EarlyTermination::StepTimeout { message }
+        | EarlyTermination::SubagentsUnresponsive { message }
+        | EarlyTermination::StreamIdleTimeout { message },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)
@@ -2091,6 +2310,7 @@ pub(crate) fn run_child_stream_semantic(
     kill_process_group(&mut child);
     stop_timing_ticker(flush_ticker);
     stop_timing_ticker(timing_monitor);
+    stop_timing_ticker(watchdog_ticker);
 
     let thread_join_timeout = Duration::from_secs(5);
     let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(
@@ -2706,6 +2926,68 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .contains("no stream activity"),
+        );
+    }
+
+    #[test]
+    fn early_termination_process_outcome_maps_subagents_unresponsive_to_completed() {
+        let termination = EarlyTermination::SubagentsUnresponsive {
+            message: "subagents a, b unresponsive for 180s".into(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::Completed);
+    }
+
+    #[test]
+    fn early_termination_process_outcome_maps_stream_idle_to_completed() {
+        let termination = EarlyTermination::StreamIdleTimeout {
+            message: "no stream activity for 300s".into(),
+        };
+
+        let outcome = early_termination_process_outcome(Some(&termination));
+
+        assert_eq!(outcome, claudine::harness::ProcessTermination::Completed);
+    }
+
+    #[test]
+    fn apply_early_termination_subagents_unresponsive_sets_error_fields() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::SubagentsUnresponsive {
+                message: "subagents a, b unresponsive for 180s".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("subagents_unresponsive"));
+        assert_eq!(
+            summary.error_message.as_deref(),
+            Some("subagents a, b unresponsive for 180s"),
+        );
+    }
+
+    #[test]
+    fn apply_early_termination_stream_idle_timeout_sets_error_fields() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::StreamIdleTimeout {
+                message: "no stream activity for 300s".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("stream_idle_timeout"));
+        assert_eq!(
+            summary.error_message.as_deref(),
+            Some("no stream activity for 300s"),
         );
     }
 

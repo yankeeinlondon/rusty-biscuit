@@ -256,6 +256,7 @@ fn build_config(
             effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
             volume: 1.0,
             speed: 1.0,
+            when: None,
         }],
     );
 
@@ -265,6 +266,7 @@ fn build_config(
         logging: true,
         protect: claudine::services::protect::config::ProtectConfig::default(),
         actions,
+        matchers: HashMap::new(),
         preferred_agent,
         canonical_provider: None,
         models: HashMap::new(),
