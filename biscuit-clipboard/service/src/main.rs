@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use biscuit_clipboard::backend::SystemClipboard;
-use biscuit_clipboard::config::WatcherRestartPolicy;
+use biscuit_clipboard::config::{WatcherRestartPolicy, configured_port};
 use biscuit_clipboard::watcher::{WatcherEvent, spawn_system_watcher};
 use biscuit_clipboard::{History, Storage, Supervisor, SupervisorAction, SupervisorStatus};
 use clap::Parser;
@@ -19,8 +19,8 @@ use api::AppState;
 #[derive(Parser, Debug)]
 #[command(name = "clipper", about = "Biscuit clipboard background service")]
 struct Args {
-    #[arg(long, default_value = "0")]
-    port: u16,
+    #[arg(long)]
+    port: Option<u16>,
 
     #[arg(long)]
     pid_file: Option<String>,
@@ -38,6 +38,7 @@ async fn main() {
         .init();
 
     let args = Args::parse();
+    let port = args.port.unwrap_or_else(configured_port);
 
     let daemon_files = create_daemon_files(&args);
 
@@ -111,7 +112,7 @@ async fn main() {
 
     let app = api::router(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -295,6 +296,7 @@ fn create_daemon_files(args: &Args) -> daemon::DaemonFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_clipboard::config::{CLIP_PORT_ENV, DEFAULT_PORT};
     use biscuit_clipboard::content::ClipboardFormat;
 
     fn make_state() -> Arc<AppState> {
@@ -395,5 +397,32 @@ mod tests {
 
         handle_failure(&mut supervisor, &status).await;
         assert_eq!(*status.read().await, SupervisorStatus::Stopped);
+    }
+
+    #[test]
+    fn test_args_default_port_is_17530() {
+        // Ensure CLIP_PORT is not set so we get the default
+        unsafe { std::env::remove_var(CLIP_PORT_ENV) };
+        let args = Args::parse_from(["clipper"]);
+        let port = args.port.unwrap_or_else(configured_port);
+        assert_eq!(port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn test_args_port_env_override() {
+        unsafe { std::env::set_var(CLIP_PORT_ENV, "12345") };
+        let args = Args::parse_from(["clipper"]);
+        let port = args.port.unwrap_or_else(configured_port);
+        unsafe { std::env::remove_var(CLIP_PORT_ENV) };
+        assert_eq!(port, 12345);
+    }
+
+    #[test]
+    fn test_args_port_cli_override() {
+        // Ensure env var does not interfere
+        unsafe { std::env::remove_var(CLIP_PORT_ENV) };
+        let args = Args::parse_from(["clipper", "--port", "9999"]);
+        let port = args.port.unwrap_or_else(configured_port);
+        assert_eq!(port, 9999);
     }
 }
