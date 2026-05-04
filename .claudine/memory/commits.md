@@ -55,6 +55,7 @@ description: A record of novel things learned about how to best perform commits 
 ## Shell Gotchas
 
 - Literal backticks inside a double-quoted shell command trigger command substitution in `zsh`. If a commit message contains Markdown code spans, escape the backticks or build the message with a single-quoted heredoc first.
+- When generating temporary files for use in shell commands (e.g., as input for `git commit -F`), they must be placed inside the project's temporary directory (`.gemini/tmp/...`) rather than the global `/tmp` directory, which may be outside the allowed workspace scope.
 - Function names, identifiers with underscores, or code-like strings in commit messages can be interpreted as commands by zsh if they match shell functions or aliases. Prefer writing commit message bodies in prose that describes the feature rather than naming implementation details, or use single-quoted strings to prevent expansion.
 - In scripts that run `git add .`, use `git add . || exit 0` to prevent CI failure when there is nothing to commit.
 
