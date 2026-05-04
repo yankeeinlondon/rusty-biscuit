@@ -1,13 +1,12 @@
 ---
 root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area}}"
-baseline: "$(sentrux gate --save "{{ctx.repo_root}}/{{ctx.current_package_area}}" 2>/dev/null >/dev/null && cat '{{ctx.repo_root}}/{{ctx.current_package_area}}/.sentrux/baseline.json')"
 start: 
     stderr: "Starting a [Sentrux](https://sentrux.dev) based review on the {{area}} package area"
 
 success:
     stderr: "The [Sentrux](https://sentrux.dev) based review for **{{area}}** completed successfully"
-    speak: "The Sentrux review in {{area}} completed successfully"
+    say: "The Sentrux review in {{area}} completed successfully"
 ---
 
 Evaluate the package area "{{area}}" of the Rusty Biscuit monorepo (directory: "{{root}}/{{area}}") using the **Sentrux** MCP tools to evaluate the quality of the following metrics and provide a list of suggestions on how to improve on the score:
