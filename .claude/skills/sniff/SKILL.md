@@ -128,6 +128,7 @@ sniff topics               # Table of available topics
 sniff just                 # Justfiles and recipes
 sniff repo                 # Repository/monorepo structure
 sniff repo git-status      # Git status with commit history
+sniff repo language        # Primary programming language for the repository
 sniff repo remote origin   # Inspect remote repository
 sniff repo pr              # List open pull requests
 sniff repo pr --status merged  # List merged pull requests
