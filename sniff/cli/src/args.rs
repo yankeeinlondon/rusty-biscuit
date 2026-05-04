@@ -223,7 +223,7 @@ pub enum PackagesFormat {
 )]
 pub struct Cli {
     /// Base directory for filesystem analysis
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub base: Option<PathBuf>,
 
     /// Output as JSON instead of text (with subcommand) or force JSON (no subcommand)

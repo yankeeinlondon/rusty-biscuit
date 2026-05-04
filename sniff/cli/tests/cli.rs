@@ -244,11 +244,11 @@ fn test_base_flag_before_subcommand() {
 }
 
 #[test]
-fn test_base_flag_after_subcommand_is_rejected() {
+fn test_base_flag_after_subcommand_is_accepted() {
     cargo_bin_cmd!("sniff")
         .args(["filesystem", "-b", "."])
         .assert()
-        .failure();
+        .success();
 }
 
 #[test]
