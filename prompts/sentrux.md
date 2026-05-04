@@ -1,7 +1,7 @@
 ---
 root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area}}"
-baseline: "$(sentrux gate --save "{{ctx.repo_root}}/{{ctx.current_package_area}} 2>/dev/null >/dev/null && cat "{{ctx.repo_root}}/{{ctx.current_package_area}}/.sentrux/baseline.json")"
+baseline: "$(sentrux gate --save "{{ctx.repo_root}}/{{ctx.current_package_area}}" 2>/dev/null >/dev/null && cat '{{ctx.repo_root}}/{{ctx.current_package_area}}/.sentrux/baseline.json')"
 start: 
     stderr: "Starting a [Sentrux](https://sentrux.dev) based review on the {{area}} package area"
 
@@ -24,7 +24,7 @@ Evaluate the package area "{{area}}" of the Rusty Biscuit monorepo (directory: "
 
 The document should be broken up with H2 headings indicating the various "packages" found in the "{{area}}" package area:
 
-::shell sniff repo packages --package-area "{{area}}"
+::shell sniff repo packages --package-area {{area}}
 
 Within each H2 section list of suggestions should be ordered by priority where priorities are (from highest to lowest):
 
