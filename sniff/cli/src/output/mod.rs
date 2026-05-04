@@ -549,7 +549,13 @@ pub fn render_text(
                     }
                 }
                 Some(RepoAction::Language) => {
-                    out.push_str(&render_repo_language(result, base_dir));
+                    let rendered = render_repo_language(result, base_dir);
+                    if rendered.is_empty() {
+                        // Mirror locator family: empty == not detected → exit 1, no stdout.
+                        // JSON path emits `{ "language": null }` with the same exit code.
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
                 }
                 Some(RepoAction::Structure { filter, .. }) => {
                     if let Some(ref filesystem) = result.filesystem

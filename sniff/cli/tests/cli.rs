@@ -765,6 +765,155 @@ fn test_language_subcommand_json_output() {
 }
 
 // ============================================================================
+// `sniff repo language` Subcommand Tests (review-plan-1, Phase 2)
+// Pins:
+//   - text output exact contract: `Rust\n` / empty + exit 1
+//   - JSON output exact contract: `{"language":"Rust"}` / `{"language":null}` + exit 1
+//   - `--base` works in all three placements (global pre, repo-nested, leaf)
+// ============================================================================
+
+#[test]
+fn test_repo_language_text_returns_rust_for_rust_repo() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "language"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout, "Rust\n", "expected exact `Rust\\n` output");
+}
+
+#[test]
+fn test_repo_language_json_returns_rust_for_rust_repo() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "language",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = std::str::from_utf8(&output).unwrap().trim_end();
+    let parsed: serde_json::Value =
+        serde_json::from_str(json_str).expect("repo language --json must emit valid JSON");
+
+    // Exact shape contract: object with single key "language" → "Rust".
+    assert_eq!(parsed, serde_json::json!({ "language": "Rust" }));
+}
+
+#[test]
+fn test_repo_language_base_flag_all_three_placements() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    let base = path.to_str().unwrap();
+
+    // Placement A: `sniff --base <repo> repo language` (global, before subcommand)
+    let a = cargo_bin_cmd!("sniff")
+        .args(["--base", base, "repo", "language"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        String::from_utf8(a).unwrap(),
+        "Rust\n",
+        "placement A failed"
+    );
+
+    // Placement B: `sniff repo --base <repo> language` (between repo and leaf)
+    let b = cargo_bin_cmd!("sniff")
+        .args(["repo", "--base", base, "language"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        String::from_utf8(b).unwrap(),
+        "Rust\n",
+        "placement B failed"
+    );
+
+    // Placement C: `sniff repo language --base <repo>` (after the leaf subcommand)
+    let c = cargo_bin_cmd!("sniff")
+        .args(["repo", "language", "--base", base])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        String::from_utf8(c).unwrap(),
+        "Rust\n",
+        "placement C failed"
+    );
+}
+
+#[test]
+fn test_repo_language_text_empty_repo_exits_one_with_no_stdout() {
+    // create_test_repo creates a git repo with one empty initial commit
+    // and no source files — primary language detection returns None.
+    let (_dir, path) = create_test_repo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "language"])
+        .assert()
+        .failure() // exit 1 by Phase 1 contract
+        .code(1);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        stdout, "",
+        "text mode must emit no stdout when no language detected"
+    );
+}
+
+#[test]
+fn test_repo_language_json_empty_repo_emits_null_and_exits_one() {
+    let (_dir, path) = create_test_repo();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "language",
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+
+    let stdout = assert.get_output().stdout.clone();
+    let json_str = std::str::from_utf8(&stdout).unwrap().trim_end();
+    let parsed: serde_json::Value = serde_json::from_str(json_str)
+        .expect("repo language --json must emit valid JSON even when null");
+    assert_eq!(parsed, serde_json::json!({ "language": null }));
+}
+
+#[test]
+fn test_repo_help_lists_language_subcommand() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sniff repo language"));
+}
+
+// ============================================================================
 // Programs Subcommand Tests
 // programs, editors, utilities, language-package-managers, os-package-managers,
 // tts-clients, terminal-apps, audio

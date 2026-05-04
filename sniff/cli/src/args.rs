@@ -1478,6 +1478,10 @@ Packages:
   sniff repo dirty-packages           Packages with uncommitted changes
   sniff repo package                  Package name for current directory
 
+Languages:
+  sniff repo language                 Primary programming language for the repository
+  sniff repo language --json          Same, as { \"language\": \"Rust\" }
+
 Dependencies:
   sniff repo deps                     Text dependency list
   sniff repo deps --ui                Mermaid dependency diagram

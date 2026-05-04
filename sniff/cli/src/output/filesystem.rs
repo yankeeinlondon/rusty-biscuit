@@ -2077,9 +2077,16 @@ pub fn render_repo_root(result: &sniff::SniffResult) -> String {
 
 /// Render the repository's primary programming language as plain text.
 ///
-/// Returns the language name (e.g. `"Rust"`) followed by a newline, suitable
-/// for piping. When no primary language can be determined, returns an empty
-/// string so callers can decide how to surface the absence (exit code, etc.).
+/// Returns the language name (e.g. `"Rust"`) followed by a newline,
+/// suitable for piping. When no primary language can be determined,
+/// returns an empty string; the caller in `output/mod.rs` treats an
+/// empty result as "not detected" and exits with status `1` — the same
+/// contract used by `repo root` / `repo package-root` / `repo package-area-root`.
+///
+/// ## Notes
+///
+/// The JSON path uses [`primary_language_name`] directly and emits
+/// `{ "language": null }` with `exit_code = 1` for the same case.
 pub fn render_repo_language(result: &sniff::SniffResult, _base_dir: Option<&Path>) -> String {
     primary_language_name(result)
         .map(|name| format!("{name}\n"))

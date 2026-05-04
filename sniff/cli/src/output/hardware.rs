@@ -320,7 +320,7 @@ fn format_sample_rate_khz(rate_hz: f64) -> String {
     }
 }
 
-/// Return the styled markup for an [`AudioDeviceKind`] as used in the
+/// Return the styled markup for an [`sniff::hardware::AudioDeviceKind`] as used in the
 /// parenthesized device descriptor.
 fn style_audio_kind(kind: sniff::hardware::AudioDeviceKind) -> String {
     use sniff::hardware::AudioDeviceKind as K;

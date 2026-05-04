@@ -708,7 +708,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .without_network()
                 .filesystem(
                     FilesystemRequest::new()
-                        .git(git_request.clone())
+                        .git(GitRequest::summary())
+                        .without_repo()
                         .without_docs()
                         .without_formatting(),
                 ),
@@ -728,7 +729,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_network()
             .filesystem(
                 FilesystemRequest::new()
-                    .git(git_request.clone())
+                    .git(GitRequest::summary())
                     .without_docs()
                     .without_formatting(),
             ),
