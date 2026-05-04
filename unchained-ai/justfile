@@ -73,6 +73,15 @@ check:
     @echo ""
     @cargo check -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen
 
+# Regenerate provider model enums and metadata lookup tables.
+# Pass extra args to gen-models, e.g.: just generate-models --providers openai,anthropic
+generate-models *args="":
+    @echo ""
+    @echo -e "{{BOLD}}Regenerating unchained-ai provider models & metadata{{RESET}}"
+    @echo -e "{{ITALIC}}Fetching live model lists from provider APIs and metadata from Parsera...{{RESET}}"
+    @echo ""
+    @cargo run -p unchained-ai-gen -- -v {{args}}
+
 # Outdated packages
 outdated:
     @cargo outdated --root-deps-only
