@@ -55,77 +55,85 @@ A degraded highlighter (broken theme load, missing yaml grammar, empty
 palette) that triggers the unstyled fallback in `report.rs:266-279` now
 fails both tests instead of slipping through silently.
 
-### Low: OSC-8 hyperlink target carries no line anchor
+### Low: OSC-8 hyperlink target carries no line anchor — **Resolved**
 
-The displayed source line includes `:42-44` but the OSC-8 link target
-constructed at `report.rs:241-255` is the bare absolute file path. Modern
-editors support `file:///path:42:1` and `file:///path#L42` jump anchors;
-clicking the rendered link in iTerm2/VS Code/Ghostty/Kitty opens the file
-at line 1, not at the offending rule.
+`render_failure_block_to` in `claudine/lib/src/harness/report.rs` now
+constructs the link target separately from the display text. When
+`line_range` is `Some(N..=M)`, the target is `<abs-path>:N:1` (clangd
+style); when it is `None`, the target stays the bare absolute path. The
+displayed text continues to use the human-friendly `:N-M` range format.
 
-Recommended fix: when `line_range` is `Some`, append `:N:1` (clangd-style)
-to the link target. Keep the display-text format unchanged. Add a
-`render_failure_block_to_string` test asserting the OSC-8 target contains
-the line suffix when a range is present.
+Coverage:
 
-### Low: Silent unstyled-fallback path is untested
+- `osc8_hyperlink_target_includes_line_anchor_when_range_present` asserts
+  the target contains `:42:1` for a `42..=44` range.
+- `osc8_hyperlink_target_omits_line_anchor_when_range_none` asserts the
+  target is the bare path (after stripping the optional `file://` scheme)
+  when no range is known.
+- The existing `osc8_hyperlink_target_present_in_raw_output` and the
+  Level-2 PTY assertion both use `contains(abs_path)` so they continue to
+  pass with the anchored target format.
 
-`report.rs:270-278` has two parallel emission branches: styled when
-highlighter line count matches plain count, unstyled otherwise. The
-unstyled branch has zero coverage. If `highlight_yaml_lines` ever returns
-extra lines (trailing newline edge case, multi-line scalars), users see
-unstyled output and no test catches the regression.
+### Low: Silent unstyled-fallback path is untested — **Resolved**
 
-Recommended fix: extract the line-count check into a single function that
-returns a `Result<Vec<String>, Vec<String>>` (or similar) so each branch
-can be unit-tested in isolation. Or, more simply, add one test that
-constructs a `RuleSource` whose `yaml_snippet` is empty after `trim_end`
-and asserts no YAML lines emit; and one that uses a single-line snippet
-that round-trips through both highlighter and plain path identically.
+The line-count selection logic was extracted from `render_failure_block_to`
+into two private helpers in `claudine/lib/src/harness/report.rs`:
 
-### Low: `prose_escape` allocates 6 strings per call
+- `yaml_snippet_lines(snippet: &str) -> Vec<String>` — owns trimming,
+  empty-input handling, and dispatch to the highlighter.
+- `select_yaml_lines(plain: &[&str], highlighted: &[String]) -> Vec<String>`
+  — owns the count-match decision and the four-space indent.
 
-`report.rs:92-99` chains six `String::replace` calls; every failure block
-runs this 2–3 times (path display, abs path, suffix, reason). On a single
-failure this is invisible; on a harness with 50 failing checks it is 200+
-unnecessary allocations. A single-pass implementation that reserves
-`s.len() + small` and walks bytes once would be both shorter and faster.
+Because `select_yaml_lines` takes both slices as parameters, the fallback
+branch is now directly unit-testable without standing up a degraded
+highlighter. New tests:
 
-Recommended fix: replace with a single linear scan. Bonus: the current
-`replace('"', "&quot;")` is asymmetric with the other replacements (HTML
-entity vs backslash escape) — confirm Prose's grammar treats both as
-equivalent and document why if so.
+- `yaml_snippet_lines_returns_empty_for_empty_input`
+- `yaml_snippet_lines_returns_empty_for_whitespace_only_input`
+- `yaml_snippet_lines_styled_path_indents_each_line_by_four_spaces`
+- `select_yaml_lines_styled_branch_uses_highlighted_when_counts_match`
+- `select_yaml_lines_fallback_branch_uses_plain_when_counts_differ`
+- `select_yaml_lines_fallback_branch_handles_extra_highlighted_entry`
+  (covers the trailing-newline edge case the original review called out)
+- `select_yaml_lines_styled_branch_handles_empty_inputs`
 
-### Low: `report_check_outcomes_to_string` is `#[cfg(test)]`-only
+### Low: `prose_escape` allocates 6 strings per call — **Resolved**
 
-`report.rs:181-189` gates the captured-string entry point behind `cfg(test)`.
-This is fine today but blocks any future JSON / SARIF / JSONL exporter or
-non-TTY snapshot consumer (called out as out-of-scope in the spec but
-plausible follow-up). The `LineSink` trait is also private. If a future
-consumer needs the rendered transcript, this becomes a gratuitous
-re-export refactor.
+`prose_escape` in `claudine/lib/src/harness/report.rs` now performs one
+linear scan with `String::with_capacity(s.len() + 8)`, replacing the
+six-step `String::replace` chain. The escape table is unchanged: `\\`,
+`<`, `>`, `{`, `}` go to backslash-escaped form; `"` goes to `&quot;`.
 
-Recommendation: leave `cfg(test)` for now; revisit when the JSON exporter
-spec lands.
+The doc comment now records why `"` uses the HTML entity form rather than
+a backslash escape: Prose's attribute parser (e.g. inside `href="..."`)
+treats `\"` as a literal quote and not as a string delimiter, so the
+entity form is the documented mechanism for embedding a quote inside an
+attribute value. The asymmetry the review flagged is intentional and now
+load-bearing in the comment.
 
-### Nit: File-level `#![allow(deprecated)]`
+The two existing tests (`prose_escape_handles_special_chars` and
+`prose_escape_escapes_double_quotes`) still pass and continue to exercise
+the full escape table.
 
-`report.rs:6` blanket-allows deprecated for the whole file. The original
-reason isn't documented at the suppression site. Either narrow to the
-specific item (`#[allow(deprecated)] fn foo`), document why a file-wide
-allow is needed, or remove if the deprecation is no longer present in the
-referenced API. A `git blame` on this line would clarify, but the
-suppression should carry its own justification.
+### Low: `report_check_outcomes_to_string` is `#[cfg(test)]`-only — **Deferred**
 
-### Nit: `ValidationCheckOutcome` clones `RuleSource` per outcome
+Per the original review's own recommendation: leave `cfg(test)` for now;
+revisit when the JSON / SARIF / JSONL exporter spec lands. No code change.
 
-`validate.rs:181` clones `rule.source` (which contains the full
-`yaml_snippet` String) into every outcome. For the current code paths
-(one outcome per rule) this is exactly one clone per rule and harmless.
-If the future ever runs the same rule against multiple subjects (e.g.
-fan-out validations like `frontmatter_prop_equals` over a list), the
-snippet text gets duplicated N times. An `Arc<RuleSource>` on the outcome
-would make this cheap. Not actionable today.
+### Nit: File-level `#![allow(deprecated)]` — **Resolved**
+
+The `#![allow(deprecated)]` at the top of `claudine/lib/src/harness/report.rs`
+existed only to silence `StatusState::Failure` (deprecated in
+`biscuit-terminal/lib/src/components/status.rs:66` in favor of
+`StatusState::Error`). Every `StatusState::Failure` reference in
+`report.rs` was swapped to `StatusState::Error`, and the file-level
+suppression was removed. The two states share an identical
+`(StatusTheme::Circular, …)` icon definition (red 500, same nerd glyph
+and emoji fallback), so the rendered output is byte-for-byte unchanged.
+
+### Nit: `ValidationCheckOutcome` clones `RuleSource` per outcome — **Deferred**
+
+Per the original review: "Not actionable today." No code change.
 
 ## Spec-vs-implementation traceability
 
@@ -136,16 +144,21 @@ Each spec goal maps to verified tests:
 | 1. Failure stated plainly (no positive assertion + red glyph) | `failure_header_text` (`report.rs:214-221`) | L1: `failure_state_pre_phase_uses_pre_validation_failed`, `failure_state_post_phase_uses_post_validation_failed`. L2: PTY transcript contains `Pre-validation failed`. |
 | 2. Surface `evaluate_single` diagnostic | Section 4 reason line (`report.rs:283-288`) | L1: `failure_state_full_block_contains_all_four_sections` checks `Reason: file does not exist:` + path. L2: stripped transcript contains it. |
 | 3. Source path with OSC-8 link + line range | `render_failure_block_to` source-line section (`report.rs:241-255`) | L1: `osc8_hyperlink_target_present_in_raw_output`, `failure_block_omits_line_range_suffix_when_unknown`. L2: OSC-8 introducer + `file://` target asserted. |
-| 4. Syntax-highlighted YAML snippet | `highlight_yaml_lines` path + four-space indent (`report.rs:266-279`) | L1 negative (no chrome): `render_failure_block_yaml_section_has_no_yaml_label_or_box`. L1 indent: `render_failure_block_yaml_section_indents_each_line_by_four_spaces`. **No L1/L2 positive styling assertion** — see Medium finding above. |
+| 4. Syntax-highlighted YAML snippet | `yaml_snippet_lines` + `select_yaml_lines` helpers, four-space indent | L1 negative (no chrome): `render_failure_block_yaml_section_has_no_yaml_label_or_box`. L1 indent: `render_failure_block_yaml_section_indents_each_line_by_four_spaces`. L1 positive styling: `render_failure_block_yaml_region_contains_sgr_styling`, `yaml_snippet_lines_styled_path_indents_each_line_by_four_spaces`. L1 fallback branch: `select_yaml_lines_fallback_branch_uses_plain_when_counts_differ` and `select_yaml_lines_fallback_branch_handles_extra_highlighted_entry`. L2 positive styling: `\x1b[38;` introducer asserted in the YAML region of the PTY transcript. |
 | 5. Pass-state stays compact (one line) | `report_check_outcomes_to::passed` branch (`report.rs:198-199`) | L1: `pass_state_renders_exactly_one_compact_row`, `report_check_outcomes_pass_path_unchanged`. |
 
 ## Readiness
 
-Ready for production. The Medium finding (positive YAML styling assertion)
-is a tightening recommendation, not a behavioral defect — manual smoke
-through the PTY harness shows the styling is present. The Low and Nit
-items are quality-of-life improvements. None of them block merge.
+Ready for production. All Medium and Low findings have been resolved
+except the two explicitly deferred per the original review's own
+recommendations (`report_check_outcomes_to_string` `cfg(test)` gating —
+revisit when JSON exporter spec lands; `ValidationCheckOutcome` snippet
+cloning — not actionable today). The file-level
+`#![allow(deprecated)]` Nit is also resolved by switching all
+`StatusState::Failure` references to `StatusState::Error`. The remaining
+deferred Nit (`ValidationCheckOutcome` clones `RuleSource` per outcome)
+is a future-only concern with no current impact.
 
-If the YAML styling fallback ever becomes a regression risk (e.g. after a
-darkmatter highlighter API change), revisit the Medium finding before
-shipping that change.
+Verification: `cargo test -p claudine --lib` (2037 passed) and
+`cargo test -p claudine-cli --test validation_reporter_pty -- --ignored`
+(1 passed) both green.
