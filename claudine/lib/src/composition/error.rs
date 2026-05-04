@@ -2,6 +2,10 @@
 
 use std::path::PathBuf;
 
+use biscuit_terminal::components::status_block::StatusBlock;
+use biscuit_terminal::components::status::StatusState;
+use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
+use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
 
@@ -155,10 +159,16 @@ pub enum CompositionError {
     /// A lifecycle notification property failed to deserialize.
     #[error("invalid lifecycle property `{property}`: {message}")]
     LifecycleInvalid {
-        /// The frontmatter property that failed to parse.
+        /// The frontmatter property that failed to parse (e.g. `"success"`).
         property: String,
         /// The underlying deserialization error message.
         message: String,
+        /// The source file whose frontmatter contained the invalid property.
+        source_file: PathBuf,
+        /// The unknown field name extracted from the serde error (e.g. `"speak"`).
+        unknown_field: Option<String>,
+        /// The list of valid field names for the lifecycle notification.
+        expected_fields: Vec<String>,
     },
 
     /// A lifecycle notification property has both `say` and `say_first`.
@@ -225,4 +235,64 @@ pub struct SequenceSelectionFailure {
     pub reason: String,
     /// Providers that were installed at the time of resolution.
     pub installed: Vec<Provider>,
+}
+
+impl BlockError for CompositionError {
+    fn status_block(&self, _term: &Terminal) -> StatusBlock {
+        match self {
+            CompositionError::LifecycleInvalid {
+                property,
+                source_file,
+                unknown_field,
+                expected_fields,
+                ..
+            } => {
+                let dotted_property = match unknown_field {
+                    Some(field) => format!("{property}.{field}"),
+                    None => property.clone(),
+                };
+
+                let file_display = source_file.display().to_string();
+                let escaped = escape_prose_path(&file_display);
+                let file_link =
+                    format!("<a href=\"{escaped}\">{}</a>", escape_prose_path(&source_file.file_name().map_or_else(|| file_display.to_string(), |n| n.to_string_lossy().to_string())));
+
+                let mut body = format!("Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}");
+                if !expected_fields.is_empty() {
+                    body.push_str("\n\n<b>Expected one of:</b>");
+                    for field in expected_fields {
+                        body.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
+                    }
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "invalid lifecycle property",
+                    ))
+                    .body(body)
+                    .hint("Check the lifecycle frontmatter section in your prompt file.")
+            }
+            _ => {
+                let msg = self.to_string();
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "composition failed"))
+                    .body(msg)
+            }
+        }
+    }
+}
+
+fn escape_prose_path(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' | '<' | '>' | '{' | '"' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }

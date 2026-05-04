@@ -100,7 +100,7 @@ pub fn prepare_direct(
         agent: agent_hint,
         model: model_hint,
     };
-    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
     let source_repo_root = find_git_root_from_path(&source.resolved_path);
 
@@ -176,7 +176,7 @@ pub fn prepare_inline(
         agent: agent_hint,
         model: model_hint,
     };
-    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
 
