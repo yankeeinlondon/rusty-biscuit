@@ -1336,7 +1336,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
-        .args(["codex", "--timeout", "30"])
+        .args(["codex", "--timeout", "30s"])
         .assert()
         .code(1)
         .stderr(contains(
@@ -1348,7 +1348,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
-        .args(["codex", "--timeout", "30", "-i", "--", "hello"])
+        .args(["codex", "--timeout", "30s", "-i", "--", "hello"])
         .assert()
         .code(1)
         .stderr(contains("--timeout cannot be used with --interactive mode"));
@@ -4920,13 +4920,30 @@ printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
         "stderr should contain step_timeout in the watchdog breach message; got: {plain}"
     );
     assert!(
-        plain.contains("sa8") || plain.contains("Task 8"),
-        "stderr should name stuck subagent 8; got: {plain}"
+        plain.contains("2 subagents were still outstanding"),
+        "stderr should enumerate stuck subagent count; got: {plain}"
     );
     assert!(
-        plain.contains("sa9") || plain.contains("Task 9"),
-        "stderr should name stuck subagent 9; got: {plain}"
+        plain.contains("sa8 \"Task 8\""),
+        "stderr should name stuck subagent 8 with id and name; got: {plain}"
     );
+    assert!(
+        plain.contains("sa9 \"Task 9\""),
+        "stderr should name stuck subagent 9 with id and name; got: {plain}"
+    );
+
+    // Assert the JSONL summary field.
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry.get("exit_reason").and_then(|v| v.as_str()),
+            Some("step_timeout"),
+            "JSONL session_end must have exit_reason=step_timeout; last entry: {last}"
+        );
+    }
 }
 
 /// Stream-idle watchdog fires when no subagents are outstanding and the
@@ -5045,5 +5062,143 @@ done
     assert!(
         !plain.contains("step_timeout"),
         "stderr should not mention step_timeout when only wall-clock fires; got: {plain}"
+    );
+
+    // Assert the JSONL summary field.
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry.get("exit_reason").and_then(|v| v.as_str()),
+            Some("timeout"),
+            "JSONL session_end must have exit_reason=timeout; last entry: {last}"
+        );
+    }
+}
+
+/// Non-harness compose respects --timeout CLI flag (duration grammar).
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_non_harness_respects_cli_timeout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: cli timeout test\n---\nHello\n",
+    )
+    .unwrap();
+
+    // Fake provider emits events forever so only wall-clock can stop it.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"cli-timeout-test","model":"test-model"}'
+while :; do
+  printf '%s\n' '{"type":"thinking","text":"working..."}'
+  /bin/sleep 0.1
+done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_STEP_TIMEOUT", "0s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args([
+            "compose",
+            "--opencode",
+            "--timeout",
+            "2s",
+            md_file.to_str().unwrap(),
+        ])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("wall-clock"),
+        "stderr should mention wall-clock budget from CLI --timeout; got: {plain}"
+    );
+    assert!(
+        !plain.contains("step_timeout"),
+        "stderr should not mention step_timeout when disabled; got: {plain}"
+    );
+}
+
+/// Non-harness inline-compose respects --step-timeout CLI flag.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn inline_compose_non_harness_respects_cli_step_timeout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: cli step timeout test\nprompt: hello\n---\nBody\n",
+    )
+    .unwrap();
+
+    // Fake provider emits one event then blocks forever.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"cli-step-test","model":"test-model"}'
+printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}'
+while :; do /bin/sleep 1; done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_TIMEOUT", "0s")
+        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args([
+            "inline-compose",
+            "--opencode",
+            "--step-timeout",
+            "2s",
+            md_file.to_str().unwrap(),
+        ])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("step_timeout"),
+        "stderr should mention step_timeout from CLI --step-timeout; got: {plain}"
     );
 }

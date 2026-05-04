@@ -8,8 +8,10 @@ iteration: 1
 area: "{{ctx.current_package_area}}"
 success:
     message: "🖥️ Implementation for the _suggestions_ in review `{{area}}/{{dir}}/review-{{iteration}}.md` have completed successfully."
+    speak: "A review in the {{area}} package area has completed"
 failure:
     message: "❌ failed to implement the _suggestions_ from the review `{{area}}/{{dir}}/review-{{iteration}}.md`"
+    speak: "A review in the {{area}} package area has run into a problem and did not complete!"
 ---
 ## Context
 

@@ -112,6 +112,7 @@ pub enum RepoAction {
         status: sniff::remote::PullRequestState,
         verbose: bool,
     },
+    Language,
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +224,7 @@ pub enum PackagesFormat {
 )]
 pub struct Cli {
     /// Base directory for filesystem analysis
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub base: Option<PathBuf>,
 
     /// Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
@@ -839,6 +840,8 @@ pub enum RepoSubcommand {
         #[arg(long, default_value = "open")]
         status: sniff::remote::PullRequestState,
     },
+    /// Output the primary programming language for the repository
+    Language,
 }
 
 impl Commands {
@@ -1285,6 +1288,7 @@ impl Commands {
                     status: *status,
                     verbose: false,
                 },
+                Some(RepoSubcommand::Language) => RepoAction::Language,
             }),
             _ => None,
         }
@@ -1473,6 +1477,10 @@ Packages:
   sniff repo packages                 List all package names
   sniff repo dirty-packages           Packages with uncommitted changes
   sniff repo package                  Package name for current directory
+
+Languages:
+  sniff repo language                 Primary programming language for the repository
+  sniff repo language --json          Same, as { \"language\": \"Rust\" }
 
 Dependencies:
   sniff repo deps                     Text dependency list

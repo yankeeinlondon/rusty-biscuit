@@ -117,81 +117,147 @@ implement-plan filter="":
     echo
 
 
-# Interactive wrapper: pick a spec/design and optionally jump into plan-feature
-plan spec="" design="":
+# Interactive wrapper: pick an area and target document, then create a plan
+plan spec="" design="" review="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     spec_file="{{spec}}"
     design_file="{{design}}"
+    review_file="{{review}}"
 
-    # If neither was provided, let the user pick a spec or design file, then
-    # optionally add the complementary doc from the same directory.
-    if [[ -z "${spec_file}" && -z "${design_file}" ]]; then
-        doc="$(just _choose_feature)"
-        if [[ -z "${doc}" ]]; then
-            echo -e "{{red}}No spec or design file selected — aborting.{{reset}}" >&2
+    # If no files were provided, interactive selection via fzf
+    if [[ -z "${spec_file}" && -z "${design_file}" && -z "${review_file}" ]]; then
+        # Step 1: Choose area
+        area="$(printf '%s\n' 'Feature' 'Fix' 'Review' 'Feature (unscheduled)' 'Fix (unscheduled)' | fzf --height=10 --border --border-label 'Choose planning area')"
+        if [[ -z "${area}" ]]; then
+            echo -e "{{red}}No area selected — aborting.{{reset}}" >&2
             exit 1
         fi
-        doc_dir="$(dirname "${doc}")"
-        if [[ "$(basename "${doc}")" == *design* ]]; then
-            design_file="${doc}"
-            spec_file="$(just _get_spec_doc "${doc_dir}")"
+
+        # Step 2: Choose target document and delegate to appropriate planner
+        case "${area}" in
+            Feature)
+                doc="$(fd -g '*{spec,design}.md' features/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                if [[ -z "${doc}" ]]; then
+                    echo -e "{{red}}No document selected — aborting.{{reset}}" >&2
+                    exit 1
+                fi
+                doc_dir="$(dirname "${doc}")"
+                if [[ "$(basename "${doc}")" == *design* ]]; then
+                    design_file="${doc}"
+                    spec_file="$(just _get_spec_doc "${doc_dir}")"
+                else
+                    spec_file="${doc}"
+                    design_file="$(just _get_design_doc "${doc_dir}")"
+                fi
+                just plan-feature "${spec_file}" "${design_file}"
+                ;;
+            Fix)
+                doc="$(fd -g '*{spec,design}.md' fixes/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                if [[ -z "${doc}" ]]; then
+                    echo -e "{{red}}No document selected — aborting.{{reset}}" >&2
+                    exit 1
+                fi
+                doc_dir="$(dirname "${doc}")"
+                if [[ "$(basename "${doc}")" == *design* ]]; then
+                    design_file="${doc}"
+                    spec_file="$(just _get_spec_doc "${doc_dir}")"
+                else
+                    spec_file="${doc}"
+                    design_file="$(just _get_design_doc "${doc_dir}")"
+                fi
+                just plan-feature "${spec_file}" "${design_file}"
+                ;;
+            Review)
+                just plan-review
+                ;;
+            'Feature (unscheduled)')
+                doc="$(fd -g '*{spec,design}.md' features/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                if [[ -z "${doc}" ]]; then
+                    echo -e "{{red}}No document selected — aborting.{{reset}}" >&2
+                    exit 1
+                fi
+                doc_dir="$(dirname "${doc}")"
+                if [[ "$(basename "${doc}")" == *design* ]]; then
+                    design_file="${doc}"
+                    spec_file="$(just _get_spec_doc "${doc_dir}")"
+                else
+                    spec_file="${doc}"
+                    design_file="$(just _get_design_doc "${doc_dir}")"
+                fi
+                just plan-feature "${spec_file}" "${design_file}"
+                ;;
+            'Fix (unscheduled)')
+                doc="$(fd -g '*{spec,design}.md' fixes/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                if [[ -z "${doc}" ]]; then
+                    echo -e "{{red}}No document selected — aborting.{{reset}}" >&2
+                    exit 1
+                fi
+                doc_dir="$(dirname "${doc}")"
+                if [[ "$(basename "${doc}")" == *design* ]]; then
+                    design_file="${doc}"
+                    spec_file="$(just _get_spec_doc "${doc_dir}")"
+                else
+                    spec_file="${doc}"
+                    design_file="$(just _get_design_doc "${doc_dir}")"
+                fi
+                just plan-feature "${spec_file}" "${design_file}"
+                ;;
+        esac
+    else
+        # Explicit arguments provided
+        if [[ -n "${review_file}" ]]; then
+            # Validate review path
+            if [[ ! -f "${review_file}" ]]; then
+                mapfile -t matches < <(fd -g '*review*.md' reviews/ --exclude '_completed' | rg "${review_file}" || true)
+                if [[ ${#matches[@]} -eq 0 ]]; then
+                    echo -e "{{red}}No review files matching '${review_file}' found{{reset}}" >&2
+                    exit 1
+                elif [[ ${#matches[@]} -eq 1 ]]; then
+                    review_file="${matches[0]}"
+                else
+                    review_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching review')"
+                fi
+            fi
+            just plan-review "${review_file}"
         else
-            spec_file="${doc}"
-            design_file="$(just _get_design_doc "${doc_dir}")"
-        fi
-    else
-        # Validate provided paths — resolve partial matches via filter
-        if [[ -n "${spec_file}" && ! -f "${spec_file}" ]]; then
-            mapfile -t matches < <(fd -g '*spec*.md' | rg "${spec_file}" || true)
-            if [[ ${#matches[@]} -eq 0 ]]; then
-                echo -e "{{red}}No spec files matching '${spec_file}' found{{reset}}" >&2
-                exit 1
-            elif [[ ${#matches[@]} -eq 1 ]]; then
-                spec_file="${matches[0]}"
-            else
-                spec_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
+            # Validate spec/design paths — resolve partial matches via filter
+            if [[ -n "${spec_file}" && ! -f "${spec_file}" ]]; then
+                mapfile -t matches < <(fd -g '*spec*.md' | rg "${spec_file}" || true)
+                if [[ ${#matches[@]} -eq 0 ]]; then
+                    echo -e "{{red}}No spec files matching '${spec_file}' found{{reset}}" >&2
+                    exit 1
+                elif [[ ${#matches[@]} -eq 1 ]]; then
+                    spec_file="${matches[0]}"
+                else
+                    spec_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching spec')"
+                fi
             fi
-        fi
 
-        if [[ -n "${design_file}" && ! -f "${design_file}" ]]; then
-            mapfile -t matches < <(fd -g '*design*.md' | rg "${design_file}" || true)
-            if [[ ${#matches[@]} -eq 0 ]]; then
-                echo -e "{{red}}No design files matching '${design_file}' found{{reset}}" >&2
-                exit 1
-            elif [[ ${#matches[@]} -eq 1 ]]; then
-                design_file="${matches[0]}"
-            else
-                design_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
+            if [[ -n "${design_file}" && ! -f "${design_file}" ]]; then
+                mapfile -t matches < <(fd -g '*design*.md' | rg "${design_file}" || true)
+                if [[ ${#matches[@]} -eq 0 ]]; then
+                    echo -e "{{red}}No design files matching '${design_file}' found{{reset}}" >&2
+                    exit 1
+                elif [[ ${#matches[@]} -eq 1 ]]; then
+                    design_file="${matches[0]}"
+                else
+                    design_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching design')"
+                fi
             fi
+
+            # Auto-find complementary doc from the same directory
+            if [[ -n "${spec_file}" && -z "${design_file}" ]]; then
+                doc_dir="$(dirname "${spec_file}")"
+                design_file="$(just _get_design_doc "${doc_dir}")"
+            elif [[ -n "${design_file}" && -z "${spec_file}" ]]; then
+                doc_dir="$(dirname "${design_file}")"
+                spec_file="$(just _get_spec_doc "${doc_dir}")"
+            fi
+
+            just plan-feature "${spec_file}" "${design_file}"
         fi
-
-        # Auto-find complementary doc from the same directory
-        if [[ -n "${spec_file}" && -z "${design_file}" ]]; then
-            doc_dir="$(dirname "${spec_file}")"
-            design_file="$(just _get_design_doc "${doc_dir}")"
-        elif [[ -n "${design_file}" && -z "${spec_file}" ]]; then
-            doc_dir="$(dirname "${design_file}")"
-            spec_file="$(just _get_spec_doc "${doc_dir}")"
-        fi
-    fi
-
-    echo
-    echo -e "Creating a detailed {{bold}}plan{{reset}} from:"
-    if [[ -n "${spec_file}" ]]; then
-        echo -e "  Specification:   {{blue}}$(just _link "${spec_file}"){{reset}}"
-    fi
-    if [[ -n "${design_file}" ]]; then
-        echo -e "  Design Document: {{blue}}$(just _link "${design_file}"){{reset}}"
-    fi
-    echo
-
-    if [[ "$(just _confirm "Do you want to create a plan now?")" == "y" ]]; then
-        just plan-feature "${spec_file}" "${design_file}"
-    else
-        echo "Ok. Bye."
-        exit 0
     fi
 
 
@@ -265,12 +331,12 @@ plan-feature spec="" design="":
     echo
     echo -e "Creating a detailed {{bold}}plan{{reset}} from:"
     if [[ -n "${spec_file}" ]]; then
-        echo -e "  Specification: {{blue}}$(just _link "${spec_file}" "$(sniff repo root)/${design_file}"){{reset}}"
-        dir="$(dirname ${spec_file})"
+        echo -e "  Specification: {{blue}}$(just _link "${spec_file}" "$(sniff repo root)/${spec_file}"){{reset}}"
+        dir="$(dirname "${spec_file}")"
     fi
     if [[ -n "${design_file}" ]]; then
         echo -e "  Design Document: {{blue}}$(just _link "${design_file}" "$(sniff repo root)/${design_file}"){{reset}}"
-        dir="$(dirname ${design_file})"
+        dir="$(dirname "${design_file}")"
     fi
     echo
     if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
@@ -290,6 +356,76 @@ plan-feature spec="" design="":
     echo -e "🎉 planning is complete!"
 
 
+# create a plan from a review
+plan-review review="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    review_file="{{review}}"
+
+    # If not provided, let the user pick a review file
+    if [[ -z "${review_file}" ]]; then
+        review_file="$(fd -g '*review*.md' reviews/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a review file')"
+        if [[ -z "${review_file}" ]]; then
+            echo -e "{{red}}No review file selected — aborting.{{reset}}" >&2
+            exit 1
+        fi
+    else
+        # Validate provided path — resolve partial matches via filter
+        if [[ ! -f "${review_file}" ]]; then
+            mapfile -t matches < <(fd -g '*review*.md' reviews/ --exclude '_completed' | rg "${review_file}" || true)
+            if [[ ${#matches[@]} -eq 0 ]]; then
+                echo -e "{{red}}No review files matching '${review_file}' found{{reset}}" >&2
+                exit 1
+            elif [[ ${#matches[@]} -eq 1 ]]; then
+                review_file="${matches[0]}"
+            else
+                review_file="$(printf '%s\n' "${matches[@]}" | fzf --height=15 --border --border-label 'Choose matching review')"
+            fi
+        fi
+    fi
+
+    agent="$(just _choose_agent)"
+    model=""
+    if [[ "${agent}" == "opencode" ]];then
+        model="--model $(just _choose_model)"
+    fi
+
+    echo
+    echo -e "Creating a detailed {{bold}}plan{{reset}} from:"
+    echo -e "  Review: {{blue}}$(just _link "${review_file}" "$(sniff repo root)/${review_file}"){{reset}}"
+    dir="$(dirname "${review_file}")"
+    echo
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
+    echo
+    claudine compose "@prompts/plan-review-implementation.md" -y --${agent} review="${review_file}" ${model} || (
+        echo
+        echo "Planning failed for review {{bold}}${dir}{{reset}}"
+        echo
+        just _speak "Planning failed for review in the $(sniff repo package-area) package area"
+        exit 1
+    )
+    echo
+    echo -e "🎉 planning is complete!"
+
+    # Offer to implement the newly created plan
+    plan_file="${dir}/plan.md"
+    if [[ -f "${plan_file}" ]]; then
+        echo
+        echo -e "A plan file was created at {{blue}}$(just _link "${plan_file}" "$(sniff repo root)/${plan_file}"){{reset}}"
+        if [[ "$(just _confirm "Do you want to start implementing this plan now?")" == "y" ]]; then
+            echo
+            just implement-plan "${plan_file}"
+        else
+            echo
+            echo -e "Ok. You can implement it later with: {{yellow}}just implement-plan ${plan_file}{{reset}}"
+        fi
+    fi
+    echo
 
 
 

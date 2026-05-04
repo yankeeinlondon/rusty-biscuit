@@ -90,8 +90,8 @@ pub(crate) fn handle_recent_commits_command(
         // can tell the variants apart.
         match mode {
             RecentCommitsMode::RecentCommits => {
-                println!("{}", serde_json::to_string_pretty(&commit_set)?);
-                perf.emit_for_json(None);
+                let value = serde_json::to_value(&commit_set)?;
+                crate::output::print_json_value(value, perf.build_report().as_ref());
                 return Ok(());
             }
             RecentCommitsMode::SourceCodeChanges | RecentCommitsMode::DocumentationChanges => {
@@ -115,8 +115,7 @@ pub(crate) fn handle_recent_commits_command(
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("filter".into(), serde_json::json!(filter_label));
                 }
-                println!("{}", serde_json::to_string_pretty(&value)?);
-                perf.emit_for_json(None);
+                crate::output::print_json_value(value, perf.build_report().as_ref());
                 return Ok(());
             }
         }

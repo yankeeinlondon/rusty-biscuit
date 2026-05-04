@@ -6,6 +6,7 @@
 
 pub mod audit;
 pub mod error;
+pub mod failure;
 pub mod handlers;
 pub mod model;
 pub mod parse;
@@ -19,6 +20,7 @@ pub mod validate;
 
 pub use audit::{audit_shell_commands, collect_auditable_commands};
 pub use error::HarnessError;
+pub use failure::{FailurePhase, ValidationEvent, ValidationFailure, ValidationRuleId};
 pub use handlers::{
     FailureContext, build_agent_failure_context, build_audit_failure_context,
     build_validation_failure_context, classify_failure, execute_deviate_command, resolve_handler,

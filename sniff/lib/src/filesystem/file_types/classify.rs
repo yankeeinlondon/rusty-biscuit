@@ -40,13 +40,10 @@ pub fn scan_file_inventory_with_exclusions(
             .collect(),
     };
 
-    // Use parallel walker for production, sequential for tests to avoid ordering issues
-    #[cfg(not(test))]
+    // Use parallel walker with Drop-based flush (same pattern as system_view.rs).
+    // The parallel path sorts output so results are deterministic.
     let (classifications, total_files_scanned) =
         scan_inventory_parallel(root, &scope.exclude_roots);
-    #[cfg(test)]
-    let (classifications, total_files_scanned) =
-        scan_inventory_sequential(root, &scope.exclude_roots);
 
     performance::record_logged_stage(
         "filesystem.file_inventory.scan",
@@ -61,7 +58,6 @@ pub fn scan_file_inventory_with_exclusions(
     })
 }
 
-#[cfg(not(test))]
 fn scan_inventory_parallel(
     root: &Path,
     exclude_roots: &[PathBuf],
@@ -69,6 +65,30 @@ fn scan_inventory_parallel(
     use ignore::WalkState;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+
+    /// Worker-local classification buffer that flushes its contents to the
+    /// shared accumulator when the walker drops the per-thread closure.
+    ///
+    /// This mirrors the pattern in `system_view::WorkerBuffers` and ensures
+    /// that classifications recorded on each walker thread are visible after
+    /// the parallel walk completes, even if a worker panics.
+    struct LocalClassifications {
+        shared: Arc<Mutex<Vec<FileClassification>>>,
+        local: Vec<FileClassification>,
+    }
+
+    impl Drop for LocalClassifications {
+        fn drop(&mut self) {
+            if self.local.is_empty() {
+                return;
+            }
+            let mut shared = self
+                .shared
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            shared.append(&mut self.local);
+        }
+    }
 
     let shared: Arc<Mutex<Vec<FileClassification>>> = Arc::new(Mutex::new(Vec::new()));
     let scanned = Arc::new(AtomicUsize::new(0));
@@ -84,10 +104,12 @@ fn scan_inventory_parallel(
         })
         .build_parallel()
         .run(|| {
-            let _shared = Arc::clone(&shared);
             let scanned = Arc::clone(&scanned);
             let scan_root = root.to_path_buf();
-            let mut local = Vec::new();
+            let mut buffer = LocalClassifications {
+                shared: Arc::clone(&shared),
+                local: Vec::new(),
+            };
             Box::new(move |result| {
                 let Ok(entry) = result else {
                     return WalkState::Continue;
@@ -103,7 +125,7 @@ fn scan_inventory_parallel(
                 // to reduce atomic overhead in the hot path.
                 #[cfg(feature = "metrics")]
                 performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
-                local.push(classify_file(&scan_root, entry.path()));
+                buffer.local.push(classify_file(&scan_root, entry.path()));
                 WalkState::Continue
             })
         });
@@ -117,7 +139,7 @@ fn scan_inventory_parallel(
     (classifications, total)
 }
 
-#[cfg(test)]
+#[allow(dead_code)]
 fn scan_inventory_sequential(
     root: &Path,
     exclude_roots: &[PathBuf],
@@ -762,5 +784,49 @@ mod tests {
             pkg_inventory.classifications[0].language,
             Some(ProgrammingLanguage::Rust)
         );
+    }
+
+    /// Regression test for the parallel inventory scanner.
+    ///
+    /// Before the worker-local flush fix, `scan_inventory_parallel` would
+    /// walk and classify files but drop the per-thread results, returning
+    /// an empty vector. This test exercises the parallel path directly
+    /// and asserts that classifications are preserved.
+    #[test]
+    fn parallel_inventory_returns_populated_classifications() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a small fixture tree with varied file types
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::create_dir_all(dir.path().join("tests")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "pub fn lib() {}").unwrap();
+        fs::write(dir.path().join("tests/test.rs"), "#[test] fn t() {}").unwrap();
+        fs::write(dir.path().join("README.md"), "# Project").unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = 'x'\n").unwrap();
+
+        // Call the parallel path directly
+        let (classifications, total) = scan_inventory_parallel(dir.path(), &[]);
+
+        assert!(
+            !classifications.is_empty(),
+            "parallel inventory must return non-empty classifications; got {} files scanned, {} classifications",
+            total,
+            classifications.len()
+        );
+        assert_eq!(classifications.len(), total);
+
+        // Verify expected file types are present
+        let rust_count = classifications
+            .iter()
+            .filter(|c| c.language == Some(ProgrammingLanguage::Rust))
+            .count();
+        assert_eq!(rust_count, 3, "expected 3 Rust files");
+
+        let md_count = classifications
+            .iter()
+            .filter(|c| c.association == FileAssociation::Documentation)
+            .count();
+        assert_eq!(md_count, 1, "expected 1 markdown file");
     }
 }

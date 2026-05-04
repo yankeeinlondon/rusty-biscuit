@@ -329,14 +329,15 @@ pub struct CompositionExecutionRequest {
     pub output: Option<OutputFormat>,
     /// Parsed system prompt CLI args for the session.
     pub system_prompt_args: crate::system_prompt::SystemPromptArgs,
-    /// Timeout in seconds for non-interactive mode.
-    pub timeout: Option<u64>,
-    /// Step-silence timeout in seconds for structured streaming runs.
+    /// Wall-clock timeout as a duration string (e.g. `30s`, `5m`, `2h`).
+    /// Parsed by the composition executor. Only valid in non-interactive mode.
+    pub timeout: Option<String>,
+    /// Step-silence timeout as a duration string (e.g. `30s`, `5m`).
     ///
     /// Resets on every stream event; when silence exceeds this budget the
     /// child is killed with `TimedOut`. Ignored in capture and passthrough
     /// modes (warning emitted). `None` means no silence deadline is applied.
-    pub step_timeout: Option<u64>,
+    pub step_timeout: Option<String>,
     /// OPERATION env var value for the composed session.
     pub operation: Option<String>,
     /// Enable provider-specific sandboxing.
