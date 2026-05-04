@@ -22,7 +22,7 @@ pub mod tool_display;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::provider::Provider;
+use crate::provider_id::Provider;
 use parser::SemanticStreamParser;
 
 pub use semantic::{NullSemanticSink, SemanticEvent, SemanticEventSink};
@@ -248,7 +248,7 @@ mod tests {
         use super::super::{
             ParserConfig, SemanticEvent, SemanticEventSink, create_semantic_parser,
         };
-        use crate::provider::Provider;
+        use crate::provider_id::Provider;
         struct RecordingSemanticSink {
             events: Arc<Mutex<Vec<SemanticEvent>>>,
         }

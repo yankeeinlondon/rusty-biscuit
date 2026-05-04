@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::token_usage::NormalizedTokenUsage;
-use crate::provider::Provider;
+use crate::provider_id::Provider;
 
 /// Typed classification of an error surfaced through [`SemanticEvent::Error`].
 ///
