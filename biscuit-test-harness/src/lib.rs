@@ -25,6 +25,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+pub mod apple_terminal;
 pub mod cliclick;
 pub mod kitty;
 pub mod tmux;
