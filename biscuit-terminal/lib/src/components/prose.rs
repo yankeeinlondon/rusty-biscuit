@@ -1505,7 +1505,6 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                     // styling sequence entirely. The matching close
                     // sequence is also a no-op so layer tracking stays
                     // balanced.
-                    state.used_styles = true;
                 } else {
                     // Unknown token, output as-is
                     result.push_str("{{");
@@ -1586,7 +1585,6 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                     // Apply the block style
                     if let Some(action) = block_tag_to_escape(&tag_name, &attrs, term) {
                         let layer = block_tag_layer(&tag_name);
-                        state.used_styles = true;
 
                         let (open, close) = match action {
                             BlockTagAction::Suppress => {
@@ -1602,7 +1600,10 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                                 ));
                                 continue;
                             }
-                            BlockTagAction::Wrap { open, close } => (open, close),
+                            BlockTagAction::Wrap { open, close } => {
+                                state.used_styles = true;
+                                (open, close)
+                            }
                         };
 
                         if let Some(layer) = layer {
@@ -2243,24 +2244,14 @@ mod tests {
             .build();
         let prose = Prose::new("<double-underline>important text</double-underline>");
         let result = prose.parse_tokens(Some(&term));
-        assert!(
-            result.contains("important text"),
-            "missing inner text, got: {:?}",
+        assert_eq!(
+            result, "important text",
+            "expected plain text with no escapes, got: {:?}",
             result
         );
         assert!(
-            !result.contains("\x1b[4:2m"),
-            "must not emit double underline escape, got: {:?}",
-            result
-        );
-        assert!(
-            !result.contains("\x1b[4m"),
-            "must not emit straight underline escape, got: {:?}",
-            result
-        );
-        assert!(
-            !result.contains("\x1b[24m"),
-            "must not emit underline close, got: {:?}",
+            !result.contains("\x1b["),
+            "must not contain any SGR escape, got: {:?}",
             result
         );
     }
@@ -2434,22 +2425,17 @@ mod tests {
                 colored: false,
             })
             .build();
-        let prose = Prose::new("{{double-underline}}important text{{reset}}");
+        let prose = Prose::new("{{double-underline}}important text");
         let result = prose.parse_tokens(Some(&term));
-        assert!(
-            result.contains("important text"),
-            "missing inner text, got: {:?}",
-            result,
+        assert_eq!(
+            result, "important text",
+            "expected plain text with no escapes, got: {:?}",
+            result
         );
         assert!(
-            !result.contains("\x1b[4:2m"),
-            "must not emit double underline SGR, got: {:?}",
-            result,
-        );
-        assert!(
-            !result.contains("\x1b[4m"),
-            "must not emit straight underline SGR, got: {:?}",
-            result,
+            !result.contains("\x1b["),
+            "must not contain any SGR escape, got: {:?}",
+            result
         );
     }
 }

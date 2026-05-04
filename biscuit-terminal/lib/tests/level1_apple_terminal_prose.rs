@@ -212,3 +212,59 @@ fn no_underline_support_emits_plain_text() {
         "expected no straight-underline SGR, got: {output:?}"
     );
 }
+
+/// Atomic-token form (`{{double-underline}}...`) must obey the same
+/// "no underline support → plain text" policy as the block-tag form
+/// (`<double-underline>...</double-underline>`).
+///
+/// With both straight and double underline disabled via the probe overrides,
+/// the rendered output between the probe markers must be exactly the literal
+/// text — no SGR sequences of any kind.
+#[test]
+fn atomic_double_underline_no_underline_support_emits_plain_text() {
+    let mut session = spawn_with_env(&[
+        ("PROBE", "prose"),
+        ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
+        ("PROBE_FORCE_UNDERLINE_STRAIGHT", "false"),
+        ("PROBE_FORCE_UNDERLINE_DOUBLE", "false"),
+        (
+            "PROBE_PROSE_INPUT",
+            "{{double-underline}}important text",
+        ),
+    ]);
+
+    let output = drain(&mut session);
+
+    assert!(
+        output.contains("---PROSE---"),
+        "expected prose probe markers, got: {output:?}"
+    );
+
+    // PTY translates LF to CRLF on output, so split on the CRLF form.
+    let rendered = output
+        .split("---PROSE---\r\n")
+        .nth(1)
+        .and_then(|s| s.split("\r\n---END---").next())
+        .unwrap_or("");
+
+    assert_eq!(
+        rendered, "important text",
+        "expected exactly the plain literal between probe markers, got: {rendered:?} (full output: {output:?})"
+    );
+    assert!(
+        !output.contains("\x1b["),
+        "expected no SGR escape of any kind, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[4:2m"),
+        "expected no double-underline SGR, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[4m"),
+        "expected no straight-underline SGR, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[0m"),
+        "expected no reset SGR, got: {output:?}"
+    );
+}

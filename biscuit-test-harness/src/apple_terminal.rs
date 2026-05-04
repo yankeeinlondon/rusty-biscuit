@@ -60,8 +60,23 @@ use super::{CapturedFrame, TerminalHarness};
 ///
 /// On `spawn_shell` opens a fresh window running a login shell with
 /// `PATH` augmented to find the workspace's CLI binaries, captures the
-/// AppleScript window id, and miniaturizes the window so the developer
-/// can keep working. On `Drop` the window is closed without saving.
+/// AppleScript window id, and restores keyboard focus to whichever
+/// application was frontmost before the spawn so the developer can
+/// keep working without an animated minimize-to-Dock effect. On `Drop`
+/// the window is closed without saving.
+///
+/// ## Why we no longer miniaturize
+///
+/// Earlier versions of this harness called
+/// `set miniaturized of front window to true` to keep the spawned
+/// window out of the developer's way. Miniaturize triggers macOS's
+/// genie / scale animation which is slow, distracting, and pushes the
+/// window into the Dock where it is easy to click by accident. Instead
+/// we now snapshot the frontmost process before `do script` and
+/// re-`activate` it afterwards: the spawned Terminal.app window remains
+/// part of normal window-manager z-order but sits behind whatever the
+/// developer was working in, with no animation and no risk of stray
+/// keystrokes being typed into the test window.
 pub struct AppleTerminalHarness {
     window_id: Option<i64>,
 }
@@ -160,9 +175,15 @@ impl Drop for AppleTerminalHarness {
 }
 
 impl TerminalHarness for AppleTerminalHarness {
-    /// Opens a fresh Terminal.app window running a login shell, captures
-    /// its AppleScript window id, and miniaturizes the window so it does
-    /// not steal focus.
+    /// Opens a fresh Terminal.app window running a login shell and
+    /// captures its AppleScript window id.
+    ///
+    /// Focus handling: the frontmost application is snapshotted before
+    /// the `do script` call and re-activated immediately after, so the
+    /// spawned window sits behind the developer's current work without
+    /// being miniaturized. There is no Dock animation and the test
+    /// window cannot accidentally receive keystrokes meant for the
+    /// developer's foreground app.
     ///
     /// Cargo's target binary directory is prepended to `PATH` so CLI
     /// binaries (`bt`, `question`) resolve without an absolute path.
@@ -196,15 +217,40 @@ impl TerminalHarness for AppleTerminalHarness {
         shell_cmd.push_str(&shell);
         shell_cmd.push_str(" -l");
 
+        // Snapshot the frontmost process *before* `do script` so we can
+        // restore focus after Terminal.app inevitably grabs it. The
+        // outer `try` blocks let the script proceed silently if System
+        // Events cannot resolve a frontmost process (e.g. login window)
+        // or if the previous app refuses an activate. We deliberately
+        // do NOT call `activate` on Terminal first — `do script` will
+        // create the window without it, and skipping `activate`
+        // shortens the focus flash.
+        //
+        // The restore step uses `System Events` to re-frontmost the
+        // captured process by *process name* rather than
+        // `tell application prevApp to activate`. The latter resolves
+        // `prevApp` through LaunchServices by app name, and the captured
+        // string is the executable / process name (e.g. `wezterm-gui`,
+        // many Electron helpers) which often does not match any
+        // installed `.app` bundle — LaunchServices then pops a
+        // "Choose Application — Where is X?" dialog that blocks the
+        // test until the developer dismisses it.
         let script = format!(
-            r#"tell application "Terminal"
-                activate
+            r#"set prevApp to ""
+            try
+                tell application "System Events" to set prevApp to name of first process whose frontmost is true
+            end try
+            tell application "Terminal"
                 set newTab to do script "{cmd}"
-                delay 0.1
+                delay 0.05
                 set winId to id of front window
-                set miniaturized of front window to true
-                return winId as text
-            end tell"#,
+            end tell
+            if prevApp is not "" and prevApp is not "Terminal" then
+                try
+                    tell application "System Events" to set frontmost of (first process whose name is prevApp) to true
+                end try
+            end if
+            return winId as text"#,
             cmd = applescript_escape(&shell_cmd),
         );
         let stdout = Self::run_script(&script)?;
