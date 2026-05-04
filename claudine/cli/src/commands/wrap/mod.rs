@@ -144,6 +144,13 @@ pub(crate) struct AttemptLaunch {
     /// Dropped (with a stderr warning) for capture and passthrough paths
     /// because those modes have no stream events to observe.
     pub(crate) step_timeout: Option<u64>,
+    /// Unified timeout configuration resolved through the full precedence
+    /// chain (CLI > frontmatter > env > built-in default). Drives the
+    /// timeout watchdog ticker for `timeout` (wall-clock) and
+    /// `step_timeout` (stream silence). Carries the supporting knobs
+    /// `kill_grace` and `interval` from `CLAUDINE_KILL_GRACE` /
+    /// `CLAUDINE_WATCHDOG_INTERVAL`.
+    pub(crate) timeout_config: subagent_watchdog::TimeoutConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -1725,13 +1732,18 @@ fn run_provider_wrapper_inner(
                 &mut _spawned,
             )?
         } else {
+            let timeout_config = composition::resolve_timeouts(
+                args.timeout,
+                None,
+                cli_step_timeout_secs,
+                None,
+            );
             exec::run_child_stream_semantic(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
                 child_cwd,
-                args.timeout,
-                cli_step_timeout_secs,
+                timeout_config,
                 stderr_noise,
                 profile.suppress_structured_stderr_on_success(),
                 stream_verbosity != Verbosity::Silent,
@@ -2101,6 +2113,12 @@ fn build_harness_launch(
         cli_step_timeout,
         plan_step_timeout,
     );
+    let timeout_config = composition::resolve_timeouts(
+        cli_timeout,
+        plan_timeout,
+        cli_step_timeout,
+        plan_step_timeout,
+    );
 
     Ok(AttemptLaunch {
         args,
@@ -2109,6 +2127,7 @@ fn build_harness_launch(
         wire_prompt,
         timeout: timeouts.timeout,
         step_timeout: timeouts.step_timeout,
+        timeout_config,
     })
 }
 
@@ -2163,10 +2182,10 @@ fn execute_harness_attempt(
         .state(StatusState::Warning)
         .render(term);
         eprintln!("{rendered}");
-        AttemptLaunch {
-            step_timeout: None,
-            ..launch.clone()
-        }
+        let mut adjusted = launch.clone();
+        adjusted.step_timeout = None;
+        adjusted.timeout_config.step_timeout = None;
+        adjusted
     } else {
         launch.clone()
     };
@@ -2227,8 +2246,7 @@ fn execute_harness_attempt(
                 &launch.args,
                 &launch.env,
                 child_cwd,
-                launch.timeout,
-                launch.step_timeout,
+                launch.timeout_config,
                 stderr_noise,
                 suppress_stderr_on_success,
                 stream_verbosity != Verbosity::Silent,

@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "https://api.openai.com/v1",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "bearerToken",
+      "value": "",
+      "description": "Bearer token for Authorization header"
     }
   ],
   "auth": {

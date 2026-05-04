@@ -415,6 +415,8 @@ mod tests {
     #[test]
     fn api_key_location_debug_clone_eq() {
         let location = ApiKeyLocation::Query;
+        // Explicitly exercise the Clone impl on a Copy type.
+        #[allow(clippy::clone_on_copy)]
         let cloned = location.clone();
         assert_eq!(location, cloned);
         assert!(format!("{:?}", location).contains("Query"));

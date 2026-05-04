@@ -109,6 +109,103 @@ pub(crate) fn build_prompt_timing_context(
     }
 }
 
+/// Source-precedence input for [`resolve_timeouts`].
+///
+/// `cli` is the value passed via `--timeout` / `--step-timeout`.
+/// `frontmatter` is the value parsed from `HarnessPlan.timeout` /
+/// `HarnessPlan.step_timeout`.
+/// `env_var` is the env-var name to consult as the third-priority source.
+/// `built_in` is the final fallback (e.g. `Some(30m)` for `step_timeout`,
+/// `None` for `timeout`).
+pub(crate) struct TimeoutResolutionInput<'a> {
+    pub cli_secs: Option<u64>,
+    pub frontmatter: Option<std::time::Duration>,
+    pub env_var: &'a str,
+    pub built_in: Option<std::time::Duration>,
+}
+
+/// Resolve a single timeout following the documented precedence chain:
+///
+///   CLI flag > frontmatter > env-var default > built-in default.
+///
+/// Env values use the same `parse_timeout` grammar as frontmatter
+/// (`30s`, `5m`, `2h`). An env value of `0s` (or any zero duration via the
+/// grammar) **disables** the rule for this run, returning `None` even if a
+/// non-zero built-in default exists. Invalid env values are silently
+/// ignored and the chain falls through to the next layer.
+pub(crate) fn resolve_single_timeout(
+    input: TimeoutResolutionInput<'_>,
+) -> Option<std::time::Duration> {
+    if let Some(secs) = input.cli_secs {
+        return Some(std::time::Duration::from_secs(secs));
+    }
+    if let Some(d) = input.frontmatter {
+        return Some(d);
+    }
+    match std::env::var(input.env_var) {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                input.built_in
+            } else if is_zero_duration_literal(trimmed) {
+                // Spec: env value of `0s` disables the rule (parse_timeout
+                // itself rejects zero, so we recognise the literal here).
+                None
+            } else {
+                match claudine::harness::parse_timeout(trimmed, std::path::Path::new("<env>")) {
+                    Ok(d) => Some(d),
+                    Err(_) => input.built_in,
+                }
+            }
+        }
+        Err(_) => input.built_in,
+    }
+}
+
+/// Recognise env-var literals that the user means as "disable this rule".
+///
+/// Accepts plain `0`, `0s`, `0 seconds`, `0m`, `0h`, etc. — anything whose
+/// numeric component is `0` regardless of unit. Case-insensitive on the unit.
+fn is_zero_duration_literal(value: &str) -> bool {
+    let trimmed = value.trim();
+    let digits_end = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(trimmed.len());
+    if digits_end == 0 {
+        return false;
+    }
+    let (digits, _rest) = trimmed.split_at(digits_end);
+    digits.parse::<u64>().is_ok_and(|n| n == 0)
+}
+
+/// Resolve `timeout` and `step_timeout` simultaneously and assemble a
+/// [`TimeoutConfig`] for the watchdog ticker.
+///
+/// CLI > frontmatter > env > built-in. Built-ins are `None` for `timeout`
+/// (no wall-clock kill unless opted in) and `30m` for `step_timeout`.
+/// Supporting knobs (`kill_grace`, `interval`) are read from env via
+/// [`super::subagent_watchdog::TimeoutConfig::resolve`].
+pub(crate) fn resolve_timeouts(
+    cli_timeout_secs: Option<u64>,
+    plan_timeout: Option<std::time::Duration>,
+    cli_step_timeout_secs: Option<u64>,
+    plan_step_timeout: Option<std::time::Duration>,
+) -> super::subagent_watchdog::TimeoutConfig {
+    let timeout = resolve_single_timeout(TimeoutResolutionInput {
+        cli_secs: cli_timeout_secs,
+        frontmatter: plan_timeout,
+        env_var: "CLAUDINE_TIMEOUT",
+        built_in: None,
+    });
+    let step_timeout = resolve_single_timeout(TimeoutResolutionInput {
+        cli_secs: cli_step_timeout_secs,
+        frontmatter: plan_step_timeout,
+        env_var: "CLAUDINE_STEP_TIMEOUT",
+        built_in: Some(std::time::Duration::from_secs(30 * 60)),
+    });
+    super::subagent_watchdog::TimeoutConfig::resolve(timeout, step_timeout)
+}
+
 fn resolve_prompt_display_path(
     path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
@@ -1684,13 +1781,16 @@ fn run_structured_composition(
             child_spawned,
         )?
     } else {
+        // Non-harness composition path: no CLI/frontmatter timeout
+        // values exist here, so the resolver only consults env vars and
+        // the built-in defaults.
+        let timeout_config = resolve_timeouts(None, None, None, None);
         exec::run_child_stream_semantic(
             binary_path,
             child_args,
             child_env,
             child_cwd,
-            None,
-            None,
+            timeout_config,
             stderr_noise,
             profile.suppress_structured_stderr_on_success(),
             stream_verbosity != Verbosity::Silent,
@@ -2125,5 +2225,119 @@ mod tests {
         assert!(catalog.is_valid(Provider::Codex, "gpt-5"));
         // Non-overridden provider should use static catalog
         assert!(catalog.is_valid(Provider::Claude, "claude-3-7-sonnet-20250219"));
+    }
+
+    /// RAII guard that restores the prior value of an env var on drop. Used
+    /// to keep the resolve_timeouts tests hermetic.
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_cli_wins_over_frontmatter_env_and_default() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+
+        let cfg = resolve_timeouts(
+            Some(60),
+            Some(std::time::Duration::from_secs(120)),
+            Some(45),
+            Some(std::time::Duration::from_secs(90)),
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(60)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(45)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_frontmatter_wins_over_env_and_default() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+
+        let cfg = resolve_timeouts(
+            None,
+            Some(std::time::Duration::from_secs(7200)),
+            None,
+            Some(std::time::Duration::from_secs(900)),
+        );
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(900)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_env_wins_over_built_in_default() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "10m");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(3600)));
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(600)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_built_in_default_used_when_nothing_set() {
+        let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
+        let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        // No CLI/frontmatter/env: timeout has no built-in default (None);
+        // step_timeout falls back to 30m.
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_zero_env_disables_rule() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "0s");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "0s");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, None);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_timeouts_invalid_env_falls_back_to_built_in() {
+        let _g1 = EnvGuard::set("CLAUDINE_TIMEOUT", "garbage");
+        let _g2 = EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "also garbage");
+
+        let cfg = resolve_timeouts(None, None, None, None);
+        assert_eq!(cfg.timeout, None);
+        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
     }
 }

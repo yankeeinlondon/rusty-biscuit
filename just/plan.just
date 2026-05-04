@@ -105,6 +105,7 @@ implement-plan filter="":
         )
         just _message "Phase ${current} (_of ${total}_) of the plan '${plan}' was implemented"
         echo
+        # INSERT HERE
         git add . || true
         just commit || true
         echo

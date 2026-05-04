@@ -1,0 +1,2629 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "emqx",
+    "description": "EMQX Broker REST API with Basic Authentication (API Key + Secret)",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:18083/api/v5",
+      "description": "EmqxBasic API Server"
+    }
+  ],
+  "paths": {
+    "/nodes": {
+      "get": {
+        "summary": "List all nodes in the EMQX cluster",
+        "description": "List all nodes in the EMQX cluster",
+        "operationId": "ListNodes",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListNodesResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListNodesResponse"
+            }
+          }
+        }
+      }
+    },
+    "/nodes/{node}": {
+      "get": {
+        "summary": "Get detailed information about a specific node",
+        "description": "Get detailed information about a specific node",
+        "operationId": "GetNode",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "NodeInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "node",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "node",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/cluster": {
+      "get": {
+        "summary": "Get cluster status and node membership",
+        "description": "Get cluster status and node membership",
+        "operationId": "GetCluster",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterStatus"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ClusterStatus"
+            }
+          }
+        }
+      }
+    },
+    "/clients": {
+      "get": {
+        "summary": "List connected MQTT clients with pagination",
+        "description": "List connected MQTT clients with pagination",
+        "operationId": "ListClients",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListClientsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListClientsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/clients/{clientid}": {
+      "get": {
+        "summary": "Get detailed information about a specific client",
+        "description": "Get detailed information about a specific client",
+        "operationId": "GetClient",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ClientInfo"
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Forcefully disconnect a client from the broker",
+        "description": "Forcefully disconnect a client from the broker",
+        "operationId": "DisconnectClient",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/clients/{clientid}/subscribe": {
+      "post": {
+        "summary": "Create a subscription for a connected client",
+        "description": "Create a subscription for a connected client",
+        "operationId": "SubscribeClient",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscribeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SubscribeBody"
+            }
+          },
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/clients/{clientid}/unsubscribe": {
+      "post": {
+        "summary": "Remove a subscription from a connected client",
+        "description": "Remove a subscription from a connected client",
+        "operationId": "UnsubscribeClient",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscribeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "SubscribeBody"
+            }
+          },
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "clientid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/subscriptions": {
+      "get": {
+        "summary": "List all subscriptions across the cluster",
+        "description": "List all subscriptions across the cluster",
+        "operationId": "ListSubscriptions",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSubscriptionsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListSubscriptionsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/publish": {
+      "post": {
+        "summary": "Publish an MQTT message to a topic",
+        "description": "Publish an MQTT message to a topic",
+        "operationId": "Publish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PublishBody"
+            }
+          },
+          "response": "Empty"
+        }
+      }
+    },
+    "/publish/bulk": {
+      "post": {
+        "summary": "Publish multiple MQTT messages in a single request",
+        "description": "Publish multiple MQTT messages in a single request",
+        "operationId": "PublishBulk",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishBatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "PublishBatchBody"
+            }
+          },
+          "response": "Empty"
+        }
+      }
+    },
+    "/rules": {
+      "get": {
+        "summary": "List all rules in the rules engine",
+        "description": "List all rules in the rules engine",
+        "operationId": "ListRules",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRulesResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListRulesResponse"
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new rule in the rules engine",
+        "description": "Create a new rule in the rules engine",
+        "operationId": "CreateRule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRuleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateRuleBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "RuleInfo"
+            }
+          }
+        }
+      }
+    },
+    "/rules/{id}": {
+      "get": {
+        "summary": "Get details of a specific rule",
+        "description": "Get details of a specific rule",
+        "operationId": "GetRule",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "RuleInfo"
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update an existing rule",
+        "description": "Update an existing rule",
+        "operationId": "UpdateRule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRuleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateRuleBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "RuleInfo"
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a rule from the rules engine",
+        "description": "Delete a rule from the rules engine",
+        "operationId": "DeleteRule",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/rules/{id}/test": {
+      "post": {
+        "summary": "Test a rule with sample data",
+        "description": "Test a rule with sample data",
+        "operationId": "TestRule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestRuleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestRuleResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "TestRuleBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "TestRuleResponse"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/authentication": {
+      "get": {
+        "summary": "List all configured authentication providers",
+        "description": "List all configured authentication providers",
+        "operationId": "ListAuthenticators",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAuthenticatorsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListAuthenticatorsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/authentication/{id}": {
+      "get": {
+        "summary": "Get details of a specific authenticator",
+        "description": "Get details of a specific authenticator",
+        "operationId": "GetAuthenticator",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticatorInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "AuthenticatorInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/authentication/{id}/users": {
+      "get": {
+        "summary": "List users in a built-in database authenticator",
+        "description": "List users in a built-in database authenticator",
+        "operationId": "ListAuthUsers",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec<AuthUser>"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Vec<AuthUser>"
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new user in a built-in database authenticator",
+        "description": "Create a new user in a built-in database authenticator",
+        "operationId": "CreateAuthUser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAuthUserBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthUser"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateAuthUserBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "AuthUser"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/authentication/{id}/users/{user_id}": {
+      "delete": {
+        "summary": "Delete a user from a built-in database authenticator",
+        "description": "Delete a user from a built-in database authenticator",
+        "operationId": "DeleteAuthUser",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "user_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "user_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/authorization/sources": {
+      "get": {
+        "summary": "List all authorization sources",
+        "description": "List all authorization sources",
+        "operationId": "ListAuthzSources",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAuthzSourcesResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListAuthzSourcesResponse"
+            }
+          }
+        }
+      }
+    },
+    "/listeners": {
+      "get": {
+        "summary": "List all configured listeners",
+        "description": "List all configured listeners",
+        "operationId": "ListListeners",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListListenersResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListListenersResponse"
+            }
+          }
+        }
+      }
+    },
+    "/listeners/{id}": {
+      "get": {
+        "summary": "Get details of a specific listener",
+        "description": "Get details of a specific listener",
+        "operationId": "GetListener",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenerInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListenerInfo"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Get broker metrics for all nodes",
+        "description": "Get broker metrics for all nodes",
+        "operationId": "ListMetrics",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMetricsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListMetricsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "summary": "Get broker statistics for all nodes",
+        "description": "Get broker statistics for all nodes",
+        "operationId": "ListStats",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListStatsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListStatsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/prometheus/stats": {
+      "get": {
+        "summary": "Get metrics in Prometheus format",
+        "description": "Get metrics in Prometheus format",
+        "operationId": "GetPrometheus",
+        "responses": {
+          "200": {
+            "description": "Successful text response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": "Text"
+        }
+      }
+    },
+    "/topics": {
+      "get": {
+        "summary": "List active topics in the broker",
+        "description": "List active topics in the broker",
+        "operationId": "ListTopics",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTopicsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListTopicsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/retainer/messages": {
+      "get": {
+        "summary": "List retained messages with pagination",
+        "description": "List retained messages with pagination",
+        "operationId": "ListRetained",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRetainedResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListRetainedResponse"
+            }
+          }
+        }
+      }
+    },
+    "/retainer/messages/{topic}": {
+      "get": {
+        "summary": "Get a specific retained message by topic",
+        "description": "Get a specific retained message by topic",
+        "operationId": "GetRetained",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetainedMessage"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "RetainedMessage"
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a retained message",
+        "description": "Delete a retained message",
+        "operationId": "DeleteRetained",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "topic",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/alarms": {
+      "get": {
+        "summary": "List active alarms",
+        "description": "List active alarms",
+        "operationId": "ListAlarms",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAlarmsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListAlarmsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/banned": {
+      "get": {
+        "summary": "List all banned clients, usernames, and hosts",
+        "description": "List all banned clients, usernames, and hosts",
+        "operationId": "ListBanned",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBannedResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "ListBannedResponse"
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Ban a client, username, or host",
+        "description": "Ban a client, username, or host",
+        "operationId": "CreateBan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBanBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BanInfo"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CreateBanBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "BanInfo"
+            }
+          }
+        }
+      }
+    },
+    "/banned/{ban_type}/{who}": {
+      "delete": {
+        "summary": "Remove a ban by type (clientid, username, peerhost) and value",
+        "description": "Remove a ban by type (clientid, username, peerhost) and value",
+        "operationId": "DeleteBan",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "response": "Empty"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "ban_type",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "who",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "ban_type",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "who",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
+    "/login": {
+      "post": {
+        "summary": "Authenticate with username/password and receive a JWT token",
+        "description": "Authenticate with username/password and receive a JWT token",
+        "operationId": "Login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "LoginBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "LoginResponse"
+            }
+          }
+        }
+      }
+    },
+    "/logout": {
+      "post": {
+        "summary": "Invalidate the current bearer token",
+        "description": "Invalidate the current bearer token",
+        "operationId": "Logout",
+        "responses": {
+          "204": {
+            "description": "No content"
+          }
+        },
+        "x-schematic": {
+          "response": "Empty"
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "LoginBody": {
+        "title": "LoginBody",
+        "description": "Request body for the `/login` endpoint.\n\n## Example\n\n```json\n{\n  \"username\": \"admin\",\n  \"password\": \"public\"\n}\n```",
+        "type": "object",
+        "properties": {
+          "password": {
+            "description": "Dashboard password.",
+            "type": "string"
+          },
+          "username": {
+            "description": "Dashboard username.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "LoginResponse": {
+        "title": "LoginResponse",
+        "description": "Response from the `/login` endpoint.\n\n## Example\n\n```json\n{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"license\": {\"edition\": \"enterprise\", ...}\n}\n```",
+        "type": "object",
+        "properties": {
+          "license": {
+            "description": "License information (optional)."
+          },
+          "token": {
+            "description": "JWT token for subsequent requests.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "SubscribeBody": {
+        "title": "SubscribeBody",
+        "description": "Request body for creating a subscription for a client.\n\n## Example\n\n```json\n{\n  \"topic\": \"sensors/#\",\n  \"qos\": 1\n}\n```",
+        "type": "object",
+        "properties": {
+          "nl": {
+            "description": "No local flag (MQTT 5.0).",
+            "type": "boolean"
+          },
+          "qos": {
+            "description": "QoS level (0, 1, or 2).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "rap": {
+            "description": "Retain as published flag (MQTT 5.0).",
+            "type": "boolean"
+          },
+          "rh": {
+            "description": "Retain handling (MQTT 5.0).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "topic": {
+            "description": "Topic filter to subscribe to.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "PublishBody": {
+        "title": "PublishBody",
+        "description": "Request body for publishing a message.\n\n## Example\n\n```json\n{\n  \"topic\": \"sensors/temp\",\n  \"payload\": \"{\\\"temperature\\\": 25.5}\",\n  \"qos\": 1,\n  \"retain\": false\n}\n```",
+        "type": "object",
+        "properties": {
+          "encoding": {
+            "description": "Message encoding (plain, base64).",
+            "type": "string"
+          },
+          "message_expiry_interval": {
+            "description": "Message expiry interval in seconds (MQTT 5.0).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "payload": {
+            "description": "Message payload.",
+            "type": "string"
+          },
+          "payload_format_indicator": {
+            "description": "Payload format indicator (MQTT 5.0).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "qos": {
+            "description": "QoS level (0, 1, or 2).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "retain": {
+            "description": "Retain flag.",
+            "type": "boolean"
+          },
+          "topic": {
+            "description": "Topic to publish to.",
+            "type": "string"
+          },
+          "user_properties": {
+            "description": "User properties (MQTT 5.0)."
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ]
+      },
+      "PublishBatchBody": {
+        "title": "PublishBatchBody",
+        "description": "Request body for batch publishing.",
+        "type": "object",
+        "properties": {
+          "messages": {
+            "description": "List of messages to publish.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PublishBody"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      },
+      "CreateRuleBody": {
+        "title": "CreateRuleBody",
+        "description": "Request body for creating or updating a rule.",
+        "type": "object",
+        "properties": {
+          "actions": {
+            "description": "List of actions to execute.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RuleAction"
+                }
+              ]
+            }
+          },
+          "description": {
+            "description": "Rule description.",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether the rule is enabled.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Rule identifier.",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Rule metadata."
+          },
+          "sql": {
+            "description": "SQL query for the rule.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sql"
+        ]
+      },
+      "RuleAction": {
+        "title": "RuleAction",
+        "description": "Rule action configuration.\n\n## Example\n\n```json\n{\n  \"function\": \"republish\",\n  \"args\": {\"topic\": \"alerts/temp\"}\n}\n```",
+        "type": "object",
+        "properties": {
+          "args": {
+            "description": "Action arguments."
+          },
+          "function": {
+            "description": "Action function name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "function"
+        ]
+      },
+      "TestRuleBody": {
+        "title": "TestRuleBody",
+        "description": "Rule test request body.",
+        "type": "object",
+        "properties": {
+          "context": {
+            "description": "Context for testing (topic, payload, etc.)."
+          },
+          "sql": {
+            "description": "SQL query to test.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql"
+        ]
+      },
+      "CreateAuthUserBody": {
+        "title": "CreateAuthUserBody",
+        "description": "Request body for creating an auth user.",
+        "type": "object",
+        "properties": {
+          "is_superuser": {
+            "description": "Whether the user is a superuser.",
+            "type": "boolean"
+          },
+          "password": {
+            "description": "Password.",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "User ID (username).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "password"
+        ]
+      },
+      "CreateBanBody": {
+        "title": "CreateBanBody",
+        "description": "Request body for creating a ban.",
+        "type": "object",
+        "properties": {
+          "as": {
+            "description": "Ban type (clientid, username, peerhost).",
+            "type": "string"
+          },
+          "duration": {
+            "description": "Ban duration in seconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "reason": {
+            "description": "Reason for ban.",
+            "type": "string"
+          },
+          "who": {
+            "description": "Value to ban.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "as",
+          "who"
+        ]
+      },
+      "NodeInfo": {
+        "title": "NodeInfo",
+        "description": "Information about a single EMQX node.\n\n## Example\n\n```json\n{\n  \"node\": \"emqx@127.0.0.1\",\n  \"version\": \"5.0.0\",\n  \"uptime\": 86400000,\n  \"status\": \"running\",\n  \"memory_total\": 1073741824,\n  \"memory_used\": 536870912,\n  \"connections\": 1000\n}\n```",
+        "type": "object",
+        "properties": {
+          "connections": {
+            "description": "Number of connections.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "load": {
+            "description": "Load averages [1min, 5min, 15min].",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "max_fds": {
+            "description": "Maximum file descriptors.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "memory_total": {
+            "description": "Total memory in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "memory_used": {
+            "description": "Used memory in bytes.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "node": {
+            "description": "Node name (e.g., \"emqx@127.0.0.1\").",
+            "type": "string"
+          },
+          "status": {
+            "description": "Node status (running, stopped, etc.).",
+            "type": "string"
+          },
+          "uptime": {
+            "description": "Node uptime in milliseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "version": {
+            "description": "EMQX version.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node"
+        ]
+      },
+      "ListNodesResponse": {
+        "title": "ListNodesResponse",
+        "description": "Response from `/nodes` endpoint - list of cluster nodes.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of nodes in the cluster.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "ClusterStatus": {
+        "title": "ClusterStatus",
+        "description": "Cluster status information.\n\n## Example\n\n```json\n{\n  \"running\": [\"emqx@node1\", \"emqx@node2\"],\n  \"stopped\": []\n}\n```",
+        "type": "object",
+        "properties": {
+          "running": {
+            "description": "Running node names.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stopped": {
+            "description": "Stopped node names.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ClientInfo": {
+        "title": "ClientInfo",
+        "description": "Connected client information.\n\n## Example\n\n```json\n{\n  \"clientid\": \"client123\",\n  \"username\": \"user1\",\n  \"node\": \"emqx@127.0.0.1\",\n  \"ip_address\": \"192.168.1.100\",\n  \"port\": 54321,\n  \"connected_at\": \"2024-01-01T12:00:00Z\",\n  \"keepalive\": 60,\n  \"clean_start\": true,\n  \"proto_ver\": 5\n}\n```",
+        "type": "object",
+        "properties": {
+          "clean_start": {
+            "description": "Clean session/start flag.",
+            "type": "boolean"
+          },
+          "clientid": {
+            "description": "Client identifier.",
+            "type": "string"
+          },
+          "connected_at": {
+            "description": "Connection timestamp.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Created at timestamp.",
+            "type": "string"
+          },
+          "expiry_interval": {
+            "description": "Expiry interval for session.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "ip_address": {
+            "description": "Client IP address.",
+            "type": "string"
+          },
+          "is_bridge": {
+            "description": "Is client connected via bridge.",
+            "type": "boolean"
+          },
+          "keepalive": {
+            "description": "Keepalive interval in seconds.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "listener": {
+            "description": "Connection listener.",
+            "type": "string"
+          },
+          "mqueue_dropped": {
+            "description": "Messages dropped.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "mqueue_len": {
+            "description": "Messages in queue (inflight + awaiting ack).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "node": {
+            "description": "Node the client is connected to.",
+            "type": "string"
+          },
+          "port": {
+            "description": "Client port.",
+            "type": "integer",
+            "format": "uint16"
+          },
+          "proto_ver": {
+            "description": "MQTT protocol version (3, 4, or 5).",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "subscriptions_cnt": {
+            "description": "Number of subscriptions.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "username": {
+            "description": "Client username.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientid"
+        ]
+      },
+      "ListClientsResponse": {
+        "title": "ListClientsResponse",
+        "description": "Paginated response for clients list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of connected clients.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ClientInfo"
+                }
+              ]
+            }
+          },
+          "meta": {
+            "description": "Pagination metadata."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "PaginationMeta": {
+        "title": "PaginationMeta",
+        "description": "Pagination metadata in EMQX list responses.\n\n## Example\n\n```json\n{\n  \"count\": 100,\n  \"limit\": 100,\n  \"page\": 1,\n  \"hasnext\": true\n}\n```",
+        "type": "object",
+        "properties": {
+          "count": {
+            "description": "Total count of items.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "hasnext": {
+            "description": "Whether more pages exist.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Maximum items per page.",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "page": {
+            "description": "Current page number.",
+            "type": "integer",
+            "format": "uint32"
+          }
+        }
+      },
+      "SubscriptionInfo": {
+        "title": "SubscriptionInfo",
+        "description": "Subscription information.\n\n## Example\n\n```json\n{\n  \"node\": \"emqx@127.0.0.1\",\n  \"topic\": \"sensors/temperature\",\n  \"clientid\": \"client123\",\n  \"qos\": 1\n}\n```",
+        "type": "object",
+        "properties": {
+          "clientid": {
+            "description": "Client ID that owns the subscription.",
+            "type": "string"
+          },
+          "nl": {
+            "description": "No local flag.",
+            "type": "boolean"
+          },
+          "node": {
+            "description": "Node where subscription exists.",
+            "type": "string"
+          },
+          "qos": {
+            "description": "QoS level.",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "rap": {
+            "description": "Retain as published flag.",
+            "type": "boolean"
+          },
+          "rh": {
+            "description": "Retain handling.",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "topic": {
+            "description": "Subscribed topic.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic",
+          "clientid"
+        ]
+      },
+      "ListSubscriptionsResponse": {
+        "title": "ListSubscriptionsResponse",
+        "description": "Paginated response for subscriptions list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of subscriptions.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SubscriptionInfo"
+                }
+              ]
+            }
+          },
+          "meta": {
+            "description": "Pagination metadata."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "RuleInfo": {
+        "title": "RuleInfo",
+        "description": "Rule definition.\n\n## Example\n\n```json\n{\n  \"id\": \"temp_alert\",\n  \"sql\": \"SELECT * FROM \\\"sensors/+/temp\\\" WHERE payload.value > 100\",\n  \"actions\": [{\"function\": \"republish\", \"args\": {\"topic\": \"alerts/temp\"}}],\n  \"enabled\": true\n}\n```",
+        "type": "object",
+        "properties": {
+          "actions": {
+            "description": "List of actions to execute.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RuleAction"
+                }
+              ]
+            }
+          },
+          "created_at": {
+            "description": "Creation timestamp.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Rule description.",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether the rule is enabled.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Rule identifier.",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Rule metadata."
+          },
+          "sql": {
+            "description": "SQL query for the rule.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sql"
+        ]
+      },
+      "ListRulesResponse": {
+        "title": "ListRulesResponse",
+        "description": "Response for rules list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of rules.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RuleInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "TestRuleResponse": {
+        "title": "TestRuleResponse",
+        "description": "Rule test response.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "Test result data."
+          }
+        }
+      },
+      "AuthUser": {
+        "title": "AuthUser",
+        "description": "User in built-in database authentication.",
+        "type": "object",
+        "properties": {
+          "is_superuser": {
+            "description": "Whether the user is a superuser.",
+            "type": "boolean"
+          },
+          "user_id": {
+            "description": "User ID (username).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      },
+      "Vec<AuthUser>": {
+        "title": "Array_of_AuthUser",
+        "type": "array",
+        "items": {
+          "allOf": [
+            {
+              "$ref": "#/components/schemas/AuthUser"
+            }
+          ]
+        }
+      },
+      "AuthenticatorInfo": {
+        "title": "AuthenticatorInfo",
+        "description": "Authentication provider configuration.",
+        "type": "object",
+        "properties": {
+          "backend": {
+            "description": "Backend configuration.",
+            "type": "string"
+          },
+          "enable": {
+            "description": "Whether the authenticator is enabled.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Authenticator ID.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Authenticator type (built_in_database, http, jwt, etc.).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ]
+      },
+      "ListAuthenticatorsResponse": {
+        "title": "ListAuthenticatorsResponse",
+        "description": "Response for authenticators list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of configured authenticators.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/AuthenticatorInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "AuthzSourceInfo": {
+        "title": "AuthzSourceInfo",
+        "description": "Authorization source configuration.",
+        "type": "object",
+        "properties": {
+          "enable": {
+            "description": "Whether the source is enabled.",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "Source type (built_in_database, file, http, etc.).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "ListAuthzSourcesResponse": {
+        "title": "ListAuthzSourcesResponse",
+        "description": "Response for authorization sources list.",
+        "type": "object",
+        "properties": {
+          "sources": {
+            "description": "List of authorization sources.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/AuthzSourceInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "sources"
+        ]
+      },
+      "ListenerInfo": {
+        "title": "ListenerInfo",
+        "description": "Listener configuration.",
+        "type": "object",
+        "properties": {
+          "bind": {
+            "description": "Bind address and port.",
+            "type": "string"
+          },
+          "current_connections": {
+            "description": "Current connections on this listener.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "id": {
+            "description": "Listener identifier.",
+            "type": "string"
+          },
+          "max_connections": {
+            "description": "Maximum connections allowed.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "running": {
+            "description": "Whether the listener is running.",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "Listener type (tcp, ssl, ws, wss).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ]
+      },
+      "ListListenersResponse": {
+        "title": "ListListenersResponse",
+        "description": "Response for listeners list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of configured listeners.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ListenerInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "MetricsInfo": {
+        "title": "MetricsInfo",
+        "description": "Broker metrics.",
+        "type": "object",
+        "properties": {
+          "bytes_received": {
+            "description": "Total bytes received.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "bytes_sent": {
+            "description": "Total bytes sent.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "connections_count": {
+            "description": "Current connections count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "messages.publish": {
+            "description": "Messages publish received.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "messages_dropped": {
+            "description": "Total messages dropped.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "messages_received": {
+            "description": "Total messages received.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "messages_retained": {
+            "description": "Total messages retained.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "messages_sent": {
+            "description": "Total messages sent.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "subscriptions_count": {
+            "description": "Current subscriptions count.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "topics_count": {
+            "description": "Current topics count.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "ListMetricsResponse": {
+        "title": "ListMetricsResponse",
+        "description": "Response for metrics list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of per-node metrics.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/MetricsInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "StatsInfo": {
+        "title": "StatsInfo",
+        "description": "Broker statistics.",
+        "type": "object",
+        "properties": {
+          "connections": {
+            "description": "Current connections.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "live_connections": {
+            "description": "Live connections.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "retained_count": {
+            "description": "Retained messages.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "subscriptions": {
+            "description": "Subscriptions.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "topics": {
+            "description": "Topics.",
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "ListStatsResponse": {
+        "title": "ListStatsResponse",
+        "description": "Response for stats list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of per-node stats.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/StatsInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "TopicInfo": {
+        "title": "TopicInfo",
+        "description": "Topic information.",
+        "type": "object",
+        "properties": {
+          "node": {
+            "description": "Node where topic exists.",
+            "type": "string"
+          },
+          "topic": {
+            "description": "Topic name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "ListTopicsResponse": {
+        "title": "ListTopicsResponse",
+        "description": "Paginated response for topics list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of topics.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/TopicInfo"
+                }
+              ]
+            }
+          },
+          "meta": {
+            "description": "Pagination metadata."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "RetainedMessage": {
+        "title": "RetainedMessage",
+        "description": "Retained message information.",
+        "type": "object",
+        "properties": {
+          "from_clientid": {
+            "description": "Publisher client ID.",
+            "type": "string"
+          },
+          "from_username": {
+            "description": "Publisher username.",
+            "type": "string"
+          },
+          "payload": {
+            "description": "Message payload.",
+            "type": "string"
+          },
+          "publish_at": {
+            "description": "Publish timestamp.",
+            "type": "string"
+          },
+          "qos": {
+            "description": "QoS level.",
+            "type": "integer",
+            "format": "uint8"
+          },
+          "topic": {
+            "description": "Topic of the retained message.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "ListRetainedResponse": {
+        "title": "ListRetainedResponse",
+        "description": "Paginated response for retained messages list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of retained messages.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RetainedMessage"
+                }
+              ]
+            }
+          },
+          "meta": {
+            "description": "Pagination metadata."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "AlarmInfo": {
+        "title": "AlarmInfo",
+        "description": "Alarm information.",
+        "type": "object",
+        "properties": {
+          "activate_at": {
+            "description": "Activation timestamp.",
+            "type": "string"
+          },
+          "deactivate_at": {
+            "description": "Deactivation timestamp (if cleared).",
+            "type": "string"
+          },
+          "details": {
+            "description": "Alarm details."
+          },
+          "duration": {
+            "description": "Duration in milliseconds.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "message": {
+            "description": "Alarm message.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Alarm name.",
+            "type": "string"
+          },
+          "node": {
+            "description": "Node where alarm was raised.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "ListAlarmsResponse": {
+        "title": "ListAlarmsResponse",
+        "description": "Response for alarms list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of alarms.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/AlarmInfo"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "BanInfo": {
+        "title": "BanInfo",
+        "description": "Ban record.",
+        "type": "object",
+        "properties": {
+          "as": {
+            "description": "Ban type (clientid, username, peerhost).",
+            "type": "string"
+          },
+          "at": {
+            "description": "Ban start time.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Reason for ban.",
+            "type": "string"
+          },
+          "until": {
+            "description": "Ban expiration time.",
+            "type": "string"
+          },
+          "who": {
+            "description": "Banned value.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "as",
+          "who"
+        ]
+      },
+      "ListBannedResponse": {
+        "title": "ListBannedResponse",
+        "description": "Response for banned list.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of ban records.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/BanInfo"
+                }
+              ]
+            }
+          },
+          "meta": {
+            "description": "Pagination metadata."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Basic HTTP authentication"
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Bearer token authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "basicAuth": []
+    },
+    {
+      "bearerAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://docs.emqx.com/en/emqx/latest/admin/api.html"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": {
+        "names": [
+          "EMQX_API_SECRET"
+        ]
+      },
+      "basic_user": {
+        "names": [
+          "EMQX_API_KEY"
+        ]
+      },
+      "bearer_token": null
+    },
+    "module_path": "emqx",
+    "request_suffix": "BasicRequest"
+  },
+  "x-schematic-grouped-from": [
+    "EmqxBasic",
+    "EmqxBearer"
+  ]
+}

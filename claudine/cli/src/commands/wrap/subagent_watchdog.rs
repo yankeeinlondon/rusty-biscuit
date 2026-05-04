@@ -43,6 +43,19 @@ pub(crate) struct ActiveSubagentSnapshot {
     pub(crate) elapsed_since_progress: Duration,
 }
 
+impl ActiveSubagentSnapshot {
+    /// Convert this snapshot into the lib-side
+    /// [`claudine::stream::logs::StuckSubagentInfo`] used to enrich
+    /// `EarlyTermination::StepTimeout`.
+    pub(crate) fn to_stuck_info(&self) -> claudine::stream::logs::StuckSubagentInfo {
+        claudine::stream::logs::StuckSubagentInfo {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            elapsed_since_progress: self.elapsed_since_progress,
+        }
+    }
+}
+
 /// A single diagnostic line for a stuck subagent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SubagentDiagnosticLine {
@@ -52,13 +65,18 @@ pub(crate) struct SubagentDiagnosticLine {
 }
 
 /// Reason for a watchdog-initiated termination.
+///
+/// The unified two-rule design has exactly two reasons. Stuck-subagent
+/// detail is surfaced through [`WatchdogTermination::stuck_subagents`] for
+/// the rendered error block, not through a distinct reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WatchdogTerminationReason {
-    /// One or more subagents have been idle longer than the threshold.
-    SubagentsUnresponsive,
-    /// The provider stream has been completely idle with no outstanding
-    /// subagents for longer than the threshold.
-    StreamIdleTimeout,
+    /// Wall-clock budget (`timeout`) elapsed since the child was spawned.
+    Timeout,
+    /// Stream-silence budget (`step_timeout`) elapsed since the last parent
+    /// stream event. Stuck subagents (if any) are carried in the
+    /// [`WatchdogTermination`] for diagnostic enrichment.
+    StepTimeout,
 }
 
 /// Request sent by the watchdog ticker to the exec wait loop asking for
@@ -164,6 +182,15 @@ impl WatchdogState {
             .collect()
     }
 
+    /// Return a snapshot of every active subagent for diagnostic enrichment
+    /// at the moment a `step_timeout` watchdog rule fires.
+    ///
+    /// Equivalent to [`Self::active_subagents`], but named to make the call
+    /// site at the breach point self-documenting.
+    pub(crate) fn outstanding_at_breach(&self, now: Instant) -> Vec<ActiveSubagentSnapshot> {
+        self.active_subagents(now)
+    }
+
     /// Return active subagents whose time since last progress exceeds the
     /// given threshold.
     pub(crate) fn stuck_subagents(
@@ -220,196 +247,222 @@ impl WatchdogState {
     }
 }
 
-/// Configuration for the subagent and stream-idle watchdogs, parsed from
-/// environment variables.
+/// Unified timeout configuration for the watchdog ticker.
+///
+/// There are exactly
+/// two timeout rules:
+///
+/// - `timeout` — wall-clock budget from child spawn. `None` disables the
+///   wall-clock kill (no built-in default).
+/// - `step_timeout` — silence-since-last-parent-stream-event budget. `None`
+///   disables the silence kill.
+///
+/// Plus two supporting knobs that govern the termination path itself:
+///
+/// - `kill_grace` — interval between SIGTERM and SIGKILL escalation
+///   (default `10s`).
+/// - `interval` — ticker cadence for evaluating the two rules
+///   (default `5s`).
+///
+/// `kill_grace` and `interval` may be overridden by the
+/// `CLAUDINE_KILL_GRACE` and `CLAUDINE_WATCHDOG_INTERVAL` env vars; the
+/// `timeout` and `step_timeout` values themselves are resolved by the
+/// composition layer (CLI > frontmatter > env > built-in default) and
+/// passed in pre-resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct WatchdogConfig {
-    /// Per-subagent silence ceiling before SIGTERM. `0` disables subagent
-    /// watchdog and diagnostic emissions.
-    pub(crate) subagent_idle_kill_seconds: u64,
-    /// Grace period between SIGTERM and SIGKILL for watchdog-initiated
-    /// termination.
-    pub(crate) subagent_kill_grace_seconds: u64,
-    /// Ticker cadence for evaluating watchdog rules.
-    pub(crate) subagent_watchdog_interval_seconds: u64,
-    /// Stream-level silence ceiling when no subagents are outstanding.
-    /// `0` disables stream-idle watchdog.
-    pub(crate) stream_idle_kill_seconds: u64,
+pub(crate) struct TimeoutConfig {
+    /// Wall-clock kill threshold. `None` disables.
+    pub(crate) timeout: Option<Duration>,
+    /// Stream-silence kill threshold. `None` disables.
+    pub(crate) step_timeout: Option<Duration>,
+    /// SIGTERM → SIGKILL grace period.
+    pub(crate) kill_grace: Duration,
+    /// Watchdog ticker cadence.
+    pub(crate) interval: Duration,
 }
 
-impl Default for WatchdogConfig {
+impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            subagent_idle_kill_seconds: 180,
-            subagent_kill_grace_seconds: 10,
-            subagent_watchdog_interval_seconds: 5,
-            stream_idle_kill_seconds: 300,
+            timeout: None,
+            step_timeout: None,
+            kill_grace: Duration::from_secs(10),
+            interval: Duration::from_secs(5),
         }
     }
 }
 
-impl WatchdogConfig {
-    /// Parse configuration from environment variables. Missing or invalid
-    /// variables fall back to the documented defaults.
-    pub(crate) fn from_env() -> Self {
-        let mut config = Self::default();
-        if let Ok(v) = std::env::var("CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS")
-            && let Ok(n) = v.parse::<u64>()
-        {
-            config.subagent_idle_kill_seconds = n;
+impl TimeoutConfig {
+    /// Build a [`TimeoutConfig`] from already-resolved `timeout` and
+    /// `step_timeout` values, reading `CLAUDINE_KILL_GRACE` and
+    /// `CLAUDINE_WATCHDOG_INTERVAL` from the environment for the
+    /// supporting knobs.
+    ///
+    /// The `timeout` and `step_timeout` arguments come from the composition
+    /// layer's precedence chain (CLI > frontmatter > env > built-in
+    /// default); this function intentionally does NOT consult env vars for
+    /// them — that single source-of-truth lives in `composition.rs`.
+    ///
+    /// Env values for `kill_grace` and `interval` use the
+    /// [`claudine::harness::parse_timeout`] grammar (e.g. `30s`, `5m`,
+    /// `2h`). Invalid or missing env values fall back to the built-in
+    /// defaults (`10s` and `5s`).
+    pub(crate) fn resolve(
+        timeout: Option<Duration>,
+        step_timeout: Option<Duration>,
+    ) -> Self {
+        let defaults = Self::default();
+        let kill_grace = parse_env_duration("CLAUDINE_KILL_GRACE").unwrap_or(defaults.kill_grace);
+        let interval =
+            parse_env_duration("CLAUDINE_WATCHDOG_INTERVAL").unwrap_or(defaults.interval);
+        Self {
+            timeout,
+            step_timeout,
+            kill_grace,
+            interval,
         }
-        if let Ok(v) = std::env::var("CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS")
-            && let Ok(n) = v.parse::<u64>()
-        {
-            config.subagent_kill_grace_seconds = n;
-        }
-        if let Ok(v) = std::env::var("CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS")
-            && let Ok(n) = v.parse::<u64>()
-        {
-            config.subagent_watchdog_interval_seconds = n;
-        }
-        if let Ok(v) = std::env::var("CLAUDINE_STREAM_IDLE_KILL_SECONDS")
-            && let Ok(n) = v.parse::<u64>()
-        {
-            config.stream_idle_kill_seconds = n;
-        }
-        config
     }
 
-    /// Returns `true` when the subagent watchdog is enabled (threshold > 0).
-    pub(crate) fn subagent_watchdog_enabled(&self) -> bool {
-        self.subagent_idle_kill_seconds > 0
+    /// Returns `true` when the wall-clock rule is enabled.
+    pub(crate) fn timeout_enabled(&self) -> bool {
+        self.timeout.is_some()
     }
 
-    /// Returns `true` when the stream-idle watchdog is enabled (threshold > 0).
-    pub(crate) fn stream_idle_watchdog_enabled(&self) -> bool {
-        self.stream_idle_kill_seconds > 0
+    /// Returns `true` when the stream-silence rule is enabled.
+    pub(crate) fn step_timeout_enabled(&self) -> bool {
+        self.step_timeout.is_some()
     }
 
-    /// Returns `true` when any watchdog rule is enabled.
-    pub(crate) fn any_watchdog_enabled(&self) -> bool {
-        self.subagent_watchdog_enabled() || self.stream_idle_watchdog_enabled()
+    /// Returns `true` when any rule is enabled.
+    pub(crate) fn any_enabled(&self) -> bool {
+        self.timeout_enabled() || self.step_timeout_enabled()
     }
 }
 
-/// Result of evaluating watchdog rules on a single tick.
+/// Parse a duration env var using the harness `parse_timeout` grammar.
+///
+/// Returns `None` when the variable is unset, empty, or unparseable.
+fn parse_env_duration(name: &str) -> Option<Duration> {
+    let raw = std::env::var(name).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    claudine::harness::parse_timeout(trimmed, std::path::Path::new("<env>")).ok()
+}
+
+/// Result of evaluating the unified two-rule timeout watchdog on a single tick.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WatchdogTickResult {
     /// No rules triggered; continue monitoring.
     Ok,
-    /// Subagent silence threshold breached; terminate with this request.
-    SubagentBreach(WatchdogTermination),
-    /// Stream-idle threshold breached; terminate with this request.
-    StreamIdleBreach(WatchdogTermination),
+    /// A timeout rule breached; terminate with this request.
+    Breach(WatchdogTermination),
 }
 
-/// Evaluate watchdog rules for the current tick.
+/// Evaluate the unified `timeout` and `step_timeout` rules for one tick.
 ///
-/// Rules are evaluated in priority order:
-/// 1. If active subagents exist and any exceeded the idle threshold,
-///    return a subagent breach.
-/// 2. If active subagents exist but none is over threshold, suppress
-///    stream-idle evaluation for this tick.
-/// 3. If no subagents are active, evaluate stream-level silence using
-///    `LiveMetrics.last_event_at`, only when at least one activity event
-///    has been observed.
+/// Rules:
 ///
-/// `fired` is an atomic flag that prevents double-fire; once set to
-/// `true`, all subsequent evaluations return `Ok`.
-pub(crate) fn evaluate_watchdog_tick(
-    config: &WatchdogConfig,
+/// 1. **Wall-clock (`timeout`).** If `config.timeout` is set and
+///    `now - started_at >= timeout`, fire `Timeout`.
+/// 2. **Stream-silence (`step_timeout`).** If `config.step_timeout` is set
+///    AND at least one activity event has been observed
+///    (`LiveMetrics.last_event_at.is_some()`) AND
+///    `now - last_event_at >= step_timeout`, fire `StepTimeout` with
+///    `outstanding = watchdog_state.active_subagents(now)` for diagnostic
+///    enrichment.
+///
+/// The wall-clock rule is evaluated first so a deadline that elapses on
+/// the same tick as a silence breach is reported as `timeout` rather than
+/// `step_timeout`.
+///
+/// `fired` is an atomic flag that prevents double-fire across both rules;
+/// once set to `true`, all subsequent evaluations return `Ok`.
+pub(crate) fn evaluate_timeout_tick(
+    config: &TimeoutConfig,
     now: Instant,
+    started_at: Instant,
     watchdog_state: &Arc<Mutex<WatchdogState>>,
     live_metrics: &LiveMetrics,
     fired: &AtomicBool,
 ) -> WatchdogTickResult {
-    // One-shot guard: after the first breach, never fire again.
     if fired.load(Ordering::SeqCst) {
         return WatchdogTickResult::Ok;
     }
 
-    // Rule 1: subagent silence.
-    if config.subagent_watchdog_enabled() {
-        let stuck = {
-            let state = match watchdog_state.lock() {
-                Ok(g) => g,
-                Err(_) => return WatchdogTickResult::Ok,
-            };
-            state.stuck_subagents(
-                now,
-                Duration::from_secs(config.subagent_idle_kill_seconds),
-            )
-        };
-
-        if !stuck.is_empty() {
+    // Rule 1: wall-clock budget.
+    if let Some(budget) = config.timeout {
+        let elapsed = now.saturating_duration_since(started_at);
+        if elapsed >= budget {
             fired.store(true, Ordering::SeqCst);
-            let message = format_subagent_breach_message(&stuck);
-            return WatchdogTickResult::SubagentBreach(WatchdogTermination {
-                reason: WatchdogTerminationReason::SubagentsUnresponsive,
-                message,
-                stuck_subagents: stuck,
-            });
-        }
-
-        // Subagents are active but not yet stuck — suppress stream-idle.
-        let has_active = {
-            let state = match watchdog_state.lock() {
-                Ok(g) => g,
-                Err(_) => return WatchdogTickResult::Ok,
-            };
-            !state.active_subagents(now).is_empty()
-        };
-        if has_active {
-            return WatchdogTickResult::Ok;
-        }
-    }
-
-    // Rule 2: stream-level silence (only when no subagents are outstanding).
-    if config.stream_idle_watchdog_enabled() {
-        let breach = {
-            let metrics = match live_metrics.lock() {
-                Ok(g) => g,
-                Err(_) => return WatchdogTickResult::Ok,
-            };
-            if let Some(last_event_at) = metrics.last_event_at {
-                let silence = now.saturating_duration_since(last_event_at);
-                silence >= Duration::from_secs(config.stream_idle_kill_seconds)
-            } else {
-                false
-            }
-        };
-
-        if breach {
-            fired.store(true, Ordering::SeqCst);
-            let threshold = config.stream_idle_kill_seconds;
             let message = format!(
-                "no stream activity for {threshold}s; terminating due to stream_idle_timeout"
+                "wall-clock budget exceeded after {}",
+                format_duration(elapsed),
             );
-            return WatchdogTickResult::StreamIdleBreach(WatchdogTermination {
-                reason: WatchdogTerminationReason::StreamIdleTimeout,
+            return WatchdogTickResult::Breach(WatchdogTermination {
+                reason: WatchdogTerminationReason::Timeout,
                 message,
                 stuck_subagents: Vec::new(),
             });
         }
     }
 
+    // Rule 2: stream silence. Requires that at least one activity event
+    // has been observed past initial session start, matching the existing
+    // `last_event_at: Option<Instant>` first-event grace semantics.
+    if let Some(budget) = config.step_timeout {
+        let last_event_at = match live_metrics.lock() {
+            Ok(g) => g.last_event_at,
+            Err(_) => return WatchdogTickResult::Ok,
+        };
+        if let Some(last) = last_event_at {
+            let silence = now.saturating_duration_since(last);
+            if silence >= budget {
+                let outstanding = match watchdog_state.lock() {
+                    Ok(g) => g.outstanding_at_breach(now),
+                    Err(_) => Vec::new(),
+                };
+                fired.store(true, Ordering::SeqCst);
+                let message = format_step_timeout_breach_message(silence, &outstanding);
+                return WatchdogTickResult::Breach(WatchdogTermination {
+                    reason: WatchdogTerminationReason::StepTimeout,
+                    message,
+                    stuck_subagents: outstanding,
+                });
+            }
+        }
+    }
+
     WatchdogTickResult::Ok
 }
 
-/// Format the human-readable breach message for stuck subagents.
-fn format_subagent_breach_message(stuck: &[ActiveSubagentSnapshot]) -> String {
-    let mut lines = String::new();
-    let count = stuck.len();
+/// Format the human-readable breach message for a `step_timeout` event.
+///
+/// When `outstanding` is non-empty the message enumerates the subagents
+/// that were still in flight at the moment the silence rule fired
+/// (id, optional name, elapsed since last progress) so the operator
+/// knows which workers stalled. When empty, only the silence duration
+/// is reported.
+fn format_step_timeout_breach_message(
+    silence: Duration,
+    outstanding: &[ActiveSubagentSnapshot],
+) -> String {
+    let silence_text = format_duration(silence);
+    if outstanding.is_empty() {
+        return format!("no stream activity for {silence_text}; terminating due to step_timeout");
+    }
+
+    let count = outstanding.len();
     let plural = if count == 1 { "subagent" } else { "subagents" };
-    lines.push_str(&format!(
-        "{count} {plural} went silent and were terminated by the watchdog:\n"
-    ));
-    for snap in stuck {
+    let mut lines = format!(
+        "no stream activity for {silence_text}. The wrapped process was terminated. {count} {plural} were still outstanding when the timeout fired:\n"
+    );
+    for snap in outstanding {
         let idle = format_duration(snap.elapsed_since_progress);
         let name = snap.name.as_deref().unwrap_or("(unnamed)");
         lines.push_str(&format!("  • {} \"{name}\" (idle {idle})\n", snap.id));
     }
-    lines.push_str("The wrapped process was terminated. Re-run the prompt to retry.");
     lines
 }
 
@@ -642,75 +695,45 @@ mod tests {
         assert_eq!(active[0].elapsed_since_progress, Duration::from_secs(7));
     }
 
-    // --- WatchdogConfig tests ---
+    // --- evaluate_timeout_tick tests ---
 
     #[test]
-    fn watchdog_config_default_values() {
-        let config = WatchdogConfig::default();
-        assert_eq!(config.subagent_idle_kill_seconds, 180);
-        assert_eq!(config.subagent_kill_grace_seconds, 10);
-        assert_eq!(config.subagent_watchdog_interval_seconds, 5);
-        assert_eq!(config.stream_idle_kill_seconds, 300);
-        assert!(config.subagent_watchdog_enabled());
-        assert!(config.stream_idle_watchdog_enabled());
-        assert!(config.any_watchdog_enabled());
-    }
-
-    #[test]
-    fn watchdog_config_zero_disables() {
-        let config = WatchdogConfig {
-            subagent_idle_kill_seconds: 0,
-            stream_idle_kill_seconds: 0,
-            ..Default::default()
-        };
-        assert!(!config.subagent_watchdog_enabled());
-        assert!(!config.stream_idle_watchdog_enabled());
-        assert!(!config.any_watchdog_enabled());
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn watchdog_config_parses_from_env() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS", "90");
-        let _g2 = TestEnvGuard::set("CLAUDINE_SUBAGENT_KILL_GRACE_SECONDS", "15");
-        let _g3 = TestEnvGuard::set("CLAUDINE_SUBAGENT_WATCHDOG_INTERVAL_SECONDS", "2");
-        let _g4 = TestEnvGuard::set("CLAUDINE_STREAM_IDLE_KILL_SECONDS", "600");
-
-        let config = WatchdogConfig::from_env();
-        assert_eq!(config.subagent_idle_kill_seconds, 90);
-        assert_eq!(config.subagent_kill_grace_seconds, 15);
-        assert_eq!(config.subagent_watchdog_interval_seconds, 2);
-        assert_eq!(config.stream_idle_kill_seconds, 600);
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn watchdog_config_ignores_invalid_env() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_SUBAGENT_IDLE_KILL_SECONDS", "not_a_number");
-        let _g2 = TestEnvGuard::set("CLAUDINE_STREAM_IDLE_KILL_SECONDS", "");
-
-        let config = WatchdogConfig::from_env();
-        assert_eq!(config.subagent_idle_kill_seconds, 180); // default
-        assert_eq!(config.stream_idle_kill_seconds, 300);   // default
-    }
-
-    // --- evaluate_watchdog_tick tests ---
-
-    #[test]
-    fn evaluate_tick_ok_when_nothing_breached() {
-        let config = WatchdogConfig::default();
+    fn evaluate_timeout_tick_ok_when_no_rule_enabled() {
+        let config = TimeoutConfig::default();
         let state = Arc::new(Mutex::new(WatchdogState::default()));
         let metrics = claudine::stream::progress::new_live_metrics();
         let fired = AtomicBool::new(false);
-
-        let result = evaluate_watchdog_tick(&config, Instant::now(), &state, &metrics, &fired);
+        let now_t = Instant::now();
+        let result = evaluate_timeout_tick(&config, now_t, now_t, &state, &metrics, &fired);
         assert_eq!(result, WatchdogTickResult::Ok);
     }
 
     #[test]
-    fn evaluate_tick_subagent_breach() {
-        let config = WatchdogConfig {
-            subagent_idle_kill_seconds: 5,
+    fn evaluate_timeout_tick_wall_clock_breach() {
+        let config = TimeoutConfig {
+            timeout: Some(Duration::from_secs(5)),
+            step_timeout: None,
+            ..Default::default()
+        };
+        let state = Arc::new(Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let started_at = Instant::now() - Duration::from_secs(10);
+
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), started_at, &state, &metrics, &fired);
+        assert!(
+            matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
+            "expected wall-clock Timeout breach, got: {result:?}"
+        );
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_breach_with_outstanding_subagents() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
             ..Default::default()
         };
         let state = Arc::new(Mutex::new(WatchdogState::default()));
@@ -722,49 +745,30 @@ mod tests {
             let mut s = state.lock().unwrap();
             s.subagent_started("sa1".into(), Some("Researcher".into()), t0);
         }
-
-        let result = evaluate_watchdog_tick(&config, Instant::now(), &state, &metrics, &fired);
-        assert!(
-            matches!(result, WatchdogTickResult::SubagentBreach(ref w) if w.reason == WatchdogTerminationReason::SubagentsUnresponsive),
-            "expected SubagentBreach, got: {result:?}"
-        );
-        assert!(fired.load(Ordering::SeqCst), "fired flag must be set");
-    }
-
-    #[test]
-    fn evaluate_tick_suppresses_stream_idle_when_subagents_active() {
-        let config = WatchdogConfig {
-            subagent_idle_kill_seconds: 60, // not breached
-            stream_idle_kill_seconds: 5,    // would breach
-            ..Default::default()
-        };
-        let state = Arc::new(Mutex::new(WatchdogState::default()));
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let fired = AtomicBool::new(false);
-        let t0 = Instant::now() - Duration::from_secs(10);
-
-        {
-            let mut s = state.lock().unwrap();
-            s.subagent_started("sa1".into(), None, t0);
-        }
         {
             let mut m = metrics.lock().unwrap();
             m.last_event_at = Some(t0);
         }
 
-        let result = evaluate_watchdog_tick(&config, Instant::now(), &state, &metrics, &fired);
-        assert_eq!(
-            result,
-            WatchdogTickResult::Ok,
-            "stream-idle must be suppressed while subagents are active"
-        );
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert_eq!(w.stuck_subagents.len(), 1);
+                assert_eq!(w.stuck_subagents[0].id, "sa1");
+                assert!(w.message.contains("Researcher"), "got: {}", w.message);
+            }
+            other => panic!("expected StepTimeout breach, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
     }
 
     #[test]
-    fn evaluate_tick_stream_idle_breach() {
-        let config = WatchdogConfig {
-            subagent_idle_kill_seconds: 0, // disabled
-            stream_idle_kill_seconds: 5,
+    fn evaluate_timeout_tick_silence_breach_without_subagents() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
             ..Default::default()
         };
         let state = Arc::new(Mutex::new(WatchdogState::default()));
@@ -777,123 +781,264 @@ mod tests {
             m.last_event_at = Some(t0);
         }
 
-        let result = evaluate_watchdog_tick(&config, Instant::now(), &state, &metrics, &fired);
-        assert!(
-            matches!(result, WatchdogTickResult::StreamIdleBreach(ref w) if w.reason == WatchdogTerminationReason::StreamIdleTimeout),
-            "expected StreamIdleBreach, got: {result:?}"
-        );
-        assert!(fired.load(Ordering::SeqCst), "fired flag must be set");
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(w.stuck_subagents.is_empty());
+                assert!(w.message.contains("step_timeout"), "got: {}", w.message);
+            }
+            other => panic!("expected StepTimeout breach, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
     }
 
     #[test]
-    fn evaluate_tick_no_stream_idle_when_no_activity_yet() {
-        let config = WatchdogConfig {
-            subagent_idle_kill_seconds: 0,
-            stream_idle_kill_seconds: 5,
+    fn evaluate_timeout_tick_does_not_fire_silence_without_first_event() {
+        // Spec: silence rule requires at least one observed activity event
+        // (matches `last_event_at: Option<Instant>` first-event grace).
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(1)),
             ..Default::default()
         };
         let state = Arc::new(Mutex::new(WatchdogState::default()));
         let metrics = claudine::stream::progress::new_live_metrics();
         let fired = AtomicBool::new(false);
+        let started_at = Instant::now() - Duration::from_secs(60);
 
-        let result = evaluate_watchdog_tick(&config, Instant::now(), &state, &metrics, &fired);
-        assert_eq!(
-            result,
-            WatchdogTickResult::Ok,
-            "must not fire when no activity has been observed"
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            started_at,
+            &state,
+            &metrics,
+            &fired,
+        );
+        assert_eq!(result, WatchdogTickResult::Ok);
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_wall_clock_wins_over_silence_on_same_tick() {
+        let config = TimeoutConfig {
+            timeout: Some(Duration::from_secs(5)),
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+        }
+
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert!(
+            matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
+            "wall-clock must win; got: {result:?}"
         );
     }
 
     #[test]
-    fn evaluate_tick_one_shot_only() {
-        let config = WatchdogConfig {
-            subagent_idle_kill_seconds: 5,
+    fn evaluate_timeout_tick_one_shot_guard() {
+        let config = TimeoutConfig {
+            timeout: Some(Duration::from_secs(1)),
+            step_timeout: Some(Duration::from_secs(1)),
             ..Default::default()
         };
         let state = Arc::new(Mutex::new(WatchdogState::default()));
         let metrics = claudine::stream::progress::new_live_metrics();
         let fired = AtomicBool::new(true); // already fired
-        let t0 = Instant::now() - Duration::from_secs(10);
+        let started_at = Instant::now() - Duration::from_secs(60);
 
-        {
-            let mut s = state.lock().unwrap();
-            s.subagent_started("sa1".into(), None, t0);
-        }
-
-        let result = evaluate_watchdog_tick(&config, Instant::now(), &state, &metrics, &fired);
-        assert_eq!(
-            result,
-            WatchdogTickResult::Ok,
-            "must not re-fire after fired flag is set"
-        );
-    }
-
-    #[test]
-    fn evaluate_tick_disabled_subagent_watchdog_skips() {
-        let config = WatchdogConfig {
-            subagent_idle_kill_seconds: 0,
-            stream_idle_kill_seconds: 0,
-            ..Default::default()
-        };
-        let state = Arc::new(Mutex::new(WatchdogState::default()));
-        let metrics = claudine::stream::progress::new_live_metrics();
-        let fired = AtomicBool::new(false);
-        let t0 = Instant::now() - Duration::from_secs(10);
-
-        {
-            let mut s = state.lock().unwrap();
-            s.subagent_started("sa1".into(), None, t0);
-        }
         {
             let mut m = metrics.lock().unwrap();
-            m.last_event_at = Some(t0);
+            m.last_event_at = Some(started_at);
         }
 
-        let result = evaluate_watchdog_tick(&config, Instant::now(), &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            started_at,
+            &state,
+            &metrics,
+            &fired,
+        );
         assert_eq!(result, WatchdogTickResult::Ok);
     }
 
     #[test]
-    fn format_subagent_breach_message_single() {
-        let stuck = vec![ActiveSubagentSnapshot {
-            id: "sa1".into(),
-            name: Some("Research".into()),
-            started_at: Instant::now(),
-            last_progress_at: Instant::now(),
-            elapsed_since_start: Duration::from_secs(180),
-            elapsed_since_progress: Duration::from_secs(180),
-        }];
-        let msg = format_subagent_breach_message(&stuck);
-        assert!(msg.contains("1 subagent went silent"));
-        assert!(msg.contains("sa1"));
-        assert!(msg.contains("Research"));
-        assert!(msg.contains("idle 3m 0s"));
+    fn format_step_timeout_breach_message_no_outstanding() {
+        let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[]);
+        assert!(msg.contains("3m 0s"));
+        assert!(msg.contains("step_timeout"));
+        assert!(!msg.contains("subagent"));
     }
 
     #[test]
-    fn format_subagent_breach_message_plural() {
-        let stuck = vec![
-            ActiveSubagentSnapshot {
-                id: "sa1".into(),
-                name: Some("A".into()),
-                started_at: Instant::now(),
-                last_progress_at: Instant::now(),
-                elapsed_since_start: Duration::from_secs(180),
-                elapsed_since_progress: Duration::from_secs(180),
-            },
-            ActiveSubagentSnapshot {
-                id: "sa2".into(),
-                name: Some("B".into()),
-                started_at: Instant::now(),
-                last_progress_at: Instant::now(),
-                elapsed_since_start: Duration::from_secs(200),
-                elapsed_since_progress: Duration::from_secs(200),
-            },
-        ];
-        let msg = format_subagent_breach_message(&stuck);
-        assert!(msg.contains("2 subagents went silent"));
-        assert!(msg.contains("sa1"));
-        assert!(msg.contains("sa2"));
+    fn format_step_timeout_breach_message_lists_outstanding() {
+        let snap = ActiveSubagentSnapshot {
+            id: "ses_a".into(),
+            name: Some("Commit work".into()),
+            started_at: Instant::now(),
+            last_progress_at: Instant::now(),
+            elapsed_since_start: Duration::from_secs(900),
+            elapsed_since_progress: Duration::from_secs(900),
+        };
+        let msg =
+            format_step_timeout_breach_message(Duration::from_secs(1800), std::slice::from_ref(&snap));
+        assert!(msg.contains("30m 0s"));
+        assert!(msg.contains("1 subagent"));
+        assert!(msg.contains("ses_a"));
+        assert!(msg.contains("Commit work"));
+        assert!(msg.contains("idle 15m 0s"));
+    }
+
+    // --- outstanding_at_breach tests ---
+
+    #[test]
+    fn outstanding_at_breach_returns_all_active_subagents() {
+        let mut state = WatchdogState::default();
+        let t0 = now();
+        state.subagent_started("a".into(), Some("Alpha".into()), t0);
+        state.subagent_started("b".into(), None, t0);
+
+        let t5 = t0 + Duration::from_secs(5);
+        let outstanding = state.outstanding_at_breach(t5);
+        assert_eq!(outstanding.len(), 2);
+        let alpha = outstanding.iter().find(|s| s.id == "a").unwrap();
+        assert_eq!(alpha.name.as_deref(), Some("Alpha"));
+        assert_eq!(alpha.elapsed_since_start, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn outstanding_at_breach_skips_stopped_subagents() {
+        let mut state = WatchdogState::default();
+        let t0 = now();
+        state.subagent_started("a".into(), None, t0);
+        state.subagent_started("b".into(), None, t0);
+        state.subagent_stopped(&"a".into(), t0);
+
+        let outstanding = state.outstanding_at_breach(t0);
+        assert_eq!(outstanding.len(), 1);
+        assert_eq!(outstanding[0].id, "b");
+    }
+
+    #[test]
+    fn outstanding_at_breach_empty_when_no_active() {
+        let state = WatchdogState::default();
+        let outstanding = state.outstanding_at_breach(now());
+        assert!(outstanding.is_empty());
+    }
+
+    // --- TimeoutConfig tests ---
+
+    #[test]
+    fn timeout_config_default_is_disabled_with_built_in_supporting_knobs() {
+        let config = TimeoutConfig::default();
+        assert_eq!(config.timeout, None);
+        assert_eq!(config.step_timeout, None);
+        assert_eq!(config.kill_grace, Duration::from_secs(10));
+        assert_eq!(config.interval, Duration::from_secs(5));
+        assert!(!config.timeout_enabled());
+        assert!(!config.step_timeout_enabled());
+        assert!(!config.any_enabled());
+    }
+
+    #[test]
+    fn timeout_config_enabled_flags_match_some_values() {
+        let only_wall = TimeoutConfig {
+            timeout: Some(Duration::from_secs(60)),
+            step_timeout: None,
+            ..Default::default()
+        };
+        assert!(only_wall.timeout_enabled());
+        assert!(!only_wall.step_timeout_enabled());
+        assert!(only_wall.any_enabled());
+
+        let only_silence = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(60)),
+            ..Default::default()
+        };
+        assert!(!only_silence.timeout_enabled());
+        assert!(only_silence.step_timeout_enabled());
+        assert!(only_silence.any_enabled());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn timeout_config_resolve_honours_pre_resolved_inputs() {
+        // Ensure env knobs are absent so we observe the inputs cleanly.
+        let _g1 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
+        let _g2 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+
+        let config = TimeoutConfig::resolve(
+            Some(Duration::from_secs(7200)),
+            Some(Duration::from_secs(1800)),
+        );
+        assert_eq!(config.timeout, Some(Duration::from_secs(7200)));
+        assert_eq!(config.step_timeout, Some(Duration::from_secs(1800)));
+        // Defaults applied when env vars unset.
+        assert_eq!(config.kill_grace, Duration::from_secs(10));
+        assert_eq!(config.interval, Duration::from_secs(5));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn timeout_config_resolve_does_not_consult_timeout_env_vars() {
+        // Composition layer owns timeout/step_timeout precedence; resolve
+        // must NOT read these env vars itself.
+        let _g1 = TestEnvGuard::set("CLAUDINE_TIMEOUT", "1h");
+        let _g2 = TestEnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
+        let _g3 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
+        let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+
+        let config = TimeoutConfig::resolve(None, None);
+        assert_eq!(config.timeout, None, "resolve must not read CLAUDINE_TIMEOUT");
+        assert_eq!(
+            config.step_timeout, None,
+            "resolve must not read CLAUDINE_STEP_TIMEOUT"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn timeout_config_resolve_parses_kill_grace_and_interval_env_vars() {
+        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "30s");
+        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "2s");
+
+        let config = TimeoutConfig::resolve(None, None);
+        assert_eq!(config.kill_grace, Duration::from_secs(30));
+        assert_eq!(config.interval, Duration::from_secs(2));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn timeout_config_resolve_falls_back_when_env_invalid() {
+        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "garbage");
+        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "");
+
+        let config = TimeoutConfig::resolve(None, None);
+        assert_eq!(config.kill_grace, Duration::from_secs(10));
+        assert_eq!(config.interval, Duration::from_secs(5));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn timeout_config_resolve_accepts_minute_and_hour_units() {
+        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "1m");
+        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "1h");
+
+        let config = TimeoutConfig::resolve(None, None);
+        assert_eq!(config.kill_grace, Duration::from_secs(60));
+        assert_eq!(config.interval, Duration::from_secs(3600));
     }
 
     /// RAII wrapper that restores the prior env var value on drop.
@@ -906,6 +1051,14 @@ mod tests {
             let prior = std::env::var(key).ok();
             unsafe {
                 std::env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
             }
             Self { key, prior }
         }

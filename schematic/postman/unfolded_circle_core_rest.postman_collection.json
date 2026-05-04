@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "http://remote.local/api",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "bearerToken",
+      "value": "",
+      "description": "Bearer token for Authorization header"
     }
   ],
   "auth": {
@@ -43,8 +48,7 @@
               "formdata": [
                 {
                   "key": "file",
-                  "value": "",
-                  "type": "text"
+                  "type": "file"
                 }
               ]
             },
@@ -83,8 +87,7 @@
               "formdata": [
                 {
                   "key": "file",
-                  "value": "",
-                  "type": "text"
+                  "type": "file"
                 }
               ]
             },
@@ -169,8 +172,7 @@
               "formdata": [
                 {
                   "key": "file",
-                  "value": "",
-                  "type": "text"
+                  "type": "file"
                 }
               ]
             },
@@ -264,8 +266,7 @@
               "formdata": [
                 {
                   "key": "file",
-                  "value": "",
-                  "type": "text"
+                  "type": "file"
                 }
               ]
             },
@@ -298,8 +299,7 @@
               "formdata": [
                 {
                   "key": "file",
-                  "value": "",
-                  "type": "text"
+                  "type": "file"
                 }
               ]
             },

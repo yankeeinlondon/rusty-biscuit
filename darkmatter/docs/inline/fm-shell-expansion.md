@@ -83,7 +83,7 @@ dir: "$(dirname {{file}})"   # only argument is interpolated
 
 ### Approval
 
-Frontmatter shell commands participate in the same approval flow as body `::shell` directives. They are included in preflight discovery and subject to whitelist, blacklist, and interactive approval.
+Frontmatter shell commands participate in the same approval flow as body `::shell` directives. They are included in preflight discovery and subject to whitelist, blacklist, and interactive approval. See [Pre-Flight Shell Approval](../topics/pre-flight-checks.md) for the full policy details.
 
 Discovery and runtime execution use the same pre-compose frontmatter preparation path:
 

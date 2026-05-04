@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "https://api.github.com",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "bearerToken",
+      "value": "",
+      "description": "Bearer token for Authorization header"
     }
   ],
   "auth": {

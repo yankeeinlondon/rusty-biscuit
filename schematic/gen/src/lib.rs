@@ -78,6 +78,8 @@ pub mod ws_codegen;
 
 pub use inference::infer_module_path;
 
+pub use openapi_output::{write_openapi, write_openapi_grouped};
+
 pub use validation::validate_api;
 
 #[cfg(test)]

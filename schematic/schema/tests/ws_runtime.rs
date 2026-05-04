@@ -1,5 +1,7 @@
 //! Runtime integration tests for generated WebSocket clients.
 
+#![allow(clippy::result_large_err)]
+
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};

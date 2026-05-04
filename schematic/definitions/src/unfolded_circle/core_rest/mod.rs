@@ -57,6 +57,7 @@ use schematic_define::{
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
     SchemaRegistry::new()
+        .register::<LoginRequest>("LoginRequest")
         .register::<ApiResponseMessage>("ApiResponseMessage")
         .register::<SystemInfo>("SystemInfo")
         .register::<BackupRestoreReportItems>("BackupRestoreReportItems")

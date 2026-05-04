@@ -566,6 +566,7 @@ fn strip_ansi(line: &str) -> String {
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tracing::{debug, warn};
@@ -585,11 +586,27 @@ pub enum StderrIngestOutcome {
     NotConsumed,
 }
 
+/// Diagnostic enrichment carried by `EarlyTermination::StepTimeout` for
+/// subagents that were still outstanding when the stream-silence rule
+/// fired. Lives in the lib so the CLI's `WatchdogTermination` can convert
+/// from its internal `ActiveSubagentSnapshot` without leaking CLI types
+/// across the boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StuckSubagentInfo {
+    /// Subagent identifier (e.g. an OpenCode session id).
+    pub id: String,
+    /// Optional human-readable name or title of the subagent.
+    pub name: Option<String>,
+    /// Wall-clock duration since the subagent last reported progress.
+    pub elapsed_since_progress: Duration,
+}
+
 /// Reason the bridge wants `run_child_stream_semantic(...)` to terminate
 /// the child process early.
 ///
-/// Today this fires for pre-stream usage-cap failures plus wrapper-driven
-/// post-stop hang recovery in OpenCode's structured non-interactive path.
+/// Today this fires for pre-stream usage-cap failures, wrapper-driven
+/// post-stop hang recovery in OpenCode's structured non-interactive path,
+/// and the unified two-rule timeout watchdog (`timeout` and `step_timeout`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EarlyTermination {
     /// The provider reported a rate-limit failure before any stdout
@@ -603,21 +620,24 @@ pub enum EarlyTermination {
     /// treats the run as successful because the semantic stream had already
     /// finished.
     CompletedButHung { message: String },
-    /// The harness-configured step-silence budget elapsed with no stream
-    /// event observed. The wrapper terminates the child process and maps
-    /// the outcome to [`crate::harness::ProcessTermination::TimedOut`] so
-    /// the standard `handle_timeout` failure handler runs.
-    StepTimeout { message: String },
-    /// One or more outstanding subagents have been silent for longer than
-    /// the configured idle threshold. The wrapper terminates the child
-    /// process and maps the outcome to a distinct exit reason so the
-    /// synthesized summary can report which subagents were stuck.
-    SubagentsUnresponsive { message: String },
-    /// The provider stream has been completely idle (no semantic events)
-    /// for longer than the configured stream-idle threshold while no
-    /// subagents are outstanding. The wrapper terminates the child process
-    /// and maps the outcome to a distinct exit reason.
-    StreamIdleTimeout { message: String },
+    /// The wall-clock budget (`timeout`) elapsed since the child process
+    /// was spawned. The wrapper terminates the child process and maps the
+    /// outcome to [`crate::harness::ProcessTermination::TimedOut`] so the
+    /// standard `handle_timeout` failure handler runs. The synthesized
+    /// summary marks `error_kind = "timeout"`.
+    Timeout { message: String },
+    /// The stream-silence budget (`step_timeout`) elapsed with no parent
+    /// stream event observed. The wrapper terminates the child process and
+    /// maps the outcome to [`crate::harness::ProcessTermination::TimedOut`].
+    /// The synthesized summary marks `error_kind = "step_timeout"`.
+    ///
+    /// `outstanding` enumerates any subagents that were still in flight at
+    /// the moment of breach so the rendered error block can name them.
+    StepTimeout {
+        message: String,
+        #[allow(dead_code)]
+        outstanding: Vec<StuckSubagentInfo>,
+    },
 }
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.

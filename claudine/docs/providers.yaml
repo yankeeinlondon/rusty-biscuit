@@ -2,13 +2,13 @@ kind: sequence
 template:
     desc: "{{name}} (_site: {{site}}, repo: {{ repo || 'n/a' }}_)"
 list:
-    # - name: Claude Code
-    #   file: claude.md
-    #   user_dir: "~/.claude"
-    #   repo_dir: ".claude"
-    #   vendor: Anthropic
-    #   site: https://code.claude.com/docs/en/overview
-    #   repo:
+    - name: Claude Code
+      file: claude.md
+      user_dir: "~/.claude"
+      repo_dir: ".claude"
+      vendor: Anthropic
+      site: https://code.claude.com/docs/en/overview
+      repo:
     - name: Codex CLI
       file: codex.md
       user_dir: "~/.codex"

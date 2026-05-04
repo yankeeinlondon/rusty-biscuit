@@ -8,7 +8,7 @@
 
 use biscuit_file::serde_yaml_ng;
 use schematic_define::openapi::{OpenApiError, OpenApiSource};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ========================================
 // OpenApiSource Tests
@@ -193,7 +193,7 @@ fn error_is_std_error() {
 #[test]
 fn source_path_convenience() {
     let source = OpenApiSource::path("/api/openapi.yaml");
-    assert!(matches!(source, OpenApiSource::Path(p) if p == PathBuf::from("/api/openapi.yaml")));
+    assert!(matches!(source, OpenApiSource::Path(p) if p == Path::new("/api/openapi.yaml")));
 }
 
 #[test]
