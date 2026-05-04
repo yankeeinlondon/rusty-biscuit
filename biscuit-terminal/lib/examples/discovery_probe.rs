@@ -42,7 +42,7 @@
 //! | Variable | Purpose |
 //! |----------|---------|
 //! | `PROBE_PROSE_INPUT` | Source prose text to render. Defaults to empty. |
-//! | `PROBE_FORCE_OSC8` | `1`/`true`/`0`/`false` to override `osc_link_support`. |
+//! | `PROBE_FORCE_OSC8` | `1`/`true`/`0`/`false` to override `osc_link_support`. When unset the probe calls `detection::osc8_link_support()` (canonical detection). |
 //! | `PROBE_FORCE_UNDERLINE_STRAIGHT` | `1`/`true`/`0`/`false` to override `underline_support.straight`. |
 //! | `PROBE_FORCE_UNDERLINE_DOUBLE` | `1`/`true`/`0`/`false` to override `underline_support.double`. |
 //!
@@ -260,7 +260,7 @@ fn probe_prose() {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::discovery::detection::{
-        TerminalApp, UnderlineSupport, get_terminal_app, underline_support,
+        UnderlineSupport, get_terminal_app, osc8_link_support, underline_support,
     };
     use biscuit_terminal::terminal::Terminal;
 
@@ -285,9 +285,14 @@ fn probe_prose() {
     if let Some(v) = force_double {
         us.double = v;
     }
+    // Use the canonical `detection::osc8_link_support()` helper so that
+    // the probe and production code share a single source of truth for
+    // OSC8 policy. `PROBE_FORCE_OSC8` is the only deviation: it lets
+    // tests assert the override path without introducing a duplicate
+    // denylist here.
     let osc_link_support = match force_osc8 {
         Some(v) => v,
-        None => !matches!(app, TerminalApp::AppleTerminal | TerminalApp::Wast),
+        None => osc8_link_support(),
     };
 
     let mut term = Terminal::new_optimistic(80);

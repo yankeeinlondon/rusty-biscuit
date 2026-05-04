@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -7,6 +8,27 @@ use crate::{
     utils::color::{Tailwind, WEB_COLOR_LOOKUP, WebColor},
     utils::layout::{Layout, Margin, WordWrap},
 };
+
+/// Action returned by [`block_tag_to_escape`] describing how a block tag
+/// should be emitted into the rendered prose stream.
+///
+/// Replaces the older `(open, close)` tuple where empty strings doubled
+/// as a "suppress this tag" sentinel. The named variant lets the parser
+/// branch on intent rather than re-checking string emptiness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BlockTagAction {
+    /// Wrap the inner content with `open` before and `close` after.
+    Wrap {
+        open: Cow<'static, str>,
+        close: Cow<'static, str>,
+    },
+    /// Emit only the inner content with no surrounding escapes.
+    ///
+    /// Used when the requested style is unsupported on the current
+    /// terminal (e.g. `<double-underline>` with no underline support)
+    /// or when the tag carries no useful payload (e.g. `<a href="">`).
+    Suppress,
+}
 
 /// Styled text with token and block tag support for rich terminal output.
 ///
@@ -244,6 +266,36 @@ fn atomic_token_to_escape(token: &str) -> Option<&'static str> {
         .map(|(_, escape)| *escape)
 }
 
+/// Capability-aware variant of [`atomic_token_to_escape`].
+///
+/// Returns the same escape as `atomic_token_to_escape` for every token
+/// **except** `double-underline`, which is routed through the same
+/// degradation policy as the `<double-underline>` block tag:
+///
+/// - No terminal context (`term == None`) — optimistic `\x1b[4:2m`.
+/// - Terminal advertises `underline_support.double` — `\x1b[4:2m`.
+/// - Terminal advertises only `underline_support.straight` —
+///   degrade to `\x1b[4m`.
+/// - Neither supported — `None` (the parser drops the token entirely).
+///
+/// Wraps `ATOMIC_TOKEN_TABLE` so the static lookup stays the source of
+/// truth for the non-degrading tokens.
+fn atomic_token_to_escape_with_term(
+    token: &str,
+    term: Option<&Terminal>,
+) -> Option<Cow<'static, str>> {
+    if token.eq_ignore_ascii_case("double-underline") {
+        return match term {
+            None => Some(Cow::Borrowed("\x1b[4:2m")),
+            Some(t) if t.underline_support.double => Some(Cow::Borrowed("\x1b[4:2m")),
+            Some(t) if t.underline_support.straight => Some(Cow::Borrowed("\x1b[4m")),
+            Some(_) => None,
+        };
+    }
+
+    atomic_token_to_escape(token).map(Cow::Borrowed)
+}
+
 /// Parse an opening tag into its name and attributes.
 fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>)> {
     let tag_content = tag_content.trim();
@@ -324,13 +376,21 @@ fn block_tag_to_escape(
     tag_name: &str,
     attrs: &[(String, String)],
     term: Option<&Terminal>,
-) -> Option<(String, String)> {
+) -> Option<BlockTagAction> {
+    /// Helper: build a `Wrap` action with two static-string escapes.
+    fn wrap_static(open: &'static str, close: &'static str) -> BlockTagAction {
+        BlockTagAction::Wrap {
+            open: Cow::Borrowed(open),
+            close: Cow::Borrowed(close),
+        }
+    }
+
     match tag_name {
         // Text styles (full names + short aliases)
-        "bold" | "b" => Some(("\x1b[1m".to_string(), "\x1b[22m".to_string())),
-        "dim" => Some(("\x1b[2m".to_string(), "\x1b[22m".to_string())),
-        "italic" | "i" => Some(("\x1b[3m".to_string(), "\x1b[23m".to_string())),
-        "underline" | "u" => Some(("\x1b[4m".to_string(), "\x1b[24m".to_string())),
+        "bold" | "b" => Some(wrap_static("\x1b[1m", "\x1b[22m")),
+        "dim" => Some(wrap_static("\x1b[2m", "\x1b[22m")),
+        "italic" | "i" => Some(wrap_static("\x1b[3m", "\x1b[23m")),
+        "underline" | "u" => Some(wrap_static("\x1b[4m", "\x1b[24m")),
         "double-underline" | "uu" => {
             // Capability-aware degradation:
             //   - No terminal context: optimistic `\x1b[4:2m` (legacy behavior).
@@ -338,23 +398,23 @@ fn block_tag_to_escape(
             //   - Only straight underline supported: degrade to `\x1b[4m`.
             //   - Neither supported: suppress the underline entirely.
             match term {
-                None => Some(("\x1b[4:2m".to_string(), "\x1b[24m".to_string())),
+                None => Some(wrap_static("\x1b[4:2m", "\x1b[24m")),
                 Some(t) if t.underline_support.double => {
-                    Some(("\x1b[4:2m".to_string(), "\x1b[24m".to_string()))
+                    Some(wrap_static("\x1b[4:2m", "\x1b[24m"))
                 }
                 Some(t) if t.underline_support.straight => {
-                    Some(("\x1b[4m".to_string(), "\x1b[24m".to_string()))
+                    Some(wrap_static("\x1b[4m", "\x1b[24m"))
                 }
-                Some(_) => Some((String::new(), String::new())),
+                Some(_) => Some(BlockTagAction::Suppress),
             }
         }
-        "curly-underline" => Some(("\x1b[4:3m".to_string(), "\x1b[24m".to_string())),
-        "dotted-underline" => Some(("\x1b[4:4m".to_string(), "\x1b[24m".to_string())),
-        "dashed-underline" => Some(("\x1b[4:5m".to_string(), "\x1b[24m".to_string())),
-        "blink" => Some(("\x1b[5m".to_string(), "\x1b[25m".to_string())),
-        "inverse" | "reverse" => Some(("\x1b[7m".to_string(), "\x1b[27m".to_string())),
-        "hidden" => Some(("\x1b[8m".to_string(), "\x1b[28m".to_string())),
-        "strikethrough" | "~" => Some(("\x1b[9m".to_string(), "\x1b[29m".to_string())),
+        "curly-underline" => Some(wrap_static("\x1b[4:3m", "\x1b[24m")),
+        "dotted-underline" => Some(wrap_static("\x1b[4:4m", "\x1b[24m")),
+        "dashed-underline" => Some(wrap_static("\x1b[4:5m", "\x1b[24m")),
+        "blink" => Some(wrap_static("\x1b[5m", "\x1b[25m")),
+        "inverse" | "reverse" => Some(wrap_static("\x1b[7m", "\x1b[27m")),
+        "hidden" => Some(wrap_static("\x1b[8m", "\x1b[28m")),
+        "strikethrough" | "~" => Some(wrap_static("\x1b[9m", "\x1b[29m")),
 
         // OSC8 hyperlinks
         "a" => {
@@ -371,17 +431,23 @@ fn block_tag_to_escape(
             let supports_osc8 = term.map(|t| t.osc_link_support).unwrap_or(true);
             if resolved_href.is_empty() {
                 // No href: just show the content with no link wrapping.
-                Some((String::new(), String::new()))
+                Some(BlockTagAction::Suppress)
             } else if supports_osc8 {
-                Some((
-                    format!("\x1b]8;;{}\x1b\\", resolved_href),
-                    "\x1b]8;;\x1b\\".to_string(),
-                ))
+                Some(BlockTagAction::Wrap {
+                    open: Cow::Owned(format!("\x1b]8;;{}\x1b\\", resolved_href)),
+                    close: Cow::Borrowed("\x1b]8;;\x1b\\"),
+                })
             } else {
                 // Markdown fallback: `[description](resolved_href)`.
-                // The closing string carries the resolved href since the
-                // structural emit pattern is `open + inner + close`.
-                Some(("[".to_string(), format!("]({})", resolved_href)))
+                //
+                // The opening bracket is a static `Cow::Borrowed` to
+                // avoid a per-tag `String` allocation; only the close
+                // string folds the resolved href into `](url)` because
+                // the structural emit pattern is `open + inner + close`.
+                Some(BlockTagAction::Wrap {
+                    open: Cow::Borrowed("["),
+                    close: Cow::Owned(format!("]({})", resolved_href)),
+                })
             }
         }
 
@@ -396,14 +462,10 @@ fn block_tag_to_escape(
                 .map(|(k, _)| k.as_str())
                 .unwrap_or("");
 
-            if let Some((r, g, b)) = parse_rgb(rgb_str) {
-                Some((
-                    format!("\x1b[38;2;{};{};{}m", r, g, b),
-                    "\x1b[39m".to_string(),
-                ))
-            } else {
-                None
-            }
+            parse_rgb(rgb_str).map(|(r, g, b)| BlockTagAction::Wrap {
+                open: Cow::Owned(format!("\x1b[38;2;{};{};{}m", r, g, b)),
+                close: Cow::Borrowed("\x1b[39m"),
+            })
         }
 
         // Background RGB colors
@@ -414,38 +476,35 @@ fn block_tag_to_escape(
                 .map(|(k, _)| k.as_str())
                 .unwrap_or("");
 
-            if let Some((r, g, b)) = parse_rgb(rgb_str) {
-                Some((
-                    format!("\x1b[48;2;{};{};{}m", r, g, b),
-                    "\x1b[49m".to_string(),
-                ))
-            } else {
-                None
-            }
+            parse_rgb(rgb_str).map(|(r, g, b)| BlockTagAction::Wrap {
+                open: Cow::Owned(format!("\x1b[48;2;{};{};{}m", r, g, b)),
+                close: Cow::Borrowed("\x1b[49m"),
+            })
         }
 
         // Basic foreground colors
-        "black" => Some(("\x1b[30m".to_string(), "\x1b[39m".to_string())),
-        "red" => Some(("\x1b[31m".to_string(), "\x1b[39m".to_string())),
-        "green" => Some(("\x1b[32m".to_string(), "\x1b[39m".to_string())),
-        "yellow" => Some(("\x1b[33m".to_string(), "\x1b[39m".to_string())),
-        "blue" => Some(("\x1b[34m".to_string(), "\x1b[39m".to_string())),
-        "magenta" => Some(("\x1b[35m".to_string(), "\x1b[39m".to_string())),
-        "cyan" => Some(("\x1b[36m".to_string(), "\x1b[39m".to_string())),
-        "white" => Some(("\x1b[37m".to_string(), "\x1b[39m".to_string())),
+        "black" => Some(wrap_static("\x1b[30m", "\x1b[39m")),
+        "red" => Some(wrap_static("\x1b[31m", "\x1b[39m")),
+        "green" => Some(wrap_static("\x1b[32m", "\x1b[39m")),
+        "yellow" => Some(wrap_static("\x1b[33m", "\x1b[39m")),
+        "blue" => Some(wrap_static("\x1b[34m", "\x1b[39m")),
+        "magenta" => Some(wrap_static("\x1b[35m", "\x1b[39m")),
+        "cyan" => Some(wrap_static("\x1b[36m", "\x1b[39m")),
+        "white" => Some(wrap_static("\x1b[37m", "\x1b[39m")),
 
         // Bright foreground colors
-        "bright-black" => Some(("\x1b[90m".to_string(), "\x1b[39m".to_string())),
-        "bright-red" => Some(("\x1b[91m".to_string(), "\x1b[39m".to_string())),
-        "bright-green" => Some(("\x1b[92m".to_string(), "\x1b[39m".to_string())),
-        "bright-yellow" => Some(("\x1b[93m".to_string(), "\x1b[39m".to_string())),
-        "bright-blue" => Some(("\x1b[94m".to_string(), "\x1b[39m".to_string())),
-        "bright-magenta" => Some(("\x1b[95m".to_string(), "\x1b[39m".to_string())),
-        "bright-cyan" => Some(("\x1b[96m".to_string(), "\x1b[39m".to_string())),
-        "bright-white" => Some(("\x1b[97m".to_string(), "\x1b[39m".to_string())),
+        "bright-black" => Some(wrap_static("\x1b[90m", "\x1b[39m")),
+        "bright-red" => Some(wrap_static("\x1b[91m", "\x1b[39m")),
+        "bright-green" => Some(wrap_static("\x1b[92m", "\x1b[39m")),
+        "bright-yellow" => Some(wrap_static("\x1b[93m", "\x1b[39m")),
+        "bright-blue" => Some(wrap_static("\x1b[94m", "\x1b[39m")),
+        "bright-magenta" => Some(wrap_static("\x1b[95m", "\x1b[39m")),
+        "bright-cyan" => Some(wrap_static("\x1b[96m", "\x1b[39m")),
+        "bright-white" => Some(wrap_static("\x1b[97m", "\x1b[39m")),
 
-        // Clipboard - returns empty escapes, actual clipboard handling would be done externally
-        "clipboard" => Some((String::new(), String::new())),
+        // Clipboard - actual clipboard handling would be done externally;
+        // emit only the inner content with no surrounding escapes.
+        "clipboard" => Some(BlockTagAction::Suppress),
 
         // Try web colors, then Tailwind colors (foreground and background)
         _ => {
@@ -453,35 +512,45 @@ fn block_tag_to_escape(
             if let Some(color_name) = tag_name.strip_prefix("bg-") {
                 // Try web color lookup for background
                 if let Some(rgb) = lookup_web_color(color_name) {
-                    return Some((
-                        format!("\x1b[48;2;{};{};{}m", rgb.red(), rgb.green(), rgb.blue()),
-                        "\x1b[49m".to_string(),
-                    ));
+                    return Some(BlockTagAction::Wrap {
+                        open: Cow::Owned(format!(
+                            "\x1b[48;2;{};{};{}m",
+                            rgb.red(),
+                            rgb.green(),
+                            rgb.blue()
+                        )),
+                        close: Cow::Borrowed("\x1b[49m"),
+                    });
                 }
 
                 // Try Tailwind color lookup for background
                 if let Some(hdr) = lookup_tailwind_color(color_name) {
-                    return Some((
-                        format!("\x1b[48;2;{};{};{}m", hdr.0, hdr.1, hdr.2),
-                        "\x1b[49m".to_string(),
-                    ));
+                    return Some(BlockTagAction::Wrap {
+                        open: Cow::Owned(format!("\x1b[48;2;{};{};{}m", hdr.0, hdr.1, hdr.2)),
+                        close: Cow::Borrowed("\x1b[49m"),
+                    });
                 }
             }
 
             // Try web color lookup (kebab-case like "alice-blue")
             if let Some(rgb) = lookup_web_color(tag_name) {
-                return Some((
-                    format!("\x1b[38;2;{};{};{}m", rgb.red(), rgb.green(), rgb.blue()),
-                    "\x1b[39m".to_string(),
-                ));
+                return Some(BlockTagAction::Wrap {
+                    open: Cow::Owned(format!(
+                        "\x1b[38;2;{};{};{}m",
+                        rgb.red(),
+                        rgb.green(),
+                        rgb.blue()
+                    )),
+                    close: Cow::Borrowed("\x1b[39m"),
+                });
             }
 
             // Try Tailwind color lookup (kebab-case like "purple-500")
             if let Some(hdr) = lookup_tailwind_color(tag_name) {
-                return Some((
-                    format!("\x1b[38;2;{};{};{}m", hdr.0, hdr.1, hdr.2),
-                    "\x1b[39m".to_string(),
-                ));
+                return Some(BlockTagAction::Wrap {
+                    open: Cow::Owned(format!("\x1b[38;2;{};{};{}m", hdr.0, hdr.1, hdr.2)),
+                    close: Cow::Borrowed("\x1b[39m"),
+                });
             }
 
             None
@@ -1403,23 +1472,40 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
             }
 
             if found_close {
-                if let Some(escape) = atomic_token_to_escape(&token) {
-                    result.push_str(escape);
+                let token_lower = token.to_ascii_lowercase();
+
+                // Capability-aware lookup: only `double-underline`
+                // consults `term`; other tokens fall through to the
+                // static table.
+                if let Some(escape) = atomic_token_to_escape_with_term(&token, term) {
+                    result.push_str(escape.as_ref());
                     state.used_styles = true;
 
-                    // Update layer tracking
-                    let token_lower = token.to_ascii_lowercase();
+                    // Update layer tracking. We always pass the *raw*
+                    // table escape into `state.set` so layer restoration
+                    // works regardless of terminal-specific degradation
+                    // (e.g. `\x1b[4m` vs `\x1b[4:2m`).
                     if token_lower == "reset" {
                         state.clear_all();
                     } else if token_lower == "reset-style" {
                         state.clear_all_except_background();
                     } else if let Some((layer, is_set)) = atomic_token_layer(&token_lower) {
                         if is_set {
-                            state.set(layer, escape);
+                            state.set(layer, escape.as_ref());
                         } else {
                             state.restore(layer, None);
                         }
                     }
+                } else if atomic_token_to_escape(&token).is_some() {
+                    // Token exists in the static table but the
+                    // capability-aware helper returned `None`
+                    // (currently only `double-underline` on a terminal
+                    // that supports neither double nor straight
+                    // underline). Emit nothing — the parser drops the
+                    // styling sequence entirely. The matching close
+                    // sequence is also a no-op so layer tracking stays
+                    // balanced.
+                    state.used_styles = true;
                 } else {
                     // Unknown token, output as-is
                     result.push_str("{{");
@@ -1498,28 +1584,40 @@ fn parse_tokens_inner(content: &str, term: Option<&Terminal>, state: &mut StyleS
                     }
 
                     // Apply the block style
-                    if let Some((open, close)) = block_tag_to_escape(&tag_name, &attrs, term) {
+                    if let Some(action) = block_tag_to_escape(&tag_name, &attrs, term) {
                         let layer = block_tag_layer(&tag_name);
                         state.used_styles = true;
 
-                        if open.is_empty() && close.is_empty() {
-                            // Suppressed tag (e.g., `<double-underline>` on a
-                            // terminal that supports neither double nor
-                            // straight underlines, or `<a href="">link</a>`):
-                            // emit only the inner content with no escapes.
-                            result.push_str(&parse_tokens_inner(&inner_content, term, state));
-                        } else if let Some(layer) = layer {
+                        let (open, close) = match action {
+                            BlockTagAction::Suppress => {
+                                // Suppressed tag (e.g., `<double-underline>` on a
+                                // terminal that supports neither double nor
+                                // straight underlines, `<a href="">link</a>`,
+                                // or `<clipboard>`): emit only the inner
+                                // content with no escapes.
+                                result.push_str(&parse_tokens_inner(
+                                    &inner_content,
+                                    term,
+                                    state,
+                                ));
+                                continue;
+                            }
+                            BlockTagAction::Wrap { open, close } => (open, close),
+                        };
+
+                        if let Some(layer) = layer {
                             // Styled tag: layer-aware push/pop
-                            let prev = state.set(layer, &open);
-                            result.push_str(&open);
+                            let prev = state.set(layer, open.as_ref());
+                            result.push_str(open.as_ref());
                             result.push_str(&parse_tokens_inner(&inner_content, term, state));
                             state.restore(layer, prev);
                             result.push_str(state.close_code(layer));
                         } else {
-                            // Structural tag (a, clipboard): emit open/close as-is
-                            result.push_str(&open);
+                            // Structural tag (e.g. `<a href>` with OSC8
+                            // or markdown fallback): emit open/close as-is.
+                            result.push_str(open.as_ref());
                             result.push_str(&parse_tokens_inner(&inner_content, term, state));
-                            result.push_str(&close);
+                            result.push_str(close.as_ref());
                         }
                     } else {
                         // Unknown tag, output as-is
@@ -2177,5 +2275,181 @@ mod tests {
         assert!(result.contains("click here"));
         assert!(!result.contains("\x1b]8;;"));
         assert!(!result.contains("[click here]"));
+    }
+
+    /// `block_tag_to_escape("double-underline")` returns
+    /// `BlockTagAction::Suppress` when the terminal supports neither
+    /// double nor straight underline. The parser routes this variant
+    /// through the inner-content-only path.
+    #[test]
+    fn block_tag_action_suppress_for_double_underline_no_support() {
+        let term = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: false,
+                double: false,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+
+        let action = block_tag_to_escape("double-underline", &[], Some(&term));
+        assert!(matches!(action, Some(BlockTagAction::Suppress)));
+    }
+
+    /// `block_tag_to_escape("a")` with an empty href returns
+    /// `BlockTagAction::Suppress`, regardless of OSC8 support.
+    #[test]
+    fn block_tag_action_suppress_for_empty_href() {
+        let term = Terminal::builder().osc_link_support(true).build();
+        let attrs = vec![("href".to_string(), String::new())];
+        let action = block_tag_to_escape("a", &attrs, Some(&term));
+        assert!(matches!(action, Some(BlockTagAction::Suppress)));
+    }
+
+    /// `block_tag_to_escape("clipboard")` always suppresses; clipboard
+    /// payloads are handled outside the SGR rendering pipeline.
+    #[test]
+    fn block_tag_action_suppress_for_clipboard() {
+        let action = block_tag_to_escape("clipboard", &[], None);
+        assert!(matches!(action, Some(BlockTagAction::Suppress)));
+    }
+
+    /// The atomic-token capability-aware helper must mirror the
+    /// `<double-underline>` block-tag policy:
+    /// - double supported → `\x1b[4:2m`
+    /// - only straight supported → `\x1b[4m`
+    /// - neither supported → `None`
+    #[test]
+    fn atomic_token_to_escape_with_term_degrades_double_underline() {
+        // 1. No terminal context → optimistic double underline.
+        assert_eq!(
+            atomic_token_to_escape_with_term("double-underline", None).as_deref(),
+            Some("\x1b[4:2m"),
+        );
+
+        // 2. Double underline supported → `\x1b[4:2m`.
+        let double_ok = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: true,
+                double: true,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+        assert_eq!(
+            atomic_token_to_escape_with_term("double-underline", Some(&double_ok)).as_deref(),
+            Some("\x1b[4:2m"),
+        );
+
+        // 3. Only straight supported → degrade to `\x1b[4m`.
+        let straight_only = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: true,
+                double: false,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+        assert_eq!(
+            atomic_token_to_escape_with_term("double-underline", Some(&straight_only)).as_deref(),
+            Some("\x1b[4m"),
+        );
+
+        // 4. Neither supported → None (parser drops the token).
+        let no_underline = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: false,
+                double: false,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+        assert!(
+            atomic_token_to_escape_with_term("double-underline", Some(&no_underline)).is_none()
+        );
+
+        // 5. Non-degrading tokens always pass through unchanged.
+        assert_eq!(
+            atomic_token_to_escape_with_term("bold", Some(&no_underline)).as_deref(),
+            Some("\x1b[1m"),
+        );
+        assert_eq!(
+            atomic_token_to_escape_with_term("red", None).as_deref(),
+            Some("\x1b[31m"),
+        );
+    }
+
+    /// `{{double-underline}}` rendered through `parse_tokens` must
+    /// follow the same capability-aware degradation as the block tag.
+    #[test]
+    fn atomic_double_underline_degrades_to_straight() {
+        let term = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: true,
+                double: false,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+        let prose = Prose::new("{{double-underline}}important text{{reset}}");
+        let result = prose.parse_tokens(Some(&term));
+        assert!(
+            result.contains("\x1b[4m"),
+            "expected straight underline SGR, got: {:?}",
+            result,
+        );
+        assert!(
+            !result.contains("\x1b[4:2m"),
+            "must not emit double underline SGR, got: {:?}",
+            result,
+        );
+        assert!(
+            result.contains("important text"),
+            "missing inner text, got: {:?}",
+            result,
+        );
+    }
+
+    /// `{{double-underline}}` must be suppressed entirely when neither
+    /// double nor straight underline is supported.
+    #[test]
+    fn atomic_double_underline_suppressed_when_no_underline_support() {
+        let term = Terminal::builder()
+            .underline_support(UnderlineSupport {
+                straight: false,
+                double: false,
+                curly: false,
+                dotted: false,
+                dashed: false,
+                colored: false,
+            })
+            .build();
+        let prose = Prose::new("{{double-underline}}important text{{reset}}");
+        let result = prose.parse_tokens(Some(&term));
+        assert!(
+            result.contains("important text"),
+            "missing inner text, got: {:?}",
+            result,
+        );
+        assert!(
+            !result.contains("\x1b[4:2m"),
+            "must not emit double underline SGR, got: {:?}",
+            result,
+        );
+        assert!(
+            !result.contains("\x1b[4m"),
+            "must not emit straight underline SGR, got: {:?}",
+            result,
+        );
     }
 }
