@@ -122,11 +122,11 @@ fn walk(root: &std::path::Path) -> impl Iterator<Item = std::path::PathBuf> {
     let mut stack = vec![root.to_path_buf()];
     let mut out = Vec::new();
     while let Some(p) = stack.pop() {
-        if p.is_dir() {
-            if let Ok(rd) = std::fs::read_dir(&p) {
-                for e in rd.flatten() {
-                    stack.push(e.path());
-                }
+        if p.is_dir()
+            && let Ok(rd) = std::fs::read_dir(&p)
+        {
+            for e in rd.flatten() {
+                stack.push(e.path());
             }
         }
         out.push(p);
