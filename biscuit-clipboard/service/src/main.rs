@@ -241,11 +241,11 @@ async fn apply_watcher_event(
                 return true;
             }
             let mut history = state.history.lock().await;
-            let summary = history
-                .insert(formats)
-                .map(biscuit_clipboard::api_types::EntrySummary::from);
+            let (inserted, evicted) = history.insert(formats);
+            let summary = inserted.map(biscuit_clipboard::api_types::EntrySummary::from);
             let history_len = history.len();
             drop(history);
+            api::cleanup_evicted_entries(&state.storage, evicted);
 
             if let Some(summary) = summary {
                 debug!(entries = history_len, "history: inserted new entry");

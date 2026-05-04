@@ -214,7 +214,8 @@ async fn get_history(
 }
 
 async fn delete_history(State(state): State<SharedState>) -> Response {
-    state.history.lock().await.clear();
+    let evicted = state.history.lock().await.clear();
+    cleanup_evicted_entries(&state.storage, evicted);
     empty_response(StatusCode::NO_CONTENT)
 }
 
@@ -438,11 +439,13 @@ async fn set_content(
     }
 
     let mut history = state.history.lock().await;
-    let (id, broadcast_payload) = match history.insert(vec![format]) {
+    let (inserted, evicted) = history.insert(vec![format]);
+    let (id, broadcast_payload) = match inserted {
         Some(entry) => (entry.id.clone(), Some(EntrySummary::from(entry))),
         None => (EntryId::new("duplicate"), None),
     };
     drop(history);
+    cleanup_evicted_entries(&state.storage, evicted);
 
     if let Some(summary) = broadcast_payload {
         // Send is best-effort: if there are no subscribers (no active
@@ -469,6 +472,17 @@ fn write_format_to_backend(
                 .map_err(|e| e.to_string())
         }
         ClipboardFormat::Files(files) => backend.set_files(files).map_err(|e| e.to_string()),
+    }
+}
+
+/// Delete any spilled image files belonging to evicted history entries.
+pub fn cleanup_evicted_entries(storage: &Storage, evicted: Vec<ClipboardEntry>) {
+    for entry in evicted {
+        for fmt in &entry.formats {
+            if let ClipboardFormat::Image(img) = fmt {
+                let _ = storage.cleanup_spilled(img);
+            }
+        }
     }
 }
 
@@ -1898,6 +1912,176 @@ mod tests {
             }
         }
         out
+    }
+
+    fn test_app_with_spill_and_max(threshold: usize, max_entries: usize) -> (Router, TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new()
+            .unwrap()
+            .with_cache_dir(dir.path().to_path_buf())
+            .with_spill_threshold(threshold);
+        let state = Arc::new(AppState {
+            history: Mutex::new(History::new().with_max_entries(max_entries)),
+            storage,
+            clipboard: Arc::new(MockClipboard::default()),
+            watcher_status: Arc::new(RwLock::new(SupervisorStatus::Running)),
+            events_tx: AppState::new_events_channel(),
+        });
+        (router(state), dir)
+    }
+
+    // -------------------------------------------------------------------
+    // Phase 3: Spilled files must be cleaned up when history entries expire
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_spilled_file_removed_on_eviction() {
+        let (app, dir) = test_app_with_spill_and_max(10, 2);
+
+        let large: Vec<u8> = (0..=255u8).cycle().take(200).collect();
+        let body = serde_json::json!({
+            "content_type": "image",
+            "data": b64(&large),
+            "width": 10u32,
+            "height": 10u32,
+        });
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Find the spilled .dat file.
+        let dat_path = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.extension().is_some_and(|e| e == "dat"))
+            .expect("expected a spilled .dat file");
+        assert!(dat_path.exists());
+
+        // Insert two text entries to evict the image (max_entries=2).
+        for i in 0..2 {
+            let resp = send_request(
+                &app,
+                Request::builder()
+                    .method("POST")
+                    .uri("/set")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"content_type":"text","data":"evict-{i}"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+
+        assert!(!dat_path.exists(), "spilled file must be removed on eviction");
+    }
+
+    #[tokio::test]
+    async fn test_spilled_file_removed_on_delete_history() {
+        let (app, dir) = test_app_with_spill_and_max(10, 100);
+
+        let large: Vec<u8> = (0..=255u8).cycle().take(200).collect();
+        let body = serde_json::json!({
+            "content_type": "image",
+            "data": b64(&large),
+            "width": 10u32,
+            "height": 10u32,
+        });
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let dat_path = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.extension().is_some_and(|e| e == "dat"))
+            .expect("expected a spilled .dat file");
+        assert!(dat_path.exists());
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("DELETE")
+                .uri("/history")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        assert!(
+            !dat_path.exists(),
+            "spilled file must be removed on delete_history"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_spilled_file_survives_when_entry_still_in_history() {
+        let (app, dir) = test_app_with_spill_and_max(10, 100);
+
+        let large: Vec<u8> = (0..=255u8).cycle().take(200).collect();
+        let body = serde_json::json!({
+            "content_type": "image",
+            "data": b64(&large),
+            "width": 10u32,
+            "height": 10u32,
+        });
+
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let dat_path = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.extension().is_some_and(|e| e == "dat"))
+            .expect("expected a spilled .dat file");
+        assert!(dat_path.exists());
+
+        // Insert a single text entry — image is still in history.
+        let resp = send_request(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri("/set")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"content_type":"text","data":"keep"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        assert!(
+            dat_path.exists(),
+            "spilled file must survive when entry is still in history"
+        );
     }
 
     // -------------------------------------------------------------------
