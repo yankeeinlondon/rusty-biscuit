@@ -43,4 +43,5 @@ pub use crate::utils::escape_codes::{
     strip_color_codes, strip_cursor_movement_codes, strip_escape_codes, strip_osc8_links,
     strip_query_codes,
 };
-pub use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
+pub use crate::utils::layout::{Alignment, Layout, Margin, RowFill};
+pub use crate::utils::wrap_policy::WordWrap;

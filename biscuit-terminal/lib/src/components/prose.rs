@@ -6,7 +6,8 @@ use crate::{
     components::renderable::Renderable,
     terminal::Terminal,
     utils::color::{Tailwind, WEB_COLOR_LOOKUP, WebColor},
-    utils::layout::{Layout, Margin, WordWrap},
+    utils::layout::{Layout, Margin},
+    utils::wrap_policy::WordWrap,
 };
 
 /// Action returned by [`block_tag_to_escape`] describing how a block tag

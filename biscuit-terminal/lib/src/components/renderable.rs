@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::terminal::Terminal;
-use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
+use crate::utils::layout::{Alignment, Layout, Margin, RowFill};
+use crate::utils::wrap_policy::WordWrap;
 
 /// A struct or enum which implements the **Renderable** trait
 /// can be reduced down to a string designed to be displayed

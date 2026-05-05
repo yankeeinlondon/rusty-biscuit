@@ -6,7 +6,8 @@ use crate::{
     terminal::Terminal,
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
-        layout::{Layout, WordWrap},
+        layout::Layout,
+        wrap_policy::WordWrap,
     },
 };
 

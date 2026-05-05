@@ -1,4 +1,5 @@
-use crate::utils::layout::{Alignment, WordWrap};
+use crate::utils::layout::Alignment;
+use crate::utils::wrap_policy::WordWrap;
 
 /// Vertical alignment for table cells with multi-line content.
 ///

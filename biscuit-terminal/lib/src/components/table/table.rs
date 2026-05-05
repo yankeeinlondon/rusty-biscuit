@@ -4,7 +4,8 @@ use crate::{
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
-        layout::{Alignment, Layout, RowFill, WordWrap},
+        layout::{Alignment, Layout, RowFill},
+        wrap_policy::WordWrap,
     },
 };
 use thiserror::Error;
