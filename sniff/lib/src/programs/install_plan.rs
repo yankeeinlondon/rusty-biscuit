@@ -13,7 +13,7 @@ use crate::programs::installer::{
     InstallOptions, InstallResult, astral_installer_url, execute_install, method_available,
 };
 use crate::programs::schema::ProgramMetadata;
-use crate::programs::types::InstallationMethod;
+use crate::programs::contract::InstallationMethod;
 
 /// Machine-readable reason an install plan option was selected or rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -531,7 +531,7 @@ mod fact_tests {
     use crate::os::OsType;
     use crate::programs::enums::OsPackageManager;
     use crate::programs::host_capability::HostCapabilities;
-    use crate::programs::types::InstallationMethod;
+    use crate::programs::contract::InstallationMethod;
 
     fn host_with_brew() -> HostCapabilities {
         let json = r#"{"brew": true}"#;
@@ -852,7 +852,7 @@ mod selection_tests {
     use crate::programs::schema::{
         ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy,
     };
-    use crate::programs::types::InstallationMethod;
+    use crate::programs::contract::InstallationMethod;
 
     struct FakeProgram {
         info: &'static ProgramInfo,
