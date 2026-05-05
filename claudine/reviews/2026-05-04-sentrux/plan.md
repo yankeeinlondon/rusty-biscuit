@@ -2,7 +2,7 @@
 title: Sentrux Quality Remediation Plan — claudine package area
 agent: claude
 phases: 6
-start_phase: 1
+start_phase: 4
 created: '2026-05-04T15:47:23'
 source_review: review-1.md
 quality_signal_baseline: 0.5372
@@ -194,6 +194,38 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/cli/src/argv/mod.rs
+  - claudine/cli/src/argv/flag_surface.rs
+  - claudine/cli/src/argv/rule1_provider_bool.rs
+  - claudine/cli/src/argv/rule2_canonicalize.rs
+  - claudine/cli/src/argv/rule3_separator.rs
+  - claudine/cli/src/argv/rule4_help_hoist.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/structured.rs
+  - claudine/cli/src/commands/wrap/composition/summary.rs
+  - claudine/cli/src/commands/wrap/composition/inline_guards.rs
+  - claudine/cli/src/commands/wrap/composition/legacy_goose.rs
+  - claudine/cli/src/completion/composition/mod.rs
+  - claudine/cli/src/completion/composition/compose.rs
+  - claudine/cli/src/completion/composition/inline_compose.rs
+  - claudine/cli/src/completion/composition/sequence.rs
+  - claudine/cli/src/completion/composition/magic_at.rs
+  - claudine/cli/src/completion/composition/setter_value.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/mod.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/masked_input.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/redaction.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/test_connection.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/routes/mod.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/routes/discord_bot.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/routes/discord_webhook.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/routes/signal.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/routes/slack_bot.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/routes/slack_webhook.rs
+  - claudine/cli/src/commands/config_tui/tabs/messenger/routes/whatsapp.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - claudine
   - claudine-cli
