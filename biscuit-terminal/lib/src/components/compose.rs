@@ -209,7 +209,7 @@ impl Compose {
 mod tests {
     use super::*;
     use crate::components::inline_content::InlineContent;
-    use crate::components::table::table::TableColumn;
+    use crate::components::table::TableColumn;
     use crate::components::text_block::TextBlock;
     use crate::utils::layout::{Alignment, Margin, RowFill};
     use crate::utils::wrap_policy::WordWrap;
