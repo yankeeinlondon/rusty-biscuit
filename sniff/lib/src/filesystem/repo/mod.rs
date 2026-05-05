@@ -1,4 +1,10 @@
+pub mod cargo;
 pub mod detection;
+pub mod go;
+pub(crate) mod manifest_index;
+pub mod npm;
+pub mod nx_turbo;
+pub mod python;
 pub mod types;
 
 pub use types::{
