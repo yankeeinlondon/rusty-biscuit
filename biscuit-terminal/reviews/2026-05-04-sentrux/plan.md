@@ -35,10 +35,29 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - .opencode/skill/biscuit-terminal/SKILL.md
 source_files_during_phase_2:
-  - biscuit-terminal/cli/src/commands.rs
+  - biscuit-terminal/cli/src/commands/mod.rs
+  - biscuit-terminal/cli/src/commands/shared.rs
+  - biscuit-terminal/cli/src/commands/color_parse.rs
+  - biscuit-terminal/cli/src/commands/image.rs
+  - biscuit-terminal/cli/src/commands/mermaid.rs
+  - biscuit-terminal/cli/src/commands/flowchart.rs
+  - biscuit-terminal/cli/src/commands/quadrant.rs
+  - biscuit-terminal/cli/src/commands/pie.rs
+  - biscuit-terminal/cli/src/commands/git_graph.rs
+  - biscuit-terminal/cli/src/commands/timeline.rs
+  - biscuit-terminal/cli/src/commands/state_diagram.rs
+  - biscuit-terminal/cli/src/commands/erd.rs
+  - biscuit-terminal/cli/src/commands/graph.rs
+  - biscuit-terminal/cli/src/commands/prose.rs
+  - biscuit-terminal/cli/src/commands/quote.rs
+  - biscuit-terminal/cli/src/commands/list.rs
+  - biscuit-terminal/cli/src/commands/pad.rs
+  - biscuit-terminal/cli/src/commands/columns.rs
+  - biscuit-terminal/cli/src/commands/dir.rs
+  - biscuit-terminal/cli/src/commands/xy_chart.rs
   - biscuit-terminal/cli/src/main.rs
   - biscuit-terminal/cli/src/args.rs
-  - biscuit-terminal/cli/src/output.rs
+  - biscuit-terminal/cli/src/types.rs
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
