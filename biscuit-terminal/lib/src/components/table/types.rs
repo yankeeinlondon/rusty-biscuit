@@ -152,7 +152,7 @@ impl ColumnType {
 /// ```
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::TableColumn;
+/// use biscuit_terminal::components::table::TableColumn;
 /// use biscuit_terminal::components::table::types::{Currency, ColumnType};
 ///
 /// // Create a currency column for prices
