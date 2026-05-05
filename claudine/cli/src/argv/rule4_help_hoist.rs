@@ -71,7 +71,6 @@ pub(crate) fn hoist_composition_help(argv: Vec<OsString>) -> Vec<OsString> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::ffi::OsString;
 
     fn argv(tokens: &[&str]) -> Vec<OsString> {
