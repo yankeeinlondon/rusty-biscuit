@@ -1,6 +1,7 @@
 ---
 root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area}}"
+baseline: "{{ctx.repo_root}}/{{ctx.current_package_area}}/.sentrux/baseline.json"
 start: 
     stderr: "Starting a [Sentrux](https://sentrux.dev) based review on the {{area}} package area"
 
@@ -17,7 +18,7 @@ Evaluate the package area "{{area}}" of the Rusty Biscuit monorepo (directory: "
 4. Equality - _are node properties concentrated?_ -- from **Gini 1912**
 5. Redundancy - _are there unnecessary nodes?_ -- from **Kolmogorov**
 
-> **Note:** the sentrux CLI has been run to create a baseline measurement which can be found at "{{ctx.repo_root}}/{{ctx.current_package_area}}/.sentrux/baseline.json"
+> **Note:** the sentrux CLI has been run to create a baseline measurement which can be found at "{{baseline}}"
 
 ## Document Structure
 

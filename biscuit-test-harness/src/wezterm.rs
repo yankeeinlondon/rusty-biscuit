@@ -16,11 +16,15 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{CapturedFrame, SpawnVisibility, TerminalHarness, wait_for_prompt};
+use super::{
+    CapturedFrame, SpawnVisibility, TerminalHarness, wait_for_prompt,
+    run_with_timeout, run_with_stdin_timeout,
+    SPAWN_TIMEOUT, SEND_TIMEOUT, CAPTURE_TIMEOUT, QUERY_TIMEOUT, CLEANUP_TIMEOUT,
+};
 
 /// Workspace name used when [`SpawnVisibility::Background`] is in
 /// effect. Picked to be distinct from any name a developer is likely
@@ -106,11 +110,11 @@ impl WezTermHarness {
     /// any error (best effort).
     fn kill_pane(&mut self) {
         if let Some(id) = self.pane_id.take() {
-            let _ = Command::new("wezterm")
-                .args(["cli", "kill-pane", "--pane-id", &id])
+            let mut cmd = Command::new("wezterm");
+            cmd.args(["cli", "kill-pane", "--pane-id", &id])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+                .stderr(Stdio::null());
+            let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
         }
     }
 
@@ -136,9 +140,9 @@ impl WezTermHarness {
     /// when the active pane id is not present in its output.
     pub fn pane_size(&self) -> io::Result<PaneSize> {
         let id = self.pane_id();
-        let out = Command::new("wezterm")
-            .args(["cli", "list", "--format", "json"])
-            .output()?;
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "list", "--format", "json"]);
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli list failed: {}",
@@ -211,9 +215,9 @@ impl WezTermHarness {
         let title = self.unique_window_title();
 
         // 1. Stamp a unique title we can target precisely.
-        let out = Command::new("wezterm")
-            .args(["cli", "set-tab-title", "--pane-id", id, &title])
-            .output()?;
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "set-tab-title", "--pane-id", id, &title]);
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli set-tab-title failed: {}",
@@ -222,9 +226,9 @@ impl WezTermHarness {
         }
 
         // 2. Activate intra-WezTerm pane focus.
-        let out = Command::new("wezterm")
-            .args(["cli", "activate-pane", "--pane-id", id])
-            .output()?;
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "activate-pane", "--pane-id", id]);
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli activate-pane failed: {}",
@@ -235,11 +239,11 @@ impl WezTermHarness {
         // 3. Raise *our* window via System Events (macOS only).
         #[cfg(target_os = "macos")]
         {
-            let _ = Command::new("osascript")
-                .args(["-e", "tell application \"WezTerm\" to activate"])
+            let mut cmd = Command::new("osascript");
+            cmd.args(["-e", "tell application \"WezTerm\" to activate"])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+                .stderr(Stdio::null());
+            let _ = run_with_timeout(&mut cmd, QUERY_TIMEOUT);
             std::thread::sleep(Duration::from_millis(150));
 
             let script = format!(
@@ -278,10 +282,9 @@ impl WezTermHarness {
                        end tell
                    end timeout"#,
             );
-            let activate = Command::new("osascript")
-                .args(["-e", &script])
-                .stderr(Stdio::piped())
-                .output()?;
+            let mut cmd = Command::new("osascript");
+            cmd.args(["-e", &script]).stderr(Stdio::piped());
+            let activate = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
             if !activate.status.success() {
                 return Err(io::Error::other(format!(
                     "System Events AXRaise of WezTerm window {title:?} failed (is \
@@ -363,7 +366,7 @@ impl TerminalHarness for WezTermHarness {
         // attributes only if SGR was actually rendered into cells.
         super::apply_color_forcing_env(&mut cmd);
 
-        let out = cmd.output()?;
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli spawn failed: {}",
@@ -397,7 +400,7 @@ impl TerminalHarness for WezTermHarness {
         for a in args {
             cmd.arg(a);
         }
-        let out = cmd.output()?;
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli spawn failed: {}",
@@ -415,16 +418,9 @@ impl TerminalHarness for WezTermHarness {
 
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
         let id = self.pane_id().to_string();
-        let mut child = Command::new("wezterm")
-            .args(["cli", "send-text", "--pane-id", &id, "--no-paste"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(bytes)?;
-        }
-        let out = child.wait_with_output()?;
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "send-text", "--pane-id", &id, "--no-paste"]);
+        let out = run_with_stdin_timeout(&mut cmd, bytes, SEND_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli send-text failed: {}",
@@ -436,9 +432,9 @@ impl TerminalHarness for WezTermHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let id = self.pane_id().to_string();
-        let out = Command::new("wezterm")
-            .args(["cli", "get-text", "--pane-id", &id, "--escapes"])
-            .output()?;
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "get-text", "--pane-id", &id, "--escapes"]);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "wezterm cli get-text failed: {}",

@@ -210,6 +210,40 @@ When the developer has many WezTerm windows already open (a common reality, not 
 5. **Click into the window via cliclick (`c:X,Y`).** AXRaise alone often does NOT transfer keyWindow when the test runner lives in a different app — only a real OS click reliably forces keyWindow assignment across applications.
 6. Combine the click with the actual key injection in **one batched cliclick invocation** (`cliclick -w 100 c:X,Y kd:ctrl`). Splitting into separate processes leaves a focus-drift window wide enough on a busy desktop for events to route to the wrong window.
 
+##### Restoring focus after a test spawns a GUI window (macOS)
+
+A common harness pattern: snapshot the frontmost app *before* spawning the test window, then re-activate that app afterwards so the developer keeps working without animations or accidental keystrokes into the test window.
+
+The naive implementation is a trap:
+
+```applescript
+tell application "System Events" to set prevApp to name of first process whose frontmost is true
+-- ... spawn test window ...
+tell application prevApp to activate    -- ⚠ pops "Choose Application" dialog
+```
+
+`tell application "<name>"` resolves `<name>` through LaunchServices **by `.app` bundle name**. But `name of process` from System Events returns the **executable / process name**, which diverges from the bundle name whenever `CFBundleExecutable != CFBundleName`. When the strings differ, LaunchServices cannot find a matching bundle and pops a *modal* "Choose Application — Where is X?" dialog that blocks the test until a human dismisses it. In CI it deadlocks, on a developer machine it interrupts every run.
+
+Apps that hit this in practice:
+
+| App | Process name | Bundle name |
+|-----|--------------|-------------|
+| WezTerm | `wezterm-gui` | `WezTerm` |
+| VS Code | `Code Helper` (or `Electron`) | `Visual Studio Code` |
+| Slack, Discord, Notion, Obsidian, … | `<App> Helper` / `Electron` | `<App>` |
+
+**Fix: re-activate via System Events.** It addresses live processes by process name and never goes through LaunchServices:
+
+```applescript
+if prevApp is not "" and prevApp is not "Terminal" then
+    try
+        tell application "System Events" to set frontmost of (first process whose name is prevApp) to true
+    end try
+end if
+```
+
+Symptom-driven debug recipe: if a test suddenly opens a "Choose Application — Where is X?" dialog, grep the harness for `tell application` calls whose target string came from `name of … process …`. The fix is almost always to switch to the `System Events`-mediated form above.
+
 ##### Parent-app vs spawned-app
 
 If the cargo test runs in WezTerm and spawns more WezTerm windows, the parent and child windows belong to the same NSApplication and compete for keyWindow. AXRaise + activate is window-ambiguous in that scenario.

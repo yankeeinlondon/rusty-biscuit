@@ -495,7 +495,7 @@ impl GitRepo {
     ) -> std::cell::Ref<'_, HashMap<git2::Oid, Vec<RefDecoration>>> {
         // If not yet computed, compute and cache
         if self.ref_decorations.borrow().is_none() {
-            let decorations = super::detection::collect_ref_decorations(&self.repo);
+            let decorations = super::discovery::collect_ref_decorations(&self.repo);
             *self.ref_decorations.borrow_mut() = Some(decorations);
         }
         std::cell::Ref::map(self.ref_decorations.borrow(), |opt| opt.as_ref().unwrap())
@@ -561,7 +561,7 @@ impl GitRepo {
 
     /// Organization and repository name parsed from the preferred remote URL.
     pub fn org_and_repo(&self) -> (Option<String>, Option<String>) {
-        let remotes = super::detection::get_remotes(&self.repo, false);
+        let remotes = super::remote_refresh::get_remotes(&self.repo, false);
         preferred_remote(&remotes)
             .and_then(|r| r.url.as_deref())
             .map(parse_org_repo)
@@ -570,20 +570,20 @@ impl GitRepo {
 
     /// File-level working tree status (staged, modified, untracked).
     pub fn file_changes(&self) -> Result<Vec<FileChange>> {
-        let (_status, changes) = super::detection::get_repo_status_with_changes(&self.repo, false)?;
+        let (_status, changes) = super::status::get_repo_status_with_changes(&self.repo, false)?;
         Ok(changes)
     }
 
     /// Aggregated working tree status.
     pub fn repo_status(&self) -> Result<RepoStatus> {
-        let (status, _changes) = super::detection::get_repo_status_with_changes(&self.repo, false)?;
+        let (status, _changes) = super::status::get_repo_status_with_changes(&self.repo, false)?;
         Ok(status)
     }
 
     /// Recent commits from HEAD.
     pub fn recent_commits(&self, count: usize) -> Vec<CommitInfo> {
         let decorations = self.ref_decorations();
-        super::detection::get_recent_commits_with_decorations(
+        super::discovery::get_recent_commits_with_decorations(
             &self.repo,
             count,
             Some(&*decorations),
@@ -592,29 +592,29 @@ impl GitRepo {
 
     /// Configured remotes.
     pub fn remotes(&self, include_details: bool) -> Vec<RemoteInfo> {
-        super::detection::get_remotes(&self.repo, include_details)
+        super::remote_refresh::get_remotes(&self.repo, include_details)
     }
 
     /// Linked worktrees.
     pub fn worktrees(&self) -> HashMap<String, WorktreeInfo> {
-        super::detection::get_worktrees(&self.repo)
+        super::remote_refresh::get_worktrees(&self.repo)
     }
 
     /// Git user configuration.
     pub fn config(&self) -> GitConfig {
-        super::detection::get_git_config(&self.repo)
+        super::remote_refresh::get_git_config(&self.repo)
     }
 
     /// Local branch information.
     pub fn branches(&self) -> Vec<LocalBranchInfo> {
         let current = self.current_branch();
-        super::detection::get_local_branches(&self.repo, current.as_deref())
+        super::remote_refresh::get_local_branches(&self.repo, current.as_deref())
     }
 
     /// Per-remote tracking status (ahead/behind).
     pub fn tracking_status(&self) -> Vec<RemoteTrackingStatus> {
         let current = self.current_branch();
-        super::detection::get_tracking_status(&self.repo, current.as_deref())
+        super::remote_refresh::get_tracking_status(&self.repo, current.as_deref())
     }
 
     /// Full detection — equivalent to `detect_git()` but reuses
@@ -650,20 +650,20 @@ impl GitRepo {
         let current_branch = self.current_branch();
 
         if request.refresh_remote_tracking {
-            super::detection::refresh_remote_tracking_refs(&self.repo, 2);
+            super::remote_refresh::refresh_remote_tracking_refs(&self.repo, 2);
         }
 
         let mut recent = if request.commit_count > 0 {
-            super::detection::get_recent_commits(&self.repo, request.commit_count)
+            super::discovery::get_recent_commits(&self.repo, request.commit_count)
         } else {
             Vec::new()
         };
 
         let (mut status, file_changes) = if request.include_file_changes {
-            super::detection::get_repo_status_with_changes(&self.repo, request.include_file_diffs)?
+            super::status::get_repo_status_with_changes(&self.repo, request.include_file_diffs)?
         } else {
             let (is_dirty, staged, unstaged, untracked) =
-                super::detection::get_repo_status_counts_detailed(&self.repo);
+                super::status::get_repo_status_counts_detailed(&self.repo);
             let status = RepoStatus {
                 is_dirty,
                 staged_count: staged,
@@ -677,22 +677,24 @@ impl GitRepo {
         };
 
         let remotes =
-            super::detection::get_remotes(&self.repo, request.include_remote_branch_details);
+            super::remote_refresh::get_remotes(&self.repo, request.include_remote_branch_details);
 
         let worktrees = if request.include_worktrees {
-            super::detection::get_worktrees(&self.repo)
+            super::remote_refresh::get_worktrees(&self.repo)
         } else {
             HashMap::new()
         };
 
-        let config = super::detection::get_git_config(&self.repo);
-        let branches = super::detection::get_local_branches(&self.repo, current_branch.as_deref());
-        let tracking = super::detection::get_tracking_status(&self.repo, current_branch.as_deref());
+        let config = super::remote_refresh::get_git_config(&self.repo);
+        let branches =
+            super::remote_refresh::get_local_branches(&self.repo, current_branch.as_deref());
+        let tracking =
+            super::remote_refresh::get_tracking_status(&self.repo, current_branch.as_deref());
 
         if request.refresh_remote_tracking {
-            status.is_behind = super::detection::summarize_behind_status(&tracking);
+            status.is_behind = super::remote_refresh::summarize_behind_status(&tracking);
             if request.include_commit_remote_containment {
-                super::detection::populate_recent_commit_remotes(
+                super::remote_refresh::populate_recent_commit_remotes(
                     &self.repo,
                     &mut recent,
                     request.max_remote_branches,

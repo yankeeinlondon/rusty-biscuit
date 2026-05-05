@@ -7,7 +7,7 @@
 
 use criterion::{Criterion, black_box};
 use sniff::ProgramsInfo;
-use sniff::programs::find_program::ExecutableIndex;
+use sniff::executable_index::ExecutableIndex;
 use sniff::services::detect_services;
 
 use crate::support::util;

@@ -25,7 +25,7 @@ use chrono::{DateTime, Duration, Local, NaiveDate};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
-use sniff::filesystem::blast_radius::{is_documentation_path, is_source_code_path};
+use sniff::filesystem::path_kind::{is_documentation_path, is_source_code_path};
 use sniff::filesystem::git::ConventionalCommit;
 use sniff::filesystem::git::recent_commits::{CommitDesc, CommitDescSet, CommitFileChange};
 
@@ -268,7 +268,7 @@ fn file_url(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sniff::filesystem::git::detection::DeltaKind;
+    use sniff::filesystem::git::discovery::DeltaKind;
     use std::path::PathBuf;
 
     fn change(path: &str) -> CommitFileChange {

@@ -60,7 +60,7 @@ test *args="":
 
 # Run only Level-2 real-terminal tests
 test-l2 *args="":
-    @cargo test -p biscuit-terminal-cli --test level2_cursor_and_hygiene --test level2_diagrams --test level2_image --test level2_prose_styling {{ args }}
+    @cargo test -p biscuit-terminal-cli --test level2_cursor_and_hygiene --test level2_diagrams --test level2_image --test level2_prose_styling --test level2_apple_terminal_prose {{ args }}
 
 # Lint both the library and CLI
 lint:

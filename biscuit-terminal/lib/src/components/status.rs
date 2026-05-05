@@ -8,7 +8,8 @@ use crate::components::renderable::Renderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
 use crate::utils::color::{Color, Tailwind, TailwindColorWrapper};
-use crate::utils::layout::{Layout, RenderableWrapper, WordWrap};
+use crate::utils::layout::{Layout, RenderableWrapper};
+use crate::utils::wrap_policy::WordWrap;
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
 
