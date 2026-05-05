@@ -97,12 +97,26 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
-  - biscuit-terminal/lib/src/components/filesystem.rs
-  - biscuit-terminal/lib/src/components/table/table.rs
   - biscuit-terminal/lib/src/components/table/mod.rs
-  - biscuit-terminal/lib/src/components/horizontal_rule.rs
-  - biscuit-terminal/lib/src/components/mod.rs
-docs_updated_during_phase_4: []
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/components/table/types.rs
+  - biscuit-terminal/lib/src/components/table/cell.rs
+  - biscuit-terminal/lib/src/components/table/column.rs
+  - biscuit-terminal/lib/src/components/table/width.rs
+  - biscuit-terminal/lib/src/components/filesystem/mod.rs
+  - biscuit-terminal/lib/src/components/filesystem/error.rs
+  - biscuit-terminal/lib/src/components/filesystem/icons.rs
+  - biscuit-terminal/lib/src/components/filesystem/tree_chars.rs
+  - biscuit-terminal/lib/src/components/filesystem/tree_node.rs
+  - biscuit-terminal/lib/src/components/filesystem/metrics.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/style.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/browser.rs
+  - biscuit-terminal/lib/src/components/compose.rs
+  - biscuit-terminal/lib/src/prelude.rs
+  - biscuit-terminal/lib/examples/table_showcase.rs
+docs_updated_during_phase_4:
+  - biscuit-terminal/lib/src/components/table/README.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
 source_files_during_phase_5:
