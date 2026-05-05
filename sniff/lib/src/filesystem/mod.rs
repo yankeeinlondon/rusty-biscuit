@@ -15,6 +15,7 @@ pub mod formatting;
 pub mod git;
 pub mod just;
 pub mod languages;
+pub mod path_kind;
 pub mod repo;
 mod system_view;
 
