@@ -178,9 +178,8 @@ async fn process_single_provider(
 struct ProcessingResult {
     summary: GenerationSummary,
     all_model_ids: Vec<String>,
-    /// Raw provider-native metadata keyed by unprefixed model ID.
-    #[allow(dead_code)]
-    raw_metadata: HashMap<String, serde_json::Value>,
+    /// Raw provider-native metadata from OpenRouter, keyed by model ID.
+    openrouter_raw: HashMap<String, serde_json::Value>,
 }
 
 /// Process all providers.
@@ -192,7 +191,7 @@ async fn process_providers(
 ) -> ProcessingResult {
     let mut summary = GenerationSummary::default();
     let mut all_model_ids = Vec::new();
-    let mut raw_metadata = HashMap::new();
+    let mut openrouter_raw = HashMap::new();
 
     for provider in providers {
         let Some(api_key) = api_keys.get(&provider) else {
@@ -214,7 +213,9 @@ async fn process_providers(
                 info!("Generated {} models for {:?}", result.model_count, provider);
                 summary.succeeded.push((provider, result.model_count));
                 all_model_ids.extend(result.model_ids);
-                raw_metadata.extend(result.raw_metadata);
+                if provider == Provider::OpenRouter {
+                    openrouter_raw = result.raw_metadata;
+                }
             }
             Err(e) => {
                 warn!("Skipping {:?}: {}", provider, e);
@@ -226,7 +227,7 @@ async fn process_providers(
     ProcessingResult {
         summary,
         all_model_ids,
-        raw_metadata,
+        openrouter_raw,
     }
 }
 
@@ -302,33 +303,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Process providers
     let result = process_providers(providers, &api_keys, &output_dir, cli.dry_run).await;
 
-    // Generate metadata lookup table
+    // Generate metadata lookup table with merge logic
     let mut metadata_gen = MetadataGenerator::new();
     let mut matched_count = 0;
 
     for model_id in &result.all_model_ids {
         let parsera_data = find_parsera_metadata(model_id, &parsera_index);
-        if parsera_data.is_some() {
+
+        let provider_native = result
+            .openrouter_raw
+            .get(model_id)
+            .and_then(|v| provider_metadata::parse_provider_metadata(Provider::OpenRouter, v));
+
+        let is_openrouter = provider_native.is_some();
+        let merged = MetadataGenerator::merge_metadata(provider_native, parsera_data);
+
+        if merged.is_some() {
             matched_count += 1;
         }
-        metadata_gen.register(model_id.clone(), parsera_data.cloned());
+
+        metadata_gen.register(model_id.clone(), merged.clone());
+
+        if is_openrouter
+            && let Some(rich_meta) = merged
+        {
+            metadata_gen.register_openrouter(model_id.clone(), rich_meta);
+        }
     }
 
     info!(
-        "Matched {}/{} models with Parsera metadata",
+        "Matched {}/{} models with metadata",
         matched_count,
         result.all_model_ids.len()
     );
 
-    // Write metadata file
+    // Write compact metadata file
+    let metadata_code = metadata_gen.generate();
     if !cli.dry_run {
-        let metadata_code = metadata_gen.generate();
         let metadata_path = output_dir.join("metadata_generated.rs");
         write_atomic(&metadata_path, &metadata_code)?;
         info!("Wrote metadata to {}", metadata_path.display());
     } else {
         println!("\n--- Metadata ({} entries) ---", matched_count);
-        println!("{}", metadata_gen.generate());
+        println!("{}", metadata_code);
+    }
+
+    // Write rich OpenRouter metadata file
+    let openrouter_code = metadata_gen.generate_openrouter();
+    if !cli.dry_run {
+        let openrouter_path = output_dir.join("metadata_openrouter_generated.rs");
+        write_atomic(&openrouter_path, &openrouter_code)?;
+        info!(
+            "Wrote OpenRouter metadata to {}",
+            openrouter_path.display()
+        );
+    } else {
+        println!(
+            "\n--- OpenRouter Metadata ({} entries) ---",
+            metadata_gen.openrouter_count()
+        );
+        println!("{}", openrouter_code);
     }
 
     result.summary.print();
