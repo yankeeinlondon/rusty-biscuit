@@ -23,6 +23,15 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - unchained-ai/gen/src/provider_metadata/openrouter.rs
+  - unchained-ai/gen/src/provider_metadata/mod.rs
+  - unchained-ai/gen/src/main.rs
+  - unchained-ai/lib/src/models/model_pricing.rs
+  - unchained-ai/lib/src/rigging/providers/models/mod.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Execution Plan - Better Model Metadata
@@ -77,13 +86,13 @@ The goal is to stop discarding rich model metadata (pricing, architecture, param
 ## Phase 3: Provider-Specific Metadata Parsing (unchained-ai-gen)
 **Goal**: Implement the logic to parse and route provider-native metadata.
 
-- [ ] **Step 3.1: Create OpenRouter parser**
+- [x] **Step 3.1: Create OpenRouter parser**
     - Create `unchained-ai/gen/src/provider_metadata/openrouter.rs`.
     - Implement `parse_openrouter_model(&serde_json::Value) -> ProviderModelMetadata`.
-- [ ] **Step 3.2: Create metadata dispatcher**
+- [x] **Step 3.2: Create metadata dispatcher**
     - Create `unchained-ai/gen/src/provider_metadata/mod.rs`.
     - Implement a dispatcher that routes to the OpenRouter parser based on `Provider` type.
-- [ ] **Step 3.3: Update generator `main.rs`**
+- [x] **Step 3.3: Update generator `main.rs`**
     - Update `ProviderResult` struct to include a `HashMap<String, serde_json::Value>` for raw metadata.
     - Update the fetch loop to store raw metadata alongside model IDs.
 
