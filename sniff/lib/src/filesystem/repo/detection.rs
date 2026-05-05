@@ -1,3 +1,4 @@
+use crate::package::{DependencyEntry, DependencyKind};
 use crate::{Result, SniffError};
 use biscuit_file::serde_yaml_ng;
 use biscuit_file::toml_crate;
