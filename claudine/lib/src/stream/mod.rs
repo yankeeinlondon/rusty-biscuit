@@ -1,16 +1,11 @@
 pub mod badges;
-pub mod claude_semantic;
-pub mod codex_semantic;
-pub mod gemini_semantic;
-pub mod kimi_semantic;
 pub mod logs;
-pub mod opencode_semantic;
 pub mod parser;
 pub mod path_link;
 pub mod progress;
 pub mod prompt_timing;
 pub mod protocol;
-pub mod qwen_semantic;
+pub mod providers;
 pub mod reporting;
 pub mod semantic;
 pub mod stderr;
