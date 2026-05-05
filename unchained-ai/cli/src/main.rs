@@ -37,6 +37,12 @@ enum Commands {
         #[arg(short, long)]
         platform: Option<String>,
     },
+    /// List models defined by `unchained-ai-gen`, optionally with metadata
+    Models {
+        /// Filter to a specific provider (e.g. openai, anthropic, gemini)
+        #[arg(short, long)]
+        provider: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -66,6 +72,9 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Limits { platform }) => {
             commands::limits::run(platform, cli.json).await?;
+        }
+        Some(Commands::Models { provider }) => {
+            commands::models::run(provider, cli.json, cli.verbose > 0).await?;
         }
         None => {
             Cli::command().print_help()?;

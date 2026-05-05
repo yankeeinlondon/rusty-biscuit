@@ -100,6 +100,13 @@ pub fn summary_to_event_meta_with_context(
     // Exit code
     extra.insert("exit_code".into(), Value::Number(summary.exit_code.into()));
 
+    // Exit reason (mirrors `summary.error_kind`). Present only when the
+    // summary recorded a typed termination kind (e.g. `timeout`,
+    // `step_timeout`, `billing_error`).
+    if let Some(kind) = &summary.error_kind {
+        extra.insert("exit_reason".into(), Value::String(kind.clone()));
+    }
+
     // Provider status
     if let Some(status) = &summary.provider_status {
         extra.insert("provider_status".into(), Value::String(status.clone()));

@@ -176,7 +176,7 @@ deny response with structured raw metadata:
 
 ## Public API
 
-The public surface of `claudine::services::protect` is:
+The public surface of `claudine::protect` is:
 
 - `ProtectService`
 - `ProtectRequest`

@@ -8,8 +8,8 @@ use std::io::{self, Write};
 
 use clap::Args;
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, HeightSpec, Label, TextAreaInput, TextAreaInputState,
-    run_standalone,
+    ABORTED_KIND, CANCELLED_KIND, FrameChromeConfig, HeightSpec, Label, TextAreaInput,
+    TextAreaInputState, run_standalone_with_chrome,
 };
 
 use crate::commands::text_input::LabelPositionArg;
@@ -51,11 +51,16 @@ pub fn run(
     args: TextAreaInputArgs,
     output: OutputMode,
     height: Option<HeightSpec>,
+    show_on_exit: bool,
 ) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
+    let chrome = FrameChromeConfig {
+        show_on_exit,
+        ..Default::default()
+    };
     run_with_writer(args, output, height, &mut lock, |state, height| {
-        run_standalone(TextAreaInput::new(), state, height)
+        run_standalone_with_chrome(TextAreaInput::new(), state, height, chrome)
     })
 }
 

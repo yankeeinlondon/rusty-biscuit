@@ -702,17 +702,31 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_filesystem()
             .hardware(HardwareRequest::summary().include_audio(true)),
         OutputFilter::Repo => match &repo_action {
-            Some(crate::args::RepoAction::Language) => DetectionPlan::new()
-                .without_os()
-                .without_hardware()
-                .without_network()
-                .filesystem(
-                    FilesystemRequest::new()
-                        .git(GitRequest::summary())
-                        .without_repo()
-                        .without_docs()
-                        .without_formatting(),
-                ),
+            Some(crate::args::RepoAction::Language { breakdown: true }) => {
+                DetectionPlan::new()
+                    .without_os()
+                    .without_hardware()
+                    .without_network()
+                    .filesystem(
+                        FilesystemRequest::new()
+                            .git(GitRequest::summary())
+                            .without_docs()
+                            .without_formatting(),
+                    )
+            }
+            Some(crate::args::RepoAction::Language { breakdown: false }) => {
+                DetectionPlan::new()
+                    .without_os()
+                    .without_hardware()
+                    .without_network()
+                    .filesystem(
+                        FilesystemRequest::new()
+                            .git(GitRequest::summary())
+                            .without_repo()
+                            .without_docs()
+                            .without_formatting(),
+                    )
+            }
             _ => DetectionPlan::new()
                 .without_os()
                 .without_hardware()
@@ -723,16 +737,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .without_file_inventory(),
                 ),
         },
-        OutputFilter::Language => DetectionPlan::new()
-            .without_os()
-            .without_hardware()
-            .without_network()
-            .filesystem(
-                FilesystemRequest::new()
-                    .git(GitRequest::summary())
-                    .without_docs()
-                    .without_formatting(),
-            ),
         OutputFilter::Files => DetectionPlan::new()
             .without_os()
             .without_hardware()

@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Provider;
 
-use crate::models::model_metadata::{Modality, ModelMetadata};
+use crate::models::model_metadata::{Modality, ProviderModelMetadata};
 use crate::rigging::providers::models::{
     anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
     gemini::ProviderModelGemini, groq::ProviderModelGroq, mistral::ProviderModelMistral,
@@ -29,6 +29,7 @@ pub mod zenmux;
 
 pub mod build;
 mod metadata_generated;
+pub mod metadata_openrouter_generated;
 
 /// Aggregated enumeration of all provider models.
 ///
@@ -248,7 +249,7 @@ impl ProviderModel {
     /// Metadata is fetched from the Parsera LLM Specs API at build time
     /// and includes context window, modalities, and capabilities.
     #[must_use]
-    pub fn metadata(&self) -> Option<&'static ModelMetadata> {
+    pub fn metadata(&self) -> Option<&'static ProviderModelMetadata> {
         match self {
             Self::Anthropic(m) => m.metadata(),
             Self::Deepseek(m) => m.metadata(),
@@ -388,7 +389,7 @@ mod tests {
         // This test ensures the enum variants compile and are accessible
         let _anthropic =
             ProviderModel::Anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101);
-        let _deepseek = ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__Chat);
+        let _deepseek = ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__V4__Flash);
         let _gemini = ProviderModel::Gemini(ProviderModelGemini::Gemini__2_5__Pro);
         let _groq = ProviderModel::Groq(ProviderModelGroq::Llama__3_3__70b__Versatile);
         let _mistral =
@@ -433,10 +434,10 @@ mod tests {
         assert!(meta.context_window.is_some());
         assert!(meta.context_window.unwrap() > 0);
 
-        // Test DeepSeek
-        let deepseek = ProviderModelDeepseek::Deepseek__Chat;
-        let meta = deepseek.metadata();
-        assert!(meta.is_some(), "DeepSeek Chat should have metadata");
+        // Test OpenAI O3 - a model with known metadata
+        let o3 = ProviderModelOpenAi::O3;
+        let meta = o3.metadata();
+        assert!(meta.is_some(), "OpenAI O3 should have metadata");
     }
 
     /// Test that Bespoke variants return None for metadata on individual enums.

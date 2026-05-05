@@ -549,3 +549,7 @@ For `sequence`, the report is aggregated across all steps: launches and total ex
 `--perf` is emitted unconditionally when passed, even alongside `--silent` or `--quiet`, because it is an explicit opt-in.
 
 > **Note:** `provider_api_duration` is only populated for structured-streaming providers. Legacy providers (e.g., Goose) omit this line.
+
+## Module Structure Audit (Phase 2.12)
+
+`composition/mod.rs` declares a mix of `pub mod` and `mod` (private) children. The private modules (`error`, `guardrails`, `prepare`, `resolve`, `select`, `types`) are re-exported via `pub use` where their items are part of the public API surface (e.g., `CompositionError`, `prepare_direct`, `resolve_composition_source`). This is an intentional design: the module tree is private, but the public types surface through targeted `pub use` re-exports. No widening of privacy was needed during the Phase 2 audit.

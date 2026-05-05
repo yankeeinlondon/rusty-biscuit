@@ -21,7 +21,7 @@
 use clap::{Args, ValueEnum};
 use tui_chrome::{
     ActiveChoiceColor, BorderStyle, FrameChromeConfig, HeightSpec, HotkeyDisplayMode, Margin,
-    Padding, SortOrder,
+    Orientation, Padding, SortOrder,
 };
 
 use crate::choice_normalize::NamingConvention;
@@ -174,6 +174,38 @@ pub struct ChooseChromeArgs {
     /// System Settings → Keyboard → Keyboard Shortcuts → Input Sources.
     #[arg(long, value_enum, value_name = "MODE", default_value_t = HotkeyBadgesArg::Auto)]
     pub hotkey_badges: HotkeyBadgesArg,
+
+    /// Layout direction for the option list.
+    ///
+    /// `vertical` (the default) stacks one option per row; `horizontal`
+    /// packs options left-to-right, wrapping to new rows. Horizontal
+    /// mode reserves a sub-row beneath each option for hotkey badges
+    /// when [`HotkeyBadgesArg`] is non-`never`.
+    #[arg(long, value_enum, value_name = "DIR", default_value_t = OrientationArg::Vertical)]
+    pub orientation: OrientationArg,
+}
+
+/// CLI-facing layout-orientation mirror.
+///
+/// Kept separate from [`Orientation`] so clap can render kebab-case
+/// help values without forcing the library to depend on clap.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum OrientationArg {
+    /// One option per row, stacked vertically (the default).
+    #[default]
+    Vertical,
+    /// Options packed left-to-right, wrapping to new rows.
+    Horizontal,
+}
+
+impl From<OrientationArg> for Orientation {
+    fn from(value: OrientationArg) -> Self {
+        match value {
+            OrientationArg::Vertical => Orientation::Vertical,
+            OrientationArg::Horizontal => Orientation::Horizontal,
+        }
+    }
 }
 
 /// CLI-facing hotkey badge mode.

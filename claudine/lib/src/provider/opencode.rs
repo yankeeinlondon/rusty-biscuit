@@ -45,7 +45,6 @@ use crate::mcp::inject::{McpInjector, OpenCodeInjector};
 use crate::mcp::state::Scope;
 use crate::mcp::types::McpServer;
 use crate::provider::EventSupportLevel;
-use crate::stream::opencode_semantic::OpenCodeSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
@@ -64,7 +63,7 @@ impl ProviderBehavior for OpenCodeProvider {
         sink: BoxedSemanticEventSink,
         config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(OpenCodeSemanticStreamParser::new(sink, config.model))
+        crate::stream::providers::for_provider(Provider::OpenCode, sink, config)
     }
 }
 impl McpBehavior for OpenCodeProvider {

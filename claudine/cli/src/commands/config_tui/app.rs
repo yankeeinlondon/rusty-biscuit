@@ -107,7 +107,7 @@ pub enum ModalState {
     },
     ProtectRules {
         highlighted: usize,
-        staged_rules: Box<claudine::services::protect::config::ProtectRuleToggles>,
+        staged_rules: Box<claudine::protect::config::ProtectRuleToggles>,
     },
     EditActions {
         event: claudine::events::AgenticEvent,
