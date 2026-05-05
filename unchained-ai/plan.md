@@ -32,6 +32,17 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - unchained-ai/gen/src/metadata_generator.rs
+  - unchained-ai/gen/src/main.rs
+  - unchained-ai/gen/src/provider_metadata/openrouter.rs
+  - unchained-ai/gen/src/provider_metadata/mod.rs
+  - unchained-ai/lib/src/rigging/providers/models/mod.rs
+  - unchained-ai/lib/src/rigging/providers/models/metadata_openrouter_generated.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/unchained-ai/SKILL.md
 ---
 
 # Execution Plan - Better Model Metadata
@@ -103,15 +114,15 @@ The goal is to stop discarding rich model metadata (pricing, architecture, param
 ## Phase 4: Metadata Merging and Code Generation (unchained-ai-gen)
 **Goal**: Merge data sources and emit the expanded Rust files.
 
-- [ ] **Step 4.1: Implement `merge_metadata` logic**
+- [x] **Step 4.1: Implement `merge_metadata` logic**
     - Update `unchained-ai/gen/src/metadata_generator.rs`.
     - Implement the merging logic with priority: Provider-Native > Parsera.
-- [ ] **Step 4.2: Expand compact metadata generation**
+- [x] **Step 4.2: Expand compact metadata generation**
     - Update `generate_entry` to emit the new `ProviderModelMetadata` fields (using `..Default::default()` for brevity).
-- [ ] **Step 4.3: Implement rich OpenRouter metadata generation**
+- [x] **Step 4.3: Implement rich OpenRouter metadata generation**
     - Add `generate_openrouter_entry` to `metadata_generator.rs`.
     - Create the structure for `metadata_openrouter_generated.rs` (LazyLock HashMap).
-- [ ] **Step 4.4: Wire up dual file output**
+- [x] **Step 4.4: Wire up dual file output**
     - Update `unchained-ai/gen/src/main.rs` to write both `metadata_generated.rs` and `metadata_openrouter_generated.rs`.
 
 **Validation**: Run `just generate-models` and verify both files are produced and compile.
