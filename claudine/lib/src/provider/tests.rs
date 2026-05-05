@@ -720,6 +720,12 @@ fn no_unauthorized_match_provider_in_lib() {
         // canonical surface that downstream code consumes via
         // `Provider::as_slug()` etc.
         "src/provider/methods.rs",
+        // `stream/providers/mod.rs` contains the `SemanticParser` factory
+        // function that matches on `Provider` to construct the correct
+        // provider-specific stream parser. This is an intentional
+        // per-provider dispatch site introduced by Phase 2.5 of the
+        // Sentrux quality remediation plan.
+        "src/stream/providers/mod.rs",
     ];
 
     let mut files = Vec::new();

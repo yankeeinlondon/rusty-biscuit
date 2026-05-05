@@ -47,7 +47,6 @@ use crate::mcp::inject::{CodexInjector, McpInjector};
 use crate::mcp::state::Scope;
 use crate::mcp::types::McpServer;
 use crate::provider::EventSupportLevel;
-use crate::stream::codex_semantic::CodexSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
@@ -66,7 +65,7 @@ impl ProviderBehavior for CodexProvider {
         sink: BoxedSemanticEventSink,
         config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(CodexSemanticStreamParser::new(sink, config.model))
+        crate::stream::providers::for_provider(Provider::Codex, sink, config)
     }
 }
 impl McpBehavior for CodexProvider {
