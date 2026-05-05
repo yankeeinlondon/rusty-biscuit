@@ -21,7 +21,7 @@ pub use crate::components::renderable::{BrowserRenderable, Renderable, Renderabl
 pub use crate::components::section::{HeadingLevel, Section};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::status_block::StatusBlock;
-pub use crate::components::table::table::{
+pub use crate::components::table::{
     MeasuredColumn, Table, TableCellContent, TableColumn, TableWidthError, TableWidthMeasurements,
     TableWidthPlan,
 };
