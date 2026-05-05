@@ -34,10 +34,19 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
 source_files_during_phase_5:
+  - sniff/lib/src/filesystem/git/detection.rs
+  - sniff/lib/src/filesystem/git/types.rs
   - sniff/cli/src/commands.rs
+  - sniff/cli/src/install_plan_cmd.rs
   - sniff/cli/src/main.rs
-  - sniff/lib/Cargo.toml
-  - sniff/cli/Cargo.toml
+  - sniff/cli/tests/cli.rs
+docs_updated_during_phase_5:
+  - sniff/reviews/2026-05-02-performance-review/baselines.md
+  - sniff/reviews/2026-05-02-performance-review/follow-up-plan.md
+  - sniff/reviews/2026-05-02-performance-review/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .opencode/skill/sniff/SKILL.md
 packages:
   - sniff/lib
   - sniff/cli
@@ -151,14 +160,12 @@ cargo test -p sniff --lib filesystem # 251 passed
 **Deliverables confirmed:**
 - [x] CLI concurrency model documented in `sniff/cli/src/commands.rs` (lines 86–92)
 
-### Phase 5.3: Dependency Feature Cleanup — Partially Complete
+### Phase 5.3: Dependency Feature Cleanup — Complete
 
 **Deliverables confirmed:**
 - [x] `which` dependency already has `default-features = false, features = ["real-sys"]` (removes `regex` and `tracing` features)
-
-**Deliverables NOT completed:**
-- [ ] Measurement-backed decision documented (`cargo bloat` / `cargo llvm-lines` data)
-- [ ] Decision on CLI feature split (e.g., `sniff-cli/remote`) recorded
+- [x] Measurement-backed decision documented in `baselines.md` (`cargo bloat` / `cargo llvm-lines` data)
+- [x] Decision on CLI feature split recorded in `baselines.md` (deferred until a feature contributes > 5% of binary size)
 
 ---
 
