@@ -104,6 +104,16 @@ impl BorderStyle {
     pub fn is_visible(self) -> bool {
         !matches!(self, BorderStyle::None)
     }
+
+    /// Returns `true` when this style draws a bottom-edge segment.
+    ///
+    /// Used by the standalone runner to decide whether the help-hint
+    /// footer should be inlined into the bottom border (via
+    /// [`FrameChromeConfig::bottom_label`]) or rendered on its own row.
+    pub fn has_bottom(self) -> bool {
+        let (sides, _) = self.ratatui_parts();
+        sides.contains(Borders::BOTTOM)
+    }
 }
 
 /// Four-sided margin in terminal cells.
@@ -249,18 +259,29 @@ impl Padding {
 
 /// The parsed form of the CLI `--height` flag.
 ///
+/// Both variants are treated as a *maximum* — when the live terminal is
+/// smaller than the requested height, the inline viewport is clamped to
+/// the available rows so the prompt never overflows the screen.
+///
 /// ## Variants
 ///
 /// - [`HeightSpec::Cells`] is an absolute cell count, clamped to the
-///   terminal height when resolved.
+///   terminal height when resolved. Resolved once at prompt start;
+///   ratatui's own `autoresize` clamps the inline viewport to the live
+///   terminal height on subsequent resizes, so the cap never exceeds
+///   the terminal even after a shrink.
 /// - [`HeightSpec::Percent`] is a percentage of the terminal height,
 ///   clamped to a floor of 3 rows so the list always has room for a
-///   header plus two rows.
+///   header plus two rows. Re-resolved on every resize event by
+///   [`crate::core::run_standalone`], so the inline viewport tracks
+///   the requested fraction of the terminal as it grows or shrinks
+///   mid-prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HeightSpec {
-    /// An absolute cell count.
+    /// An absolute cell count, treated as a maximum.
     Cells(u16),
-    /// A percentage of the current terminal height (1..=100).
+    /// A percentage of the current terminal height (1..=100), tracked
+    /// dynamically across resize events.
     Percent(u8),
 }
 
@@ -293,6 +314,14 @@ pub struct FrameChromeConfig {
     pub border: BorderStyle,
     /// Optional title rendered in the top-left of the border.
     pub border_label: Option<String>,
+    /// Optional title rendered in the bottom-left of the border.
+    ///
+    /// Used by the standalone runner to inline the help-hint footer
+    /// inside the bottom border (matching how `border_label` inlines a
+    /// title in the top border) so the hint never overwrites the
+    /// border corners. Ignored when the resolved border has no
+    /// [`Borders::BOTTOM`] segment.
+    pub bottom_label: Option<String>,
     /// Margin applied outside of the border.
     pub margin: Margin,
     /// Style applied to the border glyphs.
@@ -300,6 +329,13 @@ pub struct FrameChromeConfig {
     /// Interior padding applied inside the border (or directly inside
     /// the margin when no border is drawn).
     pub padding: Padding,
+    /// Preserve the final render after the prompt exits.
+    ///
+    /// When `false` (the default) the standalone runner clears the
+    /// inline viewport on exit so the terminal reclaims the space
+    /// (fzf-style). When `true` the final render is left in place and
+    /// the cursor is positioned on a fresh line just below the chrome.
+    pub show_on_exit: bool,
 }
 
 impl Default for FrameChromeConfig {
@@ -315,9 +351,11 @@ impl Default for FrameChromeConfig {
         Self {
             border: BorderStyle::default(),
             border_label: None,
+            bottom_label: None,
             margin: Margin::default(),
             border_style: Style::default(),
             padding: Padding::uniform(1),
+            show_on_exit: false,
         }
     }
 }
@@ -350,8 +388,8 @@ impl FrameChromeConfig {
 pub struct FrameChrome<'a, W> {
     /// The widget drawn inside the frame.
     pub inner: W,
-    /// Optional border spec: `(sides, border_type, label)`.
-    pub border: Option<(Borders, BorderType, Option<&'a str>)>,
+    /// Optional border spec: `(sides, border_type, top_label, bottom_label)`.
+    pub border: Option<(Borders, BorderType, Option<&'a str>, Option<&'a str>)>,
     /// Margin applied outside of the border.
     pub margin: Margin,
     /// Style applied to the border glyphs.
@@ -386,7 +424,12 @@ impl<'a, W> FrameChrome<'a, W> {
     pub fn from_config(inner: W, config: &'a FrameChromeConfig) -> Self {
         let border = if config.border.is_visible() {
             let (sides, ty) = config.border.ratatui_parts();
-            Some((sides, ty, config.border_label.as_deref()))
+            Some((
+                sides,
+                ty,
+                config.border_label.as_deref(),
+                config.bottom_label.as_deref(),
+            ))
         } else {
             None
         };
@@ -408,13 +451,18 @@ where
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let area = self.margin.shrink(area);
-        let inner_area = if let Some((sides, ty, label)) = self.border {
+        let inner_area = if let Some((sides, ty, top_label, bottom_label)) = self.border {
             let mut block = Block::default()
                 .borders(sides)
                 .border_type(ty)
                 .style(self.border_style);
-            if let Some(l) = label {
+            if let Some(l) = top_label {
                 block = block.title(l.to_string());
+            }
+            if let Some(l) = bottom_label
+                && sides.contains(Borders::BOTTOM)
+            {
+                block = block.title_bottom(l.to_string());
             }
             let inner = block.inner(area);
             block.render(area, buf);
@@ -618,9 +666,11 @@ mod tests {
         let config = FrameChromeConfig {
             border: BorderStyle::Rounded,
             border_label: Some("Title".to_string()),
+            bottom_label: None,
             margin: Margin::uniform(1),
             border_style: Style::default().fg(Color::Cyan),
             padding: Padding::zero(),
+            show_on_exit: false,
         };
         let frame = FrameChrome::from_config(Marker, &config);
 
@@ -806,5 +856,113 @@ mod tests {
         assert_eq!(shrunk.y, 1);
         assert_eq!(shrunk.width, 8);
         assert_eq!(shrunk.height, 4);
+    }
+
+    #[test]
+    fn border_style_has_bottom_only_for_styles_that_draw_bottom_segment() {
+        // Styles that include the BOTTOM segment in `ratatui_parts`.
+        for style in [
+            BorderStyle::Rounded,
+            BorderStyle::Sharp,
+            BorderStyle::Bold,
+            BorderStyle::Double,
+            BorderStyle::Block,
+            BorderStyle::ThinBlock,
+            BorderStyle::Horizontal,
+            BorderStyle::Bottom,
+        ] {
+            assert!(
+                style.has_bottom(),
+                "{style:?} should report has_bottom() = true",
+            );
+        }
+        // Styles that do not draw a bottom edge.
+        for style in [
+            BorderStyle::None,
+            BorderStyle::Vertical,
+            BorderStyle::Line,
+            BorderStyle::Top,
+            BorderStyle::Left,
+            BorderStyle::Right,
+        ] {
+            assert!(
+                !style.has_bottom(),
+                "{style:?} should report has_bottom() = false",
+            );
+        }
+    }
+
+    #[test]
+    fn frame_chrome_default_show_on_exit_is_false() {
+        // The library default preserves backward-compatible behaviour
+        // (clear-on-exit happens when `show_on_exit == false`).
+        assert!(!FrameChromeConfig::default().show_on_exit);
+        assert!(FrameChromeConfig::default().bottom_label.is_none());
+    }
+
+    #[test]
+    fn frame_chrome_renders_bottom_label_inside_bottom_border() {
+        // The bottom label should appear on the bottom border row,
+        // leaving the corner glyphs at column 0 and column area.right - 1
+        // intact.
+        let config = FrameChromeConfig {
+            border: BorderStyle::Rounded,
+            border_label: None,
+            bottom_label: Some("Hint".to_string()),
+            padding: Padding::zero(),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 16, 4);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let bottom_row = (0..area.width)
+            .map(|x| buf[(x, area.height - 1)].symbol().to_string())
+            .collect::<String>();
+        assert!(
+            bottom_row.contains("Hint"),
+            "bottom border row should contain the label; got {bottom_row:?}",
+        );
+        // Corners must survive — neither column 0 nor the rightmost
+        // column should be a space on the bottom row.
+        assert_ne!(
+            buf[(0, area.height - 1)].symbol(),
+            " ",
+            "bottom-left corner glyph clobbered",
+        );
+        assert_ne!(
+            buf[(area.width - 1, area.height - 1)].symbol(),
+            " ",
+            "bottom-right corner glyph clobbered",
+        );
+    }
+
+    #[test]
+    fn frame_chrome_ignores_bottom_label_when_no_bottom_border() {
+        // BorderStyle::Top draws only a top border, so a bottom_label
+        // must be silently ignored — there is no bottom row to host it.
+        let config = FrameChromeConfig {
+            border: BorderStyle::Top,
+            bottom_label: Some("Hint".to_string()),
+            padding: Padding::zero(),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 16, 4);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let bottom_row = (0..area.width)
+            .map(|x| buf[(x, area.height - 1)].symbol().to_string())
+            .collect::<String>();
+        assert!(
+            !bottom_row.contains("Hint"),
+            "bottom_label should not render when border has no bottom segment; got {bottom_row:?}",
+        );
     }
 }

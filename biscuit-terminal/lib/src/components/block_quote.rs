@@ -86,7 +86,7 @@ pub struct BlockQuote {
 
 impl Default for BlockQuote {
     fn default() -> Self {
-        use crate::utils::layout::WordWrap;
+        use crate::utils::wrap_policy::WordWrap;
         BlockQuote {
             content: RenderableContent::String("".to_string()),
             attribution: None,

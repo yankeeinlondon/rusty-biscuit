@@ -264,7 +264,7 @@ fn build_config(
         tts,
         messenger,
         logging: true,
-        protect: claudine::services::protect::config::ProtectConfig::default(),
+        protect: claudine::protect::config::ProtectConfig::default(),
         actions,
         matchers: HashMap::new(),
         preferred_agent,

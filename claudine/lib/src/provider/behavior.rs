@@ -25,7 +25,6 @@ use crate::mcp::inject::McpInjector;
 use crate::mcp::state::Scope;
 use crate::mcp::types::McpServer;
 use crate::stream::ParserConfig;
-use crate::stream::claude_semantic::ClaudeSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::semantic::SemanticEventSink;
 
@@ -53,8 +52,7 @@ pub trait ProviderBehavior: Send + Sync + std::fmt::Debug + 'static {
         sink: BoxedSemanticEventSink,
         config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        let _ = config;
-        Box::new(ClaudeSemanticStreamParser::new(sink))
+        crate::stream::providers::for_provider(super::Provider::Claude, sink, config)
     }
 }
 

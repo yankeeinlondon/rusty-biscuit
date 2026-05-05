@@ -128,7 +128,7 @@ let state = InputTableState::new(columns, vec![]);
 | `FrameChrome` / `FrameChromeConfig` | Container widget for borders, margins, and titles |
 | `BorderStyle` | 14 border glyph styles (None, Rounded, Sharp, Bold, Double, Block, ThinBlock, Horizontal, Vertical, Line, Top, Bottom, Left, Right) |
 | `Margin` | Four-sided margin outside the border |
-| `HeightSpec` | Parsed `--height` flag (absolute cells or percentage of terminal) |
+| `HeightSpec` | Parsed `--height` flag (cells or percent). Treated as a maximum (clamps to live terminal); `Percent` re-resolves on resize so the inline viewport tracks the requested fraction mid-prompt |
 | `SortOrder` | Ordering for choice options (Natural, Reverse, Asc, Desc) |
 | `OptionSort` | Preferred ordering vocabulary (Natural, Inverse, Asc, Desc) with `From` conversions to `SortOrder` |
 | `Orientation` | Choice list layout direction (`Vertical`, `Horizontal`) |
@@ -160,7 +160,9 @@ question input-table --columns '[{"type":"text","id":"name"}]'
 question completions zsh
 ```
 
-**Global flags:** `--output {raw|json|null}`, `--height <N|P%>`
+**Global flags:** `--output {raw|json|null}`, `--height <N|P%>`, `--show-input-on-exit`
+
+The inline viewport clears on exit by default (fzf-style); pass `--show-input-on-exit` to leave the final frame on screen with the cursor placed just below the chrome.
 
 **Exit codes:** `0` = submitted (ChooseOne Esc also exits `0` by restoring the initial selection), `1` = Esc cancelled (non-ChooseOne components), `130` = Ctrl-C interrupted
 

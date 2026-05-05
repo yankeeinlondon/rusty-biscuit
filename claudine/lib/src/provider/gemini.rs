@@ -45,7 +45,6 @@ use crate::mcp::inject::{GeminiInjector, McpInjector};
 use crate::mcp::state::Scope;
 use crate::mcp::types::McpServer;
 use crate::provider::EventSupportLevel;
-use crate::stream::gemini_semantic::GeminiSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
@@ -62,9 +61,9 @@ impl ProviderBehavior for GeminiProvider {
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
-        _config: ParserConfig,
+        config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(GeminiSemanticStreamParser::new(sink))
+        crate::stream::providers::for_provider(Provider::Gemini, sink, config)
     }
 }
 impl McpBehavior for GeminiProvider {

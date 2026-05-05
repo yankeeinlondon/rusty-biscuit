@@ -25,28 +25,54 @@ const MAX_RETRIES: u32 = 3;
 /// Base delay between retries in milliseconds
 const RETRY_BASE_DELAY_MS: u64 = 1000;
 
-/// Response from OpenAI-compatible /v1/models endpoint
+/// Response from provider /v1/models endpoint.
+///
+/// Preserves the full JSON value for each model so that provider-native
+/// metadata (pricing, architecture, etc.) is available to downstream consumers
+/// rather than being silently discarded during deserialization.
 #[derive(Debug, Deserialize)]
-pub struct OpenAIModelsResponse {
+pub struct ProviderModelsResponse {
+    /// Standard OpenAI-style `data` array. Each element is kept as a raw
+    /// [`serde_json::Value`] so provider-specific fields are not lost.
     #[serde(default)]
-    pub data: Vec<OpenAIModel>,
-    /// Gemini uses "models" instead of "data"
+    pub data: Vec<serde_json::Value>,
+
+    /// Gemini uses `"models"` instead of `"data"`.
     #[serde(default)]
     pub models: Vec<GeminiModel>,
 }
 
-/// Single model entry from OpenAI-compatible API
-#[derive(Debug, Deserialize)]
-pub struct OpenAIModel {
+/// A parsed model entry with its raw provider-native metadata preserved.
+///
+/// The `id` field is always populated. `raw_metadata` is `Some` when the
+/// provider response included additional fields beyond `id`.
+#[derive(Debug, Clone)]
+pub struct ProviderModelEntry {
+    /// Model identifier (unprefixed).
     pub id: String,
+    /// The full JSON object for this model from the provider response, or
+    /// `None` when only an ID was available (e.g. Gemini `name` field).
+    pub raw_metadata: Option<serde_json::Value>,
 }
 
-/// Single model entry from Gemini API
+/// Single model entry from Gemini API.
 #[derive(Debug, Deserialize)]
 pub struct GeminiModel {
     /// Gemini uses "name" like "models/gemini-1.5-flash"
     pub name: String,
 }
+
+#[deprecated(
+    since = "0.2.0",
+    note = "Use ProviderModelsResponse instead. The old type discarded provider-native metadata."
+)]
+pub type OpenAIModelsResponse = ProviderModelsResponse;
+
+#[deprecated(
+    since = "0.2.0",
+    note = "Use ProviderModelEntry instead. The old type discarded provider-native metadata."
+)]
+pub type OpenAIModel = ProviderModelEntry;
 
 /// Build the authentication header for a provider
 fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
@@ -118,10 +144,10 @@ pub fn get_api_keys() -> HashMap<Provider, String> {
     keys
 }
 
-/// Fetch models from a single provider's OpenAI-compatible API
+/// Fetch models from a single provider's OpenAI-compatible API.
 ///
-/// Queries the provider's `/v1/models` endpoint and returns a list of available
-/// model IDs. The models are returned without the provider prefix.
+/// Queries the provider's `/v1/models` endpoint and returns model entries that
+/// preserve the full provider-native JSON metadata alongside each model ID.
 ///
 /// ## Arguments
 ///
@@ -130,7 +156,7 @@ pub fn get_api_keys() -> HashMap<Provider, String> {
 ///
 /// ## Returns
 ///
-/// Vec of model IDs (unprefixed, as returned by API)
+/// Vec of [`ProviderModelEntry`] (unprefixed IDs with optional raw metadata)
 ///
 /// ## Errors
 ///
@@ -142,7 +168,7 @@ pub fn get_api_keys() -> HashMap<Provider, String> {
 pub async fn get_provider_models_from_api(
     provider: Provider,
     api_key: &str,
-) -> Result<Vec<String>, ProviderError> {
+) -> Result<Vec<ProviderModelEntry>, ProviderError> {
     let config = provider.config();
     let base_url = config.base_url;
     let endpoint = config.models_endpoint.unwrap_or("/v1/models");
@@ -161,43 +187,35 @@ pub async fn get_provider_models_from_api(
         "Fetching models from {} at {}",
         provider_name,
         url.split('?').next().unwrap_or(&url)
-    ); // Don't log API key
+    );
 
-    // Build auth header (empty for QueryParam auth)
     let (header_name, header_value) = build_auth_header(&provider, api_key);
 
-    // Create HTTP client and make request
     let client = Client::new();
     let mut request = client.get(&url);
 
-    // Add auth header if not empty
     if !header_name.is_empty() {
         request = request.header(&header_name, &header_value);
     }
 
-    // Anthropic requires anthropic-version header
     if provider == Provider::Anthropic {
         request = request.header("anthropic-version", "2023-06-01");
     }
 
-    // Make the request
     let response = request.send().await?;
 
-    // Check for authentication failure
     if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
         return Err(ProviderError::AuthenticationFailed {
             provider: provider_name.clone(),
         });
     }
 
-    // Check for rate limiting
     if response.status().as_u16() == 429 {
         return Err(ProviderError::RateLimitExceeded {
             provider: provider_name.clone(),
         });
     }
 
-    // Check response size
     if let Some(content_length) = response.content_length()
         && content_length as usize > MAX_RESPONSE_SIZE
     {
@@ -207,31 +225,50 @@ pub async fn get_provider_models_from_api(
         });
     }
 
-    // Parse response
-    let data: OpenAIModelsResponse = response.json().await?;
+    let data: ProviderModelsResponse = response.json().await?;
 
-    // Extract model IDs - handle both OpenAI format (data) and Gemini format (models)
-    let models: Vec<String> = if !data.data.is_empty() {
-        data.data.into_iter().map(|model| model.id).collect()
+    // Extract model entries — handle both OpenAI format (data) and Gemini format (models)
+    let entries: Vec<ProviderModelEntry> = if !data.data.is_empty() {
+        data.data
+            .into_iter()
+            .map(|value| {
+                let id = value
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>")
+                    .to_string();
+                ProviderModelEntry {
+                    id,
+                    raw_metadata: Some(value),
+                }
+            })
+            .collect()
     } else if !data.models.is_empty() {
-        // Gemini returns "models/gemini-1.5-flash" - extract just the model name
         data.models
             .into_iter()
             .map(|model| {
-                model
+                let id = model
                     .name
                     .strip_prefix("models/")
                     .unwrap_or(&model.name)
-                    .to_string()
+                    .to_string();
+                ProviderModelEntry {
+                    id,
+                    raw_metadata: None,
+                }
             })
             .collect()
     } else {
         vec![]
     };
 
-    info!("Fetched {} models from {}", models.len(), provider_name);
+    info!(
+        "Fetched {} models from {}",
+        entries.len(),
+        provider_name
+    );
 
-    Ok(models)
+    Ok(entries)
 }
 
 /// Fetch models from all available providers
@@ -241,14 +278,15 @@ pub async fn get_provider_models_from_api(
 ///
 /// ## Returns
 ///
-/// HashMap mapping Provider to Vec of model IDs (unprefixed)
+/// HashMap mapping Provider to Vec of [`ProviderModelEntry`]
 ///
 /// ## Errors
 ///
 /// Returns `ProviderError::NoProvidersAvailable` if no API keys are configured.
 /// Individual provider failures are logged but don't fail the entire operation.
 #[tracing::instrument]
-pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>, ProviderError> {
+pub async fn get_all_provider_models(
+) -> Result<HashMap<Provider, Vec<ProviderModelEntry>>, ProviderError> {
     use std::time::Duration;
 
     let api_keys = get_api_keys();
@@ -260,7 +298,6 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
 
     info!("Fetching models from {} providers", api_keys.len());
 
-    // Create futures for each provider with staggered start times
     let provider_futures: Vec<_> = api_keys
         .iter()
         .enumerate()
@@ -268,10 +305,8 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
             let provider = *provider;
             let api_key = api_key.clone();
             async move {
-                // Stagger start times to avoid overwhelming provider APIs
                 tokio::time::sleep(Duration::from_millis(100 * i as u64)).await;
 
-                // Wrap in retry logic
                 let provider_name = format!("{:?}", provider).to_lowercase();
                 let result = fetch_with_retry(
                     || get_provider_models_from_api(provider, &api_key),
@@ -284,14 +319,12 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
         })
         .collect();
 
-    // Execute in parallel with buffer_unordered(8) to limit concurrent requests
-    let results: Vec<(Provider, Result<Vec<String>, ProviderError>)> =
+    let results: Vec<(Provider, Result<Vec<ProviderModelEntry>, ProviderError>)> =
         stream::iter(provider_futures)
             .buffer_unordered(8)
             .collect()
             .await;
 
-    // Collect successful results and log errors
     let mut all_models = HashMap::new();
     for (provider, result) in results {
         match result {
@@ -300,7 +333,6 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
             }
             Err(e) => {
                 warn!("Failed to fetch models from {:?}: {}", provider, e);
-                // Continue with other providers
             }
         }
     }
@@ -336,5 +368,59 @@ mod tests {
         let (name, value) = build_auth_header(&Provider::Ollama, "");
         assert!(name.is_empty());
         assert!(value.is_empty());
+    }
+
+    #[test]
+    fn test_provider_models_response_deserializes_openai_format() {
+        let json = r#"{"data":[{"id":"gpt-4o","owned_by":"openai"}]}"#;
+        let resp: ProviderModelsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.data.len(), 1);
+        let entry = &resp.data[0];
+        assert_eq!(entry["id"].as_str(), Some("gpt-4o"));
+        assert_eq!(entry["owned_by"].as_str(), Some("openai"));
+    }
+
+    #[test]
+    fn test_provider_models_response_deserializes_openrouter_format() {
+        let json = r#"{"data":[{"id":"x-ai/grok-4.3","name":"xAI: Grok 4.3","pricing":{"prompt":"0.00000125","completion":"0.0000025"}}]}"#;
+        let resp: ProviderModelsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.data.len(), 1);
+        let entry = &resp.data[0];
+        assert_eq!(entry["id"].as_str(), Some("x-ai/grok-4.3"));
+        assert_eq!(entry["pricing"]["prompt"].as_str(), Some("0.00000125"));
+    }
+
+    #[test]
+    fn test_provider_models_response_deserializes_gemini_format() {
+        let json = r#"{"models":[{"name":"models/gemini-1.5-flash"}]}"#;
+        let resp: ProviderModelsResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.data.is_empty());
+        assert_eq!(resp.models.len(), 1);
+        assert_eq!(resp.models[0].name, "models/gemini-1.5-flash");
+    }
+
+    #[test]
+    fn test_provider_models_response_empty() {
+        let json = r#"{}"#;
+        let resp: ProviderModelsResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.data.is_empty());
+        assert!(resp.models.is_empty());
+    }
+
+    #[test]
+    fn test_provider_model_entry_from_openai_data() {
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"id":"gpt-4o","owned_by":"openai","created":1700000000}"#)
+                .unwrap();
+        let entry = ProviderModelEntry {
+            id: value["id"].as_str().unwrap().to_string(),
+            raw_metadata: Some(value),
+        };
+        assert_eq!(entry.id, "gpt-4o");
+        assert!(entry.raw_metadata.is_some());
+        assert_eq!(
+            entry.raw_metadata.as_ref().unwrap()["created"].as_i64(),
+            Some(1700000000)
+        );
     }
 }

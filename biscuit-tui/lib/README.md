@@ -83,13 +83,20 @@ match run_standalone(TextInput, state, None) {
 }
 ```
 
-The third parameter to `run_standalone` is `height: Option<HeightSpec>`:
+The third parameter to `run_standalone` is `height: Option<HeightSpec>`.
+Both inline variants are treated as a **maximum** — the inline viewport
+is clamped to whatever rows the live terminal actually has, so the
+prompt never overflows the screen.
 
 - `None` → fullscreen mode using `AlternateScreen`
-- `Some(HeightSpec::Cells(n))` → inline mode rendering `n` rows below
-  the current cursor
+- `Some(HeightSpec::Cells(n))` → inline mode rendering up to `n` rows
+  below the current cursor (ratatui's autoresize clamps when the
+  terminal is smaller than `n`)
 - `Some(HeightSpec::Percent(p))` → inline mode sized at `p` percent of
-  the live terminal height (clamped to a floor of 3 rows)
+  the live terminal height (clamped to a floor of 3 rows). The
+  percentage is **re-resolved on every terminal resize**, so the inline
+  viewport tracks the requested fraction as the terminal grows or
+  shrinks mid-prompt
 
 ## Key Bindings
 

@@ -5,13 +5,14 @@ use clap::Parser;
 use strum::IntoEnumIterator;
 use tracing::{Level, info, warn};
 
-use unchained_ai::api::openai_api::{get_api_keys, get_provider_models_from_api};
+use unchained_ai::api::openai_api::{get_api_keys, get_provider_models_from_api, ProviderModelEntry};
 use unchained_ai::rigging::providers::Provider;
 
 mod errors;
 mod generator;
 mod metadata_generator;
 mod parsera;
+mod provider_metadata;
 
 use errors::GeneratorError;
 use generator::ModelEnumGenerator;
@@ -112,6 +113,8 @@ struct ProviderResult {
     model_count: usize,
     /// Model IDs for metadata collection.
     model_ids: Vec<String>,
+    /// Raw provider-native metadata keyed by unprefixed model ID.
+    raw_metadata: HashMap<String, serde_json::Value>,
 }
 
 /// Process a single provider.
@@ -121,27 +124,31 @@ async fn process_single_provider(
     output_dir: &std::path::Path,
     dry_run: bool,
 ) -> Result<ProviderResult, GeneratorError> {
-    // Fetch models from API
-    let models = get_provider_models_from_api(provider, api_key)
-        .await
-        .map_err(|e| GeneratorError::FetchFailed {
-            provider: format!("{:?}", provider),
-            reason: e.to_string(),
-        })?;
+    let entries: Vec<ProviderModelEntry> =
+        get_provider_models_from_api(provider, api_key)
+            .await
+            .map_err(|e| GeneratorError::FetchFailed {
+                provider: format!("{:?}", provider),
+                reason: e.to_string(),
+            })?;
 
-    if models.is_empty() {
+    if entries.is_empty() {
         return Err(GeneratorError::FetchFailed {
             provider: format!("{:?}", provider),
             reason: "No models returned from API".to_string(),
         });
     }
 
-    // Collect model IDs for metadata
-    let model_ids: Vec<String> = models.clone();
+    // Collect model IDs and raw metadata
+    let model_ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+    let raw_metadata: HashMap<String, serde_json::Value> = entries
+        .into_iter()
+        .filter_map(|e| e.raw_metadata.map(|v| (e.id, v)))
+        .collect();
 
     // Generate code
     let provider_name = format!("{:?}", provider);
-    let generator = ModelEnumGenerator::new(provider_name, models);
+    let generator = ModelEnumGenerator::new(provider_name, model_ids.clone());
     let code = generator.generate();
     let model_count = generator.model_count();
 
@@ -149,7 +156,6 @@ async fn process_single_provider(
         println!("\n--- {:?} ({} models) ---", provider, model_count);
         println!("{}", code);
     } else {
-        // Write to file
         let filename = format!("{}.rs", provider_to_filename(provider));
         let output_path = output_dir.join(&filename);
 
@@ -164,6 +170,7 @@ async fn process_single_provider(
     Ok(ProviderResult {
         model_count,
         model_ids,
+        raw_metadata,
     })
 }
 
@@ -171,6 +178,8 @@ async fn process_single_provider(
 struct ProcessingResult {
     summary: GenerationSummary,
     all_model_ids: Vec<String>,
+    /// Raw provider-native metadata from OpenRouter, keyed by model ID.
+    openrouter_raw: HashMap<String, serde_json::Value>,
 }
 
 /// Process all providers.
@@ -182,9 +191,9 @@ async fn process_providers(
 ) -> ProcessingResult {
     let mut summary = GenerationSummary::default();
     let mut all_model_ids = Vec::new();
+    let mut openrouter_raw = HashMap::new();
 
     for provider in providers {
-        // Check if we have an API key
         let Some(api_key) = api_keys.get(&provider) else {
             summary
                 .skipped
@@ -192,7 +201,6 @@ async fn process_providers(
             continue;
         };
 
-        // Skip local providers
         if provider.config().is_local {
             summary
                 .skipped
@@ -205,6 +213,9 @@ async fn process_providers(
                 info!("Generated {} models for {:?}", result.model_count, provider);
                 summary.succeeded.push((provider, result.model_count));
                 all_model_ids.extend(result.model_ids);
+                if provider == Provider::OpenRouter {
+                    openrouter_raw = result.raw_metadata;
+                }
             }
             Err(e) => {
                 warn!("Skipping {:?}: {}", provider, e);
@@ -216,6 +227,7 @@ async fn process_providers(
     ProcessingResult {
         summary,
         all_model_ids,
+        openrouter_raw,
     }
 }
 
@@ -291,33 +303,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Process providers
     let result = process_providers(providers, &api_keys, &output_dir, cli.dry_run).await;
 
-    // Generate metadata lookup table
+    // Generate metadata lookup table with merge logic
     let mut metadata_gen = MetadataGenerator::new();
     let mut matched_count = 0;
 
     for model_id in &result.all_model_ids {
         let parsera_data = find_parsera_metadata(model_id, &parsera_index);
-        if parsera_data.is_some() {
+
+        let provider_native = result
+            .openrouter_raw
+            .get(model_id)
+            .and_then(|v| provider_metadata::parse_provider_metadata(Provider::OpenRouter, v));
+
+        let is_openrouter = provider_native.is_some();
+        let merged = MetadataGenerator::merge_metadata(provider_native, parsera_data);
+
+        if merged.is_some() {
             matched_count += 1;
         }
-        metadata_gen.register(model_id.clone(), parsera_data.cloned());
+
+        metadata_gen.register(model_id.clone(), merged.clone());
+
+        if is_openrouter
+            && let Some(rich_meta) = merged
+        {
+            metadata_gen.register_openrouter(model_id.clone(), rich_meta);
+        }
     }
 
     info!(
-        "Matched {}/{} models with Parsera metadata",
+        "Matched {}/{} models with metadata",
         matched_count,
         result.all_model_ids.len()
     );
 
-    // Write metadata file
+    // Write compact metadata file
+    let metadata_code = metadata_gen.generate();
     if !cli.dry_run {
-        let metadata_code = metadata_gen.generate();
         let metadata_path = output_dir.join("metadata_generated.rs");
         write_atomic(&metadata_path, &metadata_code)?;
         info!("Wrote metadata to {}", metadata_path.display());
     } else {
         println!("\n--- Metadata ({} entries) ---", matched_count);
-        println!("{}", metadata_gen.generate());
+        println!("{}", metadata_code);
+    }
+
+    // Write rich OpenRouter metadata file
+    let openrouter_code = metadata_gen.generate_openrouter();
+    if !cli.dry_run {
+        let openrouter_path = output_dir.join("metadata_openrouter_generated.rs");
+        write_atomic(&openrouter_path, &openrouter_code)?;
+        info!(
+            "Wrote OpenRouter metadata to {}",
+            openrouter_path.display()
+        );
+    } else {
+        println!(
+            "\n--- OpenRouter Metadata ({} entries) ---",
+            metadata_gen.openrouter_count()
+        );
+        println!("{}", openrouter_code);
     }
 
     result.summary.print();

@@ -40,7 +40,6 @@ use crate::linking::capabilities::{
 };
 use crate::provider::EventSupportLevel;
 use crate::stream::parser::SemanticStreamParser;
-use crate::stream::qwen_semantic::QwenSemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
 #[derive(Debug)]
@@ -58,9 +57,9 @@ impl ProviderBehavior for QwenProvider {
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
-        _config: ParserConfig,
+        config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(QwenSemanticStreamParser::new(sink))
+        crate::stream::providers::for_provider(Provider::QwenCode, sink, config)
     }
 }
 impl McpBehavior for QwenProvider {

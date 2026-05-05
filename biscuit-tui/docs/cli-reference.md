@@ -10,6 +10,7 @@ Every subcommand accepts the following flags:
 | :--- | :--- |
 | `--output <raw\|json\|null>` | Serialisation format for the submitted value. |
 | `--height <CELLS_OR_PERCENT>` | Render inline at an explicit height instead of fullscreen. |
+| `--show-input-on-exit` | Preserve the rendered input on exit instead of clearing it (fzf default is to clear). |
 
 ### `--output`
 
@@ -23,10 +24,21 @@ Controls how the submitted value is written to `stdout`.
 
 By default, `question` takes over the full terminal (alternate screen). The `--height` flag runs the component inline, leaving the existing terminal content visible above the prompt.
 
-- **Cell count** — e.g. `--height 10` renders the component in exactly 10 rows.
-- **Percentage** — e.g. `--height 50%` queries the current terminal size and allocates that proportion of rows. Percentages clamp to a floor of 3 rows so the list always has room for a header plus one option.
+Both forms are treated as a **maximum** — when the live terminal is smaller than the requested height, the inline viewport is clamped to the rows that are actually available so the prompt never overflows the screen.
+
+- **Cell count** — e.g. `--height 10` renders the component in up to 10 rows. If the terminal is only 6 rows tall, the prompt occupies all 6.
+- **Percentage** — e.g. `--height 50%` resolves the percentage against the current terminal height. Percentages clamp to a floor of 3 rows so the list always has room for a header plus one option, and they are **re-resolved on every terminal resize**: as the terminal grows or shrinks mid-prompt, the inline viewport tracks the requested fraction.
 
 When `--height` is omitted, the component runs fullscreen.
+
+### `--show-input-on-exit`
+
+Controls what happens to the inline viewport once the prompt exits.
+
+- **Omitted (default)** — fzf-style: the inline viewport is cleared on exit and the cursor is parked at the row where the prompt began, so the next shell prompt reuses the space the prompt occupied.
+- **Set** — the final frame is left on screen and the cursor is moved to the row immediately below the chrome. Subsequent shell output (the CLI's result line, then the next prompt) follows the rendered border without overlapping it.
+
+Has no effect on fullscreen prompts (i.e. when `--height` is omitted), since fullscreen prompts always revert to the original screen contents on exit.
 
 ## Exit Codes
 

@@ -54,7 +54,9 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`OrderedList` and `UnorderedList`](./docs/components/list.md)
     - [`PadLeft`](./docs/components/pad_left.md) and [`PadRight`](./docs/components/pad_right.md)
     - [`Progress`](./docs/components/progress.md)
-    - [`Prose`](./docs/components/prose.md)
+    - [`Prose`](./docs/components/prose.md) — capability-aware styling with
+      [graceful degradation](./docs/components/prose.md#graceful-degradation) for
+      OSC8 hyperlinks and double-underline on terminals like Apple Terminal
     - [`Section`](./docs/components/section.md)
     - [`Status`](./docs/components/status.md)
     - `StatusBlock`
