@@ -1668,7 +1668,7 @@ mod tests {
         assert!(expected_fields.contains(&"say_first".to_string()));
         assert!(expected_fields.contains(&"effect".to_string()));
 
-        let rendered = strip_escape_codes(&err.report_block_error_optimistic(Some(80)));
+        let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
         assert!(rendered.contains("success.speak"), "dotted property should appear: {rendered}");
         assert!(rendered.contains("sentrux.md"), "file name should appear: {rendered}");
         assert!(rendered.contains("say"), "expected fields should list 'say': {rendered}");
