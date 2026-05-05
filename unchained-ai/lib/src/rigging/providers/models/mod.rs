@@ -29,6 +29,7 @@ pub mod zenmux;
 
 pub mod build;
 mod metadata_generated;
+pub mod metadata_openrouter_generated;
 
 /// Aggregated enumeration of all provider models.
 ///
