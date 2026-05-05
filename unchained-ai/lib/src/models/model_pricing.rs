@@ -159,7 +159,7 @@ where
         }
     }
 
-    deserializer.deserialize_option(StringOrF64Visitor)
+    deserializer.deserialize_any(StringOrF64Visitor)
 }
 
 #[cfg(test)]
