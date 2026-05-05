@@ -14,8 +14,16 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - sniff/cli/tests/cli.rs
+  - sniff/cli/tests/install_interview_cli.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2:
+  - sniff/reviews/2026-05-02-performance-review/baselines.md
+skills_files_updated_during_phase_2: []
 packages:
   - sniff/lib
+  - sniff/cli
 ---
 
 # Performance Review — Follow-Up Plan
