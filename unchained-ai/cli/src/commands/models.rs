@@ -6,7 +6,7 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use serde_json::{Map, Value, json};
-use unchained_ai::models::model_metadata::{ModelMetadata, ModelModalities};
+use unchained_ai::models::model_metadata::{ModelModalities, ProviderModelMetadata};
 use unchained_ai::rigging::providers::Provider;
 use unchained_ai::rigging::providers::models::{
     ProviderModel, anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
@@ -197,7 +197,7 @@ fn render_json(groups: &[(Provider, Vec<ProviderModel>)]) -> Result<()> {
     Ok(())
 }
 
-fn metadata_to_json(meta: Option<&ModelMetadata>) -> Value {
+fn metadata_to_json(meta: Option<&ProviderModelMetadata>) -> Value {
     let mut map = Map::new();
     let Some(meta) = meta else {
         return Value::Object(map);
@@ -283,7 +283,7 @@ fn build_provider_list(models: &[ProviderModel], verbose: bool) -> UnorderedList
     UnorderedList::from(items)
 }
 
-fn build_metadata_list(meta: &ModelMetadata) -> Option<UnorderedList> {
+fn build_metadata_list(meta: &ProviderModelMetadata) -> Option<UnorderedList> {
     let mut entries: Vec<String> = Vec::new();
 
     if let Some(name) = &meta.display_name {
