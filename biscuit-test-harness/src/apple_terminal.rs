@@ -54,7 +54,11 @@ use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{CapturedFrame, TerminalHarness};
+use super::{
+    CapturedFrame, TerminalHarness,
+    run_with_timeout,
+    QUERY_TIMEOUT, CLEANUP_TIMEOUT,
+};
 
 /// Harness that drives Terminal.app via `osascript`.
 ///
@@ -151,12 +155,11 @@ impl AppleTerminalHarness {
             let script = format!(
                 "tell application \"Terminal\" to close (every window whose id is {id}) saving no",
             );
-            match Command::new("osascript")
-                .args(["-e", &script])
+            let mut cmd = Command::new("osascript");
+            cmd.args(["-e", &script])
                 .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .output()
-            {
+                .stderr(Stdio::piped());
+            match run_with_timeout(&mut cmd, CLEANUP_TIMEOUT) {
                 Ok(output) if !output.status.success() => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     eprintln!(
@@ -179,7 +182,9 @@ impl AppleTerminalHarness {
     /// Returns `io::Error` when the spawn fails or osascript exits
     /// non-zero, with stderr embedded in the message.
     fn run_script(script: &str) -> io::Result<String> {
-        let out = Command::new("osascript").args(["-e", script]).output()?;
+        let mut cmd = Command::new("osascript");
+        cmd.args(["-e", script]);
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "osascript failed: {}",
