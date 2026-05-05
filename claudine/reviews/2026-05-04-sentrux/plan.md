@@ -157,6 +157,43 @@ docs_updated_during_phase_2:
   - claudine/docs/topics/composition.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/claude.rs
+  - claudine/cli/src/commands/wrap/profile/codex.rs
+  - claudine/cli/src/commands/wrap/profile/gemini.rs
+  - claudine/cli/src/commands/wrap/profile/goose.rs
+  - claudine/cli/src/commands/wrap/profile/kimi.rs
+  - claudine/cli/src/commands/wrap/profile/opencode.rs
+  - claudine/cli/src/commands/wrap/profile/qwen.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/sections.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/spacing.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tool_calls.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/thinking.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/errors.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/heartbeat.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog.rs
+  - claudine/cli/src/commands/wrap/exec/termination.rs
+  - claudine/cli/src/commands/wrap/exec/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/exit.rs
+  - claudine/cli/src/commands/wrap/exec/wiring.rs
+  - claudine/cli/src/commands/wrap/exec/subagent_watchdog.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/flags.rs
+  - claudine/cli/src/commands/wrap/prompt_source.rs
+  - claudine/cli/src/commands/wrap/overlay.rs
+  - claudine/cli/src/commands/wrap/resume.rs
+  - claudine/cli/src/commands/wrap/harness_orch.rs
+  - claudine/cli/src/commands/wrap/inline.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/wire_io.rs
+  - claudine/cli/src/commands/wrap/subagent_watchdog.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - claudine
   - claudine-cli
