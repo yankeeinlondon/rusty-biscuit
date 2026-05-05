@@ -189,6 +189,7 @@ impl WatchdogState {
 
     /// Return active subagents whose time since last progress exceeds the
     /// given threshold.
+    #[allow(dead_code)]
     pub(crate) fn stuck_subagents(
         &self,
         now: Instant,

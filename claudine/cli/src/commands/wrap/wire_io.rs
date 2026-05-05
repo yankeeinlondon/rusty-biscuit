@@ -4,7 +4,7 @@
 //! JSON-RPC envelope per line (notification, server-initiated request, or
 //! response to a previously-sent client request); stdin accepts the same
 //! shape on a single serialized writer. The semantic parser
-//! ([`claudine::stream::kimi_semantic::KimiSemanticStreamParser`]) consumes
+//! ([`claudine::stream::providers::kimi::KimiSemanticStreamParser`]) consumes
 //! every stdout line and emits the user-visible event surface, while this
 //! module owns the IO loop that:
 //!
@@ -521,6 +521,7 @@ fn outcome_to_hook_outcome(outcome: &claudine::dispatch::DispatchOutcome) -> Hoo
 /// Claudine knows how to drive. Returns `Ok(())` on a recognized version
 /// and an error otherwise so the caller can convert into a terminal
 /// `SemanticEvent::Error { kind: Configuration }`.
+#[allow(dead_code)]
 pub(crate) fn validate_initialize_response(
     result: &KimiInitializeResult,
 ) -> std::result::Result<(), WireInitError> {
@@ -539,6 +540,7 @@ pub(crate) fn validate_initialize_response(
 /// Failure modes produced by [`validate_initialize_response`]. Maps onto a
 /// terminal `SemanticEvent::Error { kind: Configuration }` at the call site.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum WireInitError {
     MissingProtocolVersion,
     UnsupportedProtocolVersion {
@@ -1353,8 +1355,8 @@ mod tests {
 
     #[test]
     fn outcome_to_hook_outcome_protect_block_maps_to_deny() {
-        use claudine::services::protect::catalog::{RuleGroup, ScanSurface};
-        use claudine::services::protect::decision::{ProtectDecision, ProtectMatch};
+        use claudine::protect::catalog::{RuleGroup, ScanSurface};
+        use claudine::protect::decision::{ProtectDecision, ProtectMatch};
         let block = ProtectDecision::blocked(ProtectMatch {
             group: RuleGroup::FilesystemDestruction,
             rule_id: "test_block".to_string(),
