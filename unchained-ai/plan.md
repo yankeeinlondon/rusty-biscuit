@@ -1,7 +1,7 @@
 ---
 phases: 5
 created: 2026-05-04
-start_phase: 1
+start_phase: 5
 source_files_during_phase_1:
   - unchained-ai/lib/src/models/model_pricing.rs
   - unchained-ai/lib/src/models/model_default_parameters.rs
@@ -43,6 +43,19 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/unchained-ai/SKILL.md
+source_files_during_phase_5:
+  - unchained-ai/cli/src/commands/models.rs
+docs_updated_during_phase_5:
+  - unchained-ai/README.md
+  - unchained-ai/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .opencode/skill/unchained-ai/SKILL.md
+  - .opencode/skill/unchained-ai/providers-and-models.md
+  - .opencode/skill/unchained-ai/model-generator.md
+  - .claude/skills/unchained-ai/SKILL.md
+  - .claude/skills/unchained-ai/providers-and-models.md
+  - .claude/skills/unchained-ai/model-generator.md
 ---
 
 # Execution Plan - Better Model Metadata
@@ -132,10 +145,10 @@ The goal is to stop discarding rich model metadata (pricing, architecture, param
 ## Phase 5: Verification and Documentation
 **Goal**: Finalize the feature and update project documentation.
 
-- [ ] **Step 5.1: Full regeneration and smoke test**
+- [x] **Step 5.1: Full regeneration and smoke test**
     - Run `just generate-models` for all providers.
     - Verify that `unchained-ai` CLI (`models` command) still works and ideally displays some of the new metadata if updated.
-- [ ] **Step 5.2: Update documentation**
+- [x] **Step 5.2: Update documentation**
     - Update `.opencode/skill/unchained-ai/*.md` if applicable.
     - Update `README.md` if public API changes are notable.
 
