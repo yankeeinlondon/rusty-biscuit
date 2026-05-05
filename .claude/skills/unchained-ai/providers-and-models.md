@@ -109,16 +109,53 @@ Serializes as strings (`"Fast"`, `"SmartThink"`) or `"Specific:provider/model-id
 
 ### ModelMetadata (`models/model_metadata.rs`)
 
-Runtime model specs from Parsera LLM Specs API:
+Runtime model specs merged from Parsera LLM Specs API and provider-native APIs (e.g., OpenRouter):
 
 ```rust
-pub struct ModelMetadata {
+pub struct ProviderModelMetadata {
     pub display_name: Option<String>,
     pub family: Option<String>,
     pub context_window: Option<u32>,
     pub max_output_tokens: Option<u32>,
     pub modalities: Option<ModelModalities>,
     pub capabilities: Vec<String>,
+    pub description: Option<String>,
+    pub pricing: Option<ModelPricing>,
+    pub supported_parameters: Option<Vec<String>>,
+    pub default_parameters: Option<ModelDefaultParameters>,
+    pub knowledge_cutoff: Option<String>,
+    pub created: Option<u32>,
+}
+```
+
+A deprecated `ModelMetadata` type alias exists for backward compatibility.
+
+### ModelPricing (`models/model_pricing.rs`)
+
+Per-token and per-request pricing from provider APIs:
+
+```rust
+pub struct ModelPricing {
+    pub prompt_per_token: Option<f64>,
+    pub completion_per_token: Option<f64>,
+    pub web_search_per_request: Option<f64>,
+    pub input_cache_read_per_token: Option<f64>,
+}
+```
+
+Handles both string (`"0.000005"`) and numeric JSON values via custom deserializer.
+
+### ModelDefaultParameters (`models/model_default_parameters.rs`)
+
+Provider-recommended default generation parameters:
+
+```rust
+pub struct ModelDefaultParameters {
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    pub frequency_penalty: Option<f32>,
+    pub presence_penalty: Option<f32>,
 }
 ```
 
