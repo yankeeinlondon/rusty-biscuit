@@ -16,6 +16,13 @@ skills_files_updated_during_phase_1: []
 packages:
   - unchained-ai
   - unchained-ai-cli
+source_files_during_phase_2:
+  - unchained-ai/lib/src/api/openai_api.rs
+  - unchained-ai/gen/src/main.rs
+  - unchained-ai/lib/src/rigging/providers/models/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Execution Plan - Better Model Metadata
@@ -54,13 +61,13 @@ The goal is to stop discarding rich model metadata (pricing, architecture, param
 ## Phase 2: Preserving Raw Provider Data (unchained-ai-lib)
 **Goal**: Update the API layer to preserve full JSON responses from provider `/v1/models` endpoints.
 
-- [ ] **Step 2.1: Update `openai_api.rs` types**
+- [x] **Step 2.1: Update `openai_api.rs` types**
     - Modify `unchained-ai/lib/src/api/openai_api.rs`.
     - Define `ProviderModelsResponse` and `ProviderModelEntry` to capture `serde_json::Value` for each model.
-- [ ] **Step 2.2: Update `get_provider_models_from_api`**
+- [x] **Step 2.2: Update `get_provider_models_from_api`**
     - Change return type to `Result<Vec<ProviderModelEntry>, ...>`.
     - Update implementation to preserve the raw metadata object.
-- [ ] **Step 2.3: Update internal library consumers**
+- [x] **Step 2.3: Update internal library consumers**
     - Ensure any internal callers of the updated API function are fixed.
 
 **Validation**: `cargo test -p unchained-ai` (specifically `api::openai_api` tests).
