@@ -9,6 +9,8 @@ use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
 use super::detector::DiscoveredResource;
 use super::model::{IncompleteCause, ResourceDefinition, ResourceReference, ResourceScope};
 
+pub mod table;
+
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedMarkdown {
     pub(crate) frontmatter: serde_yaml_ng::Mapping,
@@ -611,24 +613,6 @@ fn normalize_key(key: &str) -> String {
         .collect()
 }
 
-/// Frontmatter properties that are non-portable across providers. Resources
-/// containing any of these should not be symlinked into non-Claude provider
-/// directories.
-///
-/// - `model`: shared property name but values are provider-specific (e.g.,
-///   `sonnet` vs `gemini-2.5-pro`). Present in Claude, Gemini, and OpenCode
-///   agent schemas but with incompatible value semantics.
-/// - `tools`: shared property name but Claude uses a comma-separated string
-///   while other providers (OpenCode, KimiCode) expect structured records.
-///   Value format mismatch causes parse errors.
-/// - `skills`: Claude-only. No other provider has a skill auto-loading
-///   mechanism. Unknown key — likely ignored but not guaranteed.
-///
-/// Note: `allowed-tools` / `allowed_tools` is intentionally excluded. It is
-/// Claude-only (used in skills/commands) and other providers simply ignore
-/// unrecognized frontmatter keys.
-const NON_PORTABLE_PROPERTIES: &[&str] = &["model", "tools", "skills"];
-
 /// Check whether a markdown file contains Claude-specific frontmatter properties
 /// that make it unsafe to share with other providers via symlink.
 ///
@@ -644,7 +628,7 @@ pub(crate) fn claude_specific_properties(path: &Path) -> Vec<String> {
         Err(_) => return Vec::new(),
     };
 
-    NON_PORTABLE_PROPERTIES
+    table::NON_PORTABLE_PROPERTIES
         .iter()
         .filter(|prop| {
             parsed
