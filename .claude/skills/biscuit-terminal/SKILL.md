@@ -256,7 +256,8 @@ biscuit_terminal/
 │   ├── mermaid.rs        # Terminal-facing Mermaid adapter
 │   └── graph_expression.rs # Terminal-facing graph adapter
 └── utils/
-    ├── layout.rs         # Layout, Margin, WordWrap, Alignment
+    ├── layout.rs         # Layout, Margin, Alignment
+    ├── wrap_policy.rs    # WordWrap enum
     ├── color.rs          # Color, BasicColor, RgbColor, WebColor, Tailwind, HdrColor
     ├── styling.rs        # Stylist trait, FontWeight, Style
     ├── escape_codes.rs   # ANSI escape code generation
