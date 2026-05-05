@@ -17,7 +17,6 @@ use unchained_ai::models::model_pricing::ModelPricing;
 /// Fields that OpenRouter doesn't provide (`family`, `capabilities`) are
 /// left as defaults (`None` / empty vec) so they can be filled by Parsera
 /// data during the merge phase.
-#[allow(dead_code)]
 pub fn parse_openrouter_model(value: &serde_json::Value) -> ProviderModelMetadata {
     let display_name = str_field(value, "name");
     let description = str_field(value, "description");
@@ -62,12 +61,10 @@ pub fn parse_openrouter_model(value: &serde_json::Value) -> ProviderModelMetadat
     }
 }
 
-#[allow(dead_code)]
 fn str_field(value: &serde_json::Value, key: &str) -> Option<String> {
     value.get(key).and_then(|v| v.as_str()).map(String::from)
 }
 
-#[allow(dead_code)]
 fn u32_field(value: &serde_json::Value, key: &str) -> Option<u32> {
     value.get(key).and_then(|v| v.as_u64()).map(|v| v as u32)
 }
@@ -78,7 +75,6 @@ fn u32_field(value: &serde_json::Value, key: &str) -> Option<u32> {
 /// `input_cache_read`) that differ from the serde rename attributes on
 /// `ModelPricing` (`request`, `cache_read`), so we parse manually rather
 /// than deserializing.
-#[allow(dead_code)]
 fn parse_pricing(value: &serde_json::Value) -> Option<ModelPricing> {
     if value.is_null() {
         return None;
@@ -106,7 +102,6 @@ fn parse_pricing(value: &serde_json::Value) -> Option<ModelPricing> {
 }
 
 /// Parse the OpenRouter `architecture` object into `ModelModalities`.
-#[allow(dead_code)]
 fn parse_modalities(value: &serde_json::Value) -> Option<ModelModalities> {
     let input = value
         .get("input_modalities")
@@ -140,7 +135,6 @@ fn parse_modalities(value: &serde_json::Value) -> Option<ModelModalities> {
 /// OpenRouter fields map directly to `ModelDefaultParameters` fields.
 /// The `repetition_penalty` field is present in OpenRouter but not in our
 /// struct, so it is silently ignored.
-#[allow(dead_code)]
 fn parse_default_parameters(value: &serde_json::Value) -> Option<ModelDefaultParameters> {
     if value.is_null() {
         return None;
@@ -174,7 +168,6 @@ fn parse_default_parameters(value: &serde_json::Value) -> Option<ModelDefaultPar
 }
 
 /// Convert a JSON value (string or number) to `f64`.
-#[allow(dead_code)]
 fn json_to_f64(value: &serde_json::Value) -> Option<f64> {
     match value {
         serde_json::Value::String(s) => s.parse().ok(),
@@ -184,7 +177,6 @@ fn json_to_f64(value: &serde_json::Value) -> Option<f64> {
 }
 
 /// Convert a JSON value (string or number) to `f32`.
-#[allow(dead_code)]
 fn json_to_f32(value: &serde_json::Value) -> Option<f32> {
     json_to_f64(value).map(|v| v as f32)
 }
