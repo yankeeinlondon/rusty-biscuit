@@ -2,7 +2,7 @@
 title: Sentrux Quality Remediation Plan — biscuit-terminal package area
 agent: open_code
 phases: 5
-start_phase: 1
+start_phase: 3
 created: '2026-05-04T17:10:05'
 source_review: review-1.md
 suggestions_total: 18
@@ -62,11 +62,37 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
 source_files_during_phase_3:
-  - biscuit-terminal/lib/src/discovery/detection.rs
-  - biscuit-terminal/lib/src/discovery/fonts.rs
-  - biscuit-terminal/lib/src/discovery/os_detection.rs
-  - biscuit-terminal/lib/src/discovery/osc_queries.rs
   - biscuit-terminal/lib/src/discovery/mod.rs
+  - biscuit-terminal/lib/src/discovery/detection/mod.rs
+  - biscuit-terminal/lib/src/discovery/detection/app.rs
+  - biscuit-terminal/lib/src/discovery/detection/color.rs
+  - biscuit-terminal/lib/src/discovery/detection/connection.rs
+  - biscuit-terminal/lib/src/discovery/detection/dimensions.rs
+  - biscuit-terminal/lib/src/discovery/detection/image.rs
+  - biscuit-terminal/lib/src/discovery/detection/multiplex.rs
+  - biscuit-terminal/lib/src/discovery/detection/osc8.rs
+  - biscuit-terminal/lib/src/discovery/detection/styling_caps.rs
+  - biscuit-terminal/lib/src/discovery/fonts/mod.rs
+  - biscuit-terminal/lib/src/discovery/fonts/types.rs
+  - biscuit-terminal/lib/src/discovery/fonts/nerd.rs
+  - biscuit-terminal/lib/src/discovery/fonts/window_size.rs
+  - biscuit-terminal/lib/src/discovery/fonts/parser.rs
+  - biscuit-terminal/lib/src/discovery/fonts/wezterm.rs
+  - biscuit-terminal/lib/src/discovery/fonts/ghostty.rs
+  - biscuit-terminal/lib/src/discovery/fonts/kitty.rs
+  - biscuit-terminal/lib/src/discovery/fonts/alacritty.rs
+  - biscuit-terminal/lib/src/discovery/fonts/iterm2.rs
+  - biscuit-terminal/lib/src/discovery/os_detection/mod.rs
+  - biscuit-terminal/lib/src/discovery/os_detection/types.rs
+  - biscuit-terminal/lib/src/discovery/os_detection/os_type.rs
+  - biscuit-terminal/lib/src/discovery/os_detection/family.rs
+  - biscuit-terminal/lib/src/discovery/os_detection/linux.rs
+  - biscuit-terminal/lib/src/discovery/os_detection/ci.rs
+  - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+  - biscuit-terminal/lib/src/discovery/osc_queries/types.rs
+  - biscuit-terminal/lib/src/discovery/osc_queries/parse.rs
+  - biscuit-terminal/lib/src/discovery/osc_queries/query.rs
+  - biscuit-terminal/lib/src/discovery/osc_queries/support.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
@@ -339,11 +365,11 @@ discovery/
 4. **Split `osc_queries.rs`** — per-query files.
 
 **Deliverables:**
-- [ ] `detection/` directory with 8 capability submodules
-- [ ] `fonts/` directory with trait + 5 implementations
-- [ ] `os_detection/` directory with per-platform files
-- [ ] `osc_queries/` directory with per-query files
-- [ ] All `discovery/mod.rs` re-exports updated
+- [x] `detection/` directory with 8 capability submodules
+- [x] `fonts/` directory with trait + 5 implementations
+- [x] `os_detection/` directory with per-platform files
+- [x] `osc_queries/` directory with per-query files
+- [x] All `discovery/mod.rs` re-exports updated
 
 **Validation:**
 ```bash
