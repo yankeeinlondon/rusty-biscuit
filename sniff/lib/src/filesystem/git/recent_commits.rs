@@ -7,7 +7,7 @@ use tracing::debug;
 
 use crate::filesystem::path_kind::{is_documentation_path, is_source_code_path};
 use crate::filesystem::git::ConventionalCommit;
-use crate::filesystem::git::detection::{DeltaKind, get_commit_files};
+use crate::filesystem::git::discovery::{DeltaKind, get_commit_files};
 use crate::filesystem::repo::{Package, detect_repo};
 use crate::{Result, SniffError};
 
