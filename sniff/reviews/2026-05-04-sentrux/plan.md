@@ -95,6 +95,21 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - sniff/lib/src/programs/install/mod.rs
+  - sniff/lib/src/programs/install/options.rs
+  - sniff/lib/src/programs/install/command.rs
+  - sniff/lib/src/programs/install/execute.rs
+  - sniff/lib/src/programs/install/plan.rs
+  - sniff/lib/src/programs/install/interview.rs
+  - sniff/lib/src/programs/categories.rs
+  - sniff/lib/src/programs/mod.rs
+  - sniff/lib/src/programs/host_capability.rs
+  - sniff/lib/src/programs/types.rs
+  - sniff/lib/src/programs/category_detector.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - sniff
   - sniff-cli
