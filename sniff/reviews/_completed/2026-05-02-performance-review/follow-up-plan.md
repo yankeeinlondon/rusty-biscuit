@@ -5,7 +5,7 @@ parent_plan: "sniff/reviews/2026-05-02-performance-review/plan.md"
 remaining_items: 0
 status: completed
 phases: 5
-start_phase: 1
+start_phase: 2
 source_files_during_phase_1:
   - sniff/lib/src/filesystem/file_types/classify.rs
   - sniff/lib/tests/integration.rs
