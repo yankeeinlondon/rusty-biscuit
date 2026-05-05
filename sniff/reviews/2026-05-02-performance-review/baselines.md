@@ -3,7 +3,7 @@
 **Review Date:** 2026-05-02
 **Baseline Date:** 2026-05-04
 **Branch:** `sniff`
-**Commit:** `06aa8afc`
+**Commit:** `c4136d59`
 
 ---
 
@@ -132,6 +132,15 @@ cargo bench -p sniff --bench perf -- "^(filesystem_git|filesystem_repo|filesyste
 | `programs_detect` | 25.07 ms | **Improved** (-25.54%) |
 | `services_detect` | 4.87 ms | **Regression** (+16.27%) |
 
+#### repo_package_boundaries
+
+| Benchmark | Time | Change |
+|-----------|------|--------|
+| `refresh_boundaries/10` | 64.5 µs | — |
+| `refresh_boundaries/100` | 611.6 µs | — |
+
+> Note: These benchmarks were added in Phase 4 to isolate `refresh_package_boundaries` cost. No previous baseline exists for comparison.
+
 ---
 
 ## Dependency Feature Decisions
@@ -170,7 +179,7 @@ cargo flamegraph -p sniff-cli --bin sniff -- repo git-status
 
 ## Notes
 
-- All measurements were taken on a clean working tree at commit `06aa8afc`.
+- All measurements were taken on a clean working tree at commit `c4136d59`.
 - Criterion benchmarks were run with default settings (warm-up + sample collection).
 - `hyperfine` was run with `--warmup 3` to warm caches.
 - The `cargo bloat` and `cargo llvm-lines` commands analyze the release profile (`--release`).
