@@ -2174,7 +2174,7 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
 ///
 /// Delegates to the shared library helper.
 fn is_source_code_file(path: &str) -> bool {
-    sniff::filesystem::blast_radius::is_source_code_path(Path::new(path))
+    sniff::filesystem::path_kind::is_source_code_path(Path::new(path))
 }
 
 /// Pure helper: returns `(has_changes, count, area_name)` for the current
