@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-11T20:35:19.183608+00:00
+//! Generated: 2026-05-04T04:02:13.520740+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: OpenAi
 //!

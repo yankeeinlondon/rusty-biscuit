@@ -79,7 +79,8 @@ The `tui_chrome::helpers` module provides builder functions for constructing cho
 The `question` CLI exposes each component as a subcommand. All subcommands share these global flags:
 
 - **`--output <raw|json|null>`** — serialisation format for the submitted value (`raw` is the default).
-- **`--height <CELLS_OR_PERCENT>`** — render inline at an explicit height instead of fullscreen.
+- **`--height <CELLS_OR_PERCENT>`** — render inline at up to the given height (cells or percentage of terminal rows) instead of fullscreen. Treated as a maximum: clamps to the live terminal when smaller. Percentages are re-resolved on terminal resize so the inline viewport tracks the requested fraction mid-prompt.
+- **`--show-input-on-exit`** — preserve the rendered prompt on exit instead of clearing it (default is fzf-style clear-on-exit). With this flag set, the cursor moves to the row just below the chrome so subsequent shell output follows the rendered border.
 
 Exit codes: `0` on successful submission, `130` on Ctrl-C (SIGINT). For `ChooseOne`, `Esc` restores the initial selection and also exits `0`; for other components, `Esc` exits `1`.
 

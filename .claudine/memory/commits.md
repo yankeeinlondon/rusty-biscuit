@@ -58,8 +58,14 @@ description: A record of novel things learned about how to best perform commits 
 - When generating temporary files for use in shell commands (e.g., as input for `git commit -F`), they must be placed inside the project's temporary directory (`.gemini/tmp/...`) rather than the global `/tmp` directory, which may be outside the allowed workspace scope.
 - Function names, identifiers with underscores, or code-like strings in commit messages can be interpreted as commands by zsh if they match shell functions or aliases. Prefer writing commit message bodies in prose that describes the feature rather than naming implementation details, or use single-quoted strings to prevent expansion.
 - In scripts that run `git add .`, use `git add . || exit 0` to prevent CI failure when there is nothing to commit.
+- In `zsh`, `$status` is a read-only special variable (alias of `$?`). When wrapping `git commit` in a retry loop, capture the exit code into a non-reserved name immediately after the command (e.g. `rc=$?`) — assigning to `status=$?` silently fails and breaks success/failure detection. Verify the result with `git show <hash>` rather than re-parsing captured stdout.
+- For complex commit messages with bullet points and special characters (like backticks or underscores), some agents prefer committing with a simple placeholder message first and then using `git commit --amend` (or passing the message via a temporary file) to avoid shell expansion and command-injection false positives in the `-m` argument.
 
 ## Rust Idioms
 
 - Prefer `sort_by_key` over `sort_by(|a, b| key(a).cmp(&key(b)))` for single-key sorts — it is more idiomatic and slightly more efficient.
 - Prefer guard clauses (`if condition =>`) in pattern matches over nested `if` blocks inside match arms.
+
+## Testing Terminal-Rendering CLIs
+
+- When writing tests for CLI table output that uses terminal rendering, be aware that non-TTY test contexts default to 80-column width, which may be too narrow for some tables. Tests should gracefully accept the "could not be rendered" (or equivalent) error message when the terminal is too narrow, rather than only asserting on successful table render. This makes tests more robust across different CI environments and execution contexts.

@@ -121,7 +121,7 @@ impl Default for ComponentTheme {
                 .add_modifier(Modifier::DIM),
             selected_label_style: Style::default()
                 .fg(Color::Cyan)
-                .add_modifier(Modifier::UNDERLINED),
+                .add_modifier(Modifier::BOLD),
             overflow_up_indicator: "▲".into(),
             overflow_down_indicator: "▼".into(),
             help_hint: "Enter=Submit  Esc=Cancel".into(),
