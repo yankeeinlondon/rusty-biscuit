@@ -388,7 +388,7 @@ mod tests {
         // This test ensures the enum variants compile and are accessible
         let _anthropic =
             ProviderModel::Anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101);
-        let _deepseek = ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__Chat);
+        let _deepseek = ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__V4__Flash);
         let _gemini = ProviderModel::Gemini(ProviderModelGemini::Gemini__2_5__Pro);
         let _groq = ProviderModel::Groq(ProviderModelGroq::Llama__3_3__70b__Versatile);
         let _mistral =
@@ -434,9 +434,9 @@ mod tests {
         assert!(meta.context_window.unwrap() > 0);
 
         // Test DeepSeek
-        let deepseek = ProviderModelDeepseek::Deepseek__Chat;
+        let deepseek = ProviderModelDeepseek::Deepseek__V4__Flash;
         let meta = deepseek.metadata();
-        assert!(meta.is_some(), "DeepSeek Chat should have metadata");
+        assert!(meta.is_some(), "DeepSeek V4 Flash should have metadata");
     }
 
     /// Test that Bespoke variants return None for metadata on individual enums.
