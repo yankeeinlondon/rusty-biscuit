@@ -2,6 +2,7 @@
 //! `exec::wiring`. This file preserves backward compatibility
 //! for callers that still reference `wrap::wire_io` until the
 //! migration is complete.
+#![allow(unused_imports)]
 
 pub(crate) use crate::commands::wrap::exec::wiring::{
     WIRE_PROTOCOL_VERSION, INITIALIZE_REQUEST_ID, PROMPT_REQUEST_ID, CANCEL_REQUEST_ID,

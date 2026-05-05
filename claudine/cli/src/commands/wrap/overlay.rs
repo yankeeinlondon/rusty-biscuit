@@ -1,7 +1,7 @@
 use color_eyre::eyre::{Result, eyre};
 use indexmap::IndexMap;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 
 pub(crate) fn merge_frontmatter_overlay(

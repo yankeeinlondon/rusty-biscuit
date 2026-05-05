@@ -1,14 +1,10 @@
-use biscuit_terminal::terminal::Terminal;
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
-use color_eyre::eyre::Result;
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::log;
 

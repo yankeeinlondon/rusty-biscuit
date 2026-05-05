@@ -588,6 +588,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
 
+    #[allow(dead_code)]
     fn now() -> Instant {
         Instant::now()
     }

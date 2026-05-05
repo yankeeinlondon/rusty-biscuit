@@ -1,7 +1,7 @@
 use biscuit_terminal::terminal::Terminal;
 use claudine::provider::Provider;
-use color_eyre::eyre::{Result, eyre};
-use std::path::{Path, PathBuf};
+use color_eyre::eyre::Result;
+use std::path::Path;
 
 use crate::log;
 

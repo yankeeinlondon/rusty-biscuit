@@ -1,7 +1,7 @@
 use clap::Args;
 use claudine::provider::{OutputFormatSelector, Provider, provider_info};
 use color_eyre::eyre::{Result, eyre};
-use std::path::PathBuf;
+
 
 /// Shared wrapper args for provider subcommands.
 ///
