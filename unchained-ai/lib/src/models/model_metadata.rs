@@ -1,10 +1,14 @@
 //! Runtime metadata types for model capabilities and specifications.
 //!
 //! This module provides types for representing model metadata fetched from
-//! external sources like the Parsera LLM Specs API. These types are used
-//! at runtime to query model capabilities, context windows, and modalities.
+//! external sources like the Parsera LLM Specs API and provider-native APIs
+//! (e.g., OpenRouter). These types are used at runtime to query model
+//! capabilities, context windows, modalities, pricing, and more.
 
 use std::str::FromStr;
+
+use crate::models::model_default_parameters::ModelDefaultParameters;
+use crate::models::model_pricing::ModelPricing;
 
 /// Input/output modality supported by a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -89,13 +93,16 @@ impl ModelModalities {
     }
 }
 
-/// Metadata about a model fetched from external specification sources.
+/// Metadata about a model from provider-native and external specification sources.
 ///
-/// This struct contains rich metadata that may be populated from sources
-/// like the Parsera LLM Specs API. All fields are optional since not all
-/// models have complete metadata available.
+/// This struct contains rich metadata populated from sources like the Parsera
+/// LLM Specs API and provider-native APIs (e.g., OpenRouter's `/api/v1/models`).
+/// All fields are optional since not all models have complete metadata available
+/// from every source.
+///
+/// Data merging priority: Provider-Native > Parsera.
 #[derive(Debug, Clone, Default)]
-pub struct ModelMetadata {
+pub struct ProviderModelMetadata {
     /// Human-readable display name (e.g., "GPT-4o mini").
     pub display_name: Option<String>,
 
@@ -113,9 +120,27 @@ pub struct ModelMetadata {
 
     /// Capabilities like "function_calling", "structured_output", etc.
     pub capabilities: Vec<String>,
+
+    /// Human-readable description of the model.
+    pub description: Option<String>,
+
+    /// Per-token and per-request pricing information.
+    pub pricing: Option<ModelPricing>,
+
+    /// List of supported parameter names (e.g., "temperature", "max_tokens").
+    pub supported_parameters: Option<Vec<String>>,
+
+    /// Default generation parameters recommended by the provider.
+    pub default_parameters: Option<ModelDefaultParameters>,
+
+    /// Knowledge cutoff date (e.g., "2024-06-30").
+    pub knowledge_cutoff: Option<String>,
+
+    /// Unix timestamp of when the model was created.
+    pub created: Option<u32>,
 }
 
-impl ModelMetadata {
+impl ProviderModelMetadata {
     /// Creates a new empty metadata instance.
     #[must_use]
     pub fn new() -> Self {
@@ -157,6 +182,10 @@ impl ModelMetadata {
             .any(|c| c.eq_ignore_ascii_case(capability))
     }
 }
+
+/// Deprecated alias for [`ProviderModelMetadata`].
+#[deprecated(since = "0.2.0", note = "use `ProviderModelMetadata` instead")]
+pub type ModelMetadata = ProviderModelMetadata;
 
 #[cfg(test)]
 mod tests {
@@ -202,8 +231,8 @@ mod tests {
     }
 
     #[test]
-    fn test_model_metadata_supports_modality() {
-        let metadata = ModelMetadata {
+    fn test_provider_model_metadata_supports_modality() {
+        let metadata = ProviderModelMetadata {
             modalities: Some(ModelModalities {
                 input: vec![Modality::Text, Modality::Image],
                 output: vec![Modality::Text],
@@ -219,8 +248,8 @@ mod tests {
     }
 
     #[test]
-    fn test_model_metadata_has_capability() {
-        let metadata = ModelMetadata {
+    fn test_provider_model_metadata_has_capability() {
+        let metadata = ProviderModelMetadata {
             capabilities: vec![
                 "function_calling".to_string(),
                 "structured_output".to_string(),
@@ -235,11 +264,110 @@ mod tests {
     }
 
     #[test]
-    fn test_model_metadata_empty_returns_false() {
-        let metadata = ModelMetadata::new();
+    fn test_provider_model_metadata_empty_returns_false() {
+        let metadata = ProviderModelMetadata::new();
 
         assert!(!metadata.supports_input(Modality::Text));
         assert!(!metadata.supports_output(Modality::Text));
         assert!(!metadata.has_capability("anything"));
+    }
+
+    #[test]
+    fn test_provider_model_metadata_new_fields_default() {
+        let metadata = ProviderModelMetadata::new();
+        assert_eq!(metadata.description, None);
+        assert_eq!(metadata.pricing, None);
+        assert_eq!(metadata.supported_parameters, None);
+        assert_eq!(metadata.default_parameters, None);
+        assert_eq!(metadata.knowledge_cutoff, None);
+        assert_eq!(metadata.created, None);
+    }
+
+    #[test]
+    fn test_provider_model_metadata_with_pricing() {
+        let metadata = ProviderModelMetadata {
+            pricing: Some(ModelPricing {
+                prompt_per_token: Some(0.000005),
+                completion_per_token: Some(0.000015),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(metadata.pricing.is_some());
+        assert_eq!(
+            metadata.pricing.as_ref().unwrap().prompt_per_token,
+            Some(0.000005)
+        );
+    }
+
+    #[test]
+    fn test_provider_model_metadata_with_description() {
+        let metadata = ProviderModelMetadata {
+            description: Some("A fast, affordable model.".to_string()),
+            knowledge_cutoff: Some("2024-06-30".to_string()),
+            created: Some(1_700_000_000),
+            ..Default::default()
+        };
+        assert_eq!(
+            metadata.description.as_deref(),
+            Some("A fast, affordable model.")
+        );
+        assert_eq!(metadata.knowledge_cutoff.as_deref(), Some("2024-06-30"));
+        assert_eq!(metadata.created, Some(1_700_000_000));
+    }
+
+    #[test]
+    fn test_provider_model_metadata_with_default_parameters() {
+        let metadata = ProviderModelMetadata {
+            default_parameters: Some(ModelDefaultParameters {
+                temperature: Some(0.7),
+                top_p: Some(0.9),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(metadata.default_parameters.is_some());
+        assert_eq!(
+            metadata.default_parameters.as_ref().unwrap().temperature,
+            Some(0.7)
+        );
+    }
+
+    #[test]
+    fn test_provider_model_metadata_with_supported_parameters() {
+        let metadata = ProviderModelMetadata {
+            supported_parameters: Some(vec![
+                "temperature".to_string(),
+                "max_tokens".to_string(),
+                "top_p".to_string(),
+            ]),
+            ..Default::default()
+        };
+        assert!(metadata.supported_parameters.is_some());
+        assert_eq!(metadata.supported_parameters.as_ref().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_provider_model_metadata_with_display_name() {
+        let metadata = ProviderModelMetadata::with_display_name("GPT-4o");
+        assert_eq!(metadata.display_name.as_deref(), Some("GPT-4o"));
+        assert_eq!(metadata.description, None);
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn test_deprecated_alias_still_works() {
+        let metadata = ModelMetadata::new();
+        assert!(metadata.display_name.is_none());
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn test_deprecated_alias_constructor() {
+        let metadata = ModelMetadata {
+            display_name: Some("test".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(metadata.display_name.as_deref(), Some("test"));
     }
 }
