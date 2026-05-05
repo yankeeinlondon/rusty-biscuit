@@ -24,12 +24,19 @@
 //! the pipeline to walk only inside that directory.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use super::frontmatter;
-use super::fuzzy::{self, DirMatchMode, PartialLen};
-use super::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind, ScopeSet};
-use super::walker;
+use super::scopes::{self, ComposeMode, ScopeContext};
+
+mod compose;
+mod inline_compose;
+mod magic_at;
+mod sequence;
+mod setter_value;
+
+use compose::gather_empty_or_word;
+use magic_at::gather_magic;
+use setter_value::gather_committed;
 
 /// Source rank for candidates emitted by the repo-wide directory walk.
 ///
@@ -146,584 +153,6 @@ pub(crate) fn run(mode: ComposeMode, ctx: &ScopeContext, partial_token: &str) ->
     finalize(candidates)
 }
 
-/// Empty / Word path: walk every configured scope, apply fuzzy matching to
-/// the active segment, and consult [`PartialLen`] to decide whether
-/// directories are in play.
-///
-/// After the high-profile scope pass completes, a second pass walks the
-/// repo (or CWD when no repo is detected) to emit directory candidates
-/// independent of the high-profile file scope set. This is what makes
-/// `compose c` surface directories like `claudine/` even when they are
-/// not under `prompts/`. See [`gather_repo_dirs`] for details.
-fn gather_empty_or_word(
-    mode: ComposeMode,
-    ctx: &ScopeContext,
-    set: &ScopeSet,
-    active: &str,
-) -> Vec<Candidate> {
-    let partial_len = PartialLen::classify(active.chars().count());
-    let mut out: Vec<Candidate> = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-
-    for (rank, scope) in set.iter_scopes().enumerate() {
-        let rank = rank.min(u8::MAX as usize) as u8;
-        if !scope.path.is_dir() {
-            continue;
-        }
-        let entries = walker::walk_scope(scope);
-        for entry_path in entries {
-            let render_ctx = WordRenderCtx {
-                mode,
-                scope,
-                entry_path: &entry_path,
-                active,
-                partial_len,
-                rank,
-                scope_ctx: ctx,
-            };
-            render_entry_word(&render_ctx, &mut seen, &mut out);
-        }
-    }
-
-    let walk_scope = scopes::resolve_repo_dir_walk_root(ctx);
-    let render_base = walk_scope.path.clone();
-    gather_repo_dirs(
-        &walk_scope,
-        &render_base,
-        active,
-        partial_len,
-        &mut seen,
-        &mut out,
-    );
-
-    out
-}
-
-/// Second-pass repo-wide directory walk.
-///
-/// Walks the supplied scope once and emits **directory** candidates only.
-/// Files are intentionally skipped — the file pipeline is owned by the
-/// caller's first pass. Used by both Word mode (`gather_empty_or_word`,
-/// walking the repo / cwd root) and Magic mode (`gather_magic`, walking
-/// either the repo / cwd root or the magic-resolved subdirectory).
-///
-/// Match strategy varies by typed-prefix length (see
-/// [`PartialLen::dir_match_mode`]):
-///
-/// - `DirMatchMode::None` — empty partial, function returns immediately.
-/// - `DirMatchMode::Prefix` — case-insensitive starting-substring match
-///   against the directory's leaf name.
-/// - `DirMatchMode::Fuzzy` — case-insensitive fuzzy subsequence match.
-///
-/// Rendering is `render_base`-relative so callers can choose the base
-/// segment that should appear in the inserted token. Word mode passes
-/// the walk root as the render base (so the rendered token is
-/// repo-relative); Magic mode with a path-shaped `dir` passes the repo
-/// root so `<repo>/prompts/planning/` renders as `prompts/planning/`
-/// rather than just `planning/`.
-///
-/// Dedup is shared with the file pass via the canonical-path `seen` set
-/// so a directory that already surfaced under a high-profile scope (e.g.
-/// `prompts/` at the repo root) does not appear twice. Candidates are
-/// emitted with [`REPO_DIR_WALK_RANK`] so they sort after every
-/// high-profile-rooted candidate.
-fn gather_repo_dirs(
-    walk_scope: &Scope,
-    render_base: &Path,
-    active: &str,
-    partial_len: PartialLen,
-    seen: &mut HashSet<PathBuf>,
-    out: &mut Vec<Candidate>,
-) {
-    let dir_mode = partial_len.dir_match_mode();
-    if dir_mode == DirMatchMode::None {
-        return;
-    }
-    if !walk_scope.path.is_dir() {
-        return;
-    }
-    let entries = walker::walk_scope(walk_scope);
-    for entry_path in entries {
-        if !entry_path.is_dir() {
-            continue;
-        }
-        // Skip the walk root itself (the walker already strips depth-0
-        // entries, but a defensive guard keeps the empty-relative case
-        // out of the rendered output).
-        let Ok(rel) = entry_path.strip_prefix(render_base) else {
-            continue;
-        };
-        let Some(rel_str) = rel.to_str() else {
-            continue;
-        };
-        if rel_str.is_empty() {
-            continue;
-        }
-
-        let Some(leaf) = entry_path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let dir_match = match dir_mode {
-            DirMatchMode::None => false,
-            DirMatchMode::Prefix => fuzzy::prefix_match(leaf, active),
-            DirMatchMode::Fuzzy => fuzzy::fuzzy_match(leaf, active),
-        };
-        if !dir_match {
-            continue;
-        }
-
-        let canonical = std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
-        if !seen.insert(canonical) {
-            continue;
-        }
-        let insert = format!("{}/", rel_str.trim_end_matches('/'));
-        out.push(Candidate {
-            insert,
-            source_rank: REPO_DIR_WALK_RANK,
-        });
-    }
-}
-
-/// Bundled inputs to [`render_entry_word`]. Grouping the per-entry knobs
-/// keeps clippy happy about argument count and gives callers a stable
-/// spot to plug in future rendering policies (score, highlight, etc.).
-struct WordRenderCtx<'a> {
-    mode: ComposeMode,
-    scope: &'a Scope,
-    entry_path: &'a Path,
-    active: &'a str,
-    partial_len: PartialLen,
-    rank: u8,
-    scope_ctx: &'a ScopeContext,
-}
-
-/// Decide whether a walked entry should become a candidate in Word mode.
-fn render_entry_word(
-    ctx: &WordRenderCtx<'_>,
-    seen: &mut HashSet<PathBuf>,
-    out: &mut Vec<Candidate>,
-) {
-    let is_dir = ctx.entry_path.is_dir();
-
-    // Only files from the immediate level or below are emitted; walker
-    // already returns everything rooted under the scope. For Empty / Short
-    // partials we skip nested directories entirely — drill-down is only
-    // offered once the user commits to a subtree.
-    if is_dir && !ctx.partial_len.directories_allowed() {
-        return;
-    }
-    if !is_dir && !frontmatter::valid_for_mode(ctx.entry_path, ctx.mode) {
-        return;
-    }
-
-    let canonical =
-        std::fs::canonicalize(ctx.entry_path).unwrap_or_else(|_| ctx.entry_path.to_path_buf());
-    if !seen.insert(canonical) {
-        return;
-    }
-
-    let Some(name_cmp) = display_name(ctx.entry_path) else {
-        return;
-    };
-
-    if ctx.partial_len.matching_enabled() {
-        // Match against the stem for files and the directory name for
-        // directories. The stem is a more natural target — users type
-        // `plan` intending `plan.md`, not `plan.md` literally.
-        let target = if is_dir {
-            name_cmp.as_str()
-        } else {
-            name_stem(&name_cmp)
-        };
-        if !fuzzy::fuzzy_match(target, ctx.active) {
-            return;
-        }
-    }
-
-    let Some(insert) = format_relative_insert(ctx.scope, ctx.entry_path, ctx.scope_ctx) else {
-        return;
-    };
-    let insert = if is_dir {
-        format!("{}/", insert.trim_end_matches('/'))
-    } else {
-        insert
-    };
-    out.push(Candidate {
-        insert,
-        source_rank: ctx.rank,
-    });
-}
-
-/// Render the path relative to the scope root.
-///
-/// Prioritises repository-relative rendering (via [`ScopeContext::repo_info`]
-/// or [`ScopeContext::git_root`]) so that candidates from every scope tier
-/// emit runnable paths:
-///
-/// - Repo `prompts/` → `prompts/plan.md`
-/// - Repo `.claudine/prompts/` → `.claudine/prompts/plan.md`
-/// - Package-area / package prompts → `claudine/prompts/plan.md`
-/// - User-global `~/.claudine/prompts/` → `~/.claudine/prompts/plan.md`
-/// - Extras (`docs/`) → `docs/plan.md`
-///
-/// Falls back to scope-leaf-relative rendering only when no anchor root
-/// is available.
-fn format_relative_insert(scope: &Scope, entry: &Path, ctx: &ScopeContext) -> Option<String> {
-    if scope.kind == ScopeKind::UserClaudinePrompts
-        && let Some(insert) = format_home_relative_insert(entry, ctx)
-    {
-        return Some(insert);
-    }
-
-    // 1. Repo-relative rendering (Cargo workspace, monorepo, or plain git).
-    if let Some(root) = scopes::effective_repo_root(ctx)
-        && let Ok(rel) = entry.strip_prefix(root)
-    {
-        let rel_str = rel.to_str()?;
-        if !rel_str.is_empty() {
-            return Some(rel_str.to_string());
-        }
-    }
-    // 2. Home-relative rendering (user-global `~/.claudine/...`).
-    if let Some(insert) = format_home_relative_insert(entry, ctx) {
-        return Some(insert);
-    }
-    // 3. Fallback: scope-leaf-relative rendering.
-    let leaf = scope.path.file_name()?.to_str()?;
-    let rel = entry.strip_prefix(&scope.path).ok()?;
-    let rel_str = rel.to_str()?;
-    if rel_str.is_empty() {
-        return None;
-    }
-    Some(format!("{leaf}/{rel_str}"))
-}
-
-fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<String> {
-    let home = ctx.home.as_ref()?;
-    if !entry.starts_with(home) {
-        return None;
-    }
-    let rel = entry.strip_prefix(home).ok()?.to_str()?;
-    if rel.is_empty() {
-        return None;
-    }
-    Some(format!("~/{rel}"))
-}
-
-/// Magic (`@...`): resolve against the magic scope priority order (see
-/// [`ScopeSet::iter_magic_scopes`]). The first scope whose walked tree
-/// yields a matching file wins the **file tier**; subsequent file tiers
-/// are shadowed. Directories surface independently from the repo-wide
-/// directory walk (see [`gather_repo_dirs`]) — they mirror Word-mode
-/// directory behaviour and are not affected by the file-tier shadowing
-/// rule. Spec §5.5 file table:
-///
-/// | Source tier | Inserted token |
-/// |---|---|
-/// | Repo / pkg-area / pkg / repo.claudine / extras | `prompts/plan.md` (or `docs/plan.md`, `.claudine/prompts/plan.md`) |
-/// | User global | `~/.claudine/prompts/plan.md` |
-///
-/// The `dir` argument carries the path portion of a path-shaped magic
-/// partial (e.g. `@prompts/plan` → `dir = "prompts"`). When non-empty, the
-/// walk root is constrained via [`resolve_magic_walk_root`] so the typed
-/// path prefix narrows the search before fuzzy matching the final
-/// segment. The same constraint is applied to the directory walk so
-/// `@prompts/pl` surfaces `prompts/planning/` rather than every
-/// `pl*`-named directory at the repo root.
-fn gather_magic(
-    mode: ComposeMode,
-    ctx: &ScopeContext,
-    set: &ScopeSet,
-    dir: &str,
-    active: &str,
-) -> Vec<Candidate> {
-    let partial_len = PartialLen::classify(active.chars().count());
-
-    let (mut out, mut seen) = gather_magic_files(mode, ctx, set, dir, active, partial_len);
-    gather_magic_dirs(ctx, set, dir, active, partial_len, &mut seen, &mut out);
-    out
-}
-
-/// First-tier file gathering for magic resolution.
-///
-/// Implements the spec §5.5 first-hit-wins shadow rule: walks each scope
-/// in magic priority order and returns the first scope's matching files.
-/// Lower-priority scopes never contribute file candidates once a higher-
-/// priority scope has produced a hit. The returned `seen` set carries the
-/// canonical paths of every emitted candidate so the directory pass can
-/// dedup against them without re-emitting the same path twice.
-fn gather_magic_files(
-    mode: ComposeMode,
-    ctx: &ScopeContext,
-    set: &ScopeSet,
-    dir: &str,
-    active: &str,
-    partial_len: PartialLen,
-) -> (Vec<Candidate>, HashSet<PathBuf>) {
-    for (rank, scope) in set.iter_magic_scopes().enumerate() {
-        let Some(walk_root) = resolve_magic_walk_root(&scope.path, dir) else {
-            continue;
-        };
-        if !walk_root.is_dir() {
-            continue;
-        }
-        let rank = rank.min(u8::MAX as usize) as u8;
-        let scoped = Scope {
-            kind: scope.kind,
-            path: walk_root,
-            follow_links: scope.follow_links,
-        };
-        let entries = walker::walk_scope(&scoped);
-        let mut scope_candidates: Vec<Candidate> = Vec::new();
-        let mut seen: HashSet<PathBuf> = HashSet::new();
-        for entry_path in entries {
-            // Directories are owned by the repo-wide walk (see
-            // `gather_magic_dirs`) — skip here to keep the file tier free
-            // of directory candidates and avoid double-emission.
-            if entry_path.is_dir() {
-                continue;
-            }
-            if !frontmatter::valid_for_mode(&entry_path, mode) {
-                continue;
-            }
-
-            let canonical =
-                std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
-            if seen.contains(&canonical) {
-                continue;
-            }
-            let Some(target) = entry_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            let match_target = name_stem(&target);
-            if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
-                continue;
-            }
-            let Some(insert) = render_magic_insert(scope, &entry_path, ctx) else {
-                continue;
-            };
-            seen.insert(canonical);
-            scope_candidates.push(Candidate {
-                insert,
-                source_rank: rank,
-            });
-        }
-        if !scope_candidates.is_empty() {
-            return (scope_candidates, seen);
-        }
-    }
-    (Vec::new(), HashSet::new())
-}
-
-/// Magic-mode directory parity walk (review-3 finding 4).
-///
-/// Mirrors the Word-mode directory-walk surface into Magic mode so
-/// `@pl<TAB>` and `pl<TAB>` agree on directory candidates at Short and
-/// Long prefix lengths. Empty (`@<TAB>`) remains directory-free.
-///
-/// Walk root selection:
-///
-/// - When `dir` is empty, walks [`scopes::resolve_repo_dir_walk_root`]
-///   exactly as Word mode does — surfacing `planning/`, `docs/`, etc.
-///   at the repo root.
-/// - When `dir` is non-empty, walks the magic-resolved subdirectory of
-///   the highest-priority scope whose joined walk root resolves on
-///   disk. Match target is the leaf segment (`active`), rendered as
-///   repo-relative so `<repo>/prompts/planning/` becomes
-///   `prompts/planning/`.
-///
-/// Independent of the file-tier shadowing rule from
-/// [`gather_magic_files`]: directories surface even when the winning
-/// file tier was the user-global scope (or no scope produced files at
-/// all). The file tier's `seen` set is threaded in so a directory that
-/// already surfaced as a file candidate is not double-emitted.
-fn gather_magic_dirs(
-    ctx: &ScopeContext,
-    set: &ScopeSet,
-    dir: &str,
-    active: &str,
-    partial_len: PartialLen,
-    seen: &mut HashSet<PathBuf>,
-    out: &mut Vec<Candidate>,
-) {
-    if partial_len.dir_match_mode() == DirMatchMode::None {
-        return;
-    }
-    let render_base = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
-
-    if dir.is_empty() {
-        let walk_scope = scopes::resolve_repo_dir_walk_root(ctx);
-        gather_repo_dirs(&walk_scope, &render_base, active, partial_len, seen, out);
-        return;
-    }
-
-    // Path-shaped magic: walk the magic-resolved subdirectory of the
-    // highest-priority scope whose joined walk root exists on disk. Render
-    // base is the repo / cwd root so the inserted token retains the typed
-    // prefix (e.g. `prompts/planning/` rather than `planning/`).
-    for scope in set.iter_magic_scopes() {
-        let Some(walk_root) = resolve_magic_walk_root(&scope.path, dir) else {
-            continue;
-        };
-        if !walk_root.is_dir() {
-            continue;
-        }
-        let scoped = Scope {
-            kind: scope.kind,
-            path: walk_root,
-            follow_links: scope.follow_links,
-        };
-        gather_repo_dirs(&scoped, &render_base, active, partial_len, seen, out);
-        return;
-    }
-}
-
-/// Resolve the walk root for a magic-path partial against a single scope.
-///
-/// When `dir` is empty, the walk root is the scope root itself. When `dir`
-/// is non-empty, it joins to the scope root — but with a crucial special
-/// case: if `dir` starts with the scope's leaf name (e.g. `dir = "prompts"`
-/// against `scope = /repo/prompts`), peel the leaf off before joining so
-/// `@prompts/plan` resolves against `/repo/prompts/` rather than
-/// `/repo/prompts/prompts/`.
-///
-/// ## Returns
-///
-/// `Some(path)` with the resolved walk root path (which may or may not
-/// exist on disk — the caller must `is_dir()` check). `None` only when the
-/// scope root has no final component to extract (defensive — Claudine
-/// never emits such scopes in practice).
-fn resolve_magic_walk_root(scope_root: &Path, dir: &str) -> Option<PathBuf> {
-    if dir.is_empty() {
-        return Some(scope_root.to_path_buf());
-    }
-    // Peel off a matching scope-suffix so `@prompts/plan` resolves
-    // against `<scope>/plan/` rather than `<scope>/prompts/plan/` when
-    // the scope already ends in `/prompts`. Handles multi-segment
-    // suffixes too (e.g. `@.claudine/prompts/plan` against a scope
-    // ending in `.claudine/prompts`).
-    let dir_segments: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
-    if dir_segments.is_empty() {
-        return Some(scope_root.to_path_buf());
-    }
-    // Find the longest prefix of `dir` that matches a trailing suffix of
-    // `scope_root`. For each candidate length k (from the longest down),
-    // compare the last k components of `scope_root` against the first k
-    // components of `dir_segments`. The first match wins; peel that many
-    // segments off and join the rest.
-    let scope_components: Vec<&str> = scope_root
-        .components()
-        .filter_map(|c| c.as_os_str().to_str())
-        .collect();
-    for k in (1..=dir_segments.len().min(scope_components.len())).rev() {
-        let scope_tail = &scope_components[scope_components.len() - k..];
-        if scope_tail == &dir_segments[..k] {
-            let remainder = dir_segments[k..].join("/");
-            if remainder.is_empty() {
-                return Some(scope_root.to_path_buf());
-            }
-            return Some(scope_root.join(remainder));
-        }
-    }
-    Some(scope_root.join(dir))
-}
-
-/// Render the inserted token for a magic-path match.
-///
-/// Delegates to [`format_relative_insert`] since both magic and non-magic
-/// paths now share the same repo-relative / git-root-relative /
-/// home-relative rendering logic.
-fn render_magic_insert(scope: &Scope, entry: &Path, ctx: &ScopeContext) -> Option<String> {
-    format_relative_insert(scope, entry, ctx)
-}
-
-/// CommittedDir / PartialPath: walk only inside the committed directory
-/// relative to the repo root (or cwd when no repo). High-profile scopes
-/// are intentionally **not** consulted — the spec flips semantics once the
-/// user commits to a subtree.
-fn gather_committed(
-    mode: ComposeMode,
-    ctx: &ScopeContext,
-    dir: &str,
-    active: &str,
-) -> Vec<Candidate> {
-    let partial_len = PartialLen::classify(active.chars().count());
-
-    let base = scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone());
-    let walk_root = base.join(dir);
-    if !walk_root.is_dir() {
-        return Vec::new();
-    }
-    let scope = Scope {
-        kind: ScopeKind::CommittedDir,
-        path: walk_root.clone(),
-        follow_links: true,
-    };
-    let entries = walker::walk_scope(&scope);
-    let mut out: Vec<Candidate> = Vec::new();
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-
-    for entry_path in entries {
-        let is_dir = entry_path.is_dir();
-        if is_dir && !partial_len.directories_allowed() {
-            continue;
-        }
-        if !is_dir && !frontmatter::valid_for_mode(&entry_path, mode) {
-            continue;
-        }
-
-        let canonical = std::fs::canonicalize(&entry_path).unwrap_or_else(|_| entry_path.clone());
-        if !seen.insert(canonical) {
-            continue;
-        }
-        let Some(name) = entry_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(str::to_string)
-        else {
-            continue;
-        };
-        let match_target = if is_dir {
-            name.as_str()
-        } else {
-            name_stem(&name)
-        };
-        if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
-            continue;
-        }
-        let rel = match entry_path.strip_prefix(&walk_root) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        let Some(rel_str) = rel.to_str() else {
-            continue;
-        };
-        let insert = if dir.is_empty() {
-            rel_str.to_string()
-        } else {
-            format!("{}/{}", dir.trim_end_matches('/'), rel_str)
-        };
-        let insert = if is_dir {
-            format!("{}/", insert.trim_end_matches('/'))
-        } else {
-            insert
-        };
-        out.push(Candidate {
-            insert,
-            source_rank: 0,
-        });
-    }
-    out
-}
-
 /// Sort candidates by source rank, then lexically, and collapse duplicates
 /// by inserted token. Returns strings ready for stdout.
 fn finalize(mut candidates: Vec<Candidate>) -> Vec<String> {
@@ -766,6 +195,7 @@ fn name_stem(name: &str) -> &str {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn write(path: &Path, content: &str) {
@@ -1126,7 +556,7 @@ mod tests {
     fn magic_walk_root_empty_dir_is_scope_root() {
         let scope = Path::new("/r/prompts");
         assert_eq!(
-            resolve_magic_walk_root(scope, ""),
+            magic_at::resolve_magic_walk_root(scope, ""),
             Some(PathBuf::from("/r/prompts"))
         );
     }
@@ -1138,7 +568,7 @@ mod tests {
         // `/r/prompts/prompts`.
         let scope = Path::new("/r/prompts");
         assert_eq!(
-            resolve_magic_walk_root(scope, "prompts"),
+            magic_at::resolve_magic_walk_root(scope, "prompts"),
             Some(PathBuf::from("/r/prompts"))
         );
     }
@@ -1149,7 +579,7 @@ mod tests {
         // becomes `/r/prompts/drafts`, not `/r/prompts/prompts/drafts`.
         let scope = Path::new("/r/prompts");
         assert_eq!(
-            resolve_magic_walk_root(scope, "prompts/drafts"),
+            magic_at::resolve_magic_walk_root(scope, "prompts/drafts"),
             Some(PathBuf::from("/r/prompts/drafts"))
         );
     }
@@ -1160,7 +590,7 @@ mod tests {
         // raw → `/r/prompts/drafts`.
         let scope = Path::new("/r/prompts");
         assert_eq!(
-            resolve_magic_walk_root(scope, "drafts"),
+            magic_at::resolve_magic_walk_root(scope, "drafts"),
             Some(PathBuf::from("/r/prompts/drafts"))
         );
     }
@@ -1173,7 +603,7 @@ mod tests {
         // unlikely path.
         let scope = Path::new("/r/docs");
         assert_eq!(
-            resolve_magic_walk_root(scope, "prompts/plan"),
+            magic_at::resolve_magic_walk_root(scope, "prompts/plan"),
             Some(PathBuf::from("/r/docs/prompts/plan"))
         );
     }
