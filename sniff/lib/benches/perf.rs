@@ -22,6 +22,7 @@ mod cases {
     pub mod inventory;
     pub mod network;
     pub mod programs;
+    pub mod repo;
     pub mod system;
 }
 
@@ -37,6 +38,7 @@ fn register_all(c: &mut Criterion) {
     cases::git::register(c);
     cases::inventory::register(c);
     cases::programs::register(c);
+    cases::repo::register(c);
     cases::network::register(c);
 }
 

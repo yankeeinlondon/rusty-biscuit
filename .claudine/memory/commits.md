@@ -63,3 +63,7 @@ description: A record of novel things learned about how to best perform commits 
 
 - Prefer `sort_by_key` over `sort_by(|a, b| key(a).cmp(&key(b)))` for single-key sorts — it is more idiomatic and slightly more efficient.
 - Prefer guard clauses (`if condition =>`) in pattern matches over nested `if` blocks inside match arms.
+
+## Testing Terminal-Rendering CLIs
+
+- When writing tests for CLI table output that uses terminal rendering, be aware that non-TTY test contexts default to 80-column width, which may be too narrow for some tables. Tests should gracefully accept the "could not be rendered" (or equivalent) error message when the terminal is too narrow, rather than only asserting on successful table render. This makes tests more robust across different CI environments and execution contexts.

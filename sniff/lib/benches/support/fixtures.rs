@@ -95,3 +95,13 @@ pub fn git_repo_with_fake_remotes(commit_count: usize, remote_count: usize) -> F
     builder::build_git_repo_with_fake_remotes(&root, commit_count, remote_count);
     Fixture { dir, path: root }
 }
+
+/// Cargo monorepo fixture with a configurable number of Rust packages.
+///
+/// See [`builder::build_cargo_monorepo`] for the precise layout.
+pub fn cargo_monorepo(package_count: usize) -> Fixture {
+    let dir = TempDir::new().expect("tempdir for cargo_monorepo");
+    let root = dir.path().to_path_buf();
+    builder::build_cargo_monorepo(&root, package_count);
+    Fixture { dir, path: root }
+}
