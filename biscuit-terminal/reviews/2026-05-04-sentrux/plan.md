@@ -2,7 +2,7 @@
 title: Sentrux Quality Remediation Plan — biscuit-terminal package area
 agent: open_code
 phases: 5
-start_phase: 0
+start_phase: 1
 created: '2026-05-04T17:10:05'
 source_review: review-1.md
 suggestions_total: 18
@@ -14,13 +14,26 @@ docs_updated_during_phase_0: []
 docs_created_during_phase_0: []
 skills_files_updated_during_phase_0: []
 source_files_during_phase_1:
+  - biscuit-terminal/lib/src/utils/wrap_policy.rs
   - biscuit-terminal/lib/src/utils/layout.rs
   - biscuit-terminal/lib/src/utils/block_constraint.rs
   - biscuit-terminal/lib/src/utils/word_wrap.rs
   - biscuit-terminal/lib/src/utils/mod.rs
+  - biscuit-terminal/lib/src/prelude.rs
+  - biscuit-terminal/lib/src/components/prose.rs
+  - biscuit-terminal/lib/src/components/table/types.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/components/status_block.rs
+  - biscuit-terminal/lib/src/components/status.rs
+  - biscuit-terminal/lib/src/components/renderable.rs
+  - biscuit-terminal/lib/src/components/list.rs
+  - biscuit-terminal/lib/src/components/compose.rs
+  - biscuit-terminal/lib/src/components/block_quote.rs
+  - biscuit-terminal/lib/src/components/inline_content.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
-skills_files_updated_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .opencode/skill/biscuit-terminal/SKILL.md
 source_files_during_phase_2:
   - biscuit-terminal/cli/src/commands.rs
   - biscuit-terminal/cli/src/main.rs
@@ -57,7 +70,6 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
 packages:
   - biscuit-terminal
-  - biscuit-terminal-cli
 ---
 
 # Sentrux Quality Remediation Plan — biscuit-terminal
