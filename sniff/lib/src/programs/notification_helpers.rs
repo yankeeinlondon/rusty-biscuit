@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::programs::enums::NotificationHelper;
 use crate::executable_index::ExecutableIndex;
 use crate::programs::contract::ExecutableSource;
-use crate::programs::types::CategoryDetector;
+use crate::programs::category_detector::CategoryDetector;
 
 /// Information about the active Linux notification daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

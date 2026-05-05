@@ -412,3 +412,25 @@ pub trait CategoryEnum:
         None
     }
 }
+
+#[cfg(test)]
+mod prereq_type_tests {
+    use super::*;
+
+    #[test]
+    fn system_prerequisite_is_constructible_as_const() {
+        const PREREQ: SystemPrerequisite = SystemPrerequisite {
+            name: "PortAudio",
+            probe: PrereqProbe::SharedLibrary("libportaudio.so.2"),
+            methods: &[InstallationMethod::Apt("libportaudio2")],
+        };
+        assert_eq!(PREREQ.name, "PortAudio");
+        assert!(matches!(PREREQ.probe, PrereqProbe::SharedLibrary(_)));
+    }
+
+    #[test]
+    fn prereq_probe_binary_variant() {
+        const PROBE: PrereqProbe = PrereqProbe::Binary("ffmpeg");
+        assert!(matches!(PROBE, PrereqProbe::Binary("ffmpeg")));
+    }
+}

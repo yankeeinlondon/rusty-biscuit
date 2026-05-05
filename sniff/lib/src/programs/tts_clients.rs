@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::programs::enums::TtsClient;
 use crate::programs::contract::ExecutableSource;
-use crate::programs::types::CategoryDetector;
+use crate::programs::category_detector::CategoryDetector;
 
 /// Text-to-speech clients found on the system.
 pub type InstalledTtsClients = CategoryDetector<TtsClient>;

@@ -96,6 +96,7 @@
 //! - **Linux/Windows**: Bundle detection returns `None` (PATH-only)
 
 pub mod ai_cli;
+pub mod category_detector;
 pub mod contract;
 pub mod editors;
 pub mod enums;
@@ -153,8 +154,9 @@ pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers
 pub use schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{CategoryDetector, ProgramDetector};
+pub use category_detector::CategoryDetector;
 pub use contract::{ExecutableSource, InstallationMethod, PrereqProbe, ProgramError, SystemPrerequisite};
+pub use types::ProgramDetector;
 pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.

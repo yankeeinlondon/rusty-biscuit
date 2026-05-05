@@ -1,7 +1,7 @@
 //! Editor detection — type alias for `CategoryDetector<Editor>`.
 
 use crate::programs::enums::Editor;
-use crate::programs::types::CategoryDetector;
+use crate::programs::category_detector::CategoryDetector;
 
 /// Popular text editors and IDEs found on the system.
 pub type InstalledEditors = CategoryDetector<Editor>;

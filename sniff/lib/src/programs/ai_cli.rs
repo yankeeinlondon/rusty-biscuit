@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::programs::enums::AiCli;
 use crate::programs::contract::ExecutableSource;
-use crate::programs::types::CategoryDetector;
+use crate::programs::category_detector::CategoryDetector;
 
 /// AI-powered CLI coding tools found on the system.
 pub type InstalledAiClients = CategoryDetector<AiCli>;

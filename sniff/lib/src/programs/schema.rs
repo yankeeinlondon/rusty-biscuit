@@ -285,7 +285,7 @@ pub trait ProgramMetadata: Sized {
     /// Skips the PATH lookup performed by [`ProgramMetadata::version`], which is
     /// useful when the caller has already resolved the executable (e.g. through
     /// a [`crate::executable_index::ExecutableIndex`] or a
-    /// [`crate::programs::types::CategoryDetector`]) and wants to avoid a
+    /// [`crate::programs::category_detector::CategoryDetector`]) and wants to avoid a
     /// redundant `which`-style scan.
     ///
     /// ## Errors
