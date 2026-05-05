@@ -474,14 +474,16 @@ mod tests {
 
     #[test]
     fn native_output_detection_source_has_no_provider_branch() {
-        let source = include_str!("mod.rs");
+        let source = include_str!("flags.rs");
         let start = source
             .find("fn has_explicit_native_output_request")
             .expect("helper should exist");
         let end = source[start..]
-            .find("/// Shared wrapper args")
+            .find("\nfn ")
+            .or_else(|| source[start..].find("\npub(crate) fn "))
+            .or_else(|| source[start..].find("\n#[allow"))
             .map(|offset| start + offset)
-            .expect("helper should stay before shared wrapper args docs");
+            .expect("helper should be followed by another fn definition");
         let helper_source = &source[start..end];
 
         assert!(

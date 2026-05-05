@@ -2775,9 +2775,15 @@ mod tests {
             rendered.contains("\u{1b}[34m"),
             "file-tool path must render with blue styling: {rendered:?}"
         );
+        // The visible label (the part inside `[...]` for markdown-link
+        // fallback, or the OSC8 link text for terminals with hyperlink
+        // support) must be the cwd-relative path. The link target may
+        // legitimately carry the absolute `file://` URL — that is metadata,
+        // not visible text — so we only forbid the absolute path from
+        // appearing as the bracket label.
         assert!(
-            !rendered.contains("/repo/src/main.rs)"),
-            "absolute path must not appear as visible text: {rendered:?}"
+            !rendered.contains("[/repo/src/main.rs]"),
+            "absolute path must not appear as visible label: {rendered:?}"
         );
     }
 

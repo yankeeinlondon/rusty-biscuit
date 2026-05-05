@@ -2492,40 +2492,45 @@ mod tests {
     /// Source guard: the default `apply_output_format` and `apply_entrypoint`
     /// implementations must read from the catalog. If a future change adds
     /// a raw `match provider` block inside either default method body,
-    /// this test catches it. The existing mod.rs source guard covers
-    /// `has_explicit_native_output_request` already.
+    /// this test catches it. The `has_explicit_native_output_request`
+    /// helper has its own source guard in `wrap::flags`.
     #[test]
     fn output_detection_and_application_uses_catalog_not_raw_dispatch() {
         let source = include_str!("mod.rs");
 
-        let helper_start = source
-            .find("fn has_explicit_native_output_request")
-            .expect("helper should exist in mod.rs");
-        let helper_end = source[helper_start..]
-            .find("\n\n///")
-            .map(|offset| helper_start + offset)
-            .unwrap_or(source.len());
-        let helper_body = &source[helper_start..helper_end];
-
-        assert!(
-            helper_body.contains("provider_info(provider)")
-                && helper_body.contains(".output_formats"),
-            "has_explicit_native_output_request must read from the provider catalog"
-        );
-
-        for variant in [
-            "Provider::Claude",
-            "Provider::Codex",
-            "Provider::Gemini",
-            "Provider::KimiCode",
-            "Provider::OpenCode",
-            "Provider::QwenCode",
-            "Provider::Goose",
+        for fn_signature in [
+            "fn apply_output_format(",
+            "fn apply_entrypoint(",
         ] {
+            let start = source
+                .find(fn_signature)
+                .unwrap_or_else(|| panic!("{fn_signature} default impl should exist in mod.rs"));
+            let end = source[start..]
+                .find("\n    fn ")
+                .or_else(|| source[start..].find("\n    /// "))
+                .map(|offset| start + offset)
+                .unwrap_or(source.len());
+            let body = &source[start..end];
+
             assert!(
-                !helper_body.contains(variant),
-                "has_explicit_native_output_request must not contain {variant} — use catalog data"
+                body.contains("provider_info(self.provider())"),
+                "{fn_signature} default must read from provider catalog: {body}"
             );
+
+            for variant in [
+                "Provider::Claude",
+                "Provider::Codex",
+                "Provider::Gemini",
+                "Provider::KimiCode",
+                "Provider::OpenCode",
+                "Provider::QwenCode",
+                "Provider::Goose",
+            ] {
+                assert!(
+                    !body.contains(variant),
+                    "{fn_signature} default must not contain {variant} — use catalog data"
+                );
+            }
         }
     }
 }
