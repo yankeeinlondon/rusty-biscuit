@@ -314,7 +314,7 @@ impl<E: CategoryEnum + ProgramMetadata> ProgramDetector for CategoryDetector<E> 
                 ),
             });
         }
-        let _ = plan.execute(&crate::programs::installer::InstallOptions::default())?;
+        let _ = plan.execute(&crate::programs::install::InstallOptions::default())?;
         Ok(())
     }
 
@@ -337,7 +337,7 @@ impl<E: CategoryEnum + ProgramMetadata> ProgramDetector for CategoryDetector<E> 
             let url = match &chosen.kind {
                 InstallationMethod::RemoteBash(u) => (*u).to_string(),
                 InstallationMethod::UvWithInstall(_) => {
-                    crate::programs::installer::astral_installer_url().to_string()
+                    crate::programs::install::astral_installer_url().to_string()
                 }
                 _ => unreachable!(),
             };
@@ -347,10 +347,10 @@ impl<E: CategoryEnum + ProgramMetadata> ProgramDetector for CategoryDetector<E> 
             });
         }
 
-        let _ = crate::programs::installer::execute_versioned_install(
+        let _ = crate::programs::install::execute_versioned_install(
             &chosen.kind,
             version,
-            &crate::programs::installer::InstallOptions::default(),
+            &crate::programs::install::InstallOptions::default(),
         )?;
         Ok(())
     }

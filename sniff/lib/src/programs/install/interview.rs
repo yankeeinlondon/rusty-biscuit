@@ -6,13 +6,18 @@
 //! circular dependency on `biscuit-terminal`.
 //!
 //! See `sniff/features/2026-04-12-better-interview-for-install/tech-design.md`.
-//!
-//! The runner function `run_install_interview` is added in a follow-up task.
 
 use crate::error::SniffInstallationError;
-use crate::programs::install_plan::InstallPlan;
-use crate::programs::installer::InstallOptions;
 use crate::programs::contract::InstallationMethod;
+
+use super::command::{
+    astral_installer_url, build_install_announcement, build_install_failure_status,
+    build_install_success_status, build_retry_choice_prose, build_retry_quit_prose,
+    get_install_command,
+};
+use super::execute::execute_install_captured;
+use super::options::{InstallCapturedOutcome, InstallOptions};
+use super::plan::InstallPlan;
 
 /// Semantic interview events emitted by the runner.
 ///
@@ -120,12 +125,6 @@ pub enum InstallInterviewOutcome {
     Failed { attempted: Vec<InstallationMethod> },
     NotInstallable,
 }
-
-use crate::programs::installer::{
-    InstallCapturedOutcome, build_install_announcement, build_install_failure_status,
-    build_install_success_status, build_retry_choice_prose, build_retry_quit_prose,
-    execute_install_captured, get_install_command,
-};
 
 /// Runs the install interview for the given program.
 ///
@@ -297,7 +296,7 @@ fn build_remote_script_warning(program: &str, method: &InstallationMethod) -> St
             "<yellow>Warning:</yellow> installing <b>{program}</b> will download and execute a remote shell script from <a href=\"{url}\">{url}</a>."
         ),
         InstallationMethod::UvWithInstall(_) => {
-            let url = crate::programs::installer::astral_installer_url();
+            let url = astral_installer_url();
             format!(
                 "<yellow>Warning:</yellow> installing <b>{program}</b> will bootstrap <b>uv</b> by downloading and executing a remote script from <a href=\"{url}\">{url}</a>."
             )
@@ -309,7 +308,7 @@ fn build_remote_script_warning(program: &str, method: &InstallationMethod) -> St
 #[cfg(test)]
 mod runner_tests {
     use super::*;
-    use crate::programs::install_plan::{InstallPlan, InstallPlanOption, InstallPlanReason};
+    use crate::programs::install::plan::{InstallPlan, InstallPlanOption, InstallPlanReason};
 
     struct RecordingDelegate {
         events: Vec<InstallInterviewEvent>,

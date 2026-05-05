@@ -95,26 +95,18 @@
 //! - **macOS**: Full bundle detection support
 //! - **Linux/Windows**: Bundle detection returns `None` (PATH-only)
 
-pub mod ai_cli;
+pub mod categories;
 pub mod category_detector;
 pub mod contract;
-pub mod editors;
 pub mod enums;
 pub mod find_program;
-pub mod headless_audio;
 pub mod host_capability;
-pub mod install_interview;
-pub mod install_plan;
-pub mod installer;
+pub mod install;
 pub mod inventory;
 pub mod macos_bundle;
 pub mod notification_helpers;
-pub mod pkg_mngrs;
 pub mod schema;
-pub mod terminal_apps;
-pub mod tts_clients;
 pub mod types;
-pub mod utilities;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_apps;
 
@@ -122,8 +114,15 @@ use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
 pub use crate::executable_index::{ExecutableIndex, find_programs_with_source_from_index};
-pub use ai_cli::InstalledAiClients;
-pub use editors::InstalledEditors;
+pub use categories::{
+    InstalledAiClients, InstalledEditors, InstalledHeadlessAudio,
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, InstalledTerminalApps,
+    InstalledTtsClients, InstalledUtilities,
+};
+pub use category_detector::CategoryDetector;
+pub use contract::{
+    ExecutableSource, InstallationMethod, PrereqProbe, ProgramError, SystemPrerequisite,
+};
 pub use enums::{
     AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
     OsPackageManager, TerminalApp, TtsClient, Utility,
@@ -132,32 +131,25 @@ pub use find_program::{
     find_program, find_program_with_source, find_programs_parallel,
     find_programs_with_source_parallel,
 };
-pub use headless_audio::InstalledHeadlessAudio;
 pub use host_capability::{
     CACHE_SCHEMA_VERSION, HostCapabilities, HostCapabilityCacheFile, default_cache_path,
     load_host_capabilities_from, save_host_capabilities_to,
 };
-pub use install_interview::{
-    InstallInterviewDelegate, InstallInterviewEvent, InstallInterviewInput,
-    InstallInterviewOptions, InstallInterviewOutcome, InstallOutputStream, InstallStatusKind,
-    RetryChoice, RetryPrompt, RetryPromptChoice, run_install_interview,
-};
-pub use install_plan::{InstallPlan, InstallPlanOption, InstallPlanReason, build_install_plan};
-pub use installer::{
-    InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
-    get_versioned_install_command,
+pub use install::{
+    InstallCapturedOutcome, InstallCapturedResult, InstallInterviewDelegate,
+    InstallInterviewEvent, InstallInterviewInput, InstallInterviewOptions,
+    InstallInterviewOutcome, InstallOptions, InstallOutputStream, InstallPlan, InstallPlanOption,
+    InstallPlanReason, InstallResult, InstallStatusKind, RetryChoice, RetryPrompt,
+    RetryPromptChoice, build_install_announcement, build_install_failure_status, build_install_plan,
+    build_install_success_status, build_retry_choice_prose, build_retry_quit_prose,
+    execute_install, execute_versioned_install, get_install_command, get_versioned_install_command,
+    run_install_interview,
 };
 pub use inventory::Program;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 pub use notification_helpers::InstalledNotificationHelpers;
-pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
-pub use terminal_apps::InstalledTerminalApps;
-pub use tts_clients::InstalledTtsClients;
-pub use category_detector::CategoryDetector;
-pub use contract::{ExecutableSource, InstallationMethod, PrereqProbe, ProgramError, SystemPrerequisite};
 pub use types::ProgramDetector;
-pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.
 ///

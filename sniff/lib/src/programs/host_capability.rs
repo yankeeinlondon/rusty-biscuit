@@ -16,7 +16,7 @@ use crate::os::{LinuxFamily, OsType, detect_linux_distro, detect_os_type};
 use crate::performance;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::executable_index::ExecutableIndex;
-use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
+use crate::programs::categories::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 

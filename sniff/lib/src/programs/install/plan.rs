@@ -7,13 +7,14 @@ use serde::Serialize;
 
 use crate::error::SniffInstallationError;
 use crate::os::OsType;
+use crate::programs::contract::InstallationMethod;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::host_capability::HostCapabilities;
-use crate::programs::installer::{
-    InstallOptions, InstallResult, astral_installer_url, execute_install, method_available,
-};
 use crate::programs::schema::ProgramMetadata;
-use crate::programs::contract::InstallationMethod;
+
+use super::command::{astral_installer_url, method_available};
+use super::execute::execute_install;
+use super::options::{InstallOptions, InstallResult};
 
 /// Machine-readable reason an install plan option was selected or rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -529,9 +530,9 @@ fn explain_blocking_reason(fact: &MethodFact, reason: InstallPlanReason) -> Stri
 mod fact_tests {
     use super::*;
     use crate::os::OsType;
+    use crate::programs::contract::InstallationMethod;
     use crate::programs::enums::OsPackageManager;
     use crate::programs::host_capability::HostCapabilities;
-    use crate::programs::contract::InstallationMethod;
 
     fn host_with_brew() -> HostCapabilities {
         let json = r#"{"brew": true}"#;
@@ -738,7 +739,7 @@ mod execute_tests {
     use super::*;
     use crate::os::OsType;
     use crate::programs::host_capability::HostCapabilities;
-    use crate::programs::installer::InstallOptions;
+    use crate::programs::install::options::InstallOptions;
     use crate::programs::schema::{ProgramInfo, VersionFlag, VersionParseStrategy};
 
     static BREW_PKG: ProgramInfo = ProgramInfo {
@@ -841,18 +842,46 @@ mod execute_tests {
                 .contains("curl -sSfL 'https://sh.rustup.rs' | bash")
         );
     }
+
+    #[test]
+    fn uv_with_install_without_consent_returns_consent_error_via_plan() {
+        let plan = InstallPlan {
+            program: "aider".into(),
+            website: "https://aider.chat",
+            successful: true,
+            options: vec![InstallPlanOption {
+                kind: InstallationMethod::UvWithInstall("aider-chat"),
+                requires_sudo: false,
+                choose: true,
+                reason_type: InstallPlanReason::Selected,
+                reason: "chosen".into(),
+            }],
+        };
+        let err = plan.execute(&InstallOptions::default()).unwrap_err();
+        match err {
+            SniffInstallationError::RemoteBashConsentRequired { url, .. } => {
+                // url must be the astral installer URL, NOT the package name.
+                assert!(
+                    url.starts_with("https://astral.sh/uv/install."),
+                    "expected astral installer URL, got {}",
+                    url
+                );
+            }
+            other => panic!("expected RemoteBashConsentRequired, got {:?}", other),
+        }
+    }
 }
 
 #[cfg(test)]
 mod selection_tests {
     use super::*;
     use crate::os::OsType;
+    use crate::programs::contract::InstallationMethod;
     use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
     use crate::programs::host_capability::HostCapabilities;
     use crate::programs::schema::{
         ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy,
     };
-    use crate::programs::contract::InstallationMethod;
 
     struct FakeProgram {
         info: &'static ProgramInfo,

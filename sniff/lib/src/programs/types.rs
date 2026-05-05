@@ -169,7 +169,7 @@ pub trait ProgramDetector {
     /// current OS.
     fn available_methods(&self, program: Self::Program) -> Vec<InstallationMethod> {
         use crate::programs::host_capability::HostCapabilities;
-        use crate::programs::installer::method_available;
+        use crate::programs::install::method_available;
 
         let info = program.info();
         let host = HostCapabilities::load_or_detect();
@@ -188,9 +188,9 @@ pub trait ProgramDetector {
 
     /// Returns a full install plan for this program against cached host
     /// capabilities.
-    fn install_plan(&self, program: Self::Program) -> crate::programs::install_plan::InstallPlan {
+    fn install_plan(&self, program: Self::Program) -> crate::programs::install::InstallPlan {
         use crate::programs::host_capability::HostCapabilities;
-        use crate::programs::install_plan::build_install_plan;
+        use crate::programs::install::build_install_plan;
 
         let host = HostCapabilities::load_or_detect();
         build_install_plan(&program, &host)
