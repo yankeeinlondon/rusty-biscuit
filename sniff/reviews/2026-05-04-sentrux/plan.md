@@ -26,6 +26,34 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - sniff/lib/src/filesystem/path_kind.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/blast_radius.rs
+  - sniff/lib/src/filesystem/git/recent_commits.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/src/filesystem/repo/detection.rs
+  - sniff/lib/src/filesystem/repo/mod.rs
+  - sniff/lib/src/package/dependency.rs
+  - sniff/lib/src/package/mod.rs
+  - sniff/lib/src/package/network.rs
+  - sniff/lib/src/executable_index.rs
+  - sniff/lib/src/lib.rs
+  - sniff/lib/src/programs/find_program.rs
+  - sniff/lib/src/programs/mod.rs
+  - sniff/lib/src/programs/types.rs
+  - sniff/lib/src/programs/host_capability.rs
+  - sniff/lib/src/programs/notification_helpers.rs
+  - sniff/lib/src/programs/schema.rs
+  - sniff/lib/src/programs/windows_apps.rs
+  - sniff/lib/src/os/package_manager.rs
+  - sniff/lib/src/os/mod.rs
+  - sniff/cli/src/output/commit_blocks.rs
+  - sniff/cli/src/output/filesystem.rs
+  - sniff/lib/benches/cases/inventory.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
   - sniff
   - sniff-cli
