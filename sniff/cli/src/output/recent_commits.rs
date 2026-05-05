@@ -4,7 +4,7 @@ use chrono::Utc;
 use sniff::filesystem::git::{PeriodSpecifier, parse_period};
 
 use crate::args::{RecentCommitActionArg, RepoAction};
-use crate::commands::{CliPerf, handle_no_results};
+use crate::perf::{CliPerf, handle_no_results};
 use crate::output::commit_blocks::{
     CommitCentricFilter, filter_commit_set, render_commit_set_styled,
 };
