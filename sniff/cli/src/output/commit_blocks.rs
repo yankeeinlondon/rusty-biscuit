@@ -268,7 +268,7 @@ fn file_url(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sniff::filesystem::git::detection::DeltaKind;
+    use sniff::filesystem::git::discovery::DeltaKind;
     use std::path::PathBuf;
 
     fn change(path: &str) -> CommitFileChange {
