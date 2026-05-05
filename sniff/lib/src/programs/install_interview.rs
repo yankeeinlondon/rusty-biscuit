@@ -12,7 +12,7 @@
 use crate::error::SniffInstallationError;
 use crate::programs::install_plan::InstallPlan;
 use crate::programs::installer::InstallOptions;
-use crate::programs::types::InstallationMethod;
+use crate::programs::contract::InstallationMethod;
 
 /// Semantic interview events emitted by the runner.
 ///

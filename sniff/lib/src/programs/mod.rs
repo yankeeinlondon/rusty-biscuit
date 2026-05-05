@@ -96,6 +96,7 @@
 //! - **Linux/Windows**: Bundle detection returns `None` (PATH-only)
 
 pub mod ai_cli;
+pub mod contract;
 pub mod editors;
 pub mod enums;
 pub mod find_program;
@@ -148,13 +149,11 @@ pub use inventory::Program;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 pub use notification_helpers::InstalledNotificationHelpers;
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
-pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+pub use schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{
-    CategoryDetector, ExecutableSource, InstallationMethod, PrereqProbe, ProgramDetector,
-    SystemPrerequisite,
-};
+pub use types::{CategoryDetector, ProgramDetector};
+pub use contract::{ExecutableSource, InstallationMethod, PrereqProbe, ProgramError, SystemPrerequisite};
 pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.

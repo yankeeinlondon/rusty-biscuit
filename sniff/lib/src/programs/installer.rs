@@ -35,7 +35,7 @@ use crate::os::{OsType, detect_os_type};
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::host_capability::HostCapabilities;
 use crate::programs::schema::ProgramMetadata;
-use crate::programs::types::InstallationMethod;
+use crate::programs::contract::InstallationMethod;
 
 /// The astral.sh installer URL for the current platform.
 ///

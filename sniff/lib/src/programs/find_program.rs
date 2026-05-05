@@ -44,7 +44,7 @@ pub fn find_programs_parallel(programs: &[&str]) -> HashMap<String, Option<PathB
 use super::macos_bundle::find_macos_app_bundle;
 #[cfg(target_os = "macos")]
 use super::macos_bundle::get_app_bundle_name;
-use super::types::ExecutableSource;
+use super::contract::ExecutableSource;
 
 /// Lazy lookup index for executables on PATH, macOS app bundles, and Windows
 /// fallback layers.

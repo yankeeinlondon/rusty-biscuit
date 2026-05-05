@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::programs::enums::NotificationHelper;
 use crate::programs::find_program::ExecutableIndex;
-use crate::programs::types::{CategoryDetector, ExecutableSource};
+use crate::programs::contract::ExecutableSource;
+use crate::programs::types::CategoryDetector;
 
 /// Information about the active Linux notification daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,7 +86,7 @@ impl InstalledNotificationHelpers {
     pub fn version(
         &self,
         helper: NotificationHelper,
-    ) -> Result<String, crate::programs::schema::ProgramError> {
+    ) -> Result<String, crate::programs::ProgramError> {
         self.detector.version(helper)
     }
 
@@ -218,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_version_returns_not_found_for_uninstalled() {
-        use crate::programs::schema::ProgramError;
+        use crate::programs::ProgramError;
         let helpers = InstalledNotificationHelpers::default();
         let result = helpers.version(NotificationHelper::SnoreToast);
         assert!(result.is_err());

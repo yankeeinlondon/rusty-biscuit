@@ -13,342 +13,12 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::error::SniffInstallationError;
-use crate::programs::enums::CategoryEnum;
+use crate::programs::contract::{CategoryEnum, ExecutableSource, InstallationMethod, ProgramError};
 use crate::programs::find_program::{
     ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
-use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::schema::ProgramMetadata;
 
-/// Describes where a program executable was discovered.
-///
-/// Distinguishes between traditional PATH-based executables, macOS `.app`
-/// bundles, and Windows-specific fallback sources (registry App Paths, shallow
-/// install-root walk). Non-PATH sources are "fallback" sources — they are
-/// consulted only when PATH lookup misses.
-///
-/// ## Examples
-///
-/// ```
-/// use sniff::programs::ExecutableSource;
-///
-/// let source = ExecutableSource::Path;
-/// assert!(!source.is_app_bundle());
-/// assert!(!source.is_fallback());
-///
-/// let bundle = ExecutableSource::MacOsAppBundle;
-/// assert!(bundle.is_app_bundle());
-/// assert!(bundle.is_fallback());
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutableSource {
-    /// Found via PATH lookup (traditional executable).
-    Path,
-    /// Found as a macOS `.app` bundle.
-    MacOsAppBundle,
-    /// Found via the Windows `App Paths` registry key
-    /// (`HKCU|HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`).
-    WindowsAppPaths,
-    /// Found via a shallow walk of a Windows install root
-    /// (`%ProgramFiles%`, `%ProgramFiles(x86)%`, `%LocalAppData%\Programs`).
-    WindowsInstallRoot,
-}
-
-impl ExecutableSource {
-    /// Returns `true` if this source is a macOS app bundle.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use sniff::programs::ExecutableSource;
-    ///
-    /// assert!(!ExecutableSource::Path.is_app_bundle());
-    /// assert!(ExecutableSource::MacOsAppBundle.is_app_bundle());
-    /// ```
-    #[must_use]
-    pub fn is_app_bundle(&self) -> bool {
-        matches!(self, Self::MacOsAppBundle)
-    }
-
-    /// Returns `true` if this source is a non-PATH fallback source.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use sniff::programs::ExecutableSource;
-    ///
-    /// assert!(!ExecutableSource::Path.is_fallback());
-    /// assert!(ExecutableSource::MacOsAppBundle.is_fallback());
-    /// assert!(ExecutableSource::WindowsAppPaths.is_fallback());
-    /// assert!(ExecutableSource::WindowsInstallRoot.is_fallback());
-    /// ```
-    #[must_use]
-    pub fn is_fallback(&self) -> bool {
-        !matches!(self, Self::Path)
-    }
-}
-
-impl std::fmt::Display for ExecutableSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExecutableSource::Path => write!(f, "PATH"),
-            ExecutableSource::MacOsAppBundle => write!(f, "macOS App Bundle"),
-            ExecutableSource::WindowsAppPaths => write!(f, "Windows App Paths"),
-            ExecutableSource::WindowsInstallRoot => write!(f, "Windows Install Root"),
-        }
-    }
-}
-
-/// Describes an installation method for installing some piece of software.
-///
-/// This installation takes two broad forms:
-///
-/// 1. Using a package manager (OS level _or_ Language specific)
-/// 2. Downloading a bash script and executing it locally
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "manager", content = "target", rename_all = "snake_case")]
-pub enum InstallationMethod {
-    // Language Package Managers
-    /// Default Node.js package manager. [Website](https://www.npmjs.com)
-    Npm(&'static str),
-    /// Disk-efficient Node.js package manager. [Website](https://pnpm.io)
-    Pnpm(&'static str),
-    /// Alternative Node.js package manager. [Website](https://yarnpkg.com)
-    Yarn(&'static str),
-    /// All-in-one JS runtime with built-in package manager. [Website](https://bun.sh)
-    Bun(&'static str),
-    /// Official Rust package manager and build tool. [Website](https://doc.rust-lang.org/cargo)
-    Cargo(&'static str),
-    /// Built-in Go dependency system. [Website](https://go.dev/ref/mod)
-    GoModules(&'static str),
-    /// Dependency manager for modern PHP applications. [Website](https://getcomposer.org)
-    Composer(&'static str),
-    /// Official Swift dependency manager. [Website](https://www.swift.org/package-manager)
-    SwiftPm(&'static str),
-    /// Standard package manager for Lua modules. [Website](https://luarocks.org)
-    LuaRocks(&'static str),
-    /// Cross-platform C/C++ dependency manager. [Website](https://vcpkg.io)
-    VcPkg(&'static str),
-    /// Decentralized C/C++ package manager. [Website](https://conan.io)
-    Conan(&'static str),
-    /// Official package manager for .NET and C#. [Website](https://www.nuget.org)
-    Nuget(&'static str),
-    /// Package manager for the BEAM ecosystem. [Website](https://hex.pm)
-    Hex(&'static str),
-    /// Traditional Python package installer. [Website](https://pip.pypa.io)
-    Pip(&'static str),
-    /// High-performance Python package manager. [Website](https://astral.sh/uv)
-    Uv(&'static str),
-    /// Python dependency manager with lockfile support. [Website](https://python-poetry.org)
-    Poetry(&'static str),
-    /// Canonical archive and installer for Perl modules. [Website](https://www.cpan.org)
-    Cpan(&'static str),
-    /// Lightweight, scriptable CPAN client. [Website](https://metacpan.org/pod/App::cpanminus)
-    Cpanm(&'static str),
-
-    // OS Package Managers
-    /// Debian/Ubuntu primary package manager. [Website](https://tracker.debian.org/pkg/apt)
-    Apt(&'static str),
-    /// Modern apt frontend with parallel downloads. [Website](https://github.com/volitank/nala)
-    Nala(&'static str),
-    /// macOS/Linux community package manager. [Website](https://brew.sh)
-    Brew(&'static str),
-    /// Fedora/RHEL primary package manager. [Website](https://github.com/rpm-software-management/dnf)
-    Dnf(&'static str),
-    /// Arch Linux package manager. [Website](https://archlinux.org/pacman/)
-    Pacman(&'static str),
-    /// Windows Package Manager. [Website](https://github.com/microsoft/winget-cli)
-    Winget(&'static str),
-    /// Windows community package manager. [Website](https://chocolatey.org)
-    Chocolatey(&'static str),
-    /// Windows command-line installer. [Website](https://scoop.sh)
-    Scoop(&'static str),
-    /// Nix package manager. [Website](https://nixos.org)
-    Nix(&'static str),
-
-    /// Install by downloading a bash script from a URL and then
-    /// piping it to the host's `bash` command for installation.
-    RemoteBash(&'static str),
-
-    /// Install `pkg` via `uv tool install`, bootstrapping uv from
-    /// `astral.sh/uv/install.sh` (or `install.ps1` on Windows) first if
-    /// `uv` is not already on `PATH`. Runnable whenever bash (Unix) or
-    /// PowerShell (Windows) is available — no Python on the host is
-    /// required because the astral installer is self-contained and
-    /// `uv tool install` manages Python on its own. Uses the
-    /// `RemoteBash` consent flow via the existing `approve_remote_bash`
-    /// option; consent is demanded even when the bootstrap step will
-    /// be skipped at execute time.
-    UvWithInstall(&'static str),
-}
-
-impl InstallationMethod {
-    /// Returns the package name for this installation method.
-    pub fn package_name(&self) -> &'static str {
-        match self {
-            // Language package managers
-            InstallationMethod::Npm(pkg) => pkg,
-            InstallationMethod::Pnpm(pkg) => pkg,
-            InstallationMethod::Yarn(pkg) => pkg,
-            InstallationMethod::Bun(pkg) => pkg,
-            InstallationMethod::Cargo(pkg) => pkg,
-            InstallationMethod::GoModules(pkg) => pkg,
-            InstallationMethod::Composer(pkg) => pkg,
-            InstallationMethod::SwiftPm(pkg) => pkg,
-            InstallationMethod::LuaRocks(pkg) => pkg,
-            InstallationMethod::VcPkg(pkg) => pkg,
-            InstallationMethod::Conan(pkg) => pkg,
-            InstallationMethod::Nuget(pkg) => pkg,
-            InstallationMethod::Hex(pkg) => pkg,
-            InstallationMethod::Pip(pkg) => pkg,
-            InstallationMethod::Uv(pkg) => pkg,
-            InstallationMethod::Poetry(pkg) => pkg,
-            InstallationMethod::Cpan(pkg) => pkg,
-            InstallationMethod::Cpanm(pkg) => pkg,
-            // OS package managers
-            InstallationMethod::Apt(pkg) => pkg,
-            InstallationMethod::Nala(pkg) => pkg,
-            InstallationMethod::Brew(pkg) => pkg,
-            InstallationMethod::Dnf(pkg) => pkg,
-            InstallationMethod::Pacman(pkg) => pkg,
-            InstallationMethod::Winget(pkg) => pkg,
-            InstallationMethod::Chocolatey(pkg) => pkg,
-            InstallationMethod::Scoop(pkg) => pkg,
-            InstallationMethod::Nix(pkg) => pkg,
-            // Remote bash
-            InstallationMethod::RemoteBash(url) => url,
-            // Uv with optional bootstrap
-            InstallationMethod::UvWithInstall(pkg) => pkg,
-        }
-    }
-
-    /// Returns the package manager name for this installation method.
-    pub fn manager_name(&self) -> &'static str {
-        match self {
-            InstallationMethod::Npm(_) => "npm",
-            InstallationMethod::Pnpm(_) => "pnpm",
-            InstallationMethod::Yarn(_) => "yarn",
-            InstallationMethod::Bun(_) => "bun",
-            InstallationMethod::Cargo(_) => "cargo",
-            InstallationMethod::GoModules(_) => "go",
-            InstallationMethod::Composer(_) => "composer",
-            InstallationMethod::SwiftPm(_) => "swift",
-            InstallationMethod::LuaRocks(_) => "luarocks",
-            InstallationMethod::VcPkg(_) => "vcpkg",
-            InstallationMethod::Conan(_) => "conan",
-            InstallationMethod::Nuget(_) => "nuget",
-            InstallationMethod::Hex(_) => "mix",
-            InstallationMethod::Pip(_) => "pip",
-            InstallationMethod::Uv(_) => "uv",
-            InstallationMethod::Poetry(_) => "poetry",
-            InstallationMethod::Cpan(_) => "cpan",
-            InstallationMethod::Cpanm(_) => "cpanm",
-            InstallationMethod::Apt(_) => "apt",
-            InstallationMethod::Nala(_) => "nala",
-            InstallationMethod::Brew(_) => "brew",
-            InstallationMethod::Dnf(_) => "dnf",
-            InstallationMethod::Pacman(_) => "pacman",
-            InstallationMethod::Winget(_) => "winget",
-            InstallationMethod::Chocolatey(_) => "choco",
-            InstallationMethod::Scoop(_) => "scoop",
-            InstallationMethod::Nix(_) => "nix",
-            InstallationMethod::RemoteBash(_) => "bash",
-            InstallationMethod::UvWithInstall(_) => "uv",
-        }
-    }
-
-    /// Returns true if this is an OS-level package manager.
-    pub fn is_os_package_manager(&self) -> bool {
-        matches!(
-            self,
-            InstallationMethod::Apt(_)
-                | InstallationMethod::Nala(_)
-                | InstallationMethod::Brew(_)
-                | InstallationMethod::Dnf(_)
-                | InstallationMethod::Pacman(_)
-                | InstallationMethod::Winget(_)
-                | InstallationMethod::Chocolatey(_)
-                | InstallationMethod::Scoop(_)
-                | InstallationMethod::Nix(_)
-        )
-    }
-
-    /// Returns true if this is a remote bash installation.
-    pub fn is_remote_bash(&self) -> bool {
-        matches!(self, InstallationMethod::RemoteBash(_))
-    }
-
-    /// Returns the binary name of the package manager executable.
-    ///
-    /// This is the executable that must be present on the system
-    /// to use this installation method.
-    pub fn manager_binary(&self) -> &'static str {
-        match self {
-            InstallationMethod::Npm(_) => "npm",
-            InstallationMethod::Pnpm(_) => "pnpm",
-            InstallationMethod::Yarn(_) => "yarn",
-            InstallationMethod::Bun(_) => "bun",
-            InstallationMethod::Cargo(_) => "cargo",
-            InstallationMethod::GoModules(_) => "go",
-            InstallationMethod::Composer(_) => "composer",
-            InstallationMethod::SwiftPm(_) => "swift",
-            InstallationMethod::LuaRocks(_) => "luarocks",
-            InstallationMethod::VcPkg(_) => "vcpkg",
-            InstallationMethod::Conan(_) => "conan",
-            InstallationMethod::Nuget(_) => "nuget",
-            InstallationMethod::Hex(_) => "mix",
-            InstallationMethod::Pip(_) => "pip",
-            InstallationMethod::Uv(_) => "uv",
-            InstallationMethod::Poetry(_) => "poetry",
-            InstallationMethod::Cpan(_) => "cpan",
-            InstallationMethod::Cpanm(_) => "cpanm",
-            InstallationMethod::Apt(_) => "apt",
-            InstallationMethod::Nala(_) => "nala",
-            InstallationMethod::Brew(_) => "brew",
-            InstallationMethod::Dnf(_) => "dnf",
-            InstallationMethod::Pacman(_) => "pacman",
-            InstallationMethod::Winget(_) => "winget",
-            InstallationMethod::Chocolatey(_) => "choco",
-            InstallationMethod::Scoop(_) => "scoop",
-            InstallationMethod::Nix(_) => "nix",
-            InstallationMethod::RemoteBash(_) => "bash",
-            InstallationMethod::UvWithInstall(_) => "uv",
-        }
-    }
-}
-
-/// How to detect whether a `SystemPrerequisite` is already installed on the
-/// host. The probe decides whether the prereq's install command needs to run.
-///
-/// ## Notes
-///
-/// Windows behavior for `SharedLibrary`: always reports satisfied. On Windows,
-/// shared libraries travel with the Python/npm package that consumes them
-/// (e.g., the `sounddevice` wheel bundles `portaudio.dll`), so a system-wide
-/// probe has no meaningful target. Reporting satisfied silently skips the
-/// prereq on Windows, which is correct for every v1 consumer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrereqProbe {
-    /// Shared-library lookup via the dynamic linker search path.
-    /// Linux: `ldconfig -p` cache. macOS: dyld default search paths.
-    /// Windows: always satisfied (see type-level Notes).
-    SharedLibrary(&'static str),
-    /// Binary lookup on PATH.
-    Binary(&'static str),
-}
-
-/// A system-level dependency that must be present before a program's
-/// tool-level install runs. Resolved to a single `InstallationMethod` per
-/// host using the same bucket logic as `build_install_plan`.
-#[derive(Debug, Clone, Copy)]
-pub struct SystemPrerequisite {
-    /// User-facing name shown in the combined install plan rendering.
-    pub name: &'static str,
-    /// Presence check used to decide whether installation is needed.
-    pub probe: PrereqProbe,
-    /// OS-specific install methods. Exactly one wins per host.
-    pub methods: &'static [InstallationMethod],
-}
 
 /// Generic program detector for any category enum.
 ///
@@ -356,12 +26,12 @@ pub struct SystemPrerequisite {
 /// Replaces the per-category `InstalledEditors`, `InstalledUtilities`, etc.
 /// structs with a single generic implementation.
 #[derive(Debug, Clone)]
-pub struct CategoryDetector<E: CategoryEnum> {
+pub struct CategoryDetector<E: CategoryEnum + ProgramMetadata> {
     results: Vec<Option<(PathBuf, ExecutableSource)>>,
     _phantom: PhantomData<E>,
 }
 
-impl<E: CategoryEnum> Default for CategoryDetector<E> {
+impl<E: CategoryEnum + ProgramMetadata> Default for CategoryDetector<E> {
     fn default() -> Self {
         Self {
             results: vec![None; E::COUNT],
@@ -370,15 +40,15 @@ impl<E: CategoryEnum> Default for CategoryDetector<E> {
     }
 }
 
-impl<E: CategoryEnum> PartialEq for CategoryDetector<E> {
+impl<E: CategoryEnum + ProgramMetadata> PartialEq for CategoryDetector<E> {
     fn eq(&self, other: &Self) -> bool {
         self.results == other.results
     }
 }
 
-impl<E: CategoryEnum> Eq for CategoryDetector<E> {}
+impl<E: CategoryEnum + ProgramMetadata> Eq for CategoryDetector<E> {}
 
-impl<E: CategoryEnum> Serialize for CategoryDetector<E> {
+impl<E: CategoryEnum + ProgramMetadata> Serialize for CategoryDetector<E> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -408,7 +78,7 @@ enum BoolOrEntry {
     Entry { installed: bool },
 }
 
-impl<'de, E: CategoryEnum> Deserialize<'de> for CategoryDetector<E> {
+impl<'de, E: CategoryEnum + ProgramMetadata> Deserialize<'de> for CategoryDetector<E> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -419,7 +89,7 @@ impl<'de, E: CategoryEnum> Deserialize<'de> for CategoryDetector<E> {
 
 struct CategoryDetectorVisitor<E>(PhantomData<E>);
 
-impl<'de, E: CategoryEnum> serde::de::Visitor<'de> for CategoryDetectorVisitor<E> {
+impl<'de, E: CategoryEnum + ProgramMetadata> serde::de::Visitor<'de> for CategoryDetectorVisitor<E> {
     type Value = CategoryDetector<E>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -468,7 +138,7 @@ impl<'de, E: CategoryEnum> serde::de::Visitor<'de> for CategoryDetectorVisitor<E
 /// Categories share aliases (e.g. `node`, `npm`), and a duplicate name causes
 /// the underlying `which`/`PATH` lookup to fire twice. Deduplicating up front
 /// keeps bulk detection one-PATH-walk-per-program.
-fn collect_unique_names<E: CategoryEnum>() -> Vec<&'static str> {
+fn collect_unique_names<E: CategoryEnum + ProgramMetadata>() -> Vec<&'static str> {
     let mut seen: HashSet<&'static str> = HashSet::new();
     let mut names: Vec<&'static str> = Vec::new();
     for variant in E::iter() {
@@ -485,7 +155,7 @@ fn collect_unique_names<E: CategoryEnum>() -> Vec<&'static str> {
     names
 }
 
-impl<E: CategoryEnum> CategoryDetector<E> {
+impl<E: CategoryEnum + ProgramMetadata> CategoryDetector<E> {
     /// Detect installed programs by scanning PATH.
     pub fn new() -> Self {
         let names_to_search = collect_unique_names::<E>();
@@ -596,7 +266,7 @@ impl<E: CategoryEnum> CategoryDetector<E> {
     }
 }
 
-impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
+impl<E: CategoryEnum + ProgramMetadata> ProgramDetector for CategoryDetector<E> {
     type Program = E;
 
     fn refresh(&mut self) {
@@ -876,7 +546,8 @@ pub trait ProgramDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::programs::schema::{ProgramError, ProgramInfo, ProgramMetadata};
+    use crate::programs::contract::ProgramError;
+    use crate::programs::schema::{ProgramInfo, ProgramMetadata};
 
     // ============================================
     // Mock implementation for testing ProgramDetector trait
@@ -1621,6 +1292,7 @@ mod tests {
 #[cfg(test)]
 mod prereq_type_tests {
     use super::*;
+    use crate::programs::contract::{PrereqProbe, SystemPrerequisite};
 
     #[test]
     fn system_prerequisite_is_constructible_as_const() {

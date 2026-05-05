@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn test_version_returns_not_found_for_uninstalled() {
-        use crate::programs::schema::ProgramError;
+        use crate::programs::ProgramError;
         let editors = InstalledEditors::default();
         let result = editors.version(Editor::Vim);
         assert!(result.is_err());
