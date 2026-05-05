@@ -32,8 +32,8 @@ use tui_chrome::components::input_table::{
     BooleanSwitchConfig, CellValue, TextAreaInputConfig, TextInputConfig,
 };
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChoiceOption, HeightSpec, InputTable,
-    InputTableColumn, InputTableState, Row, RowCell, run_standalone,
+    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChoiceOption, FrameChromeConfig, HeightSpec,
+    InputTable, InputTableColumn, InputTableState, Row, RowCell, run_standalone_with_chrome,
 };
 
 use crate::output::OutputMode;
@@ -61,11 +61,16 @@ pub fn run(
     args: InputTableArgs,
     output: OutputMode,
     height: Option<HeightSpec>,
+    show_on_exit: bool,
 ) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
+    let chrome = FrameChromeConfig {
+        show_on_exit,
+        ..Default::default()
+    };
     run_with_writer(args, output, height, &mut lock, |state, height| {
-        run_standalone(InputTable::new(), state, height)
+        run_standalone_with_chrome(InputTable::new(), state, height, chrome)
     })
 }
 

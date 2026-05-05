@@ -432,31 +432,11 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
         let label_style = state.theme.label_style;
 
         let inner_area = render_with_label(area, buf, label.as_ref(), label_style, |rect, b| {
-            let mut list_area = if state.filter_visible && rect.height > 0 {
+            let list_area = if state.filter_visible && rect.height > 0 {
                 draw_search_prompt(Rect::new(rect.x, rect.y, rect.width, 1), b, state);
                 Rect::new(rect.x, rect.y + 1, rect.width, rect.height - 1)
             } else {
                 rect
-            };
-
-            // Reserve the bottom row of the list area for the
-            // hotkey legend when at least one option carries an
-            // explicit hotkey. Painting the legend inside `list_area`
-            // (rather than below it on the outer canvas) means the
-            // FrameChrome border wraps the legend cleanly — the
-            // previous "render after the chrome" approach landed
-            // outside the border.
-            let legend_visible = state
-                .input
-                .options
-                .iter()
-                .any(|o| o.hotkey.is_some() && !o.disabled);
-            let legend_y = if legend_visible && list_area.height >= 2 {
-                let y = list_area.bottom().saturating_sub(1);
-                list_area = Rect::new(list_area.x, list_area.y, list_area.width, list_area.height - 1);
-                Some(y)
-            } else {
-                None
             };
 
             let visible_indices: Vec<usize> = state.filter.visible().to_vec();
@@ -512,10 +492,6 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
                 state.validation_error.as_deref(),
             );
 
-            if let Some(y) = legend_y {
-                let legend = super::choice_render::hotkey_legend_line();
-                b.set_line(rect.x, y, &legend, rect.width);
-            }
         });
 
         if let Some(message) = state.validation_error.as_deref()

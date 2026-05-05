@@ -74,9 +74,21 @@ fn zsh_post_process(script: &mut String) {
         "_arguments_options=(-s -S -C)",
         "_arguments_options=(-s -C)",
     );
+
+    // The two-value `--md PATH PROP` flag is rendered by clap_complete
+    // with `_default` for both arg positions.  Replace the path arg's
+    // action with `_files` so file completion fires; leave the property
+    // name as a free-text message.
+    *script = script.replace(
+        "'*--md=[Path to a markdown file and frontmatter property name containing an array of options]:PATH:_default:PATH:_default'",
+        "'*--md=[Path to a markdown file and frontmatter property name containing an array of options]:PATH:_files:PROP: '",
+    );
 }
 
 fn strip_hidden_legacy_zsh(script: &mut String) {
+    // zsh option specs are one line each, so a simple line filter
+    // is sufficient.  bash specs span multiple lines per case clause
+    // and need the dedicated [`strip_hidden_legacy_bash`] state machine.
     *script = script
         .lines()
         .filter(|line| {
@@ -93,9 +105,75 @@ fn strip_hidden_legacy_zsh(script: &mut String) {
 fn zsh_positional_completer() -> &'static str {
     r#"
 # Positional completer for choose-one/choose-many option arguments.
-# When the current word starts with `[`, offers hotkey-prefix candidates
-# exclusively so they are not mixed with command/file fallback pollution.
+#
+# This function is invoked by `_arguments` for every word that lands in
+# the `*::positional` rest-pattern slot.  Because that rule consumes
+# everything after the first positional argument, it also swallows
+# option-value positions (e.g. the value following `--active-color` once
+# any positional option has been typed).  Without intervention, those
+# positions fall through to `_default` and complete file paths instead
+# of the option's enumerated values.
+#
+# To restore correct behaviour, dispatch to the per-flag value action
+# whenever the previous word is a known value-taking flag, and only
+# then apply the existing `--*` flag overlay and `[` hotkey prefix
+# checks.
 _question_choice_positional() {
+    local prev="${words[CURRENT-1]}"
+    case "$prev" in
+        --active-color)
+            _values 'colour' grey green yellow red
+            return
+            ;;
+        --sort)
+            _values 'sort order' natural inverse asc desc
+            return
+            ;;
+        --border-style)
+            _values 'border style' \
+                none rounded sharp bold double block thin-block \
+                horizontal vertical line top bottom left right
+            return
+            ;;
+        --label-position)
+            _values 'label position' above below left right
+            return
+            ;;
+        --label-convention|--value-convention)
+            _values 'naming convention' \
+                none camel-case pascal-case kebab-case snake-case \
+                title-case caps lowercase
+            return
+            ;;
+        --hotkey-badges)
+            _values 'badge mode' auto always never ctrl alt
+            return
+            ;;
+        --orientation)
+            _values 'orientation' vertical horizontal
+            return
+            ;;
+        --output)
+            _values 'output mode' raw json null
+            return
+            ;;
+        --file)
+            _files
+            return
+            ;;
+        --md)
+            _files
+            return
+            ;;
+        --csv|--list|--rows|--delimiter|--selected|--initial|--label|--border-label)
+            _message 'value'
+            return
+            ;;
+        --margin|--mt|--mb|--ml|--mr|--padding|-p|--pt|--pb|--pl|--pr|--max-selections|--min-selections|--height)
+            _message 'integer'
+            return
+            ;;
+    esac
     if [[ "$PREFIX" == --* ]]; then
         local -a option_candidates
         option_candidates=(
@@ -107,7 +185,7 @@ _question_choice_positional() {
             --padding --pt --pb --pl --pr
             --numeric-hot-keys
             --label --label-position --label-convention --value-convention
-            --active-color --hotkey-badges
+            --active-color --hotkey-badges --orientation
             --output --height --help
         )
         _describe -t option-flags 'option flag' option_candidates
@@ -129,17 +207,47 @@ _question_choice_positional() {
 // ---------------------------------------------------------------------------
 
 fn strip_hidden_legacy_bash(script: &mut String) {
-    *script = script
-        .lines()
-        .filter(|line| {
-            !line.contains("--options-from-file") && !line.contains("--options-from-dictionary")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    if !script.ends_with('\n') {
-        script.push('\n');
+    // The legacy flags appear in the script in two forms:
+    //
+    // 1. As tokens inside the per-subcommand `opts="..."` string; we
+    //    must remove those tokens *in place* without dropping the line.
+    //
+    // 2. As four-line `case "${prev}"` clauses:
+    //
+    //        --options-from-file)
+    //            COMPREPLY=($(compgen -f "${cur}"))
+    //            return 0
+    //            ;;
+    //
+    //    Dropping only the label leaves an orphan body that `bash -n`
+    //    flags as a syntax error.  Skip the whole clause by consuming
+    //    lines through the closing `;;`.
+    let mut out = String::with_capacity(script.len());
+    let mut skip_until_terminator = false;
+    for line in script.lines() {
+        if skip_until_terminator {
+            if line.trim_end().ends_with(";;") {
+                skip_until_terminator = false;
+            }
+            continue;
+        }
+        let trimmed = line.trim_start();
+        let is_case_label = trimmed.starts_with("--options-from-file)")
+            || trimmed.starts_with("--options-from-dictionary)");
+        if is_case_label {
+            skip_until_terminator = true;
+            continue;
+        }
+        let cleaned = scrub_legacy_tokens(line);
+        out.push_str(&cleaned);
+        out.push('\n');
     }
+    *script = out;
+}
+
+fn scrub_legacy_tokens(line: &str) -> String {
+    line.replace(" --options-from-file", "")
+        .replace(" --options-from-dictionary", "")
 }
 
 fn bash_wrapper(bin: &str) -> String {
@@ -314,6 +422,7 @@ mod tests {
             "--value-convention",
             "--active-color",
             "--hotkey-badges",
+            "--orientation",
             "--output",
             "--height",
             "--help",
@@ -321,6 +430,80 @@ mod tests {
             assert!(
                 script.contains(flag),
                 "zsh post-separator overlay should include {flag}",
+            );
+        }
+    }
+
+    #[test]
+    fn bash_script_passes_syntax_check() {
+        // Regression guard: an earlier line-only filter for the hidden
+        // legacy flags left orphan case bodies that `bash -n` rejected
+        // with "syntax error near unexpected token `('".  The current
+        // strip routine drops the entire case clause and scrubs the
+        // legacy tokens out of the per-subcommand `opts` string, so the
+        // resulting script must parse cleanly.
+        if std::process::Command::new("bash")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: bash not available");
+            return;
+        }
+        let mut buf = Vec::new();
+        write_completions::<TestCli, _>(Shell::Bash, "question", &mut buf).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "bash_syntax_check_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("question.bash");
+        std::fs::write(&path, &buf).unwrap();
+        let output = std::process::Command::new("bash")
+            .arg("-n")
+            .arg(&path)
+            .output()
+            .expect("invoke bash -n");
+        assert!(
+            output.status.success(),
+            "bash -n rejected the generated script:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn zsh_positional_completer_dispatches_enum_value_actions() {
+        // Regression guard for the bug fixed alongside this test:
+        // the zsh `*::positional` rule swallows option-value positions
+        // after the first positional argument, so `--active-color <TAB>`
+        // (post-positional) used to fall through to file completion.
+        // The dispatcher embedded in `_question_choice_positional` must
+        // route each enum-typed flag to its value action.
+        let script = zsh_positional_completer();
+        for flag_and_values in [
+            ("--active-color)", "grey green yellow red"),
+            ("--sort)", "natural inverse asc desc"),
+            ("--label-position)", "above below left right"),
+            ("--hotkey-badges)", "auto always never ctrl alt"),
+            ("--orientation)", "vertical horizontal"),
+            ("--output)", "raw json null"),
+            ("--label-convention|--value-convention)", "camel-case"),
+            ("--border-style)", "rounded"),
+        ] {
+            assert!(
+                script.contains(flag_and_values.0),
+                "positional completer must include case for {}",
+                flag_and_values.0
+            );
+            assert!(
+                script.contains(flag_and_values.1),
+                "case for {} should advertise {}",
+                flag_and_values.0,
+                flag_and_values.1
             );
         }
     }

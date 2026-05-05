@@ -14,3 +14,6 @@ unicode-width = "0.2"
 serde_yaml_ng = "0.10"
 rand = "0.9"
 nucleo-matcher = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
