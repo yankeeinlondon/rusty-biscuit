@@ -65,10 +65,10 @@ pub(crate) fn execute_sequence(
         .fail_fast_override
         .unwrap_or(plan.document_fail_fast);
 
-    // `--step-timeout` applies to every step in the sequence. Parse once so
-    // the CLI flag error grammar is raised at sequence entry, not inside the
-    // hot per-step loop.
-    let cli_step_timeout_secs = shared.step_timeout_secs()?;
+    // `--step-timeout` applies to every step in the sequence. Early
+    // validation happens in the CLI entry point; the raw string is
+    // resolved per-step by the composition executor.
+    let _ = shared.step_timeout_secs()?;
 
     let total_steps = plan.steps.len();
 
@@ -456,8 +456,8 @@ pub(crate) fn execute_sequence(
             model: shared.model.clone(),
             output: shared.output,
             system_prompt_args,
-            timeout: shared.timeout,
-            step_timeout: cli_step_timeout_secs,
+            timeout: shared.timeout.clone(),
+            step_timeout: shared.step_timeout.clone(),
             operation: shared.operation.clone(),
             sandbox: shared.sandbox,
             repo: shared.repo,

@@ -11,19 +11,19 @@ const EXPLICIT_FRAMEWORK_WEIGHT: f64 = 1.0;
 const INFERRED_FRAMEWORK_WEIGHT: f64 = 0.75;
 
 #[derive(Default)]
-struct LanguageAccumulator {
-    direct_files: Vec<PathBuf>,
-    framework_files: Vec<PathBuf>,
-    explicit_framework_count: usize,
-    inferred_framework_count: usize,
+pub(crate) struct LanguageAccumulator {
+    pub(crate) direct_files: Vec<PathBuf>,
+    pub(crate) framework_files: Vec<PathBuf>,
+    pub(crate) explicit_framework_count: usize,
+    pub(crate) inferred_framework_count: usize,
 }
 
 #[derive(Default)]
-struct FrameworkAccumulator {
-    files: Vec<PathBuf>,
-    explicit_file_count: usize,
-    inferred_file_count: usize,
-    related_languages: BTreeSet<ProgrammingLanguage>,
+pub(crate) struct FrameworkAccumulator {
+    pub(crate) files: Vec<PathBuf>,
+    pub(crate) explicit_file_count: usize,
+    pub(crate) inferred_file_count: usize,
+    pub(crate) related_languages: BTreeSet<ProgrammingLanguage>,
 }
 
 pub fn summarize_file_inventory(
@@ -44,42 +44,60 @@ pub fn summarize_languages(inventory: &FileInventory) -> LanguageSummary {
     let mut framework_map: HashMap<FrameworkKind, FrameworkAccumulator> = HashMap::new();
 
     for classification in inventory.classifications.iter() {
-        if classification.association == FileAssociation::ProgrammingLanguage
-            && let Some(language) = classification.language
-        {
-            language_map
-                .entry(language)
-                .or_default()
-                .direct_files
-                .push(classification.path.clone());
+        accumulate_language_classification(classification, &mut language_map, &mut framework_map);
+    }
+
+    build_language_summary(language_map, framework_map, inventory.total_files_scanned)
+}
+
+/// Accumulate a single classification into language and framework maps.
+pub(crate) fn accumulate_language_classification(
+    classification: &super::model::FileClassification,
+    language_map: &mut HashMap<ProgrammingLanguage, LanguageAccumulator>,
+    framework_map: &mut HashMap<FrameworkKind, FrameworkAccumulator>,
+) {
+    if classification.association == FileAssociation::ProgrammingLanguage
+        && let Some(language) = classification.language
+    {
+        language_map
+            .entry(language)
+            .or_default()
+            .direct_files
+            .push(classification.path.clone());
+    }
+
+    if classification.association == FileAssociation::FrameworkFile
+        && let Some(framework) = classification.framework
+    {
+        let framework_acc = framework_map.entry(framework).or_default();
+        framework_acc.files.push(classification.path.clone());
+
+        let explicit = classification.source == ClassificationSource::EmbeddedLanguageHint;
+        if explicit {
+            framework_acc.explicit_file_count += 1;
+        } else {
+            framework_acc.inferred_file_count += 1;
         }
 
-        if classification.association == FileAssociation::FrameworkFile
-            && let Some(framework) = classification.framework
-        {
-            let framework_acc = framework_map.entry(framework).or_default();
-            framework_acc.files.push(classification.path.clone());
-
-            let explicit = classification.source == ClassificationSource::EmbeddedLanguageHint;
+        for language in &classification.related_languages {
+            framework_acc.related_languages.insert(*language);
+            let lang_acc = language_map.entry(*language).or_default();
+            lang_acc.framework_files.push(classification.path.clone());
             if explicit {
-                framework_acc.explicit_file_count += 1;
+                lang_acc.explicit_framework_count += 1;
             } else {
-                framework_acc.inferred_file_count += 1;
-            }
-
-            for language in &classification.related_languages {
-                framework_acc.related_languages.insert(*language);
-                let lang_acc = language_map.entry(*language).or_default();
-                lang_acc.framework_files.push(classification.path.clone());
-                if explicit {
-                    lang_acc.explicit_framework_count += 1;
-                } else {
-                    lang_acc.inferred_framework_count += 1;
-                }
+                lang_acc.inferred_framework_count += 1;
             }
         }
     }
+}
 
+/// Build a [`LanguageSummary`] from accumulated maps.
+pub(crate) fn build_language_summary(
+    language_map: HashMap<ProgrammingLanguage, LanguageAccumulator>,
+    framework_map: HashMap<FrameworkKind, FrameworkAccumulator>,
+    total_files_scanned: usize,
+) -> LanguageSummary {
     let total_language_files = language_map
         .values()
         .map(|entry| entry.direct_files.len() + entry.framework_files.len())
@@ -157,7 +175,7 @@ pub fn summarize_languages(inventory: &FileInventory) -> LanguageSummary {
     LanguageSummary {
         primary,
         secondary,
-        total_files_scanned: inventory.total_files_scanned,
+        total_files_scanned,
         total_language_files,
         languages,
         frameworks,
@@ -174,6 +192,14 @@ fn summarize_associations(inventory: &FileInventory) -> Vec<FileAssociationStats
             .push(classification.path.clone());
     }
 
+    build_association_breakdown(associations, inventory.total_files_scanned)
+}
+
+/// Build a [`Vec<FileAssociationStats>`] from an association map.
+pub(crate) fn build_association_breakdown(
+    associations: HashMap<FileAssociation, Vec<PathBuf>>,
+    total_files: usize,
+) -> Vec<FileAssociationStats> {
     let mut stats: Vec<FileAssociationStats> = associations
         .into_iter()
         .map(|(association, mut files)| {
@@ -182,8 +208,8 @@ fn summarize_associations(inventory: &FileInventory) -> Vec<FileAssociationStats
             FileAssociationStats {
                 association,
                 file_count,
-                percentage: if inventory.total_files_scanned > 0 {
-                    (file_count as f64 / inventory.total_files_scanned as f64) * 100.0
+                percentage: if total_files > 0 {
+                    (file_count as f64 / total_files as f64) * 100.0
                 } else {
                     0.0
                 },

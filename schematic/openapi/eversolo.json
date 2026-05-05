@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Eversolo",
+    "title": "eversolo",
     "description": "Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage)",
     "version": "0.1.0"
   },
@@ -757,6 +757,43 @@
           "state"
         ]
       },
+      "PlayingMusic": {
+        "description": "Metadata for the currently playing track.",
+        "type": "object",
+        "properties": {
+          "album": {},
+          "artist": {},
+          "title": {},
+          "trackNumber": {}
+        }
+      },
+      "VolumeData": {
+        "description": "Volume and mute state.\n\n## Notes\n\nThe API spells the current volume field as `currenttVolume` (double-t typo).\nThis is intentional and matches the actual device response.",
+        "type": "object",
+        "properties": {
+          "currenttVolume": {
+            "description": "Current volume level (note: API spells this `currenttVolume` with double-t).",
+            "type": "integer",
+            "format": "int32"
+          },
+          "isMute": {
+            "type": "boolean"
+          },
+          "isVolumeEnable": {},
+          "maxVolume": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minVolume": {},
+          "volumeDb": {
+            "description": "Displayed dB string."
+          }
+        },
+        "required": [
+          "currenttVolume",
+          "maxVolume"
+        ]
+      },
       "InputOutputListResponse": {
         "title": "InputOutputListResponse",
         "description": "Input and output device listing.",
@@ -806,6 +843,45 @@
           "outputData"
         ]
       },
+      "InputItem": {
+        "description": "An available audio input.",
+        "type": "object",
+        "properties": {
+          "icon": {},
+          "name": {
+            "type": "string"
+          },
+          "sortedIndex": {},
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tag"
+        ]
+      },
+      "OutputItem": {
+        "description": "An available audio output.",
+        "type": "object",
+        "properties": {
+          "enable": {
+            "type": "boolean"
+          },
+          "icon": {},
+          "name": {
+            "type": "string"
+          },
+          "sortedIndex": {},
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tag"
+        ]
+      },
       "PowerOptionsResponse": {
         "title": "PowerOptionsResponse",
         "description": "Available power options.",
@@ -829,6 +905,24 @@
         "required": [
           "status",
           "data"
+        ]
+      },
+      "PowerOption": {
+        "description": "A power action option (e.g., poweroff, reboot, screen, timeshutdown).",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Localized display name.",
+            "type": "string"
+          },
+          "tag": {
+            "description": "Action tag (e.g., \"poweroff\", \"reboot\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tag"
         ]
       },
       "BrightnessResponse": {
@@ -884,6 +978,25 @@
           "status",
           "data"
         ]
+      },
+      "DisplayMode": {
+        "description": "A display mode entry.",
+        "type": "object",
+        "properties": {
+          "index": {
+            "description": "Mode index accepted by `setVUMode` / `setSpPlayModeList`."
+          },
+          "tag": {
+            "description": "Mode tag identifier used for selection."
+          },
+          "title": {
+            "description": "Display name (the API uses `title`, not `name`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
       }
     }
   },
@@ -899,5 +1012,8 @@
       "bearer_token": null
     },
     "module_path": "eversolo"
-  }
+  },
+  "x-schematic-grouped-from": [
+    "Eversolo"
+  ]
 }

@@ -70,6 +70,12 @@ RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string
 
 The `request_suffix` prevents naming collisions when APIs have overlapping endpoint IDs (e.g., both have `Embeddings` → `EmbeddingsNativeRequest` vs `EmbeddingsOaiRequest`). The generator automatically combines shared-module APIs into a single output file and cleans up stale files.
 
+OpenAPI and Postman artifacts use the same resolved module name as generated
+Rust files. Shared-module APIs emit one grouped artifact, e.g.
+`ollama.json` / `ollama.postman_collection.json` for `OllamaNative` +
+`OllamaOpenAI`, and `emqx.json` / `emqx.postman_collection.json` for
+`EmqxBasic` + `EmqxBearer`.
+
 ### Body Type Naming Convention
 
 Use `*Body` suffix to avoid collision with generated `*Request` wrappers:

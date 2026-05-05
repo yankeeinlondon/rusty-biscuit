@@ -277,7 +277,7 @@ claudine sequence @research.md topic="async traits"
 - `-i, --interactive`
 - `-m, --model <MODEL>`
 - `-s, --system-prompt <PROMPT|FILE>`
-- `-t, --timeout <SECONDS>`
+- `-t, --timeout <DURATION>`
 - `--dry-run`, `-q, --quiet`, `--silent`
 
 ---
@@ -369,7 +369,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
-| `-t, --timeout <SECONDS>` | Timeout in seconds (non-interactive only) |
+| `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |

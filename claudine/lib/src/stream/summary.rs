@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::badges::SessionBadge;
 use super::token_usage::NormalizedTokenUsage;
-use crate::provider::Provider;
+use crate::provider_id::Provider;
 /// Rate-limit info extracted from provider streams.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RateLimitInfo {

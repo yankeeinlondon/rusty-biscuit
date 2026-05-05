@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "ElevenLabs",
+    "title": "elevenlabs",
     "description": "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation",
     "version": "0.1.0"
   },
@@ -1792,6 +1792,423 @@
   },
   "components": {
     "schemas": {
+      "CreateSpeechBody": {
+        "title": "CreateSpeechBody",
+        "description": "Request body for text-to-speech endpoints.",
+        "type": "object",
+        "properties": {
+          "apply_language_text_normalization": {
+            "description": "Language-specific text normalization.",
+            "type": "boolean"
+          },
+          "apply_text_normalization": {
+            "description": "Text normalization mode."
+          },
+          "language_code": {
+            "description": "ISO 639-1 language code.",
+            "type": "string"
+          },
+          "model_id": {
+            "description": "TTS model to use.",
+            "type": "string"
+          },
+          "next_request_ids": {
+            "description": "Next request IDs for chaining.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_text": {
+            "description": "Next text for context continuity.",
+            "type": "string"
+          },
+          "previous_request_ids": {
+            "description": "Previous request IDs for chaining.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "previous_text": {
+            "description": "Previous text for context continuity.",
+            "type": "string"
+          },
+          "pronunciation_dictionary_locators": {
+            "description": "Pronunciation dictionaries (up to 3).",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PronunciationDictionaryLocator"
+                }
+              ]
+            }
+          },
+          "seed": {
+            "description": "Seed for deterministic generation (0-4294967295).",
+            "type": "integer",
+            "format": "uint32"
+          },
+          "text": {
+            "description": "Text to convert to speech.",
+            "type": "string"
+          },
+          "voice_settings": {
+            "description": "Voice configuration."
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "PronunciationDictionaryLocator": {
+        "description": "Reference to a pronunciation dictionary.",
+        "type": "object",
+        "properties": {
+          "pronunciation_dictionary_id": {
+            "description": "Dictionary identifier.",
+            "type": "string"
+          },
+          "version_id": {
+            "description": "Dictionary version identifier.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pronunciation_dictionary_id",
+          "version_id"
+        ]
+      },
+      "TextNormalization": {
+        "description": "Text normalization mode."
+      },
+      "VoiceSettings": {
+        "title": "VoiceSettings",
+        "description": "Voice settings for TTS generation.",
+        "type": "object",
+        "properties": {
+          "similarity_boost": {
+            "description": "Adherence to original voice (0-1).",
+            "type": "number",
+            "format": "double"
+          },
+          "speed": {
+            "description": "Speech rate (0.7-1.2).",
+            "type": "number",
+            "format": "double"
+          },
+          "stability": {
+            "description": "Voice stability/randomness (0-1).",
+            "type": "number",
+            "format": "double"
+          },
+          "style": {
+            "description": "Style exaggeration (V2+ models).",
+            "type": "number",
+            "format": "double"
+          },
+          "use_speaker_boost": {
+            "description": "Enhanced similarity (V2+ models).",
+            "type": "boolean"
+          }
+        }
+      },
+      "AddSharedVoiceBody": {
+        "title": "AddSharedVoiceBody",
+        "description": "Request to add a shared voice.",
+        "type": "object",
+        "properties": {
+          "new_name": {
+            "description": "New name for the voice.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_name"
+        ]
+      },
+      "CreatePvcVoiceBody": {
+        "title": "CreatePvcVoiceBody",
+        "description": "Request to create a PVC voice.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Voice description.",
+            "type": "string"
+          },
+          "labels": {
+            "description": "Labels (language, accent, gender, age).",
+            "type": "object"
+          },
+          "language": {
+            "description": "Language used in samples.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Voice name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "language"
+        ]
+      },
+      "TrainPvcVoiceBody": {
+        "title": "TrainPvcVoiceBody",
+        "description": "Request to train a PVC voice.",
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "description": "Model to use for training.",
+            "type": "string"
+          }
+        }
+      },
+      "CreateSoundEffectBody": {
+        "title": "CreateSoundEffectBody",
+        "description": "Request to create a sound effect.",
+        "type": "object",
+        "properties": {
+          "duration_seconds": {
+            "description": "Duration in seconds (0.5-30).",
+            "type": "number",
+            "format": "double"
+          },
+          "loop": {
+            "description": "Create looping effect (v2 model only).\nNote: `loop` is a reserved keyword, so we rename it.",
+            "type": "boolean"
+          },
+          "model_id": {
+            "description": "Sound generation model.",
+            "type": "string"
+          },
+          "prompt_influence": {
+            "description": "Prompt adherence (0-1).",
+            "type": "number",
+            "format": "double"
+          },
+          "text": {
+            "description": "Text prompt for the sound effect.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "DownloadHistoryBody": {
+        "title": "DownloadHistoryBody",
+        "description": "Request to download history items.",
+        "type": "object",
+        "properties": {
+          "history_item_ids": {
+            "description": "History item IDs to download.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_format": {
+            "description": "Output format (wav or null for original).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "history_item_ids"
+        ]
+      },
+      "ShareResourceBody": {
+        "title": "ShareResourceBody",
+        "description": "Request to share a resource.",
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "description": "Target group ID.",
+            "type": "string"
+          },
+          "resource_type": {
+            "description": "Resource type."
+          },
+          "role": {
+            "description": "Access level to grant."
+          },
+          "user_email": {
+            "description": "Target user email.",
+            "type": "string"
+          },
+          "workspace_api_key_id": {
+            "description": "Target API key ID.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "resource_type"
+        ]
+      },
+      "AccessLevel": {
+        "description": "Access level for resource sharing.",
+        "type": "string"
+      },
+      "ResourceType": {
+        "description": "Resource types for workspace management.",
+        "type": "string"
+      },
+      "UnshareResourceBody": {
+        "title": "UnshareResourceBody",
+        "description": "Request to unshare a resource.",
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "description": "Target group ID.",
+            "type": "string"
+          },
+          "resource_type": {
+            "description": "Resource type."
+          },
+          "user_email": {
+            "description": "Target user email.",
+            "type": "string"
+          },
+          "workspace_api_key_id": {
+            "description": "Target API key ID.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_type"
+        ]
+      },
+      "CopyResourceBody": {
+        "title": "CopyResourceBody",
+        "description": "Request to copy resource to workspace.",
+        "type": "object",
+        "properties": {
+          "resource_type": {
+            "description": "Resource type."
+          },
+          "target_user_id": {
+            "description": "Target user ID.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_type",
+          "target_user_id"
+        ]
+      },
+      "CreateApiKeyBody": {
+        "title": "CreateApiKeyBody",
+        "description": "Request to create an API key.",
+        "type": "object",
+        "properties": {
+          "character_limit": {
+            "description": "Character limit.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "description": "Key name.",
+            "type": "string"
+          },
+          "permissions": {
+            "description": "Permissions (\"all\" or list)."
+          }
+        },
+        "required": [
+          "name",
+          "permissions"
+        ]
+      },
+      "ApiPermission": {
+        "description": "API permissions for service account keys.",
+        "type": "string"
+      },
+      "PermissionSpec": {
+        "description": "Permission specification for API keys."
+      },
+      "UpdateApiKeyBody": {
+        "title": "UpdateApiKeyBody",
+        "description": "Request to update an API key.",
+        "type": "object",
+        "properties": {
+          "character_limit": {
+            "description": "New character limit.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "is_enabled": {
+            "description": "Enable/disable the key.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "New name.",
+            "type": "string"
+          },
+          "permissions": {
+            "description": "New permissions."
+          }
+        }
+      },
+      "CreateWebhookBody": {
+        "title": "CreateWebhookBody",
+        "description": "Request to create a webhook.",
+        "type": "object",
+        "properties": {
+          "settings": {
+            "description": "Webhook settings."
+          }
+        },
+        "required": [
+          "settings"
+        ]
+      },
+      "WebhookAuthType": {
+        "description": "Webhook authentication type."
+      },
+      "WebhookSettings": {
+        "description": "Webhook settings for creation.",
+        "type": "object",
+        "properties": {
+          "auth_type": {
+            "description": "Authentication type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookAuthType"
+              }
+            ]
+          },
+          "name": {
+            "description": "Webhook name.",
+            "type": "string"
+          },
+          "webhook_url": {
+            "description": "Webhook URL.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth_type",
+          "webhook_url"
+        ]
+      },
+      "UpdateWebhookBody": {
+        "title": "UpdateWebhookBody",
+        "description": "Request to update a webhook.",
+        "type": "object",
+        "properties": {
+          "is_disabled": {
+            "description": "Disable/enable the webhook.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "New name.",
+            "type": "string"
+          }
+        }
+      },
       "SpeechWithTimestampsResponse": {
         "title": "SpeechWithTimestampsResponse",
         "description": "Response from TTS with timestamps endpoints.",
@@ -1810,6 +2227,40 @@
         },
         "required": [
           "audioBase64"
+        ]
+      },
+      "HttpAlignment": {
+        "description": "HTTP alignment object for `/with-timestamps` endpoints.\n\nTimes are in **seconds** (f64).",
+        "type": "object",
+        "properties": {
+          "characterEndTimesSeconds": {
+            "description": "End time for each character in seconds.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "characterStartTimesSeconds": {
+            "description": "Start time for each character in seconds.",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "characters": {
+            "description": "Array of individual characters.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "characters",
+          "characterStartTimesSeconds",
+          "characterEndTimesSeconds"
         ]
       },
       "ListVoicesResponse": {
@@ -1845,6 +2296,139 @@
         "required": [
           "voices"
         ]
+      },
+      "FineTuningModel": {
+        "description": "Fine-tuning model for PVC voices.\n\nNote: The `state` field is a map from model ID to fine-tuning state,\nas each voice can have different fine-tuning status per model.",
+        "type": "object",
+        "properties": {
+          "dataset_duration_seconds": {
+            "description": "Dataset duration in seconds."
+          },
+          "is_allowed_to_fine_tune": {
+            "description": "Whether fine-tuning is allowed for this voice."
+          },
+          "language": {
+            "description": "Language code for fine-tuning."
+          },
+          "manual_verification_requested": {
+            "description": "Whether manual verification was requested."
+          },
+          "max_verification_attempts": {
+            "description": "Maximum verification attempts allowed."
+          },
+          "message": {
+            "description": "Messages per model."
+          },
+          "model_id": {
+            "description": "Model used for fine-tuning."
+          },
+          "next_max_verification_attempts_reset_unix_ms": {
+            "description": "Unix timestamp for next verification reset."
+          },
+          "progress": {
+            "description": "Fine-tuning progress per model."
+          },
+          "state": {
+            "description": "Fine-tuning state per model. Keys are model IDs like \"eleven_multilingual_v2\"."
+          },
+          "verification_attempts_count": {
+            "description": "Number of verification attempts."
+          },
+          "verification_failures": {
+            "description": "Verification failures list."
+          },
+          "verification_required": {
+            "description": "Whether verification is required."
+          }
+        }
+      },
+      "FineTuningState": {
+        "description": "Fine-tuning state for PVC voices."
+      },
+      "LanguageModel": {
+        "description": "Language model for voices.\n\nUsed in verified_languages array. The API can return different field\ncombinations depending on context.",
+        "type": "object",
+        "properties": {
+          "accent": {
+            "description": "Accent variant (e.g., \"american\", \"british\")."
+          },
+          "language_id": {
+            "description": "Language identifier (e.g., \"en\").\nNote: API returns this as \"language\" in verified_languages.",
+            "type": "string"
+          },
+          "locale": {
+            "description": "Locale code (e.g., \"en-US\")."
+          },
+          "model_id": {
+            "description": "Model ID this language is verified for."
+          },
+          "name": {
+            "description": "Display name (e.g., \"English\").\nMay not be present in all API responses.",
+            "type": "string"
+          },
+          "preview_url": {
+            "description": "URL to preview audio for this language."
+          }
+        },
+        "required": [
+          "language_id"
+        ]
+      },
+      "SafetyControl": {
+        "description": "Safety control level for voices."
+      },
+      "SampleModel": {
+        "description": "Voice sample model.",
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "description": "Original file name.",
+            "type": "string"
+          },
+          "hash": {
+            "description": "Content hash.",
+            "type": "string"
+          },
+          "mime_type": {
+            "description": "MIME type of the audio.",
+            "type": "string"
+          },
+          "sample_id": {
+            "description": "Sample identifier.",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "File size in bytes.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "sample_id",
+          "file_name",
+          "mime_type",
+          "size_bytes",
+          "hash"
+        ]
+      },
+      "SharingModel": {
+        "description": "Sharing model for voices.",
+        "type": "object",
+        "properties": {
+          "cloned_by_count": {
+            "description": "Number of clones."
+          },
+          "is_public": {
+            "description": "Whether voice is shared.",
+            "type": "boolean"
+          },
+          "public_owner_id": {
+            "description": "Public owner ID."
+          }
+        }
+      },
+      "VoiceCategory": {
+        "description": "Voice category classification."
       },
       "VoiceResponseModel": {
         "title": "VoiceResponseModel",
@@ -1964,6 +2548,24 @@
           "name"
         ]
       },
+      "VoiceVerificationModel": {
+        "description": "Voice verification model.",
+        "type": "object",
+        "properties": {
+          "is_verified": {
+            "description": "Whether voice is verified.",
+            "type": "boolean"
+          },
+          "requires_verification": {
+            "description": "Whether verification is required.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "requires_verification",
+          "is_verified"
+        ]
+      },
       "StatusResponse": {
         "title": "StatusResponse",
         "description": "Generic status response for many API operations.",
@@ -1977,37 +2579,6 @@
         "required": [
           "status"
         ]
-      },
-      "VoiceSettings": {
-        "title": "VoiceSettings",
-        "description": "Voice settings for TTS generation.",
-        "type": "object",
-        "properties": {
-          "similarity_boost": {
-            "description": "Adherence to original voice (0-1).",
-            "type": "number",
-            "format": "double"
-          },
-          "speed": {
-            "description": "Speech rate (0.7-1.2).",
-            "type": "number",
-            "format": "double"
-          },
-          "stability": {
-            "description": "Voice stability/randomness (0-1).",
-            "type": "number",
-            "format": "double"
-          },
-          "style": {
-            "description": "Style exaggeration (V2+ models).",
-            "type": "number",
-            "format": "double"
-          },
-          "use_speaker_boost": {
-            "description": "Enhanced similarity (V2+ models).",
-            "type": "boolean"
-          }
-        }
       },
       "AddSampleResponse": {
         "title": "AddSampleResponse",
@@ -2053,6 +2624,33 @@
           "has_more"
         ]
       },
+      "LibraryVoiceResponseModel": {
+        "description": "Library voice response model (for shared voices).",
+        "type": "object",
+        "properties": {
+          "category": {
+            "description": "Voice category."
+          },
+          "description": {
+            "description": "Voice description."
+          },
+          "name": {
+            "description": "Voice display name.",
+            "type": "string"
+          },
+          "public_owner_id": {
+            "description": "Public owner ID."
+          },
+          "voice_id": {
+            "description": "Voice identifier.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "voice_id",
+          "name"
+        ]
+      },
       "AddSharedVoiceResponse": {
         "title": "AddSharedVoiceResponse",
         "description": "Response from add shared voice endpoint.",
@@ -2077,6 +2675,92 @@
             }
           ]
         }
+      },
+      "ModelInfo": {
+        "description": "Model information.",
+        "type": "object",
+        "properties": {
+          "can_be_finetuned": {
+            "description": "Fine-tuning capability.",
+            "type": "boolean"
+          },
+          "can_do_text_to_speech": {
+            "description": "TTS capability.",
+            "type": "boolean"
+          },
+          "can_do_voice_conversion": {
+            "description": "Voice conversion capability.",
+            "type": "boolean"
+          },
+          "can_use_speaker_boost": {
+            "description": "Speaker boost support.",
+            "type": "boolean"
+          },
+          "can_use_style": {
+            "description": "Style support.",
+            "type": "boolean"
+          },
+          "concurrency_group": {
+            "description": "Concurrency group."
+          },
+          "description": {
+            "description": "Description.",
+            "type": "string"
+          },
+          "languages": {
+            "description": "Supported languages."
+          },
+          "max_characters_request_free_user": {
+            "description": "Max characters for free users."
+          },
+          "max_characters_request_subscribed_user": {
+            "description": "Max characters for subscribed users."
+          },
+          "maximum_text_length_per_request": {
+            "description": "Max text length per request."
+          },
+          "model_id": {
+            "description": "Model identifier.",
+            "type": "string"
+          },
+          "model_rates": {
+            "description": "Model rates."
+          },
+          "name": {
+            "description": "Display name.",
+            "type": "string"
+          },
+          "requires_alpha_access": {
+            "description": "Requires alpha access.",
+            "type": "boolean"
+          },
+          "serves_pro_voices": {
+            "description": "Pro voice support.",
+            "type": "boolean"
+          },
+          "token_cost_factor": {
+            "description": "Token cost factor."
+          }
+        },
+        "required": [
+          "model_id",
+          "name",
+          "description"
+        ]
+      },
+      "ModelRates": {
+        "description": "Model rate information.",
+        "type": "object",
+        "properties": {
+          "character_cost_multiplier": {
+            "description": "Cost multiplier per character.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "character_cost_multiplier"
+        ]
       },
       "SingleUseTokenResponse": {
         "title": "SingleUseTokenResponse",
@@ -2126,6 +2810,36 @@
           "history",
           "has_more"
         ]
+      },
+      "AlignmentModel": {
+        "description": "Alignment model for history items.",
+        "type": "object",
+        "properties": {
+          "character_end_times_seconds": {
+            "description": "End times in seconds."
+          },
+          "character_start_times_seconds": {
+            "description": "Start times in seconds."
+          },
+          "characters": {
+            "description": "Character-level alignment."
+          }
+        }
+      },
+      "FeedbackModel": {
+        "description": "Feedback model for history items.",
+        "type": "object",
+        "properties": {
+          "feedback": {
+            "description": "Feedback text."
+          },
+          "thumbs_up": {
+            "description": "Thumbs up/down."
+          }
+        }
+      },
+      "HistorySource": {
+        "description": "History item source."
       },
       "SpeechHistoryItemResponseModel": {
         "title": "SpeechHistoryItemResponseModel",
@@ -2245,6 +2959,28 @@
           "user_id"
         ]
       },
+      "BillingPeriod": {
+        "description": "Billing period for subscriptions."
+      },
+      "Currency": {
+        "description": "Supported currencies.",
+        "type": "string"
+      },
+      "InvoiceModel": {
+        "description": "Invoice model.",
+        "type": "object",
+        "properties": {
+          "amount_due": {
+            "description": "Invoice amount."
+          },
+          "currency": {
+            "description": "Invoice currency."
+          },
+          "due_date_unix": {
+            "description": "Due date."
+          }
+        }
+      },
       "SubscriptionModel": {
         "title": "SubscriptionModel",
         "description": "Subscription model.",
@@ -2308,6 +3044,9 @@
           "character_limit"
         ]
       },
+      "SubscriptionStatus": {
+        "description": "Subscription status."
+      },
       "ResourceResponse": {
         "title": "ResourceResponse",
         "description": "Resource response model.",
@@ -2348,6 +3087,29 @@
           "resource_type"
         ]
       },
+      "ShareOptionModel": {
+        "description": "Share option model.",
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "description": "Group ID (if sharing with group)."
+          },
+          "role": {
+            "description": "Access level.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AccessLevel"
+              }
+            ]
+          },
+          "user_email": {
+            "description": "User email (if sharing with user)."
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
       "ListServiceAccountsResponse": {
         "title": "ListServiceAccountsResponse",
         "description": "Response from list service accounts endpoint.",
@@ -2367,6 +3129,70 @@
         },
         "required": [
           "service-accounts"
+        ]
+      },
+      "ApiKeyModel": {
+        "description": "API key model.",
+        "type": "object",
+        "properties": {
+          "character_count": {
+            "description": "Characters used."
+          },
+          "character_limit": {
+            "description": "Character limit."
+          },
+          "created_at_unix": {
+            "description": "Creation timestamp."
+          },
+          "hint": {
+            "description": "Key hint (partial key)."
+          },
+          "is_disabled": {
+            "description": "Whether key is disabled.",
+            "type": "boolean"
+          },
+          "key_id": {
+            "description": "Key identifier.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Key name.",
+            "type": "string"
+          },
+          "permissions": {
+            "description": "Permissions."
+          },
+          "service_account_user_id": {
+            "description": "Service account user ID."
+          }
+        },
+        "required": [
+          "name",
+          "key_id"
+        ]
+      },
+      "ServiceAccountModel": {
+        "description": "Service account model.",
+        "type": "object",
+        "properties": {
+          "api-keys": {
+            "description": "Associated API keys."
+          },
+          "created_at_unix": {
+            "description": "Creation timestamp."
+          },
+          "name": {
+            "description": "Account name.",
+            "type": "string"
+          },
+          "service_account_user_id": {
+            "description": "Service account user ID.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_account_user_id",
+          "name"
         ]
       },
       "ListApiKeysResponse": {
@@ -2430,6 +3256,73 @@
           "webhooks"
         ]
       },
+      "ProductModel": {
+        "description": "Webhook product model.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Product name."
+          },
+          "product_id": {
+            "description": "Product identifier."
+          }
+        }
+      },
+      "WebhookModel": {
+        "description": "Webhook model.",
+        "type": "object",
+        "properties": {
+          "auth_type": {
+            "description": "Authentication type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookAuthType"
+              }
+            ]
+          },
+          "created_at_unix": {
+            "description": "Creation timestamp.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "is_auto_disabled": {
+            "description": "Whether webhook was auto-disabled.",
+            "type": "boolean"
+          },
+          "is_disabled": {
+            "description": "Whether webhook is disabled.",
+            "type": "boolean"
+          },
+          "most_recent_failure_error_code": {
+            "description": "Most recent failure error code."
+          },
+          "most_recent_failure_timestamp": {
+            "description": "Most recent failure timestamp."
+          },
+          "name": {
+            "description": "Webhook name.",
+            "type": "string"
+          },
+          "usage": {
+            "description": "Active usages."
+          },
+          "webhook_id": {
+            "description": "Webhook identifier.",
+            "type": "string"
+          },
+          "webhook_url": {
+            "description": "Webhook URL.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "webhook_id",
+          "webhook_url",
+          "created_at_unix",
+          "auth_type"
+        ]
+      },
       "CreateWebhookResponse": {
         "title": "CreateWebhookResponse",
         "description": "Response from create webhook endpoint.",
@@ -2482,5 +3375,8 @@
       "basic_user": null,
       "bearer_token": null
     }
-  }
+  },
+  "x-schematic-grouped-from": [
+    "ElevenLabs"
+  ]
 }

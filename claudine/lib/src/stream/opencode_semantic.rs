@@ -37,7 +37,7 @@ use super::protocol::opencode::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
-use crate::provider::Provider;
+use crate::provider_id::Provider;
 pub struct OpenCodeSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
     line_num: usize,

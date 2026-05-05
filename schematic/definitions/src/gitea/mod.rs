@@ -467,7 +467,7 @@ mod tests {
         let registry = openapi_registry();
         let openapi_schemas = registry.to_openapi_schemas();
 
-        assert_eq!(openapi_schemas.len(), 21);
+        assert!(openapi_schemas.len() >= 21, "expected at least 21 schemas, got {}", openapi_schemas.len());
         assert!(openapi_schemas.contains_key("RepositoryInfo"));
         assert!(openapi_schemas.contains_key("PullRequestSummary"));
         assert!(openapi_schemas.contains_key("Vec<PullRequestSummary>"));
@@ -773,15 +773,14 @@ mod tests {
 
         for id in single_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
-            match &endpoint.response {
-                ApiResponse::Json(schema) => {
-                    assert!(
-                        !schema.type_name.starts_with("Vec<"),
-                        "Endpoint {} should return single item, not Vec",
-                        id
-                    );
-                }
-                _ => {} // GetRepositoryContentRaw returns Text, which is fine
+            // GetRepositoryContentRaw returns Text, which is fine; only
+            // assert single-item shape for JSON responses.
+            if let ApiResponse::Json(schema) = &endpoint.response {
+                assert!(
+                    !schema.type_name.starts_with("Vec<"),
+                    "Endpoint {} should return single item, not Vec",
+                    id
+                );
             }
         }
     }

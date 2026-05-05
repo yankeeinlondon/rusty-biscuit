@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-11T20:35:18.304871+00:00
+//! Generated: 2026-05-04T04:02:11.667119+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Deepseek
 //!
@@ -16,10 +16,10 @@ use model_id::ModelId;
     returns = "crate::models::model_metadata::ModelMetadata"
 )]
 pub enum ProviderModelDeepseek {
-    /// Model: `deepseek-chat`
-    Deepseek__Chat,
-    /// Model: `deepseek-reasoner`
-    Deepseek__Reasoner,
+    /// Model: `deepseek-v4-flash`
+    Deepseek__V4__Flash,
+    /// Model: `deepseek-v4-pro`
+    Deepseek__V4__Pro,
     /// Custom model ID not in the predefined list.
     Bespoke(String),
 }

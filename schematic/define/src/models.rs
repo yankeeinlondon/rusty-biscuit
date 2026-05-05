@@ -410,6 +410,8 @@ mod tests {
     #[test]
     fn primitive_type_debug_clone_eq() {
         let prim = PrimitiveType::String;
+        // Explicitly exercise the Clone impl on a Copy type.
+        #[allow(clippy::clone_on_copy)]
         let cloned = prim.clone();
         assert_eq!(prim, cloned);
         assert_eq!(format!("{:?}", prim), "String");
@@ -434,7 +436,7 @@ mod tests {
 
     #[test]
     fn primitive_type_all_variants() {
-        let variants = vec![
+        let variants = [
             PrimitiveType::String,
             PrimitiveType::Integer,
             PrimitiveType::Number,

@@ -1840,7 +1840,7 @@ pub struct MoveRepoBody {
 }
 
 /// Request to update repository settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateRepoSettingsBody {
     /// Change gated status.
     #[serde(skip_serializing_if = "Option::is_none")]

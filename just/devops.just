@@ -2,12 +2,14 @@ import 'notify.just'
 mod util
 
 bold := '\033[1m'
+dim := '\033[2m'
 reset := '\033[0m'
 italic := '\033[3m'
 red := '\033[31m'
 green := '\033[32m'
 yellow := '\033[33m'
 blue := '\033[34m'
+magenta := '\033[35m'
 underline := '\033[4m'
 
 # dim := '\033[2m'
@@ -47,16 +49,33 @@ _install path pkg_name binary="" *args="":
 
 
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
-commit agent="opencode" *args="":
-    @echo ""
-    @echo "Committing staged changes in the {{bold}}Rusty Biscuit{{reset}} monorepo to git"
-    @echo ""
-    @echo "{{bold}}{{blue}}Staged Files:{{reset}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y {{args}}
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status --compact 2>/dev/null || exit 0
-    @echo
+[arg("agent", long="agent")]
+[arg("model", long="model")]
+commit agent="opencode" model="" *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    model=""
+    if [[ ! -z "{{model}}" ]]; then
+        model="--model {{model}}"
+    else
+        if [[ "{{agent}}" == "opencode" ]]; then
+            model="--model minimax/MiniMax-M2.7-highspeed"
+        fi
+    fi
+    echo ""
+    echo -e "Committing staged changes in the {{bold}}Rusty Biscuit{{reset}} monorepo to git"
+    if [[ -z "$model" ]]; then
+        echo -e "{{dim}}  - using the {{italic}}default{{reset}}{{dim}}model for the agent{{reset}}"
+    else
+        echo -e "{{dim}}  - using the {{italic}}{{blue}}${model}{{reset}}{{dim}}model{{reset}}"
+    fi
+    echo ""
+    echo -e "{{bold}}{{blue}}Staged Files:{{reset}}"
+    sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
+    claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y ${model} {{args}}
+    just _speak "git commits completed in rusty-biscuit monorepo"
+    sniff repo git-status --compact 2>/dev/null || exit 0
+    echo
 
 
 # Lint a package
@@ -144,6 +163,19 @@ status subject="":
         else
             echo -e "  {{italic}}no fixes directory{{reset}}"
         fi
+        echo
+        echo -e "{{bold}}{{magenta}}{{underline}}Recent Reviews{{reset}}"
+        echo
+        if [[ -d reviews ]]; then
+            mapfile -t recent_reviews < <(find reviews -maxdepth 1 -mindepth 1 -type d -mtime -3 2>/dev/null | sort)
+            if [[ ${#recent_reviews[@]} -gt 0 ]]; then
+                eza "${recent_reviews[@]}" -ldga --hyperlink
+            else
+                echo -e "  {{italic}}no reviews updated in the last 3 days{{reset}}"
+            fi
+        else
+            echo -e "  {{italic}}no reviews directory{{reset}}"
+        fi
         exit 0
     fi
 
@@ -199,9 +231,3 @@ status subject="":
     matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
     eza "${matched}" -lga --hyperlink
 
-
-[arg("spec", long="spec")]
-positional filter="" spec="" design="":
-    @echo "Filter: {{filter}}"
-    @echo "Spec: {{spec}}"
-    @echo "Design: {{design}}"

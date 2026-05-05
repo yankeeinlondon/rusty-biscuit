@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
@@ -167,39 +167,6 @@ profile-cli *args="":
         exit 1
     fi
     cargo flamegraph --profile profiling -p sniff-cli -- {{ args }}
-
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{ DIM }}model{{ RESET }}"
-    @echo ""
-    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
-
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
-    @echo
-    @echo -e "Running drift workflow for {{ BOLD }}sniff{{ RESET }} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
-    @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- sniff {{ DOCS }} {{ args }}
-    @_speak "the drift recipe for the sniff package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
-
-skill-audio-programming:
-    @echo "Publishing the {{ BOLD }}audio-programming{{ RESET }} skill to this repo"
-    @mkdir -p ../.claude/skills/audio-programming
-    @cp ./docs/audio-programming/*.md ../.claude/skills/audio-programming
-    @md compose ./docs/audio-programming/SKILL.md > ../.claude/skills/audio-programming/SKILL.md
-    @echo "Published {{ BOLD }}{{ GREEN }}audio-programming{{ RESET }}"
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 

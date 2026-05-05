@@ -85,6 +85,10 @@ use schematic_define::{
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
     SchemaRegistry::new()
+        .register::<CreateRepoBody>("CreateRepoBody")
+        .register::<DeleteRepoBody>("DeleteRepoBody")
+        .register::<MoveRepoBody>("MoveRepoBody")
+        .register::<UpdateRepoSettingsBody>("UpdateRepoSettingsBody")
         .register::<Vec<ModelInfo>>("Vec<ModelInfo>")
         .register::<ModelInfo>("ModelInfo")
         .register::<Vec<RepoFile>>("Vec<RepoFile>")
@@ -447,7 +451,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                     oauth_scopes: None,
             },
         ],
-        module_path: None,
+        module_path: Some("huggingface".to_string()),
         request_suffix: None,
         version: None,
         env_mapping: Some(EnvMapping {

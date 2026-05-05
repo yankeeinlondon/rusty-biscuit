@@ -32,7 +32,7 @@ use super::protocol::kimi::{
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{ContextUsage, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
-use crate::provider::Provider;
+use crate::provider_id::Provider;
 const CONTEXT_PRESSURE_WARN_PERCENT: f64 = 80.0;
 
 /// In-flight tool-call accumulator. Holds the tool name, the optional id, and

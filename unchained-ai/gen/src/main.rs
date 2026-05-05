@@ -23,13 +23,13 @@ use parsera::{ParseraModel, fetch_parsera_specs_with_retry, find_parsera_metadat
 #[command(about = "Generate provider model enum files from API")]
 #[command(version)]
 struct Cli {
-    /// Output directory for generated files
-    #[arg(
-        short,
-        long,
-        default_value = "unchained-ai/lib/src/rigging/providers/models"
-    )]
-    output: PathBuf,
+    /// Output directory for generated files.
+    ///
+    /// Defaults to `<unchained-ai-gen crate>/../lib/src/rigging/providers/models`
+    /// resolved against `CARGO_MANIFEST_DIR`, so the generator targets the real
+    /// `unchained-ai/lib` regardless of the caller's working directory.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
 
     /// Specific providers to generate (comma-separated)
     #[arg(short, long)]
@@ -46,6 +46,18 @@ struct Cli {
     /// Dry run - don't write files, just show what would be generated
     #[arg(long)]
     dry_run: bool,
+}
+
+/// Resolve the default output directory relative to the gen crate's manifest,
+/// not the caller's current working directory.
+fn default_output_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("lib")
+        .join("src")
+        .join("rigging")
+        .join("providers")
+        .join("models")
 }
 
 /// Summary of the generation process.
@@ -268,13 +280,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Processing {} providers", providers.len());
 
+    let output_dir = cli.output.clone().unwrap_or_else(default_output_dir);
+    info!("Output directory: {}", output_dir.display());
+
     // Ensure output directory exists
     if !cli.dry_run {
-        std::fs::create_dir_all(&cli.output)?;
+        std::fs::create_dir_all(&output_dir)?;
     }
 
     // Process providers
-    let result = process_providers(providers, &api_keys, &cli.output, cli.dry_run).await;
+    let result = process_providers(providers, &api_keys, &output_dir, cli.dry_run).await;
 
     // Generate metadata lookup table
     let mut metadata_gen = MetadataGenerator::new();
@@ -297,7 +312,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Write metadata file
     if !cli.dry_run {
         let metadata_code = metadata_gen.generate();
-        let metadata_path = cli.output.join("metadata_generated.rs");
+        let metadata_path = output_dir.join("metadata_generated.rs");
         write_atomic(&metadata_path, &metadata_code)?;
         info!("Wrote metadata to {}", metadata_path.display());
     } else {

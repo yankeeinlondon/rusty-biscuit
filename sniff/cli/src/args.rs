@@ -112,6 +112,9 @@ pub enum RepoAction {
         status: sniff::remote::PullRequestState,
         verbose: bool,
     },
+    Language {
+        breakdown: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +226,7 @@ pub enum PackagesFormat {
 )]
 pub struct Cli {
     /// Base directory for filesystem analysis
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub base: Option<PathBuf>,
 
     /// Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
@@ -448,9 +451,6 @@ pub enum Commands {
         #[command(subcommand)]
         repo_subcommand: Option<RepoSubcommand>,
     },
-
-    /// Show only language detection results
-    Language,
 
     /// Show broad file associations
     Files {
@@ -839,6 +839,12 @@ pub enum RepoSubcommand {
         #[arg(long, default_value = "open")]
         status: sniff::remote::PullRequestState,
     },
+    /// Output the primary programming language for the repository
+    Language {
+        /// Show detailed per-package language breakdown (like the old `sniff language` command)
+        #[arg(long)]
+        breakdown: bool,
+    },
 }
 
 impl Commands {
@@ -856,7 +862,6 @@ impl Commands {
             Commands::Storage => OutputFilter::Storage,
             Commands::AudioDevices => OutputFilter::AudioDevices,
             Commands::Repo { .. } => OutputFilter::Repo,
-            Commands::Language => OutputFilter::Language,
             Commands::Files { .. } => OutputFilter::Files,
             Commands::Docs { .. } => OutputFilter::Docs,
             Commands::Programs { .. } => OutputFilter::Programs,
@@ -1285,6 +1290,9 @@ impl Commands {
                     status: *status,
                     verbose: false,
                 },
+                Some(RepoSubcommand::Language { breakdown }) => RepoAction::Language {
+                    breakdown: *breakdown,
+                },
             }),
             _ => None,
         }
@@ -1474,6 +1482,10 @@ Packages:
   sniff repo dirty-packages           Packages with uncommitted changes
   sniff repo package                  Package name for current directory
 
+Languages:
+  sniff repo language                 Primary programming language for the repository
+  sniff repo language --json          Same, as { \"language\": \"Rust\" }
+
 Dependencies:
   sniff repo deps                     Text dependency list
   sniff repo deps --ui                Mermaid dependency diagram
@@ -1565,10 +1577,6 @@ mod tests {
             assert!(matches!(
                 parse_args(&["audio-devices"]).unwrap().command,
                 Some(Commands::AudioDevices)
-            ));
-            assert!(matches!(
-                parse_args(&["language"]).unwrap().command,
-                Some(Commands::Language)
             ));
             assert!(matches!(
                 parse_args(&["topics"]).unwrap().command,

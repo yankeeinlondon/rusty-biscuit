@@ -108,7 +108,10 @@ let result = detect_with_config(config)?;
 - **Shared repo inventory**: full repo detection returns its `FileInventory` alongside the `RepoInfo` via `detect_repo_with_inventory`, so the file-inventory stage skips rescanning
 - **Manifest Index**: single walk records every `Cargo.toml`/`package.json`/`pyproject.toml`/`go.mod` for full repo mode; structure mode skips it entirely
 - **Git status layers**: counts-only vs full file changes vs full unified diffs, selectable via `GitRequest` flags
+- **Parallel remote fetch**: deep git mode fetches multiple remotes concurrently with bounded parallelism; `GIT_TERMINAL_PROMPT=0` is preserved to avoid interactive hangs
+- **Ancestry-walk containment**: per-commit remote containment is computed with a single ancestry walk per remote, cached in a `HashMap<Oid, Vec<remote>>`
 - **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 8 program categories via `Arc`
+- **CLI async model**: the CLI is a single-shot command runner; most paths are synchronous (git, filesystem, subprocess) and run directly in the async entrypoint. `spawn_blocking` is avoided unless true concurrent async work exists
 
 ## CLI
 
@@ -128,6 +131,7 @@ sniff topics               # Table of available topics
 sniff just                 # Justfiles and recipes
 sniff repo                 # Repository/monorepo structure
 sniff repo git-status      # Git status with commit history
+sniff repo language        # Primary programming language for the repository
 sniff repo remote origin   # Inspect remote repository
 sniff repo pr              # List open pull requests
 sniff repo pr --status merged  # List merged pull requests

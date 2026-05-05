@@ -9,6 +9,16 @@
       "key": "baseUrl",
       "value": "https://api.bitbucket.org/2.0",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "username",
+      "value": "",
+      "description": "Username for Basic authentication"
+    },
+    {
+      "key": "password",
+      "value": "",
+      "description": "Password for Basic authentication"
     }
   ],
   "auth": {

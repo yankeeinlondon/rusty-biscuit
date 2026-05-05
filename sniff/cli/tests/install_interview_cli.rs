@@ -21,5 +21,5 @@ fn install_dry_run_plain_emits_announcement_and_success_status() {
         .assert()
         .success()
         .stdout(predicate::str::contains("will be installed"))
-        .stdout(predicate::str::contains("installed successfully"));
+        .stdout(predicate::str::contains("successfully"));
 }

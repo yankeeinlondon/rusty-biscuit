@@ -34,7 +34,7 @@ tokio = { version = "1", features = ["rt"], optional = true }
 url = "2"
 urlencoding = "2.1"
 walkdir = "2.5"
-which = { version = "8.0.0", features = ["regex", "tracing"] }
+which = { version = "8.0.0", default-features = false, features = ["real-sys"] }
 
 [features]
 default = []
