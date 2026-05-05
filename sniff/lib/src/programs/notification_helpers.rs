@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::programs::enums::NotificationHelper;
-use crate::programs::find_program::ExecutableIndex;
+use crate::executable_index::ExecutableIndex;
 use crate::programs::contract::ExecutableSource;
 use crate::programs::types::CategoryDetector;
 

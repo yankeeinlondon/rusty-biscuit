@@ -120,6 +120,7 @@ pub(crate) mod windows_apps;
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
+pub use crate::executable_index::{ExecutableIndex, find_programs_with_source_from_index};
 pub use ai_cli::InstalledAiClients;
 pub use editors::InstalledEditors;
 pub use enums::{
@@ -127,8 +128,8 @@ pub use enums::{
     OsPackageManager, TerminalApp, TtsClient, Utility,
 };
 pub use find_program::{
-    ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
-    find_programs_with_source_from_index, find_programs_with_source_parallel,
+    find_program, find_program_with_source, find_programs_parallel,
+    find_programs_with_source_parallel,
 };
 pub use headless_audio::InstalledHeadlessAudio;
 pub use host_capability::{

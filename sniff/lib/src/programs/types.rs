@@ -14,9 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::SniffInstallationError;
 use crate::programs::contract::{CategoryEnum, ExecutableSource, InstallationMethod, ProgramError};
-use crate::programs::find_program::{
-    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
-};
+use crate::executable_index::{ExecutableIndex, find_programs_with_source_from_index};
+use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::schema::ProgramMetadata;
 
 
