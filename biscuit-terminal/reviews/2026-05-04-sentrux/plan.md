@@ -2,7 +2,7 @@
 title: Sentrux Quality Remediation Plan — biscuit-terminal package area
 agent: open_code
 phases: 5
-start_phase: 3
+start_phase: 5
 created: '2026-05-04T17:10:05'
 source_review: review-1.md
 suggestions_total: 18
@@ -120,10 +120,18 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
 source_files_during_phase_5:
-  - biscuit-terminal/lib/src/components/prose.rs
-  - biscuit-terminal/lib/src/components/terminal_image.rs
-  - biscuit-terminal/lib/src/utils/color.rs
-  - biscuit-terminal/lib/src/utils/mod.rs
+  - biscuit-terminal/lib/src/components/prose/mod.rs
+  - biscuit-terminal/lib/src/components/prose/prose.rs
+  - biscuit-terminal/lib/src/components/prose/render.rs
+  - biscuit-terminal/lib/src/components/prose/styles.rs
+  - biscuit-terminal/lib/src/components/prose/tokens.rs
+  - biscuit-terminal/lib/src/components/terminal_image/mod.rs
+  - biscuit-terminal/lib/src/components/terminal_image/cursor.rs
+  - biscuit-terminal/lib/src/components/terminal_image/iterm.rs
+  - biscuit-terminal/lib/src/components/terminal_image/kitty.rs
+  - biscuit-terminal/lib/src/components/terminal_image/protocol.rs
+  - biscuit-terminal/lib/src/components/terminal_image/tests.rs
+  - biscuit-terminal/lib/src/components/terminal_image/width.rs
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
@@ -523,11 +531,11 @@ utils/color/
    `ImageProtocol` trait provides a clean seam.
 
 **Deliverables:**
-- [ ] `components/prose/` directory with 4 module files
-- [ ] `components/terminal_image/` directory with 6 module files
-- [ ] `utils/color/` directory with 8 module files
-- [ ] All `mod.rs` re-exports updated
-- [ ] No file in `lib/src/` exceeds ~1,500 lines (except possibly test-heavy
+- [x] `components/prose/` directory with 4 module files
+- [x] `components/terminal_image/` directory with 6 module files
+- [x] `utils/color/` directory with 8 module files
+- [x] All `mod.rs` re-exports updated
+- [x] No file in `lib/src/` exceeds ~1,500 lines (except possibly test-heavy
       files with tracked exceptions)
 
 **Validation:**
