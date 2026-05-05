@@ -6,6 +6,16 @@ remaining_items: 4
 status: follow-up
 phases: 5
 start_phase: 1
+source_files_during_phase_1:
+  - sniff/lib/benches/cases/repo.rs
+  - sniff/lib/benches/perf.rs
+  - sniff/lib/benches/support/builder.rs
+  - sniff/lib/benches/support/fixtures.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - sniff/lib
 ---
 
 # Performance Review — Follow-Up Plan
