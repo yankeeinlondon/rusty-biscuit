@@ -268,6 +268,18 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - claudine/lib/src/stream/reporting.rs
+  - claudine/cli/src/commands/wrap/flags.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/tests/wrap_commands.rs
+  - claudine/.sentrux/baseline.json
+docs_updated_during_phase_6:
+  - claudine/docs/topics/protect-service.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/claudine/SKILL.md
 packages:
   - claudine
   - claudine-cli
