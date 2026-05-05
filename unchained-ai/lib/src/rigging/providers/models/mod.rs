@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Provider;
 
-use crate::models::model_metadata::{Modality, ModelMetadata};
+use crate::models::model_metadata::{Modality, ProviderModelMetadata};
 use crate::rigging::providers::models::{
     anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
     gemini::ProviderModelGemini, groq::ProviderModelGroq, mistral::ProviderModelMistral,
@@ -248,7 +248,7 @@ impl ProviderModel {
     /// Metadata is fetched from the Parsera LLM Specs API at build time
     /// and includes context window, modalities, and capabilities.
     #[must_use]
-    pub fn metadata(&self) -> Option<&'static ModelMetadata> {
+    pub fn metadata(&self) -> Option<&'static ProviderModelMetadata> {
         match self {
             Self::Anthropic(m) => m.metadata(),
             Self::Deepseek(m) => m.metadata(),
