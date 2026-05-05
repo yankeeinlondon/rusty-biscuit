@@ -12,6 +12,7 @@ mod errors;
 mod generator;
 mod metadata_generator;
 mod parsera;
+mod provider_metadata;
 
 use errors::GeneratorError;
 use generator::ModelEnumGenerator;
