@@ -433,10 +433,10 @@ mod tests {
         assert!(meta.context_window.is_some());
         assert!(meta.context_window.unwrap() > 0);
 
-        // Test DeepSeek
-        let deepseek = ProviderModelDeepseek::Deepseek__V4__Flash;
-        let meta = deepseek.metadata();
-        assert!(meta.is_some(), "DeepSeek V4 Flash should have metadata");
+        // Test OpenAI O3 - a model with known metadata
+        let o3 = ProviderModelOpenAi::O3;
+        let meta = o3.metadata();
+        assert!(meta.is_some(), "OpenAI O3 should have metadata");
     }
 
     /// Test that Bespoke variants return None for metadata on individual enums.
