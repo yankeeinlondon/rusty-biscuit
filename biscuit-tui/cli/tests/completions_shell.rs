@@ -214,6 +214,126 @@ mod zsh {
         );
     }
 
+    /// Reproduces the bug: typing `--active-color <SP><TAB>` should
+    /// suggest the four enum values, not file paths or `[`.
+    #[test]
+    fn enum_value_completion_active_color_space_form() {
+        if skip_if_not_enabled() {
+            return;
+        }
+        let mut session = spawn_zsh_with_completions();
+        session
+            .write_all(b"question choose-many --active-color \t\t")
+            .expect("send command+tab");
+        std::thread::sleep(Duration::from_millis(600));
+        let output = read_all_available(&mut session);
+        for v in ["grey", "green", "yellow", "red"] {
+            assert!(
+                output.contains(v),
+                "--active-color <SP><TAB> should suggest {v}, got: {output:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn enum_value_completion_sort_space_form() {
+        if skip_if_not_enabled() {
+            return;
+        }
+        let mut session = spawn_zsh_with_completions();
+        session
+            .write_all(b"question choose-many --sort \t\t")
+            .expect("send command+tab");
+        std::thread::sleep(Duration::from_millis(600));
+        let output = read_all_available(&mut session);
+        for v in ["natural", "inverse", "asc", "desc"] {
+            assert!(
+                output.contains(v),
+                "--sort <SP><TAB> should suggest {v}, got: {output:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn enum_value_completion_after_positionals() {
+        if skip_if_not_enabled() {
+            return;
+        }
+        let mut session = spawn_zsh_with_completions();
+        session
+            .write_all(b"question choose-many foo bar --active-color \t\t")
+            .expect("send command+tab");
+        std::thread::sleep(Duration::from_millis(600));
+        let output = read_all_available(&mut session);
+        for v in ["grey", "green", "yellow", "red"] {
+            assert!(
+                output.contains(v),
+                "--active-color <SP><TAB> after positionals should suggest {v}, got: {output:?}"
+            );
+        }
+    }
+
+    /// Cover every enum-typed flag advertised by the choose subcommands
+    /// when the cursor sits at the option-value position after positional
+    /// args have already been typed.  The catch-all positional completer
+    /// must dispatch to the option's value action for each.
+    #[test]
+    fn enum_value_completion_all_flags_after_positionals() {
+        if skip_if_not_enabled() {
+            return;
+        }
+        let cases: &[(&str, &[&str])] = &[
+            ("--active-color", &["grey", "green", "yellow", "red"]),
+            ("--sort", &["natural", "inverse", "asc", "desc"]),
+            ("--label-position", &["above", "below", "left", "right"]),
+            ("--hotkey-badges", &["auto", "always", "never", "ctrl", "alt"]),
+            ("--output", &["raw", "json", "null"]),
+            (
+                "--label-convention",
+                &[
+                    "camel-case",
+                    "pascal-case",
+                    "kebab-case",
+                    "snake-case",
+                    "title-case",
+                ],
+            ),
+            (
+                "--value-convention",
+                &[
+                    "camel-case",
+                    "pascal-case",
+                    "kebab-case",
+                    "snake-case",
+                    "title-case",
+                ],
+            ),
+            (
+                "--border-style",
+                &["none", "rounded", "sharp", "bold", "double", "block"],
+            ),
+        ];
+        let mut session = spawn_zsh_with_completions();
+        for (flag, expected) in cases {
+            let cmd = format!("question choose-many a b c {flag} \t\t");
+            session
+                .write_all(cmd.as_bytes())
+                .expect("send command+tab");
+            std::thread::sleep(Duration::from_millis(700));
+            let output = read_all_available(&mut session);
+            for v in *expected {
+                assert!(
+                    output.contains(v),
+                    "{flag} <SP><TAB> after positionals should suggest {v}, got: {output:?}"
+                );
+            }
+            // Reset the line for the next iteration.
+            session.write_all(b"\x15\r").expect("clear line");
+            std::thread::sleep(Duration::from_millis(200));
+            let _ = read_all_available(&mut session);
+        }
+    }
+
     fn assert_candidates_contain_only_hotkey_prefixes(output: &str) {
         // We expect the three hotkey prefixes to appear and no command/file
         // fallback pollution such as `[` or `[[`.
@@ -425,6 +545,31 @@ mod bash {
             !output.contains(" [\n") && !output.contains(" [[\n"),
             "must not contain fallback pollution, got: {output:?}"
         );
+    }
+
+    #[test]
+    fn enum_value_completion_active_color_after_positionals() {
+        if skip_if_not_enabled() {
+            return;
+        }
+        let mut session = match spawn_bash_with_completions() {
+            Some(s) => s,
+            None => {
+                eprintln!("skipping: could not spawn bash with completions");
+                return;
+            }
+        };
+        session
+            .write_all(b"question choose-many foo bar --active-color \t\t")
+            .expect("send command+tab");
+        std::thread::sleep(Duration::from_millis(600));
+        let output = read_all_available(&mut session);
+        for v in ["grey", "green", "yellow", "red"] {
+            assert!(
+                output.contains(v),
+                "--active-color <SP><TAB> after positionals should suggest {v}, got: {output:?}"
+            );
+        }
     }
 }
 

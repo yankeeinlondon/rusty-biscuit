@@ -66,9 +66,9 @@ source_files_during_phase_5:
 | Production parallel inventory drops all classifications | High | `classify.rs`, `scan_inventory_parallel` | Adopt the `system_view.rs` drop-flush pattern: create a `LocalClassifications` struct that appends worker-local results to the shared `Arc<Mutex<Vec<FileClassification>>>` on drop. Replace the unused `_shared` clone with the drop-flush wrapper. |
 
 **Deliverables:**
-- [ ] `LocalClassifications` drop-flush wrapper in `scan_inventory_parallel`
-- [ ] Non-test integration test or unit-test hook that exercises the parallel path
-- [ ] Rerun inventory/filesystem benchmarks to validate measurements
+- [x] `LocalClassifications` drop-flush wrapper in `scan_inventory_parallel`
+- [x] Non-test integration test or unit-test hook that exercises the parallel path
+- [x] Rerun inventory/filesystem benchmarks to validate measurements
 
 **Validation:**
 ```bash
@@ -93,10 +93,10 @@ cargo bench -p sniff --bench perf -- inventory
 | Git file-change stats scale with dirty files times full diff work | High | `git/detection.rs`, `get_repo_status_with_changes` | Build staged (`diff_tree_to_index`) and unstaged (`diff_index_to_workdir`) diffs once. Iterate each diff once with `foreach`, accumulating `LineStats` by path into a `HashMap<PathBuf, LineStats>`. Reuse the same diffs for deep-mode patch generation grouped by path. |
 
 **Deliverables:**
-- [ ] Single-call staged and unstaged diff construction
-- [ ] Path-keyed `HashMap` accumulator for per-file stats
-- [ ] Deep-mode patch emission from the same batched diffs (or explicit gating)
-- [ ] Focused tests for rename/delete handling and staged-plus-unstaged combinations
+- [x] Single-call staged and unstaged diff construction
+- [x] Path-keyed `HashMap` accumulator for per-file stats
+- [x] Deep-mode patch emission from the same batched diffs (or explicit gating)
+- [x] Focused tests for rename/delete handling and staged-plus-unstaged combinations
 
 **Validation:**
 ```bash
@@ -141,11 +141,11 @@ cargo bench -p sniff --bench perf -- filesystem_git
 | Blast-radius reparses every markdown document after collecting changes | Medium | `blast_radius.rs`, `docs.rs` | Add `DocParseMode::BlastRadiusOnly` to `parse_markdown_meta`. Read only until closing frontmatter delimiter; parse only the `blast_radius` key. Skip content hashing, mtime, and full-body processing unless full `MarkdownMeta` is requested. |
 
 **Deliverables:**
-- [ ] `ManifestEntry` with pre-normalized paths; updated `package_dirs_in_tree`
-- [ ] `PackageBuildContext` with `ManifestCache` wired through discovery
-- [ ] Eager `ExecutableIndex::build_eager_path()` and deduplicated `names_to_search`
-- [ ] `DocParseMode::BlastRadiusOnly` and blast-radius scanner integration
-- [ ] Tests for mixed Cargo/Node/Python/Go packages and nested-package exclusion
+- [x] `ManifestEntry` with pre-normalized paths; updated `package_dirs_in_tree`
+- [x] `PackageBuildContext` with `ManifestCache` wired through discovery
+- [x] Eager `ExecutableIndex::build_eager_path()` and deduplicated `names_to_search`
+- [x] `DocParseMode::BlastRadiusOnly` and blast-radius scanner integration
+- [x] Tests for mixed Cargo/Node/Python/Go packages and nested-package exclusion
 
 **Validation:**
 ```bash
@@ -176,11 +176,11 @@ cargo test -p sniff --test integration -- blast_radius
 | Compile-time/dependency baselines | `Cargo.toml` files | `cargo bloat` and `cargo llvm-lines` before feature cleanup |
 
 **Deliverables:**
-- [ ] Criterion benchmark for git dirty-file scaling
-- [ ] Criterion benchmark for repo package-boundary refresh
-- [ ] Criterion benchmark for docs parsing modes
-- [ ] Profiling commands documented for `cargo flamegraph` and `hyperfine`
-- [ ] Baseline measurements recorded for Phase 5 comparison
+- [x] Criterion benchmark for git dirty-file scaling
+- [x] Criterion benchmark for repo package-boundary refresh
+- [x] Criterion benchmark for docs parsing modes
+- [x] Profiling commands documented for `cargo flamegraph` and `hyperfine`
+- [x] Baseline measurements recorded for Phase 5 comparison
 
 **Validation:**
 ```bash
@@ -221,10 +221,10 @@ cargo llvm-lines -p sniff-cli --release
 | Narrow compile-time cleanup: unused or broad dependency features | Low | `lib/Cargo.toml`, `cli/Cargo.toml` | Measure with `cargo bloat` and `cargo llvm-lines`. If confirmed, remove unused `which` features (`regex`, `tracing`) and consider a CLI feature split such as `sniff-cli/remote` for commands that need remote providers. Do not split without build-size data. |
 
 **Deliverables:**
-- [ ] Bounded parallel remote fetch with `GIT_TERMINAL_PROMPT=0` preservation
-- [ ] Ancestry-walk containment optimization with `HashMap<Oid, Vec<remote>>`
-- [ ] Documented CLI concurrency model or targeted `spawn_blocking`
-- [ ] Measurement-backed dependency feature decisions
+- [x] Bounded parallel remote fetch with `GIT_TERMINAL_PROMPT=0` preservation
+- [x] Ancestry-walk containment optimization with `HashMap<Oid, Vec<remote>>`
+- [x] Documented CLI concurrency model or targeted `spawn_blocking`
+- [x] Measurement-backed dependency feature decisions
 
 **Validation:**
 ```bash

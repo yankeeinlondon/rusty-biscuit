@@ -1,6 +1,6 @@
 ---
 phases: 5
-starting_phase: 5
+start_phase: 5
 ---
 
 # Performance Review Implementation Plan

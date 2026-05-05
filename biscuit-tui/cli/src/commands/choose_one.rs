@@ -99,10 +99,16 @@ pub struct ChooseOneArgs {
 /// `Ok(0)` on submission, `Ok(1)` when the user pressed `Esc`,
 /// `Ok(130)` when the user pressed `Ctrl-C`, `Err` on a terminal I/O
 /// error.
-pub fn run(args: ChooseOneArgs, output: OutputMode, height: Option<HeightSpec>) -> io::Result<i32> {
+pub fn run(
+    args: ChooseOneArgs,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+    show_on_exit: bool,
+) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
-    let chrome = build_chrome(&args.chrome);
+    let mut chrome = build_chrome(&args.chrome);
+    chrome.show_on_exit = show_on_exit;
     run_with_writer(args, output, height, &mut lock, |state, height| {
         run_standalone_with_chrome(ChooseOne::new(), state, height, chrome)
     })
@@ -194,7 +200,8 @@ fn build_choice_input(args: &ChooseOneArgs) -> io::Result<ChoiceInput<String>> {
     let input = ChoiceInput::new("choice", "")
         .with_options(options)
         .with_sort(args.chrome.sort.into())
-        .with_active_color(args.chrome.active_color.into());
+        .with_active_color(args.chrome.active_color.into())
+        .with_orientation(args.chrome.orientation.into());
     Ok(input.with_filter_enabled(!args.chrome.no_filter))
 }
 
