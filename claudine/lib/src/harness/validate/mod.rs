@@ -3,23 +3,23 @@
 //! Executes validation rules, captures pre-run snapshots for comparison-based
 //! post-checks, and renders success/failure messages.
 
-use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
-use std::process::Command;
 
-use darkmatter::markdown::compose::expression::{
-    EvaluationLookup, Expr, ExpressionFinder, ParseMode, Parser, evaluate, scalar_string,
-};
-use serde_json::Value;
 use tracing::{debug, info_span};
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
-    AttemptOutcome, FailurePhase, FileFingerprint, HarnessPermissionProbe, HarnessPlan,
-    PermissionAssessment, PreRunSnapshot, StructuredShape, ValidationCheckOutcome, ValidationKind,
+    AttemptOutcome, FailurePhase, HarnessPermissionProbe, HarnessPlan, PreRunSnapshot, ValidationCheckOutcome, ValidationKind,
     ValidationPhaseReport, ValidationRule,
 };
+
+mod compare;
+mod fs;
+mod git;
+mod render;
+
+pub use fs::check_write_permission;
+pub(crate) use render::build_check_markup;
 
 /// Evaluate all pre-checks in declaration order.
 ///
@@ -67,13 +67,13 @@ pub fn capture_pre_run_snapshot(plan: &HarnessPlan) -> Result<PreRunSnapshot, Ha
             {
                 snapshot
                     .tracked_files
-                    .insert(file.clone(), fingerprint_file(file));
+                    .insert(file.clone(), compare::fingerprint_file(file));
             }
             ValidationKind::FrontmatterPropChanged { prop }
             | ValidationKind::FrontmatterPropUnchanged { prop } => {
                 if snapshot.source_markdown.is_none() {
                     // Load and parse source document frontmatter
-                    if let Ok(text) = fs::read_to_string(&plan.source_path) {
+                    if let Ok(text) = std::fs::read_to_string(&plan.source_path) {
                         let md: darkmatter::markdown::Markdown = text.into();
                         // Capture the specific property values
                         if let Ok(Some(val)) = md.fm_get::<serde_json::Value>(prop) {
@@ -150,7 +150,7 @@ fn run_checks(
 
     // For post-checks involving frontmatter, parse the current on-disk
     // markdown once and share it across all frontmatter checks.
-    let post_run_markdown = outcome.map(|_| match fs::read_to_string(source_path) {
+    let post_run_markdown = outcome.map(|_| match std::fs::read_to_string(source_path) {
         Ok(text) => PostRunMarkdownState::Loaded(text.into()),
         Err(error) => PostRunMarkdownState::ReadFailed {
             path: source_path.to_path_buf(),
@@ -224,35 +224,35 @@ fn evaluate_single(
                 Err(format!("directory does not exist: {}", dir.display()))
             }
         }
-        ValidationKind::JsonFileExists { file, shape } => check_json_file(file, shape.as_ref()),
-        ValidationKind::YamlFileExists { file, shape } => check_yaml_file(file, shape.as_ref()),
-        ValidationKind::TomlFileExists { file } => check_toml_file(file),
+        ValidationKind::JsonFileExists { file, shape } => fs::check_json_file(file, shape.as_ref()),
+        ValidationKind::YamlFileExists { file, shape } => fs::check_yaml_file(file, shape.as_ref()),
+        ValidationKind::TomlFileExists { file } => fs::check_toml_file(file),
         ValidationKind::HasWritePermission { file } => {
-            check_write_permission(file, source_path, permission_probe)
+            fs::check_write_permission(file, source_path, permission_probe)
         }
         ValidationKind::ShellCommand {
             command,
             show_stdout,
             show_stderr,
-        } => check_shell_command(command, *show_stdout, *show_stderr),
+        } => fs::check_shell_command(command, *show_stdout, *show_stderr),
 
         // --- Git checks ---
-        ValidationKind::NoDirtySourceCode { root } => check_dirty_source_code(root, false),
-        ValidationKind::HasDirtySourceCode { root } => check_dirty_source_code(root, true),
+        ValidationKind::NoDirtySourceCode { root } => git::check_dirty_source_code(root, false),
+        ValidationKind::HasDirtySourceCode { root } => git::check_dirty_source_code(root, true),
 
         // --- Post-only: file comparison ---
-        ValidationKind::FileChanged { file } => check_file_changed(file, snapshot, true),
-        ValidationKind::FileUnchanged { file } => check_file_changed(file, snapshot, false),
+        ValidationKind::FileChanged { file } => compare::check_file_changed(file, snapshot, true),
+        ValidationKind::FileUnchanged { file } => compare::check_file_changed(file, snapshot, false),
 
         // --- Post-only: frontmatter comparison ---
         ValidationKind::FrontmatterPropChanged { prop } => {
-            check_frontmatter_prop_changed(prop, snapshot, post_run_markdown, true)
+            compare::check_frontmatter_prop_changed(prop, snapshot, post_run_markdown, true)
         }
         ValidationKind::FrontmatterPropUnchanged { prop } => {
-            check_frontmatter_prop_changed(prop, snapshot, post_run_markdown, false)
+            compare::check_frontmatter_prop_changed(prop, snapshot, post_run_markdown, false)
         }
         ValidationKind::FrontmatterPropEquals { expected } => {
-            check_frontmatter_prop_equals(expected, post_run_markdown)
+            compare::check_frontmatter_prop_equals(expected, post_run_markdown)
         }
 
         // --- Post-only: response checks ---
@@ -297,601 +297,6 @@ fn evaluate_single(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Individual check implementations
-// ---------------------------------------------------------------------------
-
-fn check_json_file(file: &Path, shape: Option<&StructuredShape>) -> CheckResult {
-    if !file.exists() || file.is_dir() {
-        return Err(format!("file does not exist: {}", file.display()));
-    }
-    let content =
-        fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
-    let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("{} is not valid JSON: {e}", file.display()))?;
-    if let Some(expected_shape) = shape {
-        check_value_shape(&value, expected_shape, file)?;
-    }
-    Ok(())
-}
-
-fn check_yaml_file(file: &Path, shape: Option<&StructuredShape>) -> CheckResult {
-    if !file.exists() || file.is_dir() {
-        return Err(format!("file does not exist: {}", file.display()));
-    }
-    let content =
-        fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
-    let yaml = biscuit_file::Yaml::from_str(&content)
-        .map_err(|e| format!("{} is not valid YAML: {e}", file.display()))?;
-    if let Some(expected_shape) = shape {
-        let json_value = yaml
-            .as_json()
-            .map_err(|e| format!("{} YAML-to-JSON conversion failed: {e}", file.display()))?;
-        check_value_shape(&json_value, expected_shape, file)?;
-    }
-    Ok(())
-}
-
-fn check_toml_file(file: &Path) -> CheckResult {
-    if !file.exists() || file.is_dir() {
-        return Err(format!("file does not exist: {}", file.display()));
-    }
-    let content =
-        fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
-    let _: toml::Value = toml::from_str(&content)
-        .map_err(|e| format!("{} is not valid TOML: {e}", file.display()))?;
-    Ok(())
-}
-
-fn check_value_shape(
-    value: &serde_json::Value,
-    expected: &StructuredShape,
-    file: &Path,
-) -> CheckResult {
-    let actual = match value {
-        serde_json::Value::Array(_) => StructuredShape::Array,
-        serde_json::Value::Object(_) => StructuredShape::Object,
-        _ => StructuredShape::Scalar,
-    };
-    if actual == *expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "{}: root shape is {actual:?} but expected {expected:?}",
-            file.display()
-        ))
-    }
-}
-
-/// Check that `file` is writable both at the filesystem level and under the
-/// provider's runtime write policy (when a probe is supplied).
-///
-/// This is the same check used by the harness `has_write_permission`
-/// validation. Exposed publicly so that non-harness inline composition can
-/// enforce the same invariant.
-pub fn check_write_permission(
-    file: &Path,
-    source_path: &Path,
-    permission_probe: Option<&dyn HarnessPermissionProbe>,
-) -> CheckResult {
-    match std::fs::metadata(file) {
-        Ok(metadata) => {
-            if metadata.is_dir() {
-                return Err(format!(
-                    "{} is a directory; expected a writable file path",
-                    file.display()
-                ));
-            }
-
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(file)
-                .map(|_| ())
-                .map_err(|e| {
-                    format!(
-                        "cannot write existing file {}: {e} (filesystem write check failed; provider runtime policy may also deny writes)",
-                        file.display()
-                    )
-                })?;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            check_parent_allows_file_creation(file)?;
-        }
-        Err(e) => Err(format!(
-            "cannot inspect {} for write access: {e}",
-            file.display()
-        ))?,
-    }
-
-    evaluate_provider_write_policy(file, source_path, permission_probe)
-}
-
-fn evaluate_provider_write_policy(
-    file: &Path,
-    source_path: &Path,
-    permission_probe: Option<&dyn HarnessPermissionProbe>,
-) -> CheckResult {
-    let Some(probe) = permission_probe else {
-        return Ok(());
-    };
-
-    match probe.can_write(file, source_path) {
-        PermissionAssessment::Allowed => Ok(()),
-        PermissionAssessment::Denied { reason } => Err(format!(
-            "provider runtime policy denies writes to {}: {reason}",
-            file.display()
-        )),
-        PermissionAssessment::Unknown { reason } => Err(format!(
-            "provider runtime policy for {} is unknown: {reason}",
-            file.display()
-        )),
-    }
-}
-
-fn check_parent_allows_file_creation(file: &Path) -> CheckResult {
-    let parent = file
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-
-    if !parent.exists() {
-        return Err(format!(
-            "cannot create {}: parent directory {} does not exist",
-            file.display(),
-            parent.display()
-        ));
-    }
-
-    if !parent.is_dir() {
-        return Err(format!(
-            "cannot create {}: parent path {} is not a directory",
-            file.display(),
-            parent.display()
-        ));
-    }
-
-    let probe_path = parent.join(format!(
-        ".claudine-write-probe-{}-{}",
-        std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    ));
-
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&probe_path)
-    {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe_path);
-            Ok(())
-        }
-        Err(e) => Err(format!(
-            "cannot create {} in {}: {e} (filesystem write check failed; provider runtime policy may also deny writes)",
-            file.display(),
-            parent.display()
-        )),
-    }
-}
-
-fn check_shell_command(
-    command: &crate::harness::model::ApprovedRuntimeCommand,
-    show_stdout: bool,
-    show_stderr: bool,
-) -> CheckResult {
-    let timeout = std::time::Duration::from_secs(60);
-    let (exit_code, stdout, stderr) = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(crate::harness::shell::execute_approved_command(
-            command, None, timeout,
-        ))
-    })
-    .map_err(|e| format!("shell command '{}' failed: {e}", command.raw))?;
-
-    if show_stdout && !stdout.trim().is_empty() {
-        eprintln!("{stdout}");
-    }
-    if show_stderr && !stderr.trim().is_empty() {
-        eprintln!("{stderr}");
-    }
-
-    if exit_code == 0 {
-        Ok(())
-    } else {
-        Err(format!(
-            "shell command '{}' exited with code {exit_code}",
-            command.raw
-        ))
-    }
-}
-
-/// Known source code extensions for dirty-source-code checks.
-const SOURCE_EXTENSIONS: &[&str] = &[
-    // Rust
-    "rs", // JS/TS
-    "js", "jsx", "ts", "tsx", "mjs", "cjs", // Python
-    "py",  // Go
-    "go",  // JVM
-    "java", "kt", // Web
-    "css", "scss", "html", // Shell
-    "sh", "bash", "zsh",
-];
-
-/// Known source-adjacent filenames.
-const SOURCE_FILENAMES: &[&str] = &["justfile", "Cargo.toml", "package.json"];
-
-fn check_dirty_source_code(root: &Path, expect_dirty: bool) -> CheckResult {
-    // Find repo root by walking up from the specified root
-    let repo_root = find_git_repo_root(root)
-        .ok_or_else(|| format!("no git repository found at or above {}", root.display()))?;
-
-    let output = Command::new("git")
-        .args(["status", "--porcelain", "--"])
-        .arg(root)
-        .current_dir(&repo_root)
-        .output()
-        .map_err(|e| format!("failed to run git status: {e}"))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let dirty_files: Vec<&str> = stdout
-        .lines()
-        .filter(|line| {
-            // git status --porcelain format: XY filename
-            let filename = line.get(3..).unwrap_or("").trim();
-            is_source_file(filename)
-        })
-        .collect();
-
-    if expect_dirty {
-        if dirty_files.is_empty() {
-            Err("no dirty source code found".to_string())
-        } else {
-            Ok(())
-        }
-    } else if dirty_files.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "dirty source code found: {}",
-            dirty_files
-                .iter()
-                .map(|l| l.get(3..).unwrap_or("").trim())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-    }
-}
-
-fn is_source_file(path: &str) -> bool {
-    let filename = path.rsplit('/').next().unwrap_or(path);
-    if SOURCE_FILENAMES.contains(&filename) {
-        return true;
-    }
-    if let Some(ext) = path.rsplit('.').next() {
-        SOURCE_EXTENSIONS.contains(&ext)
-    } else {
-        false
-    }
-}
-
-fn find_git_repo_root(start: &Path) -> Option<std::path::PathBuf> {
-    let mut current = if start.is_file() {
-        start.parent()?.to_path_buf()
-    } else {
-        start.to_path_buf()
-    };
-    loop {
-        if current.join(".git").exists() {
-            return Some(current);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Post-check comparison helpers
-// ---------------------------------------------------------------------------
-
-fn fingerprint_file(path: &Path) -> FileFingerprint {
-    let exists = path.exists();
-    let is_dir = path.is_dir();
-    let blake3 = if exists && !is_dir {
-        fs::read(path).ok().map(|bytes| {
-            let hash_bytes = biscuit_hash::blake3_hash_bytes(&bytes);
-            hash_bytes
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>()
-        })
-    } else {
-        None
-    };
-    FileFingerprint {
-        exists,
-        is_dir,
-        blake3,
-    }
-}
-
-fn check_file_changed(
-    file: &Path,
-    snapshot: Option<&PreRunSnapshot>,
-    expect_changed: bool,
-) -> CheckResult {
-    let snapshot = snapshot.ok_or("internal error: no pre-run snapshot for file comparison")?;
-    let pre = snapshot.tracked_files.get(file).ok_or_else(|| {
-        format!(
-            "internal error: file {} not tracked in snapshot",
-            file.display()
-        )
-    })?;
-    let post = fingerprint_file(file);
-
-    let changed = pre.blake3 != post.blake3;
-    if expect_changed {
-        if changed {
-            Ok(())
-        } else {
-            Err(format!("file {} was not modified", file.display()))
-        }
-    } else if changed {
-        Err(format!("file {} was unexpectedly modified", file.display()))
-    } else {
-        Ok(())
-    }
-}
-
-fn check_frontmatter_prop_changed(
-    prop: &str,
-    snapshot: Option<&PreRunSnapshot>,
-    post_run_markdown: Option<&PostRunMarkdownState>,
-    expect_changed: bool,
-) -> CheckResult {
-    let snapshot =
-        snapshot.ok_or("internal error: no pre-run snapshot for frontmatter comparison")?;
-    let pre_value = snapshot.tracked_frontmatter.get(prop);
-
-    // Read the current on-disk post-state from the post-run markdown.
-    let post_md = get_post_run_markdown(post_run_markdown, "frontmatter comparison")?;
-
-    let post_value = post_md.fm_get::<serde_json::Value>(prop).ok().flatten();
-
-    let changed = pre_value != post_value.as_ref();
-    if expect_changed {
-        if changed {
-            Ok(())
-        } else {
-            Err(format!("frontmatter property \"{prop}\" was not modified"))
-        }
-    } else if changed {
-        Err(format!(
-            "frontmatter property \"{prop}\" was unexpectedly modified"
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn check_frontmatter_prop_equals(
-    expected: &indexmap::IndexMap<String, serde_json::Value>,
-    post_run_markdown: Option<&PostRunMarkdownState>,
-) -> CheckResult {
-    let post_md = get_post_run_markdown(post_run_markdown, "frontmatter equals check")?;
-
-    let mut mismatches = Vec::new();
-    for (key, expected_val) in expected {
-        let actual = post_md.fm_get::<serde_json::Value>(key).ok().flatten();
-        match actual {
-            Some(ref actual_val) if actual_val == expected_val => {}
-            Some(actual_val) => {
-                mismatches.push(format!("{key}: expected {expected_val}, got {actual_val}"));
-            }
-            None => {
-                mismatches.push(format!(
-                    "{key}: expected {expected_val}, but property is missing"
-                ));
-            }
-        }
-    }
-
-    if mismatches.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("frontmatter mismatch: {}", mismatches.join("; ")))
-    }
-}
-
-fn get_post_run_markdown<'a>(
-    post_run_markdown: Option<&'a PostRunMarkdownState>,
-    context: &str,
-) -> Result<&'a darkmatter::markdown::Markdown, String> {
-    match post_run_markdown {
-        Some(PostRunMarkdownState::Loaded(markdown)) => Ok(markdown),
-        Some(PostRunMarkdownState::ReadFailed { path, error }) => Err(format!(
-            "failed to read {} for {context}: {error}",
-            path.display()
-        )),
-        None => Err(format!(
-            "internal error: post-run markdown not available for {context}"
-        )),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Message rendering
-// ---------------------------------------------------------------------------
-
-/// Default message templates per validation kind.
-fn default_message(kind: &ValidationKind, vars: &HashMap<&str, String>) -> String {
-    let template = match kind {
-        ValidationKind::FileExists { .. } => "the file {{file}} exists",
-        ValidationKind::DirExists { .. } => "the directory {{dir}} exists",
-        ValidationKind::JsonFileExists { .. } => "{{file}} is a valid JSON file",
-        ValidationKind::YamlFileExists { .. } => "{{file}} is a valid YAML file",
-        ValidationKind::TomlFileExists { .. } => "{{file}} is a valid TOML file",
-        ValidationKind::HasWritePermission { .. } => "write permission for {{file}}",
-        ValidationKind::ShellCommand { .. } => "shell command: {{command}}",
-        ValidationKind::NoDirtySourceCode { .. } => "no dirty source code in {{dir}}",
-        ValidationKind::HasDirtySourceCode { .. } => "dirty source code found in {{dir}}",
-        ValidationKind::FileChanged { .. } => "the file {{file}} was modified",
-        ValidationKind::FileUnchanged { .. } => "the file {{file}} was not modified",
-        ValidationKind::FrontmatterPropChanged { .. } => {
-            "frontmatter property \"{{prop}}\" was modified"
-        }
-        ValidationKind::FrontmatterPropUnchanged { .. } => {
-            "frontmatter property \"{{prop}}\" was not modified"
-        }
-        ValidationKind::FrontmatterPropEquals { .. } => {
-            "frontmatter properties match expected values"
-        }
-        ValidationKind::ResponseLengthAtLeast { .. } => {
-            "response is at least {{length}} characters (actual: {{response_length}})"
-        }
-        ValidationKind::ResponseLengthAtMost { .. } => {
-            "response is at most {{length}} characters (actual: {{response_length}})"
-        }
-        ValidationKind::ResponseIncludes { .. } => "response includes \"{{expected}}\"",
-        ValidationKind::ResponseMissing { .. } => "response does not include \"{{expected}}\"",
-    };
-    render_template(template, vars)
-}
-
-/// Build the template variable map for a validation rule.
-///
-/// All user-controlled values are escaped for safe Prose interpolation.
-fn build_vars(kind: &ValidationKind) -> HashMap<&str, String> {
-    use crate::harness::report::prose_escape;
-
-    let mut vars: HashMap<&str, String> = HashMap::new();
-
-    match kind {
-        ValidationKind::FileExists { file }
-        | ValidationKind::JsonFileExists { file, .. }
-        | ValidationKind::YamlFileExists { file, .. }
-        | ValidationKind::TomlFileExists { file }
-        | ValidationKind::HasWritePermission { file }
-        | ValidationKind::FileChanged { file }
-        | ValidationKind::FileUnchanged { file } => {
-            vars.insert("file", prose_escape(&file.display().to_string()));
-        }
-        ValidationKind::DirExists { dir }
-        | ValidationKind::NoDirtySourceCode { root: dir }
-        | ValidationKind::HasDirtySourceCode { root: dir } => {
-            vars.insert("dir", prose_escape(&dir.display().to_string()));
-        }
-        ValidationKind::ShellCommand { command, .. } => {
-            vars.insert("command", prose_escape(&command.raw));
-        }
-        ValidationKind::FrontmatterPropChanged { prop }
-        | ValidationKind::FrontmatterPropUnchanged { prop } => {
-            vars.insert("prop", prose_escape(prop));
-        }
-        ValidationKind::FrontmatterPropEquals { .. } => {}
-        ValidationKind::ResponseLengthAtLeast { length }
-        | ValidationKind::ResponseLengthAtMost { length } => {
-            vars.insert("length", length.to_string());
-        }
-        ValidationKind::ResponseIncludes { needle }
-        | ValidationKind::ResponseMissing { needle } => {
-            vars.insert("expected", prose_escape(needle));
-        }
-    }
-
-    vars
-}
-
-/// Build the prose-ready markup string for a check result.
-///
-/// Returns a markup body suitable for `Status::from_prose(...)`.
-/// Does not render to a terminal. The `Status` component provides the
-/// pass/fail indicator via `StatusState`, so no inline glyph is emitted.
-pub(crate) fn build_check_markup(rule: &ValidationRule) -> String {
-    let vars = build_vars(&rule.kind);
-
-    if let Some(ref tmpl) = rule.message_template {
-        render_template(tmpl, &vars)
-    } else {
-        default_message(&rule.kind, &vars)
-    }
-}
-
-/// Render `{{...}}` placeholders in a validation message template.
-///
-/// Each `{{...}}` token is parsed as a Darkmatter interpolation expression
-/// against the validation variable map, so simple `{{key}}` lookups still
-/// work while richer authors can reach for fallbacks (`{{file || "n/a"}}`),
-/// ternaries, comparisons, and helper functions like `length(...)`.
-///
-/// Bare-variable references that are not in `vars` and tokens that fail
-/// to parse are preserved unchanged so validation messages remain
-/// best-effort and cannot mask the underlying validation result.
-fn render_template(template: &str, vars: &HashMap<&str, String>) -> String {
-    let locations = ExpressionFinder::find_all_plain(template);
-    if locations.is_empty() {
-        return template.to_string();
-    }
-
-    let lookup = ValidationVarsLookup { vars };
-    let mut output = String::with_capacity(template.len());
-    let mut cursor = 0;
-    for location in &locations {
-        output.push_str(&template[cursor..location.start]);
-        let original = &template[location.start..location.end];
-        match render_validation_expression(&location.expression, &lookup, vars) {
-            Some(rendered) => output.push_str(&rendered),
-            None => output.push_str(original),
-        }
-        cursor = location.end;
-    }
-    output.push_str(&template[cursor..]);
-    output
-}
-
-/// Lookup adapter exposing the validation variable map to Darkmatter's
-/// expression evaluator.
-struct ValidationVarsLookup<'a> {
-    vars: &'a HashMap<&'a str, String>,
-}
-
-impl<'a> EvaluationLookup for ValidationVarsLookup<'a> {
-    fn get(&self, path: &str) -> Option<Value> {
-        self.vars
-            .get(path)
-            .map(|value| Value::String(value.clone()))
-    }
-}
-
-/// Evaluate a single `{{...}}` body, or return `None` to preserve the
-/// original token.
-fn render_validation_expression(
-    expression: &str,
-    lookup: &ValidationVarsLookup<'_>,
-    vars: &HashMap<&str, String>,
-) -> Option<String> {
-    let trimmed = expression.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let parsed = Parser::with_mode(trimmed, ParseMode::Interpolation)
-        .ok()?
-        .parse()
-        .ok()?;
-
-    // Preserve bare-variable references not present in the validation map
-    // (for example `{{response_length}}`, which is intentionally omitted
-    // because it depends on outcome not available at template build time).
-    if let Expr::Variable(path) = &parsed
-        && !vars.contains_key(path.as_str())
-    {
-        return None;
-    }
-
-    evaluate(&parsed, lookup)
-        .ok()
-        .map(|value| scalar_string(&value))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -899,6 +304,10 @@ mod tests {
         PermissionAssessment, ProcessTermination, RuleSource, ValidationEvent, ValidationPhase,
         ValidationRuleId,
     };
+    use crate::harness::model::StructuredShape;
+    use crate::harness::validate::compare::{check_frontmatter_prop_equals, fingerprint_file};
+    use crate::harness::validate::render::{build_vars, default_message, render_template};
+    use std::collections::HashMap;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -994,9 +403,9 @@ mod tests {
 
         let file = dir.path().join(relative_path);
         if let Some(parent) = file.parent() {
-            fs::create_dir_all(parent).unwrap();
+            std::fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&file, content).unwrap();
+        std::fs::write(&file, content).unwrap();
 
         assert!(
             Command::new("git")
@@ -1024,7 +433,7 @@ mod tests {
     fn file_exists_passes_for_existing_file() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("test.txt");
-        fs::write(&file, "hello").unwrap();
+        std::fs::write(&file, "hello").unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1078,7 +487,7 @@ mod tests {
     fn json_file_exists_passes_for_valid_json() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("data.json");
-        fs::write(&file, r#"{"key": "value"}"#).unwrap();
+        std::fs::write(&file, r#"{"key": "value"}"#).unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1100,7 +509,7 @@ mod tests {
     fn json_file_exists_fails_for_invalid_json() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("bad.json");
-        fs::write(&file, "not json at all {").unwrap();
+        std::fs::write(&file, "not json at all {").unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1166,7 +575,7 @@ mod tests {
     fn has_write_permission_fails_when_provider_probe_denies_write() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("allowed-by-os.txt");
-        fs::write(&file, "hello").unwrap();
+        std::fs::write(&file, "hello").unwrap();
         let source_path = dir.path().join("source.md");
         let probe = StaticPermissionProbe {
             assessment: PermissionAssessment::Denied {
@@ -1259,7 +668,7 @@ mod tests {
     fn no_dirty_source_code_reports_dirty_source_files() {
         let dir = TempDir::new().unwrap();
         let source_file = init_committed_repo(&dir, "src/main.rs", "fn main() {}\n");
-        fs::write(&source_file, "fn main() { println!(\"dirty\"); }\n").unwrap();
+        std::fs::write(&source_file, "fn main() { println!(\"dirty\"); }\n").unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1283,7 +692,7 @@ mod tests {
     fn has_dirty_source_code_passes_for_modified_source_files() {
         let dir = TempDir::new().unwrap();
         let source_file = init_committed_repo(&dir, "src/lib.rs", "pub fn run() {}\n");
-        fs::write(&source_file, "pub fn run() { println!(\"dirty\"); }\n").unwrap();
+        std::fs::write(&source_file, "pub fn run() { println!(\"dirty\"); }\n").unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1324,7 +733,7 @@ mod tests {
     fn yaml_file_exists_passes_for_valid_yaml_with_shape() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("data.yaml");
-        fs::write(&file, "- item1\n- item2\n").unwrap();
+        std::fs::write(&file, "- item1\n- item2\n").unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1346,7 +755,7 @@ mod tests {
     fn toml_file_exists_fails_for_non_toml() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("bad.toml");
-        fs::write(&file, "{{not toml}}").unwrap();
+        std::fs::write(&file, "{{not toml}}").unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1367,14 +776,14 @@ mod tests {
     fn file_changed_passes_when_hashes_differ() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("target.txt");
-        fs::write(&file, "original content").unwrap();
+        std::fs::write(&file, "original content").unwrap();
 
         let pre_fingerprint = fingerprint_file(&file);
         let mut snapshot = PreRunSnapshot::default();
         snapshot.tracked_files.insert(file.clone(), pre_fingerprint);
 
         // Modify the file
-        fs::write(&file, "modified content").unwrap();
+        std::fs::write(&file, "modified content").unwrap();
 
         let result = evaluate_single_for_tests(
             &make_rule(
@@ -1393,7 +802,7 @@ mod tests {
     fn file_changed_fails_when_hashes_match() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("target.txt");
-        fs::write(&file, "same content").unwrap();
+        std::fs::write(&file, "same content").unwrap();
 
         let pre_fingerprint = fingerprint_file(&file);
         let mut snapshot = PreRunSnapshot::default();
@@ -1417,7 +826,7 @@ mod tests {
     fn file_unchanged_passes_when_hashes_match() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("target.txt");
-        fs::write(&file, "same content").unwrap();
+        std::fs::write(&file, "same content").unwrap();
 
         let pre_fingerprint = fingerprint_file(&file);
         let mut snapshot = PreRunSnapshot::default();
@@ -1512,7 +921,7 @@ mod tests {
     fn outcome_carries_rule_source_clone() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("test.txt");
-        fs::write(&file, "hello").unwrap();
+        std::fs::write(&file, "hello").unwrap();
 
         let source = RuleSource {
             file: std::path::PathBuf::from("/repo/prompts/run.md"),
@@ -1614,7 +1023,7 @@ mod tests {
     fn snapshot_captures_blake3_for_file_changed() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("tracked.txt");
-        fs::write(&file, "content").unwrap();
+        std::fs::write(&file, "content").unwrap();
 
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
@@ -1642,8 +1051,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let tracked = dir.path().join("tracked.txt");
         let untracked = dir.path().join("untracked.txt");
-        fs::write(&tracked, "a").unwrap();
-        fs::write(&untracked, "b").unwrap();
+        std::fs::write(&tracked, "a").unwrap();
+        std::fs::write(&untracked, "b").unwrap();
 
         let plan = HarnessPlan {
             source_path: dir.path().join("source.md"),
@@ -1809,7 +1218,7 @@ mod tests {
     fn check_write_permission_public_passes_writable_file_no_probe() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("writable.md");
-        fs::write(&file, "# hello").unwrap();
+        std::fs::write(&file, "# hello").unwrap();
 
         let result = check_write_permission(&file, &file, None);
         assert!(result.is_ok());
@@ -1819,7 +1228,7 @@ mod tests {
     fn check_write_permission_public_denies_when_probe_rejects() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("writable.md");
-        fs::write(&file, "# hello").unwrap();
+        std::fs::write(&file, "# hello").unwrap();
         let source = dir.path().join("source.md");
 
         let probe = StaticPermissionProbe {
