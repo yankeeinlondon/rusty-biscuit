@@ -19,7 +19,7 @@
 
 use criterion::{Criterion, black_box};
 use sniff::ProgramsInfo;
-use sniff::programs::find_program::{ExecutableIndex, find_programs_with_source_from_index};
+use sniff::executable_index::{ExecutableIndex, find_programs_with_source_from_index};
 
 use crate::support::util;
 
