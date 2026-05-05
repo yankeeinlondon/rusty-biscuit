@@ -7,7 +7,7 @@
 //! closure.
 
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -42,6 +42,16 @@ use super::{
 };
 use crate::log;
 
+pub(crate) mod structured;
+pub(crate) mod summary;
+pub(crate) mod inline_guards;
+pub(crate) mod legacy_goose;
+
+// Re-export the public API so existing callers don't break.
+pub(crate) use structured::run_structured_composition;
+pub(crate) use summary::{emit_composition_summary, emit_minimal_composition_summary};
+pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body};
+
 /// Result of executing a single composition step through the wrapper pipeline.
 pub(crate) struct SingleCompositionOutcome {
     /// The process exit code.
@@ -57,7 +67,7 @@ pub(crate) struct SingleCompositionOutcome {
 /// Produced by [`run_structured_composition`] and consumed by both the
 /// compose and inline-compose callers. The shared function does not emit
 /// the summary; callers decide the timing and routing.
-struct CompositionStreamResult {
+pub(crate) struct CompositionStreamResult {
     exit_code: i32,
     assistant_text: String,
     summary: claudine::stream::summary::StreamExecutionSummary,
@@ -77,7 +87,8 @@ struct CompositionStreamResult {
 /// interactivity, stderr verbosity) so the merged function can branch its
 /// post-execution logic without dragging optional parameters through every
 /// call.
-enum CompositionExecutionMode<'a> {
+#[derive(Clone, Copy)]
+pub(crate) enum CompositionExecutionMode<'a> {
     Direct,
     Inline {
         closure_plan: &'a InlineClosurePlan,
@@ -1210,7 +1221,8 @@ pub(crate) fn execute_composition_request_inner(
             detail_requested,
             &env_context,
             &dispatch_context,
-            Some(materialized_harness_prompt_from_prepared(&request.prepared)),
+            Some(materialized_harness_prompt_from_prepared(&request.prepared,
+            )),
             &term,
             lifecycle,
             &lifecycle_ctx,
@@ -1378,9 +1390,8 @@ fn execute_without_harness(
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
 
-    // -- Run the provider --------------------------------------------------
     let (agent_exit, final_response, deferred_summary) = if use_structured {
-        let result = run_structured_composition(
+        structured::run_structured_branch(
             provider,
             profile,
             binary_path,
@@ -1397,152 +1408,36 @@ fn execute_without_harness(
             child_spawned,
             prompt_timing,
             timeout_config,
-        )?;
-        *agent_perf_out = Some(result.telemetry.into_agent_perf(result.summary.duration_ms));
-
-        // Render assistant text to stdout when the provider did not stream
-        // it live. Compose routes through the section stream so the trailer
-        // summary sees a consistent section state; inline writes directly
-        // because the body will be captured into the target file.
-        if !result.had_streamed_assistant && !result.summary.assistant_text.trim().is_empty() {
-            if !is_inline {
-                result.section_stream.enter_final_stdout();
-            }
-            let text = &result.summary.assistant_text;
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(text, term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(text.as_bytes())?;
-                if !text.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
-        }
-
-        let exit = result.exit_code;
-        let response = result.assistant_text.clone();
-        (exit, response, Some(result))
+            is_inline,
+            agent_perf_out,
+            term,
+        )?
     } else {
-        // Legacy (non-structured) path. Inline must capture the response so
-        // the closure plan can rewrite the target file; direct just runs the
-        // child and lets it write to stdout on its own.
-        if timeout_config.any_enabled() {
-            use biscuit_terminal::components::renderable::Renderable;
-            use biscuit_terminal::components::status::{Status, StatusState};
-            let rendered = Status::new(
-                "timeouts are only enforced in structured-stream mode; \
-                 ignoring for this non-structured attempt"
-                    .to_string(),
-            )
-            .state(StatusState::Warning)
-            .render(term);
-            eprintln!("{rendered}");
-        }
-        match &mode {
-            CompositionExecutionMode::Inline {
-                session_interactive,
-                ..
-            } => {
-                if *session_interactive {
-                    let result = exec::run_child(
-                        binary_path,
-                        child_args,
-                        child_env,
-                        child_cwd,
-                        None,
-                        exec::ChildIoOptions {
-                            stdout_noise_prefixes: stdout_noise,
-                            stderr_noise_prefixes: stderr_noise,
-                            stdin_seed,
-                        },
-                        child_spawned,
-                    )?;
-                    *agent_perf_out = Some(result.telemetry.into_agent_perf(None));
-                    let response = if provider == Provider::Codex {
-                        if let Some(output) = structured_codex_output {
-                            let text = std::fs::read_to_string(&output.last_message_path)
-                                .unwrap_or_default();
-                            let _ = std::fs::remove_file(&output.last_message_path);
-                            text
-                        } else {
-                            String::new()
-                        }
-                    } else {
-                        String::new()
-                    };
-                    (result.data, response, None)
-                } else {
-                    let mut capture_args = child_args.to_vec();
-                    profile.prepare_captured_output(&mut capture_args);
-                    let capture = exec::run_child_capture(
-                        binary_path,
-                        &capture_args,
-                        child_env,
-                        child_cwd,
-                        None,
-                        exec::ChildIoOptions {
-                            stdout_noise_prefixes: stdout_noise,
-                            stderr_noise_prefixes: stderr_noise,
-                            stdin_seed,
-                        },
-                        child_spawned,
-                    )?;
-                    *agent_perf_out = Some(capture.telemetry.into_agent_perf(None));
-                    let response = profile.parse_captured_output(&capture.data.stdout);
-                    if !response.trim().is_empty() {
-                        if std::io::stdout().is_terminal() {
-                            let rendered =
-                                crate::output::render_assistant_markdown(&response, term);
-                            std::io::stdout().write_all(rendered.as_bytes())?;
-                            if !rendered.ends_with('\n') {
-                                std::io::stdout().write_all(b"\n")?;
-                            }
-                        } else {
-                            std::io::stdout().write_all(response.as_bytes())?;
-                            if !response.ends_with('\n') {
-                                std::io::stdout().write_all(b"\n")?;
-                            }
-                        }
-                        std::io::stdout().flush()?;
-                    }
-                    if !capture.data.stderr.trim().is_empty() {
-                        eprintln!("{}", capture.data.stderr);
-                    }
-                    (capture.data.exit_code, response, None)
-                }
-            }
-            CompositionExecutionMode::Direct => {
-                let result = exec::run_child(
-                    binary_path,
-                    child_args,
-                    child_env,
-                    child_cwd,
-                    None,
-                    exec::ChildIoOptions {
-                        stdout_noise_prefixes: stdout_noise,
-                        stderr_noise_prefixes: stderr_noise,
-                        stdin_seed,
-                    },
-                    child_spawned,
-                )?;
-                *agent_perf_out = Some(result.telemetry.into_agent_perf(None));
-                (result.data, String::new(), None)
-            }
-        }
+        legacy_goose::run_legacy_branch(
+            mode,
+            provider,
+            profile,
+            binary_path,
+            child_args,
+            child_env,
+            child_cwd,
+            stdin_seed,
+            stdout_noise,
+            stderr_noise,
+            structured_codex_output,
+            child_spawned,
+            agent_perf_out,
+            timeout_config,
+            term,
+        )?
     };
 
     let _span = tracing::info_span!("composition_postprocess").entered();
 
-    // -- Direct mode: emit summary immediately and return -------------------
-    let (closure_plan, resolved_path, show_checks) = match mode {
+    match mode {
         CompositionExecutionMode::Direct => {
             if let Some(result) = deferred_summary {
-                emit_composition_summary(
+                summary::emit_composition_summary(
                     &result.summary,
                     &result.details,
                     profile,
@@ -1554,7 +1449,7 @@ fn execute_without_harness(
                     false,
                 );
             } else {
-                emit_minimal_composition_summary(
+                summary::emit_minimal_composition_summary(
                     provider,
                     agent_exit,
                     profile,
@@ -1562,486 +1457,31 @@ fn execute_without_harness(
                     dispatch_context,
                 );
             }
-            return Ok(agent_exit);
+            Ok(agent_exit)
         }
         CompositionExecutionMode::Inline {
             closure_plan,
             resolved_path,
+            session_interactive,
             show_checks,
-            ..
-        } => (closure_plan, resolved_path, show_checks),
-    };
-
-    // -- Inline mode: validate disk state and apply closure -----------------
-    let mut final_exit = agent_exit;
-    let provider_name = crate::output::capitalize_provider(provider);
-    let should_separate_checks = deferred_summary
-        .as_ref()
-        .is_some_and(|result| !result.summary.assistant_text.trim().is_empty());
-
-    if show_checks && should_separate_checks {
-        eprintln!();
-        eprintln!();
-    }
-
-    let was_interrupted = agent_exit == 130 || agent_exit == 143;
-
-    if was_interrupted && show_checks {
-        log::message(&crate::output::fm_check_fail(
-            &format!("{provider_name} agent was interrupted by the user (code {agent_exit})"),
-            term,
-        ));
-    } else if agent_exit == 0 && show_checks {
-        log::message(&crate::output::fm_check_ok(
-            &format!("{provider_name} agent completed successfully"),
-            term,
-        ));
-    } else if agent_exit != 0 && show_checks {
-        log::message(&crate::output::fm_check_fail(
-            &format!("{provider_name} agent exited with error (code {agent_exit})"),
-            term,
-        ));
-    }
-
-    let display_path = resolved_path
-        .strip_prefix(child_cwd)
-        .unwrap_or(resolved_path)
-        .display();
-
-    if was_interrupted {
-        report_interruption(&display_path, final_response.trim(), term);
-        return Ok(1);
-    }
-
-    if agent_exit == 0 {
-        let replacement_body = match claudine::composition::closure::extract_replacement_body(
-            &final_response,
-        ) {
-            Ok(body) => body,
-            Err(error) => {
-                if show_checks {
-                    log::message(&crate::output::fm_check_fail(
-                        &format!(
-                            "the referenced file -- {display_path} -- did not receive a valid replacement body: {error}"
-                        ),
-                        term,
-                    ));
-                }
-                final_exit = 1;
-                String::new()
-            }
-        };
-
-        if final_exit == 0 {
-            let post_run_fm = std::fs::read_to_string(resolved_path).ok().map(|text| {
-                let md: darkmatter::markdown::Markdown = text.into();
-                md.frontmatter().as_map().clone()
-            });
-
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            match claudine::composition::closure::apply_inline_closure(
-                closure_plan,
-                &replacement_body,
-                resolved_path,
-                &today,
-                post_run_fm.as_ref(),
-            ) {
-                Ok(result) => {
-                    if show_checks {
-                        log::message(&crate::output::fm_check_ok(
-                            "Applied the captured replacement body to the target document",
-                            term,
-                        ));
-                        log::message(&crate::output::fm_check_ok(
-                            "Preserved original frontmatter and updated <bold>last_updated</bold>",
-                            term,
-                        ));
-
-                        for key in &result.new_properties {
-                            log::message(&crate::output::fm_check_ok(
-                                &format!("Merged new frontmatter property <bold>\"{key}\"</bold>"),
-                                term,
-                            ));
-                        }
-
-                        for key in &result.reverted_properties {
-                            let status = Status::from_prose(format!(
-                                "Agent modified frontmatter property <b>\"{key}\"</b> — reverted to original value"
-                            ))
-                            .state(StatusState::Warning);
-                            log::message(&status.render(term));
-                        }
-                    }
-
-                    match cleanup_inline_output(resolved_path) {
-                        Ok(true) => {
-                            if show_checks {
-                                log::message(&crate::output::fm_check_ok(
-                                    "Cleaned up generated markdown formatting",
-                                    term,
-                                ));
-                            }
-                        }
-                        Ok(false) => {}
-                        Err(error) => {
-                            if show_checks {
-                                log::message(&crate::output::fm_check_fail(
-                                    &format!("markdown cleanup failed: {error}"),
-                                    term,
-                                ));
-                            }
-                        }
-                    }
-                }
-                Err(error) => {
-                    if show_checks {
-                        log::message(&crate::output::fm_check_fail(
-                            &format!("failed to rewrite {display_path}: {error}"),
-                            term,
-                        ));
-                    }
-                    final_exit = 1;
-                }
-            }
-        }
-    }
-
-    if let Some(result) = deferred_summary {
-        if stream_verbosity != Verbosity::Silent {
-            eprintln!();
-        }
-        emit_composition_summary(
-            &result.summary,
-            &result.details,
+        } => inline_guards::apply_inline_closure(
+            agent_exit,
+            final_response,
+            deferred_summary,
+            closure_plan,
+            resolved_path,
+            session_interactive,
+            show_checks,
+            provider,
             profile,
             env_context,
             stream_verbosity,
             detail_requested,
             dispatch_context,
-            None,
-            true,
-        );
-    } else {
-        emit_minimal_composition_summary(
-            provider,
-            final_exit,
-            profile,
-            env_context,
-            dispatch_context,
-        );
-    }
-
-    Ok(final_exit)
-}
-
-/// Run a provider through the structured stream pipeline shared by both
-/// `compose` and `inline-compose`.
-///
-/// The function builds the live semantic sink, runs the child process, and
-/// applies any Codex-captured post-hoc text to the resulting summary. It
-/// does not emit the summary and does not render assistant text to stdout;
-/// callers decide both timing and section-stream routing.
-#[allow(clippy::too_many_arguments)]
-fn run_structured_composition(
-    provider: Provider,
-    profile: &dyn WrapperProfile,
-    binary_path: &std::path::Path,
-    child_args: &[String],
-    child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
-    child_cwd: &std::path::Path,
-    stdin_seed: Option<&str>,
-    wire_prompt: Option<&str>,
-    structured_codex_output: Option<&StructuredCodexOutput>,
-    stderr_noise: &[&str],
-    stream_verbosity: Verbosity,
-    env_context: &claudine::events::EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-    child_spawned: &mut bool,
-    prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
-    timeout_config: super::subagent_watchdog::TimeoutConfig,
-) -> Result<CompositionStreamResult> {
-    let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-    let parser_config = claudine::stream::ParserConfig::default();
-    let sink = LiveSemanticSink::with_default_wiring(
-        provider,
-        env_context.clone(),
-        child_cwd,
-        stream_verbosity,
-        summary_details.clone(),
-    )
-    .with_context_extra(dispatch_context.clone());
-    let live_metrics = sink.live_metrics();
-    let stream_output = sink.stream_output();
-    let watchdog_state = Some(sink.watchdog_state());
-    let section_stream = sink.section_stream();
-    let (build_parser, stderr_bridge) =
-        super::build_structured_plumbing(provider, sink, parser_config);
-    let stream_result = if let Some(wire_prompt) = wire_prompt {
-        let runtime_context =
-            match claudine::dispatch::DispatchRuntimeContext::load_for_env(env_context) {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    tracing::warn!(%provider, "failed to preload wire runtime config: {error}");
-                    claudine::dispatch::DispatchRuntimeContext::default()
-                }
-            };
-        let _ = stderr_bridge;
-        let _ = prompt_timing;
-        let _ = stdin_seed;
-        super::wire_io::run_kimi_wire_session(
-            super::wire_io::WireSessionConfig {
-                binary: binary_path,
-                args: child_args,
-                env: child_env,
-                cwd: child_cwd,
-                prompt: wire_prompt.to_string(),
-                timeout: timeout_config.timeout,
-                client_name: env!("CARGO_PKG_NAME"),
-                client_version: env!("CARGO_PKG_VERSION"),
-                capabilities: super::wire_io::WireClientCapabilities::default_for_claudine(),
-                env_context: env_context.clone(),
-            },
-            super::wire_io::WireSessionWiring {
-                build_parser,
-                stream_output,
-                live_metrics,
-                runtime_context,
-            },
-            child_spawned,
-        )?
-    } else {
-        exec::run_child_stream_semantic(
-            binary_path,
-            child_args,
-            child_env,
+            term,
             child_cwd,
-            timeout_config,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            stream_verbosity != Verbosity::Silent,
-            stdin_seed,
-            build_parser,
-            child_spawned,
-            live_metrics,
-            stream_output,
-            stderr_bridge,
-            prompt_timing,
-            watchdog_state,
-            Some(section_stream.tracker()),
-        )?
-    };
-    let telemetry = stream_result.telemetry;
-    let mut summary = stream_result.data;
-
-    let had_streamed_assistant =
-        provider != Provider::Codex && !summary.assistant_text.trim().is_empty();
-    if let Some(codex_output) = structured_codex_output {
-        codex_output.apply_to_summary(&mut summary);
+        ),
     }
-
-    let details = summary_details.lock().unwrap().clone();
-    Ok(CompositionStreamResult {
-        exit_code: summary.exit_code,
-        assistant_text: summary.assistant_text.clone(),
-        summary,
-        details,
-        had_streamed_assistant,
-        section_stream,
-        telemetry,
-    })
-}
-
-/// Emit the structured-stream summary trailer for a composition run.
-///
-/// Unifies the two previous paths:
-/// - `defer_section_separator = false` (compose): routes through
-///   [`emit_stream_summary_with_context`] so the section tracker inserts the
-///   separator blank exactly once.
-/// - `defer_section_separator = true` (inline-compose): prints the trailer
-///   directly so the caller controls the blank-line spacing (e.g. around
-///   closure validation output).
-///
-/// Both paths write the JSONL summary event.
-#[allow(clippy::too_many_arguments)]
-fn emit_composition_summary(
-    summary: &claudine::stream::summary::StreamExecutionSummary,
-    details: &StructuredSummaryDetails,
-    profile: &dyn WrapperProfile,
-    env_context: &claudine::events::EnvironmentContext,
-    verbosity: Verbosity,
-    verbose: bool,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-    section_stream: Option<&super::section::SectionStream>,
-    defer_section_separator: bool,
-) {
-    if defer_section_separator {
-        use biscuit_terminal::components::prose::Prose;
-
-        if verbosity != Verbosity::Silent
-            && let Some(markup) = format_summary_prose(summary)
-        {
-            let term = crate::log::terminal();
-            let rendered = Prose::new(markup).render(&term);
-            eprintln!("{rendered}");
-        }
-        if verbosity != Verbosity::Silent
-            && verbose
-            && let Some(markup) = format_verbose_summary_details_prose(summary, details)
-        {
-            let term = crate::log::terminal();
-            let rendered = Prose::new(markup).render(&term);
-            eprintln!("  {rendered}");
-        }
-
-        if let Some(protocol) = profile.stream_protocol() {
-            let meta = claudine::stream::reporting::summary_to_event_meta_with_context(
-                summary,
-                protocol,
-                env_context,
-                Some(dispatch_context),
-            );
-            if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
-                tracing::warn!("Failed to write stream summary event: {e}");
-            }
-        }
-    } else {
-        emit_stream_summary_with_context(
-            StreamSummaryContext {
-                summary,
-                profile,
-                env_context,
-                verbosity,
-                verbose,
-                details,
-                section_stream,
-            },
-            dispatch_context,
-        );
-    }
-}
-
-/// Emit a minimal composition summary for legacy (non-structured) runs.
-///
-/// Builds a minimal [`StreamExecutionSummary`] (exit_code, is_error, provider)
-/// and routes through [`emit_composition_summary`] with no section stream and
-/// deferred section separators. This delivers the same stderr trailer and
-/// JSONL event that structured runs emit, so legacy paths reach full parity
-/// with structured runs.
-fn emit_minimal_composition_summary(
-    provider: Provider,
-    exit_code: i32,
-    profile: &dyn WrapperProfile,
-    env_context: &claudine::events::EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-) {
-    let summary = claudine::stream::summary::StreamExecutionSummary {
-        provider,
-        exit_code,
-        is_error: exit_code != 0,
-        ..Default::default()
-    };
-    let details = StructuredSummaryDetails::default();
-    emit_composition_summary(
-        &summary,
-        &details,
-        profile,
-        env_context,
-        Verbosity::Normal,
-        false,
-        dispatch_context,
-        None,
-        true,
-    );
-}
-
-fn report_interruption(
-    display_path: &std::path::Display<'_>,
-    captured_body: &str,
-    term: &Terminal,
-) {
-    if captured_body.is_empty() {
-        log::message(&crate::output::fm_check_fail(
-            &format!(
-                "<b>User interrupted the agent with CTRL+C; the body of \
-                 <blue-500>{display_path}</blue-500> is empty so it appears \
-                 no work was accomplished.</b>"
-            ),
-            term,
-        ));
-    } else {
-        log::message(&crate::output::fm_check_fail(
-            &format!(
-                "<b>User interrupted the agent with CTRL+C; the body of \
-                 <blue-500>{display_path}</blue-500> has been at least \
-                 partially filled:</b>"
-            ),
-            term,
-        ));
-        eprintln!();
-        for line in captured_body.lines() {
-            eprintln!("  {line}");
-        }
-    }
-}
-
-// -- Post-processing: Darkmatter cleanup ----------------------------------
-
-/// Run Darkmatter's cleanup pass over a written inline composition file.
-///
-/// Reads the file, applies `cleanup_content` to the body (preserving
-/// frontmatter), and writes back only if the content changed.
-///
-/// Returns `Ok(true)` when the file was updated, `Ok(false)` when no
-/// changes were needed.
-fn cleanup_inline_output(path: &std::path::Path) -> Result<bool> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| eyre!("failed to read {}: {e}", path.display()))?;
-
-    // Split frontmatter from body so cleanup operates only on the body,
-    // preserving frontmatter (including YAML block scalars) byte-for-byte.
-    let (frontmatter_prefix, body) = split_frontmatter_and_body(&text);
-
-    let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(body);
-
-    if cleaned_body == body {
-        return Ok(false);
-    }
-
-    let mut output = String::with_capacity(frontmatter_prefix.len() + cleaned_body.len());
-    output.push_str(frontmatter_prefix);
-    output.push_str(&cleaned_body);
-
-    std::fs::write(path, output.as_bytes())
-        .map_err(|e| eyre!("failed to write cleaned output to {}: {e}", path.display()))?;
-
-    Ok(true)
-}
-
-/// Split text into a frontmatter prefix (including closing delimiter) and the body.
-///
-/// If the text starts with `---\n`, scans for the closing `---\n` and returns
-/// everything up to and including that line as the prefix. Otherwise returns
-/// an empty prefix and the full text as body.
-fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
-    let mut lines = text.split_inclusive('\n');
-    let first = match lines.next() {
-        Some(l) => l,
-        None => return ("", text),
-    };
-    if first.trim_end_matches(['\r', '\n']) != "---" {
-        return ("", text);
-    }
-
-    let mut offset = first.len();
-    for line in lines {
-        offset += line.len();
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            return (&text[..offset], &text[offset..]);
-        }
-    }
-
-    // No closing delimiter — treat entire text as body
-    ("", text)
 }
 
 // -- Config loading -------------------------------------------------------
@@ -2068,81 +1508,6 @@ pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn split_frontmatter_basic() {
-        let text = "---\ntitle: Test\n---\n# Body\n";
-        let (prefix, body) = split_frontmatter_and_body(text);
-        assert_eq!(prefix, "---\ntitle: Test\n---\n");
-        assert_eq!(body, "# Body\n");
-    }
-
-    #[test]
-    fn split_frontmatter_block_scalar() {
-        let text = concat!(
-            "---\n",
-            "prompt: |-\n",
-            "    First line\n",
-            "\n",
-            "    - bullet\n",
-            "last_updated: 2026-03-18\n",
-            "---\n",
-            "# Body\n",
-        );
-        let (prefix, body) = split_frontmatter_and_body(text);
-        assert!(prefix.ends_with("---\n"));
-        assert!(prefix.contains("prompt: |-"));
-        assert_eq!(body, "# Body\n");
-    }
-
-    #[test]
-    fn split_frontmatter_no_frontmatter() {
-        let text = "# Just a heading\n\nContent\n";
-        let (prefix, body) = split_frontmatter_and_body(text);
-        assert_eq!(prefix, "");
-        assert_eq!(body, text);
-    }
-
-    #[test]
-    fn split_frontmatter_unclosed() {
-        let text = "---\ntitle: Test\nNo closing\n";
-        let (prefix, body) = split_frontmatter_and_body(text);
-        assert_eq!(prefix, "");
-        assert_eq!(body, text);
-    }
-
-    #[test]
-    fn cleanup_preserves_frontmatter_block_scalar() {
-        // Reproduces the bug: cleanup_content on full text corrupts YAML
-        // block scalar indentation. The fix splits frontmatter from body
-        // so cleanup only operates on the body.
-        let frontmatter = concat!(
-            "---\n",
-            "prompt: |-\n",
-            "    First line of prompt\n",
-            "\n",
-            "    - bullet one\n",
-            "    - bullet two\n",
-            "\n",
-            "    Final paragraph\n",
-            "last_updated: 2026-03-18\n",
-            "---\n",
-        );
-        let body = "# Body\n\nSome content\n";
-        let text = format!("{frontmatter}{body}");
-
-        let (prefix, body_part) = split_frontmatter_and_body(&text);
-
-        // Frontmatter must be preserved byte-for-byte
-        assert_eq!(prefix, frontmatter);
-
-        // Cleaning only the body should not corrupt frontmatter
-        let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(body_part);
-        let result = format!("{prefix}{cleaned_body}");
-
-        // The frontmatter portion must remain unchanged
-        assert!(result.starts_with(frontmatter));
-    }
 
     #[test]
     #[serial_test::serial]
