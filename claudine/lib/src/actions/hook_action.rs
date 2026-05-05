@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::claudine_config::Gender;
+use crate::config::tts::Gender;
 
 /// Logging destination for event log output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

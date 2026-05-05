@@ -43,7 +43,7 @@ mod yolo;
 mod tests;
 
 pub use acp::{AcpEvent, AcpServerMode, AcpSupport};
-pub use behavior::{AdapterBehavior, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
+pub use behavior::{AdapterBehavior, BoxedSemanticEventSink, ConfiguratorBehavior, McpBehavior, ProviderBehavior};
 pub use cli_sensitivity::CliSensitiveAxes;
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};

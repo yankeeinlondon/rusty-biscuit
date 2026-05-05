@@ -44,6 +44,156 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/dispatch/runner.rs
+  - claudine/lib/src/dispatch/runner/mod.rs
+  - claudine/lib/src/dispatch/runner/speak.rs
+  - claudine/lib/src/dispatch/runner/bash.rs
+  - claudine/lib/src/dispatch/runner/report.rs
+  - claudine/lib/src/dispatch/runner/mappers.rs
+  - claudine/lib/src/dispatch/runner/protect.rs
+  - claudine/lib/src/dispatch/runner/meta_json.rs
+  - claudine/lib/src/dispatch/runner/decisions.rs
+  - claudine/lib/src/dispatch/loader.rs
+  - claudine/lib/src/dispatch/deps.rs
+  - claudine/lib/src/dispatch/mod.rs
+  - claudine/lib/src/harness/parse.rs
+  - claudine/lib/src/harness/parse/mod.rs
+  - claudine/lib/src/harness/parse/validations.rs
+  - claudine/lib/src/harness/parse/handlers.rs
+  - claudine/lib/src/harness/parse/overlays.rs
+  - claudine/lib/src/harness/parse/frontmatter.rs
+  - claudine/lib/src/harness/parse/shapes.rs
+  - claudine/lib/src/harness/parse/span.rs
+  - claudine/lib/src/harness/validate.rs
+  - claudine/lib/src/harness/validate/mod.rs
+  - claudine/lib/src/harness/validate/fs.rs
+  - claudine/lib/src/harness/validate/git.rs
+  - claudine/lib/src/harness/validate/compare.rs
+  - claudine/lib/src/harness/validate/render.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/config/mod.rs
+  - claudine/lib/src/config/tts.rs
+  - claudine/lib/src/config/messaging_block.rs
+  - claudine/lib/src/config/merge.rs
+  - claudine/lib/src/stream/mod.rs
+  - claudine/lib/src/stream/claude_semantic.rs
+  - claudine/lib/src/stream/codex_semantic.rs
+  - claudine/lib/src/stream/gemini_semantic.rs
+  - claudine/lib/src/stream/kimi_semantic.rs
+  - claudine/lib/src/stream/opencode_semantic.rs
+  - claudine/lib/src/stream/qwen_semantic.rs
+  - claudine/lib/src/stream/providers/mod.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/gemini.rs
+  - claudine/lib/src/stream/providers/kimi.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/qwen.rs
+  - claudine/lib/src/stream/logs/opencode.rs
+  - claudine/lib/src/stream/logs/opencode/mod.rs
+  - claudine/lib/src/stream/logs/opencode/events.rs
+  - claudine/lib/src/stream/logs/opencode/errors.rs
+  - claudine/lib/src/stream/logs/opencode/reasoning.rs
+  - claudine/lib/src/linking/skills.rs
+  - claudine/lib/src/linking/skills/mod.rs
+  - claudine/lib/src/linking/skills/portable.rs
+  - claudine/lib/src/linking/skills/partial.rs
+  - claudine/lib/src/linking/skills/native.rs
+  - claudine/lib/src/linking/compatibility.rs
+  - claudine/lib/src/linking/compatibility/mod.rs
+  - claudine/lib/src/linking/compatibility/table.rs
+  - claudine/lib/src/reporting/queries.rs
+  - claudine/lib/src/reporting/queries/mod.rs
+  - claudine/lib/src/reporting/queries/common.rs
+  - claudine/lib/src/reporting/queries/today.rs
+  - claudine/lib/src/reporting/queries/week.rs
+  - claudine/lib/src/reporting/queries/month.rs
+  - claudine/lib/src/reporting/queries/sessions.rs
+  - claudine/lib/src/reporting/queries/tools.rs
+  - claudine/lib/src/reporting/queries/errors.rs
+  - claudine/lib/src/reporting/queries/repos.rs
+  - claudine/lib/src/reporting/queries/trends.rs
+  - claudine/lib/src/reporting/queries/sync.rs
+  - claudine/lib/src/services/mod.rs
+  - claudine/lib/src/services/protect/catalog.rs
+  - claudine/lib/src/services/protect/config.rs
+  - claudine/lib/src/services/protect/decision.rs
+  - claudine/lib/src/services/protect/matcher.rs
+  - claudine/lib/src/services/protect/mod.rs
+  - claudine/lib/src/services/protect/observe.rs
+  - claudine/lib/src/services/protect/path.rs
+  - claudine/lib/src/services/protect/report.rs
+  - claudine/lib/src/services/protect/service.rs
+  - claudine/lib/src/protect/mod.rs
+  - claudine/lib/src/protect/catalog.rs
+  - claudine/lib/src/protect/config.rs
+  - claudine/lib/src/protect/decision.rs
+  - claudine/lib/src/protect/matcher.rs
+  - claudine/lib/src/protect/observe.rs
+  - claudine/lib/src/protect/path.rs
+  - claudine/lib/src/protect/report.rs
+  - claudine/lib/src/protect/service.rs
+  - claudine/lib/src/lib.rs
+  - claudine/lib/src/provider/mod.rs
+  - claudine/lib/src/provider/behavior.rs
+  - claudine/lib/src/provider/claude.rs
+  - claudine/lib/src/provider/codex.rs
+  - claudine/lib/src/provider/gemini.rs
+  - claudine/lib/src/provider/kimi.rs
+  - claudine/lib/src/provider/opencode.rs
+  - claudine/lib/src/provider/qwen.rs
+  - claudine/lib/src/provider/tests.rs
+  - claudine/cli/src/commands/wrap/subagent_watchdog.rs
+  - claudine/cli/src/commands/wrap/wire_io.rs
+  - claudine/cli/src/commands/config_tui/mod.rs
+  - claudine/cli/src/commands/config_tui/app.rs
+  - claudine/cli/src/commands/config_tui/tabs/services.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
+  - claudine/lib/benches/runtime_hot_paths.rs
+  - claudine/lib/src/composition/mod.rs
+docs_updated_during_phase_2:
+  - claudine/docs/topics/composition.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/claude.rs
+  - claudine/cli/src/commands/wrap/profile/codex.rs
+  - claudine/cli/src/commands/wrap/profile/gemini.rs
+  - claudine/cli/src/commands/wrap/profile/goose.rs
+  - claudine/cli/src/commands/wrap/profile/kimi.rs
+  - claudine/cli/src/commands/wrap/profile/opencode.rs
+  - claudine/cli/src/commands/wrap/profile/qwen.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/sections.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/spacing.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tool_calls.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/thinking.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/errors.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/heartbeat.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn.rs
+  - claudine/cli/src/commands/wrap/exec/watchdog.rs
+  - claudine/cli/src/commands/wrap/exec/termination.rs
+  - claudine/cli/src/commands/wrap/exec/timeouts.rs
+  - claudine/cli/src/commands/wrap/exec/exit.rs
+  - claudine/cli/src/commands/wrap/exec/wiring.rs
+  - claudine/cli/src/commands/wrap/exec/subagent_watchdog.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/flags.rs
+  - claudine/cli/src/commands/wrap/prompt_source.rs
+  - claudine/cli/src/commands/wrap/overlay.rs
+  - claudine/cli/src/commands/wrap/resume.rs
+  - claudine/cli/src/commands/wrap/harness_orch.rs
+  - claudine/cli/src/commands/wrap/inline.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/wire_io.rs
+  - claudine/cli/src/commands/wrap/subagent_watchdog.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - claudine
   - claudine-cli

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::actions::{HookAction, LogTarget};
 use crate::messaging::ScopedMessagingSettings;
 use crate::provider::Provider;
-use crate::services::protect::ProtectConfig;
+use crate::protect::ProtectConfig;
 
 /// Global settings that apply to all event bindings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
