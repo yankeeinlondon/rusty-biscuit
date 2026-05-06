@@ -40,21 +40,33 @@ pub(crate) fn get_repo_status_with_changes(
 
     let statuses = repo.statuses(Some(&mut opts))?;
 
-    // Resolve HEAD tree once upfront so the staged diff can be built without
-    // repeating tree resolution per file.
+    if statuses.is_empty() {
+        return Ok((
+            RepoStatus {
+                is_dirty: false,
+                staged_count: 0,
+                unstaged_count: 0,
+                untracked_count: 0,
+                dirty: Vec::new(),
+                untracked: Vec::new(),
+                is_behind: None,
+            },
+            Vec::new(),
+        ));
+    }
+
+    let estimated = statuses.iter().count();
+
     let head_tree = repo.head().and_then(|h| h.peel_to_tree()).ok();
 
-    // Build staged (HEAD -> index) and unstaged (index -> workdir) diffs once
-    // for the whole repository, then walk each diff a single time to fill the
-    // per-path accumulators below.
     let staged_diff = head_tree
         .as_ref()
         .and_then(|tree| repo.diff_tree_to_index(Some(tree), None, None).ok());
     let unstaged_diff = repo.diff_index_to_workdir(None, None).ok();
 
-    let mut diff_stats: HashMap<PathBuf, LineStats> = HashMap::new();
-    let mut staged_patches: HashMap<PathBuf, String> = HashMap::new();
-    let mut unstaged_patches: HashMap<PathBuf, String> = HashMap::new();
+    let mut diff_stats: HashMap<PathBuf, LineStats> = HashMap::with_capacity(estimated);
+    let mut staged_patches: HashMap<PathBuf, String> = HashMap::with_capacity(estimated);
+    let mut unstaged_patches: HashMap<PathBuf, String> = HashMap::with_capacity(estimated);
 
     if let Some(diff) = staged_diff.as_ref() {
         let patch_sink = include_diffs.then_some(&mut staged_patches);
@@ -666,5 +678,20 @@ mod tests {
         // Binary files produce no countable text lines.
         assert_eq!(binary_change.lines_added, 0);
         assert_eq!(binary_change.lines_removed, 0);
+    }
+
+    #[test]
+    fn clean_repo_early_exit_returns_not_dirty() {
+        let (_dir, repo) = setup_repo();
+
+        let (status, changes) = get_repo_status_with_changes(&repo, false).unwrap();
+
+        assert!(!status.is_dirty);
+        assert_eq!(status.staged_count, 0);
+        assert_eq!(status.unstaged_count, 0);
+        assert_eq!(status.untracked_count, 0);
+        assert!(status.dirty.is_empty());
+        assert!(status.untracked.is_empty());
+        assert!(changes.is_empty());
     }
 }

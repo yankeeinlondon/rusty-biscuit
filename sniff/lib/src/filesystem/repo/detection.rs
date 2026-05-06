@@ -779,24 +779,23 @@ pub fn refresh_package_boundaries(
         return;
     }
 
-    let package_path_to_index: HashMap<PathBuf, usize> = packages
+    let package_rel_to_index: HashMap<&Path, usize> = packages
         .iter()
         .enumerate()
-        .map(|(i, pkg)| (normalize_path(&pkg.path), i))
+        .map(|(i, pkg)| (Path::new(&pkg.relative), i))
         .collect();
 
     let mut nested_packages: Vec<Vec<String>> = vec![Vec::new(); packages.len()];
     for (child_idx, package) in packages.iter().enumerate() {
-        let mut current = normalize_path(&package.path);
+        let mut current = Path::new(&package.relative);
         while let Some(parent) = current.parent() {
-            let parent_normalized = normalize_path(parent);
-            if let Some(&parent_idx) = package_path_to_index.get(&parent_normalized)
+            if let Some(&parent_idx) = package_rel_to_index.get(parent)
                 && parent_idx != child_idx
             {
                 nested_packages[parent_idx].push(package.name.clone());
                 break;
             }
-            current = parent_normalized;
+            current = parent;
         }
     }
     for list in &mut nested_packages {
@@ -804,8 +803,6 @@ pub fn refresh_package_boundaries(
     }
 
     if let Some(inventory) = repo_inventory {
-        let repo_root = &inventory.scope.root;
-
         let mut per_pkg_lang: Vec<HashMap<ProgrammingLanguage, LanguageAccumulator>> =
             (0..packages.len()).map(|_| HashMap::new()).collect();
         let mut per_pkg_fw: Vec<HashMap<FrameworkKind, FrameworkAccumulator>> =
@@ -818,18 +815,14 @@ pub fn refresh_package_boundaries(
         let mut per_pkg_total: Vec<usize> = vec![0; packages.len()];
 
         for classification in inventory.classifications.iter() {
-            let abs_path = repo_root.join(&classification.path);
-            let normalized_abs = normalize_path(&abs_path);
-
             let mut assigned_pkg = None;
-            let mut current = normalized_abs;
+            let mut current = classification.path.as_path();
             while let Some(parent) = current.parent() {
-                let parent_normalized = normalize_path(parent);
-                if let Some(&pkg_idx) = package_path_to_index.get(&parent_normalized) {
+                if let Some(&pkg_idx) = package_rel_to_index.get(parent) {
                     assigned_pkg = Some(pkg_idx);
                     break;
                 }
-                current = parent_normalized;
+                current = parent;
             }
 
             let Some(pkg_idx) = assigned_pkg else {

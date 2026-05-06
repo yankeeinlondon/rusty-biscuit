@@ -478,6 +478,8 @@ pub struct GitRepo {
     repo_root: PathBuf,
     /// Cached ref decorations to avoid recomputing on every commit query.
     ref_decorations: RefCell<Option<HashMap<git2::Oid, Vec<RefDecoration>>>>,
+    /// Cached git config so disk reads happen at most once per instance.
+    config_cache: OnceLock<GitConfig>,
 }
 
 impl std::fmt::Debug for GitRepo {
@@ -523,6 +525,7 @@ impl GitRepo {
             repo,
             repo_root,
             ref_decorations: RefCell::new(None),
+            config_cache: OnceLock::new(),
         }))
     }
 
@@ -602,7 +605,9 @@ impl GitRepo {
 
     /// Git user configuration.
     pub fn config(&self) -> GitConfig {
-        super::remote_refresh::get_git_config(&self.repo)
+        self.config_cache
+            .get_or_init(|| super::remote_refresh::get_git_config(&self.repo))
+            .clone()
     }
 
     /// Local branch information.
@@ -648,6 +653,7 @@ impl GitRepo {
     /// - `refresh_remote_tracking`: true fetches remote refs (network)
     pub fn detect_with_request(&self, request: &GitRequest) -> Result<GitInfo> {
         let current_branch = self.current_branch();
+        let is_minimal = request.is_minimal();
 
         if request.refresh_remote_tracking {
             super::remote_refresh::refresh_remote_tracking_refs(&self.repo, 2);
@@ -661,6 +667,18 @@ impl GitRepo {
 
         let (mut status, file_changes) = if request.include_file_changes {
             super::status::get_repo_status_with_changes(&self.repo, request.include_file_diffs)?
+        } else if is_minimal {
+            let (is_dirty, _total) = super::status::get_repo_status_counts(&self.repo);
+            let status = RepoStatus {
+                is_dirty,
+                staged_count: 0,
+                unstaged_count: 0,
+                untracked_count: 0,
+                dirty: Vec::new(),
+                untracked: Vec::new(),
+                is_behind: None,
+            };
+            (status, Vec::new())
         } else {
             let (is_dirty, staged, unstaged, untracked) =
                 super::status::get_repo_status_counts_detailed(&self.repo);
@@ -676,8 +694,11 @@ impl GitRepo {
             (status, Vec::new())
         };
 
-        let remotes =
-            super::remote_refresh::get_remotes(&self.repo, request.include_remote_branch_details);
+        let remotes = if is_minimal {
+            Vec::new()
+        } else {
+            super::remote_refresh::get_remotes(&self.repo, request.include_remote_branch_details)
+        };
 
         let worktrees = if request.include_worktrees {
             super::remote_refresh::get_worktrees(&self.repo)
@@ -685,11 +706,23 @@ impl GitRepo {
             HashMap::new()
         };
 
-        let config = super::remote_refresh::get_git_config(&self.repo);
-        let branches =
-            super::remote_refresh::get_local_branches(&self.repo, current_branch.as_deref());
-        let tracking =
-            super::remote_refresh::get_tracking_status(&self.repo, current_branch.as_deref());
+        let config = if is_minimal {
+            GitConfig::default()
+        } else {
+            self.config()
+        };
+
+        let branches = if is_minimal {
+            Vec::new()
+        } else {
+            super::remote_refresh::get_local_branches(&self.repo, current_branch.as_deref())
+        };
+
+        let tracking = if is_minimal {
+            Vec::new()
+        } else {
+            super::remote_refresh::get_tracking_status(&self.repo, current_branch.as_deref())
+        };
 
         if request.refresh_remote_tracking {
             status.is_behind = super::remote_refresh::summarize_behind_status(&tracking);
@@ -1107,4 +1140,42 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 
     // Fall back to upstream if it's the only remote
     remotes.first()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn setup_repo() -> (TempDir, git2::Repository) {
+        let dir = TempDir::new().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "content\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("test.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+                .unwrap();
+        }
+        (dir, repo)
+    }
+
+    #[test]
+    fn config_cache_returns_same_value_on_repeated_access() {
+        let (_dir, _repo) = setup_repo();
+        let git_repo = GitRepo::discover(_dir.path())
+            .unwrap()
+            .expect("repo should be discoverable");
+
+        let config1 = git_repo.config();
+        let config2 = git_repo.config();
+
+        assert_eq!(config1.user_email, config2.user_email);
+        assert_eq!(config1.user_name, config2.user_name);
+    }
 }

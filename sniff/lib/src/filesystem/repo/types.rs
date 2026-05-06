@@ -306,7 +306,18 @@ pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
 pub fn detect_repo_with_inventory(
     root: &Path,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
-    super::detection::detect_repo_inner(root, false)
+    let options = super::super::system_view::SharedWalkOptions {
+        collect_manifests: true,
+        collect_inventory: true,
+        collect_docs: false,
+    };
+    let view = super::super::system_view::build_filesystem_system_view(root, options);
+    super::detection::detect_repo_inner_with_shared(
+        root,
+        false,
+        view.manifest_index.as_ref(),
+        view.inventory.as_ref(),
+    )
 }
 
 #[cfg(test)]
