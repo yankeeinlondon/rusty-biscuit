@@ -3,6 +3,35 @@
 use super::error::CompositionError;
 use super::types::{LoopAction, LoopCondition, LoopConfig, ResolvedCompositionSource};
 
+/// Read the fail-fast setting from env vars with deprecation support.
+///
+/// Checks `CLAUDINE_FAIL_FAST` first, then falls back to the legacy
+/// `FAIL_FAST` name with a one-time deprecation warning.
+pub fn resolve_fail_fast_from_env() -> Option<bool> {
+    if let Ok(value) = std::env::var("CLAUDINE_FAIL_FAST") {
+        return value.parse().ok();
+    }
+    if let Ok(value) = std::env::var("FAIL_FAST") {
+        static WARN_ONCE: std::sync::Once = std::sync::Once::new();
+        WARN_ONCE.call_once(|| {
+            tracing::warn!(
+                "The FAIL_FAST env var is deprecated. Use CLAUDINE_FAIL_FAST instead."
+            );
+        });
+        return value.parse().ok();
+    }
+    None
+}
+
+/// Read the max-iterations setting from env.
+///
+/// Checks `CLAUDINE_MAX_ITERATIONS`.
+pub fn resolve_max_iterations_from_env() -> Option<usize> {
+    std::env::var("CLAUDINE_MAX_ITERATIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+}
+
 /// Detect and parse a loop configuration from resolved composition frontmatter.
 ///
 /// Returns `Ok(None)` when the document has no `loop` key.

@@ -29,7 +29,9 @@ pub use lifecycle::{
     LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
     emit_lifecycle_signal, parse_lifecycle_config,
 };
-pub use loop_config::resolve_loop_config;
+pub use loop_config::{
+    resolve_fail_fast_from_env, resolve_loop_config, resolve_max_iterations_from_env,
+};
 pub use loop_engine::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, execute_loop, execute_loop_with_config,
