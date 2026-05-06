@@ -51,12 +51,12 @@ use crate::commands::compose::ComposeArgs;
 use crate::commands::sequence::SequenceArgs;
 use claudine::provider::Provider;
 
+#[cfg(test)]
+mod flag_surface;
 mod rule1_provider_bool;
 mod rule2_canonicalize;
 mod rule3_separator;
 mod rule4_help_hoist;
-#[cfg(test)]
-mod flag_surface;
 
 pub(crate) use rule1_provider_bool::provider_for_boolean_flag;
 pub(crate) use rule2_canonicalize::is_fuzzy_provider_value;
@@ -153,7 +153,10 @@ pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
 /// Only compiled under `#[cfg(test)]` because it is exclusively a test-only
 /// entry point; production code uses [`normalize`].
 #[cfg(test)]
-pub(crate) fn normalize_with_completion(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString> {
+pub(crate) fn normalize_with_completion(
+    raw: Vec<OsString>,
+    completion_active: bool,
+) -> Vec<OsString> {
     normalize_inner(raw, completion_active)
 }
 
