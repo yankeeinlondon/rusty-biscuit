@@ -31,6 +31,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::terminal::Terminal;
 use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
 use claudine::provider::{Provider, provider_info};
@@ -39,7 +40,6 @@ use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEvent
 use claudine::stream::stderr::Verbosity;
 use claudine::stream::thinking::render_thinking_block;
 use claudine::stream::tool_display::{ToolCallDisplay, ToolStatus};
-use biscuit_terminal::components::status::StatusState;
 use serde_json::Value;
 
 // Re-exports from the parent wrap module so submodules can reach them easily.
@@ -67,7 +67,7 @@ pub(crate) use tool_calls::{
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
 /// `wrap/mod.rs` so both sinks render against the same capabilities.
 fn wrap_terminal() -> Terminal {
-    Terminal::builder().build()
+    crate::log::terminal()
 }
 
 /// Function type for dispatching an agentic-event to claudine's hook pipeline.
@@ -673,11 +673,7 @@ impl SemanticEventSink for LiveSemanticSink {
             if let Ok(mut state) = self.watchdog_state.lock() {
                 match &event {
                     SemanticEvent::SubagentStart { id, name, .. } => {
-                        state.subagent_started(
-                            id.clone().unwrap_or_default(),
-                            name.clone(),
-                            now,
-                        );
+                        state.subagent_started(id.clone().unwrap_or_default(), name.clone(), now);
                     }
                     SemanticEvent::SubagentStop { id, .. } => {
                         if let Some(id) = id {
@@ -771,7 +767,9 @@ impl SemanticEventSink for LiveSemanticSink {
 /// for every matching active entry.  The list is usually empty or a
 /// single element, but OpenCode `task_progress` payloads may carry a
 /// `task_id` alongside the primary event id.
-fn extract_subagent_ids_from_event(event: &SemanticEvent) -> Vec<super::subagent_watchdog::SubagentId> {
+fn extract_subagent_ids_from_event(
+    event: &SemanticEvent,
+) -> Vec<super::subagent_watchdog::SubagentId> {
     use super::subagent_watchdog::SubagentId;
 
     let mut ids = Vec::new();
