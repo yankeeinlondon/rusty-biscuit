@@ -529,7 +529,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         output::print_json_value(outcome.value, perf.build_report().as_ref());
                         return Ok(());
                     }
-                    println!("{name}");
+                    if cli.verbose > 0 {
+                        if let Some(info) = sniff::filesystem::git::get_current_worktree_info(dir)? {
+                            println!("{} [{}]", info.0, info.1);
+                        } else {
+                            println!("{name}");
+                        }
+                    } else {
+                        println!("{name}");
+                    }
                     perf.emit_stderr(None);
                     return Ok(());
                 }

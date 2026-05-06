@@ -4663,6 +4663,29 @@ fn test_repo_worktree_json_failure_no_error() {
 }
 
 #[test]
+fn test_repo_worktree_verbose_includes_path() {
+    let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            worktree_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+            "-v",
+        ])
+        .assert()
+        .success()
+        .code(0);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let trimmed = stdout.trim();
+    assert!(trimmed.starts_with("my-worktree ["));
+    assert!(trimmed.ends_with("]"));
+    assert!(trimmed.contains(worktree_path.to_str().unwrap()));
+}
+
+#[test]
 fn test_repo_worktree_help_mentions_subcommand() {
     cargo_bin_cmd!("sniff")
         .args(["repo", "--help"])
