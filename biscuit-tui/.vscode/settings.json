@@ -6,6 +6,8 @@
         "compinit",
         "expectrl",
         "funcstack",
+        "tterm",
+        "userspace",
         "WEZTERM"
     ]
 }
