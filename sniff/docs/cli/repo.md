@@ -32,6 +32,12 @@ These flags apply to all `sniff repo` subcommands:
 | [`git-status`](./repo_git-status.md) | Branch, commits, working tree status, and worktree info |
 | [`hash <SHA>`](./repo_hash.md) | Inspect a specific commit by hash (full or short) |
 
+### Worktree
+
+| Subcommand | Description |
+|------------|-------------|
+| [`worktree`](./repo_worktree.md) | Name of the current Git linked worktree |
+
 ### File Listing
 
 | Subcommand | Description |
