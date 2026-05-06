@@ -32,10 +32,12 @@
 //! - **Condition** (`ParseMode::Condition`) - `||` is logical OR, `&&` is logical AND
 
 pub mod ast;
+pub mod ctx;
 pub mod lexer;
 pub mod parser;
 
 pub use ast::Expr;
+pub use ctx::CtxLookup;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
 };
