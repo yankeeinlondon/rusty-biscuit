@@ -4,6 +4,7 @@ mod install;
 mod install_plan_cmd;
 mod install_ui;
 mod output;
+mod perf;
 
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 

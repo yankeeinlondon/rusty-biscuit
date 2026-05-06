@@ -5,7 +5,7 @@
 //! built on top of the synthetic monorepo fixture so runs are
 //! deterministic regardless of host state.
 
-use criterion::{Criterion, black_box};
+use criterion::{Criterion, Throughput, black_box};
 use sniff::filesystem::docs::{detect_blast_radius_docs, detect_docs};
 use sniff::filesystem::file_types::scan_file_inventory;
 use sniff::filesystem::repo::detect_repo_with_inventory;
@@ -39,7 +39,7 @@ pub fn register(c: &mut Criterion) {
     // ---------- git ----------
     let mut git_group = util::configure_group(c, "filesystem_git");
 
-    git_group.bench_function("git_summary_small", |b| {
+    git_group.bench_function("git_summary_small_repo_5_commits", |b| {
         let req = GitRequest::summary();
         b.iter(|| {
             let info = detect_git_with_request(black_box(small.path()), black_box(&req)).unwrap();
@@ -47,7 +47,7 @@ pub fn register(c: &mut Criterion) {
         });
     });
 
-    git_group.bench_function("git_full_small", |b| {
+    git_group.bench_function("git_full_small_repo_10_commits_stats", |b| {
         let req = GitRequest::full();
         b.iter(|| {
             let info = detect_git_with_request(black_box(small.path()), black_box(&req)).unwrap();
@@ -55,7 +55,7 @@ pub fn register(c: &mut Criterion) {
         });
     });
 
-    git_group.bench_function("git_summary_monorepo", |b| {
+    git_group.bench_function("git_summary_monorepo_5_commits", |b| {
         let req = GitRequest::summary();
         b.iter(|| {
             let info = detect_git_with_request(black_box(large.path()), black_box(&req)).unwrap();
@@ -63,7 +63,7 @@ pub fn register(c: &mut Criterion) {
         });
     });
 
-    git_group.bench_function("git_full_monorepo", |b| {
+    git_group.bench_function("git_full_monorepo_10_commits_stats", |b| {
         let req = GitRequest::full();
         b.iter(|| {
             let info = detect_git_with_request(black_box(large.path()), black_box(&req)).unwrap();
@@ -76,14 +76,14 @@ pub fn register(c: &mut Criterion) {
     // ---------- repo / package discovery ----------
     let mut repo_group = util::configure_group(c, "filesystem_repo");
 
-    repo_group.bench_function("repo_structure_monorepo", |b| {
+    repo_group.bench_function("repo_structure_monorepo_manifest_discovery", |b| {
         b.iter(|| {
             let info = detect_repo_structure(black_box(large.path())).unwrap();
             black_box(info);
         });
     });
 
-    repo_group.bench_function("repo_with_inventory_monorepo", |b| {
+    repo_group.bench_function("repo_with_shared_inventory_monorepo", |b| {
         b.iter(|| {
             let (repo, inventory) = detect_repo_with_inventory(black_box(large.path())).unwrap();
             black_box((repo, inventory));
@@ -94,7 +94,7 @@ pub fn register(c: &mut Criterion) {
     // dependency parsing). This is the hot path that
     // `refresh_package_boundaries` feeds into and the dominant cost of
     // `RepoRequest::full()` on large monorepos.
-    repo_group.bench_function("repo_full_monorepo", |b| {
+    repo_group.bench_function("repo_full_monorepo_language_scan", |b| {
         b.iter(|| {
             let info = detect_repo(black_box(large.path())).unwrap();
             black_box(info);
@@ -102,14 +102,14 @@ pub fn register(c: &mut Criterion) {
     });
 
     // Huge monorepo benchmarks stress manifest caching and index normalization.
-    repo_group.bench_function("repo_structure_huge", |b| {
+    repo_group.bench_function("repo_structure_huge_500_packages", |b| {
         b.iter(|| {
             let info = detect_repo_structure(black_box(huge.path())).unwrap();
             black_box(info);
         });
     });
 
-    repo_group.bench_function("repo_full_huge", |b| {
+    repo_group.bench_function("repo_full_huge_500_packages", |b| {
         b.iter(|| {
             let info = detect_repo(black_box(huge.path())).unwrap();
             black_box(info);
@@ -119,7 +119,7 @@ pub fn register(c: &mut Criterion) {
     // Isolated package-enrichment benchmark: structure + inventory are
     // prepared outside the timed loop so only `refresh_package_boundaries`
     // is measured.
-    repo_group.bench_function("package_enrichment_huge", |b| {
+    repo_group.bench_function("package_boundary_refresh_huge", |b| {
         let mut repo_info = detect_repo_structure(huge.path()).unwrap().unwrap();
         let inventory = scan_file_inventory(huge.path()).unwrap();
         let mut packages = repo_info.packages.take().unwrap();
@@ -134,21 +134,21 @@ pub fn register(c: &mut Criterion) {
     // ---------- file inventory (parallel walker) ----------
     let mut inventory_group = util::configure_group(c, "filesystem_inventory");
 
-    inventory_group.bench_function("inventory_scan_small", |b| {
+    inventory_group.bench_function("file_inventory_walk_small_repo", |b| {
         b.iter(|| {
             let inventory = scan_file_inventory(black_box(small.path())).unwrap();
             black_box(inventory);
         });
     });
 
-    inventory_group.bench_function("inventory_scan_monorepo", |b| {
+    inventory_group.bench_function("file_inventory_walk_monorepo", |b| {
         b.iter(|| {
             let inventory = scan_file_inventory(black_box(large.path())).unwrap();
             black_box(inventory);
         });
     });
 
-    inventory_group.bench_function("inventory_scan_language_mix", |b| {
+    inventory_group.bench_function("file_inventory_walk_mixed_langs", |b| {
         b.iter(|| {
             let inventory = scan_file_inventory(black_box(langs.path())).unwrap();
             black_box(inventory);
@@ -160,14 +160,14 @@ pub fn register(c: &mut Criterion) {
     // ---------- languages ----------
     let mut lang_group = util::configure_group(c, "filesystem_languages");
 
-    lang_group.bench_function("languages_shallow_deep_mix", |b| {
+    lang_group.bench_function("language_detection_mixed_depths", |b| {
         b.iter(|| {
             let breakdown = detect_languages(black_box(langs.path())).unwrap();
             black_box(breakdown);
         });
     });
 
-    lang_group.bench_function("languages_monorepo", |b| {
+    lang_group.bench_function("language_detection_monorepo", |b| {
         b.iter(|| {
             let breakdown = detect_languages(black_box(large.path())).unwrap();
             black_box(breakdown);
@@ -178,15 +178,16 @@ pub fn register(c: &mut Criterion) {
 
     // ---------- docs parsing modes ----------
     let mut docs_group = util::configure_group(c, "filesystem_docs");
+    docs_group.throughput(Throughput::Elements(DOCS_FIXTURE_TOTAL as u64));
 
-    docs_group.bench_function("detect_docs_full", |b| {
+    docs_group.bench_function("docs_parse_full_frontmatter_200_files", |b| {
         b.iter(|| {
             let parsed = detect_docs(black_box(docs.path()));
             black_box(parsed);
         });
     });
 
-    docs_group.bench_function("detect_blast_radius_only", |b| {
+    docs_group.bench_function("docs_parse_blast_radius_only_40_of_200", |b| {
         b.iter(|| {
             let parsed = detect_blast_radius_docs(black_box(docs.path()));
             black_box(parsed);
@@ -198,7 +199,7 @@ pub fn register(c: &mut Criterion) {
     // ---------- staged filesystem request ----------
     let mut stage_group = util::configure_slow_group(c, "filesystem_staged");
 
-    stage_group.bench_function("filesystem_summary_request", |b| {
+    stage_group.bench_function("staged_filesystem_summary_git_plus_repo", |b| {
         let req = FilesystemRequest::new()
             .git(GitRequest::summary())
             .repo(RepoRequest::structure())
@@ -212,7 +213,7 @@ pub fn register(c: &mut Criterion) {
         });
     });
 
-    stage_group.bench_function("filesystem_full_request", |b| {
+    stage_group.bench_function("staged_filesystem_full_all_stages", |b| {
         let req = FilesystemRequest::new();
         b.iter(|| {
             let info =

@@ -178,6 +178,14 @@ pub(crate) fn build_with_outcome(
         // `{ "language": null }` when no primary language can be detected).
         // Exit code mirrors the text path: 0 on success, 1 on null, so scripts
         // can branch on `$?` without parsing the JSON body.
+        Some(RepoAction::Worktree { no_error, on_error: _ }) => {
+            // This should not normally be reached because Worktree is handled
+            // as an early return in commands.rs, but we handle it here for
+            // completeness in the JSON builder.
+            let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let name = sniff::filesystem::git::get_current_worktree_name(&dir).ok().flatten();
+            worktree_outcome(name.as_deref(), *no_error)
+        }
         Some(RepoAction::Language { breakdown: false }) => {
             let name = filesystem::primary_language_name(result);
             let exit_code = if name.is_none() { Some(1) } else { None };
@@ -251,6 +259,25 @@ pub(crate) fn has_merge_conflict_outcome(has_conflict: bool) -> BuildOutcome {
         json!({ "has_merge_conflict": has_conflict }),
         if has_conflict { 0 } else { 1 },
     )
+}
+
+/// Build the JSON outcome for `repo worktree --json`.
+///
+/// Returns `{ "worktree": "name" }` on success and `{ "worktree": null }`
+/// on failure. Exit code is `0` when a worktree is found and `1` otherwise
+/// (or `0` when `no_error` is `true`).
+pub(crate) fn worktree_outcome(name: Option<&str>, no_error: bool) -> BuildOutcome {
+    let exit_code = if name.is_some() {
+        None
+    } else if no_error {
+        Some(0)
+    } else {
+        Some(1)
+    };
+    BuildOutcome {
+        value: json!({ "worktree": name }),
+        exit_code,
+    }
 }
 
 /// Build the `{ scope, kind, names }` JSON shape used by the package and

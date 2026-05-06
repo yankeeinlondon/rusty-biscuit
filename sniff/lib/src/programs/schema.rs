@@ -9,34 +9,9 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::os::OsType;
-use crate::programs::types::{InstallationMethod, SystemPrerequisite};
-
-/// Errors that can occur during program version detection.
-#[derive(Debug, Error)]
-pub enum ProgramError {
-    /// The program was not found in PATH.
-    #[error("program '{0}' not found in PATH")]
-    NotFound(String),
-
-    /// Failed to execute the version command.
-    #[error("failed to execute version command for '{program}': {source}")]
-    ExecutionFailed {
-        program: String,
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// Failed to parse version output.
-    #[error("failed to parse version output for '{program}': {details}")]
-    ParseFailed { program: String, details: String },
-
-    /// The version command returned non-zero exit code.
-    #[error("version command for '{program}' failed with exit code {code}")]
-    NonZeroExit { program: String, code: i32 },
-}
+use crate::programs::contract::{InstallationMethod, ProgramError, SystemPrerequisite};
 
 const VERSION_COMMAND_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -309,8 +284,8 @@ pub trait ProgramMetadata: Sized {
     ///
     /// Skips the PATH lookup performed by [`ProgramMetadata::version`], which is
     /// useful when the caller has already resolved the executable (e.g. through
-    /// a [`crate::programs::find_program::ExecutableIndex`] or a
-    /// [`crate::programs::types::CategoryDetector`]) and wants to avoid a
+    /// a [`crate::executable_index::ExecutableIndex`] or a
+    /// [`crate::programs::category_detector::CategoryDetector`]) and wants to avoid a
     /// redundant `which`-style scan.
     ///
     /// ## Errors
@@ -499,7 +474,7 @@ impl ProgramEntry {
     pub fn installed(
         info: &ProgramInfo,
         path: std::path::PathBuf,
-        source: crate::programs::types::ExecutableSource,
+        source: crate::programs::contract::ExecutableSource,
     ) -> Self {
         Self {
             installed: true,

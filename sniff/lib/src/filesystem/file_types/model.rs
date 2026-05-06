@@ -364,6 +364,19 @@ pub struct LanguageSummary {
     pub frameworks: Vec<FrameworkStats>,
 }
 
+impl LanguageSummary {
+    pub fn sorted(mut self) -> Self {
+        for lang in &mut self.languages {
+            lang.direct_files.sort();
+            lang.framework_files.sort();
+        }
+        for fw in &mut self.frameworks {
+            fw.files.sort();
+        }
+        self
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileAssociationBreakdown {
     pub total_files: usize,
