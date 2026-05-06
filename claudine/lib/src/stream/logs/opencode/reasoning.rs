@@ -18,8 +18,8 @@ use crate::stream::logs::opencode::events::{
     AssetType, LogClassification, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
 };
 use crate::stream::logs::opencode::errors::{
-    asset_type_as_str, classify, classify_raw, max_reset_at, merge_rate_limit,
-    render_malformed_asset_message, render_rate_limit_message, strip_ansi,
+    asset_type_as_str, classify, classify_raw, get_http_status_description, max_reset_at,
+    merge_rate_limit, render_malformed_asset_message, render_rate_limit_message, strip_ansi,
 };
 
 /// Whether an incoming stderr log line was converted into a semantic event
@@ -368,7 +368,17 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         let rendered = if !message.is_empty() {
             message
         } else {
-            format!("OpenCode API failure ({error_name})")
+            match status_code {
+                Some(code) => {
+                    let desc = get_http_status_description(code);
+                    if !desc.is_empty() {
+                        format!("OpenCode API failure ({error_name}: {code} {desc})")
+                    } else {
+                        format!("OpenCode API failure ({error_name}: {code})")
+                    }
+                }
+                None => format!("OpenCode API failure ({error_name})"),
+            }
         };
 
         if is_fatal {
@@ -711,7 +721,7 @@ mod tests {
                 assert_string(extra, "classification", "api_failure");
                 assert_string(extra, "error_name", "AI_APICallError");
                 assert_eq!(extra.get("status_code"), Some(&json!(500)));
-                assert_eq!(message, "AI_APICallError (500): upstream boom");
+                assert_eq!(message, "AI_APICallError (500: Internal Server Error): upstream boom");
             }
             other => panic!("expected Warning, got {other:?}"),
         }

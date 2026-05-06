@@ -506,7 +506,7 @@ impl Status {
         let should_colorize = self.color_icons && has_color;
 
         let icon = if should_colorize {
-            let tw_color = match (Terminal::color_mode(), icon_def.color_alt) {
+            let tw_color = match (term.color_mode(), icon_def.color_alt) {
                 (ColorMode::Light, Some(alt)) => alt,
                 _ => icon_def.color,
             };

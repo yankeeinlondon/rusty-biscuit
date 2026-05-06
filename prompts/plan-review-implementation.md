@@ -1,5 +1,6 @@
 ---
 review: ""
+root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area}}"
 dir: "$(dirname review)"
 plan: "plan.md"
@@ -13,6 +14,7 @@ start:
     message: "🏃‍♂️ creating a plan from the review **{{area}}/{{review}}**; planning being done with {{env.AGENT}} agent "
 success:
     message: "🖥️ A high confidence plan `{{area}}/{{plan}}` has been created from a review."
+    stderr: "✅ A high confidence **plan** for the review `{{area}}/{{review}}` has been created." 
 failure:
     message: "❌ failed to implement the _suggestions_ from the review `{{area}}/{{dir}}/review-{{iteration}}.md`"
 ---
