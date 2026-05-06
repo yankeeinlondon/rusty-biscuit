@@ -15,8 +15,8 @@ use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
 use super::frontmatter::build_rule_source;
 use super::overlays::tokenize_to_approved_command;
 use super::shapes::{
-    extract_bool_field, extract_file_ref, extract_scalar_string, extract_shape, extract_string_field,
-    extract_usize,
+    extract_bool_field, extract_file_ref, extract_scalar_string, extract_shape,
+    extract_string_field, extract_usize,
 };
 
 /// Parse a `pre_checks` or `post_checks` value in list or map form.

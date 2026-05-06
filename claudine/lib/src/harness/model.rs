@@ -6,7 +6,9 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::harness::error::HarnessError;
-pub use crate::harness::failure::{FailurePhase, ValidationEvent, ValidationRuleId, ValidationFailure};
+pub use crate::harness::failure::{
+    FailurePhase, ValidationEvent, ValidationFailure, ValidationRuleId,
+};
 
 /// Top-level harness plan parsed from composed frontmatter.
 #[derive(Debug, Clone)]

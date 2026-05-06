@@ -15,18 +15,17 @@ use self::span::find_rule_spans;
 use self::validations::parse_checks;
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
-    HarnessPlan, ValidationEvent, ValidationKind, ValidationPhase, ValidationRule,
-    ValidationRuleId,
+    HarnessPlan, ValidationEvent, ValidationKind, ValidationPhase, ValidationRule, ValidationRuleId,
 };
 use crate::harness::resolve::HarnessResolutionContext;
 use crate::harness::timeout::{format_duration, parse_timeout};
 
-mod span;
-mod validations;
+mod frontmatter;
 mod handlers;
 mod overlays;
-mod frontmatter;
 mod shapes;
+mod span;
+mod validations;
 
 /// Harness-relevant frontmatter keys.
 const HARNESS_KEYS: &[&str] = &[
@@ -88,9 +87,8 @@ pub fn parse_harness_plan(
     // fall back to an empty `SpanIndex` so `line_range` stays `None` and
     // `yaml_snippet` falls back to reconstructed YAML.
     let raw_source = std::fs::read_to_string(source_path).ok();
-    let frontmatter_slice: Option<(&str, usize)> = raw_source
-        .as_deref()
-        .and_then(extract_frontmatter_text);
+    let frontmatter_slice: Option<(&str, usize)> =
+        raw_source.as_deref().and_then(extract_frontmatter_text);
     let span_index = frontmatter_slice
         .map(|(text, base_line)| find_rule_spans(text, base_line))
         .unwrap_or_default();
@@ -282,4 +280,3 @@ pub fn inline_writability_pre_check(source_path: &Path) -> ValidationRule {
         source: None,
     }
 }
-

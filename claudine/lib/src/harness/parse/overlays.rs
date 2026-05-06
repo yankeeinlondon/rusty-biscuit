@@ -10,7 +10,9 @@ use crate::harness::model::{ApprovedRuntimeCommand, FailureEvent, ValidationEven
 use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
 
 /// Parse an optional `set` overlay from a handler object.
-pub(super) fn parse_set_overlay(obj: &serde_json::Map<String, Value>) -> Option<IndexMap<String, Value>> {
+pub(super) fn parse_set_overlay(
+    obj: &serde_json::Map<String, Value>,
+) -> Option<IndexMap<String, Value>> {
     obj.get("set")
         .and_then(|v| v.as_object())
         .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
