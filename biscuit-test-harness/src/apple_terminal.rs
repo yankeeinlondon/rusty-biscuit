@@ -170,7 +170,30 @@ impl AppleTerminalHarness {
                 Err(err) => {
                     eprintln!("warning: failed to close Terminal.app window {id}: {err}");
                 }
-                Ok(_) => {}
+                Ok(_) => {
+                    // Terminal.app processes the close asynchronously;
+                    // wait until the window actually disappears so the
+                    // next test doesn't race on a stale window ID.
+                    for _ in 0..30 {
+                        std::thread::sleep(Duration::from_millis(100));
+                        let check = format!(
+                            "tell application \"Terminal\" to return (count of (every window whose id is {id}))"
+                        );
+                        let mut check_cmd = Command::new("osascript");
+                        check_cmd.args(["-e", &check])
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null());
+                        if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2)) {
+                            if out.status.success() {
+                                if let Ok(s) = std::str::from_utf8(&out.stdout) {
+                                    if s.trim() == "0" {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -237,6 +260,11 @@ impl TerminalHarness for AppleTerminalHarness {
         if !Self::available() {
             return Err(io::Error::other("Terminal.app via osascript not available"));
         }
+        // Brief pause to let Terminal.app settle after any preceding
+        // window close. AppleScript window operations are asynchronous
+        // inside Terminal.app; spawning immediately after a close can
+        // race on stale window lists.
+        std::thread::sleep(Duration::from_millis(300));
         let shell = super::detect_shell();
         let mut shell_cmd = String::new();
 
@@ -298,7 +326,7 @@ impl TerminalHarness for AppleTerminalHarness {
             end try
             tell application "Terminal"
                 set newTab to do script "{cmd}"
-                delay 0.05
+                delay 0.3
                 set winId to id of front window
             end tell
             if prevApp is not "" and prevApp is not "Terminal" then
@@ -323,6 +351,17 @@ impl TerminalHarness for AppleTerminalHarness {
         // dispatch into a ready prompt on slow hosts.
         super::wait_for_prompt(self)?;
         std::thread::sleep(Duration::from_millis(200));
+
+        // When preserve_capabilities is true we must ensure no
+        // FORCE_COLOR / CLICOLOR_FORCE leak through from the user's
+        // shell profile (e.g. .zshrc).  Unset them now so subsequent
+        // `bt` invocations see a clean environment.
+        if self.preserve_capabilities {
+            self.send_text(b"unset FORCE_COLOR CLICOLOR_FORCE\n")?;
+            super::wait_for_prompt(self)?;
+            std::thread::sleep(Duration::from_millis(200));
+        }
+
         Ok(())
     }
 
