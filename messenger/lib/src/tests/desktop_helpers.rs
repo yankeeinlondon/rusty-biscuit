@@ -26,7 +26,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 
 use crate::dispatch::{NotificationAction, NotificationUrgency};
 use crate::provider::desktop::helpers::HelperBackend;
@@ -46,17 +46,23 @@ use crate::provider::desktop::request::DesktopNotificationRequest;
 /// to the bin directory.
 fn stub_bin_dir() -> PathBuf {
     let exe = std::env::current_exe().expect("test executable path");
-    let mut dir = exe
-        .parent()
-        .expect("test executable parent")
-        .to_path_buf();
+    let mut dir = exe.parent().expect("test executable parent").to_path_buf();
     if dir.file_name().and_then(|name| name.to_str()) == Some("deps") {
         dir.pop();
     }
     dir
 }
 
-static STUB_PATH_CACHE: Mutex<Option<HashMap<String, PathBuf>>> = Mutex::new(None);
+const STUB_NAMES: &[&str] = &[
+    "stub_dunstify",
+    "stub_notify_send",
+    "stub_snoretoast",
+    "stub_burnttoast",
+    "stub_terminal_notifier",
+    "stub_alerter",
+];
+
+static STUB_PATH_CACHE: OnceLock<HashMap<&'static str, PathBuf>> = OnceLock::new();
 
 /// Resolve the path to a stub binary, building it on demand if missing.
 ///
@@ -66,26 +72,32 @@ static STUB_PATH_CACHE: Mutex<Option<HashMap<String, PathBuf>>> = Mutex::new(Non
 /// a safety net we shell out to `cargo build --bin <name>` when the file is
 /// missing; the build is a no-op when the bin is already up to date.
 ///
-/// Resolved paths are cached in a process-wide [`Mutex`] so that
+/// Resolved paths are cached in a process-wide [`OnceLock`] so that
 /// `cargo-nextest` (which runs each test in a fresh process) pays the
 /// build cost at most once per process, not once per test.
 fn stub_path(name: &str) -> PathBuf {
-    {
-        let guard = STUB_PATH_CACHE.lock().unwrap();
-        if let Some(cache) = guard.as_ref() {
-            if let Some(path) = cache.get(name) {
-                return path.clone();
-            }
-        }
-    }
+    let cache = STUB_PATH_CACHE.get_or_init(resolve_stub_paths);
+    cache
+        .get(name)
+        .unwrap_or_else(|| panic!("unknown stub binary `{name}`"))
+        .clone()
+}
 
+fn resolve_stub_paths() -> HashMap<&'static str, PathBuf> {
+    STUB_NAMES
+        .iter()
+        .map(|name| (*name, resolve_stub_path(name)))
+        .collect()
+}
+
+fn resolve_stub_path(name: &str) -> PathBuf {
     let mut path = stub_bin_dir();
     path.push(if cfg!(windows) {
         format!("{name}.exe")
     } else {
         name.to_string()
     });
-    if !path.exists() {
+    if !path.exists() || stub_source_is_newer(name, &path) {
         let status = std::process::Command::new(env!("CARGO"))
             .args([
                 "build",
@@ -99,7 +111,10 @@ fn stub_path(name: &str) -> PathBuf {
             ])
             .status()
             .expect("failed to invoke cargo to build stub binary");
-        assert!(status.success(), "cargo build failed for stub binary {name}");
+        assert!(
+            status.success(),
+            "cargo build failed for stub binary {name}"
+        );
     }
     assert!(
         path.exists(),
@@ -107,11 +122,22 @@ fn stub_path(name: &str) -> PathBuf {
         name,
         path.display()
     );
-
-    let mut guard = STUB_PATH_CACHE.lock().unwrap();
-    let cache = guard.get_or_insert_with(HashMap::new);
-    cache.insert(name.to_string(), path.clone());
     path
+}
+
+fn stub_source_is_newer(name: &str, path: &Path) -> bool {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("bin")
+        .join(name)
+        .join("main.rs");
+    let Ok(source_modified) = source.metadata().and_then(|metadata| metadata.modified()) else {
+        return false;
+    };
+    let Ok(binary_modified) = path.metadata().and_then(|metadata| metadata.modified()) else {
+        return true;
+    };
+    source_modified > binary_modified
 }
 
 /// Small RAII guard that removes the env vars it set when dropped.
@@ -186,11 +212,21 @@ fn notify_send_helper(path: &Path) -> NotifySendHelper {
 }
 
 fn snoretoast_helper(path: &Path) -> SnoreToastHelper {
-    SnoreToastHelper::new(path.to_path_buf(), "RustyBiscuit.MessengerTests".to_string())
+    let helper = SnoreToastHelper::new(
+        path.to_path_buf(),
+        "RustyBiscuit.MessengerTests".to_string(),
+    );
+    // Skip AppID registration for send-path tests; dedicated registration
+    // coverage below exercises the real `-install` shell-out.
+    helper.mark_app_id_registered();
+    helper
 }
 
 fn burnttoast_helper(path: &Path) -> BurntToastHelper {
-    let helper = BurntToastHelper::new(path.to_path_buf(), "RustyBiscuit.MessengerTests".to_string());
+    let helper = BurntToastHelper::new(
+        path.to_path_buf(),
+        "RustyBiscuit.MessengerTests".to_string(),
+    );
     // Skip the per-process AppID registration shell-out so the stub only has
     // to handle the actual send invocation.
     helper.mark_app_id_registered();
@@ -224,10 +260,7 @@ mod dunstify_stub {
     #[serial]
     async fn interactive_records_action_metadata() {
         let stub = stub_path("stub_dunstify");
-        let _env = EnvGuard::set(&[
-            ("STUB_DUNSTIFY_ID", "9"),
-            ("STUB_DUNSTIFY_ACTION", "ok"),
-        ]);
+        let _env = EnvGuard::set(&[("STUB_DUNSTIFY_ID", "9"), ("STUB_DUNSTIFY_ACTION", "ok")]);
         let helper = dunstify_helper(&stub);
         let request = interactive_request(vec![NotificationAction {
             id: "ok".into(),
@@ -279,6 +312,20 @@ mod dunstify_stub {
         let helper = dunstify_helper(&stub);
         let result = helper.send(&notice_request()).await;
         assert!(matches!(result, Err(HelperError::Parse(_))));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn notice_only_timeout_maps_to_timeout_error() {
+        let stub = stub_path("stub_dunstify");
+        let _env = EnvGuard::set(&[("STUB_DUNSTIFY_SLEEP_MS", "4000")]);
+        let helper = dunstify_helper(&stub);
+        let result = helper.send(&notice_request()).await;
+        let error = result.expect_err("expected dunstify stub to timeout");
+        assert!(
+            matches!(error, HelperError::Timeout { timeout_ms: 3000 }),
+            "got {error:?}"
+        );
     }
 }
 
@@ -332,6 +379,20 @@ mod notify_send_stub {
         let result = helper.send(&notice_request()).await;
         assert!(matches!(result, Err(HelperError::Parse(_))));
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn notice_only_timeout_maps_to_timeout_error() {
+        let stub = stub_path("stub_notify_send");
+        let _env = EnvGuard::set(&[("STUB_NOTIFY_SEND_SLEEP_MS", "6000")]);
+        let helper = notify_send_helper(&stub);
+        let result = helper.send(&notice_request()).await;
+        let error = result.expect_err("expected notify-send stub to timeout");
+        assert!(
+            matches!(error, HelperError::Timeout { timeout_ms: 5000 }),
+            "got {error:?}"
+        );
+    }
 }
 
 mod snoretoast_stub {
@@ -384,10 +445,7 @@ mod snoretoast_stub {
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[("STUB_SNORETOAST_EXIT", "1")]);
         let helper = snoretoast_helper(&stub);
-        let receipt = helper
-            .replace("toast-9", &notice_request())
-            .await
-            .unwrap();
+        let receipt = helper.replace("toast-9", &notice_request()).await.unwrap();
         assert_eq!(receipt.notification_id, "toast-9");
         assert_eq!(
             receipt.metadata.get("replaced").map(String::as_str),
@@ -422,6 +480,67 @@ mod snoretoast_stub {
             matches!(error, HelperError::Timeout { timeout_ms: 5000 }),
             "got {error:?}"
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn interactive_request_does_not_timeout() {
+        let stub = stub_path("stub_snoretoast");
+        let _env = EnvGuard::set(&[
+            ("STUB_SNORETOAST_SLEEP_MS", "2000"),
+            ("STUB_SNORETOAST_STDOUT", "Confirm"),
+            ("STUB_SNORETOAST_EXIT", "0"),
+        ]);
+        let helper = snoretoast_helper(&stub);
+        let request = interactive_request(vec![NotificationAction {
+            id: "confirm".into(),
+            label: "Confirm".into(),
+        }]);
+        let receipt = helper.send(&request).await.unwrap();
+        assert_eq!(
+            receipt.metadata.get("activation_type").map(String::as_str),
+            Some("action"),
+        );
+        assert_eq!(
+            receipt.metadata.get("activation_key").map(String::as_str),
+            Some("confirm"),
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn app_id_registration_runs_install_before_send() {
+        let stub = stub_path("stub_snoretoast");
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let log_path = log.path().to_string_lossy().into_owned();
+        let _env = EnvGuard::set(&[("STUB_SNORETOAST_ARGV_LOG", log_path.as_str())]);
+        let helper = SnoreToastHelper::new(
+            stub.to_path_buf(),
+            "RustyBiscuit.MessengerTests".to_string(),
+        );
+        assert!(!helper.app_id_registered());
+
+        let mut request = notice_request();
+        request.replace_id = Some("registered-snore".into());
+        let receipt = helper.send(&request).await.unwrap();
+
+        assert!(helper.app_id_registered());
+        assert_eq!(receipt.notification_id, "registered-snore");
+        let log = std::fs::read_to_string(log.path()).unwrap();
+        let lines = log.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines.len(),
+            2,
+            "expected install and send argv lines: {log}"
+        );
+        let install = lines[0].split('\t').collect::<Vec<_>>();
+        assert_eq!(install[0], "-appID");
+        assert_eq!(install[1], "RustyBiscuit.MessengerTests");
+        assert_eq!(install[2], "-install");
+        assert_eq!(install[3], "RustyBiscuit.MessengerTests.lnk");
+        assert_eq!(install[4], stub.to_string_lossy());
+        assert_eq!(install[5], "RustyBiscuit.MessengerTests");
+        assert!(!lines[1].contains("-install"));
     }
 
     #[tokio::test]
@@ -552,20 +671,66 @@ mod burnttoast_stub {
 
     #[tokio::test]
     #[serial]
+    async fn interactive_request_does_not_timeout() {
+        let stub = stub_path("stub_burnttoast");
+        let _env = EnvGuard::set(&[
+            ("STUB_BURNTTOAST_SLEEP_MS", "2000"),
+            (
+                "STUB_BURNTTOAST_JSON",
+                r#"{"activationType":"action","activationKey":"ok"}"#,
+            ),
+        ]);
+        let helper = burnttoast_helper(&stub);
+        let request = interactive_request(vec![NotificationAction {
+            id: "ok".into(),
+            label: "OK".into(),
+        }]);
+        let receipt = helper.send(&request).await.unwrap();
+        assert_eq!(
+            receipt.metadata.get("activation_type").map(String::as_str),
+            Some("action"),
+        );
+        assert_eq!(
+            receipt.metadata.get("activation_key").map(String::as_str),
+            Some("ok"),
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn app_id_registration_succeeds_before_send() {
         // Do NOT call mark_app_id_registered — let the real registration path run.
         let stub = stub_path("stub_burnttoast");
-        let _env = EnvGuard::set(&[(
-            "STUB_BURNTTOAST_JSON",
-            r#"{"activationType":"dismissed"}"#,
-        )]);
-        let helper = BurntToastHelper::new(stub.to_path_buf(), "RustyBiscuit.MessengerTests".to_string());
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let log_path = log.path().to_string_lossy().into_owned();
+        let _env = EnvGuard::set(&[
+            ("STUB_BURNTTOAST_JSON", r#"{"activationType":"dismissed"}"#),
+            ("STUB_BURNTTOAST_STDIN_LOG", log_path.as_str()),
+        ]);
+        let helper = BurntToastHelper::new(
+            stub.to_path_buf(),
+            "RustyBiscuit.MessengerTests".to_string(),
+        );
         assert!(!helper.app_id_registered());
         let receipt = helper.send(&notice_request()).await.unwrap();
         assert!(helper.app_id_registered());
         assert_eq!(
             receipt.metadata.get("activation_type").map(String::as_str),
             Some("dismissed"),
+        );
+        let log = std::fs::read_to_string(log.path()).unwrap();
+        let scripts = log.split("-----SCRIPT-----").collect::<Vec<_>>();
+        assert!(
+            scripts
+                .get(1)
+                .is_some_and(|script| script.contains("New-BTAppId")),
+            "registration script did not include New-BTAppId: {log}",
+        );
+        assert!(
+            scripts
+                .get(2)
+                .is_some_and(|script| script.contains("Submit-BTNotification")),
+            "send script did not include Submit-BTNotification: {log}",
         );
     }
 }
@@ -590,10 +755,7 @@ mod terminal_notifier_stub {
     async fn replace_records_replaced_metadata() {
         let stub = stub_path("stub_terminal_notifier");
         let helper = terminal_notifier_helper(&stub);
-        let receipt = helper
-            .replace("legacy-7", &notice_request())
-            .await
-            .unwrap();
+        let receipt = helper.replace("legacy-7", &notice_request()).await.unwrap();
         assert_eq!(receipt.notification_id, "legacy-7");
         assert_eq!(
             receipt.metadata.get("replaced").map(String::as_str),
@@ -725,6 +887,20 @@ mod alerter_stub {
             Some("ok"),
         );
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn notice_only_timeout_maps_to_timeout_error() {
+        let stub = stub_path("stub_alerter");
+        let _env = EnvGuard::set(&[("STUB_ALERTER_SLEEP_MS", "61000")]);
+        let helper = alerter_helper(&stub);
+        let result = helper.send(&notice_request()).await;
+        let error = result.expect_err("expected alerter stub to timeout");
+        assert!(
+            matches!(error, HelperError::Timeout { timeout_ms: 60000 }),
+            "got {error:?}"
+        );
+    }
 }
 
 mod backend_fallback {
@@ -824,10 +1000,7 @@ mod backend_fallback {
         let _env = EnvGuard::set(&[
             ("STUB_SNORETOAST_EXIT", "4"),
             ("STUB_SNORETOAST_STDOUT", "boom"),
-            (
-                "STUB_BURNTTOAST_JSON",
-                r#"{"activationType":"dismissed"}"#,
-            ),
+            ("STUB_BURNTTOAST_JSON", r#"{"activationType":"dismissed"}"#),
         ]);
 
         let config = WindowsDesktopConfig {

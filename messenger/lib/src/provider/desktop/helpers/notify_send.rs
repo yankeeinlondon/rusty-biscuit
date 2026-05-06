@@ -389,8 +389,7 @@ mod tests {
         // - omit `-A` flags from the rendered argv,
         // - mark the receipt with `dropped == "actions_libnotify_old"` so
         //   downstream callers can surface a compatibility warning.
-        let helper =
-            NotifySendHelper::new(PathBuf::from("/usr/bin/notify-send"), Some((0, 7, 7)));
+        let helper = NotifySendHelper::new(PathBuf::from("/usr/bin/notify-send"), Some((0, 7, 7)));
         let mut request = notice_request();
         request.actions.push(NotificationAction {
             id: "ok".into(),

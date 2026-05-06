@@ -2,21 +2,20 @@
 //!
 //! Three delivery strategies are wired behind a single backend:
 //!
-//! - **Helpers** (`snoretoast`, `burnttoast`) — primary delivery path probed
-//!   via `sniff` at construction time. Helpers ship interactive action
-//!   buttons and inline replies (snoretoast) that the bare WinRT toast path
-//!   does not surface. Helpers also tolerate hosts that lack a packaged app
-//!   identity, falling through to the native toast only when no helper can
-//!   handle the dispatch.
+//! - **Helpers** (`snoretoast`, `burnttoast`) — primary delivery path when
+//!   installed and scored above zero for the request. Helpers are probed via
+//!   `sniff` at construction time, ship interactive action buttons and inline
+//!   replies (snoretoast) that the bare WinRT toast path does not surface, and
+//!   tolerate hosts that lack a packaged app identity.
 //! - **`winrt-notification`** native toast — universal floor when no helper
 //!   is installed. Requires a registered App User Model ID and a Start Menu
 //!   shortcut (`messenger setup desktop`); unbundled apps will otherwise fail
 //!   to render the toast.
 //!
-//! Helpers are tried first when the dispatch shape suits one
-//! (`elect_helpers` filters them by score). The native path remains the
-//! fallback. Receipt metadata records which path served the notification:
-//! `helper_used` for helpers, `delivery=winrt` for the native toast.
+//! Helpers with `score() > 0` are tried first. The native WinRT path remains
+//! the fallback/floor when no helper can serve the dispatch. Receipt metadata
+//! records which path served the notification: `helper_used` for helpers,
+//! `delivery=winrt` for the native toast.
 //!
 //! Current bootstrap gate (only enforced when no helper succeeds):
 //!
@@ -51,7 +50,7 @@ use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 /// exact string without drifting.
 pub(crate) const WINDOWS_SETUP_REQUIRED: &str = "Windows desktop notifications require `messenger setup desktop` to register the Start Menu shortcut and App User Model ID";
 
-/// Windows WinRT toast backend with optional helper layer.
+/// Windows toast backend with helper election and native WinRT fallback.
 pub(crate) struct WindowsBackend {
     config: WindowsDesktopConfig,
     helpers: Vec<Arc<dyn HelperBackend>>,
@@ -823,10 +822,11 @@ mod tests {
     async fn native_fallback_attempts_winrt_when_bootstrap_present() {
         // On a real Windows host with a valid Start Menu shortcut, the
         // WinRT native path must be attempted when no helpers are registered.
-        // We create a fake shortcut so bootstrap passes, then assert the
-        // backend does not return MissingConfiguration.
+        // We create a fake shortcut for the configured AppID so bootstrap
+        // passes, then assert the backend does not return MissingConfiguration.
         use std::io::Write;
 
+        let app_id = "RustyBiscuit.MessengerTests";
         let temp = tempfile::tempdir().unwrap();
         let shortcut_dir = temp
             .path()
@@ -835,7 +835,7 @@ mod tests {
             .join("Start Menu")
             .join("Programs");
         std::fs::create_dir_all(&shortcut_dir).unwrap();
-        std::fs::File::create(shortcut_dir.join("RustyBiscuit.MessengerTests.lnk"))
+        std::fs::File::create(shortcut_dir.join(format!("{app_id}.lnk")))
             .unwrap()
             .write_all(b"fake")
             .unwrap();
@@ -845,7 +845,13 @@ mod tests {
         unsafe {
             std::env::set_var("APPDATA", temp.path());
         }
-        let backend = WindowsBackend::with_helpers(config_with_app_id(), Vec::new());
+        let backend = WindowsBackend::with_helpers(
+            WindowsDesktopConfig {
+                app_id: Some(app_id.into()),
+                prefer_helpers: Vec::new(),
+            },
+            Vec::new(),
+        );
         let result = backend.send(request()).await;
         unsafe {
             std::env::remove_var("APPDATA");
@@ -857,12 +863,22 @@ mod tests {
             "expected bootstrap to pass with fake shortcut, got {result:?}"
         );
 
-        // If WinRT succeeds, the receipt marks native delivery.
-        if let Ok(receipt) = result {
-            assert_eq!(
-                receipt.metadata.get("helper_used").map(String::as_str),
-                Some("native"),
-            );
+        match result {
+            Ok(receipt) => {
+                assert!(
+                    receipt.metadata.get("helper_used").map(String::as_str) == Some("native")
+                        || receipt.metadata.get("delivery").map(String::as_str) == Some("winrt"),
+                    "expected native WinRT receipt metadata, got {:?}",
+                    receipt.metadata,
+                );
+            }
+            Err(MessengerError::Transport { provider, message })
+                if provider == ProviderKind::Desktop && message.contains("WinRT toast failed") =>
+            {
+                // OS limitation: this runner passed bootstrap validation but
+                // cannot display unbundled WinRT toasts in the test host.
+            }
+            Err(other) => panic!("expected native receipt or WinRT host limitation, got {other:?}"),
         }
     }
 }
