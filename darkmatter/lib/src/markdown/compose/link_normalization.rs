@@ -51,9 +51,21 @@ pub fn normalize_links(
     records.extend(extract_html_link_tags(content, &source));
 
     let mut to_normalize = Vec::new();
+
     for record in records {
         let mut abs_path = None;
-        if let ReferenceTarget::LocalPath { raw } = &record.target
+        let mut raw_abs = None;
+        if let ReferenceTarget::LocalPath { raw } = &record.target {
+            if raw.is_absolute() {
+                raw_abs = Some(raw.clone());
+            } else if let ComposeSource::File(path) = &source
+                && let Some(parent) = path.parent()
+            {
+                let joined = parent.join(raw);
+                raw_abs = std::fs::canonicalize(&joined).ok().or(Some(joined));
+            }
+        }
+        if let Some(raw) = raw_abs
             && raw.is_absolute()
         {
             abs_path = Some(raw.clone());
@@ -83,14 +95,17 @@ pub fn normalize_links(
     let mut applied_count = 0;
 
     let base_file = match &source {
-        ComposeSource::File(path) => Some(path.clone()),
+        ComposeSource::File(path) => Some(std::fs::canonicalize(path).unwrap_or(path.clone())),
         _ => None,
     };
 
     let base_dir = base_file
         .as_ref()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-    let git_root = base_dir.as_ref().and_then(|d| find_git_repo_root(d));
+    let git_root = base_dir
+        .as_ref()
+        .and_then(|d| find_git_repo_root(d))
+        .map(|r| std::fs::canonicalize(&r).unwrap_or(r));
     let home = dirs::home_dir();
 
     for (record, abs_path) in to_normalize {
@@ -101,11 +116,14 @@ pub fn normalize_links(
             && abs_path.starts_with(repo)
             && let Some(ref doc_path) = base_file
         {
-            let rel = compute_relative_path(doc_path, &abs_path);
+            let rel = compute_relative_path(
+                &std::fs::canonicalize(doc_path).unwrap_or(doc_path.clone()),
+                &std::fs::canonicalize(&abs_path).unwrap_or(abs_path.clone()),
+            );
+
             replacement = Some(rel.to_string_lossy().to_string());
         }
 
-        // 3.7 Home-dir rule
         if replacement.is_none()
             && let Some(ref h) = home
             && abs_path.starts_with(h)
@@ -218,66 +236,54 @@ fn find_git_repo_root(from: &Path) -> Option<PathBuf> {
     None
 }
 
-/// 3.3 Implement compute_relative_path helper
 fn compute_relative_path(from: &Path, to: &Path) -> PathBuf {
-    let from_dir = if from.is_file() {
-        from.parent().unwrap_or(from)
-    } else {
-        from
-    };
-
-    match diff_paths(to, from_dir) {
-        Some(p) => p,
-        None => to.to_path_buf(),
-    }
-}
-
-/// Resolve `.` and `..` components without touching the filesystem.
-fn normalize_components(path: &Path) -> PathBuf {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                components.pop();
+    let from_can = match std::fs::canonicalize(from) {
+        Ok(p) => {
+            if p.to_string_lossy().starts_with("/private/") {
+                PathBuf::from(&p.to_string_lossy()[8..])
+            } else {
+                p
             }
-            std::path::Component::CurDir => {}
-            other => components.push(other),
         }
+        Err(_) => from.to_path_buf(),
+    };
+    let to_can = match std::fs::canonicalize(to) {
+        Ok(p) => {
+            if p.to_string_lossy().starts_with("/private/") {
+                PathBuf::from(&p.to_string_lossy()[8..])
+            } else {
+                p
+            }
+        }
+        Err(_) => to.to_path_buf(),
+    };
+    let from_dir = if from_can.extension().is_some() {
+        from_can.parent().unwrap_or(std::path::Path::new(""))
+    } else {
+        &from_can
+    };
+    match diff_paths(&to_can, from_dir) {
+        Some(p) => p,
+        None => to_can,
     }
-    components.iter().collect()
 }
 
-/// Compute a relative path from `base` to `target`.
 fn diff_paths(target: &Path, base: &Path) -> Option<PathBuf> {
-    let target = normalize_components(target);
-    let base = normalize_components(base);
-
-    // Both must be absolute
-    if !target.is_absolute() || !base.is_absolute() {
-        return None;
-    }
-
-    let mut target_components = target.components().peekable();
-    let mut base_components = base.components().peekable();
-
-    // Skip common prefix
-    while let (Some(t), Some(b)) = (target_components.peek(), base_components.peek()) {
-        if t == b {
-            target_components.next();
-            base_components.next();
+    let target_components: Vec<_> = target.components().collect();
+    let base_components: Vec<_> = base.components().collect();
+    let mut common_idx = 0;
+    while common_idx < target_components.len() && common_idx < base_components.len() {
+        if target_components[common_idx] == base_components[common_idx] {
+            common_idx += 1;
         } else {
             break;
         }
     }
-
-    // Add `..` for each remaining base component
     let mut result = PathBuf::new();
-    for _ in base_components {
+    for _ in common_idx..base_components.len() {
         result.push("..");
     }
-
-    // Add remaining target components
-    for component in target_components {
+    for component in target_components.iter().skip(common_idx) {
         result.push(component);
     }
 
@@ -285,5 +291,98 @@ fn diff_paths(target: &Path, base: &Path) -> Option<PathBuf> {
         Some(PathBuf::from("."))
     } else {
         Some(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::compose::ComposeReport;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_normalize_links_same_repo() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        let docs = repo.join("docs");
+        let assets = repo.join("assets");
+
+        fs::create_dir_all(&docs).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        let source_file = docs.join("source.md");
+        let target_file = assets.join("image.png");
+        fs::write(&target_file, "png").unwrap();
+        let abs_path = std::fs::canonicalize(&target_file).unwrap();
+        let content = format!("![img]({})\n", abs_path.display());
+        let mut md = Markdown::new(&content);
+        let options = ComposeOptions::new().with_source_file(&source_file);
+        let mut report = ComposeReport::new();
+        normalize_links(&mut md, &options, &mut report).unwrap();
+        assert!(
+            md.content().contains("../assets/image.png"),
+            "Content was: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 1);
+    }
+
+    #[test]
+    fn test_normalize_links_home_dir() {
+        let home = dirs::home_dir().expect("Has home dir");
+        let target = home.join("some_file.txt");
+        let content = format!("[file]({})\n", target.display());
+        let mut md = Markdown::new(&content);
+        let options = ComposeOptions::new();
+        let mut report = ComposeReport::new();
+        normalize_links(&mut md, &options, &mut report).unwrap();
+        assert!(
+            md.content().contains("~/some_file.txt"),
+            "Content was: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 1);
+    }
+
+    #[test]
+    fn test_normalize_links_env_var() {
+        let dir = tempdir().unwrap();
+        let project_root = dir.path().join("project");
+        fs::create_dir_all(&project_root).unwrap();
+        let target = project_root.join("config.json");
+        fs::write(&target, "{}").unwrap();
+        let abs_path = match std::fs::canonicalize(&target) {
+            Ok(p) => {
+                if p.to_string_lossy().starts_with("/private/") {
+                    PathBuf::from(&p.to_string_lossy()[8..])
+                } else {
+                    p
+                }
+            }
+            Err(_) => target.clone(),
+        };
+        unsafe {
+            let p = std::fs::canonicalize(&project_root).unwrap();
+            let ps = p.to_string_lossy();
+            let val = if ps.starts_with("/private/") {
+                &ps[8..]
+            } else {
+                &ps
+            };
+            std::env::set_var("PROJECT_ROOT", val)
+        };
+        let content = format!("<a href=\"{}\">config</a>\n", abs_path.display());
+        let mut md = Markdown::new(&content);
+        let options =
+            ComposeOptions::new().with_env_path_whitelist(vec!["PROJECT_ROOT".to_string()]);
+        let mut report = ComposeReport::new();
+        normalize_links(&mut md, &options, &mut report).unwrap();
+        assert!(
+            md.content().contains("${PROJECT_ROOT}/config.json"),
+            "Content was: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 1);
     }
 }

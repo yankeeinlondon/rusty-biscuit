@@ -137,3 +137,11 @@ Implement filepath interpolation for the Darkmatter compose pipeline per the fun
 - **Logging:** All ENV-var substitutions emit the specified warning via `biscuit_terminal::Status`.
 - **Security:** Strict whitelist for ENV vars — no ambient environment leakage. Default whitelist is minimal (`PROJECT_ROOT`, `DOCS_BASE`).
 - **Monorepo:** Repo boundary is the git root, not the workspace member. This ensures relative links work across workspace members.
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/link_normalization.rs
+    - darkmatter/lib/tests/link_interpolation_integration.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []

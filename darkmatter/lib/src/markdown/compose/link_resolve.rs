@@ -9,12 +9,11 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceRecord, ReferenceTarget,
-    local::{extract_markdown_links, extract_markdown_images},
     html::{
-        extract_html_links, extract_html_images, extract_html_videos,
-        extract_html_audio, extract_html_sources, extract_html_iframes,
-        extract_html_link_tags,
+        extract_html_audio, extract_html_iframes, extract_html_images, extract_html_link_tags,
+        extract_html_links, extract_html_sources, extract_html_videos,
     },
+    local::{extract_markdown_images, extract_markdown_links},
 };
 use crate::markdown::types::MarkdownResult;
 use std::path::Path;
@@ -105,7 +104,11 @@ pub fn link_resolve(
     Ok(())
 }
 
-fn resolve_absolute(raw: &str, base_dir: Option<&Path>, options: &ComposeOptions) -> Option<std::path::PathBuf> {
+fn resolve_absolute(
+    raw: &str,
+    base_dir: Option<&Path>,
+    options: &ComposeOptions,
+) -> Option<std::path::PathBuf> {
     let mut file_ref = biscuit_file::FileReference::new(raw).ok()?;
 
     // Add magic paths from options
@@ -127,7 +130,11 @@ fn resolve_absolute(raw: &str, base_dir: Option<&Path>, options: &ComposeOptions
     None
 }
 
-fn find_target_range(content: &str, record: &ReferenceRecord, raw_target: &str) -> Option<(usize, usize)> {
+fn find_target_range(
+    content: &str,
+    record: &ReferenceRecord,
+    raw_target: &str,
+) -> Option<(usize, usize)> {
     let span = &record.origin.span;
     let outer_text = &content[span.clone()];
 
@@ -180,7 +187,10 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b).unwrap().to_string_lossy().to_string();
+        let resolved_path = fs::canonicalize(&file_b)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert_eq!(report.link_resolves_applied, 2);
@@ -193,14 +203,18 @@ mod tests {
         let file_b = dir.path().join("b.md");
         fs::write(&file_b, "target content").unwrap();
 
-        let content = r#"<a href="./b.md">link</a> and <img src="b.md"> and <iframe src="./b.md"></iframe>"#;
+        let content =
+            r#"<a href="./b.md">link</a> and <img src="b.md"> and <iframe src="./b.md"></iframe>"#;
         let mut md = Markdown::new(content);
         let options = ComposeOptions::new().with_source_file(&file_a);
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b).unwrap().to_string_lossy().to_string();
+        let resolved_path = fs::canonicalize(&file_b)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
@@ -221,7 +235,10 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b).unwrap().to_string_lossy().to_string();
+        let resolved_path = fs::canonicalize(&file_b)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert_eq!(report.link_resolves_applied, 3);
     }
