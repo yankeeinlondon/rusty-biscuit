@@ -109,7 +109,7 @@ The action mutator(s) are defined by the `actions` frontmatter property under th
 
     Merges `value` into the Frontmatter property `prop`. This assumes that the Frontmatter `prop` is either empty/null/undefined or an object shaped property. If it is not then we will immediately stop execution with a `InvalidAction` error.
 
-    > **Note (proposed default — shallow merge):**
+    > **Note (semantics):**
     >
     > - performs a **shallow** object merge: the result is the top-level key union of `prop` and `value`
     > - on key collisions, the value from the new `value` overwrites the existing key
@@ -117,9 +117,16 @@ The action mutator(s) are defined by the `actions` frontmatter property under th
     > - if `value` is not an object (e.g. it is a string, number, boolean, or array at the top level) this yields an `InvalidAction` error
     > - if `prop` is empty/null/undefined the result is simply `value`
 
-    > **Open question:**
-    >
-    > Confirm shallow-vs-deep merge semantics. The above describes the proposed default (shallow with array-replace). If deep merge or array-concat is desired, this section needs revision.
+### Action Atomicity
+
+Actions within a single iteration are applied **all-or-nothing**:
+
+- Actions are applied to a **staged copy** of the post-prompt frontmatter; the live state is not mutated until every action in the list succeeds.
+- Only on full success of every action is the staged copy committed as iteration N+1's incoming frontmatter.
+- Any single action raising an error (`InvalidAction`, `InvalidIncrementType`, `InvalidDecrementType`, etc.) **discards the entire staged copy** — no partial mutations are persisted.
+- Under `fail_fast: false`, the next iteration starts from the **pre-action** frontmatter of the failed iteration (i.e. iteration N's incoming state), not from a partially-mutated state.
+- Error messages must still report **which action index failed** within the list, e.g. `InvalidIncrementType at iteration 7, action 2 of 4`.
+- If the **prompt run itself** fails (non-zero exit, agent error, etc.), no actions have been staged yet — there is nothing to roll back. The iteration's frontmatter remains in its pre-action state, and `fail_fast` semantics from [Error Handling](#error-handling) determine whether the loop halts or continues. Under `fail_fast: false`, the next iteration sees the same frontmatter the failed iteration started from (and `last_output` / `last_exit_code` reflect that failure).
 
 ## Iteration Semantics
 
@@ -142,14 +149,19 @@ To guard against runaway loops, every loop has a maximum iteration count.
 
 - **Default:** `max_iterations` defaults to **100**.
 - **Per-prompt override:** set `loop.max` in the frontmatter to raise or lower this for a specific prompt.
-- **Runtime override:** the CLI accepts `--max-iterations <N>`, and the env variable `MAX_ITERATIONS` provides the same override (mirroring the `--fail-fast` / `FAIL_FAST` precedent established by [sequence](../../_completed/2026-04-04-sequence/spec.md)).
-- Precedence (highest to lowest): CLI flag → env var → `loop.max` → default 100.
+- **Runtime override:** the CLI accepts `--max-iterations <N>`, and the env variable `CLAUDINE_MAX_ITERATIONS` provides the same override (mirroring the `--fail-fast` / `CLAUDINE_FAIL_FAST` precedent established by [sequence](../../_completed/2026-04-04-sequence/spec.md)).
+- Precedence (highest to lowest): CLI flag → env var (`CLAUDINE_MAX_ITERATIONS`) → `loop.max` → default 100.
 
 When the cap is exceeded, the loop halts immediately and surfaces a `LoopLimitExceeded` error. The error message must include the cap value and the prompt path so the user can diagnose quickly.
 
-> **Open question:**
->
-> Confirm the env-var name. `MAX_ITERATIONS` is a bare global that may collide with other tools. A namespaced alternative such as `CLAUDINE_MAX_ITERATIONS` may be preferable; revisit this alongside `FAIL_FAST` if/when those are renamed.
+### Migration Note
+
+This feature renames sequence's env vars to a namespaced form to avoid collisions with bare globals used by other tools:
+
+- `FAIL_FAST` → `CLAUDINE_FAIL_FAST`
+- `CLAUDINE_MAX_ITERATIONS` is introduced fresh by this feature (sequence does not define a `MAX_ITERATIONS` env var).
+
+The bare `FAIL_FAST` name continues to work for **one release** with a deprecation warning logged once per process, after which it is removed. When a process reads the legacy `FAIL_FAST` env var, Claudine emits a `tracing::warn!` once per process pointing the user at the new `CLAUDINE_FAIL_FAST` name (matching the legacy single-brace template-placeholder deprecation in `claudine/lib/src/dispatch/template.rs`). See [sequence](../../_completed/2026-04-04-sequence/spec.md) for the originating precedent.
 
 ## Ambient Variables
 
@@ -180,9 +192,9 @@ Loops inherit the `fail_fast` semantics established by [sequence](../../_complet
 
 - **Default behavior is fail-fast**: if a single iteration's prompt or any of its actions fails, the loop halts immediately with a clear error.
 - **Per-prompt opt-out:** set `loop.fail_fast: false` in the frontmatter to make the loop continue past per-iteration failures (still subject to `max_iterations`).
-- **Runtime override:** the existing `--fail-fast <boolean>` CLI flag and `FAIL_FAST` env variable apply unchanged. When a document with `loop` is run, `FAIL_FAST` is set to `true` or `false` for the prompt environment, identical to sequence's behavior.
+- **Runtime override:** the existing `--fail-fast <boolean>` CLI flag and `CLAUDINE_FAIL_FAST` env variable apply unchanged. When a document with `loop` is run, `CLAUDINE_FAIL_FAST` is set to `true` or `false` for the prompt environment, identical to sequence's behavior. (See [Migration Note](#migration-note) for the rename from `FAIL_FAST`.)
 - All loop errors must include the **failing iteration index** (1-based) in their message — e.g. `LoopLimitExceeded at iteration 100`, `InvalidIncrementType at iteration 7`.
 
-> **Open question:**
+> **Note:**
 >
-> When `fail_fast: false`, should `last_exit_code` reflect the failing iteration's exit code so the next iteration's condition can branch on it? The current ambient-variable contract says yes, but this should be confirmed against any logging / reporting expectations.
+> Under `fail_fast: false`, `last_exit_code` reflects the **failing iteration's** exit code so subsequent iterations' conditions can branch on the prior failure. This is the natural continuation of the ambient-variable contract; for example, a loop can retry until success with `until: "last_exit_code == 0"`.
