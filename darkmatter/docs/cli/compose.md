@@ -7,6 +7,8 @@ It is used for document assembly workflows like:
 - interpolation (`{{ ... }}`)
 - replacement transforms
 - transclusion (`::file`, `::code`, and related directives)
+- **link resolve** (converts relative links to absolute paths before transclusion)
+- **link normalization** (converts absolute paths back to portable forms in the final document)
 
 Unlike `read`, `compose` focuses on transformed content, not display rendering defaults.
 
