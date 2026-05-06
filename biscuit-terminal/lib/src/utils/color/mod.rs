@@ -9,13 +9,13 @@ pub mod tailwind;
 pub mod web;
 pub mod wrappers;
 
-pub use basic::{basic_color_to_rgb, BasicColor, FgBg};
+pub use basic::{BasicColor, FgBg, basic_color_to_rgb};
 pub use color_enum::Color;
 pub use hdr::HdrColor;
 pub use octet::{Octet, OctetError};
 pub use rgb::RgbColor;
 pub use tailwind::Tailwind;
-pub use web::{WebColor, WEB_COLOR_LOOKUP};
+pub use web::{WEB_COLOR_LOOKUP, WebColor};
 pub use wrappers::{BasicColorWrapper, RgbColorWrapper, TailwindColorWrapper, WebColorWrapper};
 
 pub trait TermColor<'a> {

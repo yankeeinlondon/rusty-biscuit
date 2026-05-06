@@ -54,11 +54,7 @@ use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{
-    CapturedFrame, TerminalHarness,
-    run_with_timeout,
-    QUERY_TIMEOUT, CLEANUP_TIMEOUT,
-};
+use super::{CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, TerminalHarness, run_with_timeout};
 
 /// Harness that drives Terminal.app via `osascript`.
 ///

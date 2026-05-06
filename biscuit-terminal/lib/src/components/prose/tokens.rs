@@ -5,11 +5,11 @@
 
 use crate::terminal::Terminal;
 
+use super::styles::BlockTagAction;
 use super::styles::{
     StyleState, atomic_token_layer, atomic_token_to_escape, atomic_token_to_escape_with_term,
     block_tag_layer, block_tag_to_escape,
 };
-use super::styles::BlockTagAction;
 
 /// Parse an opening tag into its name and attributes.
 pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(String, String)>)> {

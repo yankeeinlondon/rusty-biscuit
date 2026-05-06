@@ -94,7 +94,8 @@ impl Run for FlowchartArgs {
             width_str.as_deref(),
             &self.layout,
         )?;
-        display_mermaid(&diagram,
+        display_mermaid(
+            &diagram,
             &instructions,
             "flowchart",
             &self.layout,
