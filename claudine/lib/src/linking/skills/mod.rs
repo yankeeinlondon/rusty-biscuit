@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::provider::Provider;
 use super::filter::ResourceFilter;
+use crate::provider::Provider;
 
 pub mod native;
 pub mod partial;
@@ -127,8 +127,8 @@ pub struct SkillFixSummary {
 pub(super) mod test_helpers {
     use std::collections::HashMap;
 
-    use crate::linking::paths::ProviderPaths;
     use crate::linking::capabilities::ALL_PROVIDERS;
+    use crate::linking::paths::ProviderPaths;
     use crate::provider::Provider;
 
     pub fn empty_provider(provider: Provider) -> ProviderPaths {
@@ -168,7 +168,10 @@ pub(super) mod test_helpers {
             },
         );
 
-        super::super::paths::ProviderSkillPaths::from_providers_for_test(providers, base.to_path_buf())
+        super::super::paths::ProviderSkillPaths::from_providers_for_test(
+            providers,
+            base.to_path_buf(),
+        )
     }
 
     pub fn setup_skill(dir: &std::path::Path, name: &str, description: &str, body: &str) {
@@ -181,7 +184,9 @@ pub(super) mod test_helpers {
         .unwrap();
     }
 
-    pub fn test_paths_with_gemini(base: &std::path::Path) -> super::super::paths::ProviderSkillPaths {
+    pub fn test_paths_with_gemini(
+        base: &std::path::Path,
+    ) -> super::super::paths::ProviderSkillPaths {
         let mut providers = HashMap::new();
         for provider in ALL_PROVIDERS {
             providers.insert(provider, empty_provider(provider));
@@ -218,6 +223,9 @@ pub(super) mod test_helpers {
             },
         );
 
-        super::super::paths::ProviderSkillPaths::from_providers_for_test(providers, base.to_path_buf())
+        super::super::paths::ProviderSkillPaths::from_providers_for_test(
+            providers,
+            base.to_path_buf(),
+        )
     }
 }

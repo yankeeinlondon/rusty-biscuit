@@ -192,9 +192,7 @@ impl ProtectService {
 mod tests {
     use super::*;
     use crate::protect::catalog::RuleGroup;
-    use crate::protect::config::{
-        CustomPattern, RuleGroupConfig, RuleGroupDetailedConfig,
-    };
+    use crate::protect::config::{CustomPattern, RuleGroupConfig, RuleGroupDetailedConfig};
 
     fn default_service() -> ProtectService {
         ProtectService::new(ProtectConfig::default(), ProtectPlatform::current()).unwrap()

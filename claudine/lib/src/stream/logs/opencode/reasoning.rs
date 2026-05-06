@@ -14,12 +14,12 @@ use tracing::{debug, warn};
 use crate::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use crate::stream::summary::{RateLimitInfo, StderrDiagnostics};
 
-use crate::stream::logs::opencode::events::{
-    AssetType, LogClassification, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
-};
 use crate::stream::logs::opencode::errors::{
     asset_type_as_str, classify, classify_raw, get_http_status_description, max_reset_at,
     merge_rate_limit, render_malformed_asset_message, render_rate_limit_message, strip_ansi,
+};
+use crate::stream::logs::opencode::events::{
+    AssetType, LogClassification, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
 };
 
 /// Whether an incoming stderr log line was converted into a semantic event
@@ -535,8 +535,6 @@ pub fn merge_stderr_state_into_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
 
     #[derive(Default)]
     struct RecordingSink {
@@ -721,7 +719,10 @@ mod tests {
                 assert_string(extra, "classification", "api_failure");
                 assert_string(extra, "error_name", "AI_APICallError");
                 assert_eq!(extra.get("status_code"), Some(&json!(500)));
-                assert_eq!(message, "AI_APICallError (500: Internal Server Error): upstream boom");
+                assert_eq!(
+                    message,
+                    "AI_APICallError (500: Internal Server Error): upstream boom"
+                );
             }
             other => panic!("expected Warning, got {other:?}"),
         }

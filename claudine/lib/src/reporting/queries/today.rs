@@ -1,9 +1,9 @@
 use chrono::NaiveDate;
 use rusqlite::Connection;
 
+use crate::error::Result;
 use crate::reporting::metrics::summarize_metrics;
 use crate::reporting::types::{DailySummary, DateRange, ReportingFilters};
-use crate::error::Result;
 
 use super::common::{
     load_all_tool_stats, load_labeled_counts, load_provider_split, load_recovery_events,

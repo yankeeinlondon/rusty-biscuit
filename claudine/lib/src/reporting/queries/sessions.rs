@@ -1,11 +1,11 @@
 use rusqlite::Connection;
 
+use crate::error::{ClaudineError, Result};
 use crate::reporting::metrics::{classify_tool, normalize_tool_name, summarize_metrics};
 use crate::reporting::types::{
     DailyToolStat, DateRange, ErrorRecord, ReportingFilters, SessionDetailReport, SessionEvent,
     SessionInfo, SessionsReport,
 };
-use crate::error::{ClaudineError, Result};
 
 use super::common::{
     load_all_tool_stats, load_recovery_events, load_sessions, load_totals, merge_tool_stats,

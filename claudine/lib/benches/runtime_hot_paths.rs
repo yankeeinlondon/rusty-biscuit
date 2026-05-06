@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use claudine::dispatch::loader::{compile_canonical_runtime, load_claudine_config};
-use claudine::provider::Provider;
 use claudine::protect::catalog::{ProtectPlatform, RuleGroup};
 use claudine::protect::config::{
     CustomPattern, ProtectConfig, ProtectRuleToggles, RuleGroupConfig, RuleGroupDetailedConfig,
 };
 use claudine::protect::service::{ProtectRequest, ProtectService};
+use claudine::provider::Provider;
 use claudine::stream::semantic::NullSemanticSink;
 use claudine::stream::{ParserConfig, create_semantic_parser};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
