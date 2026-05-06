@@ -656,7 +656,7 @@ fn test_git_status_subcommand_compact_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Status"))
-        .stdout(predicate::str::contains("Meta").not());
+        .stdout(predicate::str::contains("\x1b[1m\x1b[4mMeta").not());
 }
 
 #[test]

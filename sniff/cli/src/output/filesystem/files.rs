@@ -50,7 +50,7 @@ pub fn render_files_section(
     verbose: u8,
     filter: &FilesFilter,
 ) -> String {
-    use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+    use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
     let mut out = String::new();
