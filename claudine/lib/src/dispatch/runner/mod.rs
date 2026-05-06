@@ -965,7 +965,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Flattened-alias `when` evaluation tests (review-1, Phase 1)
+    // `when` evaluation tests via EventMetaConditionLookup
     // =========================================================================
 
     #[tokio::test]
@@ -1089,10 +1089,9 @@ mod tests {
 
     #[tokio::test]
     async fn when_nested_tool_input_path() {
-        // Already works via `serde_json::to_value(meta)` because
-        // `tool_input` is a top-level JSON object on EventMeta. This
-        // test guards against regression when alias flattening is
-        // refactored.
+        // `tool_input` is a top-level field on EventMeta and resolves
+        // directly through EventMetaExpressionLookup. This test guards
+        // against regression in the expression evaluation path.
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
         let mut meta = make_meta_for_when_tests();
@@ -1156,9 +1155,8 @@ mod tests {
 
     #[tokio::test]
     async fn when_missing_git_block_is_falsy() {
-        // When `meta.env.git` is None, the `git` alias is omitted from
-        // the JSON payload entirely so `git.branch` resolves to Null
-        // and the condition is falsy.
+        // When `meta.env.git` is None, `git.branch` resolves to Null
+        // through EventMetaExpressionLookup and the condition is falsy.
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
         let mut meta = make_meta_for_when_tests();
