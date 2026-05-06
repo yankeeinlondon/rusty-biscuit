@@ -58,6 +58,7 @@ mod types;
 pub mod block_pairs;
 pub mod expression;
 pub mod interpolation;
+pub(crate) mod link_normalization;
 pub(crate) mod link_resolve;
 pub mod page_blocks;
 pub mod replacement;
@@ -560,9 +561,19 @@ impl Markdown {
                         }
                     }
                     ComposePhase::Finalization => {
-                        // Finalization stage is wired in a later phase
-                        // (root-only execution) — Phase 1 only registers
-                        // the new operations and phase variant.
+                        if runtime.transclusion.depth() <= 1 {
+                            let op_start = perf.is_enabled().then(std::time::Instant::now);
+                            self.run_finalization_operation(*operation, &options, &mut report)?;
+                            if let Some(start) = op_start {
+                                let kind = match operation {
+                                    ComposeOperation::LinkNormalization => {
+                                        perf::PerfMetricKind::LinkNormalization
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                perf.record(kind, start.elapsed());
+                            }
+                        }
                     }
                 }
             }
@@ -663,6 +674,20 @@ impl Markdown {
                     e
                 ))),
             },
+            _ => Ok(()),
+        }
+    }
+
+    fn run_finalization_operation(
+        &mut self,
+        operation: ComposeOperation,
+        options: &ComposeOptions,
+        report: &mut ComposeReport,
+    ) -> MarkdownResult<()> {
+        match operation {
+            ComposeOperation::LinkNormalization => {
+                link_normalization::normalize_links(self, options, report)
+            }
             _ => Ok(()),
         }
     }
