@@ -16,6 +16,10 @@ docs_updated_during_phase_5:
   - darkmatter/docs/operations/link-resolve.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - darkmatter
   - darkmatter-cli
