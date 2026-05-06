@@ -313,3 +313,4 @@ claudine local hosts
 
 > Not yet ready but will be added soon.
 
+Providing the right levels of isolation for concurrent work in the same repo is becoming more and more important and **git**'s **worktree** feature is the primitive that most people turn to.
