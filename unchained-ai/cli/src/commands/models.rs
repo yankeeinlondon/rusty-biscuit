@@ -245,7 +245,10 @@ fn metadata_to_json(meta: Option<&ProviderModelMetadata>) -> Value {
         );
     }
     if let Some(defaults) = &meta.default_parameters {
-        map.insert("default_parameters".into(), default_parameters_to_json(defaults));
+        map.insert(
+            "default_parameters".into(),
+            default_parameters_to_json(defaults),
+        );
     }
     if let Some(cutoff) = &meta.knowledge_cutoff {
         map.insert("knowledge_cutoff".into(), Value::String(cutoff.clone()));

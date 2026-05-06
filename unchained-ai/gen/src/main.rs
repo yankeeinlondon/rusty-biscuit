@@ -5,7 +5,9 @@ use clap::Parser;
 use strum::IntoEnumIterator;
 use tracing::{Level, info, warn};
 
-use unchained_ai::api::openai_api::{get_api_keys, get_provider_models_from_api, ProviderModelEntry};
+use unchained_ai::api::openai_api::{
+    ProviderModelEntry, get_api_keys, get_provider_models_from_api,
+};
 use unchained_ai::rigging::providers::Provider;
 
 mod errors;
@@ -124,13 +126,12 @@ async fn process_single_provider(
     output_dir: &std::path::Path,
     dry_run: bool,
 ) -> Result<ProviderResult, GeneratorError> {
-    let entries: Vec<ProviderModelEntry> =
-        get_provider_models_from_api(provider, api_key)
-            .await
-            .map_err(|e| GeneratorError::FetchFailed {
-                provider: format!("{:?}", provider),
-                reason: e.to_string(),
-            })?;
+    let entries: Vec<ProviderModelEntry> = get_provider_models_from_api(provider, api_key)
+        .await
+        .map_err(|e| GeneratorError::FetchFailed {
+            provider: format!("{:?}", provider),
+            reason: e.to_string(),
+        })?;
 
     if entries.is_empty() {
         return Err(GeneratorError::FetchFailed {
@@ -324,9 +325,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         metadata_gen.register(model_id.clone(), merged.clone());
 
-        if is_openrouter
-            && let Some(rich_meta) = merged
-        {
+        if is_openrouter && let Some(rich_meta) = merged {
             metadata_gen.register_openrouter(model_id.clone(), rich_meta);
         }
     }
@@ -353,10 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !cli.dry_run {
         let openrouter_path = output_dir.join("metadata_openrouter_generated.rs");
         write_atomic(&openrouter_path, &openrouter_code)?;
-        info!(
-            "Wrote OpenRouter metadata to {}",
-            openrouter_path.display()
-        );
+        info!("Wrote OpenRouter metadata to {}", openrouter_path.display());
     } else {
         println!(
             "\n--- OpenRouter Metadata ({} entries) ---",
