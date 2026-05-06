@@ -17,7 +17,7 @@
 //! invocation): mutating `PATH` from inside Criterion's test harness
 //! would race with other benches that read environment state.
 
-use criterion::{Criterion, black_box};
+use criterion::{Criterion, Throughput, black_box};
 use sniff::ProgramsInfo;
 use sniff::executable_index::{ExecutableIndex, find_programs_with_source_from_index};
 
@@ -356,14 +356,14 @@ pub fn register(c: &mut Criterion) {
     // ---------- ExecutableIndex build modes ----------
     let mut build_group = util::configure_group(c, "programs");
 
-    build_group.bench_function("index_build_lazy", |b| {
+    build_group.bench_function("executable_index_build_lazy", |b| {
         b.iter(|| {
             let index = ExecutableIndex::build();
             black_box(index);
         });
     });
 
-    build_group.bench_function("index_build_eager_path", |b| {
+    build_group.bench_function("executable_index_build_eager_path_scan", |b| {
         b.iter(|| {
             let index = ExecutableIndex::build_eager_path();
             black_box(index);
@@ -376,7 +376,8 @@ pub fn register(c: &mut Criterion) {
     let mut lookup_group = util::configure_group(c, "programs_bulk_lookup");
 
     let lazy_index = ExecutableIndex::build();
-    lookup_group.bench_function("lookup_lazy", |b| {
+    lookup_group.throughput(Throughput::Elements(BULK_LOOKUPS.len() as u64));
+    lookup_group.bench_function("bulk_lookup_25_names_lazy_index", |b| {
         b.iter(|| {
             let results = find_programs_with_source_from_index(
                 black_box(&lazy_index),
@@ -387,7 +388,8 @@ pub fn register(c: &mut Criterion) {
     });
 
     let eager_index = ExecutableIndex::build_eager_path();
-    lookup_group.bench_function("lookup_eager_path", |b| {
+    lookup_group.throughput(Throughput::Elements(BULK_LOOKUPS.len() as u64));
+    lookup_group.bench_function("bulk_lookup_25_names_eager_index", |b| {
         b.iter(|| {
             let results = find_programs_with_source_from_index(
                 black_box(&eager_index),
@@ -398,7 +400,8 @@ pub fn register(c: &mut Criterion) {
     });
 
     // Large workload: ~150 names to simulate long-PATH bulk detection.
-    lookup_group.bench_function("lookup_lazy_large", |b| {
+    lookup_group.throughput(Throughput::Elements(BULK_LOOKUPS_LARGE.len() as u64));
+    lookup_group.bench_function("bulk_lookup_150_names_lazy_index", |b| {
         b.iter(|| {
             let results = find_programs_with_source_from_index(
                 black_box(&lazy_index),
@@ -408,7 +411,8 @@ pub fn register(c: &mut Criterion) {
         });
     });
 
-    lookup_group.bench_function("lookup_eager_path_large", |b| {
+    lookup_group.throughput(Throughput::Elements(BULK_LOOKUPS_LARGE.len() as u64));
+    lookup_group.bench_function("bulk_lookup_150_names_eager_index", |b| {
         b.iter(|| {
             let results = find_programs_with_source_from_index(
                 black_box(&eager_index),
@@ -423,7 +427,7 @@ pub fn register(c: &mut Criterion) {
     // ---------- end-to-end fan-out ----------
     let mut fanout_group = util::configure_slow_group(c, "programs_fanout");
 
-    fanout_group.bench_function("programs_info_detect", |b| {
+    fanout_group.bench_function("programs_detect_all_8_categories_fanout", |b| {
         b.iter(|| {
             let programs = ProgramsInfo::detect();
             black_box(programs);
