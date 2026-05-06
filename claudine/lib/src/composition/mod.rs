@@ -10,6 +10,7 @@ pub mod closure;
 mod error;
 mod guardrails;
 pub mod lifecycle;
+pub mod loop_actions;
 pub mod loop_config;
 pub mod preflight;
 mod prepare;
