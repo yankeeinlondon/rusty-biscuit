@@ -41,9 +41,7 @@ pub fn register(c: &mut Criterion) {
 
         // Prepare structure and inventory outside the timed loop so
         // only `refresh_package_boundaries` is measured.
-        let mut repo_info = detect_repo_structure(fixture.path())
-            .unwrap()
-            .unwrap();
+        let mut repo_info = detect_repo_structure(fixture.path()).unwrap().unwrap();
         let inventory = scan_file_inventory(fixture.path()).unwrap();
         let mut packages = repo_info.packages.take().unwrap();
 

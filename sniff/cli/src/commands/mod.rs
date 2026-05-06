@@ -1,8 +1,6 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
-use sniff::filesystem::blast_radius::{
-    ChangeScope, ChangedPathKind, find_blast_radius_documents,
-};
+use sniff::filesystem::blast_radius::{ChangeScope, ChangedPathKind, find_blast_radius_documents};
 use sniff::package::{enrich_dependency, is_major_update, is_owner_repo_shorthand};
 use sniff::programs::ProgramsInfo;
 
@@ -18,16 +16,16 @@ use crate::args::{
 use crate::output::{self, OutputFilter, PathListFormat};
 use crate::perf::{CliPerf, handle_no_results};
 
-mod repo;
 mod remote;
+mod repo;
 
-use repo::{
-    RepoPackageAreasArgs, RepoPackagesArgs, handle_file_list_command,
-    handle_repo_package_areas, handle_repo_packages,
-};
 use remote::{
-    commit_url_from_repo, handle_pr_command, handle_remote_url,
-    handle_shorthand, resolve_remote_name,
+    commit_url_from_repo, handle_pr_command, handle_remote_url, handle_shorthand,
+    resolve_remote_name,
+};
+use repo::{
+    RepoPackageAreasArgs, RepoPackagesArgs, handle_file_list_command, handle_repo_package_areas,
+    handle_repo_packages,
 };
 
 /// Main CLI entrypoint.
@@ -330,8 +328,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 remote
                             )
                         })?;
-                    return handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf,
-                    ).await;
+                    return handle_remote_url(&url, cli.json, cli.plain, cli.verbose, &perf).await;
                 }
             }
             crate::args::RepoAction::Pr { status, .. } => {
@@ -656,31 +653,27 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_filesystem()
             .hardware(HardwareRequest::summary().include_audio(true)),
         OutputFilter::Repo => match &repo_action {
-            Some(crate::args::RepoAction::Language { breakdown: true }) => {
-                DetectionPlan::new()
-                    .without_os()
-                    .without_hardware()
-                    .without_network()
-                    .filesystem(
-                        FilesystemRequest::new()
-                            .git(GitRequest::summary())
-                            .without_docs()
-                            .without_formatting(),
-                    )
-            }
-            Some(crate::args::RepoAction::Language { breakdown: false }) => {
-                DetectionPlan::new()
-                    .without_os()
-                    .without_hardware()
-                    .without_network()
-                    .filesystem(
-                        FilesystemRequest::new()
-                            .git(GitRequest::summary())
-                            .without_repo()
-                            .without_docs()
-                            .without_formatting(),
-                    )
-            }
+            Some(crate::args::RepoAction::Language { breakdown: true }) => DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(GitRequest::summary())
+                        .without_docs()
+                        .without_formatting(),
+                ),
+            Some(crate::args::RepoAction::Language { breakdown: false }) => DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(GitRequest::summary())
+                        .without_repo()
+                        .without_docs()
+                        .without_formatting(),
+                ),
             _ => DetectionPlan::new()
                 .without_os()
                 .without_hardware()

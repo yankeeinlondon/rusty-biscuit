@@ -10,8 +10,8 @@ pub mod metadata;
 
 pub use crate::programs::contract::CategoryEnum;
 pub use categories::{
-    AiCli, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
-    OsPackageManager, TerminalApp, TtsClient, Utility,
+    AiCli, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper, OsPackageManager,
+    TerminalApp, TtsClient, Utility,
 };
 
 #[cfg(test)]

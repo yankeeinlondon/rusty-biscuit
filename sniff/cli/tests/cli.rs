@@ -932,8 +932,7 @@ fn test_programs_subcommand_text_output() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
@@ -983,8 +982,7 @@ fn test_editors_subcommand_text_output() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
@@ -1006,8 +1004,7 @@ fn test_utilities_subcommand_text_output() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
@@ -1029,8 +1026,7 @@ fn test_language_package_managers_subcommand_text_output() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
@@ -1070,8 +1066,7 @@ fn test_tts_clients_subcommand_text_output() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
@@ -1093,8 +1088,7 @@ fn test_terminal_apps_subcommand_text_output() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
@@ -1116,8 +1110,7 @@ fn test_audio_subcommand_text_output() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
@@ -1345,8 +1338,7 @@ fn test_editors_still_shows_table_without_install() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Name")
-                .or(predicate::str::contains("could not be rendered")),
+            predicate::str::contains("Name").or(predicate::str::contains("could not be rendered")),
         );
 }
 
