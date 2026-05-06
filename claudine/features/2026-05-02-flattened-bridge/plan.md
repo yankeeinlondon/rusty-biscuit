@@ -20,6 +20,8 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+packages:
+  - claudine
 source_files_during_phase_3:
   - claudine/lib/src/dispatch/runner/mod.rs
   - claudine/lib/src/dispatch/runner/meta_json.rs
