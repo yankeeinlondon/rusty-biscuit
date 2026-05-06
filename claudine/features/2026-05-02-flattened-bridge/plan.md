@@ -41,13 +41,16 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
   - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+  - claudine/cli/src/commands/wrap/mod.rs
+docs_updated_during_phase_5:
+  - claudine/features/2026-05-02-flattened-bridge/plan.md
+  - claudine/features/2026-05-02-flattened-bridge/reproduce.sh
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/SKILL.md
 packages:
-  - biscuit-terminal
-  - biscuit-terminal-cli
-  - biscuit-speaks
   - claudine-cli
-  - darkmatter
-  - darkmatter-cli
 ---
 
 # Execution Plan: Fix Terminal Escape Code Bleed in Non-Interactive Sessions
