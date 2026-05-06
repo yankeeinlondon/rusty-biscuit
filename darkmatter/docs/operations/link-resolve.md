@@ -25,7 +25,7 @@ During **Transclusion**, child documents are pulled into a parent document. If t
 By resolving all links to absolute paths early in the pipeline:
 1. Every document's links are anchored to their own source location.
 2. The transclusion engine can safely move content without breaking references.
-3. Downstream operations (like [Link Normalization](./link-normalization.md)) have a consistent absolute starting point to work from.
+3. Downstream operations (like [Link Normalization](../inline/link-normalization.md)) have a consistent absolute starting point to work from.
 
 ## Phase
 
