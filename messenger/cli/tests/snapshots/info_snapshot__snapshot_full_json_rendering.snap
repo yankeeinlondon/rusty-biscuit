@@ -1,0 +1,67 @@
+---
+source: messenger/cli/tests/info_snapshot.rs
+expression: json
+---
+{
+  "host_os": "Linux",
+  "active_daemon": {
+    "name": "dunst",
+    "vendor": "knopwob",
+    "version": "1.9.2"
+  },
+  "bundle_id": "com.example.messenger",
+  "app_id": "MessengerApp",
+  "helpers": [
+    {
+      "name": "dunstify",
+      "binary_name": "dunstify",
+      "installed": true,
+      "path": "/usr/bin/dunstify",
+      "version": "1.2.0",
+      "install_hint": null,
+      "website": "https://dunst-project.org",
+      "description": "Customizable notification daemon"
+    },
+    {
+      "name": "notify-send",
+      "binary_name": "notify-send",
+      "installed": false,
+      "path": null,
+      "version": null,
+      "install_hint": "sudo apt install libnotify-bin",
+      "website": "https://gitlab.gnome.org/GNOME/libnotify",
+      "description": "Sends desktop notifications"
+    },
+    {
+      "name": "terminal-notifier",
+      "binary_name": "terminal-notifier",
+      "installed": true,
+      "path": "/usr/local/bin/terminal-notifier",
+      "version": "2.0.0",
+      "install_hint": null,
+      "website": "https://github.com/julienXX/terminal-notifier",
+      "description": "macOS notification sender"
+    }
+  ],
+  "election_order": [
+    "dunstify",
+    "notify-send"
+  ],
+  "routes": [
+    {
+      "name": "desktop",
+      "provider": "Desktop",
+      "is_default": true
+    },
+    {
+      "name": "ops.slack",
+      "provider": "Slack",
+      "is_default": false
+    },
+    {
+      "name": "alerts.discord",
+      "provider": "Discord",
+      "is_default": false
+    }
+  ]
+}
