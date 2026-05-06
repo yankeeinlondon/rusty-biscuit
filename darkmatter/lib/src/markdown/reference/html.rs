@@ -236,13 +236,13 @@ fn classify_video_tag(
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
-        kind: ReferenceKind::Image,
+        kind: ReferenceKind::HtmlVideo,
         target: classify_target(&src),
         origin: ReferenceOrigin {
             source: source.clone(),
             line,
             span: span_start..span_end,
-            syntax: ReferenceSyntax::HtmlImage,
+            syntax: ReferenceSyntax::HtmlVideoTag,
         },
         attributes: serde_json::Map::new(),
     })
@@ -262,13 +262,13 @@ fn classify_audio_tag(
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
-        kind: ReferenceKind::Image,
+        kind: ReferenceKind::HtmlAudio,
         target: classify_target(&src),
         origin: ReferenceOrigin {
             source: source.clone(),
             line,
             span: span_start..span_end,
-            syntax: ReferenceSyntax::HtmlImage,
+            syntax: ReferenceSyntax::HtmlAudioTag,
         },
         attributes: serde_json::Map::new(),
     })
@@ -288,13 +288,13 @@ fn classify_source_tag(
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
-        kind: ReferenceKind::Image,
+        kind: ReferenceKind::HtmlSource,
         target: classify_target(&src),
         origin: ReferenceOrigin {
             source: source.clone(),
             line,
             span: span_start..span_end,
-            syntax: ReferenceSyntax::HtmlImage,
+            syntax: ReferenceSyntax::HtmlSourceTag,
         },
         attributes: serde_json::Map::new(),
     })
@@ -314,13 +314,13 @@ fn classify_iframe_tag(
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
-        kind: ReferenceKind::Hyperlink,
+        kind: ReferenceKind::HtmlIframe,
         target: classify_target(&src),
         origin: ReferenceOrigin {
             source: source.clone(),
             line,
             span: span_start..span_end,
-            syntax: ReferenceSyntax::HtmlAnchor,
+            syntax: ReferenceSyntax::HtmlIframeTag,
         },
         attributes: serde_json::Map::new(),
     })
@@ -684,6 +684,58 @@ mod tests {
             .as_str()
             .unwrap();
         assert_eq!(charset, "utf-8");
+    }
+
+    #[test]
+    fn extract_html_video_tag() {
+        let content = r#"<video src="./movie.mp4"></video>"#;
+        let records = extract_html_videos(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].kind, ReferenceKind::HtmlVideo);
+        assert_eq!(records[0].origin.syntax, ReferenceSyntax::HtmlVideoTag);
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::LocalPath { raw } if raw == "./movie.mp4"
+        ));
+    }
+
+    #[test]
+    fn extract_html_audio_tag() {
+        let content = r#"<audio src="song.mp3"></audio>"#;
+        let records = extract_html_audio(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].kind, ReferenceKind::HtmlAudio);
+        assert_eq!(records[0].origin.syntax, ReferenceSyntax::HtmlAudioTag);
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::LocalPath { raw } if raw == "song.mp3"
+        ));
+    }
+
+    #[test]
+    fn extract_html_source_tag() {
+        let content = r#"<source src="track.ogg" type="audio/ogg">"#;
+        let records = extract_html_sources(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].kind, ReferenceKind::HtmlSource);
+        assert_eq!(records[0].origin.syntax, ReferenceSyntax::HtmlSourceTag);
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::LocalPath { raw } if raw == "track.ogg"
+        ));
+    }
+
+    #[test]
+    fn extract_html_iframe_tag() {
+        let content = r#"<iframe src="https://example.com/widget"></iframe>"#;
+        let records = extract_html_iframes(content, &ComposeSource::Unknown);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].kind, ReferenceKind::HtmlIframe);
+        assert_eq!(records[0].origin.syntax, ReferenceSyntax::HtmlIframeTag);
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::RemoteUrl { raw } if raw == "https://example.com/widget"
+        ));
     }
 
     #[test]
