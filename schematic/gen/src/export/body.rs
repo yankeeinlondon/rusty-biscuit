@@ -190,10 +190,7 @@ mod tests {
                 assert_eq!(fields[0].kind, FormFieldExportKind::Text);
                 assert_eq!(fields[1].name, "avatar");
                 assert!(!fields[1].required);
-                assert_eq!(
-                    fields[1].kind,
-                    FormFieldExportKind::File { accept: vec![] }
-                );
+                assert_eq!(fields[1].kind, FormFieldExportKind::File { accept: vec![] });
             }
             _ => panic!("Expected FormData"),
         }
@@ -225,10 +222,7 @@ mod tests {
             ExportBody::FormData { fields } => {
                 assert_eq!(fields.len(), 1);
                 assert_eq!(fields[0].name, "audio");
-                assert_eq!(
-                    fields[0].kind,
-                    FormFieldExportKind::File { accept: vec![] }
-                );
+                assert_eq!(fields[0].kind, FormFieldExportKind::File { accept: vec![] });
             }
             _ => panic!("Expected FormData"),
         }

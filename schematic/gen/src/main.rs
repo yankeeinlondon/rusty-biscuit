@@ -406,15 +406,8 @@ fn resolve_export_defaults(
 /// The message is intentionally verbose: it names the module, the API, and
 /// every missing type so authors can fix the registry without re-running the
 /// generator with extra flags.
-fn missing_schemas_error(
-    module_name: &str,
-    api_name: &str,
-    missing: &[String],
-) -> GeneratorError {
-    let first_missing = missing
-        .first()
-        .map(String::as_str)
-        .unwrap_or("MissingType");
+fn missing_schemas_error(module_name: &str, api_name: &str, missing: &[String]) -> GeneratorError {
+    let first_missing = missing.first().map(String::as_str).unwrap_or("MissingType");
     GeneratorError::ConfigError(format!(
         "OpenAPI registry incomplete for module \"{module}\" (API \"{api}\"): \
          missing schema(s) {missing:?}. \
@@ -758,11 +751,9 @@ fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
             // schemas must be present in the merged registry. This guards the
             // grouped export path against dangling `$ref`s.
             for member in module_apis.iter() {
-                registry
-                    .validate_completeness(member)
-                    .map_err(|missing| {
-                        missing_schemas_error(module_name, &member.name, &missing)
-                    })?;
+                registry.validate_completeness(member).map_err(|missing| {
+                    missing_schemas_error(module_name, &member.name, &missing)
+                })?;
             }
 
             let api_refs: Vec<&schematic_define::RestApi> = module_apis.iter().collect();

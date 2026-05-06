@@ -181,7 +181,9 @@ fn assert_contains_any(haystack: &str, needles: &[&str], label: &str) {
     }
 
     let preview: String = haystack.chars().take(2_000).collect();
-    panic!("{label}: expected output to contain one of {needles:?}\n--- buffer preview ---\n{preview}");
+    panic!(
+        "{label}: expected output to contain one of {needles:?}\n--- buffer preview ---\n{preview}"
+    );
 }
 
 fn assert_not_contains(haystack: &str, needle: &str, label: &str) {
@@ -321,10 +323,7 @@ fn validate_unknown_api_emits_red_error() {
     // Bold-red `[ERROR]` marker.
     assert_contains_any(
         &buffer,
-        &[
-            "\x1b[1m\x1b[31m[ERROR]\x1b[0m",
-            "\x1b[1;31m[ERROR]\x1b[0m",
-        ],
+        &["\x1b[1m\x1b[31m[ERROR]\x1b[0m", "\x1b[1;31m[ERROR]\x1b[0m"],
         "ERROR marker uses bold-red styling",
     );
     assert_contains(&buffer, "Unknown API", "error message mentions Unknown API");

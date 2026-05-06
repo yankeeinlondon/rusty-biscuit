@@ -84,8 +84,8 @@ fn every_committed_postman_artifact_validates_against_schema() {
         }
 
         checked_files += 1;
-        let bytes = std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
         let value: Value = serde_json::from_slice(&bytes)
             .unwrap_or_else(|e| panic!("parse {}: {}", path.display(), e));
 
