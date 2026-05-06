@@ -18,9 +18,35 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
   - ../.claude/skills/biscuit-tui/SKILL.md
+source_files_during_phase_2:
+  - cli/src/commands/input_table/columns.rs
+  - cli/src/commands/input_table/mod.rs
+  - cli/src/commands/input_table/tests.rs
+  - lib/src/components/choice_render/badge.rs
+  - lib/src/components/choice_render/highlight.rs
+  - lib/src/components/choice_render/horizontal.rs
+  - lib/src/components/choice_render/mod.rs
+  - lib/src/components/choice_render/tests.rs
+  - lib/src/components/choice_render/vertical.rs
+  - lib/src/components/choose_many.rs
+  - lib/src/components/choose_many/tests.rs
+  - lib/src/components/choose_one.rs
+  - lib/src/components/choose_one/tests.rs
+  - lib/src/components/input_table/table.rs
+  - lib/src/components/input_table/table/tests.rs
+  - lib/src/core/standalone/inline_viewport.rs
+  - lib/src/core/standalone/loop_driver.rs
+  - lib/src/core/standalone/mod.rs
+  - lib/src/core/standalone/terminal_lifecycle.rs
+  - lib/src/core/standalone/tests.rs
+docs_updated_during_phase_2:
+  - reviews/2026-05-04-sentrux/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - ../.claude/skills/biscuit-tui/SKILL.md
 packages:
-  - biscuit-test-harness
   - tui-chrome
+  - tui-chrome-cli
 ---
 
 # biscuit-tui Refactor Plan
@@ -46,14 +72,14 @@ This plan operationalizes the 15 suggestions in [`review-1.md`](./review-1.md). 
 ## Phase 2: Code Equality & File Decomposition
 *Goal: Break up the five "god files" (>1500 LOC) by extracting tests and submodules.*
 
-- [ ] **Extract Test Modules:**
+- [x] **Extract Test Modules:**
     - Move tests from `choose_one.rs`, `choose_many.rs`, `standalone.rs`, `choice_render.rs`, and `input_table/table.rs` into sibling `tests.rs` or directory-based modules.
-- [ ] **Decompose `choice_render`:**
+- [x] **Decompose `choice_render`:**
     - Split `choice_render.rs` into a directory module: `choice_render/{mod.rs, vertical.rs, horizontal.rs, badge.rs, highlight.rs}`.
     - Flatten complex rendering functions into smaller, focused helpers.
-- [ ] **Decompose `core::standalone`:**
+- [x] **Decompose `core::standalone`:**
     - Split `standalone.rs` into `core/standalone/{mod.rs, loop_driver.rs, terminal_lifecycle.rs, inline_viewport.rs}`.
-- [ ] **Decompose `input_table` CLI:**
+- [x] **Decompose `input_table` CLI:**
     - Split `cli/src/commands/input_table.rs` into `input_table/{mod.rs, columns.rs, tests.rs}`.
 
 ## Phase 3: Redundancy Elimination
