@@ -8,10 +8,10 @@
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
-    ReferenceKind, ReferenceRecord, ReferenceTarget,
+    ReferenceKind, ReferenceTarget,
     html::{
         extract_html_audio, extract_html_iframes, extract_html_images, extract_html_link_tags,
-        extract_html_links, extract_html_sources, extract_html_videos,
+        extract_html_links, extract_html_script_blocks, extract_html_sources, extract_html_videos,
     },
     local::{extract_markdown_images, extract_markdown_links},
 };
@@ -28,7 +28,11 @@ pub fn link_resolve(
     let source = options.source.clone();
     let content = markdown.content();
 
-    // 2.3 Extract all references
+    if !content.contains("](") && !content.contains("href=") && !content.contains("src=") {
+        return Ok(());
+    }
+
+    // 2.3 Extract local path references
     let mut records = Vec::new();
     records.extend(extract_markdown_links(content, &source));
     records.extend(extract_markdown_images(content, &source));
@@ -39,16 +43,27 @@ pub fn link_resolve(
     records.extend(extract_html_sources(content, &source));
     records.extend(extract_html_iframes(content, &source));
     records.extend(extract_html_link_tags(content, &source));
+    records.extend(extract_html_script_blocks(content, &source));
 
     // 2.4 Filter to link-like references only
     // ReferenceKind::Hyperlink, ReferenceKind::Image cover most of them.
     // extract_html_link_tags returns CssImport/FontImport/Hyperlink.
     let mut to_resolve = Vec::new();
+    println!("Total records extracted: {}", records.len());
     for record in records {
+        println!(
+            "Record kind: {:?}, target: {:?}",
+            record.kind, record.target
+        );
         match record.kind {
             ReferenceKind::Hyperlink
             | ReferenceKind::Image
+            | ReferenceKind::HtmlVideo
+            | ReferenceKind::HtmlAudio
+            | ReferenceKind::HtmlSource
+            | ReferenceKind::HtmlIframe
             | ReferenceKind::CssImport
+            | ReferenceKind::ScriptImport
             | ReferenceKind::FontImport => {
                 if let ReferenceTarget::LocalPath { .. } = &record.target {
                     to_resolve.push(record);
@@ -57,6 +72,7 @@ pub fn link_resolve(
             _ => {}
         }
     }
+    println!("Records to resolve: {}", to_resolve.len());
 
     if to_resolve.is_empty() {
         return Ok(());
@@ -89,16 +105,17 @@ pub fn link_resolve(
             // For HTML tags <tag attr="target">, it's inside the attribute.
             // The ReferenceRecord span is for the WHOLE tag/link.
 
-            if let Some((start, end)) = find_target_range(&new_content, &record, &raw_target) {
+            if let Some((start, end)) = super::find_target_range(&new_content, &record, &raw_target)
+            {
                 new_content.replace_range(start..end, &abs_path_str);
                 applied_count += 1;
             }
         }
     }
 
+    report.link_resolves_applied += applied_count;
     if applied_count > 0 {
         *markdown.content_mut() = new_content;
-        report.link_resolves_applied += applied_count;
     }
 
     Ok(())
@@ -109,60 +126,30 @@ fn resolve_absolute(
     base_dir: Option<&Path>,
     options: &ComposeOptions,
 ) -> Option<std::path::PathBuf> {
-    let mut file_ref = biscuit_file::FileReference::new(raw).ok()?;
+    println!("resolve_absolute called with raw: '{}'", raw);
+    if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw) {
+        // Add magic paths from options
+        for (path, position) in &options.magic_paths {
+            file_ref = file_ref.add_magic_path(path, *position);
+        }
 
-    // Add magic paths from options
-    for (path, position) in &options.magic_paths {
-        file_ref = file_ref.add_magic_path(path, *position);
-    }
-
-    if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
-        // canonicalize to get absolute path
-        return std::fs::canonicalize(&resolved).ok().or(Some(resolved));
+        if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
+            // canonicalize to get absolute path
+            let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
+            println!("resolve_absolute FileReference success: {:?}", result);
+            return result;
+        }
     }
 
     // Fallback to simple join if FileReference fails or returns nothing
     if let Some(dir) = base_dir {
         let joined = dir.join(raw);
-        return std::fs::canonicalize(&joined).ok().or(Some(joined));
+        let result = std::fs::canonicalize(&joined).ok().or(Some(joined));
+        println!("resolve_absolute Fallback success: {:?}", result);
+        return result;
     }
 
-    None
-}
-
-fn find_target_range(
-    content: &str,
-    record: &ReferenceRecord,
-    raw_target: &str,
-) -> Option<(usize, usize)> {
-    let span = &record.origin.span;
-    let outer_text = &content[span.clone()];
-
-    // Search for the raw_target within the span.
-    // For safety, we look for it quoted or in parentheses.
-    let search_patterns = [
-        format!("\"{}\"", raw_target),
-        format!("'{}'", raw_target),
-        format!("({})", raw_target),
-    ];
-
-    for pattern in &search_patterns {
-        if let Some(idx) = outer_text.find(pattern) {
-            // idx is relative to span.start.
-            // We want the range of raw_target itself, excluding quotes/parents.
-            let start = span.start + idx + 1;
-            let end = start + raw_target.len();
-            return Some((start, end));
-        }
-    }
-
-    // Fallback to just finding the raw string if pattern matching fails
-    if let Some(idx) = outer_text.find(raw_target) {
-        let start = span.start + idx;
-        let end = start + raw_target.len();
-        return Some((start, end));
-    }
-
+    println!("resolve_absolute failed");
     None
 }
 
@@ -241,5 +228,153 @@ mod tests {
             .to_string();
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert_eq!(report.link_resolves_applied, 3);
+    }
+
+    #[test]
+    fn test_link_resolve_css_font_script() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.md");
+        let target_css = dir.path().join("styles.css");
+        let target_font = dir.path().join("font.woff2");
+        let target_script = dir.path().join("app.js");
+        fs::write(&target_css, "body {}").unwrap();
+        fs::write(&target_font, "binary...").unwrap();
+        fs::write(&target_script, "console.log();").unwrap();
+
+        let content = "<link rel=\"stylesheet\" href=\"./styles.css\">\n<link rel=\"preload\" as=\"font\" href=\"font.woff2\">\n<script src=\"./app.js\"></script>";
+
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&file_a);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let resolved_css = fs::canonicalize(&target_css)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resolved_font = fs::canonicalize(&target_font)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resolved_script = fs::canonicalize(&target_script)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_css)),
+            "CSS failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_font)),
+            "Font failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_script)),
+            "Script failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 3);
+    }
+
+    #[test]
+    fn test_link_resolve_edge_cases() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.md");
+        let target_parens = dir.path().join("with (parens).md");
+        let target_quotes = dir.path().join("single_quotes.md");
+        let target_mixed = dir.path().join("mixed.md");
+        let target_multi = dir.path().join("multi.md");
+
+        fs::write(&target_parens, "").unwrap();
+        fs::write(&target_quotes, "").unwrap();
+        fs::write(&target_mixed, "").unwrap();
+        fs::write(&target_multi, "").unwrap();
+
+        // Targets appearing multiple times in the same span? Wait, the span is per element usually.
+        // E.g., <a href='single_quotes.md' data-alt='single_quotes.md'>link</a>
+        let content = "[link with parens](<./with (parens).md>)\n<img src='single_quotes.md'>\n<a href=\"mixed.md\" data-target='mixed.md'>mixed</a>\n<a href=\"multi.md\">multi.md is the target</a>";
+
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&file_a);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let resolved_parens = fs::canonicalize(&target_parens)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resolved_quotes = fs::canonicalize(&target_quotes)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resolved_mixed = fs::canonicalize(&target_mixed)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resolved_multi = fs::canonicalize(&target_multi)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        assert!(
+            md.content().contains(&format!("(<{}>)", resolved_parens)),
+            "Parens failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains(&format!("'{}'", resolved_quotes)),
+            "Quotes failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_mixed)),
+            "Mixed failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_multi)),
+            "Multi failed. Content: {}",
+            md.content()
+        );
+
+        // Ensure "multi.md is the target" wasn't mangled, but the href was.
+        assert!(
+            md.content()
+                .contains(&format!(">{} is the target</a>", "multi.md"))
+        );
+
+        // 4 elements
+        assert_eq!(report.link_resolves_applied, 4);
+    }
+
+    #[test]
+    fn test_link_resolve_non_existent() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.md");
+        fs::write(&file_a, "source").unwrap();
+
+        // b.md does not exist
+        let content = "[link](./b.md)";
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&file_a);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        // The target b.md doesn't exist, but it should still be resolved to an absolute path via simple join
+        let joined = dir.path().join("./b.md");
+        let resolved_path = joined.to_string_lossy().to_string();
+
+        assert!(
+            md.content().contains(&format!("({})", resolved_path)),
+            "Non-existent failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 1);
     }
 }

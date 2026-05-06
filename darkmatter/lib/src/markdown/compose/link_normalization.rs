@@ -12,7 +12,7 @@ use biscuit_terminal::terminal::Terminal;
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
-    ReferenceKind, ReferenceRecord, ReferenceTarget,
+    ReferenceKind, ReferenceTarget,
     html::{
         extract_html_audio, extract_html_iframes, extract_html_images, extract_html_link_tags,
         extract_html_links, extract_html_sources, extract_html_videos,
@@ -38,6 +38,10 @@ pub fn normalize_links(
     let source = options.source.clone();
     let content = markdown.content();
 
+    if !content.contains("](") && !content.contains("href=") && !content.contains("src=") {
+        return Ok(());
+    }
+
     // 3.5 Extract absolute path references
     let mut records = Vec::new();
     records.extend(extract_markdown_links(content, &source));
@@ -49,6 +53,7 @@ pub fn normalize_links(
     records.extend(extract_html_sources(content, &source));
     records.extend(extract_html_iframes(content, &source));
     records.extend(extract_html_link_tags(content, &source));
+    records.extend(crate::markdown::reference::html::extract_html_script_blocks(content, &source));
 
     let mut to_normalize = Vec::new();
 
@@ -75,6 +80,11 @@ pub fn normalize_links(
             match record.kind {
                 ReferenceKind::Hyperlink
                 | ReferenceKind::Image
+                | ReferenceKind::HtmlVideo
+                | ReferenceKind::HtmlAudio
+                | ReferenceKind::HtmlSource
+                | ReferenceKind::HtmlIframe
+                | ReferenceKind::ScriptImport
                 | ReferenceKind::CssImport
                 | ReferenceKind::FontImport => {
                     to_normalize.push((record, abs_path));
@@ -95,7 +105,20 @@ pub fn normalize_links(
     let mut applied_count = 0;
 
     let base_file = match &source {
-        ComposeSource::File(path) => Some(std::fs::canonicalize(path).unwrap_or(path.clone())),
+        ComposeSource::File(path) => match std::fs::canonicalize(path) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                report.add_warning(crate::markdown::compose::ComposeWarning::new(
+                    "link_normalization",
+                    format!(
+                        "Failed to canonicalize source path '{}': {}",
+                        path.display(),
+                        e
+                    ),
+                ));
+                return Ok(());
+            }
+        },
         _ => None,
     };
 
@@ -104,7 +127,7 @@ pub fn normalize_links(
         .and_then(|p| p.parent().map(|p| p.to_path_buf()));
     let git_root = base_dir
         .as_ref()
-        .and_then(|d| find_git_repo_root(d))
+        .and_then(|d| super::find_git_root_from(d))
         .map(|r| std::fs::canonicalize(&r).unwrap_or(r));
     let home = dirs::home_dir();
 
@@ -116,10 +139,7 @@ pub fn normalize_links(
             && abs_path.starts_with(repo)
             && let Some(ref doc_path) = base_file
         {
-            let rel = compute_relative_path(
-                &std::fs::canonicalize(doc_path).unwrap_or(doc_path.clone()),
-                &std::fs::canonicalize(&abs_path).unwrap_or(abs_path.clone()),
-            );
+            let rel = compute_relative_path(doc_path, &abs_path);
 
             replacement = Some(rel.to_string_lossy().to_string());
         }
@@ -162,6 +182,10 @@ pub fn normalize_links(
                     abs_path.display(),
                     var_name
                 );
+                report.add_warning(crate::markdown::compose::ComposeWarning::new(
+                    "link_normalization",
+                    msg.clone(),
+                ));
                 let status = Status::new(msg).state(StatusState::Warning);
                 eprintln!("{}", status.display(&Terminal::default()));
 
@@ -171,97 +195,38 @@ pub fn normalize_links(
 
         if let Some(new_target) = replacement
             && let Some((start, end)) =
-                find_target_range(&new_content, &record, &abs_path.to_string_lossy())
+                super::find_target_range(&new_content, &record, &abs_path.to_string_lossy())
         {
             new_content.replace_range(start..end, &new_target);
             applied_count += 1;
         }
     }
 
+    report.link_normalizations_applied += applied_count;
     if applied_count > 0 {
         *markdown.content_mut() = new_content;
-        report.link_normalizations_applied += applied_count;
     }
 
     Ok(())
 }
 
-/// Helper to find target range within content (same as link_resolve.rs)
-fn find_target_range(
-    content: &str,
-    record: &ReferenceRecord,
-    raw_target: &str,
-) -> Option<(usize, usize)> {
-    let span = &record.origin.span;
-    if span.end > content.len() {
-        return None;
-    }
-    let outer_text = &content[span.clone()];
-
-    let search_patterns = [
-        format!("\"{}\"", raw_target),
-        format!("'{}'", raw_target),
-        format!("({})", raw_target),
-    ];
-
-    for pattern in &search_patterns {
-        if let Some(idx) = outer_text.find(pattern) {
-            let start = span.start + idx + 1;
-            let end = start + raw_target.len();
-            return Some((start, end));
-        }
-    }
-
-    if let Some(idx) = outer_text.find(raw_target) {
-        let start = span.start + idx;
-        let end = start + raw_target.len();
-        return Some((start, end));
-    }
-
-    None
-}
-
-/// 3.2 Implement find_git_repo_root helper
-fn find_git_repo_root(from: &Path) -> Option<PathBuf> {
-    let mut current = from;
-    loop {
-        if current.join(".git").exists() {
-            return Some(current.to_path_buf());
-        }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => break,
-        }
-    }
-    None
-}
-
 fn compute_relative_path(from: &Path, to: &Path) -> PathBuf {
-    let from_can = match std::fs::canonicalize(from) {
-        Ok(p) => {
-            if p.to_string_lossy().starts_with("/private/") {
-                PathBuf::from(&p.to_string_lossy()[8..])
-            } else {
-                p
-            }
-        }
-        Err(_) => from.to_path_buf(),
-    };
-    let to_can = match std::fs::canonicalize(to) {
-        Ok(p) => {
-            if p.to_string_lossy().starts_with("/private/") {
-                PathBuf::from(&p.to_string_lossy()[8..])
-            } else {
-                p
-            }
-        }
-        Err(_) => to.to_path_buf(),
-    };
+    let mut from_can = from.to_path_buf();
+    if from_can.to_string_lossy().starts_with("/private/") {
+        from_can = PathBuf::from(&from_can.to_string_lossy()[8..]);
+    }
+
+    let mut to_can = to.to_path_buf();
+    if to_can.to_string_lossy().starts_with("/private/") {
+        to_can = PathBuf::from(&to_can.to_string_lossy()[8..]);
+    }
+
     let from_dir = if from_can.extension().is_some() {
         from_can.parent().unwrap_or(std::path::Path::new(""))
     } else {
         &from_can
     };
+
     match diff_paths(&to_can, from_dir) {
         Some(p) => p,
         None => to_can,
@@ -312,6 +277,7 @@ mod tests {
         fs::create_dir_all(&docs).unwrap();
         fs::create_dir_all(&assets).unwrap();
         let source_file = docs.join("source.md");
+        fs::write(&source_file, "").unwrap();
         let target_file = assets.join("image.png");
         fs::write(&target_file, "png").unwrap();
         let abs_path = std::fs::canonicalize(&target_file).unwrap();
@@ -384,5 +350,185 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_normalizations_applied, 1);
+    }
+
+    #[test]
+    fn test_normalize_links_css_font_script() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        let docs = repo.join("docs");
+        let assets = repo.join("assets");
+
+        fs::create_dir_all(&docs).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+
+        let source_file = docs.join("source.md");
+        fs::write(&source_file, "").unwrap();
+
+        let target_css = assets.join("styles.css");
+        let target_font = assets.join("font.woff2");
+        let target_script = assets.join("app.js");
+        fs::write(&target_css, "").unwrap();
+        fs::write(&target_font, "").unwrap();
+        fs::write(&target_script, "").unwrap();
+
+        let abs_css = std::fs::canonicalize(&target_css).unwrap();
+        let abs_font = std::fs::canonicalize(&target_font).unwrap();
+        let abs_script = std::fs::canonicalize(&target_script).unwrap();
+
+        let content = format!(
+            "<link rel=\"stylesheet\" href=\"{}\">\n<link rel=\"preload\" as=\"font\" href=\"{}\">\n<script src=\"{}\"></script>",
+            abs_css.display(),
+            abs_font.display(),
+            abs_script.display()
+        );
+        let mut md = Markdown::new(&content);
+        let options = ComposeOptions::new().with_source_file(&source_file);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        assert!(
+            md.content().contains("../assets/styles.css"),
+            "CSS failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("../assets/font.woff2"),
+            "Font failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("../assets/app.js"),
+            "Script failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 3);
+    }
+
+    #[test]
+    fn test_normalize_links_deep_nesting() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+
+        let docs = repo.join("docs").join("deep").join("nested").join("dir");
+        let assets = repo.join("assets").join("images");
+
+        fs::create_dir_all(&docs).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+
+        let source_file = docs.join("source.md");
+        fs::write(&source_file, "").unwrap();
+
+        let target_file = assets.join("image.png");
+        fs::write(&target_file, "png").unwrap();
+
+        let same_dir_file = docs.join("sibling.md");
+        fs::write(&same_dir_file, "md").unwrap();
+
+        let abs_img = std::fs::canonicalize(&target_file).unwrap();
+        let abs_sibling = std::fs::canonicalize(&same_dir_file).unwrap();
+
+        let content = format!(
+            "[img]({})\n[sibling]({})",
+            abs_img.display(),
+            abs_sibling.display()
+        );
+        let mut md = Markdown::new(&content);
+        let options = ComposeOptions::new().with_source_file(&source_file);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        assert!(md.content().contains("../../../../assets/images/image.png"));
+        assert!(md.content().contains("sibling.md") || md.content().contains("./sibling.md"));
+        assert_eq!(report.link_normalizations_applied, 2);
+    }
+
+    #[test]
+    fn test_normalize_links_env_var_specificity() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        let child = parent.join("child");
+        fs::create_dir_all(&child).unwrap();
+
+        let target = child.join("config.json");
+        fs::write(&target, "{}").unwrap();
+
+        let abs_path = std::fs::canonicalize(&target).unwrap_or(target);
+        let abs_parent = std::fs::canonicalize(&parent).unwrap_or(parent);
+        let abs_child = std::fs::canonicalize(&child).unwrap_or(child);
+
+        unsafe {
+            std::env::set_var("USER", abs_parent.to_string_lossy().as_ref());
+            std::env::set_var("USER_NAME", abs_child.to_string_lossy().as_ref());
+        };
+
+        let content = format!("[config]({})", abs_path.display());
+        let mut md = Markdown::new(&content);
+        let options = ComposeOptions::new()
+            .with_env_path_whitelist(vec!["USER".to_string(), "USER_NAME".to_string()]);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        // Should use the longer match USER_NAME
+        assert!(
+            md.content().contains("${USER_NAME}/config.json"),
+            "Content was: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 1);
+    }
+
+    #[test]
+    fn test_normalize_links_edge_cases() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+
+        let source_file = repo.join("source.md");
+        fs::write(&source_file, "").unwrap();
+
+        let parens_file = repo.join("with (parens).md");
+        let quotes_file = repo.join("single_quotes.md");
+        fs::write(&parens_file, "").unwrap();
+        fs::write(&quotes_file, "").unwrap();
+
+        let abs_parens = std::fs::canonicalize(&parens_file).unwrap();
+        let abs_quotes = std::fs::canonicalize(&quotes_file).unwrap();
+
+        let content = format!(
+            "[link](<{}>)\n<img src='{}'>\n<a href=\"{}\" data-alt='{}'>link</a>",
+            abs_parens.display(),
+            abs_quotes.display(),
+            abs_quotes.display(),
+            abs_quotes.display()
+        );
+
+        let mut md = Markdown::new(&content);
+        let options = ComposeOptions::new().with_source_file(&source_file);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        assert!(
+            md.content().contains("(<with (parens).md>)"),
+            "Parens failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("'single_quotes.md'"),
+            "Quotes failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("\"single_quotes.md\""),
+            "Mixed failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 3);
     }
 }

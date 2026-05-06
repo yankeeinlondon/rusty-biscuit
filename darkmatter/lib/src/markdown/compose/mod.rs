@@ -124,7 +124,7 @@ fn abbreviate_path(path: &Path) -> String {
 
 /// Walk up from `start` (or its parent if it's a file) looking for a `.git`
 /// directory, returning the repo root if found.
-fn find_git_root_from(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_git_root_from(start: &Path) -> Option<PathBuf> {
     let mut dir = if start.is_dir() {
         start.to_path_buf()
     } else {
@@ -138,6 +138,55 @@ fn find_git_root_from(start: &Path) -> Option<PathBuf> {
             return None;
         }
     }
+}
+
+/// Helper to find target range within content.
+pub(crate) fn find_target_range(
+    content: &str,
+    record: &crate::markdown::reference::ReferenceRecord,
+    raw_target: &str,
+) -> Option<(usize, usize)> {
+    let span = &record.origin.span;
+    if span.end > content.len() {
+        println!(
+            "find_target_range: span.end {} > content.len {}",
+            span.end,
+            content.len()
+        );
+        return None;
+    }
+    let outer_text = &content[span.clone()];
+
+    let mut start_idx = 0;
+    while let Some(idx) = outer_text[start_idx..].find(raw_target) {
+        let actual_idx = start_idx + idx;
+
+        if actual_idx > 0 {
+            let prev_char = outer_text[..actual_idx].chars().next_back();
+            println!(
+                "find_target_range: found '{}' at {}, prev_char: {:?}",
+                raw_target, actual_idx, prev_char
+            );
+            if matches!(prev_char, Some('(' | '=' | '"' | '\'' | '<')) {
+                let start = span.start + actual_idx;
+                let end = start + raw_target.len();
+                return Some((start, end));
+            }
+        } else {
+            println!("find_target_range: found '{}' at 0", raw_target);
+            // Edge case: if raw_target is the exact span, match it.
+            let start = span.start + actual_idx;
+            let end = start + raw_target.len();
+            return Some((start, end));
+        }
+
+        start_idx = actual_idx + 1;
+    }
+    println!(
+        "find_target_range: failed to find '{}' in '{}'",
+        raw_target, outer_text
+    );
+    None
 }
 
 /// Applies pre-effective-state frontmatter preparation shared by runtime
