@@ -44,8 +44,12 @@ feature feat:
             if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == y ]]; then
                 just design "${dasherized}"
             else
-                echo "Ok. Bye."
-                exit 0
+                if [[ "$(just _confirm "Would you like to create a {{ bold }}{{ italic }}plan{{ reset }} for this feature instead?")" == y ]]; then
+                    just plan-feature "${file}"
+                else
+                    echo "Ok. Bye."
+                    exit 0
+                fi
             fi
         else
             if [[ "$(just _confirm "The spec file is {{ italic }}empty{{ reset }}; do you want to edit the specification now?")" == y ]]; then
@@ -63,8 +67,12 @@ feature feat:
                     if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == y ]]; then
                         just design "${dasherized}"
                     else
-                        echo "Ok. Bye."
-                        exit 0
+                        if [[ "$(just _confirm "Would you like to create a {{ bold }}{{ italic }}plan{{ reset }} for this feature instead?")" == y ]]; then
+                            just plan-feature "${file}"
+                        else
+                            echo "Ok. Bye."
+                            exit 0
+                        fi
                     fi
                 fi
             else
@@ -93,8 +101,12 @@ feature feat:
         if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == "y" ]]; then
             just design "${dasherized}"
         else
-            echo "Ok. Bye."
-            exit 0
+            if [[ "$(just _confirm "Would you like to create a {{ bold }}{{ italic }}plan{{ reset }} for this feature instead?")" == "y" ]]; then
+                just plan-feature "${file}"
+            else
+                echo "Ok. Bye."
+                exit 0
+            fi
         fi
     else
         # rm -rf "${dir}"
