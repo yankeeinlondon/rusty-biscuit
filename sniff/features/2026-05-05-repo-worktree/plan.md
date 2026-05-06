@@ -12,6 +12,16 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - sniff/cli/src/args/repo.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/src/output/mod.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .opencode/skill/sniff/SKILL.md
 packages:
   - sniff
 ---

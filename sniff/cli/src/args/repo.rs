@@ -109,6 +109,10 @@ pub enum RepoAction {
     Language {
         breakdown: bool,
     },
+    Worktree {
+        no_error: bool,
+        on_error: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -395,5 +399,15 @@ pub enum RepoSubcommand {
         /// Show detailed per-package language breakdown (like the old `sniff language` command)
         #[arg(long)]
         breakdown: bool,
+    },
+    /// Output the worktree name for the current directory
+    Worktree {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
     },
 }

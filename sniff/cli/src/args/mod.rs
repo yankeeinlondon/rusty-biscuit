@@ -900,6 +900,10 @@ impl Commands {
                 Some(RepoSubcommand::Language { breakdown }) => RepoAction::Language {
                     breakdown: *breakdown,
                 },
+                Some(RepoSubcommand::Worktree { no_error, on_error }) => RepoAction::Worktree {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
             }),
             _ => None,
         }
