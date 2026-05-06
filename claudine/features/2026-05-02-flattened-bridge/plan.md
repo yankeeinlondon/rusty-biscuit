@@ -1,7 +1,7 @@
 ---
 phases: 5
 created: 2026-05-05
-start_phase: 1
+start_phase: 4
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1:
@@ -29,9 +29,23 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-speaks/lib/src/cache.rs
+  - biscuit-speaks/lib/src/types.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - claudine/cli/src/log.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn.rs
+docs_updated_during_phase_4:
+  - claudine/features/2026-05-02-flattened-bridge/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/SKILL.md
 packages:
   - biscuit-terminal
   - biscuit-terminal-cli
+  - biscuit-speaks
+  - claudine-cli
   - darkmatter
   - darkmatter-cli
 ---
