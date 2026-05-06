@@ -13,6 +13,7 @@ use std::path::Path;
 
 /// Lazy-capturing `ctx.*` resolver, suitable for composing on top of any
 /// `EvaluationLookup` that handles non-`ctx` paths.
+#[derive(Debug)]
 pub struct CtxLookup<'a> {
     work_dir: &'a Path,
     cache: RefCell<HashMap<String, Value>>,
@@ -73,9 +74,7 @@ impl<'a> CtxLookup<'a> {
 
     /// Returns the set of context groups that have been captured so far.
     #[cfg(test)]
-    pub(crate) fn captured_groups(
-        &self,
-    ) -> Vec<super::super::context::capture::ContextGroup> {
+    pub(crate) fn captured_groups(&self) -> Vec<super::super::context::capture::ContextGroup> {
         self.captured.borrow().iter().cloned().collect()
     }
 }
@@ -106,10 +105,7 @@ mod tests {
     fn ctx_lookup_resolves_today() {
         let lookup = CtxLookup::new(Path::new("."));
         let value = lookup.get("ctx.today");
-        assert!(
-            value.is_some(),
-            "ctx.today should resolve to a value"
-        );
+        assert!(value.is_some(), "ctx.today should resolve to a value");
         if let Some(Value::String(s)) = value {
             assert!(!s.is_empty(), "ctx.today should be non-empty");
         } else {

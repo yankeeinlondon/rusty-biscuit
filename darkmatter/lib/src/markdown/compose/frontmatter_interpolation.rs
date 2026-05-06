@@ -227,8 +227,7 @@ pub(crate) fn interpolate_frontmatter(
 
             let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
             let evaluator = Evaluator::new(&seed_state);
-            let (new_value, count, mut warnings) =
-                rewrite_value(original, &evaluator, fail_fast)?;
+            let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
 
             for w in &mut warnings {
                 w.message = format!("key '{}': {}", key, w.message);
@@ -304,12 +303,8 @@ fn collect_simple_key_refs(value: &Value, refs: &mut Vec<String>) {
                 }
             }
         }
-        Value::Array(arr) => arr
-            .iter()
-            .for_each(|v| collect_simple_key_refs(v, refs)),
-        Value::Object(obj) => obj
-            .values()
-            .for_each(|v| collect_simple_key_refs(v, refs)),
+        Value::Array(arr) => arr.iter().for_each(|v| collect_simple_key_refs(v, refs)),
+        Value::Object(obj) => obj.values().for_each(|v| collect_simple_key_refs(v, refs)),
         _ => {}
     }
 }
@@ -534,7 +529,10 @@ mod tests {
             }));
             let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
-            assert_eq!(fm.as_map().get("plan"), Some(&json!("/root/spec.md.plan.md")));
+            assert_eq!(
+                fm.as_map().get("plan"),
+                Some(&json!("/root/spec.md.plan.md"))
+            );
             assert!(report.replacements >= 2);
         }
 

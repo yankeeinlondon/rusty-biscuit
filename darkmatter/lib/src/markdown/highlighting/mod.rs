@@ -264,16 +264,14 @@ mod tests {
     #[test]
     fn highlight_yaml_lines_returns_one_entry_per_input_line() {
         let yaml = "foo: 1\nbar: 2\nbaz: 3";
-        let lines =
-            highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
+        let lines = highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
         assert_eq!(lines.len(), 3);
     }
 
     #[test]
     fn highlight_yaml_lines_emits_no_yaml_label() {
         let yaml = "foo: 1\nbar: 2";
-        let lines =
-            highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
+        let lines = highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
         let joined = lines.join("\n");
         // The chrome-free helper must never inject the literal `yaml`
         // language label that fenced code blocks use.
@@ -290,8 +288,7 @@ mod tests {
     #[test]
     fn highlight_yaml_lines_emits_no_background_fill() {
         let yaml = "foo: 1\nbar: 2";
-        let lines =
-            highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
+        let lines = highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
         // The chrome-free helper must not emit any `\x1b[48;` background SGR
         // sequence -- those are used only by the fenced code-block chrome
         // (top/bottom padding rows, full-width background fill).
@@ -305,16 +302,14 @@ mod tests {
 
     #[test]
     fn highlight_yaml_lines_handles_empty_input() {
-        let lines =
-            highlight_yaml_lines_with_theme("", ThemePair::Github, ColorMode::Dark);
+        let lines = highlight_yaml_lines_with_theme("", ThemePair::Github, ColorMode::Dark);
         assert_eq!(lines, vec![String::new()]);
     }
 
     #[test]
     fn highlight_yaml_lines_emits_ansi_for_keys() {
         let yaml = "key: value";
-        let lines =
-            highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
+        let lines = highlight_yaml_lines_with_theme(yaml, ThemePair::Github, ColorMode::Dark);
         assert_eq!(lines.len(), 1);
         assert!(
             lines[0].contains("\x1b["),
