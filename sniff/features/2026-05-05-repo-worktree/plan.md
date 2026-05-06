@@ -2,6 +2,12 @@
 phases: 4
 created: 2026-05-05
 start_phase: 1
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - sniff
 ---
 
 # Execution Plan: `sniff repo worktree`
