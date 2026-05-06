@@ -3,7 +3,9 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::Result;
 use std::path::Path;
 
-use super::{PromptDelivery, WrapperProfile, push_stream_json_flags, prompt_delivery_stdin_or_append};
+use super::{
+    PromptDelivery, WrapperProfile, prompt_delivery_stdin_or_append, push_stream_json_flags,
+};
 
 pub(crate) struct ClaudeWrapper;
 
