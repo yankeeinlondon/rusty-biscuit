@@ -18,7 +18,7 @@ block-beta
         interpolation("<a href='./inline/interpolation.md'>5. Interpolation 🏁</a>")
         shellExpansion("<a href='./inline/shell-expansion.md'>6. Shell Expansion 🏁</a>")
         shellBlocks("<a href='./inline/shell-blocks.md'>7. Shell Blocks 🏁</a>")
-        linkResolve("<a href='./inline/shell-blocks.md'>8. Link Resolve (abs) 🏁</a>")
+        linkResolve("<a href='./operations/link-resolve.md'>8. Link Resolve (abs) 🏁</a>")
     end
 
     block:transclusion
@@ -54,7 +54,7 @@ block-beta
     block:final
         columns 1
         finalTitle["<b>Finalization</b> (<dim><i>serial</i></dim>)"]
-        links("<a href='./inline/link-normalization.md'>3. Link Normalization 🏁</a>")
+        links("<a href='./operations/link-normalization.md'>Link Normalization 🏁</a>")
 
         fs1[" "]
         fs2[" "]
@@ -111,11 +111,13 @@ However, even in this example, we don't know how expensive the operation is unti
 ### 3. Inline Post
 
 - [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible                    
-- [Normalization](./inline/normalization-and-releveling.md) - ensures that the heading structure is valid and fixes where it is not
+- [Normalization](./inline/structural-normalization.md) - ensures that the heading structure is valid and fixes where it is not
 
 ### 4. Finalization
 
-The **finalization** stage is _only_ performed in the root document the compose operation and does any adjustments on the fully transposed document before passing it back to the caller.
+The **finalization** stage is _only_ performed in the root document of the compose operation and does any adjustments on the fully transposed document before passing it back to the caller.
+
+- [Link Normalization](./operations/link-normalization.md) - converts absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
 
 
 ## Rendering
