@@ -371,13 +371,9 @@ where
     };
 
     let loop_result: io::Result<LoopExit<V>> = match height {
-        Some(spec @ HeightSpec::Percent(_)) => run_inline_dynamic_with_chrome(
-            component,
-            &mut state,
-            spec,
-            &chrome,
-            hint_opt,
-        ),
+        Some(spec @ HeightSpec::Percent(_)) => {
+            run_inline_dynamic_with_chrome(component, &mut state, spec, &chrome, hint_opt)
+        }
         Some(spec @ HeightSpec::Cells(_)) => {
             let resolved = resolve_height_spec(spec)?;
             let backend = CrosstermBackend::new(io::stdout());
@@ -580,9 +576,7 @@ where
                     }
                 }
                 Event::Resize(_, new_rows) => {
-                    if let Some(new_h) =
-                        maybe_recompute_inline_height(spec, new_rows, current_h)
-                    {
+                    if let Some(new_h) = maybe_recompute_inline_height(spec, new_rows, current_h) {
                         current_h = new_h;
                         let _ = terminal.clear();
                         drop(terminal);
@@ -854,12 +848,7 @@ impl StdoutTtyRedirect {
         }
         // SAFETY: passing a static, NUL-terminated C string and
         // standard libc flags. The returned fd is checked for error.
-        let tty_fd = unsafe {
-            libc::open(
-                c"/dev/tty".as_ptr(),
-                libc::O_WRONLY | libc::O_CLOEXEC,
-            )
-        };
+        let tty_fd = unsafe { libc::open(c"/dev/tty".as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC) };
         if tty_fd < 0 {
             return Self {
                 saved_fd: None,
@@ -1819,11 +1808,7 @@ mod tests {
         // the bottom-left rounded glyph with the first character of
         // the hint string.
         assert_ne!(buf[(0, 4)].symbol(), " ", "bottom-left corner clobbered");
-        assert_ne!(
-            buf[(29, 4)].symbol(),
-            " ",
-            "bottom-right corner clobbered",
-        );
+        assert_ne!(buf[(29, 4)].symbol(), " ", "bottom-right corner clobbered",);
         // Specifically: the bottom-left corner should be a rounded
         // border glyph — `╰` for `BorderType::Rounded`. We don't assert
         // the exact character (theme could change), but it must be
