@@ -11,16 +11,20 @@
 //! 5. **Interpolation** - Expand `{{variable}}` expressions in body content
 //! 6. **Shell Expansion** - Execute `::shell` directives with security controls
 //! 7. **Shell Blocks** - Execute `::shell-block` directives with security controls
+//! 8. **Link Resolve** - Resolve local links to absolute paths
 //!
 //! **Transclusion** (concurrent execution after serial preparation):
-//! 8. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 9. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 10. **Code Transclusion** - Include `::code` file content as fenced blocks
-//! 11. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 9. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 10. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 11. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 12. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
-//! 12. **Cleanup** - Normalize markdown formatting
-//! 13. **Normalization** - Adjust heading levels
+//! 13. **Cleanup** - Normalize markdown formatting
+//! 14. **Normalization** - Adjust heading levels
+//!
+//! **Finalization** (root-only serial):
+//! 15. **Link Normalization** - Convert absolute paths back to portable forms
 //!
 //! ## Examples
 //!
@@ -487,25 +491,34 @@ impl Markdown {
                         if let Some(start) = op_start {
                             let kind = match operation {
                                 ComposeOperation::FrontmatterInterpolation => {
-                                    perf::PerfMetricKind::FrontmatterInterpolation
+                                    Some(perf::PerfMetricKind::FrontmatterInterpolation)
                                 }
                                 ComposeOperation::FrontmatterShellExpansion => {
-                                    perf::PerfMetricKind::FrontmatterShellExpansion
+                                    Some(perf::PerfMetricKind::FrontmatterShellExpansion)
                                 }
                                 ComposeOperation::TextReplacement => {
-                                    perf::PerfMetricKind::TextReplacement
+                                    Some(perf::PerfMetricKind::TextReplacement)
                                 }
-                                ComposeOperation::PageBlocks => perf::PerfMetricKind::PageBlocks,
+                                ComposeOperation::PageBlocks => {
+                                    Some(perf::PerfMetricKind::PageBlocks)
+                                }
                                 ComposeOperation::Interpolation => {
-                                    perf::PerfMetricKind::Interpolation
+                                    Some(perf::PerfMetricKind::Interpolation)
                                 }
                                 ComposeOperation::ShellExpansion => {
-                                    perf::PerfMetricKind::ShellExpansion
+                                    Some(perf::PerfMetricKind::ShellExpansion)
                                 }
-                                ComposeOperation::ShellBlocks => perf::PerfMetricKind::ShellBlocks,
+                                ComposeOperation::ShellBlocks => {
+                                    Some(perf::PerfMetricKind::ShellBlocks)
+                                }
+                                ComposeOperation::LinkResolve => {
+                                    Some(perf::PerfMetricKind::LinkResolve)
+                                }
                                 _ => unreachable!(),
                             };
-                            perf.record(kind, start.elapsed());
+                            if let Some(kind) = kind {
+                                perf.record(kind, start.elapsed());
+                            }
                         }
                     }
                     ComposePhase::Transclusion => {
@@ -544,6 +557,11 @@ impl Markdown {
                             };
                             perf.record(kind, start.elapsed());
                         }
+                    }
+                    ComposePhase::Finalization => {
+                        // Finalization stage is wired in a later phase
+                        // (root-only execution) — Phase 1 only registers
+                        // the new operations and phase variant.
                     }
                 }
             }
