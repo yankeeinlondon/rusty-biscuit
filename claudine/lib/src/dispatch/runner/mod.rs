@@ -21,9 +21,9 @@ mod protect;
 mod report;
 mod speak;
 
-use bash::{execute_bash, run_command_blocking, BASH_ACTION_TIMEOUT};
+use bash::{BASH_ACTION_TIMEOUT, execute_bash, run_command_blocking};
 use decisions::{dot_lookup, parse_decision, should_replace_selected};
-use mappers::{apply_mapper, CommandOutput};
+use mappers::{CommandOutput, apply_mapper};
 use meta_json::strip_nulls;
 use protect::{attach_protect_context, decision_for_short_circuit, should_short_circuit_call};
 use report::execute_report;
@@ -912,8 +912,11 @@ mod tests {
         // though Claudine's EventMeta does not precompute these fields.
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
-        let actions = vec![HookAction::Report {
-            handler: None,
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_ctx_weak__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
             when: Some("ctx.today != ''".to_string()),
         }];
 
@@ -923,15 +926,15 @@ mod tests {
             &make_meta_for_when_tests(),
             DispatchConfig::Canonical(&config),
             &messaging,
-            false,
+            true,
             None,
         )
         .await;
 
-        assert!(
-            result.is_ok(),
-            "ctx.* condition should evaluate without erroring the runner",
-        );
+        let response = result
+            .expect("ctx.* condition should evaluate without erroring the runner")
+            .expect("ctx.today != '' should be truthy and let the call fire");
+        assert_eq!(response.decision, Some(HookDecision::Deny));
     }
 
     #[tokio::test]
@@ -1149,6 +1152,96 @@ mod tests {
         .await
         .unwrap()
         .expect("extra.attempt > 1 should resolve truthy with attempt=3");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_tool_response_path_resolves() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let mut meta = make_meta_for_when_tests();
+        meta.tool_response = Some(serde_json::json!({"exit_code": 0}));
+
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_tool_response__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("tool_response.exit_code == 0".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta,
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("tool_response.exit_code == 0 should resolve truthy and let the call fire");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_env_fallback_syntax_works() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_fallback__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("env.CLAUDINE_TEST_MISSING || 'default' == 'default'".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("env fallback syntax should evaluate truthy and let the call fire");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_ctx_year_resolves() {
+        // Regression test: ctx.year should resolve truthy through the
+        // EventMetaConditionLookup composite and allow the action to run.
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_ctx_year__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("ctx.year != ''".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("ctx.year != '' should be truthy and let the call fire");
 
         assert_eq!(result.decision, Some(HookDecision::Deny));
     }

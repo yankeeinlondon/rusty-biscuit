@@ -1,3 +1,5 @@
+//! Utility module for JSON null stripping (retained after flattening removal).
+
 use serde_json::Value;
 
 pub(super) fn strip_nulls(value: &mut Value) {

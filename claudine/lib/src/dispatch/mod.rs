@@ -16,10 +16,10 @@ use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, ResolvedHook};
-use crate::provider::Provider;
 use crate::protect::decision::ProtectDecision;
 use crate::protect::observe::extract_protect_request;
 use crate::protect::report::format_blocked_message;
+use crate::provider::Provider;
 
 /// Wrapper-session-scoped dispatch runtime.
 ///

@@ -127,6 +127,7 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
 /// every other path to [`EventMetaExpressionLookup`]. This is the only
 /// surface where `ctx.*` is honored — templates, matchers, and harness
 /// validation deliberately leave `ctx.*` unresolved.
+#[derive(Debug)]
 pub struct EventMetaConditionLookup<'a> {
     inner: EventMetaExpressionLookup<'a>,
     ctx: CtxLookup<'a>,
@@ -721,6 +722,23 @@ mod tests {
             assert!(!s.is_empty(), "ctx.today should be non-empty");
         } else {
             panic!("ctx.today should return Value::String, got {:?}", value);
+        }
+    }
+
+    #[test]
+    fn condition_lookup_ctx_year_resolves() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        let value = lookup.get("ctx.year");
+        assert!(
+            value.is_some(),
+            "ctx.year should resolve through the composite"
+        );
+        if let Some(Value::String(s)) = value {
+            assert!(!s.is_empty(), "ctx.year should be non-empty");
+        } else {
+            panic!("ctx.year should return Value::String, got {:?}", value);
         }
     }
 
