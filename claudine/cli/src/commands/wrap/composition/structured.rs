@@ -9,10 +9,10 @@ use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::Result;
 
+use super::{CompositionStreamResult, StructuredCodexOutput, StructuredSummaryDetails};
 use crate::commands::wrap::exec;
 use crate::commands::wrap::live_semantic_sink::LiveSemanticSink;
 use crate::commands::wrap::profile::WrapperProfile;
-use super::{CompositionStreamResult, StructuredCodexOutput, StructuredSummaryDetails};
 use crate::commands::wrap::subagent_watchdog::TimeoutConfig;
 
 /// Run a provider through the structured stream pipeline shared by both
@@ -79,7 +79,8 @@ pub(crate) fn run_structured_composition(
                 timeout: timeout_config.timeout,
                 client_name: env!("CARGO_PKG_NAME"),
                 client_version: env!("CARGO_PKG_VERSION"),
-                capabilities: crate::commands::wrap::wire_io::WireClientCapabilities::default_for_claudine(),
+                capabilities:
+                    crate::commands::wrap::wire_io::WireClientCapabilities::default_for_claudine(),
                 env_context: env_context.clone(),
             },
             crate::commands::wrap::wire_io::WireSessionWiring {
