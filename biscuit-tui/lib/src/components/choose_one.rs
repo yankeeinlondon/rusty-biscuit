@@ -39,7 +39,6 @@ use crate::core::{
 };
 
 use super::choice_layout::ChoiceLayout;
-use super::choice_layout::navigate_row;
 use super::choice_render::ChoiceRenderContext;
 use super::choice_state::{
     ChoiceCommonState, HOTKEY_DISPLAY_FALLBACK, first_enabled_index, impl_choice_common_builders,
@@ -696,12 +695,11 @@ fn move_hover<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
 }
 
 fn move_hover_row<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, delta: i32) {
-    if let Some(new_hover) = navigate_row(
-        &state.layout_cache,
-        &state.input.options,
-        state.hover,
-        delta,
-    ) {
+    if let Some(new_hover) =
+        state
+            .layout_cache
+            .navigate_row(&state.input.options, state.hover, delta)
+    {
         state.hover = new_hover;
     } else {
         move_hover(state, delta);

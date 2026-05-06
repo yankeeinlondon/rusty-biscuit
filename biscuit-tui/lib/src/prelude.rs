@@ -23,7 +23,8 @@ pub use crate::core::{
     run_standalone_with_chrome,
 };
 pub use crate::helpers::{
-    ChoiceBuilderError, choose_many_from_csv, choose_many_from_dictionary,
+    ChoiceBuilderError, choice_options_from_csv, choice_options_from_dictionary,
+    choice_options_from_markdown_list, choose_many_from_csv, choose_many_from_dictionary,
     choose_many_from_markdown_list, choose_one_from_csv, choose_one_from_dictionary,
     choose_one_from_markdown_list,
 };
