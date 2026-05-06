@@ -85,6 +85,9 @@ We are expecting to add the following providers soon:
 1. **Logging**
 
     - each Agentic provider has their own logging solution but Claudine wraps this into a single view
+    - we also enrich data with git commits, PR's and more
+    - transactional data for 3 days which shows rich details
+    - aggregate data rolled into a columnar based reporting database for trend analysis
 
 
 ## Wrapped Execution
@@ -213,11 +216,32 @@ There are a number of powerful features which Claudine unlocks with what we're c
 
 ### Sequences
 
-Claudine provides you a simple way of specifying a **sequence** either in the frontmatter of your Markdown files or as a separate YAML file.
+Claudine provides you a simple way of specifying a **sequence** either in the frontmatter of your Markdown files or as a separate YAML file. This opens up the ability to run long-running meta-agents that can call into any of the Agents you are using for parts of the sequence.
+
+```mermaid
+flowchart LR
+
+Clarify(Clarify Spec)
+Design[Technical Design]
+Plan[Plan]
+Implement[Implement]
+Review[Review]
+C1((Prod Ready?))
+Suggest(Implement Suggestions)
+
+Clarify --> Design --> Plan --> Implement --> Review --> C1
+
+C1 -->|no| Suggest
+C1 -->|yes| Done
+
+Suggest --> Review
+```
+
+Steps along this process can be _interactive_ or _non-interactive_ but the goal is typically to load any interactive prompts to the front of the process so user involvement can be done once and then the remaining process
 
 ## Communication
 
-Now that _a lot_ if not _all_ of the actual coding is being done by AI the poor humans operating that code generation must be much more _multi-tasking_ in their work. Humans -- god knows we love them -- are great at lots of things but multi-tasking is not really one of them.
+Now that _a lot_ if not **all** coding is being done by AI the poor humans operating that code generation must be much more _multi-tasking_ in their work. Humans -- god knows we love them -- are great at lots of things but multi-tasking is not really one of them.
 
 > **Pro Tip:** anyone who tells you they are "great at multi-tasking" is lying and might be a psychopath, you should look for the first opportunity to leave the conversation.
 
