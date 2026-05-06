@@ -231,3 +231,6 @@ status subject="":
     matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
     eza "${matched}" -lga --hyperlink
 
+# show the directory structure of the given directory
+_structure dir:
+    @eza -lDTL 4 --icons=always --hyperlink {{dir}}

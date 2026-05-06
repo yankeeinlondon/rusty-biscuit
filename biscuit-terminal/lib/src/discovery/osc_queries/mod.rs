@@ -56,6 +56,7 @@
 //! }
 //! ```
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub mod parse;
@@ -68,12 +69,17 @@ pub use query::query_osc_actual;
 pub use support::{osc10_support, osc11_support, osc12_support};
 pub use types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
+static BG_COLOR_CACHE: OnceLock<Option<RgbValue>> = OnceLock::new();
+
 /// Query background color via OSC 11 heuristics.
 ///
 /// Returns `None` if:
 /// - Not running in a TTY
 /// - Running in a CI environment
 /// - No color information is available
+///
+/// The result is cached per-process so repeated calls do not trigger
+/// additional terminal queries.
 ///
 /// ## Examples
 ///
@@ -85,7 +91,7 @@ pub use types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 /// }
 /// ```
 pub fn bg_color() -> Option<RgbValue> {
-    query::query_osc_color(11)
+    *BG_COLOR_CACHE.get_or_init(|| query::query_osc_color(11))
 }
 
 /// Query foreground/text color via OSC 10 heuristics.

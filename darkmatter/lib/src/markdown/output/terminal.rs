@@ -41,9 +41,10 @@ use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::{
-    Table as TerminalTable, TableCellContent, TableColumn, ColumnType,
-};
+use biscuit_terminal::components::table::cell::TableCellContent;
+use biscuit_terminal::components::table::column::TableColumn;
+use biscuit_terminal::components::table::table::Table as TerminalTable;
+use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::discovery::detection::ImageSupport;
@@ -752,6 +753,8 @@ pub struct TerminalOptions {
     pub hyperlink_mode: HyperlinkMode,
 }
 
+static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
+
 impl Default for TerminalOptions {
     fn default() -> Self {
         use crate::markdown::highlighting::{
@@ -760,7 +763,7 @@ impl Default for TerminalOptions {
 
         let prose_theme = detect_prose_theme();
         let code_theme = detect_code_theme(prose_theme);
-        let color_mode = detect_color_mode();
+        let color_mode = *DETECTED_COLOR_MODE.get_or_init(detect_color_mode);
 
         Self {
             code_theme,

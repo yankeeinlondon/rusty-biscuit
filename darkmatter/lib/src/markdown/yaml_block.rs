@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::markdown::{
     Markdown, MarkdownError,
     dsl::CodeBlockMeta,
-    highlighting::CodeHighlighter,
+    highlighting::{CodeHighlighter, detect_color_mode},
     output::code_block::{render_html_code_block, render_terminal_code_block},
     output::html::HtmlOptions,
     output::terminal::{TerminalOptions, format_header_row},
@@ -168,11 +168,10 @@ fn validate_yaml(yaml: &str) -> Result<(), serde_yaml_ng::Error> {
 /// stored [`Layout`] (margins, alignment, word-wrap) to the result.
 impl Renderable for YamlBlock {
     fn render(&self, term: &Terminal) -> String {
-        // Route through TerminalOptions::default() so the same env-driven
-        // theme/color-mode detection flows here as for Markdown YAML fences.
+        // Detect color mode fresh so env-var changes between renders are
+        // honoured (e.g. dark/light tests that flip COLORFGBG).
+        let color_mode = detect_color_mode();
         let options = TerminalOptions::default();
-        // Reuse the already-resolved color mode rather than re-detecting.
-        let color_mode = options.color_mode;
         let highlighter = CodeHighlighter::new(options.code_theme, color_mode);
         let meta = CodeBlockMeta::default();
         let terminal_width = term.width();

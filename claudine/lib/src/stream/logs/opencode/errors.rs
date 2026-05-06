@@ -124,7 +124,13 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
 
     let root: serde_json::Value = match serde_json::from_str(error_tag) {
         Ok(v) => v,
-        Err(_) => return String::new(),
+        Err(_) => {
+            // If it's not valid JSON, return the raw tag (truncated if huge).
+            if error_tag.len() > 500 {
+                return format!("{}...", &error_tag[..497]);
+            }
+            return error_tag.to_string();
+        }
     };
 
     let envelope = root.get("error").unwrap_or(&root);
@@ -156,7 +162,12 @@ fn summarize_error_json(record: &OpenCodeLogRecord) -> String {
     let mut parts = Vec::new();
 
     if let Some(code) = status_code {
-        parts.push(format!("{error_name} ({code})"));
+        let desc = get_http_status_description(code as u16);
+        if !desc.is_empty() {
+            parts.push(format!("{error_name} ({code}: {desc})"));
+        } else {
+            parts.push(format!("{error_name} ({code})"));
+        }
     } else {
         parts.push(error_name.to_string());
     }
@@ -176,21 +187,44 @@ fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
     }
 
     if let Some(body_str) = envelope.get("responseBody").and_then(|v| v.as_str()) {
-        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str)
-            && let Some(msg) = body
+        if let Ok(body) = serde_json::from_str::<serde_json::Value>(body_str) {
+            if let Some(msg) = body
                 .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(|v| v.as_str())
-            && !msg.is_empty()
-        {
-            return Some(msg.to_string());
+                && !msg.is_empty()
+            {
+                return Some(msg.to_string());
+            }
+
+            if let Some(msg) = body.get("message").and_then(|v| v.as_str())
+                && !msg.is_empty()
+            {
+                return Some(msg.to_string());
+            }
+
+            let code = body
+                .get("code")
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .or_else(|| {
+                    body.get("code")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v.to_string())
+                });
+
+            if let Some(code_str) = code {
+                let desc = get_provider_code_description(&code_str);
+                if !desc.is_empty() {
+                    return Some(format!("{code_str}: {desc}"));
+                }
+            }
         }
         if !body_str.is_empty() {
             return Some(body_str.to_string());
         }
     }
 
-    for source in ["errors", "lastError"] {
+    for source in ["errors", "lastError", "data"] {
         let entries = match source {
             "errors" => envelope.get("errors").and_then(|v| v.as_array()).cloned(),
             _ => envelope.get(source).map(|v| vec![v.clone()]),
@@ -205,6 +239,37 @@ fn extract_provider_message(envelope: &serde_json::Value) -> Option<String> {
     }
 
     None
+}
+
+pub(super) fn get_http_status_description(code: u16) -> &'static str {
+    match code {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        408 => "Request Timeout",
+        409 => "Conflict",
+        413 => "Payload Too Large",
+        422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "",
+    }
+}
+
+pub(super) fn get_provider_code_description(code: &str) -> &'static str {
+    match code {
+        "1210" | "1211" | "1212" => "Invalid or expired API Key",
+        "1301" => "System error",
+        "1302" => "Input error",
+        "1303" => "Service overloaded",
+        "1305" => "Request timeout",
+        "1308" => "Usage limit reached",
+        _ => "",
+    }
 }
 
 fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<LogClassification> {
@@ -260,6 +325,29 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
     }
 
     if haystack.contains("AI_APICallError") || is_fatal {
+        let mut message = summarize_error_json(record);
+        if message.is_empty() {
+            // Try to find a tag that contains the error name.
+            let name_to_find = if is_fatal {
+                "AI_RetryError"
+            } else {
+                "AI_APICallError"
+            };
+            for (key, value) in &record.tags {
+                if key != "service"
+                    && key != "providerID"
+                    && key != "modelID"
+                    && value.contains(name_to_find)
+                {
+                    message = value.clone();
+                    break;
+                }
+            }
+        }
+        if message.is_empty() && !record.message.is_empty() {
+            message = record.message.clone();
+        }
+
         return Some(LogClassification::ApiFailure {
             status_code,
             error_name: if is_fatal {
@@ -268,7 +356,7 @@ fn classify_llm_failure(record: &OpenCodeLogRecord, service: &str) -> Option<Log
                 "AI_APICallError"
             }
             .to_string(),
-            message: summarize_error_json(record),
+            message,
             is_fatal,
         });
     }
@@ -491,7 +579,7 @@ mod tests {
             } => {
                 assert_eq!(status_code, Some(500));
                 assert_eq!(error_name, "AI_APICallError");
-                assert_eq!(message, "AI_APICallError (500): upstream boom");
+                assert_eq!(message, "AI_APICallError (500: Internal Server Error): upstream boom");
             }
             other => panic!("expected ApiFailure, got {other:?}"),
         }
@@ -526,7 +614,7 @@ mod tests {
                 );
                 assert_eq!(
                     message,
-                    "AI_APICallError (400): model does not support thinking"
+                    "AI_APICallError (400: Bad Request): model does not support thinking"
                 );
             }
             other => panic!("expected ApiFailure, got {other:?}"),
@@ -759,6 +847,76 @@ mod tests {
         // When both patterns appear, the first (JSON) match wins
         let haystack = r#""statusCode":200 statusCode=500"#;
         assert_eq!(extract_status_code(haystack), Some(200));
+    }
+
+    #[test]
+    fn classifies_api_failure_with_status_description() {
+        let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","statusCode":502}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError (502: Bad Gateway)");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extracts_zai_code_from_response_body() {
+        let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","responseBody":"{\"code\":1301,\"message\":\"internal server error\"}"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError: internal server error");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extracts_zai_description_when_message_missing() {
+        let line = r#"ERROR 2026-04-15T19:26:02 +100ms service=llm error={"error":{"name":"AI_APICallError","responseBody":"{\"code\":1305}"}}"#;
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError: 1305: Request timeout");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_non_json_error_tag() {
+        let line = "ERROR 2026-04-15T19:26:02 +100ms service=llm error=AI_APICallError: something went wrong on the server";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "AI_APICallError: something went wrong on the server");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn api_failure_falls_back_to_record_message() {
+        let line = "ERROR 2026-04-15T19:26:02 +100ms service=llm dummy=tag AI_APICallError: connection reset";
+        let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
+            panic!("expected Structured");
+        };
+        match classify(&record) {
+            LogClassification::ApiFailure { message, .. } => {
+                assert_eq!(message, "tag AI_APICallError: connection reset");
+            }
+            other => panic!("expected ApiFailure, got {other:?}"),
+        }
     }
 
     #[test]
