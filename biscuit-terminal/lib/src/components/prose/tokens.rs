@@ -95,10 +95,11 @@ pub(super) fn parse_tokens_inner(
     let mut chars = content.chars().peekable();
 
     while let Some(ch) = chars.next() {
-        // ── Backslash escapes: \< \> \{ \\ ──────────────────────────────
+        // ── Backslash escapes: \< \> \{ \\ \* \_ \[ \] \( \) ─────────────
         if ch == '\\' {
             match chars.peek() {
-                Some(&'<') | Some(&'>') | Some(&'{') | Some(&'\\') => {
+                Some(&'<') | Some(&'>') | Some(&'{') | Some(&'\\') | Some(&'*') | Some(&'_')
+                | Some(&'[') | Some(&']') | Some(&'(') | Some(&')') => {
                     result.push(chars.next().unwrap());
                 }
                 _ => result.push(ch),

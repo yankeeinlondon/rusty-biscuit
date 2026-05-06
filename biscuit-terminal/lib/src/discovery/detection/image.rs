@@ -207,8 +207,26 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
         "wast",         // Wast supports Kitty protocol
     ];
 
-    // Check TERM_PROGRAM for known Kitty-supporting terminals
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        // Apple Terminal does not support any image protocol and its
+        // APC handling is incomplete — a Kitty probe leaks visible
+        // garbage (`Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA`) into the capture.
+        // Detect early so viuer never sends the probe.
+        if term_program == "Apple_Terminal" {
+            tracing::debug!(
+                image_support = "None",
+                term_program = %term_program,
+                method = "known_terminal",
+                "Apple Terminal has no image support (no probe needed)"
+            );
+            return Some(ImageSupportResult {
+                support: ImageSupport::None,
+                reason: "Apple Terminal does not support inline images".to_string(),
+                method: DetectionMethod::KnownTerminal,
+            });
+        }
+
+        // Check TERM_PROGRAM for known Kitty-supporting terminals
         for &known in KITTY_TERMINALS {
             if term_program.eq_ignore_ascii_case(known) {
                 tracing::debug!(
@@ -287,6 +305,14 @@ fn image_support_from_env() -> ImageSupportResult {
     // Check TERM_PROGRAM for known terminals
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
+            // Apple Terminal has no image support
+            "Apple_Terminal" => {
+                return ImageSupportResult {
+                    support: ImageSupport::None,
+                    reason: "Apple Terminal does not support inline images".to_string(),
+                    method: DetectionMethod::EnvHeuristic,
+                };
+            }
             // Terminals with Kitty Graphics Protocol support
             "kitty" | "WezTerm" | "Warp" | "WarpTerminal" | "ghostty" | "konsole" | "wast" => {
                 tracing::debug!(
@@ -594,6 +620,19 @@ mod tests {
         let result = image_support_from_env();
         assert_eq!(result.support, ImageSupport::None);
         assert!(result.reason.contains("No image protocol"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_apple_terminal() {
+        let mut env = ScopedEnv::new();
+        env.set("TERM_PROGRAM", "Apple_Terminal");
+        env.remove("ITERM_SESSION_ID");
+        env.remove("ITERM_PROFILE");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::None);
+        assert!(result.reason.contains("Apple Terminal"));
     }
 
     #[test]
