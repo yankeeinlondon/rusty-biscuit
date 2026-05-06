@@ -10,8 +10,8 @@ block-beta
     block:pre
         columns 1
         preTitle["<b>Inline Pre</b> (<i>serial</i>)"]
-        preFlightChecks("<a href='./inline/page-blocks.md'>0. Pre-flight checks 🏁</a>")
-        fmInterpolate("<a href='./inline/page-blocks.md'>1. Frontmatter Interpolation 🏁</a>")
+        preFlightChecks("<a href='./inline/preflight-checks.md'>0. Pre-flight checks 🏁</a>")
+        fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation 🏁</a>")
         shellExp("<a href='./inline/fm-shell-expansion.md'>2. Frontmatter Shell Expansion 🏁</a>")
         textReplacement("<a href='./inline/text-replacement.md'>3. Text Replacement 🏁</a>")
         pageBlocks("<a href='./inline/page-blocks.md'>4. Page Blocks 🏁</a>")
