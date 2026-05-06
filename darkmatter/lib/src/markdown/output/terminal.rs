@@ -41,10 +41,9 @@ use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::table::{
-    Table as TerminalTable, TableCellContent, TableColumn,
+use biscuit_terminal::components::table::{
+    Table as TerminalTable, TableCellContent, TableColumn, ColumnType,
 };
-use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::discovery::detection::ImageSupport;
