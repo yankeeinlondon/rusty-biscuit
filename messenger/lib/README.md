@@ -282,6 +282,13 @@ The integration test in `tests/desktop_helpers.rs` exercises every helper agains
 2. Add a corresponding integration test to `tests/desktop_helpers.rs` covering success, interactive (actions/reply), replace, timeout, non-zero exit, and parse-error paths.
 3. Make the helper module compile on all platforms (gate native API calls with `#[cfg(target_os = "...")]`, not the entire module).
 
+Optional nextest check for desktop helper changes:
+
+```bash
+cargo build -p messenger --features desktop --bins
+cargo nextest run -p messenger --features desktop
+```
+
 ## Key Crates
 
 - `pulldown-cmark` for Markdown parsing
