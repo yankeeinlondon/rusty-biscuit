@@ -191,6 +191,14 @@ pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
 }
 
+fn wrap_terminal_for_mode(non_interactive: bool) -> Terminal {
+    if non_interactive {
+        crate::log::optimistic_terminal(None)
+    } else {
+        wrap_terminal()
+    }
+}
+
 pub(crate) fn resolve_binary_path(
     profile: &dyn WrapperProfile,
     clients: &InstalledAiClients,
@@ -324,8 +332,6 @@ fn run_provider_wrapper_inner(
     }
 
     let cwd = std::env::current_dir()?;
-
-    let term = wrap_terminal();
 
     let binary_path = info_span!(
         "wrapper_binary_resolution",
@@ -483,6 +489,7 @@ fn run_provider_wrapper_inner(
 
     // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
+    let term = wrap_terminal_for_mode(effective_non_interactive);
 
     profile.reject_direct_yolo(&child_args)?;
     flags::reject_retired_composition_flags(&child_args)?;
