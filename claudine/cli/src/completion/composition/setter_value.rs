@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::{name_stem, Candidate};
+use super::{Candidate, name_stem};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, PartialLen};
 use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind};
