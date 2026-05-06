@@ -6,68 +6,28 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{ApiResponse, Endpoint, EndpointParams, QueryParamType};
+#[allow(unused_imports)]
+use schematic_define::{ApiResponse, Endpoint, QueryParamType};
 
 use crate::parser::extract_path_params;
 
+mod shared;
+mod single;
+mod body;
+mod multipart;
+mod urlencoded;
+mod paginated;
+
+use shared::{
+    extract_query_params, generate_path_format, query_param_type_to_rust_type,
+    to_snake_case, QueryParamInfo,
+};
+
+// Re-export for sibling codegen modules and tests
+pub use shared::{format_generated_code, validate_generated_code};
+
 /// Default suffix for request struct names.
 const DEFAULT_REQUEST_SUFFIX: &str = "Request";
-
-/// Converts a PascalCase or camelCase string to snake_case.
-fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() {
-            if i > 0 {
-                result.push('_');
-            }
-            result.push(c.to_ascii_lowercase());
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-/// Extracts query parameters from an endpoint's params field.
-fn extract_query_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
-    match params {
-        Some(EndpointParams { query, .. }) => query
-            .iter()
-            .map(|p| QueryParamInfo {
-                name: p.name.clone(),
-                description: p.description.clone(),
-                param_type: p.param_type.clone(),
-            })
-            .collect(),
-        None => Vec::new(),
-    }
-}
-
-/// Information about a query parameter for code generation.
-#[derive(Debug, Clone)]
-struct QueryParamInfo {
-    name: String,
-    description: Option<String>,
-    param_type: QueryParamType,
-}
-
-/// Maps QueryParamType to a Rust type token stream.
-fn query_param_type_to_rust_type(param_type: &QueryParamType) -> TokenStream {
-    match param_type {
-        QueryParamType::String => quote! { String },
-        QueryParamType::Integer => quote! { i64 },
-        QueryParamType::Number => quote! { f64 },
-        QueryParamType::Boolean => quote! { bool },
-        QueryParamType::Array(inner) => {
-            let inner_type = query_param_type_to_rust_type(inner);
-            quote! { Vec<#inner_type> }
-        }
-        QueryParamType::Enum(_) => quote! { String },
-        QueryParamType::Json => quote! { serde_json::Value },
-        _ => quote! { String },
-    }
-}
 
 /// Generates a request struct for the given endpoint.
 ///
@@ -154,13 +114,13 @@ pub fn generate_request_struct_with_options(
     // Generate struct fields
     let path_param_fields = generate_path_param_fields(&path_params);
     let query_param_fields = generate_query_param_fields(&query_params);
-    let body_field = generate_body_field(endpoint);
+    let body_field = body::generate_body_field(endpoint);
 
     // Generate derives (Default only if no body or body type implements Default)
     let derives = generate_derives(has_body);
 
     // Generate Default impl if we have a body (manual impl needed)
-    let default_impl = generate_default_impl(&struct_name, &path_params, &query_params, has_body);
+    let default_impl = body::generate_default_impl(&struct_name, &path_params, &query_params, has_body);
 
     // Generate new() constructor method body for type-safe construction
     let new_method = generate_new_method(&path_params, &query_params, has_body, body_type_name);
@@ -169,7 +129,7 @@ pub fn generate_request_struct_with_options(
     let query_builder_methods = generate_query_builder_methods(&query_params);
 
     // Generate From<Body> impl for body-only structs
-    let from_body_impl = generate_from_body_impl(
+    let from_body_impl = body::generate_from_body_impl(
         &struct_name,
         &path_params,
         &query_params,
@@ -179,7 +139,7 @@ pub fn generate_request_struct_with_options(
 
     // Generate From<&str> and From<String> impls for single-param no-body structs
     let from_string_impls =
-        generate_from_string_impls(&struct_name, &path_params, &query_params, has_body);
+        single::generate_from_string_impls(&struct_name, &path_params, &query_params, has_body);
 
     // Generate EndpointSpec implementation for type-safe hook registration
     let endpoint_spec_impl =
@@ -420,162 +380,10 @@ fn generate_query_builder_methods(query_params: &[QueryParamInfo]) -> TokenStrea
     quote! { #(#methods)* }
 }
 
-/// Generates the body field if the endpoint has a request schema.
-fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
-    use schematic_define::ApiRequest;
-
-    match &endpoint.request {
-        Some(ApiRequest::Json(schema)) => {
-            let type_name = format_ident!("{}", schema.type_name);
-            quote! {
-                /// Request body
-                pub body: #type_name,
-            }
-        }
-        // FormData, UrlEncoded, Text, Binary don't have a typed body field
-        // The generated code will handle these differently
-        Some(ApiRequest::FormData { .. })
-        | Some(ApiRequest::UrlEncoded { .. })
-        | Some(ApiRequest::Text { .. })
-        | Some(ApiRequest::Binary { .. }) => quote! {},
-        // Handle future variants (non_exhaustive)
-        Some(_) => quote! {},
-        None => quote! {},
-    }
-}
-
 /// Generates derive attributes for the struct.
 fn generate_derives(_has_body: bool) -> TokenStream {
     // Always derive Default - all field types (String, body types) implement Default
     quote! { #[derive(Debug, Clone, Default, Serialize, Deserialize)] }
-}
-
-/// Generates the Default implementation for structs with a body.
-///
-/// Returns empty TokenStream since Default is now always derived.
-fn generate_default_impl(
-    _struct_name: &proc_macro2::Ident,
-    _path_params: &[&str],
-    _query_params: &[QueryParamInfo],
-    _has_body: bool,
-) -> TokenStream {
-    // Default is derived for all structs, no manual impl needed
-    quote! {}
-}
-
-/// Generates a `From<BodyType>` impl for body-only request structs.
-///
-/// This allows ergonomic conversion from the body type to the request struct:
-/// ```text
-/// let req: CreateCompletionRequest = body.into();
-/// ```
-///
-/// ## Returns
-///
-/// - For structs with body and no path params: `impl From<BodyType> for StructName`
-/// - Otherwise: empty `TokenStream`
-fn generate_from_body_impl(
-    struct_name: &proc_macro2::Ident,
-    path_params: &[&str],
-    query_params: &[QueryParamInfo],
-    has_body: bool,
-    body_type: Option<&str>,
-) -> TokenStream {
-    // Only generate From impl for body-only structs (no path params)
-    if has_body && path_params.is_empty() {
-        let body_ty = format_ident!("{}", body_type.unwrap());
-
-        // Initialize query params to None
-        let query_field_inits: Vec<_> = query_params
-            .iter()
-            .map(|qp| {
-                let name = format_ident!("{}", to_snake_case(&qp.name));
-                quote! { #name: None }
-            })
-            .collect();
-
-        quote! {
-            impl From<#body_ty> for #struct_name {
-                fn from(body: #body_ty) -> Self {
-                    Self {
-                        #(#query_field_inits,)*
-                        body,
-                    }
-                }
-            }
-        }
-    } else {
-        quote! {}
-    }
-}
-
-/// Generates `From<&str>` and `From<String>` impls for single-param no-body request structs.
-///
-/// This allows ergonomic conversion from string types to the request struct:
-/// ```text
-/// let req: RetrieveModelRequest = "gpt-4".into();
-/// let req = RetrieveModelRequest::from("gpt-4");
-/// ```
-///
-/// ## Returns
-///
-/// - For structs with exactly one path param and no body/query params: `impl From<&str>` and `impl From<String>`
-/// - Otherwise: empty `TokenStream`
-fn generate_from_string_impls(
-    struct_name: &proc_macro2::Ident,
-    path_params: &[&str],
-    query_params: &[QueryParamInfo],
-    has_body: bool,
-) -> TokenStream {
-    // Only generate From impls for single-param no-body no-query-param structs
-    if path_params.len() == 1 && !has_body && query_params.is_empty() {
-        let field_name = format_ident!("{}", path_params[0]);
-        quote! {
-            impl From<&str> for #struct_name {
-                fn from(param: &str) -> Self {
-                    Self { #field_name: param.to_string() }
-                }
-            }
-
-            impl From<String> for #struct_name {
-                fn from(param: String) -> Self {
-                    Self { #field_name: param }
-                }
-            }
-        }
-    } else if path_params.len() == 1 && !has_body && !query_params.is_empty() {
-        // Single path param with query params - still generate From but initialize query params
-        let field_name = format_ident!("{}", path_params[0]);
-        let query_field_inits: Vec<_> = query_params
-            .iter()
-            .map(|qp| {
-                let name = format_ident!("{}", to_snake_case(&qp.name));
-                quote! { #name: None }
-            })
-            .collect();
-
-        quote! {
-            impl From<&str> for #struct_name {
-                fn from(param: &str) -> Self {
-                    Self {
-                        #field_name: param.to_string(),
-                        #(#query_field_inits,)*
-                    }
-                }
-            }
-
-            impl From<String> for #struct_name {
-                fn from(param: String) -> Self {
-                    Self {
-                        #field_name: param,
-                        #(#query_field_inits,)*
-                    }
-                }
-            }
-        }
-    } else {
-        quote! {}
-    }
 }
 
 /// Generates a `new()` constructor method body for the request struct.
@@ -753,121 +561,6 @@ fn generate_endpoint_spec_impl(
             const ENDPOINT_ID: &'static str = #endpoint_id;
         }
     }
-}
-
-/// Generates the path format expression with query parameter handling.
-///
-/// Uses a collector pattern for query parameters:
-/// 1. Collects all params into a `Vec<(&str, String)>`
-/// 2. URL-encodes values using `urlencoding::encode()`
-/// 3. Constructs query string with single `?`/`&` check
-fn generate_path_format(
-    path: &str,
-    path_params: &[&str],
-    query_params: &[QueryParamInfo],
-) -> TokenStream {
-    let mut_tok = if !query_params.is_empty() {
-        quote! { mut }
-    } else {
-        quote! {}
-    };
-
-    let base_path = if path_params.is_empty() {
-        let path_literal = path;
-        quote! { let #mut_tok path = #path_literal.to_string(); }
-    } else {
-        // Build format string and arguments
-        let format_str = build_format_string(path, path_params);
-        let format_args = path_params.iter().map(|param| {
-            let field_name = format_ident!("{}", param);
-            quote! { self.#field_name }
-        });
-
-        quote! { let #mut_tok path = format!(#format_str, #(#format_args),*); }
-    };
-
-    // Generate query parameter collection and appending
-    let query_appending = if query_params.is_empty() {
-        quote! {}
-    } else {
-        // Generate collection statements for each param
-        let query_param_collectors = query_params.iter().map(|qp| {
-            let field_name = format_ident!("{}", to_snake_case(&qp.name));
-            let param_name = &qp.name;
-
-            match &qp.param_type {
-                QueryParamType::Array(_) => {
-                    // Arrays add multiple entries for the same key
-                    quote! {
-                        if let Some(ref values) = self.#field_name {
-                            for value in values {
-                                query_pairs.push((#param_name, value.to_string()));
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    quote! {
-                        if let Some(ref value) = self.#field_name {
-                            query_pairs.push((#param_name, value.to_string()));
-                        }
-                    }
-                }
-            }
-        });
-
-        quote! {
-            let mut query_pairs: Vec<(&str, String)> = Vec::new();
-            #(#query_param_collectors)*
-            if !query_pairs.is_empty() {
-                let query_string: String = query_pairs
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
-                    .collect::<Vec<_>>()
-                    .join("&");
-                if path.contains('?') {
-                    path.push_str(&format!("&{}", query_string));
-                } else {
-                    path.push_str(&format!("?{}", query_string));
-                }
-            }
-        }
-    };
-
-    quote! {
-        #base_path
-        #query_appending
-    }
-}
-
-/// Builds a format string by replacing {param} with {}.
-fn build_format_string(path: &str, path_params: &[&str]) -> String {
-    let mut result = path.to_string();
-    for param in path_params {
-        let placeholder = format!("{{{}}}", param);
-        result = result.replace(&placeholder, "{}");
-    }
-    result
-}
-
-/// Validates that the generated code is syntactically correct.
-///
-/// ## Errors
-///
-/// Returns an error string if the generated code fails to parse.
-pub fn validate_generated_code(tokens: &TokenStream) -> Result<(), String> {
-    syn::parse2::<syn::File>(tokens.clone()).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Formats generated code using prettyplease.
-///
-/// ## Errors
-///
-/// Returns an error string if the code fails to parse.
-pub fn format_generated_code(tokens: &TokenStream) -> Result<String, String> {
-    let file = syn::parse2::<syn::File>(tokens.clone()).map_err(|e| e.to_string())?;
-    Ok(prettyplease::unparse(&file))
 }
 
 #[cfg(test)]
