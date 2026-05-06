@@ -292,7 +292,10 @@ pub(crate) fn execute_sequence(
         let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
 
         let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
+        env_overrides.insert(
+            "CLAUDINE_FAIL_FAST".to_string(),
+            effective_fail_fast.to_string(),
+        );
         // Inject AGENT for this step using the resolved target so
         // {{env.AGENT}} in the body composes correctly. The mutation of
         // the parent process env happens once below for step 0, then
