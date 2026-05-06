@@ -232,7 +232,36 @@ The core event processing pipeline runs in 6 steps:
 - `loader` — Config file discovery, loading, merge logic, runtime compilation (matchers + mappers), and config save/validation
 - `template` — `{{placeholder}}` Handlebars-style interpolation engine with 28 variables across 5 categories (legacy `{placeholder}` single-brace syntax is deprecated with warnings)
 - `matcher` — Regex-based event filtering against tool name, notification type, or error
-- `runner` — Executes actions (TTS via biscuit-speaks, logging, shell commands, sound effects via playa, report formatting)
+- `runner` — Executes actions (TTS via biscuit-speaks, logging, shell commands, sound effects via playa, report formatting), evaluating per-action `when` conditions via the composite lookup
+
+### Expression Lookup Architecture
+
+All dispatch surfaces that evaluate expressions against an `EventMeta` share the same base adapter:
+
+```text
+                      ┌─────────────────────────────────────────────┐
+                      │ EventMetaExpressionLookup                   │
+                      │ (single source of truth for event paths)    │
+                      └─────────────────────────────────────────────┘
+                                    ▲
+        ┌───────────────────────────┼─────────────────────────────┐
+        │                           │                             │
+templates (template.rs)    matchers (matcher.rs)     harness validate.rs
+
+                      ┌─────────────────────────────────────────────┐
+                      │ EventMetaConditionLookup                    │
+                      │ - composite EvaluationLookup                │
+                      │ - ctx.* → Darkmatter ctx capture            │
+                      │ - everything else → delegates to            │
+                      │   EventMetaExpressionLookup                 │
+                      └─────────────────────────────────────────────┘
+                                    ▲
+                                    │
+                      Hook `when` (runner.rs::evaluate_when)
+                      → parse_condition(expr) + evaluate(parsed, &lookup)
+```
+
+`EventMetaExpressionLookup` resolves `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`, `os.*`, `hardware.*`, `git.*`, `project.*`, and top-level event fields. `EventMetaConditionLookup` layers `ctx.*` (e.g. `ctx.today`) on top for hook `when` evaluation. The old JSON-serialize-and-flatten path was removed by feature `2026-05-02-flattened-bridge`.
 
 ### Config Merge Strategy
 
