@@ -21,7 +21,8 @@
 //! ```
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::ops::{Deref, DerefMut};
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use rand::seq::SliceRandom;
@@ -33,28 +34,19 @@ use ratatui::{
 };
 
 use crate::core::{
-    ComponentTheme, EventOutcome, FuzzyFilter, HandleEvent, KeyBindings, Label, StandaloneState,
-    TerminalStyle, ValidationState, render_with_label,
+    ComponentTheme, EventOutcome, HandleEvent, KeyBindings, Label, StandaloneState, TerminalStyle,
+    ValidationState, render_with_label,
 };
 
 use super::choice_layout::ChoiceLayout;
 use super::choice_layout::navigate_row;
 use super::choice_render::ChoiceRenderContext;
-
-use super::choose::{
-    ChoiceInput, ChoiceOption, HotkeyDisplayMode, HotkeySpec, Orientation, SelectionMode,
+use super::choice_state::{
+    ChoiceCommonState, HOTKEY_DISPLAY_FALLBACK, first_enabled_index, impl_choice_common_builders,
+    last_enabled_index, modifier_only_mode, sticky_toggle_mode,
 };
 
-/// Duration that hotkey badges remain visible after a Ctrl/Alt chord on
-/// terminals that do not emit modifier-only key events.
-///
-/// Crossterm's modifier-only key events (`KeyEventKind::Press` with a
-/// `KeyCode::Modifier`) are not portable: most terminals only deliver
-/// the modifier alongside a chord (`Ctrl+R`), never on its own. To make
-/// badges discoverable in those environments, every Ctrl/Alt chord
-/// arms a deadline. While `Instant::now() < deadline` the badges
-/// remain visible; once it expires they hide again.
-pub(crate) const HOTKEY_DISPLAY_FALLBACK: Duration = Duration::from_millis(300);
+use super::choose::{ChoiceInput, ChoiceOption, HotkeyDisplayMode, Orientation, SelectionMode};
 
 /// Mutable state for a [`ChooseOne`] widget.
 ///
@@ -66,31 +58,23 @@ pub(crate) const HOTKEY_DISPLAY_FALLBACK: Duration = Duration::from_millis(300);
 /// compatibility.
 #[derive(Debug, Clone)]
 pub struct ChooseOneState<V = String> {
-    input: ChoiceInput<V>,
-    hover: usize,
+    common: ChoiceCommonState<V>,
     selected: Option<usize>,
     initial_selected: Option<usize>,
-    scroll_offset: usize,
-    ctrl_hotkeys: HashMap<char, usize>,
-    alt_hotkeys: HashMap<char, usize>,
-    label: Option<Label>,
-    theme: ComponentTheme,
-    bindings: KeyBindings,
-    validation_error: Option<String>,
-    filter: FuzzyFilter,
-    filter_visible: bool,
-    cached_labels: Vec<String>,
-    layout_cache: ChoiceLayout,
-    hotkey_display: HotkeyDisplayMode,
-    hotkey_display_deadline: Option<Instant>,
-    hotkey_display_override: Option<HotkeyDisplayMode>,
-    /// Sticky badge-visibility mode toggled by `Ctrl+Space` / `Alt+Space`.
-    /// When `Some`, takes precedence over the dynamic deadline path so
-    /// users on terminals that do not emit bare modifier press/release
-    /// events still have a portable way to surface the badges.
-    /// `None` means the dynamic logic governs visibility.
-    hotkey_display_sticky: Option<HotkeyDisplayMode>,
-    terminal_style: TerminalStyle,
+}
+
+impl<V> Deref for ChooseOneState<V> {
+    type Target = ChoiceCommonState<V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common
+    }
+}
+
+impl<V> DerefMut for ChooseOneState<V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.common
+    }
 }
 
 impl<V: Clone + PartialEq> ChooseOneState<V> {
@@ -109,32 +93,10 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
         if input.shuffle_options {
             input.options.shuffle(&mut rand::rng());
         }
-        let (ctrl_hotkeys, alt_hotkeys) = build_effective_hotkeys(&input.options);
-        let hover = first_enabled_index(&input.options).unwrap_or(0);
-        let cached_labels: Vec<String> = input.options.iter().map(|o| o.label.clone()).collect();
-        let mut filter = FuzzyFilter::new();
-        filter.clear(&cached_labels);
         Self {
-            input,
-            hover,
+            common: ChoiceCommonState::new(input),
             selected: None,
             initial_selected: None,
-            scroll_offset: 0,
-            ctrl_hotkeys,
-            alt_hotkeys,
-            label: None,
-            theme: ComponentTheme::default(),
-            bindings: KeyBindings::default(),
-            validation_error: None,
-            filter,
-            filter_visible: false,
-            cached_labels,
-            layout_cache: ChoiceLayout::default(),
-            hotkey_display: HotkeyDisplayMode::Hidden,
-            hotkey_display_deadline: None,
-            hotkey_display_override: None,
-            hotkey_display_sticky: None,
-            terminal_style: TerminalStyle::from_env(),
         }
     }
 
@@ -143,64 +105,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
         Self::new(ChoiceInput::new("", "").with_options(options))
     }
 
-    /// Attaches a label rendered at the configured position.
-    pub fn with_label(mut self, label: Label) -> Self {
-        self.label = Some(label);
-        self
-    }
-
-    /// Replaces the active theme.
-    pub fn with_theme(mut self, theme: ComponentTheme) -> Self {
-        self.theme = theme;
-        self
-    }
-
-    /// Replaces the key bindings.
-    pub fn with_key_bindings(mut self, bindings: KeyBindings) -> Self {
-        self.bindings = bindings;
-        self
-    }
-
-    /// Sets the [`ActiveChoiceColor`] used for the actively hovered
-    /// option. Sugar over mutating the underlying [`ChoiceInput`].
-    pub fn with_active_color(mut self, color: super::choose::ActiveChoiceColor) -> Self {
-        self.input.active_color = color;
-        self
-    }
-
-    /// Forces the hotkey badge display mode for the lifetime of this
-    /// state.
-    ///
-    /// Library callers and CLI front-ends use this to bypass the
-    /// modifier-detection + deadline-fallback path. Passing
-    /// [`HotkeyDisplayMode::Hidden`] disables badges entirely;
-    /// [`HotkeyDisplayMode::CtrlHeld`] and
-    /// [`HotkeyDisplayMode::AltHeld`] always render the matching
-    /// badge style. The forced value also clears any pending fallback
-    /// deadline so the override is unambiguous.
-    ///
-    /// The override persists for the lifetime of the state: subsequent
-    /// modifier-only press/release events and Ctrl/Alt chord-fallback
-    /// events are silently ignored for badge-display purposes, so the
-    /// public `--hotkey-badges` contract cannot be mutated mid-prompt.
-    pub fn with_hotkey_display(mut self, mode: HotkeyDisplayMode) -> Self {
-        self.hotkey_display_override = Some(mode);
-        self.hotkey_display = mode;
-        self.hotkey_display_deadline = None;
-        self
-    }
-
-    /// Replaces the detected terminal style used for rendering choice
-    /// indicators and active-row contrast.
-    ///
-    /// [`ChooseOneState::new`] captures [`TerminalStyle::from_env`] by
-    /// default. Tests and embedding applications with their own
-    /// terminal capability detection can inject a deterministic style
-    /// through this builder.
-    pub fn with_terminal_style(mut self, terminal_style: TerminalStyle) -> Self {
-        self.terminal_style = terminal_style;
-        self
-    }
+    impl_choice_common_builders!(ChooseOneState);
 
     /// Returns the raw stored [`HotkeyDisplayMode`] without consulting
     /// the fallback deadline. Tests use this to verify modifier-only
@@ -220,17 +125,7 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
     /// only while `now` precedes it; otherwise the resolver collapses
     /// to [`HotkeyDisplayMode::Hidden`].
     pub fn current_hotkey_display(&self, now: Instant) -> HotkeyDisplayMode {
-        if let Some(forced) = self.hotkey_display_override {
-            return forced;
-        }
-        if let Some(sticky) = self.hotkey_display_sticky {
-            return sticky;
-        }
-        match self.hotkey_display_deadline {
-            Some(deadline) if now < deadline => self.hotkey_display,
-            Some(_) => HotkeyDisplayMode::Hidden,
-            None => self.hotkey_display,
-        }
+        self.common.current_hotkey_display(now)
     }
 
     /// Returns the current `Ctrl+Space` / `Alt+Space` toggle state.
@@ -473,25 +368,27 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
             };
             adjust_scroll(state, scroll_visible, &visible_indices, &layout);
 
+            let common = &mut state.common;
+            let selected = state.selected;
+            let validation_error = common.validation_error.clone();
             let ctx = ChoiceRenderContext::for_single(
-                &state.theme,
-                state.terminal_style,
-                state.input.orientation,
+                &common.theme,
+                common.terminal_style,
+                common.input.orientation,
             )
-            .with_active_color(state.input.active_color)
+            .with_active_color(common.input.active_color)
             .with_hotkey_display(hotkey_display);
             ctx.render(
                 list_area,
                 b,
-                &state.input.options,
+                &common.input.options,
                 &visible_indices,
-                state.scroll_offset,
-                state.hover,
-                |idx| Some(idx) == state.selected,
-                Some(&mut state.filter),
-                state.validation_error.as_deref(),
+                common.scroll_offset,
+                common.hover,
+                |idx| Some(idx) == selected,
+                Some(&mut common.filter),
+                validation_error.as_deref(),
             );
-
         });
 
         if let Some(message) = state.validation_error.as_deref()
@@ -606,14 +503,16 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
         // selection and submit.
         if KeyBindings::matches(&state.bindings.cancel, &event) {
             if state.filter_visible && state.filter.is_active() {
-                state.filter.clear(&state.cached_labels);
+                let cached_labels = state.cached_labels.clone();
+                state.filter.clear(&cached_labels);
                 state.filter_visible = false;
                 snap_hover_to_visible(state);
                 return EventOutcome::Consumed;
             }
             if state.filter_visible {
                 state.filter_visible = false;
-                state.filter.clear(&state.cached_labels);
+                let cached_labels = state.cached_labels.clone();
+                state.filter.clear(&cached_labels);
                 snap_hover_to_visible(state);
                 return EventOutcome::Consumed;
             }
@@ -628,13 +527,15 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
         if state.filter_visible && event.modifiers == KeyModifiers::NONE {
             match event.code {
                 KeyCode::Backspace => {
-                    state.filter.pop_char(&state.cached_labels);
+                    let cached_labels = state.cached_labels.clone();
+                    state.filter.pop_char(&cached_labels);
                     snap_hover_to_visible(state);
                     state.validation_error = None;
                     return EventOutcome::Consumed;
                 }
                 KeyCode::Char(c) if c != ' ' => {
-                    state.filter.push_char(c, &state.cached_labels);
+                    let cached_labels = state.cached_labels.clone();
+                    state.filter.push_char(c, &cached_labels);
                     snap_hover_to_visible(state);
                     state.validation_error = None;
                     return EventOutcome::Consumed;
@@ -714,8 +615,9 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
                     return EventOutcome::Consumed;
                 }
                 KeyCode::Char(c) if state.input.filter_enabled && c.is_alphanumeric() => {
-                    state.filter.clear(&state.cached_labels);
-                    state.filter.push_char(c, &state.cached_labels);
+                    let cached_labels = state.cached_labels.clone();
+                    state.filter.clear(&cached_labels);
+                    state.filter.push_char(c, &cached_labels);
                     state.filter_visible = true;
                     snap_hover_to_visible(state);
                     state.validation_error = None;
@@ -838,123 +740,9 @@ fn jump_to<V: Clone + PartialEq>(state: &mut ChooseOneState<V>, idx: usize) {
     }
 }
 
-pub(super) fn first_enabled_index<V>(options: &[ChoiceOption<V>]) -> Option<usize> {
-    options.iter().position(|option| !option.disabled)
-}
-
-pub(super) fn last_enabled_index<V>(options: &[ChoiceOption<V>]) -> Option<usize> {
-    options.iter().rposition(|option| !option.disabled)
-}
-
-/// Detects whether `event` is a "modifier-only" key press for `Ctrl`
-/// or `Alt`.
-///
-/// Crossterm reports modifier-only key presses with
-/// [`KeyCode::Modifier`] (or, on some terminals, a bare modifier code
-/// arriving as a chord with itself). When such an event is observed
-/// we can drive the hotkey badges directly without the deadline-based
-/// fallback.
-///
-/// Returns `Some(CtrlHeld)` for Ctrl presses, `Some(AltHeld)` for Alt
-/// presses, and `None` for everything else.
-pub(super) fn modifier_only_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> {
-    match event.code {
-        KeyCode::Modifier(mod_key) => {
-            use crossterm::event::ModifierKeyCode;
-            match mod_key {
-                ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl => {
-                    Some(HotkeyDisplayMode::CtrlHeld)
-                }
-                ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt => {
-                    Some(HotkeyDisplayMode::AltHeld)
-                }
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Detects the portable badge-visibility chord (Ctrl+Space or
-/// Alt+Space) regardless of press/release direction.
-///
-/// - `Ctrl+Space` → `Some(CtrlHeld)`
-/// - `Alt+Space`  → `Some(AltHeld)`
-///
-/// The caller inspects `event.kind` to decide what to do — Press sets
-/// the sticky display, Release clears it (mirroring "hold to show"
-/// UX). Returning the same mode for both directions keeps the
-/// matcher logic in one place.
-///
-/// ## Encoding caveat (the part you must not get wrong)
-///
-/// `Ctrl+Space` does NOT consistently arrive as `KeyCode::Char(' ')`
-/// with the CONTROL modifier. The dominant encoding across legacy /
-/// VT-style terminal input is **ASCII NUL** (`\x00`) — pressing Ctrl
-/// subtracts 0x40 from the key, and Space is `0x20`, so Ctrl+Space
-/// is `0x00`. crossterm reports this as `KeyCode::Char('\0')` with
-/// the CONTROL modifier set. Under kitty keyboard protocol with
-/// `DISAMBIGUATE_ESCAPE_CODES`, the same chord arrives as the
-/// "intuitive" `KeyCode::Char(' ') + CONTROL`. We accept BOTH —
-/// otherwise users on a non-kitty path press Ctrl+Space, the bytes
-/// reach the binary, and the chord silently does nothing.
-///
-/// `Alt+Space` does not have this NUL quirk — Alt sets the modifier
-/// flag and the key code stays `Char(' ')`.
-///
-/// ## macOS note
-///
-/// By default macOS binds `Ctrl+Space` to "Select previous input
-/// source" at the OS level, capturing the chord before it reaches
-/// the terminal. Users may need to disable that shortcut in System
-/// Settings → Keyboard → Keyboard Shortcuts → Input Sources.
-pub(super) fn sticky_toggle_mode(event: &KeyEvent) -> Option<HotkeyDisplayMode> {
-    let has_ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
-    let has_alt = event.modifiers.contains(KeyModifiers::ALT);
-    let is_space_chord = match event.code {
-        // Standard / kitty-protocol encoding.
-        KeyCode::Char(' ') => true,
-        // Legacy Ctrl+Space encoding: Ctrl subtracts 0x40 from the
-        // key code, so Space (0x20) becomes NUL (0x00). Accept this
-        // ONLY when CONTROL is set so a stray NUL byte from some
-        // other source can't accidentally trigger the toggle.
-        KeyCode::Char('\0') if has_ctrl => true,
-        _ => false,
-    };
-    if !is_space_chord {
-        return None;
-    }
-    match (has_ctrl, has_alt) {
-        (true, false) => Some(HotkeyDisplayMode::CtrlHeld),
-        (false, true) => Some(HotkeyDisplayMode::AltHeld),
-        _ => None,
-    }
-}
-
 fn is_ctrl_c(event: &KeyEvent) -> bool {
     event.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(event.code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&'c'))
-}
-
-/// Builds separate maps for effective Ctrl and Alt hotkeys.
-pub(super) fn build_effective_hotkeys<V>(
-    options: &[ChoiceOption<V>],
-) -> (HashMap<char, usize>, HashMap<char, usize>) {
-    let mut ctrl = HashMap::new();
-    let mut alt = HashMap::new();
-    for (idx, option) in options.iter().enumerate() {
-        if let Some(hotkey) = option.effective_hotkey() {
-            match hotkey {
-                HotkeySpec::Ctrl(c) => {
-                    ctrl.entry(c.to_ascii_lowercase()).or_insert(idx);
-                }
-                HotkeySpec::Alt(c) => {
-                    alt.entry(c.to_ascii_lowercase()).or_insert(idx);
-                }
-            }
-        }
-    }
-    (ctrl, alt)
 }
 
 fn error_row_y<V: Clone + PartialEq>(
@@ -1006,10 +794,12 @@ fn adjust_scroll<V: Clone + PartialEq>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::choose::HotkeySpec;
     use super::*;
     use crate::core::{Label, LabelPosition, NerdFontStatus, TerminalBackground};
     use crossterm::event::{KeyCode, KeyModifiers};
     use ratatui::style::Color;
+    use std::time::Duration;
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -1094,7 +884,7 @@ mod tests {
         assert!(state.selected_index().is_none());
     }
 
-#[test]
+    #[test]
     fn space_on_disabled_option_is_ignored() {
         let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
             ChoiceOption::new("a", "A", "a"),
@@ -1262,7 +1052,10 @@ mod tests {
         let event = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL);
         let outcome = ChooseOne::new().handle_event(&mut state, event);
         assert_eq!(outcome, EventOutcome::Consumed);
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
     }
 
     #[test]
@@ -2373,7 +2166,10 @@ mod tests {
         let mut state = ChooseOneState::new(fixture_input());
         assert_eq!(state.hotkey_display_sticky(), None);
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
             HotkeyDisplayMode::CtrlHeld
@@ -2393,7 +2189,10 @@ mod tests {
         let mut state = ChooseOneState::new(fixture_input());
         let event = KeyEvent::new(KeyCode::Char('\0'), KeyModifiers::CONTROL);
         ChooseOne::new().handle_event(&mut state, event);
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
     }
 
     #[test]
@@ -2422,7 +2221,10 @@ mod tests {
     fn alt_space_toggles_sticky_alt_held() {
         let mut state = ChooseOneState::new(fixture_input());
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::ALT));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::AltHeld)
+        );
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
             HotkeyDisplayMode::AltHeld
@@ -2437,7 +2239,10 @@ mod tests {
         // the Ctrl-emphasis state.
         let mut state = ChooseOneState::new(fixture_input());
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         let release = KeyEvent {
             code: KeyCode::Char(' '),
             modifiers: KeyModifiers::CONTROL,
@@ -2458,9 +2263,14 @@ mod tests {
         // for Ctrl+Space release (the form a non-kitty terminal would
         // emit if it emitted release events at all).
         let mut state = ChooseOneState::new(fixture_input());
-        ChooseOne::new()
-            .handle_event(&mut state, KeyEvent::new(KeyCode::Char('\0'), KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        ChooseOne::new().handle_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('\0'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         let release = KeyEvent {
             code: KeyCode::Char('\0'),
             modifiers: KeyModifiers::CONTROL,
@@ -2478,7 +2288,10 @@ mod tests {
         let mut state = ChooseOneState::new(fixture_input());
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::ALT));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::AltHeld)
+        );
     }
 
     #[test]
@@ -2504,12 +2317,13 @@ mod tests {
         // restores hidden state cleanly.
         use crossterm::event::ModifierKeyCode;
         let mut state = ChooseOneState::new(fixture_input());
-        ChooseOne::new()
-            .handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
+        ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
-        ChooseOne::new()
-            .handle_event(&mut state, modifier_release(ModifierKeyCode::LeftControl));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
+        ChooseOne::new().handle_event(&mut state, modifier_release(ModifierKeyCode::LeftControl));
         assert_eq!(state.hotkey_display_sticky(), None);
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
