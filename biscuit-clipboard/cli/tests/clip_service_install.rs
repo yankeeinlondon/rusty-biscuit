@@ -63,7 +63,12 @@ fn install_dry_run_does_not_write_to_disk() {
             count += 1;
         }
     }
-    assert_eq!(count, 0, "dry-run must not write any files under {:?}", prefix.path());
+    assert_eq!(
+        count,
+        0,
+        "dry-run must not write any files under {:?}",
+        prefix.path()
+    );
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -103,7 +108,10 @@ fn install_writes_manifest_then_uninstall_removes_it() {
 
     // Sanity: at least one file lives under the prefix.
     let files: Vec<_> = walk(prefix.path()).filter(|p| p.is_file()).collect();
-    assert!(!files.is_empty(), "install should have written at least one file");
+    assert!(
+        !files.is_empty(),
+        "install should have written at least one file"
+    );
 
     // Uninstall removes it.
     Command::cargo_bin("clip")
@@ -115,7 +123,10 @@ fn install_writes_manifest_then_uninstall_removes_it() {
         .stdout(predicate::str::contains("Removed autostart manifest"));
 
     let after: Vec<_> = walk(prefix.path()).filter(|p| p.is_file()).collect();
-    assert!(after.is_empty(), "uninstall should have removed the manifest, found: {after:?}");
+    assert!(
+        after.is_empty(),
+        "uninstall should have removed the manifest, found: {after:?}"
+    );
 }
 
 fn walk(root: &std::path::Path) -> impl Iterator<Item = std::path::PathBuf> {

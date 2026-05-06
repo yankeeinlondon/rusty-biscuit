@@ -95,7 +95,10 @@ impl History {
     /// The dedup probe uses [`entry::content_hash_of`] — the same
     /// function that derives the entry id — so a re-insert of the same
     /// content always either deduplicates or matches the existing id.
-    pub fn insert(&mut self, formats: Vec<ClipboardFormat>) -> (Option<&ClipboardEntry>, Vec<ClipboardEntry>) {
+    pub fn insert(
+        &mut self,
+        formats: Vec<ClipboardFormat>,
+    ) -> (Option<&ClipboardEntry>, Vec<ClipboardEntry>) {
         let new_hash = entry::content_hash_of(&formats);
 
         if self
