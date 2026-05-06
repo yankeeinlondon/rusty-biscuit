@@ -12,6 +12,7 @@ mod guardrails;
 pub mod lifecycle;
 pub mod loop_actions;
 pub mod loop_config;
+pub mod loop_expression;
 pub mod preflight;
 mod prepare;
 mod resolve;
@@ -28,6 +29,7 @@ pub use lifecycle::{
     emit_lifecycle_signal, parse_lifecycle_config,
 };
 pub use loop_config::resolve_loop_config;
+pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{
     PrepareOptions, parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
