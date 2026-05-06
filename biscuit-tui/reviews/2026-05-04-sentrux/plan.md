@@ -60,8 +60,17 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - ../.claude/skills/biscuit-tui/SKILL.md
+source_files_during_phase_4:
+  - cli/src/commands/choose_many.rs
+  - cli/src/commands/choose_one.rs
+  - cli/src/commands/common_choose.rs
+  - cli/tests/completions_shell.rs
+docs_updated_during_phase_4:
+  - reviews/2026-05-04-sentrux/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - ../.claude/skills/biscuit-tui/SKILL.md
 packages:
-  - tui-chrome
   - tui-chrome-cli
 ---
 
@@ -114,12 +123,12 @@ This plan operationalizes the 15 suggestions in [`review-1.md`](./review-1.md). 
 ## Phase 4: CLI Argument Ergonomics
 *Goal: Consolidate duplicated clap argument structures.*
 
-- [ ] **Lift `ChooseSourceArgs`:**
+- [x] **Lift `ChooseSourceArgs`:**
     - Create a shared struct in `cli/src/commands/common_choose.rs` for source-resolution flags.
     - Update `ChooseOneArgs` and `ChooseManyArgs` to flatten this shared struct.
-- [ ] **Generic Command Run Plumbing:**
+- [x] **Generic Command Run Plumbing:**
     - Extract shared control flow (resolve -> normalize -> build -> run -> format) into `common_choose.rs`.
     - Collapse `run()` implementations in `choose_one.rs` and `choose_many.rs`.
-- [ ] **Final Validation:**
+- [x] **Final Validation:**
     - Run `just lint` and `just test` across the entire package area.
     - Verify `quality_signal` improvement via Sentrux (if available).
