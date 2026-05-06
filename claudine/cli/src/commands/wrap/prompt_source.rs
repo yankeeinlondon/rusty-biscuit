@@ -108,7 +108,9 @@ mod tests {
 
         assert_eq!(
             edited,
-            Some(super::super::profile::PromptSource::Inline("edited prompt".to_string()))
+            Some(super::super::profile::PromptSource::Inline(
+                "edited prompt".to_string()
+            ))
         );
     }
 

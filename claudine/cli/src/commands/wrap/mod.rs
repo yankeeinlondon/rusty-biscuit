@@ -17,23 +17,18 @@ pub(crate) mod sequence;
 
 // New split modules
 pub(crate) mod flags;
-pub(crate) mod prompt_source;
-pub(crate) mod overlay;
-pub(crate) mod resume;
 pub(crate) mod harness_orch;
 pub(crate) mod inline;
+pub(crate) mod overlay;
 pub(crate) mod policy;
+pub(crate) mod prompt_source;
+pub(crate) mod resume;
 
 // Re-exports from split modules
 pub use flags::WrapperArgs;
 pub(crate) use flags::{
     extract_wrapper_flags_from_passthrough, has_explicit_native_output_request,
     reject_retired_composition_flags,
-};
-pub(crate) use policy::{
-    StructuredCodexOutput, StructuredSummaryDetails, WrapperHarnessPermissionProbe,
-    build_structured_plumbing, emit_stream_summary, emit_stream_summary_with_context,
-    format_summary_prose, format_verbose_summary_details_prose, StreamSummaryContext,
 };
 pub(crate) use harness_orch::{
     AttemptLaunch, CachedHarnessLoopContext, HarnessPromptMode, HarnessPromptState,
@@ -48,9 +43,14 @@ pub(crate) use inline::{
     try_inline_closure,
 };
 pub(crate) use overlay::{frontmatter_map_to_value, merge_frontmatter_overlay};
+pub(crate) use policy::{
+    StreamSummaryContext, StructuredCodexOutput, StructuredSummaryDetails,
+    WrapperHarnessPermissionProbe, build_structured_plumbing, emit_stream_summary,
+    emit_stream_summary_with_context, format_summary_prose, format_verbose_summary_details_prose,
+};
 pub(crate) use prompt_source::{maybe_edit_prompt_source, maybe_edit_prompt_source_with};
 pub(crate) use resume::{
-    NextAttemptPlan, apply_next_attempt_plan, append_resume_passthrough_args,
+    NextAttemptPlan, append_resume_passthrough_args, apply_next_attempt_plan,
     build_next_attempt_plan, normalize_resume_args, try_resolve_handler,
 };
 
@@ -67,7 +67,7 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tracing::{info_span};
+use tracing::info_span;
 
 use crate::log;
 
@@ -393,7 +393,9 @@ fn run_provider_wrapper_inner(
     child_args = extracted_args;
 
     if edit_requested {
-        let Some(edited_prompt) = prompt_source::maybe_edit_prompt_source(prompt_source, silent_requested)? else {
+        let Some(edited_prompt) =
+            prompt_source::maybe_edit_prompt_source(prompt_source, silent_requested)?
+        else {
             return Ok((0, None, None));
         };
         prompt_source = edited_prompt;
@@ -474,7 +476,8 @@ fn run_provider_wrapper_inner(
         ));
     }
 
-    let cli_step_timeout_duration: Option<std::time::Duration> = match args.step_timeout.as_deref() {
+    let cli_step_timeout_duration: Option<std::time::Duration> = match args.step_timeout.as_deref()
+    {
         Some(raw) => Some(
             claudine::harness::parse_timeout(raw, std::path::Path::new("<--step-timeout>"))
                 .map_err(|e| eyre!("invalid --step-timeout value: {e}"))?,
@@ -1008,7 +1011,9 @@ fn run_provider_wrapper_inner(
         });
 
         if let (Some(base_prompt), Some(source_path)) = (base_prompt, harness_source) {
-            let seed = harness_orch::materialize_passthrough_harness_seed(&source_path, base_prompt.clone(),
+            let seed = harness_orch::materialize_passthrough_harness_seed(
+                &source_path,
+                base_prompt.clone(),
             )?;
             let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
             if harness_enabled {
@@ -1016,8 +1021,10 @@ fn run_provider_wrapper_inner(
                     source_path: &source_path,
                     repo_root: env_plan.repo_root.as_deref(),
                 };
-                let shell_options =
-                    harness_orch::build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
+                let shell_options = harness_orch::build_harness_shell_options(
+                    &source_path,
+                    env_plan.repo_root.as_deref(),
+                );
                 let plan = claudine::harness::parse_harness_plan(
                     &seed.frontmatter,
                     &source_path,

@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::info_span;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnessPromptMode {
     Passthrough,
@@ -176,8 +175,7 @@ impl CachedHarnessLoopContext {
         }
     }
 
-    pub(crate) fn resolve_context(&self,
-    ) -> claudine::harness::HarnessResolutionContext<'_> {
+    pub(crate) fn resolve_context(&self) -> claudine::harness::HarnessResolutionContext<'_> {
         claudine::harness::HarnessResolutionContext {
             source_path: &self.source_path,
             repo_root: self.repo_root.as_deref(),
@@ -344,7 +342,8 @@ pub(crate) fn build_harness_launch(
     plan_step_timeout: Option<std::time::Duration>,
 ) -> Result<AttemptLaunch> {
     let mut args = if let Some(session_id) = state.next_resume_session_id.take() {
-        let mut args = super::resume::normalize_resume_args(profile, profile.build_resume_args(&session_id)?);
+        let mut args =
+            super::resume::normalize_resume_args(profile, profile.build_resume_args(&session_id)?);
         super::resume::append_resume_passthrough_args(&mut args, base_args);
         args
     } else {
@@ -357,7 +356,11 @@ pub(crate) fn build_harness_launch(
     let delivery = profile.prompt_delivery(&args, &prompt, effective_non_interactive)?;
     let wire_prompt = delivery.as_wire_rpc().map(str::to_string);
     let stdin_seed = delivery.apply_to(&mut args);
-    super::profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
+    super::profile::require_prompt_present(
+        profile.binary(),
+        effective_non_interactive,
+        &prompt_source,
+    )?;
 
     let mut env = base_env.clone();
     for (key, value) in &materialized.env_overrides {
@@ -441,7 +444,9 @@ pub(crate) fn execute_harness_attempt(
     let launch = &launch;
     let (exit_code, termination, session_id, final_response, stderr_text, perf) = if use_structured
     {
-        let summary_details = Arc::new(Mutex::new(super::policy::StructuredSummaryDetails::default()));
+        let summary_details = Arc::new(Mutex::new(
+            super::policy::StructuredSummaryDetails::default(),
+        ));
         let parser_config = claudine::stream::ParserConfig::default();
         let sink = super::live_semantic_sink::LiveSemanticSink::with_default_wiring(
             provider,
@@ -780,9 +785,7 @@ pub(crate) fn run_harness_loop(
                 command_count = auditable.len(),
             )
             .in_scope(|| {
-                claudine::harness::audit_shell_commands(&auditable,
-                    harness_context.shell_options(),
-                )
+                claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
             });
 
             if show_checks {
@@ -949,8 +952,16 @@ pub(crate) fn run_harness_loop(
         let _launch_span = info_span!(
             "harness_launch_plan",
             attempt,
-            timeout_secs = launch.timeout_config.timeout.map(|d| d.as_secs()).unwrap_or(0),
-            step_timeout_secs = launch.timeout_config.step_timeout.map(|d| d.as_secs()).unwrap_or(0),
+            timeout_secs = launch
+                .timeout_config
+                .timeout
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            step_timeout_secs = launch
+                .timeout_config
+                .step_timeout
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
         )
         .entered();
 
@@ -959,14 +970,12 @@ pub(crate) fn run_harness_loop(
         // handler that redirects to a different source document picks
         // up the replacement document's warn values, not the original's.
         let prompt_timing = if emit_prompt_timing {
-            Some(
-                super::composition::build_prompt_timing_context(
-                    &prompt_state.source_path,
-                    repo_root,
-                    plan.timeout_warn,
-                    plan.step_timeout_warn,
-                ),
-            )
+            Some(super::composition::build_prompt_timing_context(
+                &prompt_state.source_path,
+                repo_root,
+                plan.timeout_warn,
+                plan.step_timeout_warn,
+            ))
         } else {
             None
         };

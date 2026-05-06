@@ -1,15 +1,15 @@
 //! Tool call rendering — the `ToolCallDisplay` contract.
 
 use super::LiveSemanticSink;
-use super::{Section, ToolResultBody, TOOL_RESULT_BODY_MAX_LINES};
-use claudine::stream::semantic::SemanticEvent;
-use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
+use super::{Section, TOOL_RESULT_BODY_MAX_LINES, ToolResultBody};
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Margin, WordWrap};
+use claudine::stream::semantic::SemanticEvent;
+use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
 use serde_json::Value;
 
 impl LiveSemanticSink {
@@ -17,10 +17,7 @@ impl LiveSemanticSink {
     /// header line stays terse (`← Zsh(successful)`), while the actual
     /// stdout/stderr text is surfaced immediately below as a purple
     /// BlockQuote with grey text.
-    pub(crate) fn render_tool_result_body(&mut self,
-        section: Section,
-        body: &ToolResultBody,
-    ) {
+    pub(crate) fn render_tool_result_body(&mut self, section: Section, body: &ToolResultBody) {
         let prose = Prose::new(super::escape_prose(&body.text))
             .with_word_wrap(WordWrap::Truncate(Some("…".into())));
         let mut block = BlockQuote::new(RenderableContent::from(prose), None::<&str>)
@@ -99,7 +96,10 @@ impl LiveSemanticSink {
                     s.push_str(&format!("<dim>{}</dim>", self.render_file_link(path)));
                 }
                 if let Some(detail) = display.error_detail.as_deref().filter(|s| !s.is_empty()) {
-                    s.push_str(&format!(" <dim><i>{}</i></dim>", super::escape_prose(detail)));
+                    s.push_str(&format!(
+                        " <dim><i>{}</i></dim>",
+                        super::escape_prose(detail)
+                    ));
                 }
                 Some(s)
             }
@@ -118,7 +118,10 @@ impl LiveSemanticSink {
                 if is_file_tool {
                     Some(self.render_file_link(summary))
                 } else {
-                    Some(format!("<dim><i>{}</i></dim>", super::escape_prose(summary)))
+                    Some(format!(
+                        "<dim><i>{}</i></dim>",
+                        super::escape_prose(summary)
+                    ))
                 }
             }
             (None, None) => None,
@@ -171,7 +174,8 @@ impl LiveSemanticSink {
     /// - Otherwise flush the pending buffer as a standard `Info` status
     ///   line and clear it. This keeps genuinely novel progress prose on
     ///   stderr while collapsing the common duplicate pair.
-    pub(crate) fn resolve_pending_task_progress(&mut self,
+    pub(crate) fn resolve_pending_task_progress(
+        &mut self,
         section: Section,
         event: &SemanticEvent,
     ) {

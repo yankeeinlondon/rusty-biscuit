@@ -136,8 +136,7 @@ pub(crate) fn execute_sequence(
             .map(|info| info.repo_root)
     });
     let selection_config_path = source_repo_root.clone().unwrap_or_else(|| {
-        std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     });
     let selection_config = super::composition::load_selection_config(&selection_config_path);
     let catalog = match &selection_config {
@@ -177,9 +176,7 @@ pub(crate) fn execute_sequence(
         };
 
         let provider_plan = match claudine::composition::build_picker_plan_with_hints(
-            &raw_hints,
-            &snapshot,
-            favorite,
+            &raw_hints, &snapshot, favorite,
         ) {
             Ok(plan) => plan,
             Err(_) => claudine::composition::ProviderPickerPlan {

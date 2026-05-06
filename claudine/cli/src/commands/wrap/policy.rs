@@ -36,7 +36,10 @@ impl WrapperHarnessPermissionProbe {
             .map(String::as_str)
     }
 
-    fn workspace_root<'a>(&'a self, source_path: &'a std::path::Path) -> Option<&'a std::path::Path> {
+    fn workspace_root<'a>(
+        &'a self,
+        source_path: &'a std::path::Path,
+    ) -> Option<&'a std::path::Path> {
         self.repo_root.as_deref().or_else(|| {
             source_path
                 .parent()
