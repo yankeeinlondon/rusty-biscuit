@@ -341,7 +341,7 @@ impl HorizontalRule {
         let pixel_width = (rule_width as u32).saturating_mul(cell_width).max(1);
         let pixel_height = height_cells * cell_height;
 
-        let default_color = match Terminal::color_mode() {
+        let default_color = match term.color_mode() {
             ColorMode::Light => "black",
             ColorMode::Dark | ColorMode::Unknown => "white",
         };

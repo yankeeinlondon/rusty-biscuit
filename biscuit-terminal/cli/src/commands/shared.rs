@@ -6,7 +6,8 @@ use biscuit_terminal::terminal::Terminal;
 /// Returns whether the terminal is in dark mode.
 pub fn is_dark_mode() -> bool {
     use biscuit_terminal::discovery::detection::ColorMode;
-    matches!(Terminal::color_mode(), ColorMode::Dark | ColorMode::Unknown)
+    let term = Terminal::new();
+    matches!(term.color_mode(), ColorMode::Dark | ColorMode::Unknown)
 }
 
 /// Constructs a [`Terminal`] honoring the conventional color-forcing

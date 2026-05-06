@@ -1318,12 +1318,12 @@ impl Renderable for Table {
         let width = term_width.unwrap_or(80);
         // Opportunistic render assumes full capability; stripe if requested
         let stripe = if self.alternate_background_color {
-            Some(Terminal::color_mode())
+            Some(ColorMode::Dark)
         } else {
             None
         };
         let text_tint = if self.alternate_text_color {
-            Some(Terminal::color_mode())
+            Some(ColorMode::Dark)
         } else {
             None
         };
@@ -1341,12 +1341,12 @@ impl Renderable for Table {
         let has_true_color = term.color_depth == ColorDepth::TrueColor;
         // Only stripe when the terminal actually supports true color
         let stripe = if self.alternate_background_color && has_true_color {
-            Some(Terminal::color_mode())
+            Some(term.color_mode())
         } else {
             None
         };
         let text_tint = if self.alternate_text_color && has_true_color {
-            Some(Terminal::color_mode())
+            Some(term.color_mode())
         } else {
             None
         };

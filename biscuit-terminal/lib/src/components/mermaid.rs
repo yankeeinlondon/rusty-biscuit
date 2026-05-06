@@ -137,9 +137,7 @@ impl MermaidRenderer {
     /// // Theme is automatically configured based on terminal color mode
     /// ```
     pub fn for_terminal<S: Into<String>>(instructions: S) -> Self {
-        use crate::terminal::Terminal;
-
-        let color_mode = Terminal::color_mode();
+        let color_mode = crate::discovery::detection::color_mode();
         let is_dark = matches!(
             color_mode,
             crate::discovery::detection::ColorMode::Dark
