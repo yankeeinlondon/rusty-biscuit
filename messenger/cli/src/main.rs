@@ -27,12 +27,7 @@ Examples:
   COMPLETE=0
 "#;
 
-mod config;
-mod desktop_setup;
-mod info;
-mod install;
-mod receipt_store;
-mod setup;
+use messenger_cli::{config, info, install, receipt_store, setup};
 
 use config::{Config, RouteConfig, RouteProvider, RouteUrgency};
 
