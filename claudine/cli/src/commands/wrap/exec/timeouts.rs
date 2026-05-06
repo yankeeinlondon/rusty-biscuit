@@ -251,10 +251,7 @@ impl TimeoutConfig {
     /// [`claudine::harness::parse_timeout`] grammar (e.g. `30s`, `5m`,
     /// `2h`). Invalid or missing env values fall back to the built-in
     /// defaults (`10s` and `5s`).
-    pub(crate) fn resolve(
-        timeout: Option<Duration>,
-        step_timeout: Option<Duration>,
-    ) -> Self {
+    pub(crate) fn resolve(timeout: Option<Duration>, step_timeout: Option<Duration>) -> Self {
         let defaults = Self::default();
         let kill_grace = parse_env_duration("CLAUDINE_KILL_GRACE").unwrap_or(defaults.kill_grace);
         let interval =
@@ -309,10 +306,7 @@ mod tests {
             state.provider_status = Some("stop".into());
         }
 
-        let detected = detect_opencode_hang_termination(&metrics,
-            now,
-            Duration::from_secs(120),
-        );
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
 
         assert!(matches!(
             detected,
@@ -505,7 +499,10 @@ mod tests {
         let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
 
         let config = TimeoutConfig::resolve(None, None);
-        assert_eq!(config.timeout, None, "resolve must not read CLAUDINE_TIMEOUT");
+        assert_eq!(
+            config.timeout, None,
+            "resolve must not read CLAUDINE_TIMEOUT"
+        );
         assert_eq!(
             config.step_timeout, None,
             "resolve must not read CLAUDINE_STEP_TIMEOUT"

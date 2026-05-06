@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -79,8 +79,7 @@ pub(crate) fn spawn_flush_if_idle_ticker(
                     let lines = guard.diagnostic_lines(now, SILENCE_WINDOW);
                     drop(guard);
                     for line in lines {
-                        let elapsed_text =
-                            format_duration(line.elapsed_since_start);
+                        let elapsed_text = format_duration(line.elapsed_since_start);
                         let diagnostic = format!(
                             " ⏳ Awaiting subagent: {} ({})",
                             line.display_name, elapsed_text
@@ -616,8 +615,14 @@ mod tests {
         let fired = AtomicBool::new(false);
         let started_at = Instant::now() - Duration::from_secs(10);
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), started_at, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            started_at,
+            &state,
+            &metrics,
+            &fired,
+        );
         assert!(
             matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
             "expected wall-clock Timeout breach, got: {result:?}"
@@ -646,8 +651,7 @@ mod tests {
             m.last_event_at = Some(t0);
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
@@ -677,8 +681,7 @@ mod tests {
             m.last_event_at = Some(t0);
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
@@ -733,8 +736,7 @@ mod tests {
             m.last_event_at = Some(t0);
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         assert!(
             matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
             "wall-clock must win; got: {result:?}"
@@ -793,8 +795,7 @@ mod tests {
             );
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         assert_eq!(result, WatchdogTickResult::Ok);
         assert!(!fired.load(Ordering::SeqCst));
     }
@@ -823,8 +824,7 @@ mod tests {
             );
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         assert_eq!(result, WatchdogTickResult::Ok);
         assert!(!fired.load(Ordering::SeqCst));
     }
@@ -853,17 +853,19 @@ mod tests {
             );
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
-        assert_eq!(result, WatchdogTickResult::Ok, "must not fire while tool in-flight");
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "must not fire while tool in-flight"
+        );
 
         {
             let mut m = metrics.lock().unwrap();
             m.in_flight.clear();
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
@@ -891,8 +893,10 @@ mod tests {
             elapsed_since_start: Duration::from_secs(900),
             elapsed_since_progress: Duration::from_secs(900),
         };
-        let msg =
-            format_step_timeout_breach_message(Duration::from_secs(1800), std::slice::from_ref(&snap));
+        let msg = format_step_timeout_breach_message(
+            Duration::from_secs(1800),
+            std::slice::from_ref(&snap),
+        );
         assert!(msg.contains("30m 0s"));
         assert!(msg.contains("1 subagent"));
         assert!(msg.contains("ses_a"));
