@@ -8,7 +8,24 @@ docs_created_during_phase_1:
   - baseline.md
   - reproduce.sh
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - biscuit-terminal/lib/src/terminal.rs
+  - biscuit-terminal/lib/src/components/status.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/components/mermaid.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+  - biscuit-terminal/lib/src/components/graph_expression.rs
+  - biscuit-terminal/lib/src/discovery/osc_queries/mod.rs
+  - biscuit-terminal/cli/src/commands/shared.rs
+  - biscuit-terminal/cli/src/output.rs
+  - biscuit-terminal/lib/tests/integration.rs
+  - biscuit-terminal/lib/examples/terminal_info.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - biscuit-terminal
+  - biscuit-terminal-cli
 ---
 
 # Execution Plan: Fix Terminal Escape Code Bleed in Non-Interactive Sessions
