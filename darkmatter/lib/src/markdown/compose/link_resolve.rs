@@ -17,6 +17,7 @@ use crate::markdown::reference::{
 };
 use crate::markdown::types::MarkdownResult;
 use std::path::Path;
+use tracing::trace;
 
 /// Resolves all local link targets (Markdown hyperlinks/images and
 /// supported HTML embeds) to absolute paths.
@@ -27,10 +28,6 @@ pub fn link_resolve(
 ) -> MarkdownResult<()> {
     let source = options.source.clone();
     let content = markdown.content();
-
-    if !content.contains("](") && !content.contains("href=") && !content.contains("src=") {
-        return Ok(());
-    }
 
     // 2.3 Extract local path references
     let mut records = Vec::new();
@@ -49,9 +46,9 @@ pub fn link_resolve(
     // ReferenceKind::Hyperlink, ReferenceKind::Image cover most of them.
     // extract_html_link_tags returns CssImport/FontImport/Hyperlink.
     let mut to_resolve = Vec::new();
-    println!("Total records extracted: {}", records.len());
+    trace!("Total records extracted: {}", records.len());
     for record in records {
-        println!(
+        trace!(
             "Record kind: {:?}, target: {:?}",
             record.kind, record.target
         );
@@ -72,7 +69,7 @@ pub fn link_resolve(
             _ => {}
         }
     }
-    println!("Records to resolve: {}", to_resolve.len());
+    trace!("Records to resolve: {}", to_resolve.len());
 
     if to_resolve.is_empty() {
         return Ok(());
@@ -126,17 +123,28 @@ fn resolve_absolute(
     base_dir: Option<&Path>,
     options: &ComposeOptions,
 ) -> Option<std::path::PathBuf> {
-    println!("resolve_absolute called with raw: '{}'", raw);
+    trace!("resolve_absolute called with raw: '{}'", raw);
     if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw) {
         // Add magic paths from options
         for (path, position) in &options.magic_paths {
             file_ref = file_ref.add_magic_path(path, *position);
         }
 
-        if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
-            // canonicalize to get absolute path
+        // Resolve to an absolute path.  Use resolve_from when we have a
+        // base directory (document location) so that relative / magic
+        // references are resolved relative to the document, not the process
+        // CWD.  We intentionally do NOT use resolve_relative here – link
+        // resolve's job is to produce absolute paths, not make them
+        // relative again.
+        let resolved = if let Some(dir) = base_dir {
+            file_ref.resolve_from(dir).ok().flatten()
+        } else {
+            file_ref.resolve().ok().flatten()
+        };
+
+        if let Some(resolved) = resolved {
             let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
-            println!("resolve_absolute FileReference success: {:?}", result);
+            trace!("resolve_absolute FileReference success: {:?}", result);
             return result;
         }
     }
@@ -145,11 +153,11 @@ fn resolve_absolute(
     if let Some(dir) = base_dir {
         let joined = dir.join(raw);
         let result = std::fs::canonicalize(&joined).ok().or(Some(joined));
-        println!("resolve_absolute Fallback success: {:?}", result);
+        trace!("resolve_absolute Fallback success: {:?}", result);
         return result;
     }
 
-    println!("resolve_absolute failed");
+    trace!("resolve_absolute failed");
     None
 }
 
@@ -376,5 +384,54 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    #[test]
+    fn test_link_resolve_html_spaced_attributes() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.md");
+        let file_b = dir.path().join("b.md");
+        let file_movie = dir.path().join("movie.mp4");
+        let file_css = dir.path().join("styles.css");
+        fs::write(&file_b, "target content").unwrap();
+        fs::write(&file_movie, "video content").unwrap();
+        fs::write(&file_css, "body {}").unwrap();
+
+        let content = r#"<a href = "./b.md">link</a> and <img src = "b.md"> and <video src = "./movie.mp4"></video> and <link href = "styles.css">"#;
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&file_a);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let resolved_b = fs::canonicalize(&file_b)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resolved_movie = fs::canonicalize(&file_movie)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resolved_css = fs::canonicalize(&file_css)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_b)),
+            "Spaced href failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_movie)),
+            "Spaced video src failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_css)),
+            "Spaced link href failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 4);
     }
 }

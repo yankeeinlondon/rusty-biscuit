@@ -5,10 +5,6 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::status::{Status, StatusState};
-use biscuit_terminal::terminal::Terminal;
-
 use crate::markdown::Markdown;
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
@@ -37,10 +33,6 @@ pub fn normalize_links(
 ) -> MarkdownResult<()> {
     let source = options.source.clone();
     let content = markdown.content();
-
-    if !content.contains("](") && !content.contains("href=") && !content.contains("src=") {
-        return Ok(());
-    }
 
     // 3.5 Extract absolute path references
     let mut records = Vec::new();
@@ -184,10 +176,8 @@ pub fn normalize_links(
                 );
                 report.add_warning(crate::markdown::compose::ComposeWarning::new(
                     "link_normalization",
-                    msg.clone(),
+                    msg,
                 ));
-                let status = Status::new(msg).state(StatusState::Warning);
-                eprintln!("{}", status.display(&Terminal::default()));
 
                 replacement = Some(env_replacement);
             }
@@ -530,5 +520,66 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_normalizations_applied, 3);
+    }
+
+    #[test]
+    fn test_normalize_links_html_spaced_attributes() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        let docs = repo.join("docs");
+        let assets = repo.join("assets");
+
+        fs::create_dir_all(&docs).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+
+        let source_file = docs.join("source.md");
+        fs::write(&source_file, "").unwrap();
+
+        let target_img = assets.join("image.png");
+        let target_video = assets.join("movie.mp4");
+        let target_css = assets.join("styles.css");
+        fs::write(&target_img, "png").unwrap();
+        fs::write(&target_video, "video").unwrap();
+        fs::write(&target_css, "body {}").unwrap();
+
+        let abs_img = std::fs::canonicalize(&target_img).unwrap();
+        let abs_video = std::fs::canonicalize(&target_video).unwrap();
+        let abs_css = std::fs::canonicalize(&target_css).unwrap();
+
+        let content = format!(
+            "<a href = \"{}\">link</a>\n<img src = \"{}\">\n<video src = \"{}\"></video>\n<link href = \"{}\">",
+            abs_img.display(),
+            abs_img.display(),
+            abs_video.display(),
+            abs_css.display()
+        );
+        let mut md = Markdown::new(&content);
+        let options = ComposeOptions::new().with_source_file(&source_file);
+        let mut report = ComposeReport::new();
+
+        normalize_links(&mut md, &options, &mut report).unwrap();
+
+        assert!(
+            md.content().contains("../assets/image.png"),
+            "Spaced anchor href failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("\"../assets/image.png\""),
+            "Spaced img src failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("\"../assets/movie.mp4\""),
+            "Spaced video src failed. Content: {}",
+            md.content()
+        );
+        assert!(
+            md.content().contains("\"../assets/styles.css\""),
+            "Spaced link href failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_normalizations_applied, 4);
     }
 }

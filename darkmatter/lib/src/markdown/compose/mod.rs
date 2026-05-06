@@ -148,7 +148,7 @@ pub(crate) fn find_target_range(
 ) -> Option<(usize, usize)> {
     let span = &record.origin.span;
     if span.end > content.len() {
-        println!(
+        trace!(
             "find_target_range: span.end {} > content.len {}",
             span.end,
             content.len()
@@ -163,7 +163,7 @@ pub(crate) fn find_target_range(
 
         if actual_idx > 0 {
             let prev_char = outer_text[..actual_idx].chars().next_back();
-            println!(
+            trace!(
                 "find_target_range: found '{}' at {}, prev_char: {:?}",
                 raw_target, actual_idx, prev_char
             );
@@ -173,7 +173,7 @@ pub(crate) fn find_target_range(
                 return Some((start, end));
             }
         } else {
-            println!("find_target_range: found '{}' at 0", raw_target);
+            trace!("find_target_range: found '{}' at 0", raw_target);
             // Edge case: if raw_target is the exact span, match it.
             let start = span.start + actual_idx;
             let end = start + raw_target.len();
@@ -182,7 +182,7 @@ pub(crate) fn find_target_range(
 
         start_idx = actual_idx + 1;
     }
-    println!(
+    trace!(
         "find_target_range: failed to find '{}' in '{}'",
         raw_target, outer_text
     );
