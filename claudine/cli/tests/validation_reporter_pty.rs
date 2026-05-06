@@ -139,9 +139,7 @@ fn pty_pre_check_failure_emits_osc8_link_and_styled_header() {
     // -- OSC-8 introducer present and references the fixture -----------
     let osc8_introducer = "\x1b]8;;";
     let intro_idx = transcript.find(osc8_introducer).unwrap_or_else(|| {
-        panic!(
-            "expected OSC-8 introducer '\\x1b]8;;' in transcript: {transcript:?}"
-        )
+        panic!("expected OSC-8 introducer '\\x1b]8;;' in transcript: {transcript:?}")
     });
     let after_intro = &transcript[intro_idx + osc8_introducer.len()..];
     let st_idx = after_intro.find("\x1b\\").unwrap_or(after_intro.len());

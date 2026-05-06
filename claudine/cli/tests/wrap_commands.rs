@@ -4883,13 +4883,15 @@ fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
     fs::write(&md_file, "---\ntitle: watchdog test\n---\nHello\n").unwrap();
 
     // Build a shell script that emits 9 task_started, 7 task_completed, then blocks.
-    let mut script = String::from(r#"#!/bin/sh
+    let mut script = String::from(
+        r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
   exit 0
 fi
 printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
-"#);
+"#,
+    );
     for i in 1..=9 {
         script.push_str(&format!(
             r#"printf '%s\n' '{{"type":"task_started","task_id":"sa{i}","name":"Task {i}"}}'
@@ -5112,11 +5114,7 @@ fn compose_non_harness_respects_cli_timeout() {
     seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
-    fs::write(
-        &md_file,
-        "---\ntitle: cli timeout test\n---\nHello\n",
-    )
-    .unwrap();
+    fs::write(&md_file, "---\ntitle: cli timeout test\n---\nHello\n").unwrap();
 
     // Fake provider emits events forever so only wall-clock can stop it.
     write_executable(
