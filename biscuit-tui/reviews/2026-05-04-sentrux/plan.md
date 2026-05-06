@@ -44,6 +44,22 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - ../.claude/skills/biscuit-tui/SKILL.md
+source_files_during_phase_3:
+  - cli/src/choice_normalize.rs
+  - cli/src/main_tmp.rs
+  - cli/src/option_sources.rs
+  - lib/src/components/choice_layout.rs
+  - lib/src/components/choose_many.rs
+  - lib/src/components/choose_one.rs
+  - lib/src/helpers/choice_builders.rs
+  - lib/src/helpers/mod.rs
+  - lib/src/prelude.rs
+docs_updated_during_phase_3:
+  - ../docs/dependencies.md
+  - reviews/2026-05-04-sentrux/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - ../.claude/skills/biscuit-tui/SKILL.md
 packages:
   - tui-chrome
   - tui-chrome-cli
@@ -85,14 +101,14 @@ This plan operationalizes the 15 suggestions in [`review-1.md`](./review-1.md). 
 ## Phase 3: Redundancy Elimination
 *Goal: Remove duplicated logic and orphaned files across the package area.*
 
-- [ ] **Cleanup CLI Artifacts:**
+- [x] **Cleanup CLI Artifacts:**
     - Delete `cli/src/main_tmp.rs`.
-- [ ] **Consolidate Choice Parsing:**
+- [x] **Consolidate Choice Parsing:**
     - Promote markdown/dictionary/CSV parsers in `lib/src/helpers/choice_builders.rs` to canonical status.
     - Refactor `cli/src/option_sources.rs` to call these library helpers.
-- [ ] **Leverage `heck` crate:**
+- [x] **Leverage `heck` crate:**
     - Replace hand-rolled case conversion in `cli/src/choice_normalize.rs` with `heck`.
-- [ ] **Refactor Choice Layout:**
+- [x] **Refactor Choice Layout:**
     - Move `navigate_row` to be a method on `ChoiceLayout`.
 
 ## Phase 4: CLI Argument Ergonomics
