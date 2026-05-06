@@ -151,19 +151,20 @@ impl TerminalHarness for TmuxHarness {
             shell_cmd.push(' ');
             shell_cmd.push_str(&shell_quote(a));
         }
-        let status = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                &session,
-                "-x",
-                "120",
-                "-y",
-                "40",
-                &shell_cmd,
-            ])
-            .status()?;
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "120",
+            "-y",
+            "40",
+            &shell_cmd,
+        ]);
+        super::apply_color_forcing_env(&mut cmd);
+        let status = cmd.status()?;
         if !status.success() {
             return Err(io::Error::other("tmux new-session failed"));
         }
