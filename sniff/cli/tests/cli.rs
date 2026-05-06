@@ -4525,3 +4525,148 @@ fn test_package_area_has_source_code_changes_json_docs_only_is_false() {
         "docs-only dirty file must not flip has_source_code_changes, got: {value}"
     );
 }
+
+// ============================================================================
+// Phase 4 — `repo worktree` CLI integration tests
+// ============================================================================
+
+/// Create a temp git repo with an initial commit and a linked worktree.
+fn create_test_repo_with_worktree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let (dir, repo_path) = create_test_repo();
+    let repo = git2::Repository::open(&repo_path).unwrap();
+
+    let worktree_path = repo_path.join("my-worktree");
+    let _wt = repo
+        .worktree("my-worktree", &worktree_path, None)
+        .unwrap();
+
+    (dir, repo_path, worktree_path)
+}
+
+#[test]
+fn test_repo_worktree_inside_linked_worktree_returns_name() {
+    let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            worktree_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+        ])
+        .assert()
+        .success()
+        .code(0);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout.trim(), "my-worktree");
+}
+
+#[test]
+fn test_repo_worktree_inside_main_worktree_exits_1() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+        ])
+        .assert()
+        .failure()
+        .code(1);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout, "");
+}
+
+#[test]
+fn test_repo_worktree_no_error_exits_0() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+            "--no-error",
+        ])
+        .assert()
+        .success()
+        .code(0);
+}
+
+#[test]
+fn test_repo_worktree_on_error_to_stderr() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+            "--on-error",
+            "Not in a worktree",
+            "--plain",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Not in a worktree"));
+}
+
+#[test]
+fn test_repo_worktree_json_success() {
+    let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            worktree_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .code(0);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["worktree"], Value::String("my-worktree".to_string()));
+}
+
+#[test]
+fn test_repo_worktree_json_failure_no_error() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+            "--json",
+            "--no-error",
+        ])
+        .assert()
+        .success()
+        .code(0);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    assert_eq!(value["worktree"], Value::Null);
+}
+
+#[test]
+fn test_repo_worktree_help_mentions_subcommand() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("worktree"));
+}

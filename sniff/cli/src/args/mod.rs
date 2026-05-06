@@ -1971,6 +1971,48 @@ mod tests {
                 panic!("Expected repo remote");
             }
         }
+
+        #[test]
+        fn repo_worktree_parses() {
+            let cli = parse_args(&["repo", "worktree"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Worktree { no_error: false, on_error: None }),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_worktree_no_error_parses() {
+            let cli = parse_args(&["repo", "worktree", "--no-error"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktree { no_error, on_error }),
+                ..
+            }) = cli.command
+            {
+                assert!(no_error);
+                assert!(on_error.is_none());
+            } else {
+                panic!("Expected repo worktree --no-error");
+            }
+        }
+
+        #[test]
+        fn repo_worktree_on_error_parses() {
+            let cli = parse_args(&["repo", "worktree", "--on-error", "not in a worktree"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktree { no_error, on_error }),
+                ..
+            }) = cli.command
+            {
+                assert!(!no_error);
+                assert_eq!(on_error.as_deref(), Some("not in a worktree"));
+            } else {
+                panic!("Expected repo worktree --on-error");
+            }
+        }
     }
 
     mod repo_action_normalization {
@@ -2038,6 +2080,25 @@ mod tests {
                     assert!(!verbose);
                 }
                 _ => panic!("Expected Pr action"),
+            }
+        }
+
+        #[test]
+        fn to_repo_action_worktree() {
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: vec![],
+                repo_subcommand: Some(RepoSubcommand::Worktree {
+                    no_error: true,
+                    on_error: Some("msg".to_string()),
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Worktree { no_error, on_error }) => {
+                    assert!(no_error);
+                    assert_eq!(on_error, Some("msg".to_string()));
+                }
+                _ => panic!("Expected Worktree action"),
             }
         }
     }
