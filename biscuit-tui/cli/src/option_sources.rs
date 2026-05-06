@@ -13,6 +13,10 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use serde_json::Value as JsonValue;
+use tui_chrome::{
+    ChoiceBuilderError, ChoiceOption, choice_options_from_csv, choice_options_from_dictionary,
+    choice_options_from_markdown_list,
+};
 
 /// Errors that can occur while resolving options from a source.
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +39,17 @@ pub enum SourceError {
         "unsupported file format '{ext}': supported extensions are json, jsonl, ndjson, yaml, yml, toml, csv"
     )]
     UnsupportedFormat { ext: String },
+}
+
+impl From<ChoiceBuilderError> for SourceError {
+    fn from(error: ChoiceBuilderError) -> Self {
+        match error {
+            ChoiceBuilderError::Parse(message) => Self::Parse(message),
+            ChoiceBuilderError::NotAMapping => {
+                Self::Parse("dictionary input must be a mapping/object".into())
+            }
+        }
+    }
 }
 
 /// Typed raw option record produced by source resolution.
@@ -145,11 +160,17 @@ pub fn resolve_raw_options(
     }
     if let Some(path) = options_from_file {
         let body = fs::read_to_string(path)?;
-        return Ok(parse_markdown_list(&body));
+        return Ok(choice_options_from_markdown_list(&body)
+            .into_iter()
+            .map(raw_option_from_choice_option)
+            .collect());
     }
     if let Some(path) = options_from_dictionary {
         let body = fs::read_to_string(path)?;
-        return parse_dictionary(&body);
+        return Ok(choice_options_from_dictionary(&body)?
+            .into_iter()
+            .map(raw_option_from_choice_option)
+            .collect());
     }
     if !positional.is_empty() {
         return Ok(positional.into_iter().map(RawOption::from).collect());
@@ -168,10 +189,9 @@ pub fn resolve_raw_options(
 }
 
 fn parse_csv(csv: &str) -> Vec<RawOption> {
-    csv.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(RawOption::from)
+    choice_options_from_csv(csv)
+        .into_iter()
+        .map(raw_option_from_choice_option)
         .collect()
 }
 
@@ -458,29 +478,6 @@ fn toml_table_to_raw_option(
     })
 }
 
-fn parse_markdown_list(body: &str) -> Vec<RawOption> {
-    body.lines()
-        .filter_map(|line| {
-            let trimmed = line.trim_start();
-            if let Some(rest) = strip_bullet_prefix(trimmed) {
-                let value = rest.trim();
-                if value.is_empty() {
-                    return None;
-                }
-                return Some(RawOption::from(value.to_string()));
-            }
-            if let Some(rest) = strip_numbered_prefix(trimmed) {
-                let value = rest.trim();
-                if value.is_empty() {
-                    return None;
-                }
-                return Some(RawOption::from(value.to_string()));
-            }
-            None
-        })
-        .collect()
-}
-
 fn strip_bullet_prefix(line: &str) -> Option<&str> {
     let mut chars = line.chars();
     let marker = chars.next()?;
@@ -508,36 +505,6 @@ fn strip_numbered_prefix(line: &str) -> Option<&str> {
         .then(|| rest.trim_start())
 }
 
-fn parse_dictionary(body: &str) -> Result<Vec<RawOption>, SourceError> {
-    let value: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(body).map_err(|e| SourceError::Parse(e.to_string()))?;
-    let mapping = match value {
-        serde_yaml_ng::Value::Mapping(m) => m,
-        _ => {
-            return Err(SourceError::Parse(
-                "dictionary input must be a mapping/object".into(),
-            ));
-        }
-    };
-    Ok(mapping
-        .into_iter()
-        .map(|(key, value)| {
-            let label = yaml_value_to_string(&key);
-            let val = yaml_value_to_string(&value);
-            if label == val {
-                RawOption::from_label(label)
-            } else {
-                RawOption {
-                    label,
-                    value: Some(val),
-                    hotkey: None,
-                    disabled: None,
-                }
-            }
-        })
-        .collect())
-}
-
 fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {
     match value {
         serde_yaml_ng::Value::Null => String::new(),
@@ -548,6 +515,19 @@ fn yaml_value_to_string(value: &serde_yaml_ng::Value) -> String {
             .unwrap_or_default()
             .trim()
             .to_string(),
+    }
+}
+
+fn raw_option_from_choice_option(option: ChoiceOption<String>) -> RawOption {
+    if option.label == option.value && option.hotkey.is_none() && !option.disabled {
+        RawOption::from_label(option.label)
+    } else {
+        RawOption {
+            label: option.label,
+            value: Some(option.value),
+            hotkey: None,
+            disabled: option.disabled.then_some(true),
+        }
     }
 }
 
