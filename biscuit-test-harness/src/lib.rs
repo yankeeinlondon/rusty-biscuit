@@ -410,7 +410,10 @@ pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
 pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
-        let frame = harness.capture()?;
+        let frame = match harness.capture() {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
         if let Some(last_line) = frame.plain.lines().last() {
             let trimmed = last_line.trim_end();
             if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('%') {

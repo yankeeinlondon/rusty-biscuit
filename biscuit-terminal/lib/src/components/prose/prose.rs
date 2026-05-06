@@ -6,6 +6,7 @@ use crate::{
     utils::wrap_policy::WordWrap,
 };
 
+use super::markdown::preprocess_markdown;
 use super::styles::StyleState;
 use super::tokens::parse_tokens_inner;
 
@@ -116,11 +117,14 @@ impl Prose {
 
     /// Parse and render the content, replacing tokens with ANSI escape codes.
     ///
-    /// Creates a fresh [`StyleState`] and delegates to [`parse_tokens_inner`].
-    /// Only this outermost call emits the final `\x1b[0m` reset.
+    /// Pre-processes the raw content for the supported Markdown subset
+    /// (`**bold**`, `_italics_`, `[desc](ref)`) before delegating to the
+    /// existing block-tag parser. Only this outermost call emits the
+    /// final `\x1b[0m` reset.
     pub(super) fn parse_tokens(&self, term: Option<&Terminal>) -> String {
+        let preprocessed = preprocess_markdown(&self.content);
         let mut state = StyleState::default();
-        let mut result = parse_tokens_inner(&self.content, term, &mut state);
+        let mut result = parse_tokens_inner(&preprocessed, term, &mut state);
         if state.used_styles {
             result.push_str("\x1b[0m");
         }

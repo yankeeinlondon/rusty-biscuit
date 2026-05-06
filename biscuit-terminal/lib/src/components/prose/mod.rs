@@ -8,6 +8,7 @@
 //! - [`styles`] — color/weight resolution tables and SGR layer state
 //! - [`render`] — the [`Renderable`](crate::components::renderable::Renderable) impl
 
+mod markdown;
 #[allow(clippy::module_inception)]
 mod prose;
 mod render;
