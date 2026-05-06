@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use darkmatter::markdown::compose::conditions::evaluate_condition_against;
-use serde_json::Value;
+use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse_condition};
 use tracing::{debug, info_span, warn};
 
 use crate::actions::{CompiledMapper, HookAction, HookDecision, HookResponse};
 use crate::config::claudine_config::{ClaudineConfig, Gender};
+use crate::dispatch::expression::EventMetaConditionLookup;
 use crate::dispatch::template::interpolate;
 use crate::error::Result;
 use crate::events::{AgenticEvent, EventMeta};
@@ -24,7 +24,7 @@ mod speak;
 use bash::{execute_bash, run_command_blocking, BASH_ACTION_TIMEOUT};
 use decisions::{dot_lookup, parse_decision, should_replace_selected};
 use mappers::{apply_mapper, CommandOutput};
-use meta_json::{event_meta_to_json, strip_nulls};
+use meta_json::strip_nulls;
 use protect::{attach_protect_context, decision_for_short_circuit, should_short_circuit_call};
 use report::execute_report;
 use speak::execute_speak_from_claudine;
@@ -69,13 +69,13 @@ enum WhenOutcome {
 /// Evaluate an action's `when` expression against the live [`EventMeta`].
 ///
 /// `when` is optional: when absent, the action always runs. When present,
-/// the expression is parsed and evaluated through Darkmatter's
-/// [`evaluate_condition_against`] shortcut against the event meta
-/// serialized as JSON. Falsy results yield [`WhenOutcome::SkipFalse`];
+/// the expression is parsed and evaluated through [`EventMetaConditionLookup`]
+/// which layers Darkmatter's lazy `ctx.*` capture on top of
+/// [`EventMetaExpressionLookup`]. Falsy results yield [`WhenOutcome::SkipFalse`];
 /// parse or evaluation errors yield [`WhenOutcome::SkipInvalid`] with a
 /// `tracing::warn!` so operators can spot a broken condition without
 /// breaking the rest of the binding.
-fn evaluate_when(when: Option<&str>, meta: &EventMeta, meta_json: &Value) -> WhenOutcome {
+fn evaluate_when(when: Option<&str>, meta: &EventMeta) -> WhenOutcome {
     let Some(expr) = when else {
         return WhenOutcome::Run;
     };
@@ -86,14 +86,27 @@ fn evaluate_when(when: Option<&str>, meta: &EventMeta, meta_json: &Value) -> Whe
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    match evaluate_condition_against(expr, meta_json, work_dir.as_path()) {
-        Ok(true) => WhenOutcome::Run,
-        Ok(false) => WhenOutcome::SkipFalse,
+    let parsed = match parse_condition(expr) {
+        Ok(parsed) => parsed,
         Err(error) => {
             warn!(
                 expression = expr,
                 %error,
-                "Hook action `when` expression failed to parse or evaluate; skipping action",
+                "Hook action `when` failed to parse; skipping action",
+            );
+            return WhenOutcome::SkipInvalid;
+        }
+    };
+
+    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
+    match evaluate(&parsed, &lookup) {
+        Ok(value) if is_truthy(&value) => WhenOutcome::Run,
+        Ok(_) => WhenOutcome::SkipFalse,
+        Err(error) => {
+            warn!(
+                expression = expr,
+                %error,
+                "Hook action `when` failed to evaluate; skipping action",
             );
             WhenOutcome::SkipInvalid
         }
@@ -113,14 +126,13 @@ pub(crate) async fn execute_actions(
     protect_decision: Option<&ProtectDecision>,
 ) -> Result<Option<HookResponse>> {
     let mut selected_response: Option<HookResponse> = None;
-    let meta_json = event_meta_to_json(meta);
 
     for (index, action) in actions.iter().enumerate() {
         // Pre-execution `when` gate. Falsy or invalid conditions skip the
         // action without affecting `selected_response`, which guarantees
         // a skipped `Call` cannot replace a previously selected blocking
         // response.
-        match evaluate_when(action.when(), meta, &meta_json) {
+        match evaluate_when(action.when(), meta) {
             WhenOutcome::Run => {}
             WhenOutcome::SkipFalse => {
                 debug!(
@@ -920,6 +932,36 @@ mod tests {
             result.is_ok(),
             "ctx.* condition should evaluate without erroring the runner",
         );
+    }
+
+    #[tokio::test]
+    async fn when_ctx_today_resolves() {
+        // Regression test: ctx.today should resolve truthy through the
+        // EventMetaConditionLookup composite and allow the action to run.
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_ctx_today__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("ctx.today != ''".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("ctx.today != '' should be truthy and let the call fire");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
     }
 
     // =========================================================================

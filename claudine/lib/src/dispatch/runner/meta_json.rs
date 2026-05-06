@@ -27,6 +27,7 @@ use crate::events::EventMeta;
 /// Keep the alias surface in sync with
 /// [`EventMetaExpressionLookup::resolve_env_path`](crate::dispatch::expression)
 /// when adding or renaming event metadata fields.
+#[allow(dead_code)]
 pub(super) fn event_meta_to_json(meta: &EventMeta) -> Value {
     let mut value = serde_json::to_value(meta).unwrap_or_else(|err| {
         warn!(%err, "serializing EventMeta for `when` evaluation failed; using null payload");
@@ -66,6 +67,7 @@ pub(super) fn event_meta_to_json(meta: &EventMeta) -> Value {
 /// This helper is unit-tested as a contract: the same paths that
 /// [`EventMetaExpressionLookup`] exposes must appear here with the
 /// same value types.
+#[allow(dead_code)]
 pub(super) fn flatten_event_meta_aliases(meta: &EventMeta) -> Map<String, Value> {
     let mut aliases = Map::new();
 

@@ -8,15 +8,23 @@
 //! harness validation messages can all evaluate the same expression syntax
 //! against the live event payload.
 //!
-//! ## Resolution Order
+//! ## Adapters
+//!
+//! - [`EventMetaExpressionLookup`] — used by templates, matchers, and harness
+//!   validation. Resolves the full event path surface but deliberately leaves
+//!   `ctx.*` unresolved.
+//! - [`EventMetaConditionLookup`] — used by hook `when` evaluation. Layers
+//!   Darkmatter's lazy `ctx.*` capture on top of [`EventMetaExpressionLookup`]
+//!   so that conditions like `ctx.today != ''` resolve correctly.
+//!
+//! ## Resolution Order (both adapters)
 //!
 //! 1. `env.NAME` — resolves to the current process environment variable.
 //!    Fallback syntax (`env.NAME || "default"`) is handled by Darkmatter's
 //!    parser, so this layer never inspects the `||` token itself.
-//! 2. `ctx.*` — left unresolved at this layer. Callers that need runtime
-//!    context capture should use Darkmatter's own
-//!    [`evaluate_condition_against`](darkmatter::markdown::compose::conditions::evaluate_condition_against)
-//!    shortcut.
+//! 2. `ctx.*` — left unresolved by [`EventMetaExpressionLookup`].
+//!    [`EventMetaConditionLookup`] short-circuits `ctx.*` to Darkmatter's
+//!    [`CtxLookup`] before falling through to the inner adapter.
 //! 3. `extra.<key>[.<nested>...]` — resolves against `EventMeta.extra`,
 //!    preserving JSON scalar/object/array values for helpers such as
 //!    `length(...)` and `has_key(...)`.
@@ -31,15 +39,11 @@
 //!    `session_id`, `cwd`, `tool_name`, `tool_input`, `tool_response`,
 //!    `error`, `prompt`, `agent_type`, `notification_type`,
 //!    `notification_message`, `extra`) resolve directly off `EventMeta`.
-//!
-//! Hook action `when` evaluation in
-//! [`dispatch::runner`](crate::dispatch::runner) mirrors these paths via
-//! JSON flattening; keep the two layers in sync if you add or rename
-//! event metadata fields.
 
 use std::collections::HashMap;
+use std::path::Path;
 
-use darkmatter::markdown::compose::expression::EvaluationLookup;
+use darkmatter::markdown::compose::expression::{CtxLookup, EvaluationLookup};
 use serde_json::{Map, Value};
 
 use crate::events::EventMeta;
@@ -114,6 +118,42 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
         }
 
         resolve_top_level(self.meta, path)
+    }
+}
+
+/// Composite lookup used for hook `when` evaluation.
+///
+/// Resolves `ctx.*` via Darkmatter's lazy context capture and delegates
+/// every other path to [`EventMetaExpressionLookup`]. This is the only
+/// surface where `ctx.*` is honored — templates, matchers, and harness
+/// validation deliberately leave `ctx.*` unresolved.
+pub struct EventMetaConditionLookup<'a> {
+    inner: EventMetaExpressionLookup<'a>,
+    ctx: CtxLookup<'a>,
+}
+
+impl<'a> EventMetaConditionLookup<'a> {
+    /// Wrap an [`EventMeta`] reference and working directory for use with
+    /// Darkmatter's evaluator, including `ctx.*` resolution.
+    pub fn new(meta: &'a EventMeta, work_dir: &'a Path) -> Self {
+        Self {
+            inner: EventMetaExpressionLookup::new(meta),
+            ctx: CtxLookup::new(work_dir),
+        }
+    }
+
+    /// Borrow the underlying [`EventMeta`].
+    pub fn meta(&self) -> &'a EventMeta {
+        self.inner.meta()
+    }
+}
+
+impl<'a> EvaluationLookup for EventMetaConditionLookup<'a> {
+    fn get(&self, path: &str) -> Option<Value> {
+        if path == "ctx" || path.starts_with("ctx.") {
+            return self.ctx.get(path);
+        }
+        self.inner.get(path)
     }
 }
 
@@ -568,5 +608,215 @@ mod tests {
         );
 
         assert_eq!(value, json!(true));
+    }
+
+    // ------------------------------------------------------------------
+    // EventMetaConditionLookup parity + ctx tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn condition_lookup_resolves_top_level_event_fields() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("provider"), Some(json!("claude")));
+        assert_eq!(lookup.get("event"), Some(json!("before_tool")));
+        assert_eq!(lookup.get("session_id"), Some(json!("abc123")));
+        assert_eq!(lookup.get("cwd"), Some(json!("/tmp/project")));
+        assert_eq!(lookup.get("tool_name"), Some(json!("Bash")));
+        assert_eq!(lookup.get("error"), None);
+        assert_eq!(lookup.get_string("error"), "");
+    }
+
+    #[test]
+    fn condition_lookup_resolves_grouped_environment_paths() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("os.type"), Some(json!("macos")));
+        assert_eq!(lookup.get("hardware.cores"), Some(json!(16)));
+        assert_eq!(lookup.get("git.branch"), Some(json!("main")));
+        assert_eq!(lookup.get("git.is_dirty"), Some(json!(true)));
+        assert_eq!(lookup.get("git.repo_name"), Some(json!("rusty-biscuit")));
+        assert_eq!(lookup.get("project.language"), Some(json!("Rust")));
+        assert_eq!(lookup.get("project.is_monorepo"), Some(json!(true)));
+        assert_eq!(
+            lookup.get("project.monorepo_tool"),
+            Some(json!("cargo_workspace"))
+        );
+    }
+
+    #[test]
+    fn condition_lookup_missing_keys_return_none() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("missing"), None);
+        assert_eq!(lookup.get("git.unknown"), None);
+        assert_eq!(lookup.get_string("missing"), "");
+    }
+
+    #[test]
+    fn condition_lookup_extra_paths_resolve_with_typed_values() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("extra.status"), Some(json!("success")));
+        assert_eq!(lookup.get("extra.attempt"), Some(json!(3)));
+        assert_eq!(
+            lookup.get("extra.nested.inner.depth"),
+            Some(json!(7)),
+            "nested extra paths should drill into JSON objects"
+        );
+        assert_eq!(
+            lookup.get("extra.tags"),
+            Some(json!(["fast", "urgent", "infrastructure"]))
+        );
+        assert_eq!(lookup.get("extra.missing"), None);
+    }
+
+    #[test]
+    fn condition_lookup_tool_input_paths_resolve_nested_json() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("tool_input.command"), Some(json!("npm test")));
+        assert_eq!(
+            lookup.get("tool_input.options.cwd"),
+            Some(json!("/repo")),
+            "nested tool_input paths should drill in"
+        );
+        assert_eq!(lookup.get("tool_input.options.timeout"), Some(json!(60)));
+        assert_eq!(lookup.get("tool_input.missing"), None);
+    }
+
+    #[test]
+    fn condition_lookup_env_namespace_resolves_via_std_env() {
+        let key = "CLAUDINE_CONDITION_TEST_PRESENT";
+        // SAFETY: tests run sequentially within this module by default; the
+        // env var is unique per test scope and is removed before exit.
+        unsafe {
+            std::env::set_var(key, "value-here");
+        }
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+        let resolved = lookup.get(&format!("env.{key}"));
+        unsafe {
+            std::env::remove_var(key);
+        }
+        assert_eq!(resolved, Some(json!("value-here")));
+    }
+
+    #[test]
+    fn condition_lookup_ctx_today_resolves() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        let value = lookup.get("ctx.today");
+        assert!(
+            value.is_some(),
+            "ctx.today should resolve through the composite"
+        );
+        if let Some(Value::String(s)) = value {
+            assert!(!s.is_empty(), "ctx.today should be non-empty");
+        } else {
+            panic!("ctx.today should return Value::String, got {:?}", value);
+        }
+    }
+
+    #[test]
+    fn condition_lookup_falls_through_to_inner() {
+        let meta = sample_meta();
+        let inner = EventMetaExpressionLookup::new(&meta);
+        let composite = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        // Every non-ctx path should be identical between inner and composite.
+        let paths = [
+            "provider",
+            "event",
+            "session_id",
+            "cwd",
+            "tool_name",
+            "tool_input",
+            "tool_response",
+            "error",
+            "extra.status",
+            "extra.attempt",
+            "extra.nested.inner.depth",
+            "tool_input.command",
+            "tool_input.options.cwd",
+            "os.type",
+            "hardware.cores",
+            "git.branch",
+            "git.is_dirty",
+            "project.language",
+            "project.is_monorepo",
+        ];
+
+        for path in paths {
+            assert_eq!(
+                composite.get(path),
+                inner.get(path),
+                "path '{}' should fall through to inner unchanged",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn condition_lookup_ctx_short_circuit() {
+        // Create a meta where the inner lookup would theoretically produce a
+        // value for a fictional ctx.x path (it won't, because ctx.* is
+        // hard-coded to None in EventMetaExpressionLookup). The important
+        // invariant is that the composite returns None for unknown ctx keys
+        // because CtxLookup does not recognise them, and never reaches the
+        // inner adapter.
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        assert_eq!(lookup.get("ctx.unknown_key"), None);
+        assert_eq!(lookup.get("ctx"), None);
+    }
+
+    #[test]
+    fn condition_lookup_evaluator_handles_string_equality_in_condition_mode() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        let value = parse_and_evaluate(
+            "tool_name == 'Bash' && git.branch == 'main'",
+            ParseMode::Condition,
+            &lookup,
+        );
+
+        assert_eq!(value, json!(true));
+    }
+
+    #[test]
+    fn condition_lookup_evaluator_handles_numeric_comparison_on_hardware_cores() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        let value = parse_and_evaluate(
+            "hardware.cores > 8 ? \"fast\" : \"slow\"",
+            ParseMode::Interpolation,
+            &lookup,
+        );
+
+        assert_eq!(value, json!("fast"));
+    }
+
+    #[test]
+    fn condition_lookup_evaluator_supports_length_helper_on_extra_array() {
+        let meta = sample_meta();
+        let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+
+        let value = parse_and_evaluate(
+            "length(extra.tags) > 2 ? \"many\" : \"few\"",
+            ParseMode::Interpolation,
+            &lookup,
+        );
+
+        assert_eq!(value, json!("many"));
     }
 }
