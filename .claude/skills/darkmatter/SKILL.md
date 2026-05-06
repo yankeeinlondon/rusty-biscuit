@@ -14,7 +14,7 @@ Markdown parsing, rendering, and composition library. Part of the dockhand monor
 | Responsibility | Package |
 |----------------|---------|
 | Markdown parsing (CommonMark + GFM) | darkmatter |
-| Compose pipeline (Inline Pre + Transclusion + Inline Post) | darkmatter |
+| Compose pipeline (Inline Pre + Transclusion + Inline Post + Finalization) | darkmatter |
 | Syntax highlighting | darkmatter (syntect) |
 | Frontmatter extraction | darkmatter |
 | HTML output | darkmatter |
@@ -44,6 +44,7 @@ Three-phase pipeline for document preparation leveraging the [pulldown-cmark](./
 5. **Interpolation** - `{{ variable }}` expressions expand to values
 6. **Shell Expansion** - `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
 7. **Shell Blocks** - `::shell-block` / `::end-block` directives execute multiple approved commands sequentially and render their combined output
+8. **Link Resolve (abs)** - Converts local links to absolute paths before transclusion
 
 **Transclusion** (prepared serially, resolved concurrently):
 - `::file ./doc.md` - Markdown transclusion with recursive processing
@@ -57,6 +58,9 @@ Three-phase pipeline for document preparation leveraging the [pulldown-cmark](./
 **Inline Post** (serial):
 1. **Cleanup** - Normalizes formatting (spacing, tables)
 2. **Normalization** - Adjusts heading levels
+
+**Finalization** (serial, root-only):
+1. **Link Normalization** - Converts absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
 
 ```rust
 use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation}};
