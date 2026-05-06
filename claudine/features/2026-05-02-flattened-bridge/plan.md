@@ -40,7 +40,6 @@ packages:
   - claudine
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
-  - claudine/docs/topics/configuring-actions.md
   - .claude/skills/claudine/SKILL.md
   - .claude/skills/claudine/architecture.md
   - .claude/skills/claudine/hook-actions.md
@@ -49,6 +48,8 @@ skills_files_updated_during_phase_5:
   - .claude/skills/claudine/SKILL.md
   - .claude/skills/claudine/architecture.md
   - .claude/skills/claudine/hook-actions.md
+packages:
+  - claudine
 ---
 
 # Plan — Unify Hook `when` Lookup with `EventMetaExpressionLookup`

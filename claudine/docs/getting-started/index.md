@@ -273,8 +273,18 @@ Think hard and do something amazing ... but do it really fast.
 
 This built-in functionality can be now be embedded into your prompts and allow your humans to live a slightly better life than they did before.
 
+## Coming Soon
 
-## Scheduling, Queues, and Dashboard
+### Claudine Language Server
+
+> Note yet ready but will be added soon.
+
+Language Servers allow the _extended_ syntax that Claudine provides to Markdown files (both the Markdown body and the YAML frontmatter) to become context aware in all modern editors and several apps. That allows us to provide quality of life features like autocomplete, show type errors, autolink file references, and much more.
+
+Ultimately the Language Server should make learning the power user features of Claudine intuitive and easy. No more looking through documentation as the editor will be become the guide to keeping you informed and writing valid configuration.
+
+
+### Scheduling, Queues, and Dashboard
 
 > Not yet ready but will be added soon.
 
@@ -284,7 +294,7 @@ Claudine comes with a separate background process called `rendezvous` which is a
 - recurring tasks can also be added and they will be run on an interval
 - see an active dashboard of all prompts, sequences, etc. which are running and where they are in the process
 
-## Local Models
+### Local Models
 
 > Not yet ready but will be added soon. You can use local models today but you'd need to do the configuration yourself in the Agent platform.
 
@@ -298,7 +308,7 @@ claudine local hosts
 ```
 
 - All configuration of local services is included in the `claudine config` TUI.
-- If you want to use a local model then you just use it like any other model and Claudine will adapt it's shell completions to only those models which are available
+- If you want to use a _local_ model then you just specify it like any other model and Claudine will adapt it's shell completions to only those models which are available
 
     ```sh
     # use a model hosted locally on same computer 
@@ -307,10 +317,22 @@ claudine local hosts
     claudine codex 'why is the sky blue?' --model my-host::omlx/kimi-for-coding/kimi-k2.6
     ```
 
-    > the `my-host` reference will need to be in your **Claudine** configuration
+    The structure of the model's you're familiar with is often:
 
-## Worktree Integration
+    - `{provider}/{model}`
+
+    However, if you're using aggregators like OpenRouter or ZenMux you'll notice that they'll add themselves as a prefix:
+
+    - `{aggregator}/{provider}/{model}`
+
+    We use this latter pattern to provide local models but instead of the aggregator name we use the server being used to provide the model:
+
+    - omlx (as seen in the example), ollama, vllm, llama.cpp are all valid identifiers
+
+    > the `my-host` reference will need to be in your **Claudine** configuration to resolve
+
+### Worktree Integration
 
 > Not yet ready but will be added soon.
 
-Providing the right levels of isolation for concurrent work in the same repo is becoming more and more important and **git**'s **worktree** feature is the primitive that most people turn to.
+Providing the right levels of isolation for concurrent work in the same repo is becoming more and more important and **git**'s **worktree** feature is the primitive that most people turn to. Some of the agent's have incorporated their own worktree solution (_which you're free to use if you prefer it_) but **Claudine** provides a unified worktree solution that spans all of the providers.
