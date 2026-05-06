@@ -23,11 +23,13 @@ skills_files_updated_during_phase_2: []
 packages:
   - claudine
 source_files_during_phase_3:
-  - claudine/lib/src/dispatch/runner/mod.rs
-  - claudine/lib/src/dispatch/runner/meta_json.rs
-docs_updated_during_phase_3: []
-docs_created_during_phase_3: []
-skills_files_updated_during_phase_3: []
+   - claudine/lib/src/dispatch/runner/mod.rs
+   - claudine/lib/src/dispatch/runner/meta_json.rs
+ docs_updated_during_phase_3: []
+ docs_created_during_phase_3: []
+ skills_files_updated_during_phase_3: []
+ packages:
+   - claudine
 source_files_during_phase_4:
   - claudine/lib/src/dispatch/runner/mod.rs
   - claudine/lib/src/dispatch/runner/meta_json.rs

@@ -241,7 +241,7 @@ Steps along this process can be _interactive_ or _non-interactive_ but the goal 
 
 ## Communication
 
-Now that _a lot_ if not **all** coding is being done by AI the poor humans operating that code generation must be much more _multi-tasking_ in their work. Humans -- god knows we love them -- are great at lots of things but multi-tasking is not really one of them.
+Now that _a lot_ if not **all** coding is being done by AI the poor humans operating that code generation must do much more _multi-tasking_ in their work. Humans -- god knows we love them -- are great at lots of things but multi-tasking is not really one of them.
 
 > **Pro Tip:** anyone who tells you they are "great at multi-tasking" is lying and might be a psychopath, you should look for the first opportunity to leave the conversation.
 
@@ -265,6 +265,7 @@ failure:
     say: "Wow you are such a loser! The {{ctx.current_package}} just couldn't handle the prompt!"
     effect: cartoon-cry
     message: "The {{ctx.current_package}} just couldn't handle the prompt!"
+    notify: "Ding dong, the witch is dead"
 ---
 
 Think hard and do something amazing ... but do it really fast.
@@ -273,15 +274,42 @@ Think hard and do something amazing ... but do it really fast.
 This built-in functionality can be now be embedded into your prompts and allow your humans to live a slightly better life than they did before.
 
 
-## Scheduling
+## Scheduling, Queues, and Dashboard
 
-Not yet ready but will be added soon.
+> Not yet ready but will be added soon.
+
+Claudine comes with a separate background process called `rendezvous` which is always running in the background. Claudine is able to interact with rendezvous to:
+
+- provide users the ability to _queue_ jobs (either one after another or at set times)
+- recurring tasks can also be added and they will be run on an interval
+- see an active dashboard of all prompts, sequences, etc. which are running and where they are in the process
 
 ## Local Models
 
-Not yet ready but will be added soon. You can use local models today but you'd need to do the configuration yourself in the Agent platform.
+> Not yet ready but will be added soon. You can use local models today but you'd need to do the configuration yourself in the Agent platform.
+
+```sh
+# detect locally hosted LLM servers (ollama, vllm, llama.cpp, oMLX)
+# which are currently available plus what models these servers can provide
+claudine local detect
+# locally running LLMs will always be looked for on the local host but 
+# you can specify other local servers that are running 
+claudine local hosts
+```
+
+- All configuration of local services is included in the `claudine config` TUI.
+- If you want to use a local model then you just use it like any other model and Claudine will adapt it's shell completions to only those models which are available
+
+    ```sh
+    # use a model hosted locally on same computer 
+    claudine opencode 'why is the sky blue?' --model omlx/kimi-for-coding/kimi-k2.6
+    # use a model on another server nearby
+    claudine codex 'why is the sky blue?' --model my-host::omlx/kimi-for-coding/kimi-k2.6
+    ```
+
+    > the `my-host` reference will need to be in your **Claudine** configuration
 
 ## Worktree Integration
 
-Not yet ready but will be added soon.
+> Not yet ready but will be added soon.
 
