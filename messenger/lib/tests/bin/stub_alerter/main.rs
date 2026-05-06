@@ -24,8 +24,8 @@ fn main() {
     if let Ok(payload) = std::env::var("STUB_ALERTER_STDOUT_OVERRIDE") {
         print!("{payload}");
     } else {
-        let activation_type = std::env::var("STUB_ALERTER_TYPE")
-            .unwrap_or_else(|_| "closed".to_string());
+        let activation_type =
+            std::env::var("STUB_ALERTER_TYPE").unwrap_or_else(|_| "closed".to_string());
         let mut payload = format!("{{\"activationType\":\"{}\"", escape_json(&activation_type));
         if let Ok(value) = std::env::var("STUB_ALERTER_VALUE")
             && !value.is_empty()

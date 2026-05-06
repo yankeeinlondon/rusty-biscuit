@@ -546,7 +546,10 @@ mod tests {
         // its `--wait` / `-A` round-trips work end-to-end against dunst.
         let info = linux_helpers_with_daemon("dunst");
         let order = compute_election_order(&info, OsType::Linux, &[]);
-        assert_eq!(order, vec!["dunstify".to_string(), "notify-send".to_string()]);
+        assert_eq!(
+            order,
+            vec!["dunstify".to_string(), "notify-send".to_string()]
+        );
     }
 
     #[test]
@@ -584,7 +587,10 @@ mod tests {
                 ExecutableSource::Path,
             );
         let order = compute_election_order(&info, OsType::Linux, &[]);
-        assert_eq!(order, vec!["notify-send".to_string(), "dunstify".to_string()]);
+        assert_eq!(
+            order,
+            vec!["notify-send".to_string(), "dunstify".to_string()]
+        );
     }
 
     #[test]
@@ -607,7 +613,10 @@ mod tests {
         };
 
         let text = render_text(&report);
-        assert!(text.contains("Active daemon:"), "missing daemon row: {text}");
+        assert!(
+            text.contains("Active daemon:"),
+            "missing daemon row: {text}"
+        );
         assert!(text.contains("dunst"), "missing daemon name: {text}");
         assert!(text.contains("knopwob"), "missing vendor: {text}");
         assert!(text.contains("1.9.2"), "missing version: {text}");
@@ -631,7 +640,10 @@ mod tests {
 
         let text = render_text(&report);
         assert!(text.contains("dunstify"), "missing dunstify row: {text}");
-        assert!(text.contains("notify-send"), "missing notify-send row: {text}");
+        assert!(
+            text.contains("notify-send"),
+            "missing notify-send row: {text}"
+        );
         // The numbered prefix proves dunstify ranks ahead of notify-send.
         let dunstify_pos = text.find("dunstify").expect("dunstify present");
         let notify_pos = text.find("notify-send").expect("notify-send present");
@@ -675,13 +687,11 @@ mod tests {
                 },
             ],
             election_order: vec!["dunstify".into(), "notify-send".into()],
-            routes: vec![
-                RouteRecord {
-                    name: "desktop".into(),
-                    provider: "Desktop".into(),
-                    is_default: true,
-                },
-            ],
+            routes: vec![RouteRecord {
+                name: "desktop".into(),
+                provider: "Desktop".into(),
+                is_default: true,
+            }],
         };
         let text = render_text(&report);
         insta::assert_snapshot!(text);
@@ -721,13 +731,11 @@ mod tests {
                 },
             ],
             election_order: vec!["dunstify".into(), "notify-send".into()],
-            routes: vec![
-                RouteRecord {
-                    name: "desktop".into(),
-                    provider: "Desktop".into(),
-                    is_default: true,
-                },
-            ],
+            routes: vec![RouteRecord {
+                name: "desktop".into(),
+                provider: "Desktop".into(),
+                is_default: true,
+            }],
         };
         let json = render_json(&report).unwrap();
         insta::assert_snapshot!(json);

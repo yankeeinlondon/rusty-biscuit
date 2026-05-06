@@ -46,10 +46,7 @@ use crate::provider::desktop::request::DesktopNotificationRequest;
 /// to the bin directory.
 fn stub_bin_dir() -> PathBuf {
     let exe = std::env::current_exe().expect("test executable path");
-    let mut dir = exe
-        .parent()
-        .expect("test executable parent")
-        .to_path_buf();
+    let mut dir = exe.parent().expect("test executable parent").to_path_buf();
     if dir.file_name().and_then(|name| name.to_str()) == Some("deps") {
         dir.pop();
     }
@@ -99,7 +96,10 @@ fn stub_path(name: &str) -> PathBuf {
             ])
             .status()
             .expect("failed to invoke cargo to build stub binary");
-        assert!(status.success(), "cargo build failed for stub binary {name}");
+        assert!(
+            status.success(),
+            "cargo build failed for stub binary {name}"
+        );
     }
     assert!(
         path.exists(),
@@ -186,11 +186,17 @@ fn notify_send_helper(path: &Path) -> NotifySendHelper {
 }
 
 fn snoretoast_helper(path: &Path) -> SnoreToastHelper {
-    SnoreToastHelper::new(path.to_path_buf(), "RustyBiscuit.MessengerTests".to_string())
+    SnoreToastHelper::new(
+        path.to_path_buf(),
+        "RustyBiscuit.MessengerTests".to_string(),
+    )
 }
 
 fn burnttoast_helper(path: &Path) -> BurntToastHelper {
-    let helper = BurntToastHelper::new(path.to_path_buf(), "RustyBiscuit.MessengerTests".to_string());
+    let helper = BurntToastHelper::new(
+        path.to_path_buf(),
+        "RustyBiscuit.MessengerTests".to_string(),
+    );
     // Skip the per-process AppID registration shell-out so the stub only has
     // to handle the actual send invocation.
     helper.mark_app_id_registered();
@@ -224,10 +230,7 @@ mod dunstify_stub {
     #[serial]
     async fn interactive_records_action_metadata() {
         let stub = stub_path("stub_dunstify");
-        let _env = EnvGuard::set(&[
-            ("STUB_DUNSTIFY_ID", "9"),
-            ("STUB_DUNSTIFY_ACTION", "ok"),
-        ]);
+        let _env = EnvGuard::set(&[("STUB_DUNSTIFY_ID", "9"), ("STUB_DUNSTIFY_ACTION", "ok")]);
         let helper = dunstify_helper(&stub);
         let request = interactive_request(vec![NotificationAction {
             id: "ok".into(),
@@ -384,10 +387,7 @@ mod snoretoast_stub {
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[("STUB_SNORETOAST_EXIT", "1")]);
         let helper = snoretoast_helper(&stub);
-        let receipt = helper
-            .replace("toast-9", &notice_request())
-            .await
-            .unwrap();
+        let receipt = helper.replace("toast-9", &notice_request()).await.unwrap();
         assert_eq!(receipt.notification_id, "toast-9");
         assert_eq!(
             receipt.metadata.get("replaced").map(String::as_str),
@@ -555,11 +555,11 @@ mod burnttoast_stub {
     async fn app_id_registration_succeeds_before_send() {
         // Do NOT call mark_app_id_registered — let the real registration path run.
         let stub = stub_path("stub_burnttoast");
-        let _env = EnvGuard::set(&[(
-            "STUB_BURNTTOAST_JSON",
-            r#"{"activationType":"dismissed"}"#,
-        )]);
-        let helper = BurntToastHelper::new(stub.to_path_buf(), "RustyBiscuit.MessengerTests".to_string());
+        let _env = EnvGuard::set(&[("STUB_BURNTTOAST_JSON", r#"{"activationType":"dismissed"}"#)]);
+        let helper = BurntToastHelper::new(
+            stub.to_path_buf(),
+            "RustyBiscuit.MessengerTests".to_string(),
+        );
         assert!(!helper.app_id_registered());
         let receipt = helper.send(&notice_request()).await.unwrap();
         assert!(helper.app_id_registered());
@@ -590,10 +590,7 @@ mod terminal_notifier_stub {
     async fn replace_records_replaced_metadata() {
         let stub = stub_path("stub_terminal_notifier");
         let helper = terminal_notifier_helper(&stub);
-        let receipt = helper
-            .replace("legacy-7", &notice_request())
-            .await
-            .unwrap();
+        let receipt = helper.replace("legacy-7", &notice_request()).await.unwrap();
         assert_eq!(receipt.notification_id, "legacy-7");
         assert_eq!(
             receipt.metadata.get("replaced").map(String::as_str),
@@ -824,10 +821,7 @@ mod backend_fallback {
         let _env = EnvGuard::set(&[
             ("STUB_SNORETOAST_EXIT", "4"),
             ("STUB_SNORETOAST_STDOUT", "boom"),
-            (
-                "STUB_BURNTTOAST_JSON",
-                r#"{"activationType":"dismissed"}"#,
-            ),
+            ("STUB_BURNTTOAST_JSON", r#"{"activationType":"dismissed"}"#),
         ]);
 
         let config = WindowsDesktopConfig {
