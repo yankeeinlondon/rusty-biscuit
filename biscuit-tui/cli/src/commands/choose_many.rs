@@ -5,66 +5,25 @@
 //! captured option values according to the current [`OutputMode`].
 
 use std::io::{self, Write};
-use std::path::PathBuf;
 
 use clap::Args;
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseMany, ChooseManyState, HeightSpec, Label,
-    SelectionMode, run_standalone_with_chrome,
+    ChoiceInput, ChooseMany, ChooseManyState, HeightSpec, Label, SelectionMode,
+    run_standalone_with_chrome,
 };
 
-use crate::choice_normalize::normalize_options;
-use crate::commands::common_choose::{ChooseChromeArgs, build_chrome, resolve_hotkey_badges};
+use crate::commands::common_choose::{
+    ChooseChromeArgs, ChooseSourceArgs, build_choice_input as build_common_choice_input,
+    build_chrome, resolve_hotkey_badges, run_choice_with_writer,
+};
 use crate::commands::text_input::LabelPositionArg;
-use crate::option_sources::resolve_raw_options;
 use crate::output::{OutputMode, write_list};
 
 /// Arguments accepted by the `choose-many` subcommand.
 #[derive(Debug, Args)]
 pub struct ChooseManyArgs {
-    /// Option strings. Trailing positional arguments become the list
-    /// of options when no explicit source flag is set.
-    #[arg(value_name = "OPTIONS")]
-    pub positional: Vec<String>,
-
-    /// Comma-separated list of option values.
-    #[arg(long = "csv", alias = "options", value_name = "TEXT")]
-    pub csv: Option<String>,
-
-    /// Newline-separated list of option values.
-    #[arg(long, value_name = "TEXT")]
-    pub list: Option<String>,
-
-    /// Newline-separated rows of options.
-    #[arg(long, value_name = "TEXT")]
-    pub rows: Option<String>,
-
-    /// Path to a file containing options (JSON, JSONL, NDJSON, YAML, TOML, or CSV).
-    ///
-    /// The file's top level must be an array of strings or an array of
-    /// objects with `label` / `value` / `hotkey` / `disabled` keys.
-    ///
-    /// **TOML note:** standard TOML cannot represent a top-level bare
-    /// array (the document root must be a table), so a TOML options file
-    /// must use the `options = [...]` table form (e.g.
-    /// `options = ["Red", "Green"]`). Other top-level keys (e.g.
-    /// `colors = [...]`) are rejected with
-    /// `option file must contain an array`.
-    #[arg(long, value_name = "PATH")]
-    pub file: Option<PathBuf>,
-
-    /// Path to a markdown file and frontmatter property name containing
-    /// an array of options.
-    #[arg(long, value_names = ["PATH", "PROP"], num_args = 2)]
-    pub md: Option<Vec<String>>,
-
-    /// Legacy: path to a markdown file containing a bullet/numbered list.
-    #[arg(long, hide = true)]
-    pub options_from_file: Option<PathBuf>,
-
-    /// Legacy: path to a YAML/JSON file containing a mapping of label → value.
-    #[arg(long, hide = true)]
-    pub options_from_dictionary: Option<PathBuf>,
+    #[command(flatten)]
+    pub source: ChooseSourceArgs,
 
     /// Label text rendered next to the list.
     #[arg(long)]
@@ -162,16 +121,14 @@ where
         state = state.with_hotkey_display(mode);
     }
 
-    match run_prompt(state, height) {
-        Ok(values) => {
-            write_list(writer, &values, output)?;
-            writer.flush()?;
-            Ok(0)
-        }
-        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
-        Err(e) if e.kind() == ABORTED_KIND => Ok(1),
-        Err(e) => Err(e),
-    }
+    run_choice_with_writer(
+        state,
+        output,
+        height,
+        writer,
+        run_prompt,
+        |writer, values, output| write_list(writer, &values, output),
+    )
 }
 
 fn effective_selected(args: &ChooseManyArgs) -> Vec<String> {
@@ -195,42 +152,7 @@ fn effective_selected(args: &ChooseManyArgs) -> Vec<String> {
 }
 
 fn build_choice_input(args: &ChooseManyArgs) -> io::Result<ChoiceInput<String>> {
-    let md = args.md.as_ref().and_then(|v| {
-        if v.len() >= 2 {
-            Some((std::path::Path::new(&v[0]), v[1].as_str()))
-        } else {
-            None
-        }
-    });
-
-    let raw_options = resolve_raw_options(
-        args.csv.as_deref(),
-        args.list.as_deref(),
-        args.rows.as_deref(),
-        args.file.as_deref(),
-        md,
-        args.options_from_file.as_deref(),
-        args.options_from_dictionary.as_deref(),
-        args.positional.clone(),
-    )
-    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
-
-    let options = normalize_options(
-        raw_options,
-        args.chrome.label_convention,
-        args.chrome.value_convention,
-        args.chrome.numeric_hot_keys,
-        args.chrome.delimiter,
-    )
-    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
-
-    let input = ChoiceInput::new("choice", "")
-        .with_selection_mode(SelectionMode::Multiple)
-        .with_options(options)
-        .with_sort(args.chrome.sort.into())
-        .with_active_color(args.chrome.active_color.into())
-        .with_orientation(args.chrome.orientation.into());
-    Ok(input.with_filter_enabled(!args.chrome.no_filter))
+    build_common_choice_input(&args.source, &args.chrome, SelectionMode::Multiple)
 }
 
 fn parse_initial_ids(raw: &str) -> Vec<String> {
@@ -244,17 +166,11 @@ fn parse_initial_ids(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tui_chrome::{ABORTED_KIND, CANCELLED_KIND};
 
     fn default_args() -> ChooseManyArgs {
         ChooseManyArgs {
-            positional: Vec::new(),
-            csv: None,
-            list: None,
-            rows: None,
-            file: None,
-            md: None,
-            options_from_file: None,
-            options_from_dictionary: None,
+            source: ChooseSourceArgs::default(),
             label: None,
             label_position: LabelPositionArg::Above,
             selected: Vec::new(),
@@ -266,10 +182,31 @@ mod tests {
         }
     }
 
+    fn source_csv(csv: String) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            csv: Some(csv),
+            ..ChooseSourceArgs::default()
+        }
+    }
+
+    fn source_positional(positional: Vec<String>) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            positional,
+            ..ChooseSourceArgs::default()
+        }
+    }
+
+    fn source_file(file: std::path::PathBuf) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            file: Some(file),
+            ..ChooseSourceArgs::default()
+        }
+    }
+
     #[test]
     fn build_choice_input_from_csv_uses_multiple_mode() {
         let args = ChooseManyArgs {
-            csv: Some("a,b,c".into()),
+            source: source_csv("a,b,c".into()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -280,7 +217,7 @@ mod tests {
     #[test]
     fn build_choice_input_from_positional_uses_multiple_mode() {
         let args = ChooseManyArgs {
-            positional: vec!["a".into(), "b".into()],
+            source: source_positional(vec!["a".into(), "b".into()]),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -291,7 +228,7 @@ mod tests {
     #[test]
     fn build_choice_input_active_color_default_is_grey() {
         let args = ChooseManyArgs {
-            csv: Some("a,b".into()),
+            source: source_csv("a,b".into()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -302,7 +239,7 @@ mod tests {
     fn build_choice_input_active_color_yellow_propagates_to_input() {
         use crate::commands::common_choose::ActiveColorArg;
         let args = ChooseManyArgs {
-            csv: Some("a,b".into()),
+            source: source_csv("a,b".into()),
             chrome: ChooseChromeArgs {
                 active_color: ActiveColorArg::Yellow,
                 ..ChooseChromeArgs::default()
@@ -316,7 +253,7 @@ mod tests {
     #[test]
     fn build_choice_input_enables_filter_for_positional_args_by_default() {
         let args = ChooseManyArgs {
-            positional: vec!["a".into(), "b".into()],
+            source: source_positional(vec!["a".into(), "b".into()]),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -327,7 +264,7 @@ mod tests {
     #[test]
     fn build_choice_input_enables_filter_for_legacy_csv_by_default() {
         let args = ChooseManyArgs {
-            csv: Some("a,b,c".into()),
+            source: source_csv("a,b,c".into()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -338,7 +275,7 @@ mod tests {
     #[test]
     fn build_choice_input_respects_no_filter_flag() {
         let args = ChooseManyArgs {
-            positional: vec!["a".into(), "b".into()],
+            source: source_positional(vec!["a".into(), "b".into()]),
             chrome: ChooseChromeArgs {
                 no_filter: true,
                 ..ChooseChromeArgs::default()
@@ -353,7 +290,7 @@ mod tests {
     #[test]
     fn build_choice_input_from_positional_with_delimiter_splits_label_value() {
         let args = ChooseManyArgs {
-            positional: vec!["Apple:1".into(), "Berry:2".into()],
+            source: source_positional(vec!["Apple:1".into(), "Berry:2".into()]),
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
                 ..ChooseChromeArgs::default()
@@ -390,7 +327,7 @@ mod tests {
         // through unchanged and matches the option whose value is
         // `one,two`.
         let args = ChooseManyArgs {
-            positional: vec!["A|one,two".into(), "B|three".into()],
+            source: source_positional(vec!["A|one,two".into(), "B|three".into()]),
             selected: vec!["one,two".into()],
             chrome: ChooseChromeArgs {
                 delimiter: Some('|'),
@@ -425,7 +362,7 @@ mod tests {
         // so the CLI's effective-hotkey duplicate check (`Ctrl+<first
         // alphanumeric>`) does not reject them.
         let args = ChooseManyArgs {
-            positional: vec!["one".into(), "two".into(), "four".into()],
+            source: source_positional(vec!["one".into(), "two".into(), "four".into()]),
             selected: vec!["one".into(), "two".into(), "four".into()],
             ..default_args()
         };
@@ -450,7 +387,7 @@ mod tests {
     #[test]
     fn initial_still_splits_on_commas_for_backward_compat() {
         let args = ChooseManyArgs {
-            positional: vec!["one".into(), "two".into()],
+            source: source_positional(vec!["one".into(), "two".into()]),
             selected: Vec::new(),
             initial: Some("one,two".into()),
             ..default_args()
@@ -497,7 +434,7 @@ mod tests {
         // expected order.
         use crate::commands::common_choose::SortOrderArg;
         let args = ChooseManyArgs {
-            positional: vec!["a".into(), "b".into(), "c".into()],
+            source: source_positional(vec!["a".into(), "b".into(), "c".into()]),
             chrome: ChooseChromeArgs {
                 sort: SortOrderArg::Inverse,
                 ..ChooseChromeArgs::default()
@@ -521,7 +458,7 @@ mod tests {
     #[test]
     fn run_writes_nul_separated_selected_values_from_initial_ids() {
         let args = ChooseManyArgs {
-            csv: Some("Pepperoni,Mushrooms,Olives".into()),
+            source: source_csv("Pepperoni,Mushrooms,Olives".into()),
             selected: vec!["Pepperoni".into(), "Olives".into()],
             required: true,
             min_selections: Some(1),
@@ -549,7 +486,7 @@ mod tests {
     #[test]
     fn run_propagates_percent_height_to_prompt() {
         let args = ChooseManyArgs {
-            csv: Some("A,B,C".into()),
+            source: source_csv("A,B,C".into()),
             selected: vec!["A".into()],
             ..default_args()
         };
@@ -574,7 +511,7 @@ mod tests {
     #[test]
     fn run_writes_raw_newline_separated_values() {
         let args = ChooseManyArgs {
-            csv: Some("Red,Green,Blue".into()),
+            source: source_csv("Red,Green,Blue".into()),
             selected: vec!["Red".into(), "Blue".into()],
             ..default_args()
         };
@@ -596,7 +533,7 @@ mod tests {
     #[test]
     fn run_writes_selected_values_from_positional_args() {
         let args = ChooseManyArgs {
-            positional: vec!["alpha".into(), "beta".into(), "gamma".into()],
+            source: source_positional(vec!["alpha".into(), "beta".into(), "gamma".into()]),
             selected: vec!["alpha".into(), "gamma".into()],
             ..default_args()
         };
@@ -623,7 +560,7 @@ mod tests {
     #[test]
     fn run_writes_delimited_positional_values() {
         let args = ChooseManyArgs {
-            positional: vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()],
+            source: source_positional(vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()]),
             selected: vec!["1".into(), "3".into()],
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
@@ -655,7 +592,7 @@ mod tests {
     #[test]
     fn run_selected_defaults_match_delimited_values() {
         let args = ChooseManyArgs {
-            positional: vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()],
+            source: source_positional(vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()]),
             selected: vec!["2".into(), "3".into()],
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
@@ -685,7 +622,7 @@ mod tests {
     #[test]
     fn run_builds_filter_enabled_state_by_default() {
         let args = ChooseManyArgs {
-            positional: vec!["alpha".into(), "beta".into()],
+            source: source_positional(vec!["alpha".into(), "beta".into()]),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -711,7 +648,7 @@ mod tests {
     #[test]
     fn run_select_all_outputs_all_values() {
         let args = ChooseManyArgs {
-            positional: vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()],
+            source: source_positional(vec!["Apple:1".into(), "Berry:2".into(), "Cherry:3".into()]),
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
                 ..ChooseChromeArgs::default()
@@ -740,7 +677,7 @@ mod tests {
     #[test]
     fn run_deselect_all_outputs_no_values() {
         let args = ChooseManyArgs {
-            csv: Some("Red,Green,Blue".into()),
+            source: source_csv("Red,Green,Blue".into()),
             selected: vec!["Red".into(), "Green".into(), "Blue".into()],
             ..default_args()
         };
@@ -767,7 +704,7 @@ mod tests {
     #[test]
     fn run_writes_json_array_of_selected_values() {
         let args = ChooseManyArgs {
-            csv: Some("A,B,C".into()),
+            source: source_csv("A,B,C".into()),
             selected: vec!["A".into(), "C".into()],
             ..default_args()
         };
@@ -789,7 +726,7 @@ mod tests {
     #[test]
     fn run_returns_130_without_output_on_ctrl_c() {
         let args = ChooseManyArgs {
-            csv: Some("Pepperoni,Olives".into()),
+            source: source_csv("Pepperoni,Olives".into()),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -822,7 +759,7 @@ mod tests {
             r#"[{"label":"Red","value":"apple","hotkey":"CTRL+R"},{"label":"Blue","value":"sky"}]"#,
         );
         let args = ChooseManyArgs {
-            file: Some(path.clone()),
+            source: source_file(path.clone()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -841,7 +778,7 @@ mod tests {
         let body = "- label: Red\n  value: apple\n  hotkey: CTRL+R\n- label: Blue\n  value: sky\n";
         let path = write_temp_file("choose_many_phase3_objects.yaml", body);
         let args = ChooseManyArgs {
-            file: Some(path.clone()),
+            source: source_file(path.clone()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -858,7 +795,7 @@ mod tests {
         let body = "Red,apple,CTRL+R\nBlue,sky,ALT+B\n";
         let path = write_temp_file("choose_many_phase3_objects.csv", body);
         let args = ChooseManyArgs {
-            file: Some(path.clone()),
+            source: source_file(path.clone()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -882,7 +819,7 @@ mod tests {
             r#"[{"label":"Red","value":"apple"},{"label":"Blue","value":"sky"}]"#,
         );
         let args = ChooseManyArgs {
-            file: Some(path.clone()),
+            source: source_file(path.clone()),
             selected: vec!["apple".into(), "sky".into()],
             ..default_args()
         };
@@ -906,7 +843,7 @@ mod tests {
     #[test]
     fn run_returns_1_without_output_on_esc() {
         let args = ChooseManyArgs {
-            csv: Some("Pepperoni,Olives".into()),
+            source: source_csv("Pepperoni,Olives".into()),
             ..default_args()
         };
         let mut output = Vec::new();

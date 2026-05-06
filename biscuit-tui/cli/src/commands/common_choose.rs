@@ -18,13 +18,79 @@
 //!
 //! and returns an error if none are available.
 
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
 use clap::{Args, ValueEnum};
 use tui_chrome::{
-    ActiveChoiceColor, BorderStyle, FrameChromeConfig, HeightSpec, HotkeyDisplayMode, Margin,
-    Orientation, Padding, SortOrder,
+    ABORTED_KIND, ActiveChoiceColor, BorderStyle, CANCELLED_KIND, ChoiceInput, FrameChromeConfig,
+    HeightSpec, HotkeyDisplayMode, Margin, Orientation, Padding, SelectionMode, SortOrder,
 };
 
 use crate::choice_normalize::NamingConvention;
+use crate::choice_normalize::normalize_options;
+use crate::option_sources::resolve_raw_options;
+use crate::output::OutputMode;
+
+/// Shared source-resolution clap arguments for the `choose-*` subcommands.
+#[derive(Debug, Args, Clone, Default)]
+pub struct ChooseSourceArgs {
+    /// Option strings. Trailing positional arguments become the list
+    /// of options when no explicit source flag is set.
+    #[arg(value_name = "OPTIONS")]
+    pub positional: Vec<String>,
+
+    /// Comma-separated list of option values.
+    #[arg(long = "csv", alias = "options", value_name = "TEXT")]
+    pub csv: Option<String>,
+
+    /// Newline-separated list of option values.
+    #[arg(long, value_name = "TEXT")]
+    pub list: Option<String>,
+
+    /// Newline-separated rows of options.
+    #[arg(long, value_name = "TEXT")]
+    pub rows: Option<String>,
+
+    /// Path to a file containing options (JSON, JSONL, NDJSON, YAML, TOML, or CSV).
+    ///
+    /// The file's top level must be an array of strings or an array of
+    /// objects with `label` / `value` / `hotkey` / `disabled` keys.
+    ///
+    /// **TOML note:** standard TOML cannot represent a top-level bare
+    /// array (the document root must be a table), so a TOML options file
+    /// must use the `options = [...]` table form (e.g.
+    /// `options = ["Red", "Green"]`). Other top-level keys (e.g.
+    /// `colors = [...]`) are rejected with
+    /// `option file must contain an array`.
+    #[arg(long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+
+    /// Path to a markdown file and frontmatter property name containing
+    /// an array of options.
+    #[arg(long, value_names = ["PATH", "PROP"], num_args = 2)]
+    pub md: Option<Vec<String>>,
+
+    /// Legacy: path to a markdown file containing a bullet/numbered list.
+    #[arg(long, hide = true)]
+    pub options_from_file: Option<PathBuf>,
+
+    /// Legacy: path to a YAML/JSON file containing a mapping of label -> value.
+    #[arg(long, hide = true)]
+    pub options_from_dictionary: Option<PathBuf>,
+}
+
+impl ChooseSourceArgs {
+    fn markdown_source(&self) -> Option<(&Path, &str)> {
+        self.md.as_ref().and_then(|v| {
+            if v.len() >= 2 {
+                Some((Path::new(&v[0]), v[1].as_str()))
+            } else {
+                None
+            }
+        })
+    }
+}
 
 /// Shared clap arguments for the `choose-*` subcommands.
 ///
@@ -397,6 +463,69 @@ pub fn build_chrome(args: &ChooseChromeArgs) -> FrameChromeConfig {
         margin: resolve_margin(args),
         padding: resolve_padding(args),
         ..Default::default()
+    }
+}
+
+/// Resolves raw source flags, normalizes options, and builds the shared
+/// library choice input.
+pub fn build_choice_input(
+    source: &ChooseSourceArgs,
+    chrome: &ChooseChromeArgs,
+    selection_mode: SelectionMode,
+) -> io::Result<ChoiceInput<String>> {
+    let raw_options = resolve_raw_options(
+        source.csv.as_deref(),
+        source.list.as_deref(),
+        source.rows.as_deref(),
+        source.file.as_deref(),
+        source.markdown_source(),
+        source.options_from_file.as_deref(),
+        source.options_from_dictionary.as_deref(),
+        source.positional.clone(),
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+
+    let options = normalize_options(
+        raw_options,
+        chrome.label_convention,
+        chrome.value_convention,
+        chrome.numeric_hot_keys,
+        chrome.delimiter,
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+
+    Ok(ChoiceInput::new("choice", "")
+        .with_selection_mode(selection_mode)
+        .with_options(options)
+        .with_sort(chrome.sort.into())
+        .with_active_color(chrome.active_color.into())
+        .with_orientation(chrome.orientation.into())
+        .with_filter_enabled(!chrome.no_filter))
+}
+
+/// Runs a choose prompt and serializes the submitted value.
+pub fn run_choice_with_writer<State, Value, RunPrompt, WriteValue, W>(
+    state: State,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+    writer: &mut W,
+    run_prompt: RunPrompt,
+    write_value: WriteValue,
+) -> io::Result<i32>
+where
+    RunPrompt: FnOnce(State, Option<HeightSpec>) -> io::Result<Value>,
+    WriteValue: FnOnce(&mut W, Value, OutputMode) -> io::Result<()>,
+    W: Write,
+{
+    match run_prompt(state, height) {
+        Ok(value) => {
+            write_value(writer, value, output)?;
+            writer.flush()?;
+            Ok(0)
+        }
+        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
+        Err(e) if e.kind() == ABORTED_KIND => Ok(1),
+        Err(e) => Err(e),
     }
 }
 
