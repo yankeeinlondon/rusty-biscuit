@@ -23,6 +23,26 @@ pub(crate) fn extract_html_images(content: &str, source: &ComposeSource) -> Vec<
     collect_from_html_nodes(content, source, classify_img_tag)
 }
 
+/// Extract HTML `<video>` tags as [`ReferenceRecord`]s with provenance.
+pub(crate) fn extract_html_videos(content: &str, source: &ComposeSource) -> Vec<ReferenceRecord> {
+    collect_from_html_nodes(content, source, classify_video_tag)
+}
+
+/// Extract HTML `<audio>` tags as [`ReferenceRecord`]s with provenance.
+pub(crate) fn extract_html_audio(content: &str, source: &ComposeSource) -> Vec<ReferenceRecord> {
+    collect_from_html_nodes(content, source, classify_audio_tag)
+}
+
+/// Extract HTML `<source>` tags as [`ReferenceRecord`]s with provenance.
+pub(crate) fn extract_html_sources(content: &str, source: &ComposeSource) -> Vec<ReferenceRecord> {
+    collect_from_html_nodes(content, source, classify_source_tag)
+}
+
+/// Extract HTML `<iframe>` tags as [`ReferenceRecord`]s with provenance.
+pub(crate) fn extract_html_iframes(content: &str, source: &ComposeSource) -> Vec<ReferenceRecord> {
+    collect_from_html_nodes(content, source, classify_iframe_tag)
+}
+
 /// Extract HTML `<style>` blocks as [`ReferenceRecord`]s with provenance.
 pub(crate) fn extract_html_style_blocks(
     content: &str,
@@ -199,6 +219,110 @@ fn classify_img_tag(
             syntax: ReferenceSyntax::HtmlImage,
         },
         attributes,
+    })
+}
+
+fn classify_video_tag(
+    html: &str,
+    source: &ComposeSource,
+    line: usize,
+    span_start: usize,
+    span_end: usize,
+) -> Option<ReferenceRecord> {
+    if !is_tag(html, "video") {
+        return None;
+    }
+    let src = extract_attribute(html, "src")?;
+
+    Some(ReferenceRecord {
+        id: make_reference_id(source, line, span_start),
+        kind: ReferenceKind::Image,
+        target: classify_target(&src),
+        origin: ReferenceOrigin {
+            source: source.clone(),
+            line,
+            span: span_start..span_end,
+            syntax: ReferenceSyntax::HtmlImage,
+        },
+        attributes: serde_json::Map::new(),
+    })
+}
+
+fn classify_audio_tag(
+    html: &str,
+    source: &ComposeSource,
+    line: usize,
+    span_start: usize,
+    span_end: usize,
+) -> Option<ReferenceRecord> {
+    if !is_tag(html, "audio") {
+        return None;
+    }
+    let src = extract_attribute(html, "src")?;
+
+    Some(ReferenceRecord {
+        id: make_reference_id(source, line, span_start),
+        kind: ReferenceKind::Image,
+        target: classify_target(&src),
+        origin: ReferenceOrigin {
+            source: source.clone(),
+            line,
+            span: span_start..span_end,
+            syntax: ReferenceSyntax::HtmlImage,
+        },
+        attributes: serde_json::Map::new(),
+    })
+}
+
+fn classify_source_tag(
+    html: &str,
+    source: &ComposeSource,
+    line: usize,
+    span_start: usize,
+    span_end: usize,
+) -> Option<ReferenceRecord> {
+    if !is_tag(html, "source") {
+        return None;
+    }
+    let src = extract_attribute(html, "src")?;
+
+    Some(ReferenceRecord {
+        id: make_reference_id(source, line, span_start),
+        kind: ReferenceKind::Image,
+        target: classify_target(&src),
+        origin: ReferenceOrigin {
+            source: source.clone(),
+            line,
+            span: span_start..span_end,
+            syntax: ReferenceSyntax::HtmlImage,
+        },
+        attributes: serde_json::Map::new(),
+    })
+}
+
+fn classify_iframe_tag(
+    html: &str,
+    source: &ComposeSource,
+    line: usize,
+    span_start: usize,
+    span_end: usize,
+) -> Option<ReferenceRecord> {
+    if !is_tag(html, "iframe") {
+        return None;
+    }
+    let src = extract_attribute(html, "src")?;
+
+    Some(ReferenceRecord {
+        id: make_reference_id(source, line, span_start),
+        kind: ReferenceKind::Hyperlink,
+        target: classify_target(&src),
+        origin: ReferenceOrigin {
+            source: source.clone(),
+            line,
+            span: span_start..span_end,
+            syntax: ReferenceSyntax::HtmlAnchor,
+        },
+        attributes: serde_json::Map::new(),
     })
 }
 

@@ -58,6 +58,7 @@ mod types;
 pub mod block_pairs;
 pub mod expression;
 pub mod interpolation;
+pub(crate) mod link_resolve;
 pub mod page_blocks;
 pub mod replacement;
 pub mod shell_blocks;
@@ -611,6 +612,7 @@ impl Markdown {
                 &mut runtime.shell,
                 report,
             ),
+            ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),
             _ => Ok(()),
         }
     }
