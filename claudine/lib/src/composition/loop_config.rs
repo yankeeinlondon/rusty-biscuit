@@ -544,4 +544,163 @@ mod tests {
             matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `value`"))
         );
     }
+
+    #[test]
+    fn max_must_be_positive_integer() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "max": "five"}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("loop.max") && msg.contains("positive integer"))
+        );
+    }
+
+    #[test]
+    fn actions_must_be_string_object_or_list() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "actions": 42}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("loop.actions") && msg.contains("string, object, or list"))
+        );
+    }
+
+    #[test]
+    fn invalid_dsl_action_missing_closing_paren() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "actions": "increment(counter"}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("missing closing")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn invalid_dsl_action_unknown_op() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "actions": "unknown(prop)"}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("unknown loop action op")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn invalid_dsl_action_wrong_arg_count() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "actions": "increment()"}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("expects 1 argument")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn structured_action_missing_op() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "actions": {"prop": "counter"}}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `op`"))
+        );
+    }
+
+    #[test]
+    fn structured_action_missing_prop() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "actions": {"op": "increment"}}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `prop`"))
+        );
+    }
+
+    #[test]
+    fn structured_action_unknown_op() {
+        let source = make_source(&[(
+            "loop",
+            json!({"while": "true", "actions": {"op": "unknown", "prop": "counter"}}),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("unknown loop action op")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn empty_loop_object_requires_condition() {
+        let source = make_source(&[("loop", json!({}))]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("either `while` or `until`"))
+        );
+    }
+
+    #[test]
+    fn loop_must_be_an_object() {
+        let source = make_source(&[("loop", json!("while counter < 3"))]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("must be an object")),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn scalar_object_action_parses_json_value() {
+        let source = make_source(&[(
+            "loop",
+            json!({
+                "while": "counter < 3",
+                "actions": "set(counter, 5)"
+            }),
+        )]);
+
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        assert_eq!(
+            config.actions,
+            vec![LoopAction::Set {
+                prop: "counter".into(),
+                value: json!(5)
+            }]
+        );
+    }
+
+    #[test]
+    fn scalar_string_action_parses_quoted_string() {
+        let source = make_source(&[(
+            "loop",
+            json!({
+                "while": "counter < 3",
+                "actions": "set(msg, 'hello world')"
+            }),
+        )]);
+
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        assert_eq!(
+            config.actions,
+            vec![LoopAction::Set {
+                prop: "msg".into(),
+                value: json!("hello world")
+            }]
+        );
+    }
 }

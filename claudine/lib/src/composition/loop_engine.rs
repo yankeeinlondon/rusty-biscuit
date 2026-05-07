@@ -592,4 +592,177 @@ mod tests {
         assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(0)));
         assert_eq!(result.final_frontmatter.get("bad"), Some(&json!("abc")));
     }
+
+    #[test]
+    fn five_iteration_counter_loop() {
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 5".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+        };
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |_ctx| Ok(LoopIterationOutput::success("tick")),
+        )
+        .unwrap();
+
+        assert!(result.error.is_none());
+        assert_eq!(result.iteration_count, 5);
+        assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(5)));
+        assert_eq!(result.last_output, "tick");
+    }
+
+    #[test]
+    fn until_loop_runs_until_condition_met() {
+        // until: "counter >= 2" means "continue while counter < 2"
+        // actions increment counter each iteration, so 2 iterations run
+        let config = LoopConfig {
+            condition: LoopCondition::Until("counter >= 2".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+        };
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |_ctx| Ok(LoopIterationOutput::success("ok")),
+        )
+        .unwrap();
+
+        assert!(result.error.is_none());
+        // Iteration 1: counter=0 < 2 -> continue -> counter=1
+        // Iteration 2: counter=1 < 2 -> continue -> counter=2
+        // Iteration 3: counter=2 >= 2 -> stop
+        assert_eq!(result.iteration_count, 2);
+        assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(2)));
+    }
+
+    #[test]
+    fn until_loop_with_counter_reaches_target() {
+        // Continue until counter >= 3; actions increment each iteration
+        let config = LoopConfig {
+            condition: LoopCondition::Until("counter >= 3".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+        };
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |_ctx| Ok(LoopIterationOutput::success("ok")),
+        )
+        .unwrap();
+
+        assert!(result.error.is_none());
+        // Iteration 1: counter=0 < 3 -> continue -> counter=1
+        // Iteration 2: counter=1 < 3 -> continue -> counter=2
+        // Iteration 3: counter=2 < 3 -> continue -> counter=3
+        // Iteration 4: counter=3 >= 3 -> stop
+        assert_eq!(result.iteration_count, 3);
+        assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(3)));
+    }
+
+    #[test]
+    fn append_accumulates_log_across_iterations() {
+        let config = LoopConfig {
+            condition: LoopCondition::While("iteration < 4".into()),
+            actions: vec![LoopAction::Append {
+                prop: "log".into(),
+                value: json!({"event": "tick"}),
+            }],
+            max_iterations: None,
+            fail_fast: None,
+        };
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"log": ""})),
+            LoopExecutionOptions::default(),
+            |_ctx| Ok(LoopIterationOutput::success("ok")),
+        )
+        .unwrap();
+
+        assert!(result.error.is_none());
+        assert_eq!(result.iteration_count, 3);
+        let log = result.final_frontmatter.get("log").unwrap().as_str().unwrap();
+        assert_eq!(log.matches("tick").count(), 3);
+    }
+
+    #[test]
+    fn last_output_and_last_exit_code_propagate() {
+        let config = LoopConfig {
+            condition: LoopCondition::While("iteration < 4".into()),
+            actions: vec![],
+            max_iterations: None,
+            fail_fast: None,
+        };
+        let outputs = RefCell::new(Vec::new());
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({})),
+            LoopExecutionOptions::default(),
+            |ctx| {
+                let out = format!("run-{}", ctx.iteration);
+                outputs.borrow_mut().push((
+                    ctx.iteration,
+                    ctx.ambient.last_output.clone(),
+                    ctx.ambient.last_exit_code,
+                ));
+                Ok(LoopIterationOutput::success(out))
+            },
+        )
+        .unwrap();
+
+        assert!(result.error.is_none());
+        assert_eq!(result.iteration_count, 3);
+        assert_eq!(result.last_output, "run-3");
+
+        let seen = outputs.borrow();
+        assert_eq!(seen[0], (1, String::new(), 0));
+        assert_eq!(seen[1], (2, "run-1".into(), 0));
+        assert_eq!(seen[2], (3, "run-2".into(), 0));
+    }
+
+    #[test]
+    fn last_exit_code_reflects_failure_in_next_iteration() {
+        let config = LoopConfig {
+            condition: LoopCondition::While("iteration < 4".into()),
+            actions: vec![],
+            max_iterations: None,
+            fail_fast: Some(false),
+        };
+        let exit_codes = RefCell::new(Vec::new());
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({})),
+            LoopExecutionOptions::default(),
+            |ctx| {
+                exit_codes.borrow_mut().push(ctx.ambient.last_exit_code);
+                if ctx.iteration == 2 {
+                    Ok(LoopIterationOutput::failure("bad", 7, CompositionError::LoopInvalid("boom".into())))
+                } else {
+                    Ok(LoopIterationOutput::success("ok"))
+                }
+            },
+        )
+        .unwrap();
+
+        assert!(result.error.is_none());
+        assert_eq!(result.iteration_count, 3);
+        assert_eq!(result.final_exit_code, 0);
+
+        let seen = exit_codes.borrow();
+        assert_eq!(&*seen, &[0, 0, 7]);
+    }
+
 }

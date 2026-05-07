@@ -604,4 +604,166 @@ mod tests {
         assert_eq!(stage.commit(), json!({"counter": 2, "stage": "done"}));
         assert_eq!(fm, object(json!({"counter": 1})));
     }
+
+    #[test]
+    fn increment_rejects_boolean() {
+        let mut fm = object(json!({"flag": true}));
+        let err = apply_increment(&mut fm, "flag").unwrap_err();
+        assert!(matches!(
+            err,
+            CompositionError::InvalidIncrementType {
+                iteration: 1,
+                action_index: 1,
+                total_actions: 1,
+                property,
+                found
+            } if property == "flag" && found == "boolean"
+        ));
+    }
+
+    #[test]
+    fn decrement_rejects_boolean() {
+        let mut fm = object(json!({"flag": true}));
+        let err = apply_decrement(&mut fm, "flag").unwrap_err();
+        assert!(matches!(
+            err,
+            CompositionError::InvalidDecrementType {
+                iteration: 1,
+                action_index: 1,
+                total_actions: 1,
+                property,
+                found
+            } if property == "flag" && found == "boolean"
+        ));
+    }
+
+    #[test]
+    fn decrement_rejects_non_numeric_string() {
+        let mut fm = object(json!({"counter": "abc"}));
+        let err = apply_decrement(&mut fm, "counter").unwrap_err();
+        assert!(matches!(
+            err,
+            CompositionError::InvalidDecrementType {
+                iteration: 1,
+                action_index: 1,
+                total_actions: 1,
+                property,
+                found
+            } if property == "counter" && found == "string"
+        ));
+    }
+
+    #[test]
+    fn append_to_empty_string() {
+        let mut fm = object(json!({"log": ""}));
+        apply_action(
+            &mut fm,
+            &LoopAction::Append {
+                prop: "log".into(),
+                value: json!("first"),
+            },
+        )
+        .unwrap();
+        assert_eq!(fm.get("log"), Some(&json!("first")));
+    }
+
+    #[test]
+    fn prepend_to_empty_string() {
+        let mut fm = object(json!({"log": ""}));
+        apply_action(
+            &mut fm,
+            &LoopAction::Prepend {
+                prop: "log".into(),
+                value: json!("first"),
+            },
+        )
+        .unwrap();
+        assert_eq!(fm.get("log"), Some(&json!("first")));
+    }
+
+    #[test]
+    fn prepend_handles_scalars_and_json_values() {
+        let mut fm = object(json!({"log": "tail"}));
+        apply_action(
+            &mut fm,
+            &LoopAction::Prepend {
+                prop: "log".into(),
+                value: json!(true),
+            },
+        )
+        .unwrap();
+        apply_action(
+            &mut fm,
+            &LoopAction::Prepend {
+                prop: "log".into(),
+                value: json!({"event": "tick"}),
+            },
+        )
+        .unwrap();
+        apply_action(
+            &mut fm,
+            &LoopAction::Prepend {
+                prop: "log".into(),
+                value: json!([1, 2]),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            fm.get("log"),
+            Some(&json!("[1,2]\n{\"event\":\"tick\"}\ntruetail"))
+        );
+    }
+
+    #[test]
+    fn prepend_empty_preserves_jsonl_shape() {
+        let mut fm = object(json!({"objects": "{\"a\":1}", "arrays": "[1]"}));
+        apply_action(
+            &mut fm,
+            &LoopAction::Prepend {
+                prop: "objects".into(),
+                value: Value::Null,
+            },
+        )
+        .unwrap();
+        apply_action(
+            &mut fm,
+            &LoopAction::Prepend {
+                prop: "arrays".into(),
+                value: json!(""),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(fm.get("objects"), Some(&json!("{}\n{\"a\":1}")));
+        assert_eq!(fm.get("arrays"), Some(&json!("[]\n[1]")));
+    }
+
+    #[test]
+    fn merge_onto_null_creates_object() {
+        let mut fm = object(json!({"state": null}));
+        apply_action(
+            &mut fm,
+            &LoopAction::Merge {
+                prop: "state".into(),
+                value: json!({"a": 1}),
+            },
+        )
+        .unwrap();
+        assert_eq!(fm.get("state"), Some(&json!({"a": 1})));
+    }
+
+    #[test]
+    fn merge_onto_missing_creates_object() {
+        let mut fm = Map::new();
+        apply_action(
+            &mut fm,
+            &LoopAction::Merge {
+                prop: "state".into(),
+                value: json!({"a": 1}),
+            },
+        )
+        .unwrap();
+        assert_eq!(fm.get("state"), Some(&json!({"a": 1})));
+    }
 }
