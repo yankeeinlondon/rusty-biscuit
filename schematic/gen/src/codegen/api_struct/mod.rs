@@ -230,7 +230,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             ///     .build();
             /// ```
             #[must_use]
-            pub fn variant(&self) -> #builder_name<'&_> {
+            pub fn variant(&self) -> #builder_name<'_> {
                 #builder_name::new(self)
             }
 
