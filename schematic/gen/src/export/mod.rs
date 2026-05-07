@@ -6,7 +6,9 @@ pub mod auth;
 pub mod body;
 pub mod http;
 pub mod naming;
+pub mod openapi;
 pub mod path_params;
+pub mod postman;
 
 pub use auth::ExportAuth;
 pub use body::{ExportBody, FormField, FormFieldExportKind};

@@ -361,10 +361,16 @@ mod tests {
 
     #[test]
     fn test_build_available_provider_stack_filters() {
-        use sniff::programs::TtsClient;
+        use std::path::PathBuf;
+
+        use sniff::programs::{ExecutableSource, TtsClient};
 
         // Create a mock installed clients with only Say available
-        let installed = InstalledTtsClients::default().with_client(TtsClient::Say);
+        let installed = InstalledTtsClients::default().with_program(
+            TtsClient::Say,
+            PathBuf::from("/usr/bin/say"),
+            ExecutableSource::Path,
+        );
 
         let stack = build_available_provider_stack(&installed);
 

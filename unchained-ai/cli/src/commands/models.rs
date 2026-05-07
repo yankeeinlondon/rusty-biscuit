@@ -6,7 +6,9 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use serde_json::{Map, Value, json};
-use unchained_ai::models::model_metadata::{ModelMetadata, ModelModalities};
+use unchained_ai::models::model_default_parameters::ModelDefaultParameters;
+use unchained_ai::models::model_metadata::{ModelModalities, ProviderModelMetadata};
+use unchained_ai::models::model_pricing::ModelPricing;
 use unchained_ai::rigging::providers::Provider;
 use unchained_ai::rigging::providers::models::{
     ProviderModel, anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
@@ -197,7 +199,7 @@ fn render_json(groups: &[(Provider, Vec<ProviderModel>)]) -> Result<()> {
     Ok(())
 }
 
-fn metadata_to_json(meta: Option<&ModelMetadata>) -> Value {
+fn metadata_to_json(meta: Option<&ProviderModelMetadata>) -> Value {
     let mut map = Map::new();
     let Some(meta) = meta else {
         return Value::Object(map);
@@ -230,6 +232,27 @@ fn metadata_to_json(meta: Option<&ModelMetadata>) -> Value {
             ),
         );
     }
+    if let Some(desc) = &meta.description {
+        map.insert("description".into(), Value::String(desc.clone()));
+    }
+    if let Some(pricing) = &meta.pricing {
+        map.insert("pricing".into(), pricing_to_json(pricing));
+    }
+    if let Some(params) = &meta.supported_parameters {
+        map.insert(
+            "supported_parameters".into(),
+            Value::Array(params.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    if let Some(defaults) = &meta.default_parameters {
+        map.insert("default_parameters".into(), default_parameters_to_json(defaults));
+    }
+    if let Some(cutoff) = &meta.knowledge_cutoff {
+        map.insert("knowledge_cutoff".into(), Value::String(cutoff.clone()));
+    }
+    if let Some(created) = meta.created {
+        map.insert("created".into(), Value::Number(created.into()));
+    }
 
     Value::Object(map)
 }
@@ -239,6 +262,43 @@ fn modalities_to_json(modalities: &ModelModalities) -> Value {
         "input": modalities.input.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
         "output": modalities.output.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
     })
+}
+
+fn pricing_to_json(pricing: &ModelPricing) -> Value {
+    let mut map = Map::new();
+    if let Some(v) = pricing.prompt_per_token {
+        map.insert("prompt_per_token".into(), json!(v));
+    }
+    if let Some(v) = pricing.completion_per_token {
+        map.insert("completion_per_token".into(), json!(v));
+    }
+    if let Some(v) = pricing.web_search_per_request {
+        map.insert("web_search_per_request".into(), json!(v));
+    }
+    if let Some(v) = pricing.input_cache_read_per_token {
+        map.insert("input_cache_read_per_token".into(), json!(v));
+    }
+    Value::Object(map)
+}
+
+fn default_parameters_to_json(params: &ModelDefaultParameters) -> Value {
+    let mut map = Map::new();
+    if let Some(v) = params.temperature {
+        map.insert("temperature".into(), json!(v));
+    }
+    if let Some(v) = params.top_p {
+        map.insert("top_p".into(), json!(v));
+    }
+    if let Some(v) = params.top_k {
+        map.insert("top_k".into(), json!(v));
+    }
+    if let Some(v) = params.frequency_penalty {
+        map.insert("frequency_penalty".into(), json!(v));
+    }
+    if let Some(v) = params.presence_penalty {
+        map.insert("presence_penalty".into(), json!(v));
+    }
+    Value::Object(map)
 }
 
 fn render_terminal(groups: &[(Provider, Vec<ProviderModel>)], verbose: bool) {
@@ -283,7 +343,7 @@ fn build_provider_list(models: &[ProviderModel], verbose: bool) -> UnorderedList
     UnorderedList::from(items)
 }
 
-fn build_metadata_list(meta: &ModelMetadata) -> Option<UnorderedList> {
+fn build_metadata_list(meta: &ProviderModelMetadata) -> Option<UnorderedList> {
     let mut entries: Vec<String> = Vec::new();
 
     if let Some(name) = &meta.display_name {
@@ -310,10 +370,70 @@ fn build_metadata_list(meta: &ModelMetadata) -> Option<UnorderedList> {
     if !meta.capabilities.is_empty() {
         entries.push(format!("capabilities: {}", meta.capabilities.join(", ")));
     }
+    if let Some(desc) = &meta.description {
+        entries.push(format!("description: {desc}"));
+    }
+    if let Some(pricing) = &meta.pricing {
+        entries.push(format_pricing(pricing));
+    }
+    if let Some(cutoff) = &meta.knowledge_cutoff {
+        entries.push(format!("knowledge_cutoff: {cutoff}"));
+    }
+    if let Some(defaults) = &meta.default_parameters {
+        entries.push(format_default_parameters(defaults));
+    }
+    if let Some(params) = &meta.supported_parameters {
+        entries.push(format!("supported_parameters: {}", params.join(", ")));
+    }
 
     if entries.is_empty() {
         None
     } else {
         Some(UnorderedList::new(entries))
+    }
+}
+
+fn format_pricing(pricing: &ModelPricing) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(v) = pricing.prompt_per_token {
+        parts.push(format!("prompt=${v:.8}/tok"));
+    }
+    if let Some(v) = pricing.completion_per_token {
+        parts.push(format!("completion=${v:.8}/tok"));
+    }
+    if let Some(v) = pricing.web_search_per_request {
+        parts.push(format!("web_search=${v:.4}/req"));
+    }
+    if let Some(v) = pricing.input_cache_read_per_token {
+        parts.push(format!("cache_read=${v:.8}/tok"));
+    }
+    if parts.is_empty() {
+        "pricing: (no data)".to_string()
+    } else {
+        format!("pricing: {}", parts.join(", "))
+    }
+}
+
+fn format_default_parameters(params: &ModelDefaultParameters) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(v) = params.temperature {
+        parts.push(format!("temp={v}"));
+    }
+    if let Some(v) = params.top_p {
+        parts.push(format!("top_p={v}"));
+    }
+    if let Some(v) = params.top_k {
+        parts.push(format!("top_k={v}"));
+    }
+    if let Some(v) = params.frequency_penalty {
+        parts.push(format!("freq_penalty={v}"));
+    }
+    if let Some(v) = params.presence_penalty {
+        parts.push(format!("pres_penalty={v}"));
+    }
+    if parts.is_empty() {
+        "default_parameters: (no data)".to_string()
+    } else {
+        format!("default_parameters: {}", parts.join(", "))
     }
 }

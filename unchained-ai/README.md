@@ -20,7 +20,7 @@ Note: the `unchained-ai` workspace includes `lib`, `cli`, and `gen`; `model_id` 
 - `primitives::services`: platform detection and cap parsing for Claude Code/Codex via PTY status checks.
 - `rigging::providers`: provider registry/config plus generated model enums and aggregated `ProviderModel`.
 - `rigging::tools`: rig `Tool` implementations (`BraveSearchTool`, `ScreenScrapeTool`).
-- `models`: abstract model capability targeting (`ModelCapability`) and runtime metadata types.
+- `models`: abstract model capability targeting (`ModelCapability`) and runtime metadata types (`ProviderModelMetadata`, `ModelPricing`, `ModelDefaultParameters`).
 - `api`: OpenAI-compatible model discovery utilities.
 
 ## Current Status
@@ -29,6 +29,7 @@ Note: the `unchained-ai` workspace includes `lib`, `cli`, and `gen`; `model_id` 
     - pipeline/state primitives and validation
     - provider registry and generated provider model enums
     - Parsera-backed metadata generation and runtime metadata lookup
+    - Provider-native metadata merging (OpenRouter pricing, parameters, architecture)
     - OpenCode delegation primitive
     - agent cap monitoring for Claude Code and Codex
     - rig tools for web search and scraping

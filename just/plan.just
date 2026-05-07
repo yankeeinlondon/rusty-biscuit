@@ -331,11 +331,11 @@ plan-feature spec="" design="":
     echo
     echo -e "Creating a detailed {{bold}}plan{{reset}} from:"
     if [[ -n "${spec_file}" ]]; then
-        echo -e "  Specification: {{blue}}$(just _link "${spec_file}" "$(sniff repo root)/${spec_file}"){{reset}}"
+        echo -e "  Specification: {{blue}}$(just _link "${spec_file}" "$(just _abs_path "${spec_file}")"){{reset}}"
         dir="$(dirname "${spec_file}")"
     fi
     if [[ -n "${design_file}" ]]; then
-        echo -e "  Design Document: {{blue}}$(just _link "${design_file}" "$(sniff repo root)/${design_file}"){{reset}}"
+        echo -e "  Design Document: {{blue}}$(just _link "${design_file}" "$(just _abs_path "${design_file}")"){{reset}}"
         dir="$(dirname "${design_file}")"
     fi
     echo
@@ -393,7 +393,7 @@ plan-review review="":
 
     echo
     echo -e "Creating a detailed {{bold}}plan{{reset}} from:"
-    echo -e "  Review: {{blue}}$(just _link "${review_file}" "$(sniff repo root)/${review_file}"){{reset}}"
+    echo -e "  Review: {{blue}}$(just _link "${review_file}" "$(just _abs_path "${review_file}")"){{reset}}"
     dir="$(dirname "${review_file}")"
     echo
     if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
@@ -416,7 +416,7 @@ plan-review review="":
     plan_file="${dir}/plan.md"
     if [[ -f "${plan_file}" ]]; then
         echo
-        echo -e "A plan file was created at {{blue}}$(just _link "${plan_file}" "$(sniff repo root)/${plan_file}"){{reset}}"
+        echo -e "A plan file was created at {{blue}}$(just _link "${plan_file}" "$(just _abs_path "${plan_file}")"){{reset}}"
         if [[ "$(just _confirm "Do you want to start implementing this plan now?")" == "y" ]]; then
             echo
             just implement-plan "${plan_file}"

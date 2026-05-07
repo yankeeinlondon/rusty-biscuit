@@ -21,6 +21,7 @@
 //! ```
 
 mod language;
+pub mod dependency;
 mod manager;
 mod network;
 mod os;
@@ -29,6 +30,7 @@ mod stubs;
 mod versioning;
 
 // Re-export all public types for API stability
+pub use dependency::{DependencyEntry, DependencyKind};
 pub use language::LanguagePackageManager;
 pub use manager::{BoxFuture, PackageManager, PackageManagerShape};
 pub use network::{

@@ -1,17 +1,15 @@
 use crate::Result;
-use biscuit_file::toml_crate;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::filesystem::file_types::{
     FileAssociationStats, FileInventory, FrameworkStats, ProgrammingLanguage,
     ProgrammingLanguageStats,
 };
-use crate::filesystem::repo::detection::{
-    canonicalize_path, is_fixture_manifest, is_generated_manifest, normalize_path,
-};
+use crate::filesystem::repo::detection::canonicalize_path;
+use crate::package::DependencyEntry;
 
 /// Supported monorepo tools and package managers
 #[non_exhaustive]
@@ -74,66 +72,6 @@ pub enum PackageDiscoverySource {
     Lerna,
     /// Directly discovered from a package manifest
     ManifestScan,
-}
-
-/// The type/category of a dependency.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum DependencyKind {
-    /// Normal runtime dependency
-    #[default]
-    Normal,
-    /// Development-only dependency (testing, building docs, etc.)
-    Dev,
-    /// Build script dependency (Cargo's build-dependencies)
-    Build,
-    /// Optional dependency (enabled via features)
-    Optional,
-    /// Target-specific dependency (e.g., platform-specific)
-    Target,
-}
-
-/// A single dependency entry with version information.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DependencyEntry {
-    /// The package/crate name
-    pub name: String,
-    /// The kind of dependency (internal use only, hidden from JSON)
-    #[serde(skip)]
-    pub kind: DependencyKind,
-    /// Version requirement as specified in the manifest (e.g., "^1.0", ">=2.0, <3.0")
-    #[serde(alias = "version_req")]
-    pub targeted_version: String,
-    /// Actual resolved version from the lockfile (if available)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual_version: Option<String>,
-    /// The package manager used for this dependency (e.g., "cargo", "npm")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub package_manager: Option<String>,
-    /// Latest version available from the registry (only populated with --deep flag)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_version: Option<String>,
-    /// Target specification for target-specific dependencies (e.g., "cfg(target_os = \"macos\")")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    /// Whether this dependency is optional (feature-gated)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub optional: bool,
-    /// Features enabled for this dependency
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub features: Vec<String>,
-    /// Whether this dependency can be updated (latest != actual)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub is_updatable: bool,
-    /// Whether the available update is a major version bump.
-    ///
-    /// Only set when `is_updatable` is true and both versions follow
-    /// semantic versioning (`major.minor.patch`). Considered major when:
-    /// - The major version is 0 and a newer minor version exists, or
-    /// - A newer major version exists.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub has_major_update: bool,
 }
 
 /// Information about a detected repository
@@ -322,213 +260,6 @@ pub(crate) struct PackageScanResult {
     pub(crate) compatibility: PackageFiles,
 }
 
-/// Resolved versions from Cargo.lock.
-pub(crate) struct CargoLockVersions {
-    versions: HashMap<String, Vec<String>>,
-}
-
-impl CargoLockVersions {
-    /// Parse a Cargo.lock file and extract package versions.
-    pub fn parse(lock_path: &Path) -> Option<Self> {
-        let content = std::fs::read_to_string(lock_path)
-            .map_err(|e| {
-                debug!(path = %lock_path.display(), error = %e, "could not read file");
-                e
-            })
-            .ok()?;
-        let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-
-        let mut versions: HashMap<String, Vec<String>> = HashMap::new();
-
-        if let Some(packages) = parsed.get("package").and_then(|p| p.as_array()) {
-            for pkg in packages {
-                if let (Some(name), Some(version)) = (
-                    pkg.get("name").and_then(|n| n.as_str()),
-                    pkg.get("version").and_then(|v| v.as_str()),
-                ) {
-                    versions
-                        .entry(name.to_string())
-                        .or_default()
-                        .push(version.to_string());
-                }
-            }
-        }
-
-        Some(Self { versions })
-    }
-
-    /// Resolve the version for a dependency name.
-    ///
-    /// Returns the first resolved version if available.
-    pub fn resolve(&self, name: &str) -> Option<String> {
-        self.versions.get(name).and_then(|v| v.first()).cloned()
-    }
-}
-
-/// Manifest file type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ManifestKind {
-    Cargo,
-    Node,
-    Python,
-    Go,
-}
-
-/// Manifest entry storing both the original path and its canonicalized form.
-///
-/// Pre-normalizing at index-build time eliminates per-query `canonicalize`
-/// syscalls during `package_dirs_in_tree` lookups.
-#[derive(Debug, Clone)]
-struct ManifestEntry {
-    /// Original parent directory path (as discovered).
-    original: PathBuf,
-    /// Canonicalized parent directory path (resolved at build time).
-    canonical: PathBuf,
-    /// Kinds of manifests detected in this directory.
-    #[allow(dead_code)]
-    kinds: HashSet<ManifestKind>,
-}
-
-/// Index of all manifest files in a directory tree.
-///
-/// Performs a single directory walk and caches manifest locations,
-/// avoiding redundant filesystem traversals during package discovery.
-/// Each entry is canonicalized once at build time so that downstream
-/// `package_dirs_in_tree` queries do not perform any syscalls.
-#[derive(Debug, Clone)]
-pub(crate) struct ManifestIndex {
-    entries: Vec<ManifestEntry>,
-}
-
-impl ManifestIndex {
-    /// Build manifest index by walking the directory tree once.
-    pub(crate) fn build(root: &Path) -> Self {
-        let mut grouped: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
-
-        let walker = walkdir::WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|entry| {
-                if !entry.file_type().is_dir() {
-                    return true;
-                }
-
-                let name = entry.file_name().to_string_lossy();
-                name != ".git"
-                    && name != "node_modules"
-                    && name != "target"
-                    && name != ".turbo"
-                    && name != "dist"
-                    && name != "build"
-            });
-
-        for entry in walker.filter_map(|e| e.ok()) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-
-            let file_name = entry.file_name().to_string_lossy();
-            let kind = match file_name.as_ref() {
-                "Cargo.toml" => ManifestKind::Cargo,
-                "package.json" => ManifestKind::Node,
-                "pyproject.toml" => ManifestKind::Python,
-                "go.mod" => ManifestKind::Go,
-                _ => continue,
-            };
-
-            if is_generated_manifest(entry.path()) {
-                continue;
-            }
-            if is_fixture_manifest(entry.path()) {
-                continue;
-            }
-
-            let Some(parent) = entry.path().parent() else {
-                continue;
-            };
-
-            grouped
-                .entry(parent.to_path_buf())
-                .or_default()
-                .insert(kind);
-        }
-
-        Self::from_grouped(grouped)
-    }
-
-    pub(crate) fn from_manifest_paths(paths: impl IntoIterator<Item = PathBuf>) -> Self {
-        let mut grouped: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
-
-        for path in paths {
-            let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-
-            let kind = match file_name {
-                "Cargo.toml" => ManifestKind::Cargo,
-                "package.json" => ManifestKind::Node,
-                "pyproject.toml" => ManifestKind::Python,
-                "go.mod" => ManifestKind::Go,
-                _ => continue,
-            };
-
-            let Some(parent) = path.parent() else {
-                continue;
-            };
-
-            grouped
-                .entry(parent.to_path_buf())
-                .or_default()
-                .insert(kind);
-        }
-
-        Self::from_grouped(grouped)
-    }
-
-    fn from_grouped(grouped: HashMap<PathBuf, HashSet<ManifestKind>>) -> Self {
-        let entries = grouped
-            .into_iter()
-            .map(|(original, kinds)| {
-                let canonical = canonicalize_path(&original);
-                ManifestEntry {
-                    original,
-                    canonical,
-                    kinds,
-                }
-            })
-            .collect();
-        Self { entries }
-    }
-
-    /// Get directories containing manifests within a specific subtree.
-    ///
-    /// Uses the pre-canonicalized entries built at index construction time, so
-    /// no filesystem syscalls occur during the query.  The `search_root` and
-    /// `root` parameters are lexically normalized (not canonicalized) so the
-    /// comparison is syscall-free.
-    pub(crate) fn package_dirs_in_tree(&self, search_root: &Path, root: &Path) -> Vec<&Path> {
-        let search_root_normalized = normalize_path(search_root);
-        let root_normalized = normalize_path(root);
-
-        let mut dirs: Vec<&Path> = self
-            .entries
-            .iter()
-            .filter_map(|entry| {
-                if entry.canonical.starts_with(&search_root_normalized)
-                    && entry.canonical != root_normalized
-                {
-                    Some(entry.original.as_path())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        dirs.sort();
-        dirs
-    }
-}
-
 /// Detect repository configuration in the given directory.
 ///
 /// ## Examples
@@ -575,112 +306,23 @@ pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
 pub fn detect_repo_with_inventory(
     root: &Path,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
-    super::detection::detect_repo_inner(root, false)
+    let options = super::super::system_view::SharedWalkOptions {
+        collect_manifests: true,
+        collect_inventory: true,
+        collect_docs: false,
+    };
+    let view = super::super::system_view::build_filesystem_system_view(root, options);
+    super::detection::detect_repo_inner_with_shared(
+        root,
+        false,
+        view.manifest_index.as_ref(),
+        view.inventory.as_ref(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ============================================================================
-    // ManifestIndex normalization tests (Phase 3)
-    // ============================================================================
-
-    #[test]
-    fn manifest_index_package_dirs_in_tree_uses_normalized_paths() {
-        // Build an index from synthetic paths.  The key property under
-        // test is that `package_dirs_in_tree` works without filesystem
-        // syscalls, so the paths do not need to exist on disk.
-        let index = ManifestIndex::from_manifest_paths(vec![
-            PathBuf::from("/repo/crates/pkg-a/Cargo.toml"),
-            PathBuf::from("/repo/crates/pkg-b/Cargo.toml"),
-            PathBuf::from("/repo/apps/app-a/package.json"),
-            PathBuf::from("/repo/vendor/some-lib/Cargo.toml"),
-        ]);
-
-        // Query with a path containing `.` and `..` — normalize_path
-        // should clean these up without touching the filesystem.
-        let search_root = Path::new("/repo/crates/../crates");
-        let root = Path::new("/repo");
-        let dirs = index.package_dirs_in_tree(search_root, root);
-
-        // Should find pkg-a and pkg-b under crates, but not the root itself.
-        assert_eq!(dirs.len(), 2);
-        assert!(dirs.contains(&Path::new("/repo/crates/pkg-a")));
-        assert!(dirs.contains(&Path::new("/repo/crates/pkg-b")));
-    }
-
-    #[test]
-    fn manifest_index_package_dirs_excludes_root() {
-        let index = ManifestIndex::from_manifest_paths(vec![
-            PathBuf::from("/repo/Cargo.toml"),
-            PathBuf::from("/repo/crates/pkg-a/Cargo.toml"),
-        ]);
-
-        let dirs = index.package_dirs_in_tree(Path::new("/repo"), Path::new("/repo"));
-
-        // The repo root itself should be excluded even though it has a manifest.
-        assert_eq!(dirs.len(), 1);
-        assert!(dirs.contains(&Path::new("/repo/crates/pkg-a")));
-    }
-
-    #[test]
-    fn manifest_index_package_dirs_returns_empty_for_no_match() {
-        let index = ManifestIndex::from_manifest_paths(vec![PathBuf::from(
-            "/repo/crates/pkg-a/Cargo.toml",
-        )]);
-
-        let dirs = index.package_dirs_in_tree(Path::new("/other"), Path::new("/repo"));
-        assert!(dirs.is_empty());
-    }
-
-    #[test]
-    fn manifest_index_preserves_original_paths_in_output() {
-        let index = ManifestIndex::from_manifest_paths(vec![PathBuf::from(
-            "/repo/crates/pkg-a/Cargo.toml",
-        )]);
-
-        let dirs = index.package_dirs_in_tree(Path::new("/repo"), Path::new("/repo"));
-        assert_eq!(dirs.len(), 1);
-        // Returns the *original* parent path, not the canonical one.
-        assert_eq!(dirs[0], Path::new("/repo/crates/pkg-a"));
-    }
-
-    #[test]
-    fn manifest_index_build_deduplicates_same_dir_different_manifests() {
-        let index = ManifestIndex::from_manifest_paths(vec![
-            PathBuf::from("/repo/crates/pkg-a/Cargo.toml"),
-            PathBuf::from("/repo/crates/pkg-a/package.json"),
-        ]);
-
-        // Only one entry for the directory, but it should have both kinds.
-        assert_eq!(index.entries.len(), 1);
-        let entry = &index.entries[0];
-        assert_eq!(entry.original, PathBuf::from("/repo/crates/pkg-a"));
-        assert!(entry.kinds.contains(&ManifestKind::Cargo));
-        assert!(entry.kinds.contains(&ManifestKind::Node));
-    }
-
-    // ============================================================================
-    // CargoLockVersions tests
-    // ============================================================================
-
-    #[test]
-    fn cargo_lock_versions_resolve_finds_first_match() {
-        let versions = CargoLockVersions {
-            versions: {
-                let mut m = HashMap::new();
-                m.insert(
-                    "serde".to_string(),
-                    vec!["1.0.0".to_string(), "1.0.1".to_string()],
-                );
-                m
-            },
-        };
-
-        assert_eq!(versions.resolve("serde"), Some("1.0.0".to_string()));
-        assert_eq!(versions.resolve("missing"), None);
-    }
 
     // ============================================================================
     // RepoInfo helper tests

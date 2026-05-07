@@ -1,0 +1,306 @@
+//! npm/pnpm/yarn workspace detection and package.json parsing helpers.
+
+use std::path::Path;
+
+use biscuit_file::serde_yaml_ng;
+
+use crate::package::{DependencyEntry, DependencyKind};
+use crate::{Result, SniffError};
+
+use super::detection::{
+    dedupe_packages, expand_glob_patterns_with_deps, resolve_internal_deps,
+};
+use super::types::{MonorepoTool, RepoInfo};
+
+/// Parses a single dependency section from package.json.
+pub(super) fn parse_package_json_dep_section(
+    parsed: &serde_json::Value,
+    section: &str,
+    kind: DependencyKind,
+    package_manager: &str,
+    optional: bool,
+) -> Vec<DependencyEntry> {
+    let Some(deps) = parsed.get(section).and_then(|d| d.as_object()) else {
+        return Vec::new();
+    };
+
+    deps.iter()
+        .map(|(name, value)| {
+            let targeted_version = value
+                .as_str()
+                .map(String::from)
+                .or_else(|| {
+                    value
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| "*".to_string());
+
+            DependencyEntry {
+                name: name.clone(),
+                kind,
+                targeted_version,
+                actual_version: None,
+                package_manager: Some(package_manager.to_string()),
+                latest_version: None,
+                target: None,
+                optional,
+                features: Vec::new(),
+                is_updatable: false,
+                has_major_update: false,
+            }
+        })
+        .collect()
+}
+
+/// Parses package.json dependencies from an already-parsed JSON value.
+#[allow(clippy::type_complexity)]
+pub(super) fn package_json_dependencies_from_value(
+    parsed: &serde_json::Value,
+    package_manager: &str,
+) -> (
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+) {
+    let deps = parse_package_json_dep_section(
+        parsed,
+        "dependencies",
+        DependencyKind::Normal,
+        package_manager,
+        false,
+    );
+    let dev_deps = parse_package_json_dep_section(
+        parsed,
+        "devDependencies",
+        DependencyKind::Dev,
+        package_manager,
+        false,
+    );
+    let peer_deps = parse_package_json_dep_section(
+        parsed,
+        "peerDependencies",
+        DependencyKind::Normal,
+        package_manager,
+        false,
+    );
+    let optional_deps = parse_package_json_dep_section(
+        parsed,
+        "optionalDependencies",
+        DependencyKind::Optional,
+        package_manager,
+        true,
+    );
+
+    (deps, dev_deps, peer_deps, optional_deps)
+}
+
+/// Extracts the package name from a parsed package.json value.
+pub(super) fn npm_package_name(parsed: &serde_json::Value) -> Option<String> {
+    parsed
+        .get("name")
+        .and_then(|n| n.as_str())
+        .map(String::from)
+}
+
+/// Extracts the package version from a parsed package.json value.
+pub(super) fn npm_package_version(parsed: &serde_json::Value) -> Option<String> {
+    parsed
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+pub(super) fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+    let pnpm_workspace = root.join("pnpm-workspace.yaml");
+    if !pnpm_workspace.exists() {
+        return Ok(None);
+    }
+
+    let packages = parse_pnpm_workspace_patterns(&pnpm_workspace)?;
+
+    if packages.is_empty() {
+        return Ok(None);
+    }
+
+    let lock_versions = None;
+    let mut package_locations = expand_glob_patterns_with_deps(
+        root,
+        &packages,
+        MonorepoTool::PnpmWorkspaces,
+        &lock_versions,
+    );
+    package_locations = dedupe_packages(package_locations);
+    resolve_internal_deps(&mut package_locations);
+
+    Ok(Some(RepoInfo {
+        is_monorepo: true,
+        monorepo_tool: Some(MonorepoTool::PnpmWorkspaces),
+        workspace_tools: vec![MonorepoTool::PnpmWorkspaces],
+        root: root.to_path_buf(),
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        packages: Some(package_locations),
+    }))
+}
+
+pub(super) fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+    let package_json = root.join("package.json");
+    if !package_json.exists() {
+        return Ok(None);
+    }
+
+    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
+
+    if workspaces.is_empty() {
+        return Ok(None);
+    }
+
+    let lock_versions = None;
+    let mut packages = expand_glob_patterns_with_deps(
+        root,
+        &workspaces,
+        MonorepoTool::NpmWorkspaces,
+        &lock_versions,
+    );
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
+    Ok(Some(RepoInfo {
+        is_monorepo: true,
+        monorepo_tool: Some(MonorepoTool::NpmWorkspaces),
+        workspace_tools: vec![MonorepoTool::NpmWorkspaces],
+        root: root.to_path_buf(),
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        packages: Some(packages),
+    }))
+}
+
+pub(super) fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
+    if !root.join("yarn.lock").exists() {
+        return Ok(None);
+    }
+
+    let package_json = root.join("package.json");
+    if !package_json.exists() {
+        return Ok(None);
+    }
+
+    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
+
+    if workspaces.is_empty() {
+        return Ok(None);
+    }
+
+    let lock_versions = None;
+    let mut packages = expand_glob_patterns_with_deps(
+        root,
+        &workspaces,
+        MonorepoTool::YarnWorkspaces,
+        &lock_versions,
+    );
+    packages = dedupe_packages(packages);
+    resolve_internal_deps(&mut packages);
+
+    Ok(Some(RepoInfo {
+        is_monorepo: true,
+        monorepo_tool: Some(MonorepoTool::YarnWorkspaces),
+        workspace_tools: vec![MonorepoTool::YarnWorkspaces],
+        root: root.to_path_buf(),
+        dependencies: None,
+        dev_dependencies: None,
+        peer_dependencies: None,
+        optional_dependencies: None,
+        packages: Some(packages),
+    }))
+}
+
+pub(super) fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(pnpm_workspace_path)?;
+    let parsed: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&content).map_err(|e| SniffError::SystemInfo {
+            domain: "repo",
+            message: e.to_string(),
+        })?;
+
+    Ok(parsed
+        .get("packages")
+        .and_then(|p| p.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default())
+}
+
+pub(super) fn parse_package_json_workspace_patterns(
+    package_json_path: &Path,
+) -> Result<Option<Vec<String>>> {
+    let content = std::fs::read_to_string(package_json_path)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| SniffError::SystemInfo {
+            domain: "repo",
+            message: e.to_string(),
+        })?;
+    let Some(workspaces) = parsed.get("workspaces") else {
+        return Ok(None);
+    };
+
+    if let Some(arr) = workspaces.as_array() {
+        return Ok(Some(
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect(),
+        ));
+    }
+
+    if let Some(obj) = workspaces.as_object() {
+        return Ok(Some(
+            obj.get("packages")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        ));
+    }
+
+    Ok(Some(Vec::new()))
+}
+
+pub(super) fn resolve_js_package_manager(
+    tool: MonorepoTool,
+    root: &Path,
+    package_managers: &[String],
+) -> &'static str {
+    match tool {
+        MonorepoTool::PnpmWorkspaces => return "pnpm",
+        MonorepoTool::YarnWorkspaces => return "yarn",
+        _ => {}
+    }
+
+    if package_managers.iter().any(|manager| manager == "pnpm")
+        || root.join("pnpm-lock.yaml").exists()
+    {
+        return "pnpm";
+    }
+    if package_managers.iter().any(|manager| manager == "yarn") || root.join("yarn.lock").exists() {
+        return "yarn";
+    }
+    if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
+        return "bun";
+    }
+
+    "npm"
+}
+

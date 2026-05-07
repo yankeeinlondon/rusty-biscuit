@@ -47,7 +47,8 @@
 
 pub use crate::auth::{AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
 pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
-pub use crate::params::{EndpointParams, PaginationResponse, PaginationStyle};
+pub use crate::params::EndpointParams;
+pub use crate::pagination::{PaginationResponse, PaginationStyle};
 pub use crate::request::{ApiRequest, FormField, FormFieldKind};
 pub use crate::response::ApiResponse;
 pub use crate::schema::{Schema, SchemaObject};

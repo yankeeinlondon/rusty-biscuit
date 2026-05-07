@@ -1,4 +1,5 @@
-use crate::utils::layout::{Alignment, WordWrap};
+use crate::utils::layout::Alignment;
+use crate::utils::wrap_policy::WordWrap;
 
 /// Vertical alignment for table cells with multi-line content.
 ///
@@ -151,7 +152,7 @@ impl ColumnType {
 /// ```
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::TableColumn;
+/// use biscuit_terminal::components::table::TableColumn;
 /// use biscuit_terminal::components::table::types::{Currency, ColumnType};
 ///
 /// // Create a currency column for prices

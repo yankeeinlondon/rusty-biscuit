@@ -18,7 +18,11 @@ use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{CapturedFrame, TerminalHarness, wait_for_prompt};
+use super::{
+    CapturedFrame, TerminalHarness, wait_for_prompt,
+    run_with_timeout,
+    SPAWN_TIMEOUT, SEND_TIMEOUT, CAPTURE_TIMEOUT, CLEANUP_TIMEOUT,
+};
 
 /// Harness that runs each spawned binary inside a fresh detached tmux
 /// session.
@@ -45,11 +49,11 @@ impl TmuxHarness {
 
     fn kill_session(&mut self) {
         if let Some(name) = self.session.take() {
-            let _ = Command::new("tmux")
-                .args(["kill-session", "-t", &name])
+            let mut cmd = Command::new("tmux");
+            cmd.args(["kill-session", "-t", &name])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+                .stderr(Stdio::null());
+            let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
         }
     }
 
@@ -63,10 +67,10 @@ impl TmuxHarness {
     /// `Command::arg` API rejects when passed as raw text.
     pub fn send_key(&mut self, key_name: &str) -> io::Result<()> {
         let session = self.session().to_string();
-        let status = Command::new("tmux")
-            .args(["send-keys", "-t", &session, key_name])
-            .status()?;
-        if !status.success() {
+        let mut cmd = Command::new("tmux");
+        cmd.args(["send-keys", "-t", &session, key_name]);
+        let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
+        if !out.status.success() {
             return Err(io::Error::other("tmux send-keys (key-name) failed"));
         }
         Ok(())
@@ -129,8 +133,8 @@ impl TerminalHarness for TmuxHarness {
         // state.
         super::apply_color_forcing_env(&mut cmd);
 
-        let status = cmd.status()?;
-        if !status.success() {
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
+        if !out.status.success() {
             return Err(io::Error::other("tmux new-session failed"));
         }
         self.session = Some(session);
@@ -151,20 +155,20 @@ impl TerminalHarness for TmuxHarness {
             shell_cmd.push(' ');
             shell_cmd.push_str(&shell_quote(a));
         }
-        let status = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                &session,
-                "-x",
-                "120",
-                "-y",
-                "40",
-                &shell_cmd,
-            ])
-            .status()?;
-        if !status.success() {
+        let mut cmd = Command::new("tmux");
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            &session,
+            "-x",
+            "120",
+            "-y",
+            "40",
+            &shell_cmd,
+        ]);
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
+        if !out.status.success() {
             return Err(io::Error::other("tmux new-session failed"));
         }
         self.session = Some(session);
@@ -176,10 +180,10 @@ impl TerminalHarness for TmuxHarness {
         let session = self.session().to_string();
         let s = std::str::from_utf8(bytes)
             .map_err(|e| io::Error::other(format!("send_text non-utf8: {e}")))?;
-        let status = Command::new("tmux")
-            .args(["send-keys", "-t", &session, "-l", s])
-            .status()?;
-        if !status.success() {
+        let mut cmd = Command::new("tmux");
+        cmd.args(["send-keys", "-t", &session, "-l", s]);
+        let out = run_with_timeout(&mut cmd, SEND_TIMEOUT)?;
+        if !out.status.success() {
             return Err(io::Error::other("tmux send-keys failed"));
         }
         Ok(())
@@ -187,9 +191,9 @@ impl TerminalHarness for TmuxHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let session = self.session().to_string();
-        let out = Command::new("tmux")
-            .args(["capture-pane", "-t", &session, "-p", "-e"])
-            .output()?;
+        let mut cmd = Command::new("tmux");
+        cmd.args(["capture-pane", "-t", &session, "-p", "-e"]);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "tmux capture-pane failed: {}",

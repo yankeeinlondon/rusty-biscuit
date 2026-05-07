@@ -2,8 +2,7 @@ use super::docs::{self, MarkdownMeta};
 use super::file_types::{
     self, FileClassification, FileInventory, FileScanScope, MAX_FILES, should_skip_directory_name,
 };
-use super::repo::detection::{is_fixture_manifest, is_generated_manifest};
-use super::repo::types::ManifestIndex;
+use super::repo::manifest_index::{ManifestIndex, is_fixture_manifest, is_generated_manifest};
 use crate::performance;
 use ignore::{DirEntry, WalkBuilder, WalkState};
 use std::path::{Path, PathBuf};

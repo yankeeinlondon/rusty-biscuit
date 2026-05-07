@@ -7,10 +7,10 @@
 //! discovery overhead.
 //!
 //! Each [`BenchmarkId`](criterion::BenchmarkId) is parameterized by
-//! package count so Criterion produces a single comparable line across
+//! package count, so Criterion produces a single comparable line across
 //! counts.
 
-use criterion::{BenchmarkId, Criterion, black_box};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box};
 use sniff::filesystem::file_types::scan_file_inventory;
 use sniff::filesystem::repo::detect_repo_structure;
 use sniff::filesystem::repo::detection::refresh_package_boundaries;
@@ -47,8 +47,9 @@ pub fn register(c: &mut Criterion) {
         let inventory = scan_file_inventory(fixture.path()).unwrap();
         let mut packages = repo_info.packages.take().unwrap();
 
+        group.throughput(Throughput::Elements(count as u64));
         group.bench_with_input(
-            BenchmarkId::new("refresh_boundaries", count),
+            BenchmarkId::new("package_boundary_refresh", count),
             &count,
             |b, _| {
                 b.iter(|| {

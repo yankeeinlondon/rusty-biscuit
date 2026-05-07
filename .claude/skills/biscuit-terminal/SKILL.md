@@ -256,7 +256,8 @@ biscuit_terminal/
 │   ├── mermaid.rs        # Terminal-facing Mermaid adapter
 │   └── graph_expression.rs # Terminal-facing graph adapter
 └── utils/
-    ├── layout.rs         # Layout, Margin, WordWrap, Alignment
+    ├── layout.rs         # Layout, Margin, Alignment
+    ├── wrap_policy.rs    # WordWrap enum
     ├── color.rs          # Color, BasicColor, RgbColor, WebColor, Tailwind, HdrColor
     ├── styling.rs        # Stylist trait, FontWeight, Style
     ├── escape_codes.rs   # ANSI escape code generation
@@ -297,14 +298,39 @@ biscuit-terminal follows the Level 1 / 2 / 3 testing vocabulary from the
 The `biscuit-test-harness` workspace member provides:
 
 - `TerminalHarness` trait — `spawn`, `send_text`, `capture`, `settle`.
-- `WezTermHarness`, `KittyHarness`, `TmuxHarness` implementations.
+- `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`
+  implementations.
 - `CapturedFrame { raw, plain }` plus a robust ECMA-48 `strip_ansi` helper.
 - `available()` probes that check the binary on `$PATH` plus required env
-  (`WEZTERM_UNIX_SOCKET`, `KITTY_LISTEN_ON`, `TMUX`).
+  (`WEZTERM_UNIX_SOCKET`, `KITTY_LISTEN_ON`, `TMUX`). `AppleTerminalHarness`
+  additionally returns false in CI (`CI=1`) and off-macOS.
 - `skip_with_reason()` for clean test skips.
 
 Level-2 tests skip cleanly when the required terminal emulator is
 unavailable; no `#[ignore]` markers are used.
+
+#### `AppleTerminalHarness` capture limitation
+
+Terminal.app's AppleScript interface exposes only the **plain visible
+text** of a tab — there is no API to retrieve the raw ANSI/SGR byte
+stream. `CapturedFrame::raw` and `CapturedFrame::plain` therefore hold
+the same string. Use this harness for "no escape garbage is visible"
+assertions; use Level-1 PTY tests for byte-level negative assertions
+(e.g. "no OSC8 bytes were emitted").
+
+#### macOS focus-restore trap (AppleScript)
+
+Harnesses that snapshot the frontmost app via System Events
+(`name of first process whose frontmost is true`) and then restore it
+with `tell application <name> to activate` will pop a modal "Choose
+Application — Where is X?" dialog whenever the captured *process* name
+differs from any installed `.app` bundle name (WezTerm → `wezterm-gui`,
+all Electron apps, Slack/Discord/etc.). The dialog blocks the test
+until a human dismisses it. Always restore via System Events instead:
+`tell application "System Events" to set frontmost of (first process
+whose name is prevApp) to true`. See the **cli** skill →
+"Restoring focus after a test spawns a GUI window (macOS)" for the
+full rationale and the affected-app table.
 
 ### Adding new Level-1 tests
 

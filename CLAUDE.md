@@ -19,9 +19,8 @@
 
 Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **curated** area list — not every workspace member.
 
-- `so-you-say` appears in the root `areas` list but has **no top-level `so-you-say/justfile`**; its recipes live in `biscuit-speaks/cli`.
-- Workspace members **not** covered by the root `areas` list: `agent-sandbox`, `biscuit-tui`, `biscuit-visualized`, `messenger`, `tabby`, `worktree`. Use the area `justfile` when present, otherwise direct `cargo` commands.
-- Areas with **no** area `justfile`: `agent-sandbox`, `tabby`.
+- shared recipes are all located in the `/just` folder
+- each package area has it's own `justfile` but the shared recipes are leveraged as much as possible to keep as much uniformity as possible
 
 ## Rustdoc Convention
 

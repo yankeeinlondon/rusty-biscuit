@@ -44,7 +44,6 @@ use crate::mcp::export::ExportServer;
 use crate::mcp::state::Scope;
 use crate::mcp::types::McpServer;
 use crate::provider::EventSupportLevel;
-use crate::stream::claude_semantic::ClaudeSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
@@ -63,9 +62,9 @@ impl ProviderBehavior for ClaudeProvider {
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
-        _config: ParserConfig,
+        config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(ClaudeSemanticStreamParser::new(sink))
+        crate::stream::providers::for_provider(Provider::Claude, sink, config)
     }
 }
 impl McpBehavior for ClaudeProvider {

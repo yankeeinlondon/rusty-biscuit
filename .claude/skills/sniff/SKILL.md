@@ -100,6 +100,7 @@ let result = detect_with_config(config)?;
 | `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
 | `Package` | Package path, languages, managers, dependencies |
 | `GitRepo` | libgit2 handle from `GitRepo::discover(path)` |
+| `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
 
 ## Shared-Work Highlights
 
@@ -132,6 +133,7 @@ sniff just                 # Justfiles and recipes
 sniff repo                 # Repository/monorepo structure
 sniff repo git-status      # Git status with commit history
 sniff repo language        # Primary programming language for the repository
+sniff repo worktree        # Linked worktree name (exit 1 if main worktree)
 sniff repo remote origin   # Inspect remote repository
 sniff repo pr              # List open pull requests
 sniff repo pr --status merged  # List merged pull requests
