@@ -45,6 +45,17 @@ docs_updated_during_phase_5:
   - claudine/features/2026-05-06-looping/plan.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - claudine/lib/src/composition/loop_config.rs
+  - claudine/lib/src/composition/loop_actions.rs
+  - claudine/lib/src/composition/loop_engine.rs
+  - claudine/cli/tests/loop_cli.rs
+  - claudine/cli/src/commands/compose.rs
+docs_updated_during_phase_6:
+  - claudine/features/2026-05-06-looping/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/claudine/SKILL.md
 packages:
   - claudine
 ---
