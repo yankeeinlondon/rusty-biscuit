@@ -277,8 +277,7 @@ fn default_helper_order(
 }
 
 /// Render `messenger info` in human-friendly text mode.
-pub fn render_text(report: &InfoReport) -> String {
-    let term = Terminal::default();
+pub fn render_text(report: &InfoReport, term: &Terminal) -> String {
     let mut out = String::new();
 
     out.push_str(&Prose::new(format!("<b>Host OS:</b> {}", report.host_os)).render(&term));
@@ -438,7 +437,8 @@ pub fn run(json: bool) -> Result<()> {
     if json {
         println!("{}", render_json(&report)?);
     } else {
-        print!("{}", render_text(&report));
+        let term = Terminal::default();
+        print!("{}", render_text(&report, &term));
     }
     Ok(())
 }
@@ -482,7 +482,8 @@ mod tests {
     #[test]
     fn render_text_includes_host_os_label() {
         let report = build_report(&empty_config(), &[]);
-        let text = render_text(&report);
+        let term = Terminal::builder().is_tty(false).width(80).build();
+        let text = render_text(&report, &term);
         assert!(text.contains("Host OS:"));
         assert!(text.contains("Notification helpers"));
         assert!(text.contains("Election order"));
@@ -499,7 +500,8 @@ mod tests {
             .routes
             .insert("desktop.local".into(), RouteConfig::desktop_default());
         let report = build_report(&config, &[]);
-        let text = render_text(&report);
+        let term = Terminal::builder().is_tty(false).width(80).build();
+        let text = render_text(&report, &term);
         assert!(
             text.contains("desktop.local"),
             "expected route name in output: {text}"
@@ -608,7 +610,8 @@ mod tests {
             routes: Vec::new(),
         };
 
-        let text = render_text(&report);
+        let term = Terminal::builder().is_tty(false).width(80).build();
+        let text = render_text(&report, &term);
         assert!(text.contains("Active daemon:"), "missing daemon row: {text}");
         assert!(text.contains("dunst"), "missing daemon name: {text}");
         assert!(text.contains("knopwob"), "missing vendor: {text}");
@@ -631,7 +634,8 @@ mod tests {
             routes: Vec::new(),
         };
 
-        let text = render_text(&report);
+        let term = Terminal::builder().is_tty(false).width(80).build();
+        let text = render_text(&report, &term);
         assert!(text.contains("dunstify"), "missing dunstify row: {text}");
         assert!(text.contains("notify-send"), "missing notify-send row: {text}");
         // The numbered prefix proves dunstify ranks ahead of notify-send.
@@ -694,7 +698,8 @@ mod tests {
     #[test]
     fn snapshot_plain_rendering() {
         let report = snapshot_report();
-        let text = render_text(&report);
+        let term = Terminal::builder().is_tty(false).width(80).build();
+        let text = render_text(&report, &term);
         insta::assert_snapshot!(text);
     }
 

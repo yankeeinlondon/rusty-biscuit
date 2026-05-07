@@ -1,3 +1,4 @@
+use biscuit_terminal::terminal::Terminal;
 use messenger_cli::info::{
     DaemonRecord, HelperRecord, InfoReport, RouteRecord, render_json, render_text,
 };
@@ -83,7 +84,8 @@ fn empty_report() -> InfoReport {
 #[test]
 fn snapshot_full_plain_rendering() {
     let report = full_report();
-    let text = render_text(&report);
+    let term = Terminal::builder().is_tty(false).width(80).build();
+    let text = render_text(&report, &term);
     insta::assert_snapshot!(text);
 }
 
@@ -97,7 +99,8 @@ fn snapshot_full_json_rendering() {
 #[test]
 fn snapshot_empty_plain_rendering() {
     let report = empty_report();
-    let text = render_text(&report);
+    let term = Terminal::builder().is_tty(false).width(80).build();
+    let text = render_text(&report, &term);
     insta::assert_snapshot!(text);
 }
 
