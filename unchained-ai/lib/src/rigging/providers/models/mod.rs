@@ -29,7 +29,6 @@ pub mod zenmux;
 
 pub mod build;
 mod metadata_generated;
-pub mod metadata_openrouter_generated;
 
 /// Aggregated enumeration of all provider models.
 ///
@@ -62,7 +61,7 @@ pub enum ProviderModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ProviderModelParseError {
+pub enum ProviderModelParseError {
     InvalidFormat { input: String },
     UnknownProvider { provider: String, input: String },
     UnknownModel { provider: Provider, model: String },
@@ -93,7 +92,7 @@ impl fmt::Display for ProviderModelParseError {
 impl std::error::Error for ProviderModelParseError {}
 
 impl ProviderModel {
-    fn provider(&self) -> Provider {
+    pub fn provider(&self) -> Provider {
         match self {
             Self::Anthropic(_) => Provider::Anthropic,
             Self::Deepseek(_) => Provider::Deepseek,
@@ -109,11 +108,11 @@ impl ProviderModel {
         }
     }
 
-    pub(crate) fn wire_id(&self) -> String {
+    pub fn wire_id(&self) -> String {
         format!("{}/{}", provider_slug(self.provider()), self.model_id())
     }
 
-    pub(crate) fn parse_wire_id(input: &str) -> Result<Self, ProviderModelParseError> {
+    pub fn parse_wire_id(input: &str) -> Result<Self, ProviderModelParseError> {
         let trimmed = input.trim();
         let (provider_raw, model_id) =
             trimmed
@@ -265,6 +264,50 @@ impl ProviderModel {
         }
     }
 
+    /// Returns all known wire IDs across all providers.
+    ///
+    /// Useful for shell completion and model discovery.
+    #[must_use]
+    pub fn all_wire_ids() -> Vec<&'static str> {
+        let mut ids = Vec::new();
+
+        for model in ProviderModelAnthropic::ALL {
+            ids.push(&*Box::leak(ProviderModel::Anthropic(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelDeepseek::ALL {
+            ids.push(&*Box::leak(ProviderModel::Deepseek(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelGemini::ALL {
+            ids.push(&*Box::leak(ProviderModel::Gemini(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelGroq::ALL {
+            ids.push(&*Box::leak(ProviderModel::Groq(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelMistral::ALL {
+            ids.push(&*Box::leak(ProviderModel::Mistral(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelMoonshotAi::ALL {
+            ids.push(&*Box::leak(ProviderModel::MoonshotAi(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelOpenAi::ALL {
+            ids.push(&*Box::leak(ProviderModel::OpenAi(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelOpenRouter::ALL {
+            ids.push(&*Box::leak(ProviderModel::OpenRouter(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelXai::ALL {
+            ids.push(&*Box::leak(ProviderModel::Xai(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelZai::ALL {
+            ids.push(&*Box::leak(ProviderModel::Zai(model.clone()).wire_id().into_boxed_str()));
+        }
+        for model in ProviderModelZenMux::ALL {
+            ids.push(&*Box::leak(ProviderModel::ZenMux(model.clone()).wire_id().into_boxed_str()));
+        }
+
+        ids
+    }
+
     /// Returns the context window size if known.
     ///
     /// The context window is the maximum number of tokens the model can
@@ -394,7 +437,7 @@ mod tests {
         let _groq = ProviderModel::Groq(ProviderModelGroq::Llama__3_3__70b__Versatile);
         let _mistral =
             ProviderModel::Mistral(ProviderModelMistral::Bespoke("mistral-large".to_string()));
-        let _moonshot = ProviderModel::MoonshotAi(ProviderModelMoonshotAi::Kimi__K2__Thinking);
+        let _moonshot = ProviderModel::MoonshotAi(ProviderModelMoonshotAi::Kimi__K2_5);
         let _openai = ProviderModel::OpenAi(ProviderModelOpenAi::O3);
         let _openrouter =
             ProviderModel::OpenRouter(ProviderModelOpenRouter::Bespoke("test".to_string()));

@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-04T04:02:13.677968+00:00
+//! Generated: 2026-05-07T02:07:04.911884+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: OpenRouter
 //!
@@ -32,8 +32,6 @@ pub enum ProviderModelOpenRouter {
     Alibaba___Tongyi__Deepresearch__30b__A3b,
     /// Model: `allenai/olmo-3-32b-think`
     Allenai___Olmo__3__32b__Think,
-    /// Model: `allenai/olmo-3.1-32b-instruct`
-    Allenai___Olmo__3_1__32b__Instruct,
     /// Model: `alpindale/goliath-120b`
     Alpindale___Goliath__120b,
     /// Model: `amazon/nova-2-lite-v1`
@@ -90,6 +88,8 @@ pub enum ProviderModelOpenRouter {
     Arcee__Ai___Trinity__Mini,
     /// Model: `arcee-ai/virtuoso-large`
     Arcee__Ai___Virtuoso__Large,
+    /// Model: `baidu/cobuddy:free`
+    Baidu___Cobuddy__Free,
     /// Model: `baidu/ernie-4.5-21b-a3b`
     Baidu___Ernie__4_5__21b__A3b,
     /// Model: `baidu/ernie-4.5-21b-a3b-thinking`
@@ -186,22 +186,12 @@ pub enum ProviderModelOpenRouter {
     Google___Gemma__2__27b__It,
     /// Model: `google/gemma-3-12b-it`
     Google___Gemma__3__12b__It,
-    /// Model: `google/gemma-3-12b-it:free`
-    Google___Gemma__3__12b__It__Free,
     /// Model: `google/gemma-3-27b-it`
     Google___Gemma__3__27b__It,
-    /// Model: `google/gemma-3-27b-it:free`
-    Google___Gemma__3__27b__It__Free,
     /// Model: `google/gemma-3-4b-it`
     Google___Gemma__3__4b__It,
-    /// Model: `google/gemma-3-4b-it:free`
-    Google___Gemma__3__4b__It__Free,
-    /// Model: `google/gemma-3n-e2b-it:free`
-    Google___Gemma__3n__E2b__It__Free,
     /// Model: `google/gemma-3n-e4b-it`
     Google___Gemma__3n__E4b__It,
-    /// Model: `google/gemma-3n-e4b-it:free`
-    Google___Gemma__3n__E4b__It__Free,
     /// Model: `google/gemma-4-26b-a4b-it`
     Google___Gemma__4__26b__A4b__It,
     /// Model: `google/gemma-4-26b-a4b-it:free`
@@ -270,6 +260,8 @@ pub enum ProviderModelOpenRouter {
     Meta__Llama___Llama__Guard__4__12b,
     /// Model: `microsoft/phi-4`
     Microsoft___Phi__4,
+    /// Model: `microsoft/phi-4-mini-instruct`
+    Microsoft___Phi__4__Mini__Instruct,
     /// Model: `microsoft/wizardlm-2-8x22b`
     Microsoft___Wizardlm__2__8x22b,
     /// Model: `minimax/minimax-01`
@@ -314,6 +306,8 @@ pub enum ProviderModelOpenRouter {
     Mistralai___Mistral__Large__2512,
     /// Model: `mistralai/mistral-medium-3`
     Mistralai___Mistral__Medium__3,
+    /// Model: `mistralai/mistral-medium-3-5`
+    Mistralai___Mistral__Medium__3__5,
     /// Model: `mistralai/mistral-medium-3.1`
     Mistralai___Mistral__Medium__3_1,
     /// Model: `mistralai/mistral-nemo`
@@ -378,8 +372,6 @@ pub enum ProviderModelOpenRouter {
     Nvidia___Nemotron__3__Super__120b__A12b,
     /// Model: `nvidia/nemotron-3-super-120b-a12b:free`
     Nvidia___Nemotron__3__Super__120b__A12b__Free,
-    /// Model: `nvidia/nemotron-nano-12b-v2-vl`
-    Nvidia___Nemotron__Nano__12b__V2__Vl,
     /// Model: `nvidia/nemotron-nano-12b-v2-vl:free`
     Nvidia___Nemotron__Nano__12b__V2__Vl__Free,
     /// Model: `nvidia/nemotron-nano-9b-v2`
@@ -484,6 +476,8 @@ pub enum ProviderModelOpenRouter {
     Openai___Gpt__Audio,
     /// Model: `openai/gpt-audio-mini`
     Openai___Gpt__Audio__Mini,
+    /// Model: `openai/gpt-chat-latest`
+    Openai___Gpt__Chat__Latest,
     /// Model: `openai/gpt-oss-120b`
     Openai___Gpt__Oss__120b,
     /// Model: `openai/gpt-oss-120b:free`
