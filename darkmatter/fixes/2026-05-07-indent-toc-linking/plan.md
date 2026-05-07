@@ -2,6 +2,14 @@
 phases: 4
 created: 2026-05-07
 start_phase: 1
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/compose/toc_linking/parser.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/render.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+  - darkmatter
 source_files_during_phase_1:
   - darkmatter/lib/src/markdown/compose/toc_linking/types.rs
   - darkmatter/lib/src/markdown/compose/toc_linking/parser.rs

@@ -17,8 +17,12 @@ pub fn render_toc_links(
     indent: &str,
     inferred_indent: Option<&str>,
 ) -> String {
-    let _ = indent;
-    let _ = inferred_indent;
+    let effective_indent = if indent.is_empty() {
+        inferred_indent.unwrap_or("")
+    } else {
+        indent
+    };
+
     let links: Vec<String> = headings
         .iter()
         .filter(|h| options.levels.includes(h.level))
@@ -29,12 +33,24 @@ pub fn render_toc_links(
             } else {
                 apply_cleanup(&h.title, &options.cleanup_services)
             };
-            format!("- [{}]({}#{})", display, file_path, h.slug)
+            format!("{}- [{}]({}#{})", effective_indent, display, file_path, h.slug)
         })
         .collect();
 
     if links.is_empty() {
-        options.empty_text.clone().unwrap_or_default()
+        match &options.empty_text {
+            Some(text) => {
+                if text.contains('\n') {
+                    text.lines()
+                        .map(|line| format!("{}{}", effective_indent, line))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    format!("{}{}", effective_indent, text)
+                }
+            }
+            None => String::new(),
+        }
     } else {
         links.join("\n")
     }

@@ -32,11 +32,17 @@ pub fn parse_toc_linking_directives(
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
                 let indent = &content[line_start..first_non_ws];
+                let inferred_indent = if indent.is_empty() {
+                    infer_indent_from_previous_line(content, line_start)
+                } else {
+                    None
+                };
                 let directive = parse_directive_line(
                     trimmed,
                     line_start..span_end,
                     line_number,
                     indent.to_string(),
+                    inferred_indent,
                 )?;
                 directives.push(directive);
             }
@@ -49,11 +55,29 @@ pub fn parse_toc_linking_directives(
     Ok(directives)
 }
 
+/// Scan backward from `pos` to find the first non-empty line and return its leading whitespace.
+fn infer_indent_from_previous_line(content: &str, pos: usize) -> Option<String> {
+    let before = &content[..pos];
+    for line in before.lines().rev() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            let leading_ws_len = line.len() - line.trim_start().len();
+            if leading_ws_len > 0 {
+                return Some(line[..leading_ws_len].to_string());
+            } else {
+                return None;
+            }
+        }
+    }
+    None
+}
+
 fn parse_directive_line(
     input: &str,
     span: std::ops::Range<usize>,
     line: usize,
     indent: String,
+    inferred_indent: Option<String>,
 ) -> Result<TocLinkingDirective, TocLinkingError> {
     let mut cursor = Cursor::new(input);
 
@@ -97,7 +121,7 @@ fn parse_directive_line(
         span,
         line,
         indent,
-        inferred_indent: None,
+        inferred_indent,
     })
 }
 
