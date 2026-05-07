@@ -231,5 +231,16 @@ status subject="":
 _structure dir:
     @eza -lDTL 4 --icons=always --hyperlink {{ dir }}
 
+# brings up nvim to edit *.just files
 edit:
     @nvim ../just
+
+# brings up nvim to edit .claudine files
+claudine:
+    @nvim ../.claudine
+
+prompts:
+    @nvim ../prompts
+
+skills:
+    @nvim ../skills
