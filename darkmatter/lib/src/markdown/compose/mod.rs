@@ -1725,6 +1725,14 @@ impl Markdown {
         }
     }
 
+    // NOTE: `::file` and `::code` directives share the same indentation
+    // preservation bug as `::toc-linking` (see spec.md for 2026-05-07).
+    // Unlike `::toc-linking`, the fix is not trivially co-located here:
+    // `PreparedTransclusion::Markdown` and `PreparedTransclusion::Code`
+    // do not capture directive indentation, and the underlying
+    // `transclusion::Directive` struct lacks indent fields. Fixing this
+    // would require structural changes across the transclusion pipeline.
+    // Tracked as part of the same feature but deferred to a follow-up.
     #[allow(clippy::too_many_arguments)]
     fn render_markdown_transclusion(
         &self,
