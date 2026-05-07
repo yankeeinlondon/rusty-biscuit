@@ -1717,10 +1717,28 @@ fn push_prose_text(
         // Use dark text for contrast on yellow background
         let _ = write!(output, "\x1b[38;2;0;0;0m{}\x1b[0m", text);
     } else if let Some(bg) = blockquote_bg {
-        // Apply blockquote background color with foreground color
+        // Apply blockquote background color with foreground color.
+        //
+        // ## Soft reset rationale
+        //
+        // We use a "soft" SGR reset (`\x1b[22;23;24;25;27;28;29;39m`) instead of the
+        // usual hard reset (`\x1b[0m`) so that the background color is **preserved**
+        // across word boundaries.  Hard reset clears *all* attributes including the
+        // background, which causes a tiny gap (one cell wide) where the terminal's
+        // default background shows through.  In blockquotes this is especially
+        // visible because every word and space is a separate ANSI segment, so the
+        // gaps add up and create a "dotted line" effect on the background.
+        //
+        // The soft reset only clears:
+        //   - 22 (normal intensity), 23 (italic off), 24 (underline off)
+        //   - 25 (blink off), 27 (inverse off), 28 (conceal off), 29 (strikethrough off)
+        //   - 39 (default foreground)
+        // while leaving the background (48) intact.
+        //
+        // See biscuit-terminal skill → "Terminal rendering: background gaps" for more.
         let _ = write!(
             output,
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[22;23;24;25;27;28;29;39m",
             bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
         );
     } else {
@@ -1744,23 +1762,38 @@ fn emit_inline_code(text: &str, style: Style) -> String {
 }
 
 fn push_inline_code(output: &mut String, text: &str, style: Style) {
+    push_inline_code_with_bg(output, text, style, None);
+}
+
+fn push_inline_code_with_bg(
+    output: &mut String,
+    text: &str,
+    style: Style,
+    preserve_bg: Option<Color>,
+) {
     let fg = style.foreground;
     let bg = style.background;
+
+    let reset = if preserve_bg.is_some() {
+        "[22;23;24;25;27;28;29;39m"
+    } else {
+        "[0m"
+    };
 
     // Check if background is meaningful (not transparent/zero alpha)
     if bg.a > 0 && (bg.r > 0 || bg.g > 0 || bg.b > 0) {
         // Use provided background
         let _ = write!(
             output,
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
-            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}{}",
+            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text, reset
         );
     } else {
         // Use a subtle dark gray background for contrast
         let _ = write!(
             output,
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
-            50, 50, 55, fg.r, fg.g, fg.b, text
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}{}",
+            50, 50, 55, fg.r, fg.g, fg.b, text, reset
         );
     }
 }
@@ -2252,6 +2285,7 @@ impl LineWrapper {
     /// Pads the final line to terminal width before clearing to ensure uniform background.
     fn clear_blockquote(&mut self) {
         self.pad_to_width();
+        self.output.push_str("[0m");
         self.blockquote_depth = 0;
         self.blockquote_bg = None;
     }
@@ -2520,7 +2554,7 @@ impl LineWrapper {
             self.emit_newline_with_prefix();
         }
 
-        push_inline_code(&mut self.output, code, style);
+        push_inline_code_with_bg(&mut self.output, code, style, self.blockquote_bg);
         self.current_col += code_width;
     }
 
@@ -8462,5 +8496,25 @@ flowchart LR
             .unwrap();
         assert_eq!(lines[p_idx + 1], "▐");
         assert_eq!(lines[p_idx + 2], "▐   - Item 1");
+    }
+
+    #[test]
+    fn test_blockquote_soft_reset() {
+        let content = "> Note: this is not the first review we've done\n";
+        let md: Markdown = content.into();
+        let mut options = test_options();
+        options.max_width = Some(80);
+        let output = for_terminal(&md, options).unwrap();
+        
+        // Check that blockquote words use soft reset
+        let soft_reset = "\x1b[22;23;24;25;27;28;29;39m";
+        let hard_reset = "\x1b[0m";
+        
+        println!("Output: {:?}", output);
+        println!("Soft reset count: {}", output.matches(soft_reset).count());
+        println!("Hard reset count: {}", output.matches(hard_reset).count());
+        
+        // The blockquote words should use soft reset
+        assert!(output.contains(soft_reset), "Should use soft reset for blockquote words");
     }
 }
