@@ -27,8 +27,8 @@ Used in 4 locations — this is the primary option set:
 Used in `cleanup.rs` (line 36) for the normalize/reformat pass:
 
 - Enables everything except two intentionally excluded options:
-  - **`ENABLE_SMART_PUNCTUATION` excluded** — Would convert `"` → `\u{201c}`/`\u{201d}` and `'` → `\u{2018}`/`\u{2019}` (curly quotes). Cleanup must preserve the user's original quote characters.
-  - **`ENABLE_DEFINITION_LIST` excluded** — Darkmatter's `::file`, `::code`, `::url` transclusion directives start with `::`. Definition list parsing would mangle the `::` prefix into `: :`, breaking transclusion during the round-trip parse→serialize cycle.
+    - **`ENABLE_SMART_PUNCTUATION` excluded** — Would convert `"` → `\u{201c}`/`\u{201d}` and `'` → `\u{2018}`/`\u{2019}` (curly quotes). Cleanup must preserve the user's original quote characters.
+    - **`ENABLE_DEFINITION_LIST` excluded** — Darkmatter's `::file`, `::code`, `::url` transclusion directives start with `::`. Definition list parsing would mangle the `::` prefix into `: :`, breaking transclusion during the round-trip parse→serialize cycle.
 
 ### 3. Other Consumers
 

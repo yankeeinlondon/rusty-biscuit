@@ -1,46 +1,12 @@
 {
-  "timestamp": 1777918493.330982,
-  "previous_baseline": {
-    "timestamp": 1777918493.330982,
-    "quality_signal": 0.5372413438342327,
-    "coupling_score": 0.2991596638655462,
-    "cycle_count": 2,
-    "god_file_count": 1,
-    "hotspot_count": 0,
-    "complex_fn_count": 133,
-    "max_depth": 8,
-    "total_import_edges": 595,
-    "cross_module_edges": 326
-  },
-  "post_phase_5_snapshot": {
-    "captured_at": "2026-05-04",
-    "files_scanned": 984,
-    "lines": 354748,
-    "quality_signal_score": 4917,
-    "bottleneck": "acyclicity",
-    "cross_module_edges": 492,
-    "total_import_edges": 807,
-    "cross_module_ratio": 0.6097893432465923,
-    "dsm": {
-      "above_diagonal": 0,
-      "below_diagonal": 788,
-      "same_level": 19,
-      "size": 426,
-      "density": 45,
-      "edge_count": 807,
-      "level_breaks": 10,
-      "propagation_cost": 152,
-      "clusters": [
-        {"files_count": 6, "internal_edges": 10, "level": 3},
-        {"files_count": 2, "internal_edges": 2, "level": 7}
-      ]
-    },
-    "root_causes": {
-      "acyclicity": {"raw": 3, "score": 2500},
-      "depth": {"raw": 10, "score": 4444},
-      "equality": {"raw": 0.5242071065042161, "score": 4758},
-      "modularity": {"raw": 0.38176590060189763, "score": 5878},
-      "redundancy": {"raw": 0.07494546587722031, "score": 9251}
-    }
-  }
+  "timestamp": 1778008784.050816,
+  "quality_signal": 0.4917183011134307,
+  "coupling_score": 0.2255266418835192,
+  "cycle_count": 3,
+  "god_file_count": 0,
+  "hotspot_count": 0,
+  "complex_fn_count": 133,
+  "max_depth": 10,
+  "total_import_edges": 807,
+  "cross_module_edges": 492
 }
