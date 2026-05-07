@@ -186,6 +186,14 @@ On each iteration, the looping engine injects a set of read-only ambient variabl
 >
 > Ambient variables shadow same-named frontmatter keys for the duration of the iteration. Setting (or attempting to `set`) a frontmatter key with the same name as an ambient variable yields an `InvalidAction` error, mirroring the existing rule for `loop` and `replace`.
 
+## Examples
+
+See the `examples/` directory in this feature folder for working prompt files:
+
+- `counter-loop.md` — basic `while` loop with `increment`
+- `retry-until-success.md` — `until` loop with `fail_fast: false`
+- `accumulate-log.md` — `append` action building JSONL
+
 ## Error Handling
 
 Loops inherit the `fail_fast` semantics established by [sequence](../../_completed/2026-04-04-sequence/spec.md):
