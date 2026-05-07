@@ -31,7 +31,13 @@ pub fn parse_toc_linking_directives(
         if trimmed.starts_with("::toc-linking") {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
-                let directive = parse_directive_line(trimmed, line_start..span_end, line_number)?;
+                let indent = &content[line_start..first_non_ws];
+                let directive = parse_directive_line(
+                    trimmed,
+                    line_start..span_end,
+                    line_number,
+                    indent.to_string(),
+                )?;
                 directives.push(directive);
             }
         }
@@ -47,6 +53,7 @@ fn parse_directive_line(
     input: &str,
     span: std::ops::Range<usize>,
     line: usize,
+    indent: String,
 ) -> Result<TocLinkingDirective, TocLinkingError> {
     let mut cursor = Cursor::new(input);
 
@@ -89,6 +96,8 @@ fn parse_directive_line(
         options,
         span,
         line,
+        indent,
+        inferred_indent: None,
     })
 }
 
@@ -352,5 +361,30 @@ mod tests {
         let content = "::toc-linking ./doc.md bogus=value\n";
         let err = parse_toc_linking_directives(content).unwrap_err();
         assert!(matches!(err, TocLinkingError::ParseDirective { .. }));
+    }
+
+    #[test]
+    fn captures_indent_from_leading_whitespace() {
+        let content = "  ::toc-linking ./doc.md\n";
+        let directives = parse_toc_linking_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].indent, "  ");
+    }
+
+    #[test]
+    fn captures_indent_from_tabs() {
+        let content = "- Item\n\t::toc-linking ./doc.md\n";
+        let directives = parse_toc_linking_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].indent, "\t");
+    }
+
+    #[test]
+    fn inferred_indent_from_previous_line() {
+        let content = "  some text\n::toc-linking ./doc.md\n";
+        let directives = parse_toc_linking_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].indent, "");
+        assert_eq!(directives[0].inferred_indent, Some("  ".to_string()));
     }
 }

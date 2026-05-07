@@ -77,6 +77,8 @@ pub(crate) fn render_resolved_directive(
     headings: &[MarkdownTocNode],
     options: &TocLinkingOptions,
     line: usize,
+    indent: &str,
+    inferred_indent: Option<&str>,
 ) -> Result<String, TocLinkingError> {
     let heading_filter =
         HeadingFilter::new(&options.keep_patterns, &options.filter_patterns, line)?;
@@ -86,6 +88,8 @@ pub(crate) fn render_resolved_directive(
         display_target,
         options,
         &heading_filter,
+        indent,
+        inferred_indent,
     ))
 }
 
@@ -120,8 +124,14 @@ pub(crate) fn process_toc_linking(
                 .cloned()
                 .collect::<Vec<_>>();
 
-            let replacement =
-                render_resolved_directive(&target, &headings, &directive.options, directive.line)?;
+            let replacement = render_resolved_directive(
+                &target,
+                &headings,
+                &directive.options,
+                directive.line,
+                &directive.indent,
+                directive.inferred_indent.as_deref(),
+            )?;
             replacements.push((directive.span.clone(), replacement));
         } else {
             let replacement = directive.options.empty_text.clone().unwrap_or_default();
@@ -312,5 +322,104 @@ mod tests {
         assert!(report.toc_links_generated > 0);
         assert!(report.has_changes());
         assert!(report.summary().contains("toc-link"));
+    }
+
+    #[test]
+    fn indented_toc_linking_nested_two_levels() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n\n## Configuration\n\nConfig.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "- Item\n    - Subitem\n        ::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+        // Every generated bullet should have 8 leading spaces (two levels deep)
+        for line in result.lines() {
+            if line.contains("[Getting Started]") || line.contains("[Configuration]") {
+                assert!(
+                    line.starts_with("        "),
+                    "Expected line to start with 8 spaces: {}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn indented_toc_linking_at_column_one_in_list() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "- Item\n  ::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+        // Output should be indented to match the list item (2 spaces)
+        for line in result.lines() {
+            if line.contains("[Getting Started]") {
+                assert!(
+                    line.starts_with("  "),
+                    "Expected line to start with 2 spaces: {}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn toc_linking_at_root_unchanged() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+        // Output should start at column 1, unchanged from current behavior
+        for line in result.lines() {
+            if line.contains("[Getting Started]") {
+                assert!(
+                    line.starts_with("- ["),
+                    "Expected line to start at column 1: {}",
+                    line
+                );
+            }
+        }
     }
 }

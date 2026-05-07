@@ -1693,6 +1693,8 @@ impl Markdown {
                                 &headings,
                                 &options_clone,
                                 line,
+                                &directive.indent,
+                                directive.inferred_indent.as_deref(),
                             )
                             .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                             Ok(cache::OperationResult { content })

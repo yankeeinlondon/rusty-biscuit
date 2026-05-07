@@ -14,7 +14,11 @@ pub fn render_toc_links(
     file_path: &str,
     options: &TocLinkingOptions,
     filter: &HeadingFilter,
+    indent: &str,
+    inferred_indent: Option<&str>,
 ) -> String {
+    let _ = indent;
+    let _ = inferred_indent;
     let links: Vec<String> = headings
         .iter()
         .filter(|h| options.levels.includes(h.level))
@@ -64,7 +68,7 @@ mod tests {
         let headings: Vec<&MarkdownTocNode> = vec![&h1, &h2];
         let options = TocLinkingOptions::default();
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(
             result,
             "- [Getting Started](./doc.md#getting-started)\n- [Usage](./doc.md#usage)"
@@ -80,7 +84,7 @@ mod tests {
         let mut options = TocLinkingOptions::default();
         options.levels.levels.insert(HeadingLevel::H2);
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(result, "- [Section](./doc.md#section)");
     }
 
@@ -89,7 +93,7 @@ mod tests {
         let headings: Vec<&MarkdownTocNode> = vec![];
         let options = TocLinkingOptions::default();
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(result, "");
     }
 
@@ -101,7 +105,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(result, "no results");
     }
 
@@ -115,7 +119,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         // Display text has emoji stripped, but slug is unchanged
         assert_eq!(result, "- [Getting Started](./doc.md#getting-started)");
     }
@@ -131,7 +135,66 @@ mod tests {
             "../relative/path.md",
             &options,
             &default_filter(),
+            "",
+            None,
         );
         assert!(result.contains("../relative/path.md#test"));
+    }
+
+    #[test]
+    fn indented_output_two_levels() {
+        let h1 = make_heading(2, "Getting Started", "getting-started");
+        let h2 = make_heading(2, "Usage", "usage");
+        let headings: Vec<&MarkdownTocNode> = vec![&h1, &h2];
+        let options = TocLinkingOptions::default();
+
+        let result = render_toc_links(
+            &headings,
+            "./doc.md",
+            &options,
+            &default_filter(),
+            "    ",
+            None,
+        );
+        assert_eq!(
+            result,
+            "    - [Getting Started](./doc.md#getting-started)\n    - [Usage](./doc.md#usage)"
+        );
+    }
+
+    #[test]
+    fn indented_output_empty_text() {
+        let headings: Vec<&MarkdownTocNode> = vec![];
+        let options = TocLinkingOptions {
+            empty_text: Some("no results".to_string()),
+            ..Default::default()
+        };
+
+        let result = render_toc_links(
+            &headings,
+            "./doc.md",
+            &options,
+            &default_filter(),
+            "  ",
+            None,
+        );
+        assert_eq!(result, "  no results");
+    }
+
+    #[test]
+    fn no_indent_at_root() {
+        let h1 = make_heading(2, "Getting Started", "getting-started");
+        let headings: Vec<&MarkdownTocNode> = vec![&h1];
+        let options = TocLinkingOptions::default();
+
+        let result = render_toc_links(
+            &headings,
+            "./doc.md",
+            &options,
+            &default_filter(),
+            "",
+            None,
+        );
+        assert_eq!(result, "- [Getting Started](./doc.md#getting-started)");
     }
 }
