@@ -1,10 +1,8 @@
 //! Metadata code generator.
 //!
-//! Generates two static lookup tables:
-//!
-//! - `metadata_generated.rs` — compact table with basic fields + `..Default::default()`
-//! - `metadata_openrouter_generated.rs` — rich table for OpenRouter models with
-//!   full pricing, architecture, and default parameters.
+//! Generates `metadata_generated.rs` — a static lookup table containing full
+//! `ProviderModelMetadata` for all models, including pricing, parameters,
+//! description, and knowledge cutoff when available.
 
 use std::collections::HashMap;
 
@@ -12,12 +10,10 @@ use unchained_ai::models::model_metadata::{ModelModalities, Modality, ProviderMo
 
 use crate::parsera::ParseraModel;
 
-/// Generates metadata lookup table code for both compact and rich formats.
+/// Generates metadata lookup table code.
 pub struct MetadataGenerator {
-    /// Model ID -> merged `ProviderModelMetadata` (compact table).
+    /// Model ID -> merged `ProviderModelMetadata`.
     entries: HashMap<String, Option<ProviderModelMetadata>>,
-    /// OpenRouter model ID -> `ProviderModelMetadata` (rich table).
-    openrouter_entries: HashMap<String, ProviderModelMetadata>,
 }
 
 impl MetadataGenerator {
@@ -25,23 +21,12 @@ impl MetadataGenerator {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
-            openrouter_entries: HashMap::new(),
         }
     }
 
-    /// Registers a model ID with optional merged metadata for the compact table.
+    /// Registers a model ID with optional merged metadata.
     pub fn register(&mut self, model_id: String, metadata: Option<ProviderModelMetadata>) {
         self.entries.insert(model_id, metadata);
-    }
-
-    /// Registers an OpenRouter model with rich metadata for the dedicated table.
-    pub fn register_openrouter(&mut self, model_id: String, metadata: ProviderModelMetadata) {
-        self.openrouter_entries.insert(model_id, metadata);
-    }
-
-    /// Returns the number of OpenRouter entries registered.
-    pub fn openrouter_count(&self) -> usize {
-        self.openrouter_entries.len()
     }
 
     /// Merges provider-native metadata with Parsera data.
@@ -62,7 +47,7 @@ impl MetadataGenerator {
         }
     }
 
-    /// Generates the compact metadata lookup table.
+    /// Generates the metadata lookup table with full fields for all models.
     pub fn generate(&self) -> String {
         let mut code = String::new();
 
@@ -78,8 +63,12 @@ impl MetadataGenerator {
         code.push_str("use std::sync::LazyLock;\n\n");
         code.push_str("#[allow(unused_imports)]\n");
         code.push_str(
-            "use crate::models::model_metadata::{ModelMetadata, ModelModalities, Modality};\n\n",
+            "use crate::models::model_metadata::{ModelMetadata, ModelModalities, Modality};\n",
         );
+        code.push_str("#[allow(unused_imports)]\n");
+        code.push_str("use crate::models::model_pricing::ModelPricing;\n");
+        code.push_str("#[allow(unused_imports)]\n");
+        code.push_str("use crate::models::model_default_parameters::ModelDefaultParameters;\n\n");
 
         let capacity = self.entries.len();
         code.push_str("/// Static lookup table mapping model IDs to their metadata.\n");
@@ -105,139 +94,9 @@ impl MetadataGenerator {
         code
     }
 
-    /// Generates a single compact entry using basic fields + `..Default::default()`.
+    /// Generates a single entry with all metadata fields.
     fn generate_entry(&self, model_id: &str, meta: &ProviderModelMetadata) -> String {
         let mut entry = format!("    m.insert(\"{model_id}\", ModelMetadata {{\n");
-
-        if let Some(name) = &meta.display_name {
-            entry.push_str(&format!(
-                "        display_name: Some(\"{}\".to_string()),\n",
-                escape_string(name)
-            ));
-        } else {
-            entry.push_str("        display_name: None,\n");
-        }
-
-        if let Some(family) = &meta.family {
-            entry.push_str(&format!(
-                "        family: Some(\"{}\".to_string()),\n",
-                escape_string(family)
-            ));
-        } else {
-            entry.push_str("        family: None,\n");
-        }
-
-        if let Some(ctx) = meta.context_window {
-            entry.push_str(&format!("        context_window: Some({ctx}),\n"));
-        } else {
-            entry.push_str("        context_window: None,\n");
-        }
-
-        if let Some(max_out) = meta.max_output_tokens {
-            entry.push_str(&format!("        max_output_tokens: Some({max_out}),\n"));
-        } else {
-            entry.push_str("        max_output_tokens: None,\n");
-        }
-
-        if let Some(mods) = &meta.modalities {
-            entry.push_str("        modalities: Some(ModelModalities {\n");
-            entry.push_str(&format!(
-                "            input: vec![{}],\n",
-                mods.input
-                    .iter()
-                    .map(|m| modality_variant_str(*m))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-            entry.push_str(&format!(
-                "            output: vec![{}],\n",
-                mods.output
-                    .iter()
-                    .map(|m| modality_variant_str(*m))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-            entry.push_str("        }),\n");
-        } else {
-            entry.push_str("        modalities: None,\n");
-        }
-
-        if meta.capabilities.is_empty() {
-            entry.push_str("        capabilities: vec![],\n");
-        } else {
-            entry.push_str("        capabilities: vec![\n");
-            for cap in &meta.capabilities {
-                entry.push_str(&format!(
-                    "            \"{}\".to_string(),\n",
-                    escape_string(cap)
-                ));
-            }
-            entry.push_str("        ],\n");
-        }
-
-        entry.push_str("        ..Default::default()\n");
-        entry.push_str("    });\n");
-        entry
-    }
-
-    /// Generates the rich OpenRouter metadata lookup table.
-    pub fn generate_openrouter(&self) -> String {
-        let mut code = String::new();
-
-        code.push_str("//! Generated OpenRouter model metadata lookup table.\n");
-        code.push_str("//!\n");
-        code.push_str(
-            "//! This file is auto-generated by `gen-models`. Do not edit manually.\n",
-        );
-        code.push_str("//! Re-run `gen-models` to regenerate.\n");
-        code.push_str("//!\n");
-        code.push_str(
-            "//! Contains rich metadata for OpenRouter models including pricing,\n",
-        );
-        code.push_str(
-            "//! architecture, supported parameters, and default generation settings.\n\n",
-        );
-
-        code.push_str("use std::collections::HashMap;\n");
-        code.push_str("use std::sync::LazyLock;\n\n");
-        code.push_str("#[allow(unused_imports)]\n");
-        code.push_str(
-            "use crate::models::model_metadata::{ProviderModelMetadata, ModelModalities, Modality};\n",
-        );
-        code.push_str("#[allow(unused_imports)]\n");
-        code.push_str("use crate::models::model_pricing::ModelPricing;\n");
-        code.push_str("#[allow(unused_imports)]\n");
-        code.push_str("use crate::models::model_default_parameters::ModelDefaultParameters;\n\n");
-
-        let capacity = self.openrouter_entries.len();
-        code.push_str(
-            "/// Static lookup table for OpenRouter-specific rich metadata.\n",
-        );
-        code.push_str("pub static OPENROUTER_MODEL_METADATA: LazyLock<HashMap<&'static str, ProviderModelMetadata>> = LazyLock::new(|| {\n");
-        code.push_str(&format!(
-            "    let mut m = HashMap::with_capacity({capacity});\n"
-        ));
-
-        let mut sorted_entries: Vec<_> = self.openrouter_entries.iter().collect();
-        sorted_entries.sort_by_key(|(k, _)| k.as_str());
-
-        for (model_id, meta) in sorted_entries {
-            code.push_str(&self.generate_openrouter_entry(model_id, meta));
-        }
-
-        code.push_str("    m\n");
-        code.push_str("});\n");
-
-        code
-    }
-
-    /// Generates a single rich OpenRouter entry with all fields.
-    fn generate_openrouter_entry(
-        &self,
-        model_id: &str,
-        meta: &ProviderModelMetadata,
-    ) -> String {
-        let mut entry = format!("    m.insert(\"{model_id}\", ProviderModelMetadata {{\n");
 
         if let Some(name) = &meta.display_name {
             entry.push_str(&format!(
@@ -520,15 +379,8 @@ mod tests {
 
         assert!(code.contains("MODEL_METADATA"));
         assert!(code.contains("HashMap::with_capacity(0)"));
-    }
-
-    #[test]
-    fn test_empty_openrouter_generator() {
-        let generator = MetadataGenerator::new();
-        let code = generator.generate_openrouter();
-
-        assert!(code.contains("OPENROUTER_MODEL_METADATA"));
-        assert!(code.contains("HashMap::with_capacity(0)"));
+        assert!(code.contains("ModelPricing"));
+        assert!(code.contains("ModelDefaultParameters"));
     }
 
     #[test]
@@ -546,7 +398,7 @@ mod tests {
         assert!(code.contains("Modality::Text"));
         assert!(code.contains("Modality::Image"));
         assert!(code.contains("function_calling"));
-        assert!(code.contains("..Default::default()"));
+        assert!(!code.contains("..Default::default()"));
     }
 
     #[test]
@@ -611,8 +463,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let result =
-            MetadataGenerator::merge_metadata(Some(native), None);
+        let result = MetadataGenerator::merge_metadata(Some(native), None);
         let merged = result.unwrap();
         assert_eq!(merged.display_name.as_deref(), Some("Test"));
         assert_eq!(merged.context_window, Some(100000));
@@ -639,8 +490,7 @@ mod tests {
         };
         let parsera = sample_parsera_model();
 
-        let result =
-            MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
         let merged = result.unwrap();
 
         assert_eq!(merged.display_name.as_deref(), Some("Native Name"));
@@ -657,8 +507,7 @@ mod tests {
         };
         let parsera = sample_parsera_model();
 
-        let result =
-            MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
         let merged = result.unwrap();
 
         assert_eq!(merged.display_name.as_deref(), Some("Native Name"));
@@ -686,14 +535,10 @@ mod tests {
         };
         let parsera = sample_parsera_model();
 
-        let result =
-            MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
         let merged = result.unwrap();
 
-        assert_eq!(
-            merged.description.as_deref(),
-            Some("A test model.")
-        );
+        assert_eq!(merged.description.as_deref(), Some("A test model."));
         assert!(merged.pricing.is_some());
         assert!(merged.supported_parameters.is_some());
         assert!(merged.default_parameters.is_some());
@@ -710,15 +555,14 @@ mod tests {
         };
         let parsera = sample_parsera_model();
 
-        let result =
-            MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
+        let result = MetadataGenerator::merge_metadata(Some(native), Some(&parsera));
         let merged = result.unwrap();
 
         assert_eq!(merged.capabilities, vec!["vision"]);
     }
 
     #[test]
-    fn test_openrouter_entry_with_rich_data() {
+    fn test_entry_with_rich_data() {
         let mut generator = MetadataGenerator::new();
 
         let meta = ProviderModelMetadata {
@@ -745,13 +589,13 @@ mod tests {
             ..Default::default()
         };
 
-        generator.register_openrouter("x-ai/grok-4.3".to_string(), meta);
+        generator.register("x-ai/grok-4.3".to_string(), Some(meta));
 
-        let code = generator.generate_openrouter();
+        let code = generator.generate();
 
-        assert!(code.contains("OPENROUTER_MODEL_METADATA"));
+        assert!(code.contains("MODEL_METADATA"));
         assert!(code.contains("\"x-ai/grok-4.3\""));
-        assert!(code.contains("ProviderModelMetadata"));
+        assert!(code.contains("ModelMetadata"));
         assert!(code.contains("ModelPricing"));
         assert!(code.contains("ModelDefaultParameters"));
         assert!(code.contains("Some(0.00000125_f64)"));
@@ -783,27 +627,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_entry_uses_default() {
-        let mut generator = MetadataGenerator::new();
-
-        let meta = ProviderModelMetadata {
-            display_name: Some("Test".to_string()),
-            context_window: Some(128000),
-            pricing: Some(ModelPricing::new()),
-            description: Some("Has rich data".to_string()),
-            ..Default::default()
-        };
-        generator.register("test-model".to_string(), Some(meta));
-
-        let code = generator.generate();
-
-        assert!(code.contains("..Default::default()"));
-        assert!(!code.contains("pricing:"));
-        assert!(!code.contains("description:"));
-    }
-
-    #[test]
-    fn test_openrouter_entry_emits_all_fields() {
+    fn test_entry_emits_all_fields() {
         let mut generator = MetadataGenerator::new();
 
         let meta = ProviderModelMetadata {
@@ -816,9 +640,9 @@ mod tests {
             description: Some("A rich model.".to_string()),
             ..Default::default()
         };
-        generator.register_openrouter("test/model".to_string(), meta);
+        generator.register("test/model".to_string(), Some(meta));
 
-        let code = generator.generate_openrouter();
+        let code = generator.generate();
 
         assert!(code.contains("pricing: Some(ModelPricing"));
         assert!(code.contains("description: Some(\"A rich model.\""));
