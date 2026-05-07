@@ -2,7 +2,7 @@
     "folders": [
         {
             "name": "unchained-ai",
-            "path": "."
+            "path": "unchained-ai"
         }
     ],
     "settings": {
@@ -81,6 +81,9 @@
         "git.detectWorktrees": false,
         "git.repositoryScanMaxDepth": 0,
         "git.autoRepositoryDetection": false,
-        "git.detectWorktreesLimit": 1
+        "git.detectWorktreesLimit": 0,
+        "gitlens.views.repositories.showWorktrees": false,
+        "gitlens.views.collapseWorktreesWhenPossible": false,
+        "gitlens.views.workspaces.showWorktrees": false
     }
 }

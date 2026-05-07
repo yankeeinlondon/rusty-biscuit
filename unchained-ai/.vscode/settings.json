@@ -3,5 +3,7 @@
         "Probs"
     ],
     "git.autofetchPeriod": 5000,
-    "git.detectWorktreesLimit": 1
+    "git.detectWorktreesLimit": 1,
+    "git.detectWorktrees": false,
+    "gitlens.worktrees.promptForLocation": false
 }
