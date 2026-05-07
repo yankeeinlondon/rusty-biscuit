@@ -16,7 +16,7 @@ use crate::protect::decision::ProtectDecision;
 mod bash;
 mod decisions;
 mod mappers;
-mod meta_json;
+mod null_strip;
 mod protect;
 mod report;
 mod speak;
@@ -24,7 +24,7 @@ mod speak;
 use bash::{BASH_ACTION_TIMEOUT, execute_bash, run_command_blocking};
 use decisions::{dot_lookup, parse_decision, should_replace_selected};
 use mappers::{CommandOutput, apply_mapper};
-use meta_json::strip_nulls;
+use null_strip::strip_nulls;
 use protect::{attach_protect_context, decision_for_short_circuit, should_short_circuit_call};
 use report::execute_report;
 use speak::execute_speak_from_claudine;
@@ -75,16 +75,26 @@ enum WhenOutcome {
 /// parse or evaluation errors yield [`WhenOutcome::SkipInvalid`] with a
 /// `tracing::warn!` so operators can spot a broken condition without
 /// breaking the rest of the binding.
+#[allow(dead_code)]
 fn evaluate_when(when: Option<&str>, meta: &EventMeta) -> WhenOutcome {
-    let Some(expr) = when else {
-        return WhenOutcome::Run;
-    };
-
     let work_dir: PathBuf = meta
         .cwd
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
+    evaluate_when_with_lookup(when, &lookup)
+}
+
+/// Evaluate an action's `when` expression using a pre-built [`EventMetaConditionLookup`].
+///
+/// This keeps the parse/evaluate plumbing but reuses the cached context groups,
+/// avoiding repeated `ctx.*` captures across multiple actions in the same binding.
+fn evaluate_when_with_lookup(when: Option<&str>, lookup: &EventMetaConditionLookup<'_>) -> WhenOutcome {
+    let Some(expr) = when else {
+        return WhenOutcome::Run;
+    };
 
     let parsed = match parse_condition(expr) {
         Ok(parsed) => parsed,
@@ -98,8 +108,7 @@ fn evaluate_when(when: Option<&str>, meta: &EventMeta) -> WhenOutcome {
         }
     };
 
-    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
-    match evaluate(&parsed, &lookup) {
+    match evaluate(&parsed, lookup) {
         Ok(value) if is_truthy(&value) => WhenOutcome::Run,
         Ok(_) => WhenOutcome::SkipFalse,
         Err(error) => {
@@ -127,12 +136,21 @@ pub(crate) async fn execute_actions(
 ) -> Result<Option<HookResponse>> {
     let mut selected_response: Option<HookResponse> = None;
 
+    // Build the composite lookup once so that `ctx.*` captures are cached
+    // across all actions in this binding.
+    let work_dir: PathBuf = meta
+        .cwd
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
+
     for (index, action) in actions.iter().enumerate() {
         // Pre-execution `when` gate. Falsy or invalid conditions skip the
         // action without affecting `selected_response`, which guarantees
         // a skipped `Call` cannot replace a previously selected blocking
         // response.
-        match evaluate_when(action.when(), meta) {
+        match evaluate_when_with_lookup(action.when(), &lookup) {
             WhenOutcome::Run => {}
             WhenOutcome::SkipFalse => {
                 debug!(
