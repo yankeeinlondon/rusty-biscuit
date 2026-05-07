@@ -362,7 +362,9 @@ fn run_compose_inner(
 
     // ── Loop detection and execution ─────────────────────────────────────
     let loop_options = claudine::composition::LoopExecutionOptions {
-        max_iterations: shared.max_iterations,
+        max_iterations: shared
+            .max_iterations
+            .or(claudine::composition::resolve_max_iterations_from_env()),
         fail_fast: claudine::composition::resolve_fail_fast_from_env(),
     };
 
@@ -608,7 +610,9 @@ fn run_inline_compose_inner(
 
     // ── Loop detection and execution ─────────────────────────────────────
     let loop_options = claudine::composition::LoopExecutionOptions {
-        max_iterations: shared.max_iterations,
+        max_iterations: shared
+            .max_iterations
+            .or(claudine::composition::resolve_max_iterations_from_env()),
         fail_fast: claudine::composition::resolve_fail_fast_from_env(),
     };
 
