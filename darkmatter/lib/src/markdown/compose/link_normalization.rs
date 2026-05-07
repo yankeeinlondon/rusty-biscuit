@@ -170,7 +170,7 @@ pub fn normalize_links(
 
                 // 3.9 Emit warning
                 let msg = format!(
-                    "the path {} was found to be an offset of the {} environment variable and will use this abstraction.",
+                    "the path <blue>{}</blue> was found to be an offset of the <b>{}</b> environment variable and will use this abstraction.",
                     abs_path.display(),
                     var_name
                 );

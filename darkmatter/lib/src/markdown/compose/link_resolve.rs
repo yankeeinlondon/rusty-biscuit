@@ -387,6 +387,97 @@ mod tests {
     }
 
     #[test]
+    fn test_link_resolve_wrong_attribute_not_replaced() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.md");
+        let logo = dir.path().join("logo.png");
+        fs::write(&logo, "png").unwrap();
+
+        // alt contains same path as src - should only replace src
+        let content = r#"<img alt="logo.png" src="logo.png">"#;
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&file_a);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let resolved_path = fs::canonicalize(&logo)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        // src should be resolved to absolute path
+        assert!(
+            md.content().contains(&format!("src=\"{}\"", resolved_path)),
+            "src was not resolved. Content: {}",
+            md.content()
+        );
+        // alt should remain unchanged
+        assert!(
+            md.content().contains(r#"alt="logo.png""#),
+            "alt was incorrectly modified. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    #[test]
+    fn test_link_resolve_html_entity_in_attribute() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.md");
+        let target = dir.path().join("foo&bar.md");
+        fs::write(&target, "content").unwrap();
+
+        // HTML entity in href
+        let content = r#"<a href="foo&amp;bar.md">link</a>"#;
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&file_a);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let resolved_path = fs::canonicalize(&target)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_path)),
+            "HTML entity link was not resolved. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    #[test]
+    fn test_link_resolve_nested_source_in_video() {
+        let dir = tempdir().unwrap();
+        let file_a = dir.path().join("a.md");
+        let movie = dir.path().join("movie.mp4");
+        fs::write(&movie, "video content").unwrap();
+
+        // Nested source inside video tag
+        let content = r#"<video><source src="./movie.mp4"></video>"#;
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&file_a);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let resolved_path = fs::canonicalize(&movie)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        assert!(
+            md.content().contains(&format!("\"{}\"", resolved_path)),
+            "Nested source was not resolved. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    #[test]
     fn test_link_resolve_html_spaced_attributes() {
         let dir = tempdir().unwrap();
         let file_a = dir.path().join("a.md");
