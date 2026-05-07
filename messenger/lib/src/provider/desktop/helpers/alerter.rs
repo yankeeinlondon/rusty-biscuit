@@ -38,6 +38,9 @@ const NOTICE_TIMEOUT_MS: u64 = 60_000;
 /// Helper backend that delivers via the macOS `alerter` CLI.
 pub(crate) struct AlerterHelper {
     pub(crate) path: PathBuf,
+    /// Overridable timeout for notice-only requests (tests use a shorter
+    /// value so the suite stays fast).
+    pub(crate) notice_timeout_ms: u64,
 }
 
 /// Activation payload produced by alerter on stdout (`--json` mode).
@@ -68,7 +71,10 @@ pub(crate) struct AlerterActivation {
 impl AlerterHelper {
     /// Build a helper from sniff detection data.
     pub(crate) fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            notice_timeout_ms: NOTICE_TIMEOUT_MS,
+        }
     }
 
     /// Materialize the argv passed to `alerter`.
@@ -228,7 +234,7 @@ impl HelperBackend for AlerterHelper {
         let timeout_ms = if interactive {
             None
         } else {
-            Some(NOTICE_TIMEOUT_MS)
+            Some(self.notice_timeout_ms)
         };
         let output = run_expect_success(&self.path, &args, None, timeout_ms).await?;
         Self::parse_output(request, &output.stdout)

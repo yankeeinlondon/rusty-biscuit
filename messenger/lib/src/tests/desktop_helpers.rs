@@ -27,6 +27,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::dispatch::{NotificationAction, NotificationUrgency};
 use crate::provider::desktop::helpers::HelperBackend;
@@ -98,7 +99,7 @@ fn resolve_stub_path(name: &str) -> PathBuf {
         name.to_string()
     });
     if !path.exists() || stub_source_is_newer(name, &path) {
-        let status = std::process::Command::new(env!("CARGO"))
+        let mut child = std::process::Command::new(env!("CARGO"))
             .args([
                 "build",
                 "--quiet",
@@ -109,8 +110,27 @@ fn resolve_stub_path(name: &str) -> PathBuf {
                 "-p",
                 "messenger",
             ])
-            .status()
+            .spawn()
             .expect("failed to invoke cargo to build stub binary");
+
+        let start = Instant::now();
+        let timeout = Duration::from_secs(120);
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {
+                    if start.elapsed() > timeout {
+                        let _ = child.kill();
+                        panic!(
+                            "cargo build for stub binary `{name}` timed out after {timeout:?}. \
+                             Build stubs manually with: cargo build --features desktop -p messenger"
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => panic!("failed to wait for cargo build of stub `{name}`: {e}"),
+            }
+        };
         assert!(
             status.success(),
             "cargo build failed for stub binary {name}"
@@ -118,7 +138,8 @@ fn resolve_stub_path(name: &str) -> PathBuf {
     }
     assert!(
         path.exists(),
-        "stub binary {} not found at {}",
+        "stub binary {} not found at {}. \
+         Build stubs manually with: cargo build --features desktop -p messenger",
         name,
         path.display()
     );
@@ -241,12 +262,18 @@ fn alerter_helper(path: &Path) -> AlerterHelper {
     AlerterHelper::new(path.to_path_buf())
 }
 
+fn alerter_helper_with_timeout(path: &Path, timeout_ms: u64) -> AlerterHelper {
+    let mut helper = AlerterHelper::new(path.to_path_buf());
+    helper.notice_timeout_ms = timeout_ms;
+    helper
+}
+
 mod dunstify_stub {
     use super::*;
     use serial_test::serial;
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify)]
     async fn success_returns_id_and_helper_name() {
         let stub = stub_path("stub_dunstify");
         let _env = EnvGuard::set(&[("STUB_DUNSTIFY_ID", "123")]);
@@ -257,7 +284,7 @@ mod dunstify_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify)]
     async fn interactive_records_action_metadata() {
         let stub = stub_path("stub_dunstify");
         let _env = EnvGuard::set(&[("STUB_DUNSTIFY_ID", "9"), ("STUB_DUNSTIFY_ACTION", "ok")]);
@@ -279,7 +306,7 @@ mod dunstify_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify)]
     async fn replace_returns_replaced_metadata() {
         let stub = stub_path("stub_dunstify");
         let _env = EnvGuard::set(&[("STUB_DUNSTIFY_ID", "42")]);
@@ -293,7 +320,7 @@ mod dunstify_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify)]
     async fn nonzero_exit_maps_to_exited_error() {
         let stub = stub_path("stub_dunstify");
         let _env = EnvGuard::set(&[("STUB_DUNSTIFY_EXIT", "7")]);
@@ -305,7 +332,7 @@ mod dunstify_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify)]
     async fn empty_stdout_propagates_parse_error() {
         let stub = stub_path("stub_dunstify");
         let _env = EnvGuard::set(&[("STUB_DUNSTIFY_STDOUT_OVERRIDE", "")]);
@@ -315,7 +342,7 @@ mod dunstify_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify)]
     async fn notice_only_timeout_maps_to_timeout_error() {
         let stub = stub_path("stub_dunstify");
         let _env = EnvGuard::set(&[("STUB_DUNSTIFY_SLEEP_MS", "4000")]);
@@ -334,7 +361,7 @@ mod notify_send_stub {
     use serial_test::serial;
 
     #[tokio::test]
-    #[serial]
+    #[serial(notify_send)]
     async fn success_records_id() {
         let stub = stub_path("stub_notify_send");
         let _env = EnvGuard::set(&[("STUB_NOTIFY_SEND_ID", "777")]);
@@ -345,7 +372,7 @@ mod notify_send_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(notify_send)]
     async fn replace_returns_replaced_metadata() {
         let stub = stub_path("stub_notify_send");
         let _env = EnvGuard::set(&[("STUB_NOTIFY_SEND_ID", "55")]);
@@ -359,7 +386,7 @@ mod notify_send_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(notify_send)]
     async fn nonzero_exit_maps_to_exited_error() {
         let stub = stub_path("stub_notify_send");
         let _env = EnvGuard::set(&[("STUB_NOTIFY_SEND_EXIT", "1")]);
@@ -371,7 +398,7 @@ mod notify_send_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(notify_send)]
     async fn empty_stdout_propagates_parse_error() {
         let stub = stub_path("stub_notify_send");
         let _env = EnvGuard::set(&[("STUB_NOTIFY_SEND_STDOUT_OVERRIDE", "")]);
@@ -381,7 +408,7 @@ mod notify_send_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(notify_send)]
     async fn notice_only_timeout_maps_to_timeout_error() {
         let stub = stub_path("stub_notify_send");
         let _env = EnvGuard::set(&[("STUB_NOTIFY_SEND_SLEEP_MS", "6000")]);
@@ -400,7 +427,7 @@ mod snoretoast_stub {
     use serial_test::serial;
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn notice_only_uses_replace_id_and_records_dismissed() {
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[("STUB_SNORETOAST_EXIT", "1")]);
@@ -416,7 +443,7 @@ mod snoretoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn interactive_recovers_action_id_via_label() {
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[
@@ -440,7 +467,7 @@ mod snoretoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn replace_round_trips_id() {
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[("STUB_SNORETOAST_EXIT", "1")]);
@@ -454,7 +481,7 @@ mod snoretoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn exit_four_propagates_exited_error() {
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[
@@ -468,7 +495,7 @@ mod snoretoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn notice_only_timeout_maps_to_timeout_error() {
         // SnoreToast notice-only timeout is 5000ms; sleep for 6000ms to trigger it.
         let stub = stub_path("stub_snoretoast");
@@ -483,7 +510,7 @@ mod snoretoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn interactive_request_does_not_timeout() {
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[
@@ -508,7 +535,7 @@ mod snoretoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn app_id_registration_runs_install_before_send() {
         let stub = stub_path("stub_snoretoast");
         let log = tempfile::NamedTempFile::new().unwrap();
@@ -544,7 +571,7 @@ mod snoretoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn oversized_png_is_dropped_but_send_still_succeeds() {
         // Step 4.1: a 2048×2048 PNG exceeds Windows toast limits. The helper
         // must drop the image from argv, annotate the receipt with
@@ -587,7 +614,7 @@ mod burnttoast_stub {
     use serial_test::serial;
 
     #[tokio::test]
-    #[serial]
+    #[serial(burnttoast)]
     async fn parses_action_activation() {
         let stub = stub_path("stub_burnttoast");
         let _env = EnvGuard::set(&[(
@@ -611,7 +638,7 @@ mod burnttoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(burnttoast)]
     async fn parses_reply_activation() {
         let stub = stub_path("stub_burnttoast");
         let _env = EnvGuard::set(&[(
@@ -631,7 +658,7 @@ mod burnttoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(burnttoast)]
     async fn missing_marker_falls_back_to_dismissed() {
         let stub = stub_path("stub_burnttoast");
         // No JSON env var → stub emits no marker.
@@ -644,7 +671,7 @@ mod burnttoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(burnttoast)]
     async fn nonzero_exit_propagates_exited_error() {
         let stub = stub_path("stub_burnttoast");
         let _env = EnvGuard::set(&[("STUB_BURNTTOAST_EXIT", "9")]);
@@ -655,7 +682,7 @@ mod burnttoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(burnttoast)]
     async fn notice_only_timeout_maps_to_timeout_error() {
         // BurntToast notice-only timeout is 10000ms; sleep for 11000ms to trigger it.
         let stub = stub_path("stub_burnttoast");
@@ -670,7 +697,7 @@ mod burnttoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(burnttoast)]
     async fn interactive_request_does_not_timeout() {
         let stub = stub_path("stub_burnttoast");
         let _env = EnvGuard::set(&[
@@ -697,7 +724,7 @@ mod burnttoast_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(burnttoast)]
     async fn app_id_registration_succeeds_before_send() {
         // Do NOT call mark_app_id_registered — let the real registration path run.
         let stub = stub_path("stub_burnttoast");
@@ -740,7 +767,7 @@ mod terminal_notifier_stub {
     use serial_test::serial;
 
     #[tokio::test]
-    #[serial]
+    #[serial(terminal_notifier)]
     async fn success_uses_group_as_id_when_supplied() {
         let stub = stub_path("stub_terminal_notifier");
         let helper = terminal_notifier_helper(&stub);
@@ -751,7 +778,7 @@ mod terminal_notifier_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(terminal_notifier)]
     async fn replace_records_replaced_metadata() {
         let stub = stub_path("stub_terminal_notifier");
         let helper = terminal_notifier_helper(&stub);
@@ -764,7 +791,7 @@ mod terminal_notifier_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(terminal_notifier)]
     async fn nonzero_exit_propagates_exited_error() {
         let stub = stub_path("stub_terminal_notifier");
         let _env = EnvGuard::set(&[("STUB_TERMINAL_NOTIFIER_EXIT", "2")]);
@@ -775,7 +802,7 @@ mod terminal_notifier_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(terminal_notifier)]
     async fn notice_only_timeout_maps_to_timeout_error() {
         // terminal-notifier timeout is 5000ms; sleep for 6000ms to trigger it.
         let stub = stub_path("stub_terminal_notifier");
@@ -795,7 +822,7 @@ mod alerter_stub {
     use serial_test::serial;
 
     #[tokio::test]
-    #[serial]
+    #[serial(alerter)]
     async fn parses_action_clicked() {
         let stub = stub_path("stub_alerter");
         let _env = EnvGuard::set(&[
@@ -819,7 +846,7 @@ mod alerter_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(alerter)]
     async fn parses_replied_with_value_as_reply_text() {
         let stub = stub_path("stub_alerter");
         let _env = EnvGuard::set(&[
@@ -839,7 +866,7 @@ mod alerter_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(alerter)]
     async fn parses_closed_as_dismissed() {
         let stub = stub_path("stub_alerter");
         let _env = EnvGuard::set(&[("STUB_ALERTER_TYPE", "closed")]);
@@ -852,7 +879,7 @@ mod alerter_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(alerter)]
     async fn invalid_json_propagates_parse_error() {
         let stub = stub_path("stub_alerter");
         let _env = EnvGuard::set(&[("STUB_ALERTER_STDOUT_OVERRIDE", "not-json\n")]);
@@ -862,7 +889,7 @@ mod alerter_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(alerter)]
     async fn interactive_request_does_not_timeout() {
         // Alerter has no timeout for interactive requests. Sleeping for 2s
         // must not trigger a timeout error.
@@ -889,15 +916,17 @@ mod alerter_stub {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(alerter)]
     async fn notice_only_timeout_maps_to_timeout_error() {
+        // Use a very short timeout so the suite stays fast; we only need to
+        // verify that the helper surfaces HelperError::Timeout.
         let stub = stub_path("stub_alerter");
-        let _env = EnvGuard::set(&[("STUB_ALERTER_SLEEP_MS", "61000")]);
-        let helper = alerter_helper(&stub);
+        let _env = EnvGuard::set(&[("STUB_ALERTER_SLEEP_MS", "200")]);
+        let helper = alerter_helper_with_timeout(&stub, 100);
         let result = helper.send(&notice_request()).await;
         let error = result.expect_err("expected alerter stub to timeout");
         assert!(
-            matches!(error, HelperError::Timeout { timeout_ms: 60000 }),
+            matches!(error, HelperError::Timeout { timeout_ms: 100 }),
             "got {error:?}"
         );
     }
@@ -922,7 +951,7 @@ mod backend_fallback {
     use serial_test::serial;
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify)]
     async fn linux_backend_routes_through_dunstify_stub() {
         let dunstify_path = stub_path("stub_dunstify");
         let _env = EnvGuard::set(&[("STUB_DUNSTIFY_ID", "linux-99")]);
@@ -940,7 +969,7 @@ mod backend_fallback {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify, notify_send)]
     async fn linux_backend_falls_through_to_notify_send_when_dunstify_fails() {
         let dunstify_path = stub_path("stub_dunstify");
         let notify_path = stub_path("stub_notify_send");
@@ -970,7 +999,7 @@ mod backend_fallback {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast)]
     async fn windows_backend_routes_through_snoretoast_stub() {
         let snore_path = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[("STUB_SNORETOAST_EXIT", "1")]);
@@ -993,7 +1022,7 @@ mod backend_fallback {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(snoretoast, burnttoast)]
     async fn windows_backend_falls_through_to_burnttoast_when_snoretoast_fails() {
         let snore_path = stub_path("stub_snoretoast");
         let burnt_path = stub_path("stub_burnttoast");
@@ -1027,7 +1056,7 @@ mod backend_fallback {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(dunstify, notify_send)]
     async fn linux_backend_dunstify_timeout_falls_through_to_notify_send() {
         let dunstify_path = stub_path("stub_dunstify");
         let notify_path = stub_path("stub_notify_send");
@@ -1058,7 +1087,7 @@ mod backend_fallback {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(terminal_notifier)]
     async fn macos_backend_routes_through_terminal_notifier_stub() {
         let tn_path = stub_path("stub_terminal_notifier");
         let helpers: Vec<Arc<dyn HelperBackend>> =
@@ -1076,7 +1105,7 @@ mod backend_fallback {
     }
 
     #[tokio::test]
-    #[serial]
+    #[serial(terminal_notifier, alerter)]
     async fn macos_backend_falls_through_to_alerter_when_terminal_notifier_fails() {
         let tn_path = stub_path("stub_terminal_notifier");
         let alerter_path = stub_path("stub_alerter");
