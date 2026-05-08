@@ -299,6 +299,9 @@ pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
         "anthropic" => Some(crate::anthropic::openapi_registry()),
         "bitbucket" => Some(crate::bitbucket::openapi_registry()),
         "elevenlabs" => Some(crate::elevenlabs::openapi_registry()),
+        "artificial-analysis-data" | "artificial-analysis-critpt" => {
+            Some(crate::artificial_analysis::openapi_registry())
+        }
         "emqx-basic" | "emqx-bearer" => Some(crate::emqx::openapi_registry()),
         "eversolo" => Some(crate::eversolo::openapi_registry()),
         "gitea" => Some(crate::gitea::openapi_registry()),
@@ -340,6 +343,8 @@ pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
 pub fn registry_key_for(api_name: &str) -> String {
     match api_name {
         "Anthropic" => "anthropic".to_string(),
+        "ArtificialAnalysisData" => "artificial-analysis-data".to_string(),
+        "ArtificialAnalysisCritPt" => "artificial-analysis-critpt".to_string(),
         "Bitbucket" => "bitbucket".to_string(),
         "OpenAI" => "openai".to_string(),
         "ElevenLabs" => "elevenlabs".to_string(),
@@ -1089,6 +1094,8 @@ mod tests {
         // Mirrors the api_names table previously in schematic-gen/src/main.rs.
         let table = [
             ("Anthropic", "anthropic"),
+            ("ArtificialAnalysisData", "artificial-analysis-data"),
+            ("ArtificialAnalysisCritPt", "artificial-analysis-critpt"),
             ("OpenAI", "openai"),
             ("ElevenLabs", "elevenlabs"),
             ("Gitea", "gitea"),

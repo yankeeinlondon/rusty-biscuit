@@ -2393,6 +2393,7 @@ dependencies = [
  "schematic-definitions",
  "serde",
  "serde_json",
+ "serial_test",
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
