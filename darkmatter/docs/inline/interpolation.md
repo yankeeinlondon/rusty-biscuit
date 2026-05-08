@@ -101,7 +101,7 @@ Body interpolation runs after text replacement and page blocks have been applied
 
 The current implementation uses a source-first scanner approach (single-pass rewrite):
 
-- A scanner finds `{{ ... }}` spans in the document body (skipping inline code and fenced code blocks)
+- A scanner finds `{{ ... }}` spans in the document body. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case. Fenced and indented code blocks are skipped.
 - Each expression is parsed with a dedicated tokenizer and evaluator
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
 - Replacements are applied from the end of the string backward to preserve offsets
