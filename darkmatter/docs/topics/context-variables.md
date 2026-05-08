@@ -40,9 +40,6 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 | **Hardware** | `detect_hardware_summary` | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
 | **GPU** | `detect_gpus` (subprocess on macOS) | `gpu` |
 
-## CWD in Compose
-
-Some of the information provided in the context is based on the current working directory (process CWD, not the input file location).
 
 ## Information Provided
 
@@ -115,6 +112,8 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 ### Filesystem and Git
 
+> **Note:** the CWD in all file/git operations is the directory which _executed_ the `md compose` command **not** the directory where the composed document lives
+> 
 > **Note:** most discovery in this section leverages the `sniff` library
 
 | Variable               | Type              | Description                                                                        |
