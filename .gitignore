@@ -73,3 +73,5 @@ Cargo.lock
 **/*.pending-snap
 
 .opencode/package-lock.json
+**/lint-*timing.jsonl
+**/test-*timing.jsonl
