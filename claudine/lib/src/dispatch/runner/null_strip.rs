@@ -65,7 +65,7 @@ mod tests {
                 "e": [true, false, null]
             },
             "f": "string",
-            "g": 3.14,
+            "g": 1.5,
             "h": false
         });
         strip_nulls(&mut value);
@@ -79,7 +79,7 @@ mod tests {
                     "e": [true, false]
                 },
                 "f": "string",
-                "g": 3.14,
+                "g": 1.5,
                 "h": false
             })
         );
