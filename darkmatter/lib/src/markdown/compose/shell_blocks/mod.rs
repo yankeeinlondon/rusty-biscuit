@@ -114,7 +114,7 @@ pub(crate) fn run_shell_blocks_stage(
                 },
                 error_handling: region.options.clone(),
                 timeout_override: region.timeout_override,
-                pipeline: None,
+                pipeline: Some(command.pipeline.clone()),
             };
 
             match prepare_directive(&directive, options, &policy_paths, runtime) {
@@ -206,7 +206,8 @@ pub(crate) fn run_shell_blocks_stage_for_markdown(
 mod tests {
     use super::*;
     use crate::markdown::compose::shell_expansion::types::{
-        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
+        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions,
+        ShellTimeoutBehavior,
     };
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -303,6 +304,26 @@ mod tests {
     }
 
     #[test]
+    fn pipeline_command_block() {
+        let content = "::shell-block\necho first && echo second\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
+        assert_eq!(result, "first\n\nsecond\n");
+        assert_eq!(report.shell_blocks_applied, 1);
+    }
+
+    #[test]
+    fn pipeline_command_block_supports_stdout_null_redirect() {
+        let content = "::shell-block\necho hidden > /dev/null && echo visible\n::end-block\n";
+        let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
+        assert_eq!(result, "visible\n");
+        assert_eq!(report.shell_blocks_applied, 1);
+    }
+
+    #[test]
     fn denial_prevents_execution() {
         let content = "::shell-block\necho hello\necho world\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(DenyAllHandler));
@@ -381,6 +402,24 @@ mod tests {
             err.to_string().contains("timed out"),
             "Expected timeout error: {err}"
         );
+    }
+
+    #[test]
+    fn pipeline_timeout_fallback_emits_warning() {
+        let content = "::shell-block\nsleep 1 && echo after\n::end-block\n";
+        let temp_dir = TempDir::new().unwrap();
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            timeout: std::time::Duration::from_millis(100),
+            timeout_behavior: ShellTimeoutBehavior::EmptyString,
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(AllowAllHandler)),
+            ..Default::default()
+        });
+        let mut runtime = ShellExpansionRuntime::new();
+        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime).unwrap();
+        assert!(result.contains("after"));
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].message.contains("timed out"));
     }
 
     // ── Phase 4 edge-case tests ───────────────────────────────────────

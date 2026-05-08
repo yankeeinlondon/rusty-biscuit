@@ -58,7 +58,6 @@ pub(crate) fn split_logical_commands(
             let start_byte = current_start_byte.unwrap();
             let end_byte = line_start + line.len();
 
-            // Tokenize
             let shell_tokens = crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw)
                 .map_err(|e| ShellBlockError::Parse {
                     line: start_line,
@@ -67,34 +66,16 @@ pub(crate) fn split_logical_commands(
                     source_file: None,
                 })?;
 
-            // Extract only word tokens; reject operators/redirections for shell blocks
-            let mut tokens = Vec::new();
-            for st in &shell_tokens {
-                match st {
-                    crate::markdown::compose::shell_expansion::tokenize::ShellToken::Word(w) => {
-                        tokens.push(w.clone());
-                    }
-                    other => {
-                        let desc = match other {
-                            crate::markdown::compose::shell_expansion::tokenize::ShellToken::And => {
-                                "Chain operators (&&) are not allowed in shell blocks"
-                            }
-                            crate::markdown::compose::shell_expansion::tokenize::ShellToken::Or => {
-                                "Chain operators (||) are not allowed in shell blocks"
-                            }
-                            _ => "Redirections are not allowed in shell blocks",
-                        };
-                        return Err(ShellBlockError::Parse {
-                            line: start_line,
-                            message: desc.to_string(),
-                            excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
-                            source_file: None,
-                        });
-                    }
-                }
-            }
+            let pipeline =
+                crate::markdown::compose::shell_expansion::tokenize::parse_pipeline(&shell_tokens)
+                    .map_err(|e| ShellBlockError::Parse {
+                        line: start_line,
+                        message: format!("Command parsing failed: {e}"),
+                        excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                        source_file: None,
+                    })?;
 
-            if tokens.is_empty() {
+            if pipeline.actions.is_empty() {
                 return Err(ShellBlockError::Parse {
                     line: start_line,
                     message: "Empty command after tokenization".to_string(),
@@ -103,13 +84,14 @@ pub(crate) fn split_logical_commands(
                 });
             }
 
-            let executable = tokens[0].clone();
-            let args = tokens[1..].to_vec();
+            let executable = pipeline.actions[0].command.executable.clone();
+            let args = pipeline.actions[0].command.args.clone();
 
             commands.push(ShellBlockCommand {
                 raw_command: raw,
                 executable,
                 args,
+                pipeline,
                 physical_span: start_byte..end_byte,
                 start_line,
             });
@@ -234,6 +216,15 @@ mod tests {
     }
 
     #[test]
+    fn accepts_stdout_null_redirect() {
+        let cmds = split_logical_commands("echo hello > /dev/null", 1).unwrap();
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].executable, "echo");
+        assert_eq!(cmds[0].args, vec!["hello"]);
+        assert_eq!(cmds[0].pipeline.actions.len(), 1);
+    }
+
+    #[test]
     fn empty_body() {
         let cmds = split_logical_commands("", 1).unwrap();
         assert!(cmds.is_empty());
@@ -260,15 +251,13 @@ mod tests {
     }
 
     #[test]
-    fn double_ampersand_rejected() {
-        let result = split_logical_commands("make && make install", 1);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Chain operators")
-        );
+    fn double_ampersand_accepted_as_pipeline() {
+        let cmds = split_logical_commands("make && make install", 1).unwrap();
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].executable, "make");
+        assert_eq!(cmds[0].pipeline.actions.len(), 2);
+        assert_eq!(cmds[0].pipeline.actions[1].command.executable, "make");
+        assert_eq!(cmds[0].pipeline.actions[1].command.args, vec!["install"]);
     }
 
     #[test]

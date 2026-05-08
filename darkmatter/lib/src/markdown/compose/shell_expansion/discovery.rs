@@ -52,9 +52,7 @@ fn render_action(executable: &str, args: &[String]) -> String {
 /// Yields one tuple per executable action in a directive: the per-action raw
 /// command rendering, the executable, and its args. For non-pipeline
 /// directives this yields a single entry.
-fn directive_action_iter(
-    directive: &ShellDirective,
-) -> Vec<(String, String, Vec<String>)> {
+fn directive_action_iter(directive: &ShellDirective) -> Vec<(String, String, Vec<String>)> {
     if let Some(ref pipeline) = directive.pipeline
         && pipeline.actions.len() > 1
     {
@@ -232,41 +230,49 @@ pub fn collect_shell_commands(
             .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
 
         for command in commands {
-            let (executable, args) = if which::which(&command.executable).is_ok() {
-                (command.executable.clone(), command.args.clone())
-            } else if let Some(resolved) = resolve_alias(&command.executable) {
-                let mut merged_args = resolved.args;
-                merged_args.extend_from_slice(&command.args);
-                (resolved.executable, merged_args)
-            } else {
-                (command.executable.clone(), command.args.clone())
-            };
+            let (source_file, command_line) = lookup_provenance(
+                pair.body_span.start + command.physical_span.start,
+                command.start_line,
+                &report.source_map,
+                composed.content(),
+                &default_source,
+            );
 
-            let normalized = normalize_command(&executable, &args);
+            let (_, start_line) = lookup_provenance(
+                pair.span.start,
+                pair.start_line,
+                &report.source_map,
+                composed.content(),
+                &default_source,
+            );
 
-            if seen.insert(normalized.clone()) {
-                let (source_file, command_line) = lookup_provenance(
-                    pair.body_span.start + command.physical_span.start,
-                    command.start_line,
-                    &report.source_map,
-                    composed.content(),
-                    &default_source,
-                );
+            for action in &command.pipeline.actions {
+                let exe_raw = action.command.executable.clone();
+                let args_raw = action.command.args.clone();
+                let raw_command = render_action(&exe_raw, &args_raw);
 
-                let (_, start_line) = lookup_provenance(
-                    pair.span.start,
-                    pair.start_line,
-                    &report.source_map,
-                    composed.content(),
-                    &default_source,
-                );
+                let (executable, args) = if which::which(&exe_raw).is_ok() {
+                    (exe_raw.clone(), args_raw.clone())
+                } else if let Some(resolved) = resolve_alias(&exe_raw) {
+                    let mut merged_args = resolved.args;
+                    merged_args.extend_from_slice(&args_raw);
+                    (resolved.executable, merged_args)
+                } else {
+                    (exe_raw.clone(), args_raw.clone())
+                };
+
+                let normalized = normalize_command(&executable, &args);
+
+                if !seen.insert(normalized.clone()) {
+                    continue;
+                }
 
                 entries.push(ShellCommandEntry {
-                    raw_command: command.raw_command,
+                    raw_command,
                     executable,
                     args,
                     normalized,
-                    source_file,
+                    source_file: source_file.clone(),
                     origin: ShellCommandOrigin::ShellBlock {
                         start_line,
                         command_line,
@@ -848,10 +854,7 @@ replace:
             executables.contains(&"echo"),
             "missing echo: {executables:?}"
         );
-        assert!(
-            executables.contains(&"pwd"),
-            "missing pwd: {executables:?}"
-        );
+        assert!(executables.contains(&"pwd"), "missing pwd: {executables:?}");
     }
 
     /// Body chains with redirection still emit a per-action entry, and the
@@ -887,6 +890,26 @@ replace:
                 command_line: 2,
             }
         );
+    }
+
+    #[test]
+    fn shell_block_chain_emits_one_entry_per_action() {
+        let content = "::shell-block\necho ok && pwd || ls\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(raw.contains(&"echo ok"), "missing echo ok: {raw:?}");
+        assert!(raw.contains(&"pwd"), "missing pwd: {raw:?}");
+        assert!(raw.contains(&"ls"), "missing ls: {raw:?}");
+
+        let blocks: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.origin, ShellCommandOrigin::ShellBlock { .. }))
+            .collect();
+        assert_eq!(blocks.len(), 3);
     }
 
     #[test]
