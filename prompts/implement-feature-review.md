@@ -72,6 +72,9 @@ The plan has {{total_phases}} phases, but your task is to focus EXCLUSIVELY on i
 
 ## **IMPORTANT:**
 
+- do NOT modify the `ready` property in the review file after implementing
+    - you may feel that everything in that review was fixed but the review's assessment at that time should not change
+    - furthermore, we will be running another review _after_ you've completed here to validate that everything is fixed
 ::block when="ctx.current_package_area"
 - use the '{{ctx.current_package_area}}' skill during the task
 - do not commit your work to git (this will be done as an independent process which you are not responsible for)
