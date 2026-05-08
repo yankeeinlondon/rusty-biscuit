@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Artificial_analysis",
-    "description": "ArtificialAnalysisData: Artificial Analysis free data API: LLM and media-model benchmark catalogs.\nArtificialAnalysisCritPt: Artificial Analysis CritPt benchmark: submit code-generation results for evaluation.",
+    "description": "ArtificialAnalysisData: Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.\nArtificialAnalysisCritPt: Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

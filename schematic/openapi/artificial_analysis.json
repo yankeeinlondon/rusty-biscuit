@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "artificial_analysis",
-    "description": "Artificial Analysis free data API: LLM and media-model benchmark catalogs.",
+    "description": "Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.",
     "version": "0.1.0"
   },
   "servers": [

@@ -76,7 +76,9 @@ pub fn openapi_registry() -> SchemaRegistry {
 pub fn define_artificial_analysis_data_api() -> RestApi {
     RestApi {
         name: "ArtificialAnalysisData".to_string(),
-        description: "Artificial Analysis free data API: LLM and media-model benchmark catalogs."
+        description: "Artificial Analysis free data API: LLM and media-model benchmark \
+             catalogs. Attribution: as required by the Artificial Analysis API terms, all \
+             usage must include attribution to https://artificialanalysis.ai/."
             .to_string(),
         base_url: "https://artificialanalysis.ai/api/v2".to_string(),
         docs_url: Some("https://artificialanalysis.ai/api-reference".to_string()),
@@ -190,7 +192,8 @@ pub fn define_artificial_analysis_critpt_api() -> RestApi {
     RestApi {
         name: "ArtificialAnalysisCritPt".to_string(),
         description: "Artificial Analysis CritPt benchmark: submit code-generation results for \
-             evaluation."
+             evaluation. Attribution: as required by the Artificial Analysis API terms, all \
+             usage must include attribution to https://artificialanalysis.ai/."
             .to_string(),
         base_url: "https://artificialanalysis.ai/api/v2".to_string(),
         docs_url: Some("https://artificialanalysis.ai/api-reference".to_string()),
