@@ -31,9 +31,7 @@ use schematic_define::params::{EndpointParams, QueryParamType};
 use schematic_define::{
     ApiRequest, ApiResponse, AuthStrategy, Endpoint, FormField, RestApi, RestMethod, Schema,
 };
-use schematic_gen::postman_output::{
-    build_postman_collection, build_postman_collection_grouped,
-};
+use schematic_gen::postman_output::{build_postman_collection, build_postman_collection_grouped};
 use serde_json::Value;
 
 // --- Schema validator ------------------------------------------------------
@@ -113,7 +111,8 @@ fn assert_golden(name: &str, produced: &Value) {
     });
 
     assert_eq!(
-        pretty, expected,
+        pretty,
+        expected,
         "golden fixture {} drifted; regenerate with BLESS_POSTMAN_GOLDEN=1 \
          after confirming the diff is intentional",
         fixture_path.display(),
@@ -292,17 +291,16 @@ fn build_file_upload_elevenlabs() -> Value {
 /// `:owner`/`:repo` segments + a `variable` block, and that the query
 /// param is exposed as a Postman query entry.
 fn build_path_query_params_github() -> Value {
-    let params = EndpointParams::default()
-        .with_query_param(
-            "state",
-            QueryParamType::Enum(vec![
-                "open".to_string(),
-                "closed".to_string(),
-                "all".to_string(),
-            ]),
-            false,
-            Some("Issue state filter"),
-        );
+    let params = EndpointParams::default().with_query_param(
+        "state",
+        QueryParamType::Enum(vec![
+            "open".to_string(),
+            "closed".to_string(),
+            "all".to_string(),
+        ]),
+        false,
+        Some("Issue state filter"),
+    );
 
     let api = rest_api(
         "GitHub",
@@ -554,15 +552,14 @@ fn golden_grouped_module_ollama() {
         })
         .unwrap_or_default();
     assert!(
-        var_keys.contains(&"baseUrl".to_string())
-            && var_keys.contains(&"baseUrl2".to_string()),
+        var_keys.contains(&"baseUrl".to_string()) && var_keys.contains(&"baseUrl2".to_string()),
         "expected baseUrl + baseUrl2 in grouped collection, got {:?}",
         var_keys,
     );
 
     // Verify OllamaOpenAI's ListModels uses baseUrl2, not baseUrl
-    let list_models_req = find_request_by_name(&value, "ListModels")
-        .expect("ListModels request must exist");
+    let list_models_req =
+        find_request_by_name(&value, "ListModels").expect("ListModels request must exist");
     let raw_url = list_models_req.pointer("/url/raw").and_then(Value::as_str);
     assert_eq!(
         raw_url,
@@ -578,7 +575,11 @@ fn golden_grouped_module_ollama() {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    assert_eq!(host, vec!["{{baseUrl2}}"], "OllamaOpenAI host must use baseUrl2");
+    assert_eq!(
+        host,
+        vec!["{{baseUrl2}}"],
+        "OllamaOpenAI host must use baseUrl2"
+    );
 
     assert_golden("grouped_module_ollama", &value);
 }
@@ -644,4 +645,3 @@ fn walk_request_names_inner(value: &Value, out: &mut Vec<String>) {
         _ => {}
     }
 }
-

@@ -11,16 +11,16 @@ use schematic_define::{ApiResponse, Endpoint, QueryParamType};
 
 use crate::parser::extract_path_params;
 
-mod shared;
-mod single;
 mod body;
 mod multipart;
-mod urlencoded;
 mod paginated;
+mod shared;
+mod single;
+mod urlencoded;
 
 use shared::{
-    extract_query_params, generate_path_format, query_param_type_to_rust_type,
-    to_snake_case, QueryParamInfo,
+    QueryParamInfo, extract_query_params, generate_path_format, query_param_type_to_rust_type,
+    to_snake_case,
 };
 
 // Re-export for sibling codegen modules and tests
@@ -120,7 +120,8 @@ pub fn generate_request_struct_with_options(
     let derives = generate_derives(has_body);
 
     // Generate Default impl if we have a body (manual impl needed)
-    let default_impl = body::generate_default_impl(&struct_name, &path_params, &query_params, has_body);
+    let default_impl =
+        body::generate_default_impl(&struct_name, &path_params, &query_params, has_body);
 
     // Generate new() constructor method body for type-safe construction
     let new_method = generate_new_method(&path_params, &query_params, has_body, body_type_name);

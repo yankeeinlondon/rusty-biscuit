@@ -89,10 +89,26 @@ fn single_api_with_missing_schema_fails_validation() {
     // Verify the rendered error message contains every diagnostic field that
     // a generator user needs: module, API, and missing list.
     let rendered = render_error("synthetic", &api.name, &missing);
-    assert!(rendered.contains("\"synthetic\""), "expected module name in: {}", rendered);
-    assert!(rendered.contains("\"SyntheticOne\""), "expected API name in: {}", rendered);
-    assert!(rendered.contains("MissingResponseType"), "expected missing type in: {}", rendered);
-    assert!(rendered.contains("--no-openapi"), "expected escape-hatch hint in: {}", rendered);
+    assert!(
+        rendered.contains("\"synthetic\""),
+        "expected module name in: {}",
+        rendered
+    );
+    assert!(
+        rendered.contains("\"SyntheticOne\""),
+        "expected API name in: {}",
+        rendered
+    );
+    assert!(
+        rendered.contains("MissingResponseType"),
+        "expected missing type in: {}",
+        rendered
+    );
+    assert!(
+        rendered.contains("--no-openapi"),
+        "expected escape-hatch hint in: {}",
+        rendered
+    );
 }
 
 #[test]
@@ -178,14 +194,14 @@ fn real_registries_still_pass_strict_completeness() {
 
     for api_name in api_names {
         let key = registry_key_for(api_name);
-        let registry = get_registry(&key)
-            .unwrap_or_else(|| panic!("get_registry({key:?}) returned None"));
+        let registry =
+            get_registry(&key).unwrap_or_else(|| panic!("get_registry({key:?}) returned None"));
         let api = lookup_api(api_name);
-        registry.validate_completeness(&api).unwrap_or_else(|missing| {
-            panic!(
-                "{api_name}: per-API registry should be complete, missing {missing:?}",
-            )
-        });
+        registry
+            .validate_completeness(&api)
+            .unwrap_or_else(|missing| {
+                panic!("{api_name}: per-API registry should be complete, missing {missing:?}",)
+            });
     }
 }
 
@@ -200,12 +216,14 @@ fn real_module_registries_still_pass_strict_completeness() {
             None => continue, // Modules without a registry are not exported.
         };
         for api in member_apis.iter() {
-            registry.validate_completeness(api).unwrap_or_else(|missing| {
-                panic!(
-                    "module {module_name:?}, API {api_name:?}: missing {missing:?}",
-                    api_name = api.name,
-                )
-            });
+            registry
+                .validate_completeness(api)
+                .unwrap_or_else(|missing| {
+                    panic!(
+                        "module {module_name:?}, API {api_name:?}: missing {missing:?}",
+                        api_name = api.name,
+                    )
+                });
         }
     }
 }
@@ -244,7 +262,10 @@ fn request_body_types_must_be_registered() {
 
     let registry = SchemaRegistry::new();
     let result = registry.validate_completeness(&api);
-    assert!(result.is_err(), "expected validation to fail for missing request body type");
+    assert!(
+        result.is_err(),
+        "expected validation to fail for missing request body type"
+    );
 
     let missing = result.unwrap_err();
     assert!(
