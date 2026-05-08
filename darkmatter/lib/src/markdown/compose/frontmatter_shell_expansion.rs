@@ -123,10 +123,12 @@ pub(crate) fn parse_shell_value(
     }))
 }
 
-/// Validates that the executable token doesn't contain interpolation.
+/// Validates that no executable token in the pipeline comes from interpolation.
 ///
 /// Checks the ORIGINAL (pre-interpolation) string to ensure `{{ }}` doesn't
-/// appear in the executable position (first token after `$(` and before whitespace).
+/// appear in any executable position — that is, the first non-whitespace token
+/// after `$(`, plus the first non-whitespace token after every top-level `&&`
+/// or `||` chain operator.
 fn validate_no_executable_interpolation(
     original: &str,
     key: &str,
@@ -141,18 +143,80 @@ fn validate_no_executable_interpolation(
 
     let inner = &rest[..close_pos];
 
-    // Extract the executable portion (up to first whitespace)
-    let executable_portion = first_token_portion(inner);
-
-    // Check if it contains {{ and }}
-    if executable_portion.contains("{{") && executable_portion.contains("}}") {
-        return Err(frontmatter_parse_error(
-            key,
-            "Frontmatter shell executable may not come from interpolation",
-        ));
+    for segment in split_at_chain_operators(inner) {
+        let executable_portion = first_token_portion(segment);
+        if executable_portion.contains("{{") && executable_portion.contains("}}") {
+            return Err(frontmatter_parse_error(
+                key,
+                "Frontmatter shell executable may not come from interpolation",
+            ));
+        }
     }
 
     Ok(())
+}
+
+/// Splits an inner `$(...)` body at top-level `&&` and `||` operators,
+/// respecting single quotes, double quotes, and backslash escaping.
+///
+/// Each returned segment corresponds to one chain action; the executable
+/// position of that action is the first non-whitespace token of the segment.
+fn split_at_chain_operators(input: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if escaped {
+            escaped = false;
+            i += 1;
+            continue;
+        }
+
+        let ch = bytes[i];
+        match ch {
+            b'\\' if !in_single => {
+                escaped = true;
+                i += 1;
+            }
+            b'\'' if !in_double => {
+                in_single = !in_single;
+                i += 1;
+            }
+            b'"' if !in_single => {
+                in_double = !in_double;
+                i += 1;
+            }
+            b'&' if !in_single
+                && !in_double
+                && i + 1 < bytes.len()
+                && bytes[i + 1] == b'&' =>
+            {
+                segments.push(&input[start..i]);
+                i += 2;
+                start = i;
+            }
+            b'|' if !in_single
+                && !in_double
+                && i + 1 < bytes.len()
+                && bytes[i + 1] == b'|' =>
+            {
+                segments.push(&input[start..i]);
+                i += 2;
+                start = i;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    segments.push(&input[start..]);
+    segments
 }
 
 /// Scans all top-level string-valued frontmatter entries and returns candidates.
@@ -399,6 +463,64 @@ mod tests {
         let resolved = "$(ls arg)";
         let result = parse_shell_value(resolved, "key", Some(original));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_interpolated_executable_after_or_operator() {
+        let original = "$(false || {{cmd}} arg)";
+        let resolved = "$(false || echo arg)";
+        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("may not come from interpolation"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_interpolated_executable_after_and_operator() {
+        let original = "$(true && {{cmd}} arg)";
+        let resolved = "$(true && echo arg)";
+        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("may not come from interpolation"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_interpolated_executable_in_third_chain_segment() {
+        let original = "$(true && false || {{cmd}} arg)";
+        let resolved = "$(true && false || echo arg)";
+        let result = parse_shell_value(resolved, "key", Some(original));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn accepts_interpolated_argument_after_chain_operator() {
+        let original = "$(false || echo {{file}})";
+        let resolved = "$(false || echo README.md)";
+        let result = parse_shell_value(resolved, "key", Some(original));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn ignores_chain_operators_inside_quotes() {
+        // `||` inside single quotes is literal, not a chain operator,
+        // so the interpolation here is in argument position, not executable.
+        let original = "$(echo 'a || {{cmd}}')";
+        let resolved = "$(echo 'a || hello')";
+        let result = parse_shell_value(resolved, "key", Some(original));
+        assert!(result.is_ok());
     }
 
     #[test]

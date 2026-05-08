@@ -348,6 +348,20 @@ pub fn tokenize_simple(input: &str) -> Result<Vec<String>, ShellExpansionError> 
 }
 
 /// Parses tokens into a pipeline structure for chain execution.
+///
+/// ## Combined Redirections
+///
+/// Multiple redirection tokens on the same command action are accepted and
+/// resolved using shell-style left-to-right dup semantics:
+///
+/// - `cmd > /dev/null 2>&1` → both streams suppressed (stderr dups the
+///   already-nulled stdout).
+/// - `cmd 2>&1 > /dev/null` → only stdout suppressed; stderr keeps its
+///   reference to the original (captured) stdout.
+/// - `cmd 2> /dev/null >&2` → both streams suppressed (stdout dups the
+///   already-nulled stderr).
+/// - `cmd >&2 2> /dev/null` → only stderr suppressed; stdout keeps its
+///   reference to the original (captured) stderr.
 pub fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpansionError> {
     let mut actions = Vec::new();
     let mut current_words = Vec::new();
@@ -368,16 +382,42 @@ pub fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpan
                 operator = ChainOperator::Or;
             }
             ShellToken::RedirectStdoutNull => {
+                // Shell-style dup resolution: if stderr was previously duped
+                // to stdout via `2>&1`, it captured stdout's prior target —
+                // changing stdout now must not retroactively change stderr.
+                if redirection.stderr == StderrTarget::ToStdout {
+                    redirection.stderr = match redirection.stdout {
+                        StdoutTarget::Capture => StderrTarget::Capture,
+                        StdoutTarget::Null => StderrTarget::Null,
+                        StdoutTarget::ToStderr => StderrTarget::Capture,
+                    };
+                }
                 redirection.stdout = StdoutTarget::Null;
             }
             ShellToken::RedirectStderrNull => {
+                if redirection.stdout == StdoutTarget::ToStderr {
+                    redirection.stdout = match redirection.stderr {
+                        StderrTarget::Capture => StdoutTarget::Capture,
+                        StderrTarget::Null => StdoutTarget::Null,
+                        StderrTarget::ToStdout => StdoutTarget::Capture,
+                    };
+                }
                 redirection.stderr = StderrTarget::Null;
             }
             ShellToken::RedirectStderrToStdout => {
-                redirection.stderr = StderrTarget::ToStdout;
+                // `2>&1` snapshots stdout's CURRENT target into stderr.
+                redirection.stderr = match redirection.stdout {
+                    StdoutTarget::Capture => StderrTarget::ToStdout,
+                    StdoutTarget::Null => StderrTarget::Null,
+                    StdoutTarget::ToStderr => StderrTarget::Capture,
+                };
             }
             ShellToken::RedirectStdoutToStderr => {
-                redirection.stdout = StdoutTarget::ToStderr;
+                redirection.stdout = match redirection.stderr {
+                    StderrTarget::Capture => StdoutTarget::ToStderr,
+                    StderrTarget::Null => StdoutTarget::Null,
+                    StderrTarget::ToStdout => StdoutTarget::Capture,
+                };
             }
         }
     }
@@ -724,6 +764,61 @@ mod tests {
         let tokens = tokenize("cmd 2>&1").unwrap();
         let pipeline = parse_pipeline(&tokens).unwrap();
         assert_eq!(pipeline.actions[0].command.redirection.stderr, StderrTarget::ToStdout);
+    }
+
+    /// `> /dev/null 2>&1`: stdout is redirected to null first, then `2>&1`
+    /// snapshots the now-null stdout into stderr — both go to /dev/null.
+    #[test]
+    fn pipeline_combined_stdout_null_then_merge_resolves_to_both_null() {
+        let tokens = tokenize("cmd > /dev/null 2>&1").unwrap();
+        let pipeline = parse_pipeline(&tokens).unwrap();
+        let redir = &pipeline.actions[0].command.redirection;
+        assert_eq!(redir.stdout, StdoutTarget::Null);
+        assert_eq!(redir.stderr, StderrTarget::Null);
+    }
+
+    /// `2>&1 > /dev/null`: stderr captures stdout's CURRENT (Capture) target,
+    /// then stdout is nulled — stderr keeps the Capture reference, matching
+    /// real shell semantics.
+    #[test]
+    fn pipeline_combined_merge_then_stdout_null_keeps_stderr_captured() {
+        let tokens = tokenize("cmd 2>&1 > /dev/null").unwrap();
+        let pipeline = parse_pipeline(&tokens).unwrap();
+        let redir = &pipeline.actions[0].command.redirection;
+        assert_eq!(redir.stdout, StdoutTarget::Null);
+        assert_eq!(redir.stderr, StderrTarget::Capture);
+    }
+
+    /// `> /dev/null 2> /dev/null`: independent nullings of both streams.
+    #[test]
+    fn pipeline_combined_both_streams_to_null() {
+        let tokens = tokenize("cmd > /dev/null 2> /dev/null").unwrap();
+        let pipeline = parse_pipeline(&tokens).unwrap();
+        let redir = &pipeline.actions[0].command.redirection;
+        assert_eq!(redir.stdout, StdoutTarget::Null);
+        assert_eq!(redir.stderr, StderrTarget::Null);
+    }
+
+    /// `2> /dev/null >&2`: stderr nulled, then stdout dups the now-null
+    /// stderr — both streams suppressed.
+    #[test]
+    fn pipeline_combined_stderr_null_then_route_resolves_to_both_null() {
+        let tokens = tokenize("cmd 2> /dev/null >&2").unwrap();
+        let pipeline = parse_pipeline(&tokens).unwrap();
+        let redir = &pipeline.actions[0].command.redirection;
+        assert_eq!(redir.stdout, StdoutTarget::Null);
+        assert_eq!(redir.stderr, StderrTarget::Null);
+    }
+
+    /// `>&2 2> /dev/null`: stdout dups stderr (Capture), then stderr nulled —
+    /// stdout keeps the Capture reference.
+    #[test]
+    fn pipeline_combined_route_then_stderr_null_keeps_stdout_captured() {
+        let tokens = tokenize("cmd >&2 2> /dev/null").unwrap();
+        let pipeline = parse_pipeline(&tokens).unwrap();
+        let redir = &pipeline.actions[0].command.redirection;
+        assert_eq!(redir.stdout, StdoutTarget::Capture);
+        assert_eq!(redir.stderr, StderrTarget::Null);
     }
 
     #[test]

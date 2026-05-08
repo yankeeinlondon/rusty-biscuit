@@ -1855,6 +1855,126 @@ name: world
         assert!(composed.content().contains("routed"));
     }
 
+    /// `> /dev/null 2>&1` suppresses BOTH stdout and stderr.
+    ///
+    /// Per shell semantics, `2>&1` after `>/dev/null` dups stderr to the
+    /// already-redirected stdout (now /dev/null), so both streams vanish.
+    #[test]
+    fn redirection_stdout_null_then_merge_suppresses_both_streams() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "Before\n::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" > /dev/null 2>&1\nAfter\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(body.contains("Before"));
+        assert!(body.contains("After"));
+        assert!(!body.contains("OUT"), "stdout should be suppressed: {body:?}");
+        assert!(!body.contains("ERR"), "stderr should be suppressed: {body:?}");
+    }
+
+    /// `2>&1 > /dev/null` differs from `> /dev/null 2>&1`: stderr keeps a
+    /// reference to the ORIGINAL stdout (capture), so only stdout is
+    /// suppressed and stderr remains visible.
+    #[test]
+    fn redirection_merge_then_stdout_null_only_suppresses_stdout() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" 2>&1 > /dev/null\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(!body.contains("OUT"), "stdout should be suppressed: {body:?}");
+        assert!(body.contains("ERR"), "stderr should remain visible: {body:?}");
+    }
+
+    /// `> /dev/null 2> /dev/null` independently nulls both streams.
+    #[test]
+    fn redirection_both_streams_null_suppresses_both() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "Before\n::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" > /dev/null 2> /dev/null\nAfter\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(body.contains("Before"));
+        assert!(body.contains("After"));
+        assert!(!body.contains("OUT"));
+        assert!(!body.contains("ERR"));
+    }
+
+    /// `2> /dev/null >&2` first nulls stderr, then routes stdout to the
+    /// already-nulled stderr — both streams vanish.
+    #[test]
+    fn redirection_stderr_null_then_route_stdout_to_stderr_suppresses_both() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "Before\n::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" 2> /dev/null >&2\nAfter\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(body.contains("Before"));
+        assert!(body.contains("After"));
+        assert!(!body.contains("OUT"));
+        assert!(!body.contains("ERR"));
+    }
+
     /// Trailing chain operator at the body level produces a parse error.
     #[test]
     fn body_directive_trailing_operator_is_rejected() {
