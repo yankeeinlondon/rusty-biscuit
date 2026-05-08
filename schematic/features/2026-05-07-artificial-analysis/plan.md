@@ -6,6 +6,16 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/registry.rs
+  - schematic/definitions/src/prelude.rs
+docs_updated_during_phase_2:
+  - schematic/definitions/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
   - schematic-definitions
 ---
