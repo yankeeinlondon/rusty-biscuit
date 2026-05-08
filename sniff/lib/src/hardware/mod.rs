@@ -108,9 +108,8 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
             let avail = s.available_memory();
             (avail > 0).then_some(avail)
         });
-        let available_bytes = available.unwrap_or_else(|| {
-            sys.map(|s| s.free_memory()).unwrap_or(0)
-        });
+        let available_bytes =
+            available.unwrap_or_else(|| sys.map(|s| s.free_memory()).unwrap_or(0));
 
         MemoryInfo {
             total_bytes: sys.map(|s| s.total_memory()).unwrap_or(0),

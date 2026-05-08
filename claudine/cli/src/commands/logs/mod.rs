@@ -3,9 +3,7 @@ use clap::{Args, Subcommand};
 use color_eyre::eyre::{Result, eyre};
 
 use claudine::provider::Provider;
-use claudine::reporting::{
-    DateRange, ReportingFilters, ReportingStore, SyncRequest,
-};
+use claudine::reporting::{DateRange, ReportingFilters, ReportingStore, SyncRequest};
 
 use crate::cli_utils::parse_naive_date;
 use crate::log;
@@ -332,8 +330,8 @@ fn best_effort_sync(store: &mut ReportingStore, request: SyncRequest) {
 mod tests {
     use super::common::{render_provider_split, render_repo_entry};
     use super::*;
-    use claudine::reporting::ProviderSplit;
     use clap::Parser;
+    use claudine::reporting::ProviderSplit;
 
     #[derive(Parser)]
     struct TestLogsCli {

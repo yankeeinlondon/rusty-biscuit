@@ -15,10 +15,7 @@ use unchained_ai::rigging::providers::Provider;
 /// Returns `Some(ProviderModelMetadata)` when the provider has a dedicated
 /// parser, or `None` for providers that return minimal metadata and should
 /// rely on Parsera data instead.
-pub fn parse_provider_metadata(
-    provider: Provider,
-    value: &Value,
-) -> Option<ProviderModelMetadata> {
+pub fn parse_provider_metadata(provider: Provider, value: &Value) -> Option<ProviderModelMetadata> {
     match provider {
         Provider::OpenRouter => Some(openrouter::parse_openrouter_model(value)),
         _ => None,

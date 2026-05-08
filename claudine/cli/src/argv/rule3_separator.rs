@@ -7,8 +7,8 @@
 use std::ffi::OsString;
 
 use crate::argv::{
-    as_utf8, find_subcommand, first_dash_dash_index, is_composition_flag_with_value, looks_like_flag,
-    looks_like_setter, COMPOSITION_SUBCOMMANDS,
+    COMPOSITION_SUBCOMMANDS, as_utf8, find_subcommand, first_dash_dash_index,
+    is_composition_flag_with_value, looks_like_flag, looks_like_setter,
 };
 
 /// Apply the first half of Rule 3: when composition flags appear after the

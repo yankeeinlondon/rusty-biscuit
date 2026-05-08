@@ -2,7 +2,10 @@ use serde_json::Value;
 
 use crate::actions::{HookDecision, HookResponse};
 
-pub(super) fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookResponse) -> bool {
+pub(super) fn should_replace_selected(
+    current: Option<&HookResponse>,
+    candidate: &HookResponse,
+) -> bool {
     match current {
         None => true,
         Some(existing) => {

@@ -6,9 +6,7 @@
 
 use std::ffi::OsString;
 
-use crate::argv::{
-    COMPOSITION_SUBCOMMANDS, find_subcommand, first_dash_dash_index,
-};
+use crate::argv::{COMPOSITION_SUBCOMMANDS, find_subcommand, first_dash_dash_index};
 
 /// Apply Rule 4: hoist `-h`/`--help` on composition subcommands to argv
 /// position 1 so the root [`Cli::help`] handler fires.

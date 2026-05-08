@@ -51,6 +51,26 @@ impl Provider {
     pub fn is_local(&self) -> bool {
         self.config().is_local
     }
+
+    /// Returns a human-readable display name for this provider.
+    #[must_use]
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Provider::Anthropic => "Anthropic",
+            Provider::Deepseek => "DeepSeek",
+            Provider::Gemini => "Google Gemini",
+            Provider::Groq => "Groq",
+            Provider::HuggingFace => "Hugging Face",
+            Provider::Mistral => "Mistral",
+            Provider::MoonshotAi => "Moonshot AI",
+            Provider::Ollama => "Ollama",
+            Provider::OpenAi => "OpenAI",
+            Provider::OpenRouter => "OpenRouter",
+            Provider::Xai => "xAI",
+            Provider::Zai => "Z.ai",
+            Provider::ZenMux => "ZenMux",
+        }
+    }
 }
 
 /// Configuration for a single LLM provider.

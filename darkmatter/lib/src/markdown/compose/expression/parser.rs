@@ -5,14 +5,14 @@
 //!
 //! ```text
 //! expression     = ternary
-//! ternary        = fallback ("?" fallback ":" fallback)?
+//! ternary        = fallback ("?" ternary ":" ternary)?
 //! fallback       = comparison ("||" comparison)*
 //! comparison     = unary (comp_op unary)?
 //! unary          = "!" unary | primary
 //! primary        = literal | variable | function_call | "(" expression ")"
 //! function_call  = variable "(" args? ")"
 //! args           = expression ("," expression)*
-//! literal        = STRING | NUMBER
+//! literal        = STRING | NUMBER | BOOL
 //! ```
 //!
 //! ## Operator Precedence
@@ -39,6 +39,10 @@
 //!
 //! // Ternary
 //! let expr = parse(r#"x ? "yes" : "no""#).unwrap();
+//! assert!(matches!(expr, Expr::Ternary { .. }));
+//!
+//! // Nested ternary (right-associative)
+//! let expr = parse(r#"a ? b ? c : d : e"#).unwrap();
 //! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
@@ -187,18 +191,21 @@ impl<'a> Parser<'a> {
 
     /// Parses a ternary expression.
     ///
-    /// In interpolation mode: `fallback ("?" fallback ":" fallback)?`
+    /// In interpolation mode: `fallback ("?" ternary ":" ternary)?`
     ///
-    /// In condition mode: `logical_or ("?" logical_or ":" logical_or)?`
+    /// In condition mode: `logical_or ("?" ternary ":" ternary)?`
+    ///
+    /// Branches are parsed recursively so nested ternaries are supported
+    /// without extra parentheses: `a ? b ? c : d : e`.
     fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_ternary_branch()?;
 
         if matches!(self.current, Token::Question) {
             self.advance()?; // consume ?
-            let then_branch = self.parse_ternary_branch()?;
+            let then_branch = self.parse_ternary()?;
 
             self.expect(&Token::Colon, "':'")?;
-            let else_branch = self.parse_ternary_branch()?;
+            let else_branch = self.parse_ternary()?;
 
             expr = Expr::Ternary {
                 condition: Box::new(expr),
@@ -317,6 +324,11 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(Expr::NumberLiteral(value))
             }
+            Token::BoolLiteral(b) => {
+                let value = *b;
+                self.advance()?;
+                Ok(Expr::BoolLiteral(value))
+            }
             Token::Variable(name) => {
                 let name = name.clone();
                 self.advance()?;
@@ -332,7 +344,7 @@ impl<'a> Parser<'a> {
                 self.advance()?; // consume (
                 let expr = self.parse_expression()?;
                 self.expect(&Token::RParen, "')'")?;
-                Ok(expr)
+                Ok(Expr::Paren(Box::new(expr)))
             }
             _ => Err(ParseError::unexpected(
                 "expression",
@@ -481,6 +493,35 @@ mod tests {
             let expr = parse("-42").unwrap();
             assert!(matches!(expr, Expr::NumberLiteral(n) if n == -42.0));
         }
+
+        #[test]
+        fn parses_true_literal() {
+            let expr = parse("true").unwrap();
+            assert!(matches!(expr, Expr::BoolLiteral(b) if b));
+        }
+
+        #[test]
+        fn parses_false_literal() {
+            let expr = parse("false").unwrap();
+            assert!(matches!(expr, Expr::BoolLiteral(b) if !b));
+        }
+
+        #[test]
+        fn parses_ternary_with_bool_literals() {
+            let expr = parse("enabled ? true : false").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "enabled"));
+                    assert!(matches!(*then_branch, Expr::BoolLiteral(true)));
+                    assert!(matches!(*else_branch, Expr::BoolLiteral(false)));
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
     }
 
     mod fallback_expressions {
@@ -616,6 +657,138 @@ mod tests {
                     assert!(matches!(*condition, Expr::Variable(ref n) if n == "x"));
                     assert!(matches!(*then_branch, Expr::Fallback { .. }));
                     assert!(matches!(*else_branch, Expr::Fallback { .. }));
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_nested_ternary_in_true_branch() {
+            // a ? b ? c : d : e parses as a ? (b ? c : d) : e
+            let expr = parse("a ? b ? c : d : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "e"));
+                    // then_branch should itself be a ternary
+                    match *then_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                            assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "c"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "d"));
+                        }
+                        _ => panic!("Expected nested Ternary in then_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_nested_ternary_in_false_branch() {
+            // a ? b : c ? d : e parses as a ? b : (c ? d : e)
+            let expr = parse("a ? b : c ? d : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*then_branch, Expr::Variable(ref n) if n == "b"));
+                    // else_branch should itself be a ternary
+                    match *else_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "c"));
+                            assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "d"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "e"));
+                        }
+                        _ => panic!("Expected nested Ternary in else_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_parenthesized_nested_ternary() {
+            // a ? (b ? c : d) : e
+            let expr = parse("a ? (b ? c : d) : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "e"));
+                    match *then_branch {
+                        Expr::Paren(inner) => match *inner {
+                            Expr::Ternary {
+                                condition: inner_cond,
+                                then_branch: inner_then,
+                                else_branch: inner_else,
+                            } => {
+                                assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                                assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "c"));
+                                assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "d"));
+                            }
+                            _ => panic!("Expected nested Ternary inside Paren"),
+                        },
+                        _ => panic!("Expected Paren wrapping nested Ternary in then_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_deeply_nested_ternary() {
+            // a ? b ? c ? d : e : f : g
+            let expr = parse("a ? b ? c ? d : e : f : g").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "g"));
+                    match *then_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "f"));
+                            match *inner_then {
+                                Expr::Ternary {
+                                    condition: deepest_cond,
+                                    then_branch: deepest_then,
+                                    else_branch: deepest_else,
+                                } => {
+                                    assert!(matches!(*deepest_cond, Expr::Variable(ref n) if n == "c"));
+                                    assert!(matches!(*deepest_then, Expr::Variable(ref n) if n == "d"));
+                                    assert!(matches!(*deepest_else, Expr::Variable(ref n) if n == "e"));
+                                }
+                                _ => panic!("Expected deepest Ternary"),
+                            }
+                        }
+                        _ => panic!("Expected nested Ternary in then_branch"),
+                    }
                 }
                 _ => panic!("Expected Ternary"),
             }
@@ -863,19 +1036,27 @@ mod tests {
         #[test]
         fn parses_parenthesized_expression() {
             let expr = parse("(foo)").unwrap();
-            assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
+            assert!(matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::Variable(ref name) if name == "foo")));
         }
 
         #[test]
         fn parses_nested_parentheses() {
             let expr = parse("((foo))").unwrap();
-            assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
+            match expr {
+                Expr::Paren(outer) => match *outer {
+                    Expr::Paren(inner) => {
+                        assert!(matches!(*inner, Expr::Variable(ref name) if name == "foo"));
+                    }
+                    _ => panic!("Expected inner Paren"),
+                },
+                _ => panic!("Expected Paren"),
+            }
         }
 
         #[test]
         fn parses_parenthesized_fallback() {
             let expr = parse("(foo || bar)").unwrap();
-            assert!(matches!(expr, Expr::Fallback { .. }));
+            assert!(matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. })));
         }
 
         #[test]
@@ -884,7 +1065,7 @@ mod tests {
             let expr = parse("(a || b) ? c : d").unwrap();
             match expr {
                 Expr::Ternary { condition, .. } => {
-                    assert!(matches!(*condition, Expr::Fallback { .. }));
+                    assert!(matches!(*condition, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. })));
                 }
                 _ => panic!("Expected Ternary"),
             }
@@ -959,6 +1140,29 @@ mod tests {
         }
 
         #[test]
+        fn error_paren_around_bare_colon_in_ternary() {
+            // a ? (b : c) — colon inside parentheses without matching ?
+            let result = parse("a ? (b : c)");
+            assert!(result.is_err(), "colon inside parens without ? should fail");
+        }
+
+        #[test]
+        fn error_unmatched_paren_in_ternary() {
+            // a ? b) : c
+            let result = parse("a ? b) : c");
+            assert!(result.is_err(), "unmatched ')' should fail");
+        }
+
+        #[test]
+        fn error_unbalanced_paren_in_nested_ternary() {
+            // a ? (b ? c : d
+            let result = parse("a ? (b ? c : d");
+            assert!(result.is_err(), "missing closing ')' should fail");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("')'"));
+        }
+
+        #[test]
         fn error_trailing_pipe() {
             let result = parse("foo ||");
             assert!(result.is_err());
@@ -1000,6 +1204,24 @@ mod tests {
             let err = result.unwrap_err();
             assert!(err.message.contains("end of expression"));
         }
+
+        #[test]
+        fn error_invalid_groupings_from_spec() {
+            // a group can not encapsulate both the true and false path of the top level comparison
+            assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff' )").is_err());
+            
+            // unbalanced: missing closing
+            assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff'").is_err());
+            
+            // unbalanced: missing opening (parenthesis must wrap a complete pattern)
+            assert!(parse("a ? b ? 'tt' : 'tf' : c ? ('ft' : 'ff')").is_err());
+            
+            // parenthesis must wrap a complete pattern
+            assert!(parse("a ? b ? ( 'tt' : 'tf' ) : c ? ( 'ft' : 'ff' )").is_err());
+            
+            // parenthesis encapsulates part of top level but not full
+            assert!(parse("a ? b ( ? 'tt' : 'tf' ) : c ( ? 'ft' : 'ff' )").is_err());
+        }
     }
 
     mod parse_error_display {
@@ -1029,6 +1251,26 @@ mod tests {
             let input = "foo";
             let expr = parse(input).unwrap();
             assert_eq!(expr.to_string(), "foo");
+        }
+
+        #[test]
+        fn roundtrip_bool_literal() {
+            let expr = parse("true").unwrap();
+            assert_eq!(expr.to_string(), "true");
+            let expr = parse("false").unwrap();
+            assert_eq!(expr.to_string(), "false");
+        }
+
+        #[test]
+        fn roundtrip_parenthesized_variable() {
+            let expr = parse("(foo)").unwrap();
+            assert_eq!(expr.to_string(), "(foo)");
+        }
+
+        #[test]
+        fn roundtrip_parenthesized_fallback() {
+            let expr = parse(r#"(foo || "default")"#).unwrap();
+            assert_eq!(expr.to_string(), "(foo || \"default\")");
         }
 
         #[test]
@@ -1116,12 +1358,16 @@ mod tests {
 
         #[test]
         fn condition_parenthesized_or_then_and() {
-            // (a || b) && c parses as And(Or(a, b), c)
+            // (a || b) && c parses as And(Paren(Or(a, b)), c)
             let expr = parse_condition("(a || b) && c").unwrap();
             let (outer, args) = extract_call(&expr);
             assert_eq!(outer, "And");
             assert_eq!(args.len(), 2);
-            let (inner, inner_args) = extract_call(&args[0]);
+            let paren = match &args[0] {
+                Expr::Paren(inner) => inner,
+                other => panic!("expected Paren, got {other:?}"),
+            };
+            let (inner, inner_args) = extract_call(paren);
             assert_eq!(inner, "Or");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
@@ -1136,7 +1382,11 @@ mod tests {
             assert_eq!(outer, "Or");
             assert_eq!(args.len(), 2);
             assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
-            let (inner, inner_args) = extract_call(&args[1]);
+            let paren = match &args[1] {
+                Expr::Paren(inner) => inner,
+                other => panic!("expected Paren, got {other:?}"),
+            };
+            let (inner, inner_args) = extract_call(paren);
             assert_eq!(inner, "Or");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));

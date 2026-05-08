@@ -2616,11 +2616,7 @@ fn test_compose_link_relative_same_repo() {
     std::fs::write(&source_file, "# Source\n\n![img](../assets/logo.png)\n").unwrap();
     std::fs::write(&logo_file, "png").unwrap();
 
-    let output = md_cmd()
-        .arg("compose")
-        .arg(&source_file)
-        .output()
-        .unwrap();
+    let output = md_cmd().arg("compose").arg(&source_file).output().unwrap();
 
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2670,11 +2666,7 @@ fn test_compose_link_transcluded_child() {
     std::fs::write(&child_file, "[link](./sibling.md)\n").unwrap();
     std::fs::write(&sibling_file, "sibling content\n").unwrap();
 
-    let output = md_cmd()
-        .arg("compose")
-        .arg(&parent_file)
-        .output()
-        .unwrap();
+    let output = md_cmd().arg("compose").arg(&parent_file).output().unwrap();
 
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2755,11 +2747,7 @@ fn test_compose_html_spaced_attributes() {
     std::fs::write(&other_file, "other content\n").unwrap();
     std::fs::write(&img_file, "png").unwrap();
 
-    let output = md_cmd()
-        .arg("compose")
-        .arg(&page_file)
-        .output()
-        .unwrap();
+    let output = md_cmd().arg("compose").arg(&page_file).output().unwrap();
 
     assert!(output.status.success(), "command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);

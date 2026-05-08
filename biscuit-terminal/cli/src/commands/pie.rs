@@ -209,7 +209,8 @@ impl Run for PieChartArgs {
             width_str.as_deref(),
             &self.layout,
         )?;
-        display_mermaid(&diagram,
+        display_mermaid(
+            &diagram,
             &instructions,
             "pie chart",
             &self.layout,

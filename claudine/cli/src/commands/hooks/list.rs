@@ -7,8 +7,8 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::utils::layout::Margin;
 use claudine::actions::{HookAction, ReportFormat};
-use claudine::config::claudine_config::ClaudineConfig;
 use claudine::config::AgentConfigurator;
+use claudine::config::claudine_config::ClaudineConfig;
 use claudine::events::AgenticEvent;
 use claudine::provider::{EventSupportLevel, Provider};
 use playa::SoundEffect;
@@ -355,7 +355,10 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 }
 
 /// Show detailed event/action configuration for a specific provider.
-pub(super) fn run_provider_detail(provider: Provider, config: Option<&ClaudineConfig>) -> Result<()> {
+pub(super) fn run_provider_detail(
+    provider: Provider,
+    config: Option<&ClaudineConfig>,
+) -> Result<()> {
     let term = crate::log::terminal();
     let clients = InstalledAiClients::new();
     let installed = clients.is_installed(provider.sniff_ai_cli());

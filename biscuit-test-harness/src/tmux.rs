@@ -19,9 +19,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use super::{
-    CapturedFrame, TerminalHarness, wait_for_prompt,
-    run_with_timeout,
-    SPAWN_TIMEOUT, SEND_TIMEOUT, CAPTURE_TIMEOUT, CLEANUP_TIMEOUT,
+    CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, SEND_TIMEOUT, SPAWN_TIMEOUT, TerminalHarness,
+    run_with_timeout, wait_for_prompt,
 };
 
 /// Harness that runs each spawned binary inside a fresh detached tmux

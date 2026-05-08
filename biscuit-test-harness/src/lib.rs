@@ -467,10 +467,7 @@ pub const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 /// stdout and stderr are drained on background threads so that a
 /// chatty child cannot deadlock itself by filling either pipe buffer
 /// before the polling loop has a chance to reap it.
-pub fn run_with_timeout(
-    cmd: &mut Command,
-    timeout: Duration,
-) -> io::Result<std::process::Output> {
+pub fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> io::Result<std::process::Output> {
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
 
     // Drain pipes on background threads to avoid pipe-buffer deadlock.

@@ -9,8 +9,8 @@ use tracing::{debug, info_span};
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
-    AttemptOutcome, FailurePhase, HarnessPermissionProbe, HarnessPlan, PreRunSnapshot, ValidationCheckOutcome, ValidationKind,
-    ValidationPhaseReport, ValidationRule,
+    AttemptOutcome, FailurePhase, HarnessPermissionProbe, HarnessPlan, PreRunSnapshot,
+    ValidationCheckOutcome, ValidationKind, ValidationPhaseReport, ValidationRule,
 };
 
 mod compare;
@@ -242,7 +242,9 @@ fn evaluate_single(
 
         // --- Post-only: file comparison ---
         ValidationKind::FileChanged { file } => compare::check_file_changed(file, snapshot, true),
-        ValidationKind::FileUnchanged { file } => compare::check_file_changed(file, snapshot, false),
+        ValidationKind::FileUnchanged { file } => {
+            compare::check_file_changed(file, snapshot, false)
+        }
 
         // --- Post-only: frontmatter comparison ---
         ValidationKind::FrontmatterPropChanged { prop } => {
@@ -300,11 +302,11 @@ fn evaluate_single(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::model::StructuredShape;
     use crate::harness::model::{
         PermissionAssessment, ProcessTermination, RuleSource, ValidationEvent, ValidationPhase,
         ValidationRuleId,
     };
-    use crate::harness::model::StructuredShape;
     use crate::harness::validate::compare::{check_frontmatter_prop_equals, fingerprint_file};
     use crate::harness::validate::render::{build_vars, default_message, render_template};
     use std::collections::HashMap;

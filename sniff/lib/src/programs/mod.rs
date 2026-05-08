@@ -115,9 +115,8 @@ use tracing::{info_span, instrument};
 
 pub use crate::executable_index::{ExecutableIndex, find_programs_with_source_from_index};
 pub use categories::{
-    InstalledAiClients, InstalledEditors, InstalledHeadlessAudio,
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers, InstalledTerminalApps,
-    InstalledTtsClients, InstalledUtilities,
+    InstalledAiClients, InstalledEditors, InstalledHeadlessAudio, InstalledLanguagePackageManagers,
+    InstalledOsPackageManagers, InstalledTerminalApps, InstalledTtsClients, InstalledUtilities,
 };
 pub use category_detector::CategoryDetector;
 pub use contract::{
@@ -136,14 +135,13 @@ pub use host_capability::{
     load_host_capabilities_from, save_host_capabilities_to,
 };
 pub use install::{
-    InstallCapturedOutcome, InstallCapturedResult, InstallInterviewDelegate,
-    InstallInterviewEvent, InstallInterviewInput, InstallInterviewOptions,
-    InstallInterviewOutcome, InstallOptions, InstallOutputStream, InstallPlan, InstallPlanOption,
-    InstallPlanReason, InstallResult, InstallStatusKind, RetryChoice, RetryPrompt,
-    RetryPromptChoice, build_install_announcement, build_install_failure_status, build_install_plan,
-    build_install_success_status, build_retry_choice_prose, build_retry_quit_prose,
-    execute_install, execute_versioned_install, get_install_command, get_versioned_install_command,
-    run_install_interview,
+    InstallCapturedOutcome, InstallCapturedResult, InstallInterviewDelegate, InstallInterviewEvent,
+    InstallInterviewInput, InstallInterviewOptions, InstallInterviewOutcome, InstallOptions,
+    InstallOutputStream, InstallPlan, InstallPlanOption, InstallPlanReason, InstallResult,
+    InstallStatusKind, RetryChoice, RetryPrompt, RetryPromptChoice, build_install_announcement,
+    build_install_failure_status, build_install_plan, build_install_success_status,
+    build_retry_choice_prose, build_retry_quit_prose, execute_install, execute_versioned_install,
+    get_install_command, get_versioned_install_command, run_install_interview,
 };
 pub use inventory::Program;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};

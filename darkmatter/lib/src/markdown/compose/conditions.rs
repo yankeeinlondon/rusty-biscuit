@@ -5,10 +5,8 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::expression::{EvaluationLookup, evaluate, is_truthy, parse_condition};
+use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_condition};
 use serde_json::Value;
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::Path;
 use tracing::{debug, trace};
@@ -237,21 +235,15 @@ pub fn evaluate_condition_against(
 struct ShortcutLookup<'a> {
     /// Plain data payload for top-level and nested lookups.
     data: &'a Value,
-    /// Base directory for runtime context capture.
-    work_dir: &'a Path,
-    /// Cache of lazily-captured context values.
-    ctx_cache: RefCell<HashMap<String, Value>>,
-    /// Set of context groups that have already been captured.
-    captured_groups: RefCell<HashSet<super::context::capture::ContextGroup>>,
+    /// Lazy-capturing `ctx.*` resolver.
+    ctx: CtxLookup<'a>,
 }
 
 impl<'a> ShortcutLookup<'a> {
     fn new(data: &'a Value, work_dir: &'a Path) -> Self {
         Self {
             data,
-            work_dir,
-            ctx_cache: RefCell::new(HashMap::new()),
-            captured_groups: RefCell::new(HashSet::new()),
+            ctx: CtxLookup::new(work_dir),
         }
     }
 
@@ -274,43 +266,17 @@ impl<'a> ShortcutLookup<'a> {
         Some(current)
     }
 
-    /// Captures a single context group and merges its values into the cache.
-    fn capture_group(&self, group: super::context::capture::ContextGroup) {
-        let (values, _diagnostics, _timings) =
-            super::context::capture::capture_runtime_context_for_groups(self.work_dir, &[group]);
-
-        let mut cache = self.ctx_cache.borrow_mut();
-        let mut captured = self.captured_groups.borrow_mut();
-        for (key, value) in values {
-            cache.insert(key, value);
-        }
-        captured.insert(group);
-    }
-
     #[cfg(test)]
     fn captured_groups(&self) -> Vec<super::context::capture::ContextGroup> {
-        self.captured_groups.borrow().iter().cloned().collect()
+        self.ctx.captured_groups()
     }
 }
 
 impl EvaluationLookup for ShortcutLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
         // Handle ctx.* prefixes with lazy capture
-        if let Some(ctx_key) = path.strip_prefix("ctx.") {
-            // Check cache first
-            if let Some(cached) = self.ctx_cache.borrow().get(ctx_key) {
-                return Some(cached.clone());
-            }
-
-            // Determine which group this key belongs to
-            if let Some(group) = super::context::capture::ContextGroup::for_key(ctx_key) {
-                let need_capture = !self.captured_groups.borrow().contains(&group);
-                if need_capture {
-                    self.capture_group(group);
-                }
-            }
-
-            return self.ctx_cache.borrow().get(ctx_key).cloned();
+        if path == "ctx" || path.starts_with("ctx.") {
+            return self.ctx.resolve_ctx(path);
         }
 
         // Handle env.* prefixes

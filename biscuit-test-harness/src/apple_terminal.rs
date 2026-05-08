@@ -54,11 +54,7 @@ use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{
-    CapturedFrame, TerminalHarness,
-    run_with_timeout,
-    QUERY_TIMEOUT, CLEANUP_TIMEOUT,
-};
+use super::{CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, TerminalHarness, run_with_timeout};
 
 /// Harness that drives Terminal.app via `osascript`.
 ///
@@ -180,7 +176,8 @@ impl AppleTerminalHarness {
                             "tell application \"Terminal\" to return (count of (every window whose id is {id}))"
                         );
                         let mut check_cmd = Command::new("osascript");
-                        check_cmd.args(["-e", &check])
+                        check_cmd
+                            .args(["-e", &check])
                             .stdout(Stdio::null())
                             .stderr(Stdio::null());
                         if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2)) {

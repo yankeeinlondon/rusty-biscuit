@@ -29,16 +29,30 @@ pub struct QuadrantArgs {
     #[arg(long, short = 't', allow_hyphen_values = true)]
     pub title: Option<String>,
 
-    #[arg(long = "top-left", short = 'l', visible_alias = "tl", allow_hyphen_values = true)]
+    #[arg(
+        long = "top-left",
+        short = 'l',
+        visible_alias = "tl",
+        allow_hyphen_values = true
+    )]
     pub top_left: Option<String>,
 
-    #[arg(long = "top-right", short = 'r', visible_alias = "tr", allow_hyphen_values = true)]
+    #[arg(
+        long = "top-right",
+        short = 'r',
+        visible_alias = "tr",
+        allow_hyphen_values = true
+    )]
     pub top_right: Option<String>,
 
     #[arg(long = "bottom-left", visible_alias = "bl", allow_hyphen_values = true)]
     pub bottom_left: Option<String>,
 
-    #[arg(long = "bottom-right", visible_alias = "br", allow_hyphen_values = true)]
+    #[arg(
+        long = "bottom-right",
+        visible_alias = "br",
+        allow_hyphen_values = true
+    )]
     pub bottom_right: Option<String>,
 
     #[arg(long)]
@@ -85,22 +99,26 @@ impl Run for QuadrantArgs {
     fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let _ = std::io::stdout().flush();
 
-        let (title, x_axis, y_axis, points): (Option<&str>, Option<&str>, Option<&str>, Vec<String>) =
-            if self.example {
-                (
-                    Some("Campaign Analysis"),
-                    Some("Low Reach --> High Reach"),
-                    Some("Low Engagement --> High Engagement"),
-                    QUADRANT_EXAMPLE.iter().map(|s| s.to_string()).collect(),
-                )
-            } else {
-                (
-                    self.title.as_deref(),
-                    self.x_axis.as_deref(),
-                    self.y_axis.as_deref(),
-                    self.points,
-                )
-            };
+        let (title, x_axis, y_axis, points): (
+            Option<&str>,
+            Option<&str>,
+            Option<&str>,
+            Vec<String>,
+        ) = if self.example {
+            (
+                Some("Campaign Analysis"),
+                Some("Low Reach --> High Reach"),
+                Some("Low Engagement --> High Engagement"),
+                QUADRANT_EXAMPLE.iter().map(|s| s.to_string()).collect(),
+            )
+        } else {
+            (
+                self.title.as_deref(),
+                self.x_axis.as_deref(),
+                self.y_axis.as_deref(),
+                self.points,
+            )
+        };
 
         let mut body_lines = Vec::new();
 
@@ -167,10 +185,14 @@ impl Run for QuadrantArgs {
             if let Some(r) = self.point_radius {
                 cfg = cfg.with_point_radius(r);
             }
-            let effective_label_size = self.label_size.unwrap_or(if points.len() <= 6 { 18 } else { 15 });
+            let effective_label_size =
+                self.label_size
+                    .unwrap_or(if points.len() <= 6 { 18 } else { 15 });
             cfg = cfg.with_point_label_font_size(effective_label_size);
 
-            cfg = self.theme.apply(cfg, crate::commands::shared::is_dark_mode());
+            cfg = self
+                .theme
+                .apply(cfg, crate::commands::shared::is_dark_mode());
 
             if let Some(color) = &self.q1_fill {
                 cfg = cfg.with_quadrant_fill(1, color.as_str());

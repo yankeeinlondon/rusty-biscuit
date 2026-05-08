@@ -1,9 +1,7 @@
 use claudine::config::claudine_config::MessengerProviderConfig;
 use claudine::messaging::MessagingRouteConfig;
 
-use super::routes::{
-    self, build_messenger_from_fields, messenger_fields_with_name,
-};
+use super::routes::{self, build_messenger_from_fields, messenger_fields_with_name};
 
 /// Build a temporary [`MessagingRouteConfig`] from the current modal state
 /// for test-connection workflow. Combines collected fields with the current

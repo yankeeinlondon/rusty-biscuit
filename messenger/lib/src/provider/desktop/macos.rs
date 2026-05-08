@@ -3,9 +3,10 @@
 //! Three delivery strategies are wired behind a single backend:
 //!
 //! - **Helpers** (`terminal-notifier`, `alerter`) — primary delivery path
-//!   probed via `sniff` at construction time. Helpers ship interactive
-//!   actions and inline replies that AppleScript cannot, and they remain
-//!   available even when the host has no bundle identity.
+//!   when installed and scored above zero for the request. Helpers are probed
+//!   via `sniff` at construction time, ship interactive actions and inline
+//!   replies that AppleScript cannot, and remain available even when the host
+//!   has no bundle identity.
 //! - **AppleScript** (`osascript display notification`) — the v1 default.
 //!   Works from any process (including `cargo install`ed CLI binaries) and
 //!   does not trigger a notification authorization prompt. Limited feature
@@ -24,13 +25,12 @@
 //! | `AppleScript` | helpers → AppleScript |
 //! | `NativeUserNotifications` | helpers → Native |
 //!
-//! Helpers are always tried first when the dispatch shape suits one
-//! (`elect_helpers` filters them by score). Native and AppleScript paths
-//! both generate a UUID for the `notification_id` (AppleScript does not
-//! return a handle; the native submit path is fire-and-forget without a
-//! completion handler). Receipt metadata records which path served the
-//! notification: `helper_used` for helpers, `delivery=applescript` or
-//! `delivery=native` for the native backends.
+//! Helpers with `score() > 0` are tried first. Native and AppleScript paths
+//! are fallback/floor delivery paths and both generate a UUID for the
+//! `notification_id` (AppleScript does not return a handle; the native submit
+//! path is fire-and-forget without a completion handler). Receipt metadata
+//! records which path served the notification: `helper_used` for helpers,
+//! `delivery=applescript` or `delivery=native` for the native backends.
 
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 

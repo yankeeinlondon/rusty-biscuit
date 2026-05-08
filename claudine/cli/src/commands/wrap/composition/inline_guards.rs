@@ -9,9 +9,9 @@ use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
 
-use crate::commands::wrap::profile::WrapperProfile;
-use super::summary::{emit_composition_summary, emit_minimal_composition_summary};
 use super::CompositionStreamResult;
+use super::summary::{emit_composition_summary, emit_minimal_composition_summary};
+use crate::commands::wrap::profile::WrapperProfile;
 
 /// Apply inline closure post-processing after a composition run.
 ///

@@ -280,7 +280,10 @@ mod tests {
     #[test]
     fn test_parse_modalities() {
         let meta = parse_openrouter_model(&grok_fixture());
-        let mods = meta.modalities.as_ref().expect("modalities should be present");
+        let mods = meta
+            .modalities
+            .as_ref()
+            .expect("modalities should be present");
         assert_eq!(mods.input, vec![Modality::Text, Modality::Image]);
         assert_eq!(mods.output, vec![Modality::Text]);
     }

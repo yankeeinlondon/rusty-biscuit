@@ -87,7 +87,9 @@ impl<'de, E: CategoryEnum + ProgramMetadata> Deserialize<'de> for CategoryDetect
 
 struct CategoryDetectorVisitor<E>(PhantomData<E>);
 
-impl<'de, E: CategoryEnum + ProgramMetadata> serde::de::Visitor<'de> for CategoryDetectorVisitor<E> {
+impl<'de, E: CategoryEnum + ProgramMetadata> serde::de::Visitor<'de>
+    for CategoryDetectorVisitor<E>
+{
     type Value = CategoryDetector<E>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

@@ -286,7 +286,10 @@ mod zsh {
             ("--active-color", &["grey", "green", "yellow", "red"]),
             ("--sort", &["natural", "inverse", "asc", "desc"]),
             ("--label-position", &["above", "below", "left", "right"]),
-            ("--hotkey-badges", &["auto", "always", "never", "ctrl", "alt"]),
+            (
+                "--hotkey-badges",
+                &["auto", "always", "never", "ctrl", "alt"],
+            ),
             ("--output", &["raw", "json", "null"]),
             (
                 "--label-convention",
@@ -316,9 +319,7 @@ mod zsh {
         let mut session = spawn_zsh_with_completions();
         for (flag, expected) in cases {
             let cmd = format!("question choose-many a b c {flag} \t\t");
-            session
-                .write_all(cmd.as_bytes())
-                .expect("send command+tab");
+            session.write_all(cmd.as_bytes()).expect("send command+tab");
             std::thread::sleep(Duration::from_millis(700));
             let output = read_all_available(&mut session);
             for v in *expected {

@@ -1,0 +1,13 @@
+---
+source: messenger/cli/tests/info_snapshot.rs
+expression: json
+---
+{
+  "host_os": "macOS",
+  "active_daemon": null,
+  "bundle_id": null,
+  "app_id": null,
+  "helpers": [],
+  "election_order": [],
+  "routes": []
+}

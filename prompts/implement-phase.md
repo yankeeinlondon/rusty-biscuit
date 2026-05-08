@@ -5,9 +5,12 @@ plan: ""
 success: 
     say: "Phase {{phase}} of the plan was implemented"
     message: "✅ phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{plan}}` successfully completed  in the **{{ctx.current_package_area}}** _package area_."
-failure: 
+failure:
     say: "Ran into problems implementing phase {{phase}} of the plan!"
-    message: "❌ the plan `{{plan}}` failed to complete the implementation of phase **{{phase}}** in the **{{ctx.current_package_area}}** _package area_."
+    message: "❌️ phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{plan}}`"
+loop:
+    until: "{{phase}} > {{total_phases}}"
+    action: increment(phase)
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}

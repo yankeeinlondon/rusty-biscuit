@@ -85,6 +85,9 @@ We are expecting to add the following providers soon:
 1. **Logging**
 
     - each Agentic provider has their own logging solution but Claudine wraps this into a single view
+    - we also enrich data with git commits, PR's and more
+    - transactional data for 3 days which shows rich details
+    - aggregate data rolled into a columnar based reporting database for trend analysis
 
 
 ## Wrapped Execution
@@ -213,11 +216,32 @@ There are a number of powerful features which Claudine unlocks with what we're c
 
 ### Sequences
 
-Claudine provides you a simple way of specifying a **sequence** either in the frontmatter of your Markdown files or as a separate YAML file.
+Claudine provides you a simple way of specifying a **sequence** either in the frontmatter of your Markdown files or as a separate YAML file. This opens up the ability to run long-running meta-agents that can call into any of the Agents you are using for parts of the sequence.
+
+```mermaid
+flowchart LR
+
+Clarify(Clarify Spec)
+Design[Technical Design]
+Plan[Plan]
+Implement[Implement]
+Review[Review]
+C1((Prod Ready?))
+Suggest(Implement Suggestions)
+
+Clarify --> Design --> Plan --> Implement --> Review --> C1
+
+C1 -->|no| Suggest
+C1 -->|yes| Done
+
+Suggest --> Review
+```
+
+Steps along this process can be _interactive_ or _non-interactive_ but the goal is typically to load any interactive prompts to the front of the process so user involvement can be done once and then the remaining process
 
 ## Communication
 
-Now that _a lot_ if not _all_ of the actual coding is being done by AI the poor humans operating that code generation must be much more _multi-tasking_ in their work. Humans -- god knows we love them -- are great at lots of things but multi-tasking is not really one of them.
+Now that _a lot_ if not **all** coding is being done by AI the poor humans operating that code generation must do much more _multi-tasking_ in their work. Humans -- god knows we love them -- are great at lots of things but multi-tasking is not really one of them.
 
 > **Pro Tip:** anyone who tells you they are "great at multi-tasking" is lying and might be a psychopath, you should look for the first opportunity to leave the conversation.
 
@@ -241,6 +265,7 @@ failure:
     say: "Wow you are such a loser! The {{ctx.current_package}} just couldn't handle the prompt!"
     effect: cartoon-cry
     message: "The {{ctx.current_package}} just couldn't handle the prompt!"
+    notify: "Ding dong, the witch is dead"
 ---
 
 Think hard and do something amazing ... but do it really fast.
@@ -248,16 +273,66 @@ Think hard and do something amazing ... but do it really fast.
 
 This built-in functionality can be now be embedded into your prompts and allow your humans to live a slightly better life than they did before.
 
+## Coming Soon
 
-## Scheduling
+### Claudine Language Server
 
-Not yet ready but will be added soon.
+> Note yet ready but will be added soon.
 
-## Local Models
+Language Servers allow the _extended_ syntax that Claudine provides to Markdown files (both the Markdown body and the YAML frontmatter) to become context aware in all modern editors and several apps. That allows us to provide quality of life features like autocomplete, show type errors, autolink file references, and much more.
 
-Not yet ready but will be added soon. You can use local models today but you'd need to do the configuration yourself in the Agent platform.
+Ultimately the Language Server should make learning the power user features of Claudine intuitive and easy. No more looking through documentation as the editor will be become the guide to keeping you informed and writing valid configuration.
 
-## Worktree Integration
 
-Not yet ready but will be added soon.
+### Scheduling, Queues, and Dashboard
 
+> Not yet ready but will be added soon.
+
+Claudine comes with a separate background process called `rendezvous` which is always running in the background. Claudine is able to interact with rendezvous to:
+
+- provide users the ability to _queue_ jobs (either one after another or at set times)
+- recurring tasks can also be added and they will be run on an interval
+- see an active dashboard of all prompts, sequences, etc. which are running and where they are in the process
+
+### Local Models
+
+> Not yet ready but will be added soon. You can use local models today but you'd need to do the configuration yourself in the Agent platform.
+
+```sh
+# detect locally hosted LLM servers (ollama, vllm, llama.cpp, oMLX)
+# which are currently available plus what models these servers can provide
+claudine local detect
+# locally running LLMs will always be looked for on the local host but 
+# you can specify other local servers that are running 
+claudine local hosts
+```
+
+- All configuration of local services is included in the `claudine config` TUI.
+- If you want to use a _local_ model then you just specify it like any other model and Claudine will adapt it's shell completions to only those models which are available
+
+    ```sh
+    # use a model hosted locally on same computer 
+    claudine opencode 'why is the sky blue?' --model omlx/kimi-for-coding/kimi-k2.6
+    # use a model on another server nearby
+    claudine codex 'why is the sky blue?' --model my-host::omlx/kimi-for-coding/kimi-k2.6
+    ```
+
+    The structure of the model's you're familiar with is often:
+
+    - `{provider}/{model}`
+
+    However, if you're using aggregators like OpenRouter or ZenMux you'll notice that they'll add themselves as a prefix:
+
+    - `{aggregator}/{provider}/{model}`
+
+    We use this latter pattern to provide local models but instead of the aggregator name we use the server being used to provide the model:
+
+    - omlx (as seen in the example), ollama, vllm, llama.cpp are all valid identifiers
+
+    > the `my-host` reference will need to be in your **Claudine** configuration to resolve
+
+### Worktree Integration
+
+> Not yet ready but will be added soon.
+
+Providing the right levels of isolation for concurrent work in the same repo is becoming more and more important and **git**'s **worktree** feature is the primitive that most people turn to. Some of the agent's have incorporated their own worktree solution (_which you're free to use if you prefer it_) but **Claudine** provides a unified worktree solution that spans all of the providers.

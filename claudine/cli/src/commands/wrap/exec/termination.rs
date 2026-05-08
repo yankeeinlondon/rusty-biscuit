@@ -153,7 +153,9 @@ pub(crate) fn wait_with_signal_and_early_termination(
         }
 
         // Watchdog-initiated termination (unified `timeout` / `step_timeout`).
-        if early_termination.is_none() && let Some(ref wd_rx) = watchdog_rx {
+        if early_termination.is_none()
+            && let Some(ref wd_rx) = watchdog_rx
+        {
             match wd_rx.try_recv() {
                 Ok(req) => {
                     tracing::warn!(
@@ -179,8 +181,11 @@ pub(crate) fn wait_with_signal_and_early_termination(
 
         if early_termination.is_none()
             && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) =
-                super::timeouts::detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
+            && let Some(signal) = super::timeouts::detect_opencode_hang_termination(
+                metrics,
+                Instant::now(),
+                stop_threshold,
+            )
         {
             let kill_pid = if child_in_own_pgroup {
                 -(child_pid as i32)
@@ -259,7 +264,9 @@ pub(crate) fn wait_with_signal_and_early_termination(
             }
         }
 
-        if early_termination.is_none() && let Some(ref wd_rx) = watchdog_rx {
+        if early_termination.is_none()
+            && let Some(ref wd_rx) = watchdog_rx
+        {
             match wd_rx.try_recv() {
                 Ok(req) => {
                     let _ = child.kill();
@@ -273,8 +280,11 @@ pub(crate) fn wait_with_signal_and_early_termination(
 
         if early_termination.is_none()
             && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) =
-                super::timeouts::detect_opencode_hang_termination(metrics, Instant::now(), stop_threshold)
+            && let Some(signal) = super::timeouts::detect_opencode_hang_termination(
+                metrics,
+                Instant::now(),
+                stop_threshold,
+            )
         {
             let _ = child.kill();
             early_termination = Some(signal);
@@ -369,9 +379,7 @@ pub(crate) fn early_termination_process_outcome(
     early_termination: Option<&EarlyTermination>,
 ) -> claudine::harness::ProcessTermination {
     match early_termination {
-        Some(EarlyTermination::Timeout { .. }) => {
-            claudine::harness::ProcessTermination::TimedOut
-        }
+        Some(EarlyTermination::Timeout { .. }) => claudine::harness::ProcessTermination::TimedOut,
         Some(EarlyTermination::StepTimeout { .. }) => {
             claudine::harness::ProcessTermination::TimedOut
         }
@@ -557,8 +565,8 @@ mod tests {
 
     #[test]
     fn watchdog_request_to_early_termination_maps_timeout_reason() {
-        use crate::commands::wrap::exec::subagent_watchdog::ActiveSubagentSnapshot;
         use super::{WatchdogTermination, WatchdogTerminationReason};
+        use crate::commands::wrap::exec::subagent_watchdog::ActiveSubagentSnapshot;
 
         let req = WatchdogTermination {
             reason: WatchdogTerminationReason::Timeout,
@@ -575,8 +583,8 @@ mod tests {
 
     #[test]
     fn watchdog_request_to_early_termination_carries_stuck_subagents() {
-        use crate::commands::wrap::exec::subagent_watchdog::ActiveSubagentSnapshot;
         use super::{WatchdogTermination, WatchdogTerminationReason};
+        use crate::commands::wrap::exec::subagent_watchdog::ActiveSubagentSnapshot;
 
         let now = Instant::now();
         let snapshot = ActiveSubagentSnapshot {
@@ -601,6 +609,9 @@ mod tests {
         assert_eq!(outstanding.len(), 1);
         assert_eq!(outstanding[0].id, "ses_a");
         assert_eq!(outstanding[0].name.as_deref(), Some("Commit feature work"));
-        assert_eq!(outstanding[0].elapsed_since_progress, Duration::from_secs(900));
+        assert_eq!(
+            outstanding[0].elapsed_since_progress,
+            Duration::from_secs(900)
+        );
     }
 }

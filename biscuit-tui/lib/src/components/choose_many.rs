@@ -43,8 +43,8 @@ use super::choice_layout::{ChoiceLayout, navigate_row};
 use super::choice_render::ChoiceRenderContext;
 use super::choose::{ChoiceInput, ChoiceOption, HotkeyDisplayMode, Orientation, SelectionMode};
 use super::choose_one::{
-    HOTKEY_DISPLAY_FALLBACK, build_effective_hotkeys, first_enabled_index,
-    last_enabled_index, modifier_only_mode, sticky_toggle_mode,
+    HOTKEY_DISPLAY_FALLBACK, build_effective_hotkeys, first_enabled_index, last_enabled_index,
+    modifier_only_mode, sticky_toggle_mode,
 };
 
 /// Mutable state for a [`ChooseMany`] widget.
@@ -501,7 +501,6 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseMany<V> {
                 Some(&mut state.filter),
                 state.validation_error.as_deref(),
             );
-
         });
 
         if let Some(message) = state.validation_error.as_deref()
@@ -1974,8 +1973,10 @@ mod tests {
         use crossterm::event::ModifierKeyCode;
         let mut state =
             ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::Hidden);
-        ChooseMany::new()
-            .handle_event(&mut state, modifier_press_many(ModifierKeyCode::LeftControl));
+        ChooseMany::new().handle_event(
+            &mut state,
+            modifier_press_many(ModifierKeyCode::LeftControl),
+        );
         assert_eq!(state.hotkey_display(), HotkeyDisplayMode::Hidden);
         assert!(state.hotkey_display_deadline.is_none());
         assert_eq!(
@@ -2029,8 +2030,7 @@ mod tests {
         use crossterm::event::ModifierKeyCode;
         let mut state =
             ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::AltHeld);
-        ChooseMany::new()
-            .handle_event(&mut state, modifier_release_many(ModifierKeyCode::LeftAlt));
+        ChooseMany::new().handle_event(&mut state, modifier_release_many(ModifierKeyCode::LeftAlt));
         assert_eq!(state.hotkey_display(), HotkeyDisplayMode::AltHeld);
         assert!(state.hotkey_display_deadline.is_none());
         assert_eq!(
@@ -2089,7 +2089,10 @@ mod tests {
         let outcome = ChooseMany::new()
             .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
         assert_eq!(outcome, EventOutcome::Consumed);
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
             HotkeyDisplayMode::CtrlHeld
@@ -2099,18 +2102,22 @@ mod tests {
     #[test]
     fn many_alt_space_toggles_sticky_alt_held() {
         let mut state = ChooseManyState::new(fixture_input());
-        ChooseMany::new()
-            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::ALT));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+        ChooseMany::new().handle_event(&mut state, many_space_with_modifier(KeyModifiers::ALT));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::AltHeld)
+        );
     }
 
     #[test]
     fn many_sticky_release_clears() {
         // Press sets the sticky mode, Release clears it.
         let mut state = ChooseManyState::new(fixture_input());
-        ChooseMany::new()
-            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        ChooseMany::new().handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         let release = KeyEvent {
             code: KeyCode::Char(' '),
             modifiers: KeyModifiers::CONTROL,
@@ -2124,19 +2131,19 @@ mod tests {
     #[test]
     fn many_sticky_toggle_other_chord_switches_mode() {
         let mut state = ChooseManyState::new(fixture_input());
-        ChooseMany::new()
-            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
-        ChooseMany::new()
-            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::ALT));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+        ChooseMany::new().handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        ChooseMany::new().handle_event(&mut state, many_space_with_modifier(KeyModifiers::ALT));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::AltHeld)
+        );
     }
 
     #[test]
     fn many_sticky_toggle_suppressed_when_override_active() {
         let mut state =
             ChooseManyState::new(fixture_input()).with_hotkey_display(HotkeyDisplayMode::Hidden);
-        ChooseMany::new()
-            .handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
+        ChooseMany::new().handle_event(&mut state, many_space_with_modifier(KeyModifiers::CONTROL));
         assert_eq!(state.hotkey_display_sticky(), None);
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
@@ -2150,8 +2157,10 @@ mod tests {
         // row's selection. The sticky-toggle handler is only triggered
         // by `Ctrl+Space` / `Alt+Space`.
         let mut state = ChooseManyState::new(fixture_input());
-        ChooseMany::new()
-            .handle_event(&mut state, KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        ChooseMany::new().handle_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        );
         assert_eq!(state.hotkey_display_sticky(), None);
         // The active option is now selected.
         assert!(state.is_selected(0));

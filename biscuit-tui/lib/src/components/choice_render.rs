@@ -1518,10 +1518,8 @@ mod tests {
         )
         .with_hotkey_display(HotkeyDisplayMode::CtrlHeld);
         let options = vec![
-            ChoiceOption::<String>::new("a", "Alpha", "alpha")
-                .with_hotkey(HotkeySpec::Ctrl('a')),
-            ChoiceOption::<String>::new("b", "Bravo", "bravo")
-                .with_hotkey(HotkeySpec::Ctrl('b')),
+            ChoiceOption::<String>::new("a", "Alpha", "alpha").with_hotkey(HotkeySpec::Ctrl('a')),
+            ChoiceOption::<String>::new("b", "Bravo", "bravo").with_hotkey(HotkeySpec::Ctrl('b')),
         ];
         let area = Rect::new(0, 0, 12, 4);
         let layout = ctx.compute_layout(area, &options, &[0, 1], |_idx| false);

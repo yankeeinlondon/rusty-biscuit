@@ -47,8 +47,9 @@ pub fn register(c: &mut Criterion) {
             &count,
             |b, _| {
                 b.iter(|| {
-                    let info = detect_git_with_request(black_box(fixture.path()), black_box(&full_req))
-                        .unwrap();
+                    let info =
+                        detect_git_with_request(black_box(fixture.path()), black_box(&full_req))
+                            .unwrap();
                     black_box(info);
                 });
             },
@@ -62,8 +63,9 @@ pub fn register(c: &mut Criterion) {
             &count,
             |b, _| {
                 b.iter(|| {
-                    let info = detect_git_with_request(black_box(fixture.path()), black_box(&deep_req))
-                        .unwrap();
+                    let info =
+                        detect_git_with_request(black_box(fixture.path()), black_box(&deep_req))
+                            .unwrap();
                     black_box(info);
                 });
             },

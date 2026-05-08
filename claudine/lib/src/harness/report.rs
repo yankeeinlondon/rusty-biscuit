@@ -65,12 +65,7 @@ impl LineSink for StringSink {
 }
 
 /// Render a single status line into the provided sink.
-fn emit_status_to(
-    sink: &mut dyn LineSink,
-    markup: &str,
-    state: StatusState,
-    term: &Terminal,
-) {
+fn emit_status_to(sink: &mut dyn LineSink, markup: &str, state: StatusState, term: &Terminal) {
     let rendered = Status::from_prose(markup)
         .state(state)
         .theme(StatusTheme::Circular)
@@ -1220,9 +1215,7 @@ mod tests {
         let trimmed = source_line.trim_end();
         assert!(
             trimmed.ends_with(&abs_display)
-                || trimmed.ends_with(
-                    source_file.file_name().unwrap().to_string_lossy().as_ref()
-                ),
+                || trimmed.ends_with(source_file.file_name().unwrap().to_string_lossy().as_ref()),
             "source line should end at the file path with no ':N-M' suffix, got {trimmed:?}"
         );
         // Belt-and-suspenders: the source line must not contain a `:digit-digit`
@@ -1508,10 +1501,8 @@ mod tests {
         // Symmetric mismatch: highlighter returned more entries than there
         // were plain lines (e.g. trailing newline edge case). Same fallback.
         let plain: Vec<&str> = vec!["plain_a"];
-        let highlighted: Vec<String> = vec![
-            "extra_styled_a".to_string(),
-            "extra_styled_b".to_string(),
-        ];
+        let highlighted: Vec<String> =
+            vec!["extra_styled_a".to_string(), "extra_styled_b".to_string()];
         let out = select_yaml_lines(&plain, &highlighted);
         assert_eq!(out, vec!["    plain_a".to_string()]);
     }

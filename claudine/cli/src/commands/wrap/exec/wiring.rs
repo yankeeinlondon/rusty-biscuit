@@ -26,8 +26,6 @@
 //! behind a `Mutex` and flushes after each newline, satisfying the
 //! "one serialized writer path" requirement from the Phase 3 plan.
 
-
-
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{self, BufRead, BufReader, Write};
@@ -51,10 +49,10 @@ use color_eyre::eyre::Result;
 use serde_json::{Value, json};
 use tracing::{Span, debug, info, info_span, warn};
 
+use super::super::stream_io::StreamOutput;
 use super::{
     OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback, SemanticParserBuilder,
 };
-use super::super::stream_io::StreamOutput;
 
 // ---------------------------------------------------------------------------
 // Stable identifiers and protocol contract constants

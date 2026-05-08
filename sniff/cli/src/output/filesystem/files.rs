@@ -9,8 +9,8 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats};
 
-use super::path_format::{format_basename_filepath, format_styled_filepath};
 use super::language::render_framework_summary;
+use super::path_format::{format_basename_filepath, format_styled_filepath};
 use crate::args::FilesFilter;
 
 pub(crate) fn filter_file_breakdown(

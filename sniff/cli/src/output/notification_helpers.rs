@@ -1,9 +1,7 @@
 //! Notification helpers section output formatting (table and JSON).
 
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::{
-    Table as TerminalTable, TableCellContent, TableColumn,
-};
+use biscuit_terminal::components::table::{Table as TerminalTable, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;
 use sniff::programs::ProgramMetadata;

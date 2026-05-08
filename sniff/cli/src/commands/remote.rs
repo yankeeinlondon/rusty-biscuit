@@ -1,7 +1,7 @@
-use sniff::filesystem::git::GitHostingProvider;
-use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteReport};
-use sniff::remote::PullRequestState;
 use sniff::SniffError;
+use sniff::filesystem::git::GitHostingProvider;
+use sniff::remote::PullRequestState;
+use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteReport};
 
 use crate::output;
 use crate::perf::CliPerf;
@@ -207,7 +207,10 @@ pub(super) async fn fetch_readme(
 /// Resolve a remote name to a URL by looking it up in the local git repository.
 ///
 /// Returns `None` if not in a git repo or if the remote doesn't exist.
-pub(super) fn resolve_remote_name(name: &str, base_dir: Option<&std::path::Path>) -> Option<String> {
+pub(super) fn resolve_remote_name(
+    name: &str,
+    base_dir: Option<&std::path::Path>,
+) -> Option<String> {
     let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
     let repo = git2::Repository::discover(dir).ok()?;
     let remote = repo.find_remote(name).ok()?;
