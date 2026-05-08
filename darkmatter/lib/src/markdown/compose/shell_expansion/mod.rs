@@ -195,12 +195,7 @@ pub(crate) fn prepare_directive(
     // 2. Check user blacklist for all commands
     for (i, normalized) in normalized_commands.iter().enumerate() {
         let (exe, args) = executable_and_args_at(&effective, i);
-        if check_user_blacklist(
-            &runtime_snapshot.user_blacklist,
-            &exe,
-            &args,
-            normalized,
-        ) {
+        if check_user_blacklist(&runtime_snapshot.user_blacklist, &exe, &args, normalized) {
             return Err(ShellExpansionError::Blacklisted {
                 command: display_command.clone(),
                 reason: "user blacklist".to_string(),
@@ -210,11 +205,14 @@ pub(crate) fn prepare_directive(
     }
 
     // 3. Check whitelist for all commands
-    let all_whitelisted = normalized_commands.iter().enumerate().all(|(i, normalized)| {
-        let (exe, _) = executable_and_args_at(&effective, i);
-        check_whitelist(&runtime_snapshot.whitelist, &exe, normalized)
-            || runtime_snapshot.allow_once.contains(normalized)
-    });
+    let all_whitelisted = normalized_commands
+        .iter()
+        .enumerate()
+        .all(|(i, normalized)| {
+            let (exe, _) = executable_and_args_at(&effective, i);
+            check_whitelist(&runtime_snapshot.whitelist, &exe, normalized)
+                || runtime_snapshot.allow_once.contains(normalized)
+        });
 
     if all_whitelisted {
         return Ok(PreparedShellDirective {
@@ -225,17 +223,47 @@ pub(crate) fn prepare_directive(
 
     // 5. Request approval for the entire chain
     if let Some(ref handler) = options.shell_approval_handler {
-        // Reserve all commands for allow-once handling before calling the handler
-        let mut all_reserved = true;
-        for normalized in &normalized_commands {
-            if !shell_runtime.try_reserve_allow_once(normalized) {
-                all_reserved = false;
-                break;
+        // Reserve only the commands that are not already authorized. Commands
+        // already in the snapshot whitelist or already in `allow_once` are
+        // skipped. If another thread holds a pending reservation for any
+        // command in this chain, treat it as a conflict and require fresh
+        // approval rather than implicitly approving the unrelated commands.
+        let mut reserved: Vec<String> = Vec::new();
+        let mut pending_conflict = false;
+
+        for (i, normalized) in normalized_commands.iter().enumerate() {
+            let (exe, _) = executable_and_args_at(&effective, i);
+            if check_whitelist(&runtime_snapshot.whitelist, &exe, normalized) {
+                continue;
+            }
+            match shell_runtime.try_reserve_allow_once(normalized) {
+                types::ReserveOutcome::Reserved => reserved.push(normalized.clone()),
+                types::ReserveOutcome::AlreadyAllowed => {}
+                types::ReserveOutcome::Pending => {
+                    pending_conflict = true;
+                    break;
+                }
             }
         }
 
-        if !all_reserved {
-            // Some commands already approved — treat entire chain as approved
+        if pending_conflict {
+            // Release reservations we just made so the conflicting thread can
+            // make progress, then surface the conflict as an approval-required
+            // error instead of silently approving the rest of the chain.
+            for normalized in &reserved {
+                shell_runtime.complete_allow_once(normalized, false);
+            }
+            return Err(ShellExpansionError::ApprovalRequired {
+                command: display_command,
+                whitelist_path: policy_paths.whitelist.clone(),
+                blacklist_path: policy_paths.blacklist.clone(),
+                origin: directive.origin.clone(),
+            });
+        }
+
+        if reserved.is_empty() {
+            // Every command in the chain is now authorized (whitelist or a
+            // concurrently-completed allow-once). No prompt is needed.
             return Ok(PreparedShellDirective {
                 effective,
                 display_command,
@@ -596,7 +624,10 @@ fn executable_and_args_at(directive: &ShellDirective, index: usize) -> (String, 
     if let Some(ref pipeline) = directive.pipeline
         && let Some(action) = pipeline.actions.get(index)
     {
-        return (action.command.executable.clone(), action.command.args.clone());
+        return (
+            action.command.executable.clone(),
+            action.command.args.clone(),
+        );
     }
     (directive.executable.clone(), directive.args.clone())
 }
@@ -673,6 +704,31 @@ mod integration_tests {
         assert!(!composed.content().contains("::shell"));
         assert_eq!(report.shell_expansions_applied, 1);
         assert_eq!(report.shell_approvals_used, 1);
+    }
+
+    #[test]
+    fn pipeline_timeout_fallback_emits_warning() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell sleep 1 && echo after\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                timeout: std::time::Duration::from_millis(100),
+                timeout_behavior: ShellTimeoutBehavior::EmptyString,
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert!(composed.content().contains("after"));
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].message.contains("timed out"));
     }
 
     #[test]
@@ -1031,7 +1087,10 @@ name: world
         let whitelist =
             std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
         let count = whitelist.matches("prefix echo").count();
-        assert_eq!(count, 1, "expected exactly one 'prefix echo' line: {whitelist:?}");
+        assert_eq!(
+            count, 1,
+            "expected exactly one 'prefix echo' line: {whitelist:?}"
+        );
     }
 
     /// The approval request exposes every unique executable in the chain so
@@ -1883,8 +1942,14 @@ name: world
         let body = composed.content();
         assert!(body.contains("Before"));
         assert!(body.contains("After"));
-        assert!(!body.contains("OUT"), "stdout should be suppressed: {body:?}");
-        assert!(!body.contains("ERR"), "stderr should be suppressed: {body:?}");
+        assert!(
+            !body.contains("OUT"),
+            "stdout should be suppressed: {body:?}"
+        );
+        assert!(
+            !body.contains("ERR"),
+            "stderr should be suppressed: {body:?}"
+        );
     }
 
     /// `2>&1 > /dev/null` differs from `> /dev/null 2>&1`: stderr keeps a
@@ -1912,8 +1977,14 @@ name: world
 
         let (composed, _) = md.compose_with(options).unwrap();
         let body = composed.content();
-        assert!(!body.contains("OUT"), "stdout should be suppressed: {body:?}");
-        assert!(body.contains("ERR"), "stderr should remain visible: {body:?}");
+        assert!(
+            !body.contains("OUT"),
+            "stdout should be suppressed: {body:?}"
+        );
+        assert!(
+            body.contains("ERR"),
+            "stderr should remain visible: {body:?}"
+        );
     }
 
     /// `> /dev/null 2> /dev/null` independently nulls both streams.

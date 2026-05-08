@@ -338,6 +338,7 @@ fn execute_pipeline_detailed(
     let mut combined_stdout = String::new();
     let mut combined_stderr = String::new();
     let mut last_success = true;
+    let mut timeout_fallback = None;
 
     for action in &pipeline.actions {
         // Check chain condition
@@ -367,6 +368,7 @@ fn execute_pipeline_detailed(
         match result {
             Ok(exec) => {
                 last_success = true;
+                timeout_fallback = timeout_fallback.or(exec.timeout_fallback);
                 if !exec.stdout.is_empty() {
                     if !combined_stdout.is_empty() {
                         combined_stdout.push('\n');
@@ -380,7 +382,12 @@ fn execute_pipeline_detailed(
                     combined_stderr.push_str(&exec.stderr);
                 }
             }
-            Err(ShellExpansionError::ExecutionFailed { code, stdout, stderr, .. }) => {
+            Err(ShellExpansionError::ExecutionFailed {
+                code,
+                stdout,
+                stderr,
+                ..
+            }) => {
                 last_success = false;
                 if !stdout.is_empty() {
                     if !combined_stdout.is_empty() {
@@ -395,12 +402,12 @@ fn execute_pipeline_detailed(
                     combined_stderr.push_str(&stderr);
                 }
                 // If this is the last action (or no subsequent Or handler), propagate failure
-                let is_last = std::ptr::eq(
-                    action,
-                    &pipeline.actions[pipeline.actions.len() - 1],
-                );
+                let is_last = std::ptr::eq(action, &pipeline.actions[pipeline.actions.len() - 1]);
                 // Check if next action handles failure with ||
-                let next_handles_failure = pipeline.actions.iter().position(|a| std::ptr::eq(a, action))
+                let next_handles_failure = pipeline
+                    .actions
+                    .iter()
+                    .position(|a| std::ptr::eq(a, action))
                     .map(|idx| {
                         idx + 1 < pipeline.actions.len()
                             && pipeline.actions[idx + 1].operator == ChainOperator::Or
@@ -409,7 +416,11 @@ fn execute_pipeline_detailed(
 
                 if is_last || !next_handles_failure {
                     // Check if any remaining actions could handle the failure
-                    let pos = pipeline.actions.iter().position(|a| std::ptr::eq(a, action)).unwrap();
+                    let pos = pipeline
+                        .actions
+                        .iter()
+                        .position(|a| std::ptr::eq(a, action))
+                        .unwrap();
                     let any_or_handler = pipeline.actions[pos + 1..]
                         .iter()
                         .any(|a| a.operator == ChainOperator::Or);
@@ -436,7 +447,9 @@ fn execute_pipeline_detailed(
         }
     }
 
-    Ok(CommandExecution::from_streams(combined_stdout, combined_stderr))
+    let mut execution = CommandExecution::from_streams(combined_stdout, combined_stderr);
+    execution.timeout_fallback = timeout_fallback;
+    Ok(execution)
 }
 
 /// Executes a single command action with its redirection config.
@@ -452,12 +465,11 @@ fn execute_single_action(
     raw_command: &str,
     origin: &super::types::ShellCommandOrigin,
 ) -> Result<CommandExecution, ShellExpansionError> {
-    let resolved_path = which::which(&action.executable).map_err(|_| {
-        ShellExpansionError::CommandNotFound {
+    let resolved_path =
+        which::which(&action.executable).map_err(|_| ShellExpansionError::CommandNotFound {
             command: action.executable.clone(),
             origin: origin.clone(),
-        }
-    })?;
+        })?;
 
     let mut cmd = Command::new(&resolved_path);
     cmd.args(&action.args)
@@ -478,13 +490,15 @@ fn execute_single_action(
         }
     })?;
 
-    let mut child = cmd.spawn().map_err(|e| ShellExpansionError::ExecutionFailed {
-        command: raw_command.to_string(),
-        code: -1,
-        stdout: String::new(),
-        stderr: e.to_string(),
-        origin: origin.clone(),
-    })?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| ShellExpansionError::ExecutionFailed {
+            command: raw_command.to_string(),
+            code: -1,
+            stdout: String::new(),
+            stderr: e.to_string(),
+            origin: origin.clone(),
+        })?;
 
     // `Command::spawn` takes `&mut self` and keeps any parent-owned `Stdio`s
     // (like our merged pipe writers) alive inside `cmd` until it is dropped.
@@ -492,7 +506,10 @@ fn execute_single_action(
     // pipe writers and the merged reader will never see EOF.
     drop(cmd);
 
-    let CaptureHandles { merged_reader, merge_target } = capture;
+    let CaptureHandles {
+        merged_reader,
+        merge_target,
+    } = capture;
 
     let read_strategy = match merged_reader {
         Some(reader) => {
@@ -695,13 +712,15 @@ fn join_output_thread_raw(
     handle: JoinHandle<Vec<u8>>,
     stream_name: &str,
 ) -> Result<Vec<u8>, ShellExpansionError> {
-    handle.join().map_err(|_| ShellExpansionError::ExecutionFailed {
-        command: String::new(),
-        code: -1,
-        stdout: String::new(),
-        stderr: format!("{stream_name} capture thread panicked"),
-        origin: ShellCommandOrigin::Body { line: 0 },
-    })
+    handle
+        .join()
+        .map_err(|_| ShellExpansionError::ExecutionFailed {
+            command: String::new(),
+            code: -1,
+            stdout: String::new(),
+            stderr: format!("{stream_name} capture thread panicked"),
+            origin: ShellCommandOrigin::Body { line: 0 },
+        })
 }
 
 #[cfg(test)]
@@ -888,11 +907,7 @@ mod tests {
 
         let err = join_output_thread_raw(handle, "stdout").unwrap_err();
         match err {
-            ShellExpansionError::ExecutionFailed {
-                code,
-                stderr,
-                ..
-            } => {
+            ShellExpansionError::ExecutionFailed { code, stderr, .. } => {
                 assert_eq!(code, -1);
                 assert!(stderr.contains("stdout capture thread panicked"));
             }

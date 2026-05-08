@@ -191,20 +191,12 @@ fn split_at_chain_operators(input: &str) -> Vec<&str> {
                 in_double = !in_double;
                 i += 1;
             }
-            b'&' if !in_single
-                && !in_double
-                && i + 1 < bytes.len()
-                && bytes[i + 1] == b'&' =>
-            {
+            b'&' if !in_single && !in_double && i + 1 < bytes.len() && bytes[i + 1] == b'&' => {
                 segments.push(&input[start..i]);
                 i += 2;
                 start = i;
             }
-            b'|' if !in_single
-                && !in_double
-                && i + 1 < bytes.len()
-                && bytes[i + 1] == b'|' =>
-            {
+            b'|' if !in_single && !in_double && i + 1 < bytes.len() && bytes[i + 1] == b'|' => {
                 segments.push(&input[start..i]);
                 i += 2;
                 start = i;
@@ -776,6 +768,29 @@ mod execution_tests {
         let report =
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
         assert_eq!(fm.as_map().get("val"), Some(&json!("")));
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].message.contains("timed out"));
+    }
+
+    #[test]
+    fn execute_pipeline_timeout_fallback_emits_warning() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": "$(sleep 1 && echo after)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            timeout: Duration::from_millis(100),
+            timeout_behavior:
+                super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(fm.as_map().get("val"), Some(&json!("after")));
         assert_eq!(report.warnings.len(), 1);
         assert!(report.warnings[0].message.contains("timed out"));
     }
