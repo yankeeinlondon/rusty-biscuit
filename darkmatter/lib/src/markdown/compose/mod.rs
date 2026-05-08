@@ -1693,6 +1693,8 @@ impl Markdown {
                                 &headings,
                                 &options_clone,
                                 line,
+                                &directive.indent,
+                                directive.inferred_indent.as_deref(),
                             )
                             .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                             Ok(cache::OperationResult { content })
@@ -1723,6 +1725,14 @@ impl Markdown {
         }
     }
 
+    // NOTE: `::file` and `::code` directives share the same indentation
+    // preservation bug as `::toc-linking` (see spec.md for 2026-05-07).
+    // Unlike `::toc-linking`, the fix is not trivially co-located here:
+    // `PreparedTransclusion::Markdown` and `PreparedTransclusion::Code`
+    // do not capture directive indentation, and the underlying
+    // `transclusion::Directive` struct lacks indent fields. Fixing this
+    // would require structural changes across the transclusion pipeline.
+    // Tracked as part of the same feature but deferred to a follow-up.
     #[allow(clippy::too_many_arguments)]
     fn render_markdown_transclusion(
         &self,
@@ -4321,7 +4331,7 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
-        fn frontmatter_shell_rejects_double_pipe_in_command() {
+        fn frontmatter_shell_or_chain_works() {
             let temp_dir = TempDir::new().unwrap();
             let content = "---\nval: \"$(false || echo fallback)\"\n---\n";
             let md: Markdown = content.into();
@@ -4334,11 +4344,10 @@ Rounded: {{ round(pi) }}"#;
                     ..Default::default()
                 });
 
-            let err = md.compose_with(options).unwrap_err();
-            assert!(
-                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
-                "Expected shell pipe rejection for '||', got: {}",
-                err
+            let (composed, _report) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("val"),
+                Some(&serde_json::json!("fallback"))
             );
         }
     }

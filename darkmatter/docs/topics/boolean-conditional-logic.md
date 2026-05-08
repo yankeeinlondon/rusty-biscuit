@@ -340,6 +340,8 @@ Because the condition evaluator reuses Darkmatter's expression parser, `when=` a
 
 This is valid, but in practice explicit boolean expressions are usually easier to read.
 
+Ternary expressions support nesting in both interpolation (`{{ }}`) and condition (`when="..."`) contexts, so either branch may itself contain another ternary. Parentheses can be used for visual grouping when desired.
+
 ## Common Patterns
 
 ### Mutually Exclusive Includes

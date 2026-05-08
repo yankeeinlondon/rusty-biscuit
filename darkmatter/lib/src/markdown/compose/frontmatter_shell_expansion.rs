@@ -5,9 +5,10 @@
 //! structured directives ready for execution.
 
 use super::shell_expansion::store::resolve_policy_paths;
-use super::shell_expansion::tokenize::tokenize;
+use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::types::{
     ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective, ShellExpansionError,
+    ShellPipeline,
 };
 use super::shell_expansion::{execute_prepared_directive, prepare_directive};
 use super::types::{ComposeOptions, ComposeWarning};
@@ -20,16 +21,12 @@ use std::collections::HashMap;
 /// A parsed frontmatter shell directive ready for execution.
 #[derive(Debug, Clone)]
 pub(crate) struct FrontmatterShellDirective {
-    /// The frontmatter key this directive was extracted from.
     pub key: String,
-    /// The command string between $( and ).
     pub raw_command: String,
-    /// The resolved executable name.
     pub executable: String,
-    /// The resolved arguments.
     pub args: Vec<String>,
-    /// Per-command timeout override from ::timeout:N suffix.
     pub timeout_override: Option<std::time::Duration>,
+    pub pipeline: Option<ShellPipeline>,
 }
 
 /// Result of frontmatter shell expansion.
@@ -110,8 +107,11 @@ pub(crate) fn parse_shell_value(
     // Tokenize the inner command
     let tokens = tokenize(inner_command).map_err(|error| remap_parse_error(error, key))?;
 
-    let executable = tokens[0].clone();
-    let args = tokens[1..].to_vec();
+    // Parse into a pipeline
+    let pipeline = parse_pipeline(&tokens).map_err(|error| remap_parse_error(error, key))?;
+
+    let executable = pipeline.actions[0].command.executable.clone();
+    let args = pipeline.actions[0].command.args.clone();
 
     Ok(Some(FrontmatterShellDirective {
         key: key.to_string(),
@@ -119,13 +119,16 @@ pub(crate) fn parse_shell_value(
         executable,
         args,
         timeout_override,
+        pipeline: Some(pipeline),
     }))
 }
 
-/// Validates that the executable token doesn't contain interpolation.
+/// Validates that no executable token in the pipeline comes from interpolation.
 ///
 /// Checks the ORIGINAL (pre-interpolation) string to ensure `{{ }}` doesn't
-/// appear in the executable position (first token after `$(` and before whitespace).
+/// appear in any executable position — that is, the first non-whitespace token
+/// after `$(`, plus the first non-whitespace token after every top-level `&&`
+/// or `||` chain operator.
 fn validate_no_executable_interpolation(
     original: &str,
     key: &str,
@@ -140,18 +143,72 @@ fn validate_no_executable_interpolation(
 
     let inner = &rest[..close_pos];
 
-    // Extract the executable portion (up to first whitespace)
-    let executable_portion = first_token_portion(inner);
-
-    // Check if it contains {{ and }}
-    if executable_portion.contains("{{") && executable_portion.contains("}}") {
-        return Err(frontmatter_parse_error(
-            key,
-            "Frontmatter shell executable may not come from interpolation",
-        ));
+    for segment in split_at_chain_operators(inner) {
+        let executable_portion = first_token_portion(segment);
+        if executable_portion.contains("{{") && executable_portion.contains("}}") {
+            return Err(frontmatter_parse_error(
+                key,
+                "Frontmatter shell executable may not come from interpolation",
+            ));
+        }
     }
 
     Ok(())
+}
+
+/// Splits an inner `$(...)` body at top-level `&&` and `||` operators,
+/// respecting single quotes, double quotes, and backslash escaping.
+///
+/// Each returned segment corresponds to one chain action; the executable
+/// position of that action is the first non-whitespace token of the segment.
+fn split_at_chain_operators(input: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if escaped {
+            escaped = false;
+            i += 1;
+            continue;
+        }
+
+        let ch = bytes[i];
+        match ch {
+            b'\\' if !in_single => {
+                escaped = true;
+                i += 1;
+            }
+            b'\'' if !in_double => {
+                in_single = !in_single;
+                i += 1;
+            }
+            b'"' if !in_single => {
+                in_double = !in_double;
+                i += 1;
+            }
+            b'&' if !in_single && !in_double && i + 1 < bytes.len() && bytes[i + 1] == b'&' => {
+                segments.push(&input[start..i]);
+                i += 2;
+                start = i;
+            }
+            b'|' if !in_single && !in_double && i + 1 < bytes.len() && bytes[i + 1] == b'|' => {
+                segments.push(&input[start..i]);
+                i += 2;
+                start = i;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    segments.push(&input[start..]);
+    segments
 }
 
 /// Scans all top-level string-valued frontmatter entries and returns candidates.
@@ -221,12 +278,13 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             raw_command: candidate.raw_command.clone(),
             executable: candidate.executable.clone(),
             args: candidate.args.clone(),
-            span: 0..0, // Not relevant for frontmatter
+            span: 0..0,
             origin: ShellCommandOrigin::Frontmatter {
                 key: candidate.key.clone(),
             },
             error_handling: ErrorHandling::default(),
             timeout_override: candidate.timeout_override,
+            pipeline: candidate.pipeline.clone(),
         };
 
         prepared.push((
@@ -397,6 +455,64 @@ mod tests {
         let resolved = "$(ls arg)";
         let result = parse_shell_value(resolved, "key", Some(original));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_interpolated_executable_after_or_operator() {
+        let original = "$(false || {{cmd}} arg)";
+        let resolved = "$(false || echo arg)";
+        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("may not come from interpolation"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_interpolated_executable_after_and_operator() {
+        let original = "$(true && {{cmd}} arg)";
+        let resolved = "$(true && echo arg)";
+        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { message, .. } => {
+                assert!(
+                    message.contains("may not come from interpolation"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_interpolated_executable_in_third_chain_segment() {
+        let original = "$(true && false || {{cmd}} arg)";
+        let resolved = "$(true && false || echo arg)";
+        let result = parse_shell_value(resolved, "key", Some(original));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn accepts_interpolated_argument_after_chain_operator() {
+        let original = "$(false || echo {{file}})";
+        let resolved = "$(false || echo README.md)";
+        let result = parse_shell_value(resolved, "key", Some(original));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn ignores_chain_operators_inside_quotes() {
+        // `||` inside single quotes is literal, not a chain operator,
+        // so the interpolation here is in argument position, not executable.
+        let original = "$(echo 'a || {{cmd}}')";
+        let resolved = "$(echo 'a || hello')";
+        let result = parse_shell_value(resolved, "key", Some(original));
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -652,6 +768,29 @@ mod execution_tests {
         let report =
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
         assert_eq!(fm.as_map().get("val"), Some(&json!("")));
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].message.contains("timed out"));
+    }
+
+    #[test]
+    fn execute_pipeline_timeout_fallback_emits_warning() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": "$(sleep 1 && echo after)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            timeout: Duration::from_millis(100),
+            timeout_behavior:
+                super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(fm.as_map().get("val"), Some(&json!("after")));
         assert_eq!(report.warnings.len(), 1);
         assert!(report.warnings[0].message.contains("timed out"));
     }

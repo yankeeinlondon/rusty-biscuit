@@ -227,6 +227,8 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
             };
             Ok(Value::Number(num))
         }
+        Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
+        Expr::Paren(inner) => evaluate(inner, lookup),
         Expr::UnaryNot(inner) => {
             let value = evaluate(inner, lookup)?;
             Ok(Value::Bool(!is_truthy(&value)))
@@ -526,6 +528,37 @@ mod tests {
                 ],
             };
             assert_eq!(evaluate(&expr, &state).unwrap(), json!(true));
+        }
+
+        #[test]
+        fn bool_literal_evaluates_to_json_bool() {
+            assert_eq!(evaluate(&Expr::BoolLiteral(true), &lookup(json!({}))).unwrap(), json!(true));
+            assert_eq!(evaluate(&Expr::BoolLiteral(false), &lookup(json!({}))).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn paren_evaluates_inner_expression() {
+            let state = lookup(json!({"name": "Alice"}));
+            let expr = Expr::Paren(Box::new(Expr::Variable("name".to_string())));
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("Alice"));
+        }
+
+        #[test]
+        fn ternary_with_bool_literals() {
+            let state = lookup(json!({}));
+            let expr = Expr::Ternary {
+                condition: Box::new(Expr::BoolLiteral(true)),
+                then_branch: Box::new(Expr::StringLiteral("yes".to_string())),
+                else_branch: Box::new(Expr::StringLiteral("no".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("yes"));
+
+            let expr = Expr::Ternary {
+                condition: Box::new(Expr::BoolLiteral(false)),
+                then_branch: Box::new(Expr::StringLiteral("yes".to_string())),
+                else_branch: Box::new(Expr::StringLiteral("no".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("no"));
         }
     }
 }
