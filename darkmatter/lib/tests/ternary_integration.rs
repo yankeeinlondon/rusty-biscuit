@@ -84,3 +84,25 @@ fn test_false_branch_with_nested_interpolation() {
     let (composed, _) = md.compose().unwrap();
     assert_eq!(composed.content().trim(), "missing: none");
 }
+
+#[test]
+fn test_frontmatter_ternary_dependency_ordering() {
+    // The ternary in `message` references `spec`, which is itself templated and
+    // declared after `message`. The frontmatter dependency scanner must look
+    // through the ternary AST to discover `spec` as a dependency, otherwise
+    // `message` would resolve before `spec` and produce an empty branch value.
+    let content = "---\nuse: true\nmessage: \"{{ use ? spec : 'none' }}\"\nbase: \"prefix\"\nspec: \"{{ base }}/spec.md\"\n---\n{{message}}";
+    let md: Markdown = content.into();
+    let (composed, _) = md.compose().unwrap();
+    assert_eq!(composed.content().trim(), "prefix/spec.md");
+}
+
+#[test]
+fn test_frontmatter_fallback_dependency_ordering() {
+    // A fallback expression must declare `area` as a dependency even though it
+    // appears alongside a literal default.
+    let content = "---\nlabel: \"{{ area || 'unknown' }}\"\nbase: \"core\"\narea: \"{{ base }}-area\"\n---\n{{label}}";
+    let md: Markdown = content.into();
+    let (composed, _) = md.compose().unwrap();
+    assert_eq!(composed.content().trim(), "core-area");
+}
