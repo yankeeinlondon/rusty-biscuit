@@ -58,14 +58,13 @@ pub(super) fn tokenize_to_approved_command(
     raw: &str,
     source_path: &Path,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
-    let tokens =
-        darkmatter::markdown::compose::shell_expansion::tokenize::tokenize(raw).map_err(|_e| {
-            HarnessError::InvalidFrontmatter {
-                source_path: source_path.to_path_buf(),
-                property: "shell_command".to_string(),
-                detail: format!("invalid command string: \"{raw}\""),
-            }
-        })?;
+    let tokens = crate::harness::shell::tokenize_words_strict(raw).map_err(|_e| {
+        HarnessError::InvalidFrontmatter {
+            source_path: source_path.to_path_buf(),
+            property: "shell_command".to_string(),
+            detail: format!("invalid command string: \"{raw}\""),
+        }
+    })?;
 
     if tokens.is_empty() {
         return Err(HarnessError::InvalidFrontmatter {
