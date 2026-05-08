@@ -164,16 +164,34 @@ pub(crate) fn detect_opencode_hang_termination(
         return None;
     }
 
-    let silence_text = format_internal_duration(silence.as_secs());
-    if silence >= stop_threshold && state.provider_status.as_deref() == Some("stop") {
-        return Some(EarlyTermination::CompletedButHung {
-            message: format!(
-                "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
-            ),
-        });
+    if silence < stop_threshold {
+        return None;
     }
 
-    None
+    // Hang recovery requires that we've observed at least one `step_finish`
+    // boundary (`provider_status` becomes `Some(_)` only after the parser
+    // routes a `step_finish` Info event). Until then, startup latency or a
+    // very slow first model response can plausibly explain the silence.
+    let provider_status = state.provider_status.as_deref()?;
+
+    let silence_text = format_internal_duration(silence.as_secs());
+    let message = match provider_status {
+        "stop" => format!(
+            "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
+        ),
+        // Common after parallel `task` tool dispatch: the last observed
+        // `step_finish.reason` is `"tool-calls"`, every dispatched tool has
+        // returned (`in_flight` is empty), and OpenCode never emits a final
+        // synthesis step. Treat this as a hang once the silence threshold
+        // is met. Note that OpenCode's `task` tool is dispatched as an
+        // ordinary tool — its `task_started`/`task_completed` events are
+        // not emitted, so `in_flight_subagents` stays empty for these runs.
+        other => format!(
+            "OpenCode went silent after step_finish reason={other:?} for {silence_text} with no tools or subagents in flight; terminating hung process"
+        ),
+    };
+
+    Some(EarlyTermination::CompletedButHung { message })
 }
 
 /// Format a duration in seconds for internal early-termination messages.
@@ -308,10 +326,91 @@ mod tests {
 
         let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
 
-        assert!(matches!(
-            detected,
-            Some(EarlyTermination::CompletedButHung { .. })
-        ));
+        let message = match detected {
+            Some(EarlyTermination::CompletedButHung { message }) => message,
+            other => panic!("expected CompletedButHung, got {other:?}"),
+        };
+        assert!(message.contains("reported stop"), "got: {message}");
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_recovers_after_tool_calls_reason() {
+        // Parallel-Task hang: the last observed `step_finish.reason` is
+        // `"tool-calls"` (the parent dispatched parallel tools), every
+        // dispatched tool has returned (`in_flight` is empty), and OpenCode
+        // never emits a final synthesis step. The wrapper must recover.
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.provider_status = Some("tool-calls".into());
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        let message = match detected {
+            Some(EarlyTermination::CompletedButHung { message }) => message,
+            other => panic!("expected CompletedButHung, got {other:?}"),
+        };
+        assert!(message.contains("tool-calls"), "got: {message}");
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_skips_when_no_step_finish_seen() {
+        // First-step grace: until at least one `step_finish` Info event has
+        // been observed, `provider_status` stays `None`. Slow startup or a
+        // long first model response must not be killed.
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        assert!(
+            detected.is_none(),
+            "must not fire before any step_finish has been observed"
+        );
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_skips_when_silence_below_threshold() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(60));
+            state.provider_status = Some("tool-calls".into());
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_skips_when_in_flight_tool() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.provider_status = Some("tool-calls".into());
+            state.in_flight.insert(
+                "task-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("task".into()),
+                    started_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        assert!(detected.is_none());
     }
 
     #[test]
