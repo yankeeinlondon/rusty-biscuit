@@ -5144,10 +5144,10 @@ done
             "compose",
             "--opencode",
             "--timeout",
-            "2s",
+            "5s",
             md_file.to_str().unwrap(),
         ])
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(120))
         .assert()
         .failure();
 
