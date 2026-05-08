@@ -2,7 +2,7 @@
 
 //! Generated API client for [ArtificialAnalysisData](https://artificialanalysis.ai/api-reference).
 //!
-//! Artificial Analysis free data API: LLM and media-model benchmark catalogs.
+//! Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.
 //!
 //! ---
 //!
@@ -10,7 +10,7 @@
 //!
 //! Generated API client for [ArtificialAnalysisCritPt](https://artificialanalysis.ai/api-reference).
 //!
-//! Artificial Analysis CritPt benchmark: submit code-generation results for evaluation.
+//! Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/.
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::artificial_analysis::*;
 use crate::shared::{RequestParts, SchematicError};
@@ -410,7 +410,7 @@ impl From<ListImageToVideoModelsRequest> for ArtificialAnalysisDataRequest {
         Self::ListImageToVideoModels(req)
     }
 }
-/// Artificial Analysis free data API: LLM and media-model benchmark catalogs. client.
+/// Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. client.
 pub struct ArtificialAnalysisData {
     client: reqwest::Client,
     base_url: String,
@@ -1370,7 +1370,7 @@ impl From<EvaluateCritPtRequest> for ArtificialAnalysisCritPtRequest {
         Self::EvaluateCritPt(req)
     }
 }
-/// Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. client.
+/// Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. client.
 pub struct ArtificialAnalysisCritPt {
     client: reqwest::Client,
     base_url: String,

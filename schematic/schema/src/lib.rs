@@ -10,8 +10,8 @@
 //! | Module | Client | Description | Auth |
 //! |--------|--------|-------------|------|
 //! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
-//! | [`artificial_analysis`] | [`ArtificialAnalysisData`](artificial_analysis::ArtificialAnalysisData) | Artificial Analysis free data API: LLM and media-model benchmark catalogs. | API Key (`x-api-key`) |
-//! | [`artificial_analysis`] | [`ArtificialAnalysisCritPt`](artificial_analysis::ArtificialAnalysisCritPt) | Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. | API Key (`x-api-key`) |
+//! | [`artificial_analysis`] | [`ArtificialAnalysisData`](artificial_analysis::ArtificialAnalysisData) | Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
+//! | [`artificial_analysis`] | [`ArtificialAnalysisCritPt`](artificial_analysis::ArtificialAnalysisCritPt) | Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
 //! | [`bitbucket`] | [`Bitbucket`](bitbucket::Bitbucket) | Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows | Basic |
 //! | [`openai`] | [`OpenAI`](openai::OpenAI) | OpenAI REST API for model management | Bearer |
 //! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
