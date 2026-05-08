@@ -3911,8 +3911,9 @@ Rounded: {{ round(pi) }}"#;
             .unwrap();
 
         assert_eq!(report.frontmatter_interpolations_applied, 0);
-        // body interpolation sees the raw templated value
-        assert!(composed.content().contains("{{base}}/spec.md"));
+        // body interpolation resolves {{spec}} to {{base}}/spec.md and then
+        // recursively resolves {{base}} in the same pass.
+        assert!(composed.content().contains("/path/spec.md"));
     }
 
     #[test]
