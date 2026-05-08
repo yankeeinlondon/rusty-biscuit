@@ -1122,8 +1122,13 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
 
 /// Resolve a package name to its path prefix for git filtering.
 ///
-/// Tries exact match on `Package.name` first, then falls back to `Package.package_area`.
-/// Returns the relative path prefix (e.g., "homelab/server" or "homelab").
+/// Performs an exact case-insensitive match on `Package.name`. The returned
+/// path always ends with a trailing `/` so `starts_with` filtering matches
+/// whole-segment boundaries.
+///
+/// ## Errors
+///
+/// Returns an error listing valid package names when no package matches.
 fn resolve_package_path(
     result: &SniffResult,
     pkg_name: &str,
@@ -1140,35 +1145,122 @@ fn resolve_package_path(
 
     let lower = pkg_name.to_lowercase();
 
-    // Try exact match on package name
     if let Some(pkg) = packages.iter().find(|p| p.name.to_lowercase() == lower) {
         return Ok(format!("{}/", pkg.relative));
     }
 
-    // Try match on package_area
-    if let Some(pkg) = packages
-        .iter()
-        .find(|p| p.package_area.to_lowercase() == lower)
-    {
-        return Ok(format!("{}/", pkg.package_area));
-    }
-
-    // No match — list valid options
     let mut names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
     names.sort();
     names.dedup();
+
+    Err(format!(
+        "Package '{}' not found.\n\nValid package names: {}",
+        pkg_name,
+        names.join(", "),
+    )
+    .into())
+}
+
+/// Resolve a package-area name to its path prefix for git filtering.
+///
+/// Performs a case-insensitive **prefix** match on `Package.package_area`.
+/// The returned path always ends with a trailing `/` so `starts_with`
+/// filtering matches whole-segment boundaries. The canonical area casing
+/// from the package list is preserved.
+///
+/// ## Errors
+///
+/// Returns an error listing valid package areas when no area matches.
+#[allow(dead_code)]
+fn resolve_package_area_path(
+    result: &SniffResult,
+    area: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let packages = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .and_then(|repo| repo.packages.as_ref());
+
+    let Some(packages) = packages else {
+        return Err("No packages found in this repository".into());
+    };
+
+    let lower = area.to_lowercase();
+
+    if let Some(pkg) = packages
+        .iter()
+        .find(|p| p.package_area.to_lowercase().starts_with(&lower))
+    {
+        return Ok(format!("{}/", pkg.package_area));
+    }
 
     let mut areas: Vec<&str> = packages.iter().map(|p| p.package_area.as_str()).collect();
     areas.sort();
     areas.dedup();
 
     Err(format!(
-        "Package '{}' not found.\n\nValid package names: {}\nValid package areas: {}",
-        pkg_name,
-        names.join(", "),
-        areas.join(", ")
+        "Package area '{}' not found.\n\nValid package areas: {}",
+        area,
+        areas.join(", "),
     )
     .into())
+}
+
+/// Resolve and intersect optional `--package` and `--package-area` inputs.
+///
+/// Returns `Ok(None)` when both inputs are `None`. Otherwise resolves the
+/// inputs that are `Some` via [`resolve_package_path`] and
+/// [`resolve_package_area_path`] respectively. When **both** are `Some`, the
+/// resolved package path must start with the resolved area path; otherwise
+/// the function returns a hard error. The narrower prefix (the package path)
+/// is returned in the overlap case.
+///
+/// ## Errors
+///
+/// - Either resolver propagates its error when an input does not match.
+/// - When both resolve but the package is in a different area, the error
+///   message names the package, its real area, and the requested area.
+#[allow(dead_code)]
+fn resolve_package_and_area(
+    result: &SniffResult,
+    package: Option<&str>,
+    area: Option<&str>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    match (package, area) {
+        (None, None) => Ok(None),
+        (Some(name), None) => resolve_package_path(result, name).map(Some),
+        (None, Some(area)) => resolve_package_area_path(result, area).map(Some),
+        (Some(name), Some(area)) => {
+            let pkg_path = resolve_package_path(result, name)?;
+            let area_path = resolve_package_area_path(result, area)?;
+            if !pkg_path.starts_with(&area_path) {
+                let real_area = area_path.trim_end_matches('/');
+                let requested = area_path_label(result, area).unwrap_or_else(|| area.to_string());
+                return Err(format!(
+                    "Package '{name}' is in area '{real_area}', not '{requested}'"
+                )
+                .into());
+            }
+            Ok(Some(pkg_path))
+        }
+    }
+}
+
+/// Return the canonical package-area label for an input string, if any
+/// package's area starts with the (case-insensitive) input.
+#[allow(dead_code)]
+fn area_path_label(result: &SniffResult, area: &str) -> Option<String> {
+    let packages = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .and_then(|repo| repo.packages.as_ref())?;
+    let lower = area.to_lowercase();
+    packages
+        .iter()
+        .find(|p| p.package_area.to_lowercase().starts_with(&lower))
+        .map(|p| p.package_area.clone())
 }
 
 /// Detect only the program category needed for the given output filter.
