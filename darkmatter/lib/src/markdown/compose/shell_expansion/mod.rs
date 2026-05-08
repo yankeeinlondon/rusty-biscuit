@@ -242,6 +242,18 @@ pub(crate) fn prepare_directive(
             });
         }
 
+        // Build the unique list of chain executables for the prompt. Empty
+        // when the request is a single command.
+        let chain_executables = if effective.is_chain() {
+            let mut seen = std::collections::HashSet::new();
+            executables_with_args(&effective)
+                .into_iter()
+                .filter_map(|(exe, _)| seen.insert(exe.clone()).then_some(exe))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
         // Present the entire chain for approval
         let request = ShellApprovalRequest {
             source: options.source.clone(),
@@ -253,6 +265,7 @@ pub(crate) fn prepare_directive(
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
             alias_name: alias_name.clone(),
+            chain_executables,
         };
 
         match handler.approve(request)? {
@@ -271,9 +284,15 @@ pub(crate) fn prepare_directive(
                 for normalized in &normalized_commands {
                     shell_runtime.complete_allow_once(normalized, false);
                 }
-                // Persist the first executable as a prefix match (covers the common case)
-                store::append_whitelist_prefix(policy_paths, &effective.executable)?;
-                shell_runtime.persist_whitelist_prefix(effective.executable.clone());
+                // Persist a prefix entry for every unique executable in the
+                // chain so the next run does not re-prompt for later actions.
+                let mut persisted = std::collections::HashSet::new();
+                for (exe, _) in executables_with_args(&effective) {
+                    if persisted.insert(exe.clone()) {
+                        store::append_whitelist_prefix(policy_paths, &exe)?;
+                        shell_runtime.persist_whitelist_prefix(exe);
+                    }
+                }
                 Ok(PreparedShellDirective {
                     effective,
                     display_command,
@@ -957,6 +976,123 @@ name: world
         assert!(err.to_string().contains("denied") || err.to_string().contains("Denied"));
     }
 
+    /// AllowCommandPersist on a chain writes a prefix entry for every unique
+    /// executable in the chain so later runs do not re-prompt. Regression for
+    /// review-3.
+    #[test]
+    fn pipeline_allow_command_persist_writes_each_chain_executable() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell echo ok && pwd\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowCommandPersist,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("ok"));
+
+        let whitelist =
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+        assert!(
+            whitelist.contains("prefix echo"),
+            "whitelist missing 'prefix echo': {whitelist:?}"
+        );
+        assert!(
+            whitelist.contains("prefix pwd"),
+            "whitelist missing 'prefix pwd': {whitelist:?}"
+        );
+    }
+
+    /// Repeated executables in a chain are only persisted once.
+    #[test]
+    fn pipeline_allow_command_persist_dedupes_repeated_chain_executables() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell echo a && echo b\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowCommandPersist,
+                })),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let whitelist =
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+        let count = whitelist.matches("prefix echo").count();
+        assert_eq!(count, 1, "expected exactly one 'prefix echo' line: {whitelist:?}");
+    }
+
+    /// The approval request exposes every unique executable in the chain so
+    /// the CLI prompt can describe option 2 accurately.
+    #[test]
+    fn approval_request_exposes_chain_executables() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo a && pwd && echo b\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(RecordingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        // Chain is a, pwd, b — unique entries in first-occurrence order.
+        assert_eq!(
+            requests[0].chain_executables,
+            vec!["echo".to_string(), "pwd".to_string()]
+        );
+    }
+
+    /// Single-command requests leave `chain_executables` empty so the CLI
+    /// keeps the original wording.
+    #[test]
+    fn approval_request_chain_executables_empty_for_single_command() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo hi\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(RecordingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].chain_executables.is_empty());
+    }
+
     /// AllowExactPersist writes the normalized command to the whitelist file.
     #[test]
     fn pipeline_allow_exact_persist_writes_whitelist() {
@@ -1628,6 +1764,72 @@ name: world
         let (composed, _) = md.compose_with(options).unwrap();
         assert!(composed.content().contains("OUT"));
         assert!(composed.content().contains("ERR"));
+    }
+
+    /// `2>&1` preserves emission order: a child that writes ERR before OUT
+    /// must surface as `ERROUT`, not `OUTERR`. Regression for review-3.
+    #[test]
+    fn redirection_stderr_to_stdout_preserves_emission_order() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        // Write ERR first, flush, then OUT — both go to the merged pipe.
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stderr.write('ERR'); sys.stderr.flush(); sys.stdout.write('OUT'); sys.stdout.flush()\" 2>&1\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        // The merged stream must contain ERR before OUT in source order.
+        let body = composed.content();
+        let err_pos = body.find("ERR").expect("expected ERR in merged output");
+        let out_pos = body.find("OUT").expect("expected OUT in merged output");
+        assert!(
+            err_pos < out_pos,
+            "expected ERR to precede OUT under 2>&1, got: {body:?}"
+        );
+    }
+
+    /// `>&2` preserves emission order in the merged stream and the body-shell
+    /// contract still surfaces both pieces.
+    #[test]
+    fn redirection_stdout_to_stderr_preserves_emission_order() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stdout.write('A'); sys.stdout.flush(); sys.stderr.write('B'); sys.stderr.flush()\" >&2\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        let a_pos = body.find('A').expect("expected A in merged output");
+        let b_pos = body.find('B').expect("expected B in merged output");
+        assert!(
+            a_pos < b_pos,
+            "expected A to precede B under >&2, got: {body:?}"
+        );
     }
 
     /// `>&2` routes stdout to stderr; combined output still surfaces it via

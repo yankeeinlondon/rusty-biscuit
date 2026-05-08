@@ -438,6 +438,10 @@ fn execute_pipeline_detailed(
 }
 
 /// Executes a single command action with its redirection config.
+///
+/// For `2>&1` and `>&2` redirections, both child streams are wired to a single
+/// OS pipe (via `std::io::pipe`) before spawning so that emission order is
+/// preserved by the kernel rather than reconstructed after exit.
 fn execute_single_action(
     action: &CommandAction,
     working_dir: &std::path::Path,
@@ -458,11 +462,19 @@ fn execute_single_action(
         .current_dir(working_dir)
         .stdin(std::process::Stdio::null());
 
-    configure_streams(&mut cmd, &action.redirection);
-
     if shell_opts.strip_ansi {
         cmd.env("NO_COLOR", "1");
     }
+
+    let capture = configure_streams(&mut cmd, &action.redirection).map_err(|e| {
+        ShellExpansionError::ExecutionFailed {
+            command: raw_command.to_string(),
+            code: -1,
+            stdout: String::new(),
+            stderr: format!("failed to create stream pipe: {e}"),
+            origin: origin.clone(),
+        }
+    })?;
 
     let mut child = cmd.spawn().map_err(|e| ShellExpansionError::ExecutionFailed {
         command: raw_command.to_string(),
@@ -472,24 +484,53 @@ fn execute_single_action(
         origin: origin.clone(),
     })?;
 
-    let stdout_handle = child.stdout.take();
-    let stderr_handle = child.stderr.take();
+    // `Command::spawn` takes `&mut self` and keeps any parent-owned `Stdio`s
+    // (like our merged pipe writers) alive inside `cmd` until it is dropped.
+    // If we do not drop `cmd` here, the parent retains its own copies of the
+    // pipe writers and the merged reader will never see EOF.
+    drop(cmd);
 
-    let stdout_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut stdout) = stdout_handle {
-            let _ = stdout.read_to_end(&mut buf);
-        }
-        buf
-    });
+    let CaptureHandles { merged_reader, merge_target } = capture;
 
-    let stderr_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut stderr) = stderr_handle {
-            let _ = stderr.read_to_end(&mut buf);
+    let read_strategy = match merged_reader {
+        Some(reader) => {
+            let merged_thread = std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let mut reader = reader;
+                let _ = reader.read_to_end(&mut buf);
+                buf
+            });
+            ReadStrategy::Merged {
+                thread: merged_thread,
+                target: merge_target,
+            }
         }
-        buf
-    });
+        None => {
+            let stdout_handle = child.stdout.take();
+            let stderr_handle = child.stderr.take();
+
+            let stdout_thread = std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut stdout) = stdout_handle {
+                    let _ = stdout.read_to_end(&mut buf);
+                }
+                buf
+            });
+
+            let stderr_thread = std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut stderr) = stderr_handle {
+                    let _ = stderr.read_to_end(&mut buf);
+                }
+                buf
+            });
+
+            ReadStrategy::Separate {
+                stdout: stdout_thread,
+                stderr: stderr_thread,
+            }
+        }
+    };
 
     let start = Instant::now();
     let sleep_duration = std::time::Duration::from_millis(10);
@@ -497,19 +538,29 @@ fn execute_single_action(
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout")?;
-                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr")?;
-                let mut stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
-                let mut stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
+                let (mut final_stdout, mut final_stderr) = match read_strategy {
+                    ReadStrategy::Merged { thread, target } => {
+                        let bytes = join_output_thread_raw(thread, "merged")?;
+                        let merged = String::from_utf8_lossy(&bytes).to_string();
+                        match target {
+                            MergeTarget::Stdout => (merged, String::new()),
+                            MergeTarget::Stderr => (String::new(), merged),
+                        }
+                    }
+                    ReadStrategy::Separate { stdout, stderr } => {
+                        let stdout_bytes = join_output_thread_raw(stdout, "stdout")?;
+                        let stderr_bytes = join_output_thread_raw(stderr, "stderr")?;
+                        (
+                            String::from_utf8_lossy(&stdout_bytes).to_string(),
+                            String::from_utf8_lossy(&stderr_bytes).to_string(),
+                        )
+                    }
+                };
 
                 if shell_opts.strip_ansi {
-                    stdout_str = biscuit_terminal::prelude::strip_escape_codes(stdout_str);
-                    stderr_str = biscuit_terminal::prelude::strip_escape_codes(stderr_str);
+                    final_stdout = biscuit_terminal::prelude::strip_escape_codes(final_stdout);
+                    final_stderr = biscuit_terminal::prelude::strip_escape_codes(final_stderr);
                 }
-
-                // Apply redirection merging for captured output
-                let (final_stdout, final_stderr) =
-                    apply_redirection_to_output(&action.redirection, &stdout_str, &stderr_str);
 
                 if status.success() {
                     return Ok(CommandExecution::from_streams(final_stdout, final_stderr));
@@ -555,7 +606,63 @@ fn execute_single_action(
     }
 }
 
-fn configure_streams(cmd: &mut Command, redir: &RedirectionConfig) {
+/// Identifies which output field (stdout or stderr) the merged stream's bytes
+/// should populate after the child exits.
+#[derive(Debug, Clone, Copy)]
+enum MergeTarget {
+    Stdout,
+    Stderr,
+}
+
+/// How captured bytes will be read after the child is spawned.
+enum ReadStrategy {
+    Merged {
+        thread: JoinHandle<Vec<u8>>,
+        target: MergeTarget,
+    },
+    Separate {
+        stdout: JoinHandle<Vec<u8>>,
+        stderr: JoinHandle<Vec<u8>>,
+    },
+}
+
+/// Capture configuration returned by [`configure_streams`].
+struct CaptureHandles {
+    /// When the redirection merges streams at the OS level, the read end of
+    /// the shared pipe lives here. The writer copies are owned by the
+    /// `Command` and dropped after spawn.
+    merged_reader: Option<std::io::PipeReader>,
+    /// Where the merged bytes should land in the final result.
+    /// Ignored when `merged_reader` is `None`.
+    merge_target: MergeTarget,
+}
+
+/// Configures the child's stdout and stderr based on the redirection.
+///
+/// For `2>&1` and `>&2` we create a single pipe and wire both child streams
+/// to it so the OS preserves emission order. For all other redirections we
+/// fall back to separate `Stdio::piped()` / `Stdio::null()` channels.
+fn configure_streams(
+    cmd: &mut Command,
+    redir: &RedirectionConfig,
+) -> std::io::Result<CaptureHandles> {
+    let merge = match (redir.stdout, redir.stderr) {
+        (StdoutTarget::ToStderr, _) => Some(MergeTarget::Stderr),
+        (_, StderrTarget::ToStdout) => Some(MergeTarget::Stdout),
+        _ => None,
+    };
+
+    if let Some(target) = merge {
+        let (reader, writer) = std::io::pipe()?;
+        let writer_clone = writer.try_clone()?;
+        cmd.stdout(writer);
+        cmd.stderr(writer_clone);
+        return Ok(CaptureHandles {
+            merged_reader: Some(reader),
+            merge_target: target,
+        });
+    }
+
     match redir.stdout {
         StdoutTarget::Capture => {
             cmd.stdout(std::process::Stdio::piped());
@@ -563,56 +670,23 @@ fn configure_streams(cmd: &mut Command, redir: &RedirectionConfig) {
         StdoutTarget::Null => {
             cmd.stdout(std::process::Stdio::null());
         }
-        StdoutTarget::ToStderr => {
-            // We still pipe both, then merge in post-processing
-            cmd.stdout(std::process::Stdio::piped());
-            cmd.stderr(std::process::Stdio::piped());
-        }
+        StdoutTarget::ToStderr => unreachable!("handled by merge branch"),
     }
 
     match redir.stderr {
         StderrTarget::Capture => {
-            if redir.stdout != StdoutTarget::ToStderr {
-                cmd.stderr(std::process::Stdio::piped());
-            }
+            cmd.stderr(std::process::Stdio::piped());
         }
         StderrTarget::Null => {
             cmd.stderr(std::process::Stdio::null());
         }
-        StderrTarget::ToStdout => {
-            cmd.stderr(std::process::Stdio::piped());
-        }
+        StderrTarget::ToStdout => unreachable!("handled by merge branch"),
     }
-}
 
-fn apply_redirection_to_output(
-    redir: &RedirectionConfig,
-    stdout: &str,
-    stderr: &str,
-) -> (String, String) {
-    match (redir.stdout, redir.stderr) {
-        (StdoutTarget::ToStderr, _) => {
-            let mut new_stderr = stderr.to_string();
-            if !stdout.is_empty() {
-                if !new_stderr.is_empty() {
-                    new_stderr.push('\n');
-                }
-                new_stderr.push_str(stdout);
-            }
-            (String::new(), new_stderr)
-        }
-        (_, StderrTarget::ToStdout) => {
-            let mut new_stdout = stdout.to_string();
-            if !stderr.is_empty() {
-                if !new_stdout.is_empty() {
-                    new_stdout.push('\n');
-                }
-                new_stdout.push_str(stderr);
-            }
-            (new_stdout, String::new())
-        }
-        _ => (stdout.to_string(), stderr.to_string()),
-    }
+    Ok(CaptureHandles {
+        merged_reader: None,
+        merge_target: MergeTarget::Stdout,
+    })
 }
 
 fn join_output_thread_raw(
