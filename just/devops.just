@@ -83,10 +83,28 @@ _lint pkg:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    SECONDS=0
+
     echo
     echo -e "Linting {{bold}}{{pkg}}{{reset}}"
     echo
-    cargo clippy -p {{pkg}} -- -D warnings || ( just _speak "The {{pkg}} package has failing lints" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing lints!" && exit 1 )
+
+    exit_code=0
+    cargo clippy -p {{pkg}} -- -D warnings || exit_code=$?
+
+    duration=$SECONDS
+    commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    if [[ $exit_code -eq 0 ]]; then
+        echo "{\"duration\": $duration, \"result\": \"pass\", \"last_commit\": \"$commit_hash\"}" >> "lint-{{pkg}}-timing.jsonl"
+    else
+        echo "{\"duration\": $duration, \"result\": \"fail\", \"last_commit\": \"$commit_hash\"}" >> "lint-{{pkg}}-timing.jsonl"
+    fi
+
+    if [[ $exit_code -ne 0 ]]; then
+        just _speak "The {{pkg}} package has failing lints"
+        echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing lints!"
+        exit 1
+    fi
 
 _fix_lint pkg agent="claude" *args="":
     #!/usr/bin/env bash
@@ -114,16 +132,59 @@ _test pkg *args="":
     #!/usr/bin/env bash
     set -euo pipefail
 
+    to_json_array() {
+        local first=1
+        local json="["
+        for arg in "$@"; do
+            if [[ $first -eq 1 ]]; then
+                first=0
+            else
+                json="${json},"
+            fi
+            local escaped
+            escaped=$(printf '%s' "$arg" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            json="${json}\"${escaped}\""
+        done
+        json="${json}]"
+        printf '%s' "$json"
+    }
+
+    SECONDS=0
+
     echo
     echo -e "Testing {{bold}}{{pkg}}{{reset}} package"
     echo
+
+    exit_code=0
     if cargo nextest --version >/dev/null 2>&1; then
         echo -e "ℹ️ using {{green}}cargo nextest run{{reset}}"
-        cargo nextest run -p {{pkg}} {{args}} || ( echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+        cargo nextest run -p {{pkg}} {{args}} || exit_code=$?
     else
         echo -e "ℹ️ using {{green}}cargo test{{reset}}"
-        cargo test -p {{pkg}} {{args}} || ( echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+        cargo test -p {{pkg}} {{args}} || exit_code=$?
     fi
+
+    duration=$SECONDS
+    commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+
+    if [[ $exit_code -eq 0 ]]; then
+        result="pass"
+    else
+        result="fail"
+    fi
+
+    if [[ -n "{{args}}" ]]; then
+        params_json=$(to_json_array {{args}})
+        echo "{\"duration\": $duration, \"result\": \"$result\", \"last_commit\": \"$commit_hash\", \"params\": $params_json}" >> "test-{{pkg}}-timing.jsonl"
+    else
+        echo "{\"duration\": $duration, \"result\": \"$result\", \"last_commit\": \"$commit_hash\"}" >> "test-{{pkg}}-timing.jsonl"
+    fi
+
+    if [[ $exit_code -ne 0 ]]; then
+        echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!"
+        exit 1
+    fi
+
     echo
     echo -e "✅ {{green}} all tests passing in {{bold}}{{pkg}}{{reset}}{{green}} package{{reset}}"
     echo
