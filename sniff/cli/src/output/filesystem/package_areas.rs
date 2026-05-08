@@ -6,7 +6,7 @@ use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{Package, RepoInfo};
 
 use crate::args::PackagesFormat;
-use super::{RepoFilter, filter_packages};
+use super::RepoFilter;
 use super::packages::{
     dirty_package_names, staged_package_names, unstaged_package_names,
 };
@@ -16,9 +16,10 @@ use super::resolve_dir;
 fn select_repo_package_areas<'a>(
     packages: &'a [Package],
     repo_filter: &[String],
+    package: Option<&str>,
     package_area: Option<&str>,
 ) -> Vec<&'a str> {
-    select_repo_package_areas_with_roots(packages, repo_filter, package_area)
+    select_repo_package_areas_with_roots(packages, repo_filter, package, package_area)
         .into_iter()
         .map(|(area, _)| area)
         .collect()
@@ -65,11 +66,29 @@ pub(super) fn package_area_root(pkg: &Package) -> &str {
 
 /// Same selection logic as [`select_repo_package_areas`] but also returns the
 /// repo-relative area root directory derived from each area's first package.
+///
+/// `package` matches by exact case-insensitive `Package.name` and narrows the
+/// area set to the area containing that package. `package_area` matches by
+/// case-insensitive **prefix** on `Package.package_area`, so
+/// `--package-area homelab` includes both `homelab` and `homelab/server`.
 fn select_repo_package_areas_with_roots<'a>(
     packages: &'a [Package],
     repo_filter: &[String],
+    package: Option<&str>,
     package_area: Option<&str>,
 ) -> Vec<(&'a str, &'a str)> {
+    // Resolve `--package` to its declared area so we can apply the exact-name
+    // filter on the area level (an area is shown only if it contains the
+    // matched package).
+    let package_areas: Option<std::collections::HashSet<String>> = package.map(|name| {
+        let needle = name.to_lowercase();
+        packages
+            .iter()
+            .filter(|p| p.name.to_lowercase() == needle)
+            .map(|p| p.package_area.to_lowercase())
+            .collect()
+    });
+
     // Capture the first package encountered for each area (deterministic via
     // BTreeMap ordering) so we can derive the area root once.
     let mut seen: std::collections::BTreeMap<&str, &Package> = std::collections::BTreeMap::new();
@@ -86,15 +105,20 @@ fn select_repo_package_areas_with_roots<'a>(
 
     seen.into_iter()
         .filter(|(area, _)| {
+            let lower = area.to_lowercase();
             if let Some(needle) = scope.as_deref()
-                && area.to_lowercase() != needle
+                && !lower.starts_with(needle)
+            {
+                return false;
+            }
+            if let Some(ref allowed) = package_areas
+                && !allowed.contains(&lower)
             {
                 return false;
             }
             if filters.is_empty() {
                 return true;
             }
-            let lower = area.to_lowercase();
             filters.iter().any(|f| {
                 let hit = lower.contains(&f.query.to_lowercase());
                 if f.negate { !hit } else { hit }
@@ -110,6 +134,7 @@ fn select_repo_package_areas_with_roots<'a>(
 pub fn collect_repo_package_area_names<'a>(
     repo: &'a RepoInfo,
     repo_filter: &[String],
+    package: Option<&str>,
     package_area: Option<&str>,
 ) -> Vec<&'a str> {
     if !repo.is_monorepo {
@@ -118,7 +143,7 @@ pub fn collect_repo_package_area_names<'a>(
     let Some(packages) = repo.packages.as_ref() else {
         return Vec::new();
     };
-    select_repo_package_areas(packages, repo_filter, package_area)
+    select_repo_package_areas(packages, repo_filter, package, package_area)
 }
 
 /// Render the unique package area list for `sniff repo package-areas` in the
@@ -130,6 +155,7 @@ pub fn collect_repo_package_area_names<'a>(
 pub fn render_repo_package_areas_formatted(
     repo: &RepoInfo,
     repo_filter: &[String],
+    package: Option<&str>,
     package_area: Option<&str>,
     format: PackagesFormat,
     verbose: u8,
@@ -144,7 +170,7 @@ pub fn render_repo_package_areas_formatted(
         return String::new();
     };
 
-    let areas = select_repo_package_areas_with_roots(packages, repo_filter, package_area);
+    let areas = select_repo_package_areas_with_roots(packages, repo_filter, package, package_area);
     if areas.is_empty() {
         return String::new();
     }
@@ -189,6 +215,8 @@ pub fn render_repo_package_areas_formatted(
 pub(crate) fn select_dirty_package_area_names(
     result: &sniff::SniffResult,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> Vec<String> {
     let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
         return Vec::new();
@@ -204,7 +232,12 @@ pub(crate) fn select_dirty_package_area_names(
     let dirty_set: std::collections::HashSet<&str> =
         dirty_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = filter_packages(packages, repo_filter);
+    let filtered = super::packages::select_repo_packages(
+        packages,
+        repo_filter,
+        package,
+        package_area,
+    );
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| dirty_set.contains(p.name.as_str()))
@@ -217,12 +250,18 @@ pub(crate) fn select_dirty_package_area_names(
 /// Render package area names with uncommitted changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
+pub fn render_dirty_package_areas(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
+) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_dirty_package_area_names(result, repo_filter).join(", ")
+            select_dirty_package_area_names(result, repo_filter, package, package_area)
+                .join(", ")
         }
         _ => String::from(
             "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo",
@@ -233,6 +272,8 @@ pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: &[St
 pub(crate) fn select_staged_package_area_names(
     result: &sniff::SniffResult,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> Vec<String> {
     let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
         return Vec::new();
@@ -248,7 +289,12 @@ pub(crate) fn select_staged_package_area_names(
     let staged_set: std::collections::HashSet<&str> =
         staged_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = filter_packages(packages, repo_filter);
+    let filtered = super::packages::select_repo_packages(
+        packages,
+        repo_filter,
+        package,
+        package_area,
+    );
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| staged_set.contains(p.name.as_str()))
@@ -261,12 +307,18 @@ pub(crate) fn select_staged_package_area_names(
 /// Render package area names with staged files as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_staged_package_areas(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
+pub fn render_staged_package_areas(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
+) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_staged_package_area_names(result, repo_filter).join(", ")
+            select_staged_package_area_names(result, repo_filter, package, package_area)
+                .join(", ")
         }
         _ => String::from(
             "- the \"staged-package-areas\" subcommand is only intended to be used in a monorepo",
@@ -277,6 +329,8 @@ pub fn render_staged_package_areas(result: &sniff::SniffResult, repo_filter: &[S
 pub(crate) fn select_unstaged_package_area_names(
     result: &sniff::SniffResult,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> Vec<String> {
     let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
         return Vec::new();
@@ -292,7 +346,12 @@ pub(crate) fn select_unstaged_package_area_names(
     let unstaged_set: std::collections::HashSet<&str> =
         unstaged_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = filter_packages(packages, repo_filter);
+    let filtered = super::packages::select_repo_packages(
+        packages,
+        repo_filter,
+        package,
+        package_area,
+    );
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| unstaged_set.contains(p.name.as_str()))
@@ -308,12 +367,15 @@ pub(crate) fn select_unstaged_package_area_names(
 pub fn render_unstaged_package_areas(
     result: &sniff::SniffResult,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_unstaged_package_area_names(result, repo_filter).join(", ")
+            select_unstaged_package_area_names(result, repo_filter, package, package_area)
+                .join(", ")
         }
         _ => String::from(
             "- the \"unstaged-package-areas\" subcommand is only intended to be used in a monorepo",

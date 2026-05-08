@@ -9,7 +9,8 @@ use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
 use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
 
-use super::{filter_packages, format_number, relative_path};
+use super::packages::select_repo_packages;
+use super::{format_number, relative_path};
 use super::language::render_framework_summary;
 
 fn area_parent(area: &str) -> Option<String> {
@@ -392,6 +393,8 @@ pub fn render_repo_section(
     verbose: u8,
     _repo_root: Option<&Path>,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
     latest_versions_requested: bool,
 ) -> String {
     let mut out = String::new();
@@ -428,10 +431,11 @@ pub fn render_repo_section(
     let total_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
 
     if let Some(ref packages) = repo.packages {
-        let filtered = filter_packages(packages, repo_filter);
+        let filtered = select_repo_packages(packages, repo_filter, package, package_area);
         let showing_count = filtered.len();
 
-        let title_suffix = if !repo_filter.is_empty() && showing_count != total_count {
+        let any_scope = !repo_filter.is_empty() || package.is_some() || package_area.is_some();
+        let title_suffix = if any_scope && showing_count != total_count {
             format!(
                 " <dim>({} / showing {} of {} packages)</dim>",
                 tool_name, showing_count, total_count,

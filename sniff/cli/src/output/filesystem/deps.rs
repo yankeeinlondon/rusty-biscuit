@@ -10,7 +10,7 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::Package;
 
-use super::filter_packages;
+use super::packages::select_repo_packages;
 
 /// Build a Mermaid flowchart from workspace package dependencies.
 ///
@@ -85,6 +85,8 @@ pub(super) fn build_deps_mermaid(packages: &[Package]) -> Option<String> {
 pub fn render_repo_deps_visual(
     repo: &sniff::filesystem::repo::RepoInfo,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> String {
     if !repo.is_monorepo {
         return String::from("deps requires a monorepo (no workspace packages found)");
@@ -97,7 +99,7 @@ pub fn render_repo_deps_visual(
         }
     };
 
-    let filtered: Vec<Package> = filter_packages(packages, repo_filter)
+    let filtered: Vec<Package> = select_repo_packages(packages, repo_filter, package, package_area)
         .into_iter()
         .cloned()
         .collect();
@@ -122,6 +124,8 @@ pub fn render_repo_deps_visual(
 pub fn render_repo_deps_text(
     repo: &sniff::filesystem::repo::RepoInfo,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> String {
     let mut out = String::new();
 
@@ -136,8 +140,9 @@ pub fn render_repo_deps_text(
         }
     };
 
-    let filtered = filter_packages(packages, repo_filter);
-    let has_explicit_filter = !repo_filter.is_empty();
+    let filtered = select_repo_packages(packages, repo_filter, package, package_area);
+    let has_explicit_filter =
+        !repo_filter.is_empty() || package.is_some() || package_area.is_some();
 
     // Collect only packages that participate in dependency relationships
     // (unless an explicit filter is set, in which case show all matched)
