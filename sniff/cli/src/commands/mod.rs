@@ -855,69 +855,57 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Tier 2/3 scoping: for package/area-list and structure/deps commands, the
-    // user-facing flags scope output by narrowing the package list in place
-    // before any rendering or JSON serialization. The intersection error from
-    // `resolve_package_and_area` fires here when both flags are supplied but
-    // disagree.
-    let scope_action_prefix = match &repo_action {
-        Some(
-            crate::args::RepoAction::Structure {
-                package,
-                package_area,
-                ..
-            }
-            | crate::args::RepoAction::Deps {
-                package,
-                package_area,
-                ..
-            }
-            | crate::args::RepoAction::DirtyPackages {
-                package,
-                package_area,
-                ..
-            }
-            | crate::args::RepoAction::DirtyPackageAreas {
-                package,
-                package_area,
-                ..
-            }
-            | crate::args::RepoAction::StagedPackages {
-                package,
-                package_area,
-                ..
-            }
-            | crate::args::RepoAction::StagedPackageAreas {
-                package,
-                package_area,
-                ..
-            }
-            | crate::args::RepoAction::UnstagedPackages {
-                package,
-                package_area,
-                ..
-            }
-            | crate::args::RepoAction::UnstagedPackageAreas {
-                package,
-                package_area,
-                ..
-            },
-        ) => resolve_package_and_area(
+    // Tier 2/3 scoping: validate that `--package` and `--package-area` resolve
+    // and (when both supplied) overlap. The output functions apply the actual
+    // filtering; this call surfaces the intersection error before render time.
+    if let Some(
+        crate::args::RepoAction::Structure {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::Deps {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::DirtyPackages {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::DirtyPackageAreas {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::StagedPackages {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::StagedPackageAreas {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::UnstagedPackages {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::UnstagedPackageAreas {
+            package,
+            package_area,
+            ..
+        },
+    ) = &repo_action
+    {
+        resolve_package_and_area(
             packages_from_result(&result),
             package.as_deref(),
             package_area.as_deref(),
-        )?,
-        _ => None,
-    };
-    if let Some(prefix) = scope_action_prefix.as_deref()
-        && let Some(ref mut filesystem) = result.filesystem
-        && let Some(ref mut repo_info) = filesystem.repo
-        && let Some(ref mut packages) = repo_info.packages
-    {
-        packages.retain(|pkg| {
-            let pkg_path = format!("{}/", pkg.relative);
-            pkg_path.starts_with(prefix)
-        });
+        )?;
     }
 
     // Handle Package/PackageArea early returns (need detection result but not enrichment)

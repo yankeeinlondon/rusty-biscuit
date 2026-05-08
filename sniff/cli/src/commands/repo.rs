@@ -45,35 +45,34 @@ pub(super) fn handle_repo_packages(
             .unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let mut info = match detect_repo_structure(&root)? {
+    let info = match detect_repo_structure(&root)? {
         Some(info) => info,
         None => {
             return Err("Not inside a recognized repository".into());
         }
     };
 
-    // Resolve `--package` and `--package-area` against the discovered packages.
-    // The intersection error fires here when both flags disagree.
-    let scope_prefix =
-        super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
-    if let Some(prefix) = scope_prefix.as_deref()
-        && let Some(ref mut packages) = info.packages
-    {
-        packages.retain(|pkg| {
-            let pkg_path = format!("{}/", pkg.relative);
-            pkg_path.starts_with(prefix)
-        });
-    }
+    // Validate that `--package` and `--package-area` resolve and (when both
+    // are passed) overlap. The output functions apply the actual filtering;
+    // this call surfaces the intersection error before render time.
+    super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
 
     if json {
-        let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
+        let names: Vec<&str> =
+            output::collect_repo_package_names(&info, filter, package, package_area);
         println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());
     }
 
-    let rendered =
-        output::render_repo_packages_formatted(&info, filter, package_area, format, verbose);
+    let rendered = output::render_repo_packages_formatted(
+        &info,
+        filter,
+        package,
+        package_area,
+        format,
+        verbose,
+    );
     let with_newline = if rendered.ends_with('\n') {
         rendered
     } else {
@@ -121,35 +120,34 @@ pub(super) fn handle_repo_package_areas(
             .unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let mut info = match detect_repo_structure(&root)? {
+    let info = match detect_repo_structure(&root)? {
         Some(info) => info,
         None => {
             return Err("Not inside a recognized repository".into());
         }
     };
 
-    // Resolve `--package` and `--package-area` against the discovered packages.
-    // The intersection error fires here when both flags disagree.
-    let scope_prefix =
-        super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
-    if let Some(prefix) = scope_prefix.as_deref()
-        && let Some(ref mut packages) = info.packages
-    {
-        packages.retain(|pkg| {
-            let pkg_path = format!("{}/", pkg.relative);
-            pkg_path.starts_with(prefix)
-        });
-    }
+    // Validate that `--package` and `--package-area` resolve and (when both
+    // are passed) overlap. The output functions apply the actual filtering;
+    // this call surfaces the intersection error before render time.
+    super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
 
     if json {
-        let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
+        let names: Vec<&str> =
+            output::collect_repo_package_area_names(&info, filter, package, package_area);
         println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());
     }
 
-    let rendered =
-        output::render_repo_package_areas_formatted(&info, filter, package_area, format, verbose);
+    let rendered = output::render_repo_package_areas_formatted(
+        &info,
+        filter,
+        package,
+        package_area,
+        format,
+        verbose,
+    );
     let with_newline = if rendered.ends_with('\n') {
         rendered
     } else {
