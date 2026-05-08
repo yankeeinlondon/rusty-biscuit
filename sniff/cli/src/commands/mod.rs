@@ -381,7 +381,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            crate::args::RepoAction::UnstagedFiles { package } => {
+            crate::args::RepoAction::UnstagedFiles { package, .. } => {
                 let args = crate::args::FileListArgs {
                     package: package.clone(),
                     package_area: None,
@@ -402,7 +402,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &perf,
                 );
             }
-            crate::args::RepoAction::UntrackedFiles { package } => {
+            crate::args::RepoAction::UntrackedFiles { package, .. } => {
                 let args = crate::args::FileListArgs {
                     package: package.clone(),
                     package_area: None,
@@ -565,6 +565,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 filter,
                 package_area,
                 format,
+                ..
             } => {
                 return handle_repo_packages(
                     base_dir.as_deref(),
@@ -583,6 +584,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 filter,
                 package_area,
                 format,
+                ..
             } => {
                 return handle_repo_package_areas(
                     base_dir.as_deref(),

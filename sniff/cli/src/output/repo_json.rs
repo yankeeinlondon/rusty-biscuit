@@ -109,34 +109,34 @@ pub(crate) fn build_with_outcome(
         // emit `{ scope, kind, names }` so JSON consumers can scope
         // automation by lifecycle (dirty/staged/unstaged) and
         // granularity (packages/areas).
-        Some(RepoAction::DirtyPackages { filter }) => BuildOutcome::pure(package_family_value(
+        Some(RepoAction::DirtyPackages { filter, .. }) => BuildOutcome::pure(package_family_value(
             "dirty",
             "packages",
             filesystem::select_dirty_package_names(result, filter),
         )),
-        Some(RepoAction::DirtyPackageAreas { filter }) => BuildOutcome::pure(package_family_value(
+        Some(RepoAction::DirtyPackageAreas { filter, .. }) => BuildOutcome::pure(package_family_value(
             "dirty",
             "package_areas",
             filesystem::select_dirty_package_area_names(result, filter),
         )),
-        Some(RepoAction::StagedPackages { filter }) => BuildOutcome::pure(package_family_value(
+        Some(RepoAction::StagedPackages { filter, .. }) => BuildOutcome::pure(package_family_value(
             "staged",
             "packages",
             filesystem::select_staged_package_names(result, filter),
         )),
-        Some(RepoAction::StagedPackageAreas { filter }) => {
+        Some(RepoAction::StagedPackageAreas { filter, .. }) => {
             BuildOutcome::pure(package_family_value(
                 "staged",
                 "package_areas",
                 filesystem::select_staged_package_area_names(result, filter),
             ))
         }
-        Some(RepoAction::UnstagedPackages { filter }) => BuildOutcome::pure(package_family_value(
+        Some(RepoAction::UnstagedPackages { filter, .. }) => BuildOutcome::pure(package_family_value(
             "unstaged",
             "packages",
             filesystem::select_unstaged_package_names(result, filter),
         )),
-        Some(RepoAction::UnstagedPackageAreas { filter }) => {
+        Some(RepoAction::UnstagedPackageAreas { filter, .. }) => {
             BuildOutcome::pure(package_family_value(
                 "unstaged",
                 "package_areas",
@@ -205,7 +205,7 @@ pub(crate) fn build_with_outcome(
         // Phase 5: `deps --json` emits a hand-built per-package object so
         // future fields on `Package` don't leak into the public contract.
         // The `ui` flag is text-only and is intentionally ignored in JSON.
-        Some(RepoAction::Deps { filter, ui: _ }) => {
+        Some(RepoAction::Deps { filter, ui: _, .. }) => {
             BuildOutcome::pure(build_deps_value(result, filter))
         }
         // All other actions fall through to today's behavior. Later phases
@@ -497,6 +497,7 @@ mod tests {
             refresh_remotes: false,
             compact: false,
             package: None,
+            package_area: None,
         }
     }
 
@@ -541,6 +542,8 @@ mod tests {
         let action = RepoAction::Structure {
             filter: Vec::new(),
             latest_versions: false,
+            package: None,
+            package_area: None,
         };
 
         let bare = build(&result, None, None);
@@ -728,7 +731,7 @@ mod tests {
         #[test]
         fn dirty_packages_action_returns_scope_kind_names() {
             let result = fixture(true, &["area-a/alpha/src/main.rs"], &[]);
-            let action = RepoAction::DirtyPackages { filter: vec![] };
+            let action = RepoAction::DirtyPackages { filter: vec![], package: None, package_area: None };
             let value = build(&result, Some(&action), None);
             assert_eq!(value["scope"], "dirty");
             assert_eq!(value["kind"], "packages");
@@ -739,7 +742,7 @@ mod tests {
         #[test]
         fn dirty_package_areas_action_returns_scope_kind_names() {
             let result = fixture(true, &["area-a/alpha/src/main.rs"], &[]);
-            let action = RepoAction::DirtyPackageAreas { filter: vec![] };
+            let action = RepoAction::DirtyPackageAreas { filter: vec![], package: None, package_area: None };
             let value = build(&result, Some(&action), None);
             assert_eq!(value["scope"], "dirty");
             assert_eq!(value["kind"], "package_areas");
@@ -750,7 +753,7 @@ mod tests {
         #[test]
         fn staged_packages_action_returns_scope_kind_names() {
             let result = fixture(true, &[], &["area-b/beta/src/lib.rs"]);
-            let action = RepoAction::StagedPackages { filter: vec![] };
+            let action = RepoAction::StagedPackages { filter: vec![], package: None, package_area: None };
             let value = build(&result, Some(&action), None);
             assert_eq!(value["scope"], "staged");
             assert_eq!(value["kind"], "packages");
@@ -761,7 +764,7 @@ mod tests {
         #[test]
         fn staged_package_areas_action_returns_scope_kind_names() {
             let result = fixture(true, &[], &["area-b/beta/src/lib.rs"]);
-            let action = RepoAction::StagedPackageAreas { filter: vec![] };
+            let action = RepoAction::StagedPackageAreas { filter: vec![], package: None, package_area: None };
             let value = build(&result, Some(&action), None);
             assert_eq!(value["scope"], "staged");
             assert_eq!(value["kind"], "package_areas");
@@ -784,7 +787,7 @@ mod tests {
                     lines_removed: 0,
                 }];
             }
-            let action = RepoAction::UnstagedPackages { filter: vec![] };
+            let action = RepoAction::UnstagedPackages { filter: vec![], package: None, package_area: None };
             let value = build(&result, Some(&action), None);
             assert_eq!(value["scope"], "unstaged");
             assert_eq!(value["kind"], "packages");
@@ -806,7 +809,7 @@ mod tests {
                     lines_removed: 0,
                 }];
             }
-            let action = RepoAction::UnstagedPackageAreas { filter: vec![] };
+            let action = RepoAction::UnstagedPackageAreas { filter: vec![], package: None, package_area: None };
             let value = build(&result, Some(&action), None);
             assert_eq!(value["scope"], "unstaged");
             assert_eq!(value["kind"], "package_areas");
@@ -817,7 +820,7 @@ mod tests {
         #[test]
         fn non_monorepo_returns_empty_names_not_prose_error() {
             let result = fixture(false, &["area-a/alpha/src/main.rs"], &[]);
-            let action = RepoAction::DirtyPackages { filter: vec![] };
+            let action = RepoAction::DirtyPackages { filter: vec![], package: None, package_area: None };
             let value = build(&result, Some(&action), None);
             assert_eq!(value["scope"], "dirty");
             assert_eq!(value["kind"], "packages");
@@ -1310,6 +1313,8 @@ mod tests {
             let action = RepoAction::Deps {
                 ui: false,
                 filter: vec![],
+                package: None,
+                package_area: None,
             };
             let value = build(&result, Some(&action), None);
             assert!(value.is_object(), "deps value must be object");
@@ -1336,10 +1341,14 @@ mod tests {
             let text_action = RepoAction::Deps {
                 ui: false,
                 filter: vec![],
+                package: None,
+                package_area: None,
             };
             let ui_action = RepoAction::Deps {
                 ui: true,
                 filter: vec![],
+                package: None,
+                package_area: None,
             };
             let text_value = build(&result, Some(&text_action), None);
             let ui_value = build(&result, Some(&ui_action), None);
@@ -1463,6 +1472,8 @@ mod tests {
             let action = RepoAction::Structure {
                 filter: vec!["beta".to_string()],
                 latest_versions: false,
+                package: None,
+                package_area: None,
             };
             let value = build(&result, Some(&action), None);
             let pkgs = value["packages"]

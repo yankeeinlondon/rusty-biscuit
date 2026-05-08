@@ -331,7 +331,7 @@ pub fn render_text(
                 Some(RepoAction::PackageAreas { .. }) => {
                     unreachable!("PackageAreas is handled as an early return in commands.rs")
                 }
-                Some(RepoAction::DirtyPackages { filter }) => {
+                Some(RepoAction::DirtyPackages { filter, .. }) => {
                     let rendered = render_dirty_packages(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
@@ -339,7 +339,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::DirtyPackageAreas { filter }) => {
+                Some(RepoAction::DirtyPackageAreas { filter, .. }) => {
                     let rendered = render_dirty_package_areas(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
@@ -347,7 +347,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::StagedPackages { filter }) => {
+                Some(RepoAction::StagedPackages { filter, .. }) => {
                     let rendered = render_staged_packages(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
@@ -355,7 +355,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::StagedPackageAreas { filter }) => {
+                Some(RepoAction::StagedPackageAreas { filter, .. }) => {
                     let rendered = render_staged_package_areas(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
@@ -363,7 +363,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::UnstagedPackages { filter }) => {
+                Some(RepoAction::UnstagedPackages { filter, .. }) => {
                     let rendered = render_unstaged_packages(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
@@ -371,7 +371,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::UnstagedPackageAreas { filter }) => {
+                Some(RepoAction::UnstagedPackageAreas { filter, .. }) => {
                     let rendered = render_unstaged_package_areas(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
@@ -379,7 +379,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::Deps { ui, filter }) => {
+                Some(RepoAction::Deps { ui, filter, .. }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
