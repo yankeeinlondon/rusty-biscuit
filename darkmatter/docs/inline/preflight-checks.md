@@ -108,3 +108,4 @@ This separation ensures:
 - [Shell Expansion](../inline/shell-expansion.md) — `::shell` directive syntax, output handling, and error exit codes
 - [Frontmatter Shell Expansion](../inline/fm-shell-expansion.md) — `$(cmd)` expressions in frontmatter
 - [Shell Blocks](../inline/shell-blocks.md) — `::shell-block` / `::end-block` multi-command directives
+- [Darkmatter Compose Pipeline](../darkmatter-compose-pipeline.md)
