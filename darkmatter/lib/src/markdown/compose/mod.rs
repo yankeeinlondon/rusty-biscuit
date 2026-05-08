@@ -4331,7 +4331,7 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
-        fn frontmatter_shell_rejects_double_pipe_in_command() {
+        fn frontmatter_shell_or_chain_works() {
             let temp_dir = TempDir::new().unwrap();
             let content = "---\nval: \"$(false || echo fallback)\"\n---\n";
             let md: Markdown = content.into();
@@ -4344,11 +4344,10 @@ Rounded: {{ round(pi) }}"#;
                     ..Default::default()
                 });
 
-            let err = md.compose_with(options).unwrap_err();
-            assert!(
-                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
-                "Expected shell pipe rejection for '||', got: {}",
-                err
+            let (composed, _report) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("val"),
+                Some(&serde_json::json!("fallback"))
             );
         }
     }

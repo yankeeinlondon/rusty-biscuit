@@ -59,13 +59,40 @@ pub(crate) fn split_logical_commands(
             let end_byte = line_start + line.len();
 
             // Tokenize
-            let tokens = crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw)
+            let shell_tokens = crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw)
                 .map_err(|e| ShellBlockError::Parse {
                     line: start_line,
                     message: format!("Command tokenization failed: {e}"),
                     excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
                     source_file: None,
                 })?;
+
+            // Extract only word tokens; reject operators/redirections for shell blocks
+            let mut tokens = Vec::new();
+            for st in &shell_tokens {
+                match st {
+                    crate::markdown::compose::shell_expansion::tokenize::ShellToken::Word(w) => {
+                        tokens.push(w.clone());
+                    }
+                    other => {
+                        let desc = match other {
+                            crate::markdown::compose::shell_expansion::tokenize::ShellToken::And => {
+                                "Chain operators (&&) are not allowed in shell blocks"
+                            }
+                            crate::markdown::compose::shell_expansion::tokenize::ShellToken::Or => {
+                                "Chain operators (||) are not allowed in shell blocks"
+                            }
+                            _ => "Redirections are not allowed in shell blocks",
+                        };
+                        return Err(ShellBlockError::Parse {
+                            line: start_line,
+                            message: desc.to_string(),
+                            excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                            source_file: None,
+                        });
+                    }
+                }
+            }
 
             if tokens.is_empty() {
                 return Err(ShellBlockError::Parse {
@@ -240,7 +267,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Conditional execution")
+                .contains("Chain operators")
         );
     }
 

@@ -114,6 +114,7 @@ pub(crate) fn run_shell_blocks_stage(
                 },
                 error_handling: region.options.clone(),
                 timeout_override: region.timeout_override,
+                pipeline: None,
             };
 
             match prepare_directive(&directive, options, &policy_paths, runtime) {

@@ -12,7 +12,9 @@ use std::time::Instant;
 use tracing::{debug, instrument, warn};
 
 use super::types::{
-    ShellDirective, ShellExpansionError, ShellExpansionOptions, ShellTimeoutBehavior,
+    ChainOperator, CommandAction, RedirectionConfig, ShellCommandOrigin, ShellDirective,
+    ShellExpansionError, ShellExpansionOptions, ShellPipeline, ShellTimeoutBehavior, StderrTarget,
+    StdoutTarget,
 };
 use crate::markdown::compose::ComposeSource;
 
@@ -126,6 +128,7 @@ pub fn resolve_working_directory(
 ///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
+///     pipeline: None,
 /// };
 /// let options = ShellExpansionOptions::default();
 /// let source = ComposeSource::Unknown;
@@ -154,14 +157,31 @@ pub(crate) fn execute_command_detailed(
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
 ) -> Result<CommandExecution, ShellExpansionError> {
-    // 1. Resolve executable with which::which
+    // If there's a pipeline with redirections, use the action-based path
+    if let Some(ref pipeline) = directive.pipeline {
+        if let Some(action) = pipeline.actions.first() {
+            if action.command.redirection != RedirectionConfig::default() {
+                let working_dir = resolve_working_directory(shell_opts, source);
+                let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
+                return execute_single_action(
+                    &action.command,
+                    &working_dir,
+                    timeout,
+                    shell_opts,
+                    &directive.raw_command,
+                    &directive.origin,
+                );
+            }
+        }
+    }
+
+    // Standard single-command path (no redirections)
     let resolved_path =
         which::which(&directive.executable).map_err(|_| ShellExpansionError::CommandNotFound {
             command: directive.executable.clone(),
             origin: directive.origin.clone(),
         })?;
 
-    // 2. Resolve working directory
     let working_dir = resolve_working_directory(shell_opts, source);
     debug!(working_dir = %working_dir.display(), "shell: executing command");
 
@@ -217,8 +237,8 @@ pub(crate) fn execute_command_detailed(
         match child.try_wait() {
             Ok(Some(status)) => {
                 // Process completed
-                let stdout_bytes = join_output_thread(stdout_thread, "stdout", directive)?;
-                let stderr_bytes = join_output_thread(stderr_thread, "stderr", directive)?;
+                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout")?;
+                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr")?;
                 let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
                 let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
 
@@ -291,27 +311,320 @@ pub(crate) fn execute_command_detailed(
     }
 }
 
-fn join_output_thread(
+/// Executes a shell directive, dispatching to pipeline execution if the
+/// directive contains a chain, otherwise to single-command execution.
+pub(crate) fn execute_directive_impl(
+    directive: &ShellDirective,
+    shell_opts: &ShellExpansionOptions,
+    source: &ComposeSource,
+) -> Result<CommandExecution, ShellExpansionError> {
+    if let Some(ref pipeline) = directive.pipeline {
+        if pipeline.actions.len() > 1 {
+            return execute_pipeline_detailed(directive, pipeline, shell_opts, source);
+        }
+    }
+    execute_command_detailed(directive, shell_opts, source)
+}
+
+/// Executes a pipeline of chained commands with per-command redirections.
+fn execute_pipeline_detailed(
+    directive: &ShellDirective,
+    pipeline: &ShellPipeline,
+    shell_opts: &ShellExpansionOptions,
+    source: &ComposeSource,
+) -> Result<CommandExecution, ShellExpansionError> {
+    let working_dir = resolve_working_directory(shell_opts, source);
+    let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
+
+    let mut combined_stdout = String::new();
+    let mut combined_stderr = String::new();
+    let mut last_success = true;
+
+    for action in &pipeline.actions {
+        // Check chain condition
+        match action.operator {
+            ChainOperator::None => {}
+            ChainOperator::And => {
+                if !last_success {
+                    continue;
+                }
+            }
+            ChainOperator::Or => {
+                if last_success {
+                    continue;
+                }
+            }
+        }
+
+        let result = execute_single_action(
+            &action.command,
+            &working_dir,
+            timeout,
+            shell_opts,
+            &directive.raw_command,
+            &directive.origin,
+        );
+
+        match result {
+            Ok(exec) => {
+                last_success = true;
+                if !exec.stdout.is_empty() {
+                    if !combined_stdout.is_empty() {
+                        combined_stdout.push('\n');
+                    }
+                    combined_stdout.push_str(&exec.stdout);
+                }
+                if !exec.stderr.is_empty() {
+                    if !combined_stderr.is_empty() {
+                        combined_stderr.push('\n');
+                    }
+                    combined_stderr.push_str(&exec.stderr);
+                }
+            }
+            Err(ShellExpansionError::ExecutionFailed { code, stdout, stderr, .. }) => {
+                last_success = false;
+                if !stdout.is_empty() {
+                    if !combined_stdout.is_empty() {
+                        combined_stdout.push('\n');
+                    }
+                    combined_stdout.push_str(&stdout);
+                }
+                if !stderr.is_empty() {
+                    if !combined_stderr.is_empty() {
+                        combined_stderr.push('\n');
+                    }
+                    combined_stderr.push_str(&stderr);
+                }
+                // If this is the last action (or no subsequent Or handler), propagate failure
+                let is_last = action as *const _ == &pipeline.actions[pipeline.actions.len() - 1] as *const _;
+                // Check if next action handles failure with ||
+                let next_handles_failure = pipeline.actions.iter().position(|a| std::ptr::eq(a, action))
+                    .map(|idx| {
+                        idx + 1 < pipeline.actions.len()
+                            && pipeline.actions[idx + 1].operator == ChainOperator::Or
+                    })
+                    .unwrap_or(false);
+
+                if is_last || !next_handles_failure {
+                    // Check if any remaining actions could handle the failure
+                    let pos = pipeline.actions.iter().position(|a| std::ptr::eq(a, action)).unwrap();
+                    let any_or_handler = pipeline.actions[pos + 1..]
+                        .iter()
+                        .any(|a| a.operator == ChainOperator::Or);
+
+                    if !any_or_handler {
+                        return Err(ShellExpansionError::ExecutionFailed {
+                            command: directive.raw_command.clone(),
+                            code,
+                            stdout: combined_stdout,
+                            stderr: combined_stderr,
+                            origin: directive.origin.clone(),
+                        });
+                    }
+                }
+            }
+            Err(ShellExpansionError::Timeout { .. }) => {
+                return Err(ShellExpansionError::Timeout {
+                    command: directive.raw_command.clone(),
+                    timeout,
+                    origin: directive.origin.clone(),
+                });
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(CommandExecution::from_streams(combined_stdout, combined_stderr))
+}
+
+/// Executes a single command action with its redirection config.
+fn execute_single_action(
+    action: &CommandAction,
+    working_dir: &std::path::Path,
+    timeout: std::time::Duration,
+    shell_opts: &ShellExpansionOptions,
+    raw_command: &str,
+    origin: &super::types::ShellCommandOrigin,
+) -> Result<CommandExecution, ShellExpansionError> {
+    let resolved_path = which::which(&action.executable).map_err(|_| {
+        ShellExpansionError::CommandNotFound {
+            command: action.executable.clone(),
+            origin: origin.clone(),
+        }
+    })?;
+
+    let mut cmd = Command::new(&resolved_path);
+    cmd.args(&action.args)
+        .current_dir(working_dir)
+        .stdin(std::process::Stdio::null());
+
+    configure_streams(&mut cmd, &action.redirection);
+
+    if shell_opts.strip_ansi {
+        cmd.env("NO_COLOR", "1");
+    }
+
+    let mut child = cmd.spawn().map_err(|e| ShellExpansionError::ExecutionFailed {
+        command: raw_command.to_string(),
+        code: -1,
+        stdout: String::new(),
+        stderr: e.to_string(),
+        origin: origin.clone(),
+    })?;
+
+    let stdout_handle = child.stdout.take();
+    let stderr_handle = child.stderr.take();
+
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut stdout) = stdout_handle {
+            let _ = stdout.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut stderr) = stderr_handle {
+            let _ = stderr.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let start = Instant::now();
+    let sleep_duration = std::time::Duration::from_millis(10);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout")?;
+                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr")?;
+                let mut stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
+                let mut stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
+
+                if shell_opts.strip_ansi {
+                    stdout_str = biscuit_terminal::prelude::strip_escape_codes(stdout_str);
+                    stderr_str = biscuit_terminal::prelude::strip_escape_codes(stderr_str);
+                }
+
+                // Apply redirection merging for captured output
+                let (final_stdout, final_stderr) =
+                    apply_redirection_to_output(&action.redirection, &stdout_str, &stderr_str);
+
+                if status.success() {
+                    return Ok(CommandExecution::from_streams(final_stdout, final_stderr));
+                } else {
+                    return Err(ShellExpansionError::ExecutionFailed {
+                        command: raw_command.to_string(),
+                        code: status.code().unwrap_or(-1),
+                        stdout: final_stdout,
+                        stderr: final_stderr,
+                        origin: origin.clone(),
+                    });
+                }
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    match shell_opts.timeout_behavior {
+                        ShellTimeoutBehavior::Error => {
+                            return Err(ShellExpansionError::Timeout {
+                                command: raw_command.to_string(),
+                                timeout,
+                                origin: origin.clone(),
+                            });
+                        }
+                        ShellTimeoutBehavior::EmptyString => {
+                            return Ok(CommandExecution::timeout_fallback(timeout));
+                        }
+                    }
+                }
+                std::thread::sleep(sleep_duration);
+            }
+            Err(e) => {
+                return Err(ShellExpansionError::ExecutionFailed {
+                    command: raw_command.to_string(),
+                    code: -1,
+                    stdout: String::new(),
+                    stderr: e.to_string(),
+                    origin: origin.clone(),
+                });
+            }
+        }
+    }
+}
+
+fn configure_streams(cmd: &mut Command, redir: &RedirectionConfig) {
+    match redir.stdout {
+        StdoutTarget::Capture => {
+            cmd.stdout(std::process::Stdio::piped());
+        }
+        StdoutTarget::Null => {
+            cmd.stdout(std::process::Stdio::null());
+        }
+        StdoutTarget::ToStderr => {
+            // We still pipe both, then merge in post-processing
+            cmd.stdout(std::process::Stdio::piped());
+            cmd.stderr(std::process::Stdio::piped());
+        }
+    }
+
+    match redir.stderr {
+        StderrTarget::Capture => {
+            if redir.stdout != StdoutTarget::ToStderr {
+                cmd.stderr(std::process::Stdio::piped());
+            }
+        }
+        StderrTarget::Null => {
+            cmd.stderr(std::process::Stdio::null());
+        }
+        StderrTarget::ToStdout => {
+            cmd.stderr(std::process::Stdio::piped());
+        }
+    }
+}
+
+fn apply_redirection_to_output(
+    redir: &RedirectionConfig,
+    stdout: &str,
+    stderr: &str,
+) -> (String, String) {
+    match (redir.stdout, redir.stderr) {
+        (StdoutTarget::ToStderr, _) => {
+            let mut new_stderr = stderr.to_string();
+            if !stdout.is_empty() {
+                if !new_stderr.is_empty() {
+                    new_stderr.push('\n');
+                }
+                new_stderr.push_str(stdout);
+            }
+            (String::new(), new_stderr)
+        }
+        (_, StderrTarget::ToStdout) => {
+            let mut new_stdout = stdout.to_string();
+            if !stderr.is_empty() {
+                if !new_stdout.is_empty() {
+                    new_stdout.push('\n');
+                }
+                new_stdout.push_str(stderr);
+            }
+            (new_stdout, String::new())
+        }
+        _ => (stdout.to_string(), stderr.to_string()),
+    }
+}
+
+fn join_output_thread_raw(
     handle: JoinHandle<Vec<u8>>,
     stream_name: &str,
-    directive: &ShellDirective,
 ) -> Result<Vec<u8>, ShellExpansionError> {
-    handle.join().map_err(|panic_payload| {
-        let detail = if let Some(message) = panic_payload.downcast_ref::<&str>() {
-            *message
-        } else if let Some(message) = panic_payload.downcast_ref::<String>() {
-            message.as_str()
-        } else {
-            "unknown panic payload"
-        };
-
-        ShellExpansionError::ExecutionFailed {
-            command: directive.raw_command.clone(),
-            code: -1,
-            stdout: String::new(),
-            stderr: format!("{stream_name} capture thread panicked: {detail}"),
-            origin: directive.origin.clone(),
-        }
+    handle.join().map_err(|_| ShellExpansionError::ExecutionFailed {
+        command: String::new(),
+        code: -1,
+        stdout: String::new(),
+        stderr: format!("{stream_name} capture thread panicked"),
+        origin: ShellCommandOrigin::Body { line: 0 },
     })
 }
 
@@ -333,6 +646,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
+            pipeline: None,
         }
     }
 
@@ -479,6 +793,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
+            pipeline: None,
         };
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
@@ -491,23 +806,19 @@ mod tests {
 
     #[test]
     fn join_output_thread_reports_panic() {
-        let d = directive("echo hello", "echo", &["hello"], 7);
         let handle = std::thread::spawn(|| -> Vec<u8> {
             panic!("boom");
         });
 
-        let err = join_output_thread(handle, "stdout", &d).unwrap_err();
+        let err = join_output_thread_raw(handle, "stdout").unwrap_err();
         match err {
             ShellExpansionError::ExecutionFailed {
                 code,
                 stderr,
-                origin,
                 ..
             } => {
                 assert_eq!(code, -1);
-                assert_eq!(origin, ShellCommandOrigin::Body { line: 7 });
                 assert!(stderr.contains("stdout capture thread panicked"));
-                assert!(stderr.contains("boom"));
             }
             other => panic!("Expected ExecutionFailed, got {other:?}"),
         }
@@ -544,6 +855,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
+            pipeline: None,
         };
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
@@ -570,6 +882,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
+            pipeline: None,
         };
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
@@ -613,6 +926,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
+            pipeline: None,
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
         let source = ComposeSource::Unknown;
@@ -631,6 +945,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
+            pipeline: None,
         };
         let options = ShellExpansionOptions {
             strip_ansi: false,
@@ -644,7 +959,6 @@ mod tests {
 
     #[test]
     fn execute_command_sets_no_color_env() {
-        // On macOS/Linux, 'env' will show the environment
         let d = ShellDirective {
             raw_command: "env".to_string(),
             executable: "env".to_string(),
@@ -653,6 +967,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
+            pipeline: None,
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
         let source = ComposeSource::Unknown;
@@ -671,6 +986,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
+            pipeline: None,
         };
         let options = ShellExpansionOptions {
             timeout: Duration::from_secs(60), // Global timeout is 60s
@@ -698,6 +1014,7 @@ mod tests {
             origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
+            pipeline: None,
         };
         let options = ShellExpansionOptions {
             timeout: Duration::from_secs(60),

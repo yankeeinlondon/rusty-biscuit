@@ -5,9 +5,10 @@
 //! structured directives ready for execution.
 
 use super::shell_expansion::store::resolve_policy_paths;
-use super::shell_expansion::tokenize::tokenize;
+use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::types::{
     ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective, ShellExpansionError,
+    ShellPipeline,
 };
 use super::shell_expansion::{execute_prepared_directive, prepare_directive};
 use super::types::{ComposeOptions, ComposeWarning};
@@ -20,16 +21,12 @@ use std::collections::HashMap;
 /// A parsed frontmatter shell directive ready for execution.
 #[derive(Debug, Clone)]
 pub(crate) struct FrontmatterShellDirective {
-    /// The frontmatter key this directive was extracted from.
     pub key: String,
-    /// The command string between $( and ).
     pub raw_command: String,
-    /// The resolved executable name.
     pub executable: String,
-    /// The resolved arguments.
     pub args: Vec<String>,
-    /// Per-command timeout override from ::timeout:N suffix.
     pub timeout_override: Option<std::time::Duration>,
+    pub pipeline: Option<ShellPipeline>,
 }
 
 /// Result of frontmatter shell expansion.
@@ -110,8 +107,11 @@ pub(crate) fn parse_shell_value(
     // Tokenize the inner command
     let tokens = tokenize(inner_command).map_err(|error| remap_parse_error(error, key))?;
 
-    let executable = tokens[0].clone();
-    let args = tokens[1..].to_vec();
+    // Parse into a pipeline
+    let pipeline = parse_pipeline(&tokens).map_err(|error| remap_parse_error(error, key))?;
+
+    let executable = pipeline.actions[0].command.executable.clone();
+    let args = pipeline.actions[0].command.args.clone();
 
     Ok(Some(FrontmatterShellDirective {
         key: key.to_string(),
@@ -119,6 +119,7 @@ pub(crate) fn parse_shell_value(
         executable,
         args,
         timeout_override,
+        pipeline: Some(pipeline),
     }))
 }
 
@@ -221,12 +222,13 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             raw_command: candidate.raw_command.clone(),
             executable: candidate.executable.clone(),
             args: candidate.args.clone(),
-            span: 0..0, // Not relevant for frontmatter
+            span: 0..0,
             origin: ShellCommandOrigin::Frontmatter {
                 key: candidate.key.clone(),
             },
             error_handling: ErrorHandling::default(),
             timeout_override: candidate.timeout_override,
+            pipeline: candidate.pipeline.clone(),
         };
 
         prepared.push((
