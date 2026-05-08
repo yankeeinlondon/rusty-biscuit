@@ -134,16 +134,54 @@ pub(crate) fn detect_step_timeout(
 ) -> Option<EarlyTermination> {
     let state = metrics.lock().ok()?;
     let last_event_at = state.last_event_at?;
-    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
+
+    // Stuck-aware evaluation: only suppress step_timeout when ALL in-flight
+    // items are active (none stuck). If any item is stuck, the silence rule
+    // is allowed to fire so hung work does not block termination indefinitely.
+    let stuck_tools = state.stuck_tools(now, step_timeout);
+    let stuck_subagents = state.stuck_subagents(now, step_timeout);
+    let any_stuck = !stuck_tools.is_empty() || !stuck_subagents.is_empty();
+    let any_active = !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty();
+
+    if any_active && !any_stuck {
         return None;
     }
+
     let silence = now.saturating_duration_since(last_event_at);
     if silence >= step_timeout {
         let silence_text = format_internal_duration(silence.as_secs());
+        let message = if stuck_tools.is_empty() && stuck_subagents.is_empty() {
+            format!("no stream activity for {silence_text}; terminating due to step_timeout")
+        } else {
+            let mut msg = format!(
+                "no stream activity for {silence_text}. The wrapped process was terminated."
+            );
+            if !stuck_tools.is_empty() {
+                let count = stuck_tools.len();
+                let plural = if count == 1 { "tool" } else { "tools" };
+                msg.push_str(&format!(
+                    " {count} {plural} were stuck when the timeout fired:\n"
+                ));
+                for tool in stuck_tools {
+                    let name = tool.name.as_deref().unwrap_or("(unnamed)");
+                    msg.push_str(&format!("  • \"{name}\"\n"));
+                }
+            }
+            if !stuck_subagents.is_empty() {
+                let count = stuck_subagents.len();
+                let plural = if count == 1 { "subagent" } else { "subagents" };
+                msg.push_str(&format!(
+                    " {count} {plural} were stuck when the timeout fired:\n"
+                ));
+                for subagent in stuck_subagents {
+                    let name = subagent.name.as_deref().unwrap_or("(unnamed)");
+                    msg.push_str(&format!("  • \"{name}\"\n"));
+                }
+            }
+            msg
+        };
         Some(EarlyTermination::StepTimeout {
-            message: format!(
-                "no stream activity for {silence_text}; terminating due to step_timeout"
-            ),
+            message,
             outstanding: Vec::new(),
         })
     } else {
@@ -458,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_step_timeout_returns_none_when_in_flight_tool_exists() {
+    fn detect_step_timeout_fires_when_in_flight_tool_is_stuck() {
         let metrics = claudine::stream::progress::new_live_metrics();
         let now = Instant::now();
         {
@@ -477,13 +515,41 @@ mod tests {
         let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
 
         assert!(
-            detected.is_none(),
-            "step_timeout must not fire while a tool call is in-flight"
+            matches!(
+                detected,
+                Some(EarlyTermination::StepTimeout { ref message, .. })
+            ) if message.contains("Task"),
+            "stuck tool should trigger step_timeout, got: {detected:?}"
         );
     }
 
     #[test]
-    fn detect_step_timeout_returns_none_when_in_flight_subagent_exists() {
+    fn detect_step_timeout_returns_none_when_in_flight_tool_is_active() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight.insert(
+                "task-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: now - Duration::from_secs(180),
+                    last_progress_at: now,
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(
+            detected.is_none(),
+            "active tool must suppress step_timeout"
+        );
+    }
+
+    #[test]
+    fn detect_step_timeout_fires_when_in_flight_subagent_is_stuck() {
         let metrics = claudine::stream::progress::new_live_metrics();
         let now = Instant::now();
         {
@@ -502,8 +568,36 @@ mod tests {
         let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
 
         assert!(
+            matches!(
+                detected,
+                Some(EarlyTermination::StepTimeout { .. })
+            ),
+            "stuck subagent should trigger step_timeout, got: {detected:?}"
+        );
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_in_flight_subagent_is_active() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: now - Duration::from_secs(180),
+                    last_progress_at: now,
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(
             detected.is_none(),
-            "step_timeout must not fire while a subagent is in-flight"
+            "active subagent must suppress step_timeout"
         );
     }
 
@@ -519,14 +613,14 @@ mod tests {
                 claudine::stream::progress::InFlightSubagent {
                     name: Some("rust-developer".into()),
                     started_at: now - Duration::from_secs(180),
-                    last_progress_at: now - Duration::from_secs(180),
+                    last_progress_at: now,
                 },
             );
         }
 
         assert!(
             detect_step_timeout(&metrics, now, Duration::from_secs(5)).is_none(),
-            "must not fire while subagent is active"
+            "must not fire while active subagent is in-flight"
         );
 
         {
