@@ -985,6 +985,91 @@ mod tests {
                 _ => panic!("Expected Value"),
             }
         }
+
+        #[test]
+        fn nested_ternary_true_branch() {
+            // a ? b ? c : d : e
+            // When a is truthy and b is truthy -> c
+            let state = create_test_state(json!({"a": true, "b": true}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"a ? b ? "c" : "d" : "e""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "c"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        #[test]
+        fn nested_ternary_inner_false_branch() {
+            // a ? b ? c : d : e
+            // When a is truthy and b is falsy -> d
+            let state = create_test_state(json!({"a": true, "b": false}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"a ? b ? "c" : "d" : "e""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "d"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        #[test]
+        fn nested_ternary_outer_false_branch() {
+            // a ? b ? c : d : e
+            // When a is falsy -> e
+            let state = create_test_state(json!({"a": false}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"a ? b ? "c" : "d" : "e""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "e"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        #[test]
+        fn nested_ternary_in_false_branch() {
+            // a ? b : c ? d : e
+            // When a is falsy and c is truthy -> d
+            let state = create_test_state(json!({"a": false, "c": true}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"a ? "b" : c ? "d" : "e""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "d"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        #[test]
+        fn deeply_nested_ternary() {
+            // a ? b ? c ? d : e : f : g
+            let state = create_test_state(json!({"a": true, "b": true, "c": false}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"a ? b ? c ? "d" : "e" : "f" : "g""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "e"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        #[test]
+        fn nested_ternary_with_mixed_variables_and_literals() {
+            let state = create_test_state(json!({
+                "flag": true,
+                "name": "Alice",
+                "default": "unknown"
+            }));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"flag ? name ? name : default : "missing""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "Alice"),
+                _ => panic!("Expected Value"),
+            }
+        }
     }
 
     mod eval_comparison {

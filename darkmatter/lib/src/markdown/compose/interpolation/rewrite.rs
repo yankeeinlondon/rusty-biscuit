@@ -245,4 +245,69 @@ mod tests {
         assert_eq!(result.replacements, 0);
         assert!(result.warnings.is_empty());
     }
+
+    #[test]
+    fn nested_ternary_in_true_branch_via_interpolate_text() {
+        let state = make_state(json!({"a": true, "b": true}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ a ? b ? 'inner-true' : 'inner-false' : 'outer-false' }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "inner-true");
+        assert_eq!(result.replacements, 1);
+    }
+
+    #[test]
+    fn nested_ternary_in_false_branch_via_interpolate_text() {
+        let state = make_state(json!({"a": false, "c": true}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ a ? 'outer-true' : c ? 'inner-true' : 'inner-false' }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "inner-true");
+        assert_eq!(result.replacements, 1);
+    }
+
+    #[test]
+    fn deeply_nested_ternary_via_interpolate_text() {
+        let state = make_state(json!({"a": true, "b": true, "c": false}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ a ? b ? c ? 'd' : 'e' : 'f' : 'g' }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "e");
+        assert_eq!(result.replacements, 1);
+    }
+
+    #[test]
+    fn nested_ternary_with_context_variable() {
+        // ctx.today is always truthy in test context (returns "2024-06-15")
+        let state = make_state(json!({"flag": false}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ ctx.today ? ctx.today : 'no date' }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "2024-06-15");
+        assert_eq!(result.replacements, 1);
+    }
 }

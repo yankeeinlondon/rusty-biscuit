@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! expression     = ternary
-//! ternary        = fallback ("?" fallback ":" fallback)?
+//! ternary        = fallback ("?" ternary ":" ternary)?
 //! fallback       = comparison ("||" comparison)*
 //! comparison     = unary (comp_op unary)?
 //! unary          = "!" unary | primary
@@ -39,6 +39,10 @@
 //!
 //! // Ternary
 //! let expr = parse(r#"x ? "yes" : "no""#).unwrap();
+//! assert!(matches!(expr, Expr::Ternary { .. }));
+//!
+//! // Nested ternary (right-associative)
+//! let expr = parse(r#"a ? b ? c : d : e"#).unwrap();
 //! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
@@ -187,18 +191,21 @@ impl<'a> Parser<'a> {
 
     /// Parses a ternary expression.
     ///
-    /// In interpolation mode: `fallback ("?" fallback ":" fallback)?`
+    /// In interpolation mode: `fallback ("?" ternary ":" ternary)?`
     ///
-    /// In condition mode: `logical_or ("?" logical_or ":" logical_or)?`
+    /// In condition mode: `logical_or ("?" ternary ":" ternary)?`
+    ///
+    /// Branches are parsed recursively so nested ternaries are supported
+    /// without extra parentheses: `a ? b ? c : d : e`.
     fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_ternary_branch()?;
 
         if matches!(self.current, Token::Question) {
             self.advance()?; // consume ?
-            let then_branch = self.parse_ternary_branch()?;
+            let then_branch = self.parse_ternary()?;
 
             self.expect(&Token::Colon, "':'")?;
-            let else_branch = self.parse_ternary_branch()?;
+            let else_branch = self.parse_ternary()?;
 
             expr = Expr::Ternary {
                 condition: Box::new(expr),
@@ -620,6 +627,135 @@ mod tests {
                 _ => panic!("Expected Ternary"),
             }
         }
+
+        #[test]
+        fn parses_nested_ternary_in_true_branch() {
+            // a ? b ? c : d : e parses as a ? (b ? c : d) : e
+            let expr = parse("a ? b ? c : d : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "e"));
+                    // then_branch should itself be a ternary
+                    match *then_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                            assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "c"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "d"));
+                        }
+                        _ => panic!("Expected nested Ternary in then_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_nested_ternary_in_false_branch() {
+            // a ? b : c ? d : e parses as a ? b : (c ? d : e)
+            let expr = parse("a ? b : c ? d : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*then_branch, Expr::Variable(ref n) if n == "b"));
+                    // else_branch should itself be a ternary
+                    match *else_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "c"));
+                            assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "d"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "e"));
+                        }
+                        _ => panic!("Expected nested Ternary in else_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_parenthesized_nested_ternary() {
+            // a ? (b ? c : d) : e
+            let expr = parse("a ? (b ? c : d) : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "e"));
+                    match *then_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                            assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "c"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "d"));
+                        }
+                        _ => panic!("Expected nested Ternary in then_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_deeply_nested_ternary() {
+            // a ? b ? c ? d : e : f : g
+            let expr = parse("a ? b ? c ? d : e : f : g").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "g"));
+                    match *then_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "f"));
+                            match *inner_then {
+                                Expr::Ternary {
+                                    condition: deepest_cond,
+                                    then_branch: deepest_then,
+                                    else_branch: deepest_else,
+                                } => {
+                                    assert!(matches!(*deepest_cond, Expr::Variable(ref n) if n == "c"));
+                                    assert!(matches!(*deepest_then, Expr::Variable(ref n) if n == "d"));
+                                    assert!(matches!(*deepest_else, Expr::Variable(ref n) if n == "e"));
+                                }
+                                _ => panic!("Expected deepest Ternary"),
+                            }
+                        }
+                        _ => panic!("Expected nested Ternary in then_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
     }
 
     mod comparison_expressions {
@@ -956,6 +1092,29 @@ mod tests {
         fn error_missing_ternary_else() {
             let result = parse("x ? y :");
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn error_paren_around_bare_colon_in_ternary() {
+            // a ? (b : c) — colon inside parentheses without matching ?
+            let result = parse("a ? (b : c)");
+            assert!(result.is_err(), "colon inside parens without ? should fail");
+        }
+
+        #[test]
+        fn error_unmatched_paren_in_ternary() {
+            // a ? b) : c
+            let result = parse("a ? b) : c");
+            assert!(result.is_err(), "unmatched ')' should fail");
+        }
+
+        #[test]
+        fn error_unbalanced_paren_in_nested_ternary() {
+            // a ? (b ? c : d
+            let result = parse("a ? (b ? c : d");
+            assert!(result.is_err(), "missing closing ')' should fail");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("')'"));
         }
 
         #[test]
