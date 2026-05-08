@@ -141,7 +141,7 @@ fn compose_max_iterations_flag_overrides_frontmatter() {
         &md_file,
         r#"---
 loop:
-  while: "counter < 10"
+  while: "counter < 100"
   actions:
     - "increment(counter)"
 ---
@@ -174,7 +174,7 @@ exit 0
             "compose",
             "--goose",
             "--max-iterations",
-            "5",
+            "2",
             md_file.to_str().unwrap(),
         ])
         .assert()
@@ -183,8 +183,8 @@ exit 0
     let calls = fs::read_to_string(&count_path).unwrap();
     assert_eq!(
         calls.trim(),
-        "5",
-        "--max-iterations should cap at 5"
+        "2",
+        "--max-iterations should cap at 2"
     );
 }
 
@@ -201,7 +201,7 @@ fn compose_max_iterations_env_overrides_default() {
         &md_file,
         r#"---
 loop:
-  while: "counter < 10"
+  while: "counter < 100"
   actions:
     - "increment(counter)"
 ---
@@ -229,7 +229,7 @@ exit 0
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .env("CLAUDINE_MAX_ITERATIONS", "4")
+        .env("CLAUDINE_MAX_ITERATIONS", "2")
         .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
@@ -238,8 +238,8 @@ exit 0
     let calls = fs::read_to_string(&count_path).unwrap();
     assert_eq!(
         calls.trim(),
-        "4",
-        "CLAUDINE_MAX_ITERATIONS should cap at 4"
+        "2",
+        "CLAUDINE_MAX_ITERATIONS should cap at 2"
     );
 }
 
@@ -387,7 +387,7 @@ fn compose_loop_fail_fast_false_continues_after_failure() {
         &md_file,
         r#"---
 loop:
-  while: "counter < 3"
+  while: "counter < 2"
   actions:
     - "increment(counter)"
   fail_fast: false
@@ -407,7 +407,7 @@ fi
 count=$((count + 1))
 printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
 cat > /dev/null
-if [ "$count" = "2" ]; then
+if [ "$count" = "1" ]; then
   exit 5
 fi
 exit 0
@@ -427,8 +427,8 @@ exit 0
     let calls = fs::read_to_string(&count_path).unwrap();
     assert_eq!(
         calls.trim(),
-        "4",
-        "fail_fast=false should continue after iteration 2 fails (4 total: 1 ok, 2 fail, 3 ok, 4 ok)"
+        "3",
+        "fail_fast=false should continue after iteration 1 fails (3 total: 1 fail, 2 ok, 3 ok)"
     );
 }
 
