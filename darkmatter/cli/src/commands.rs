@@ -681,9 +681,17 @@ pub fn run_compose(
                 ..
             }) => {
                 let executable = command.split_whitespace().next().unwrap_or(&command);
+                // Backslash-escape underscores so Prose (used by `main` to
+                // render error chains) does not mistake `_..._` patterns in
+                // paths or command names for italic markdown.
+                let escape_prose = |s: &str| s.replace('_', "\\_");
+                let path = whitelist_path.display().to_string();
                 eyre!(
-                    "Approval required for '{command}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {command}\n  prefix {executable}",
-                    whitelist_path.display(),
+                    "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
+                    escape_prose(&command),
+                    escape_prose(&path),
+                    escape_prose(&command),
+                    escape_prose(executable),
                 )
             }
             other => other.into(),
