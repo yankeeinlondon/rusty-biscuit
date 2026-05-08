@@ -1159,6 +1159,24 @@ mod tests {
             let err = result.unwrap_err();
             assert!(err.message.contains("end of expression"));
         }
+
+        #[test]
+        fn error_invalid_groupings_from_spec() {
+            // a group can not encapsulate both the true and false path of the top level comparison
+            assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff' )").is_err());
+            
+            // unbalanced: missing closing
+            assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff'").is_err());
+            
+            // unbalanced: missing opening (parenthesis must wrap a complete pattern)
+            assert!(parse("a ? b ? 'tt' : 'tf' : c ? ('ft' : 'ff')").is_err());
+            
+            // parenthesis must wrap a complete pattern
+            assert!(parse("a ? b ? ( 'tt' : 'tf' ) : c ? ( 'ft' : 'ff' )").is_err());
+            
+            // parenthesis encapsulates part of top level but not full
+            assert!(parse("a ? b ( ? 'tt' : 'tf' ) : c ( ? 'ft' : 'ff' )").is_err());
+        }
     }
 
     mod parse_error_display {
